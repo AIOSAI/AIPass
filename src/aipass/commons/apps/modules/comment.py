@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: comment.py
 # Description: Comment orchestration module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -98,6 +98,8 @@ def _handle_comment(args: List[str]) -> bool:
     console.print(f"  [dim]Author:[/dim] {resolve_display_name(result['author'])}")
     if result.get("mentions"):
         console.print(f"  [dim]Mentions:[/dim] {', '.join(f'@{m}' for m in result['mentions'])}")
+    if result.get("mentions_error"):
+        console.print(f"  [yellow]Commented; {result['mentions_error']}[/yellow]")
     console.print()
 
     return True

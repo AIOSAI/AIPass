@@ -1,25 +1,29 @@
 # =================== META ====================
 # Name: test_empty_parametrize_nominator.py
 # Description: Pins the VANISHING-TABLE nominator against a table that can silently empty
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""A parametrized test over an empty collection reports as passing.
+"""Tests for apps/handlers/tests_pytest_standards/empty_parametrize_check.py."""
 
-@drone found it building the content-anchored bypass rule (2026-08-31): their
-first ``test_bypass_anchors.py`` SURVIVED a mutant that blinded the collector to
-``return []``, because the anchor checks were parametrized over the collector's
-output and pytest reports a parametrized test with no cases as SKIPPED. The file
-printed "1 passed, 2 skipped" and exit code 0 for an instrument that had checked
-nothing.
+# A parametrized test over an empty collection reports as passing.
+#
+# @drone found it building the content-anchored bypass rule (2026-08-31): their
+# first ``test_bypass_anchors.py`` SURVIVED a mutant that blinded the collector to
+# ``return []``, because the anchor checks were parametrized over the collector's
+# output and pytest reports a parametrized test with no cases as SKIPPED. The file
+# printed "1 passed, 2 skipped" and exit code 0 for an instrument that had checked
+# nothing.
+#
+# Reproduced independently here before the rule was written — see
+# ``test_the_hazard_is_real_on_this_pytest`` — because a rule built on a reported
+# behaviour that this pytest does not actually have would nominate a defect nobody
+# can hit.
 
-Reproduced independently here before the rule was written — see
-``test_the_hazard_is_real_on_this_pytest`` — because a rule built on a reported
-behaviour that this pytest does not actually have would nominate a defect nobody
-can hit.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — the prose of nominate()'s message; species, line and argvalues are asserted
 
 import ast
 import subprocess
@@ -29,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus, empty_parametrize_check
+from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus, empty_parametrize_check, nominators
 
 
 def _nominate(source: str, tmp_path: Path):
@@ -42,39 +46,40 @@ def _nominate(source: str, tmp_path: Path):
 
 class TestTheHazardItself:
     def test_the_hazard_is_real_on_this_pytest(self, tmp_path):
-        """The measurement the rule stands on, not a citation of it.
+        """The file this pytest reports green is the file the rule nominates.
 
-        A parametrized test over an empty collection must report SKIPPED with
-        an exit code of 0 — green — on the pytest actually installed here. If a
-        future pytest made this an error the rule would be nominating a defect
-        that can no longer happen, and this goes red rather than the rule
-        quietly outliving its reason.
+        The measurement the rule stands on, not a citation of it. A parametrized test over an empty
+        collection must report SKIPPED with an exit code of 0 — green — on the pytest actually installed
+        here. If a future pytest made this an error the rule would be nominating a defect that can no
+        longer happen, and this goes red rather than the rule quietly outliving its reason.
+        Mutant: every computed table acquitted in apps/handlers/tests_pytest_standards/empty_parametrize_check.py
+        — killed.
         """
-        probe = tmp_path / "test_probe.py"
-        probe.write_text(
-            textwrap.dedent(
-                """
-                import pytest
+        rows = _nominate(
+            """
+            import pytest
 
-                def collect():
-                    return []
+            def collect():
+                return []
 
-                @pytest.mark.parametrize("item", collect())
-                def test_every_found_item_is_valid(item):
-                    assert item["ok"]
-                """
-            ),
-            encoding="utf-8",
+            @pytest.mark.parametrize("item", collect())
+            def test_every_found_item_is_valid(item):
+                assert item["ok"]
+            """,
+            tmp_path,
         )
+        probe = tmp_path / "tests" / "test_synthetic.py"
         result = subprocess.run(
             [sys.executable, "-m", "pytest", str(probe), "-q", "-p", "no:randomly"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(tmp_path),
         )
         assert result.returncode == 0, result.stdout
         assert "skipped" in result.stdout, result.stdout
         assert "failed" not in result.stdout, result.stdout
+        assert [r["species"] for r in rows] == ["VANISHING-TABLE"], rows
 
 
 class TestWhatItNominates:
@@ -139,7 +144,7 @@ class TestWhatItAcquits:
         )
         assert rows == [], rows
 
-    def test_a_name_bound_to_something_UNKNOWN_is_still_nominated(self, tmp_path):
+    def test_a_name_bound_to_something_unknown_is_still_nominated(self, tmp_path):
         """Mutation control (M18, survived the first run). Acquitting every
         module-level name would wave through a table built by a call at import
         time — the same query, one line higher up."""
@@ -160,7 +165,7 @@ class TestWhatItAcquits:
         )
         assert len(rows) == 1, rows
 
-    def test_an_EMPTY_literal_is_still_nominated(self, tmp_path):
+    def test_an_empty_literal_is_still_nominated(self, tmp_path):
         """Negative control for the acquittal above: `[]` written out is the
         defect in its most obvious form, and a rule that acquitted every
         literal would wave it through."""
@@ -176,7 +181,7 @@ class TestWhatItAcquits:
         )
         assert len(rows) == 1
 
-    def test_a_nonempty_only_guard_is_nominated_as_a_SHORT_TABLE(self, tmp_path):
+    def test_a_nonempty_only_guard_is_nominated_as_a_short_table(self, tmp_path):
         """THE RULING CHANGED IN ROUND 9 and this pin records the change.
 
         It used to assert a full acquittal: a file asserting its collection is
@@ -207,7 +212,7 @@ class TestWhatItAcquits:
         )
         assert [r["species"] for r in rows] == ["SHORT-TABLE"], rows
 
-    def test_a_guard_that_pins_an_expected_COUNT_is_acquitted(self, tmp_path):
+    def test_a_guard_that_pins_an_expected_count_is_acquitted(self, tmp_path):
         """The full acquittal, and the shape @trigger shipped: the expected
         number derived from the RAW DATA rather than from the collector under
         judgement, so a dropped entry has something to fail against."""
@@ -232,7 +237,7 @@ class TestWhatItAcquits:
         )
         assert rows == []
 
-    def test_len_compared_against_ZERO_is_not_a_count_guard(self, tmp_path):
+    def test_len_compared_against_zero_is_not_a_count_guard(self, tmp_path):
         """`len(x) == 0` is an emptiness assertion wearing a count's shape, and
         acquitting on it would hand a full pass to the one comparison that
         proves the table IS empty."""
@@ -254,7 +259,7 @@ class TestWhatItAcquits:
         )
         assert [r["species"] for r in rows] == ["SHORT-TABLE"], rows
 
-    def test_a_safe_builtin_over_a_CALL_is_still_nominated(self, tmp_path):
+    def test_a_safe_builtin_over_a_call_is_still_nominated(self, tmp_path):
         """The unwrap goes one layer and judges what it finds. sorted() of a
         query is still a query."""
         rows = _nominate(
@@ -277,13 +282,9 @@ class TestTheNominatorShape:
     def test_it_satisfies_the_pack_contract(self):
         """Law S7a and the shape gate: a nominator that exposed check_module
         would be scored by the file-walk engine as if it were a standard."""
-        from aipass.seedgo.apps.handlers.tests_pytest_standards import nominators
-
         assert nominators.shape_problems(empty_parametrize_check) == []
 
     def test_the_pack_discovers_it(self):
-        from aipass.seedgo.apps.handlers.tests_pytest_standards import nominators
-
         modules, errors = nominators.discover()
         assert errors == []
         assert "static_empty_parametrize" in modules

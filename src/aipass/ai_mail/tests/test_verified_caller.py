@@ -1,18 +1,20 @@
 # =================== AIPass ====================
 # Name: test_verified_caller.py
 # Description: Tests for the verified-caller rail (FPLAN-0401 Phase 1)
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for the verified-caller rail.
+"""Tests for apps/handlers/users/verified_caller.py."""
 
-The rail exists because ``--from`` / ``--sender`` are unauthenticated strings:
-before this, ``dispatch @manager --from @daemon`` resolved ``sender="@daemon"``
-and unlocked the manager wake lane for any caller. Identity that gates a
-privilege may only come from the env drone stamps from real process ancestry.
-"""
+# The rail exists because ``--from`` / ``--sender`` are unauthenticated strings:
+# before this, ``dispatch @manager --from @daemon`` resolved ``sender="@daemon"``
+# and unlocked the manager wake lane for any caller. Identity that gates a
+# privilege may only come from the env drone stamps from real process ancestry.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the win32 console re-encoding guard at import time
 
 import re
 from pathlib import Path
@@ -25,6 +27,9 @@ from aipass.ai_mail.apps.handlers.users.verified_caller import (
     sender_claim_refusal,
     resolve_wake_sender,
 )
+
+# The refusal's own form: the normalized claim, then who may not make it.
+_REFUSED = "is privilege-bearing and cannot be claimed by"
 
 
 @pytest.fixture(autouse=True)
@@ -109,8 +114,7 @@ class TestSenderClaimRefusal:
     def test_privileged_claim_without_the_rail_is_refused(self):
         """Unprovable is refused, not waved through. Fail closed."""
         reason = sender_claim_refusal("@daemon")
-        assert reason is not None
-        assert "unverified" in reason.lower()
+        assert str(reason).startswith(f"sender @daemon {_REFUSED} unverified caller")
 
     def test_privileged_claim_proven_by_passport_walk(self, tmp_path, monkeypatch):
         """The documented fallback leg proves the claim too."""
@@ -122,13 +126,13 @@ class TestSenderClaimRefusal:
         """Standing in the daemon tree is not being the daemon."""
         branch = _make_branch(tmp_path, "daemon")
         monkeypatch.chdir(branch)
-        assert sender_claim_refusal("@daemon") is not None
+        assert str(sender_claim_refusal("@daemon")).startswith(f"sender @daemon {_REFUSED}")
 
     def test_claim_is_normalized_before_comparison(self, monkeypatch):
         """Case and the leading @ are not a bypass."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
-        assert sender_claim_refusal("DAEMON") is not None
-        assert sender_claim_refusal("@DaEmOn") is not None
+        assert str(sender_claim_refusal("DAEMON")).startswith(f"sender @daemon {_REFUSED}")
+        assert str(sender_claim_refusal("@DaEmOn")).startswith(f"sender @daemon {_REFUSED}")
 
     def test_non_privileged_claim_is_never_refused(self, monkeypatch):
         """--from @spawn from @seedgo stays legal: it gates nothing."""
@@ -180,5 +184,5 @@ class TestPrivilegedSendersCoverage:
         )
         code = "\n".join(line for line in wake_src.splitlines() if not line.strip().startswith("#"))
         gated = {m.lower() for m in re.findall(r"""sender\s*==\s*["']([^"']+)["']""", code)}
-        assert gated, "expected at least one sender gate in wake.py"
+        assert "@daemon" in gated, "expected the manager-lane sender gate in wake.py"
         assert gated <= set(PRIVILEGED_SENDERS), f"unguarded sender gate(s): {gated - set(PRIVILEGED_SENDERS)}"

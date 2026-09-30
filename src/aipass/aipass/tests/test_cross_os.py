@@ -1,17 +1,21 @@
 # =================== AIPass ====================
 # Name: test_cross_os.py
 # Description: Tests for cross-OS gap registry parser + doctor/init integration
-# Version: 1.0.0
+# Version: 1.1.6
 # Created: 2026-07-02
-# Modified: 2026-07-02
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for the cross-OS gap registry (TDPLAN-0011 slice 1).
+"""Tests for apps/handlers/cross_os/gap_registry.py and the handlers it drives."""
 
-Covers: parser happy path, platform filtering (win32/darwin/linux),
-fail-to-error (missing/malformed doc), _check_cross_os() row shape, the
-doctor --cross-os subcommand, and the init stage-2 heads-up wiring.
-"""
+# Tests the cross-OS gap registry (TDPLAN-0011 slice 1).
+# Covers: parser happy path, platform filtering (win32/darwin/linux),
+# fail-to-error (missing/malformed doc), the doctor --cross-os row shape, the
+# doctor --cross-os subcommand, and the init stage-2 heads-up wiring.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/cross_os/ parses and imports
+# seedgo: no-test-needed(documentation) — that the public parser and preflight functions carry docstrings
 
 import contextlib
 import platform
@@ -40,19 +44,32 @@ from aipass.aipass.apps.handlers.cross_os import (
     run_e2e,
 )
 from aipass.aipass.apps.handlers.cross_os.preflight import E2E_UNRUNNABLE_PREFIX
-from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
+from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN, format_check
 from aipass.aipass.apps.modules.doctor import (
-    _check_cross_os,
-    _cross_os_gap_rows,
+    CheckResult,
+    handle_command,
     run_cross_os,
     run_cross_os_record,
 )
+from aipass.aipass.apps.modules.init_flow import stage_2_system_detect
 
 _HANDLER_MOD = "aipass.aipass.apps.handlers.cross_os.gap_registry"
 _PREFLIGHT_MOD = "aipass.aipass.apps.handlers.cross_os.preflight"
 _RECORD_MOD = "aipass.aipass.apps.handlers.cross_os.run_record"
 _DOCTOR_MOD = "aipass.aipass.apps.modules.doctor"
+_ROWS_MOD = "aipass.aipass.apps.handlers.cross_os.doctor_rows"  # builds the rows doctor prints (leg 5 split)
 _INIT_MOD = "aipass.aipass.apps.modules.init_flow"
+
+
+def _cross_os_rows(run_e2e: bool = False) -> list[CheckResult]:
+    """The rows `aipass doctor --cross-os` prints, in order, read through run_cross_os.
+
+    run_cross_os is the public runner the command calls; format_check is wrapped (it
+    still formats) so each printed row comes back whole (fleet green leg 3).
+    """
+    with patch(f"{_DOCTOR_MOD}.format_check", wraps=format_check) as printed:
+        run_cross_os(run_e2e=run_e2e)
+    return [CheckResult(*call.args) for call in printed.call_args_list]
 
 
 def _completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
@@ -226,17 +243,30 @@ class TestFailToError:
 
 
 # =============================================================================
-# _cross_os_gap_rows — OS-gap cross-reference row shape (slice 1 logic)
+# OS-gap cross-reference row shape (doctor_rows.cross_os_gap_rows), read through run_cross_os
 # =============================================================================
 
 
 class TestCrossOsGapRows:
+    @staticmethod
+    def _gap_rows(gaps: list | None = None, raises: Exception | None = None) -> list[CheckResult]:
+        """The gap rows `doctor --cross-os` prints; the three light probes are stubbed, so no drone runs."""
+        ok = PreflightResult("probe", True, "ok")
+        with (
+            patch(f"{_ROWS_MOD}.gaps_for_platform", return_value=gaps, side_effect=raises),
+            patch(f"{_ROWS_MOD}.check_routing", return_value=ok),
+            patch(f"{_ROWS_MOD}.check_versions", return_value=ok),
+            patch(f"{_ROWS_MOD}.check_hookstatus", return_value=ok),
+        ):
+            rows = _cross_os_rows()
+        return [row for row in rows if row.label.startswith("cross-os")]
+
     def test_gaps_become_warn_preflight_rows(self) -> None:
+        """Mutant (fleet green leg 3): the gap row's `GLYPH_WARN,` -> `GLYPH_PASS,` -> red."""
         fake = [
             CrossOsGap("2", ".venv symlink", "Win", "WinError 1314", "aipass", "untested"),
         ]
-        with patch(f"{_DOCTOR_MOD}.gaps_for_platform", return_value=fake):
-            results = _cross_os_gap_rows()
+        results = self._gap_rows(fake)
         assert len(results) == 1
         row = results[0]
         assert row.glyph == GLYPH_WARN
@@ -246,16 +276,33 @@ class TestCrossOsGapRows:
         assert "WinError 1314" in row.detail
         assert "aipass" in row.remediation
 
+    def test_bracketed_registry_text_reaches_the_screen_as_written(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """What the gap registry holds is printed as written, brackets included.
+
+        The row wraps the status in brackets and a symptom may hold its own; Rich read
+        both as markup and dropped them (red first on HEAD, fleet green leg 4).
+        Mutant: doctor.py run_cross_os's escape of the row dropped (the shape of HEAD) -> red.
+        Mutant (fleet green leg 5): the label's escape alone dropped -> red at the label assert
+        (the registry number cell holds a bracket Rich would read as a tag; `[9]` alone
+        is not one, and survived).
+        """
+        fake = [CrossOsGap("[new] 9", "route masks", "all", "printed as [unknown command]", "aipass", "recommended")]
+        self._gap_rows(fake)
+        out = " ".join(capsys.readouterr().out.split())
+        assert "cross-os gap #[new] 9 (pre-flight)" in out
+        assert "pre-flight: printed as [unknown command]" in out
+        assert "tracked gap [recommended] — owner aipass" in out
+
     def test_no_gaps_emits_single_pass(self) -> None:
-        with patch(f"{_DOCTOR_MOD}.gaps_for_platform", return_value=[]):
-            results = _cross_os_gap_rows()
+        """Mutant (fleet green leg 3): `if not gaps:` -> `if False:` -> red."""
+        results = self._gap_rows([])
         assert len(results) == 1
         assert results[0].glyph == GLYPH_PASS
         assert "no tracked cross-OS gaps" in results[0].detail
 
     def test_registry_error_emits_warn_not_silent(self) -> None:
-        with patch(f"{_DOCTOR_MOD}.gaps_for_platform", side_effect=CrossOsGapError("doc gone")):
-            results = _cross_os_gap_rows()
+        """Mutant (fleet green leg 3): the registry-error `return [` -> `return [] and [` (no row) -> red."""
+        results = self._gap_rows(raises=CrossOsGapError("doc gone"))
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
         assert "unavailable" in results[0].detail
@@ -370,7 +417,8 @@ class TestRunE2e:
 
 
 # =============================================================================
-# _check_cross_os — composed group (gap rows + pre-flight rows + optional e2e)
+# Composed group (doctor_rows.check_cross_os: gap rows + pre-flight rows + optional e2e),
+# read through run_cross_os
 # =============================================================================
 
 
@@ -381,85 +429,96 @@ class TestCheckCrossOsComposed:
         versions = versions or PreflightResult("versions", True, "drone v1; aipass 0.1")
         hookstatus = hookstatus or PreflightResult("hookstatus", True, "config ok")
         return (
-            patch(f"{_DOCTOR_MOD}.gaps_for_platform", return_value=[]),
-            patch(f"{_DOCTOR_MOD}.check_routing", return_value=routing),
-            patch(f"{_DOCTOR_MOD}.check_versions", return_value=versions),
-            patch(f"{_DOCTOR_MOD}.check_hookstatus", return_value=hookstatus),
+            patch(f"{_ROWS_MOD}.gaps_for_platform", return_value=[]),
+            patch(f"{_ROWS_MOD}.check_routing", return_value=routing),
+            patch(f"{_ROWS_MOD}.check_versions", return_value=versions),
+            patch(f"{_ROWS_MOD}.check_hookstatus", return_value=hookstatus),
         )
 
     def test_preflight_rows_pass_when_ok(self) -> None:
+        """Mutant (fleet green leg 3): `glyph = GLYPH_PASS if result.ok else GLYPH_FAIL` -> always GLYPH_FAIL -> red."""
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
-            results = _check_cross_os()
+            results = _cross_os_rows()
         labels = {r.label: r for r in results}
+        probes = ["routing (pre-flight)", "versions (pre-flight)", "hookstatus (pre-flight)"]
+        assert [label for label in probes if label in labels] == probes  # every probe has its row
         assert labels["routing (pre-flight)"].glyph == GLYPH_PASS
         assert labels["versions (pre-flight)"].glyph == GLYPH_PASS
         assert labels["hookstatus (pre-flight)"].glyph == GLYPH_PASS
         assert labels["routing (pre-flight)"].detail.startswith("pre-flight:")
 
     def test_preflight_fail_maps_to_fail_glyph(self) -> None:
+        """Mutant (fleet green leg 3): the fail row's remediation `"" if result.ok else remediation` -> `""` -> red."""
         bad = PreflightResult("routing", False, "drone systems -> 1")
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight(routing=bad):
                 stack.enter_context(p)
-            results = _check_cross_os()
+            results = _cross_os_rows()
         row = next(r for r in results if r.label == "routing (pre-flight)")
         assert row.glyph == GLYPH_FAIL
         assert row.remediation  # fail rows carry remediation
 
     def test_e2e_not_run_by_default(self) -> None:
+        """Mutant (fleet green leg 3): `if run_e2e:` -> `if True:` -> red."""
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
-            mock_e2e = stack.enter_context(patch(f"{_DOCTOR_MOD}.run_e2e_preflight"))
-            results = _check_cross_os()
+            mock_e2e = stack.enter_context(patch(f"{_ROWS_MOD}.run_e2e_preflight"))
+            results = _cross_os_rows()
         mock_e2e.assert_not_called()
         assert not any("e2e" in r.label for r in results)
 
     def test_e2e_runs_when_flag_set_and_pass_maps_pass(self) -> None:
+        """Mutant (fleet green leg 3): e2e ok `GLYPH_PASS, ""` -> `GLYPH_WARN, ""` -> red."""
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
             mock_e2e = stack.enter_context(
-                patch(f"{_DOCTOR_MOD}.run_e2e_preflight", return_value=PreflightResult("e2e", True, "14 passed"))
+                patch(f"{_ROWS_MOD}.run_e2e_preflight", return_value=PreflightResult("e2e", True, "14 passed"))
             )
-            results = _check_cross_os(run_e2e=True)
+            results = _cross_os_rows(run_e2e=True)
         mock_e2e.assert_called_once()
         row = next(r for r in results if r.label == "e2e suite (pre-flight)")
         assert row.glyph == GLYPH_PASS
 
     def test_e2e_real_failure_maps_fail(self) -> None:
+        """Mutant (fleet green leg 3): real-failure `GLYPH_FAIL, "Run ...` -> `GLYPH_WARN, "Run ...` -> red."""
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
             stack.enter_context(
                 patch(
-                    f"{_DOCTOR_MOD}.run_e2e_preflight",
+                    f"{_ROWS_MOD}.run_e2e_preflight",
                     return_value=PreflightResult("e2e", False, "2 failed, 12 passed"),
                 )
             )
-            results = _check_cross_os(run_e2e=True)
+            results = _cross_os_rows(run_e2e=True)
         row = next(r for r in results if r.label == "e2e suite (pre-flight)")
         assert row.glyph == GLYPH_FAIL
 
     def test_e2e_unrunnable_maps_warn(self) -> None:
+        """Mutant (fleet green leg 3): unrunnable `glyph = GLYPH_WARN` -> `glyph = GLYPH_FAIL` -> red."""
         unrunnable = PreflightResult("e2e", False, f"{E2E_UNRUNNABLE_PREFIX}: e2e dir not found")
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
-            stack.enter_context(patch(f"{_DOCTOR_MOD}.run_e2e_preflight", return_value=unrunnable))
-            results = _check_cross_os(run_e2e=True)
+            stack.enter_context(patch(f"{_ROWS_MOD}.run_e2e_preflight", return_value=unrunnable))
+            results = _cross_os_rows(run_e2e=True)
         row = next(r for r in results if r.label == "e2e suite (pre-flight)")
         assert row.glyph == GLYPH_WARN
 
-    def test_run_cross_os_returns_int_no_errors(self) -> None:
+    def test_run_cross_os_returns_int_no_errors(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: summary errors count dropped -> red."""
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
-            stack.enter_context(patch(f"{_DOCTOR_MOD}.console"))
             rc = run_cross_os()
         assert rc == 0
+        out, _err = capsys.readouterr()
+        assert "aipass doctor --cross-os" in out
+        assert "errors: 0" in out
 
 
 # =============================================================================
@@ -469,8 +528,6 @@ class TestCheckCrossOsComposed:
 
 class TestDoctorCrossOsCommand:
     def test_cross_os_flag_routes_to_run_cross_os(self) -> None:
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0) as mock_run,
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -481,8 +538,6 @@ class TestDoctorCrossOsCommand:
 
     def test_cross_os_does_not_run_full_doctor(self) -> None:
         """The subcommand must not invoke the default full run."""
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0),
             patch(f"{_DOCTOR_MOD}.run_doctor") as mock_full,
@@ -493,8 +548,6 @@ class TestDoctorCrossOsCommand:
 
     def test_cross_os_alone_stays_light_no_e2e(self) -> None:
         """`--cross-os` without `--e2e` threads run_e2e=False."""
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0) as mock_run,
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -504,8 +557,6 @@ class TestDoctorCrossOsCommand:
 
     def test_cross_os_with_e2e_flag_threads_run_e2e_true(self) -> None:
         """Both `--cross-os` and `--e2e` present -> run_cross_os(run_e2e=True)."""
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0) as mock_run,
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -520,42 +571,82 @@ class TestDoctorCrossOsCommand:
 
 
 class TestInitStage2HeadsUp:
-    def test_heads_up_prints_gaps(self) -> None:
-        from aipass.aipass.apps.modules.init_flow import _print_os_gap_heads_up
+    """The heads-up read through stage_2_system_detect, its one caller (fleet green leg 3).
 
-        fake = [CrossOsGap("9", "route masks", "all", "printed as Unknown command", "aipass", "rec")]
-        with (
-            patch("aipass.aipass.apps.handlers.cross_os.gaps_for_platform", return_value=fake),
-            patch(f"{_INIT_MOD}.console") as mock_console,
+    The detectors are stubbed as TestStages in test_init_flow.py stubs them, so no
+    detector runs and no git process starts. dry_run=True skips _save_stage, so no
+    setup progress is written. The oracle is the whole output: each call is compared
+    with the same call where the heads-up is replaced by nothing.
+    """
+
+    @staticmethod
+    def _stage_2(capsys: pytest.CaptureFixture[str], *, heads_up: bool = True) -> tuple[str, str]:
+        """Run stage 2 on stubbed detectors; heads_up=False replaces the heads-up by nothing."""
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                patch.multiple(
+                    _INIT_MOD,
+                    detect_python=MagicMock(return_value={"version": "3.12.0", "ok": True}),
+                    detect_git=MagicMock(return_value={"found": True, "version": "2.43"}),
+                    detect_shell=MagicMock(return_value={"name": "bash", "path": "bash"}),
+                    detect_os=MagicMock(return_value={"os_name": "Linux", "release": "6.0", "machine": "x86"}),
+                    detect_ram=MagicMock(return_value={"total_gb": 16.0, "ok": True, "warning": False}),
+                    detect_cpu=MagicMock(return_value={"count": 8}),
+                    detect_install_method=MagicMock(return_value="pip"),
+                    detect_tmux=MagicMock(return_value=True),
+                    detect_wt=MagicMock(return_value=False),
+                )
+            )
+            if not heads_up:
+                stack.enter_context(patch(f"{_INIT_MOD}._print_os_gap_heads_up", return_value=None))
+            stage_2_system_detect(dry_run=True)
+        return capsys.readouterr()
+
+    def test_heads_up_prints_gaps(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """The output is the heads-up-free output followed by the heads-up, and nothing else.
+
+        The registry's text is printed as written: the status in its brackets and a
+        symptom that holds a bracket of its own (Rich ate both on HEAD, fleet green leg 4).
+        Mutant: per-gap line not printed -> red.
+        Mutant: init_flow.py's escape of the gap line dropped (the shape of HEAD) -> red.
+        """
+        fake = [CrossOsGap("9", "route masks", "all", "printed as [unknown command]", "aipass", "rec")]
+        without, _ = self._stage_2(capsys, heads_up=False)
+        with patch("aipass.aipass.apps.handlers.cross_os.gaps_for_platform", return_value=fake):
+            out, err = self._stage_2(capsys)
+        assert out.startswith(without)
+        # Rich wraps at the console width, so the tail is compared word by word.
+        expected = (
+            "Heads-up — 1 tracked cross-OS gap(s) may apply on this OS (machine pre-flight, not a guarantee): "
+            "! gap #9: printed as [unknown command] [rec]"
+        )
+        assert out[len(without) :].split() == expected.split()
+        assert err == ""
+
+    def test_heads_up_no_gaps_prints_nothing(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """No gaps: the output equals the same call with the heads-up replaced by nothing.
+
+        Mutant: empty-gaps early return removed -> red.
+        """
+        without, _ = self._stage_2(capsys, heads_up=False)
+        with patch("aipass.aipass.apps.handlers.cross_os.gaps_for_platform", return_value=[]):
+            out, err = self._stage_2(capsys)
+        assert out == without
+        assert err == ""
+
+    def test_heads_up_error_warns_and_does_not_crash(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A registry error prints the warning only, and the stage goes on.
+
+        Mutant: warning text emptied -> red.
+        """
+        without, _ = self._stage_2(capsys, heads_up=False)
+        with patch(
+            "aipass.aipass.apps.handlers.cross_os.gaps_for_platform",
+            side_effect=CrossOsGapError("doc missing"),
         ):
-            _print_os_gap_heads_up()
-        printed = " ".join(str(c.args[0]) for c in mock_console.print.call_args_list if c.args)
-        assert "gap #9" in printed
-        assert "Unknown command" in printed
-
-    def test_heads_up_no_gaps_prints_nothing(self) -> None:
-        from aipass.aipass.apps.modules.init_flow import _print_os_gap_heads_up
-
-        with (
-            patch("aipass.aipass.apps.handlers.cross_os.gaps_for_platform", return_value=[]),
-            patch(f"{_INIT_MOD}.console") as mock_console,
-        ):
-            _print_os_gap_heads_up()
-        mock_console.print.assert_not_called()
-
-    def test_heads_up_error_warns_and_does_not_crash(self) -> None:
-        from aipass.aipass.apps.modules.init_flow import _print_os_gap_heads_up
-
-        with (
-            patch(
-                "aipass.aipass.apps.handlers.cross_os.gaps_for_platform",
-                side_effect=CrossOsGapError("doc missing"),
-            ),
-            patch(f"{_INIT_MOD}.console"),
-            patch(f"{_INIT_MOD}.warning") as mock_warning,
-        ):
-            _print_os_gap_heads_up()  # must not raise
-        mock_warning.assert_called_once()
+            out, err = self._stage_2(capsys)  # must not raise
+        assert out == without
+        assert "cross-OS gap registry unavailable" in err
 
 
 # =============================================================================
@@ -618,25 +709,25 @@ class TestBuildRunRecord:
         assert "✅" not in phase4
 
     def test_human_rows_marked_and_never_auto_ticked(self) -> None:
-        """Human-only rows must carry the human marker and NEVER the machine ✅."""
+        """Human-only rows must carry the human marker and NEVER the machine ✅.
+
+        Mutant: human box rendered as a ✔ tick -> red.
+        """
         with contextlib.ExitStack() as stack:
             self._patch(stack)
             text = build_run_record(platform_name="linux")
         for prefix in (
-            "Phase 1 clean install",
-            "Phase 3 aipass init",
-            "Phase 5 daemons",
-            "Phase 7 interactive",
-            "Per-branch matrix",
+            "Phase 1 clean install ........",
+            "Phase 3 aipass init ..........",
+            "Phase 5 daemons ..............",
+            "Phase 7 interactive ..........",
+            "Per-branch matrix (13) .......",
         ):
             line = _line_starting(text, prefix)
-            assert line, f"missing row: {prefix}"
-            assert "— human" in line
-            assert "✅" not in line
+            assert line.removeprefix(prefix).split("   ")[0] == " ⬜ — human"
         # Overall verdict stays human, never a machine tick.
         verdict = _line_starting(text, "Overall verdict")
-        assert "— human" in verdict
-        assert "✅" not in verdict
+        assert verdict.startswith("Overall verdict: ⬜ — human (")
 
     def test_commit_and_tester_left_blank_with_hint(self) -> None:
         with contextlib.ExitStack() as stack:
@@ -669,16 +760,16 @@ class TestBuildRunRecord:
         assert "✅" not in phase2
 
     def test_e2e_recorded_when_flag_set(self) -> None:
+        """Mutant: e2e detail truncated in the record -> red."""
         with contextlib.ExitStack() as stack:
             self._patch(stack)
             mock_e2e = stack.enter_context(
                 patch(f"{_RECORD_MOD}.run_e2e", return_value=PreflightResult("e2e", True, "14 passed in 18.15s"))
             )
             text = build_run_record(platform_name="linux", run_heavy_e2e=True)
-        mock_e2e.assert_called_once()
+        mock_e2e.assert_called_once_with()
         phase2 = _line_starting(text, "Phase 2")
-        assert "✅" in phase2
-        assert "14 passed" in phase2
+        assert phase2 == "Phase 2 e2e suite (14/14) .... ✅ pre-flight (machine)   notes: 14 passed in 18.15s"
 
     def test_e2e_unrunnable_marked_could_not_run(self) -> None:
         unrunnable = PreflightResult("e2e", False, f"{E2E_UNRUNNABLE_PREFIX}: e2e dir not found")
@@ -781,8 +872,6 @@ class TestGenerateRunRecord:
 
 class TestDoctorCrossOsRecordCommand:
     def test_record_flag_routes_to_run_cross_os_record(self) -> None:
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=0) as mock_rec,
             patch(f"{_DOCTOR_MOD}.run_cross_os") as mock_plain,
@@ -794,8 +883,6 @@ class TestDoctorCrossOsRecordCommand:
         mock_plain.assert_not_called()  # record path does not also run the plain group
 
     def test_record_default_path_when_no_value(self) -> None:
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=0) as mock_rec,
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -804,8 +891,6 @@ class TestDoctorCrossOsRecordCommand:
         mock_rec.assert_called_once_with(None, run_e2e=False)
 
     def test_record_with_e2e_threads_run_e2e_true(self) -> None:
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=0) as mock_rec,
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -815,8 +900,6 @@ class TestDoctorCrossOsRecordCommand:
         mock_rec.assert_called_once_with(None, run_e2e=True)
 
     def test_record_write_failure_exits_nonzero(self) -> None:
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=1),
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -824,16 +907,16 @@ class TestDoctorCrossOsRecordCommand:
             with pytest.raises(SystemExit):
                 handle_command("doctor", ["--cross-os", "--record", "record.txt"])
 
-    def test_run_cross_os_record_returns_zero_on_success(self) -> None:
-        with (
-            patch(f"{_DOCTOR_MOD}.generate_run_record", return_value=Path("record.txt")),
-            patch(f"{_DOCTOR_MOD}.console"),
-        ):
+    def test_run_cross_os_record_returns_zero_on_success(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: written-path success line not printed -> red."""
+        with patch(f"{_DOCTOR_MOD}.generate_run_record", return_value=Path("record.txt")):
             assert run_cross_os_record("record.txt") == 0
+        out, _err = capsys.readouterr()
+        assert "Run Record written: record.txt" in out
 
-    def test_run_cross_os_record_returns_one_on_write_error(self) -> None:
-        with (
-            patch(f"{_DOCTOR_MOD}.generate_run_record", side_effect=RunRecordError("disk full")),
-            patch(f"{_DOCTOR_MOD}.console"),
-        ):
+    def test_run_cross_os_record_returns_one_on_write_error(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: write error not reported -> red."""
+        with patch(f"{_DOCTOR_MOD}.generate_run_record", side_effect=RunRecordError("disk full")):
             assert run_cross_os_record("record.txt") == 1
+        _out, err = capsys.readouterr()
+        assert "disk full" in err

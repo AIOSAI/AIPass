@@ -3,17 +3,25 @@
 # Description: Tests for registry_ops handler — template registry CRUD
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for registry_ops: template registry CRUD, auto-healing, discovery, edge cases."""
+"""Tests for apps/handlers/template/registry_ops.py and the plan registry save it drives."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import json
 import os
+import sys
+import re
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from aipass.flow.apps.handlers.registry import save_registry as plan_reg
+from aipass.flow.apps.handlers.template import registry_ops
 
 # ---------------------------------------------------------------------------
 # Module-level patch targets (patch where used, not where defined)
@@ -26,12 +34,6 @@ _PLAN_REG_MOD = "aipass.flow.apps.handlers.registry.save_registry"
 
 # Captured before any test patches os.open: the stand-in below delegates here.
 _REAL_OS_OPEN = os.open
-
-
-def _import_mod():
-    import aipass.flow.apps.handlers.template.registry_ops as mod
-
-    return mod
 
 
 def _deny_exclusive_creates(lock_path: Path, denials: int | None):
@@ -70,7 +72,7 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
 @pytest.fixture
 def setup_flow_root(tmp_path, monkeypatch):
     """Redirect FLOW_ROOT and REGISTRY_PATH to tmp_path for isolation."""
-    mod = _import_mod()
+    mod = registry_ops
     flow_root = tmp_path / "flow"
     flow_root.mkdir()
     (flow_root / "flow_json").mkdir()
@@ -135,7 +137,7 @@ class TestLoadRegistry:
 
     def test_creates_registry_when_missing(self, setup_flow_root):
         """Auto-creates registry file with defaults when it does not exist."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
 
@@ -158,7 +160,7 @@ class TestLoadRegistry:
         beyond FPLAN and DPLAN -- and the second command saw them all. Two
         answers to one question, decided by call ordering.
         """
-        mod = _import_mod()
+        mod = registry_ops
         for name in ("flow_plans", "dev_plans", "audit_plans", "playbook_plans"):
             _create_template_dir(setup_flow_root, name, ["default.md"])
 
@@ -170,7 +172,7 @@ class TestLoadRegistry:
 
     def test_a_recreated_corrupt_registry_also_sees_shipped_templates(self, setup_flow_root):
         """Same fall-through, reached by the corrupt-file branch instead."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "audit_plans", ["default.md"])
         reg_path = setup_flow_root / "flow_json" / "template_registry.json"
@@ -182,7 +184,7 @@ class TestLoadRegistry:
 
     def test_loads_existing_valid_registry(self, setup_flow_root):
         """Loads a valid existing registry from disk."""
-        mod = _import_mod()
+        mod = registry_ops
         data = _valid_registry()
         _write_registry(setup_flow_root, data)
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
@@ -195,7 +197,7 @@ class TestLoadRegistry:
 
     def test_corrupt_json_recreates(self, setup_flow_root):
         """Corrupt JSON triggers recreation with defaults."""
-        mod = _import_mod()
+        mod = registry_ops
         reg_path = setup_flow_root / "flow_json" / "template_registry.json"
         reg_path.write_text("{invalid json!!!", encoding="utf-8")
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
@@ -207,8 +209,11 @@ class TestLoadRegistry:
         assert "flow_plans" in result["types"]
 
     def test_non_dict_recreates(self, setup_flow_root):
-        """Non-dict JSON (e.g. a list) triggers recreation."""
-        mod = _import_mod()
+        """Non-dict JSON (e.g. a list) triggers recreation.
+
+        Mutant: if changed or seeded: -> if changed: reddens this.
+        """
+        mod = registry_ops
         reg_path = setup_flow_root / "flow_json" / "template_registry.json"
         reg_path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
@@ -216,12 +221,13 @@ class TestLoadRegistry:
 
         result = mod.load_registry()
 
-        assert isinstance(result, dict)
-        assert "types" in result
+        # Recreated with the default types, and the list on disk is replaced by it.
+        assert set(result["types"]) == {"flow_plans", "dev_plans"}
+        assert json.loads(reg_path.read_text(encoding="utf-8")) == result
 
     def test_heals_missing_types_key(self, setup_flow_root):
         """Auto-heals missing 'types' key by injecting defaults."""
-        mod = _import_mod()
+        mod = registry_ops
         data = {"metadata": {"version": "1.0.0", "last_updated": "2026-01-01", "type_count": 0}}
         _write_registry(setup_flow_root, data)
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
@@ -235,7 +241,7 @@ class TestLoadRegistry:
 
     def test_heals_missing_metadata_key(self, setup_flow_root):
         """Auto-heals missing 'metadata' key."""
-        mod = _import_mod()
+        mod = registry_ops
         data = {
             "types": {
                 "flow_plans": {"prefix": "FPLAN", "shorthand": "fplan"},
@@ -253,8 +259,11 @@ class TestLoadRegistry:
         assert "type_count" in result["metadata"]
 
     def test_calls_prune_and_auto_register(self, setup_flow_root):
-        """load_registry invokes prune and auto-register."""
-        mod = _import_mod()
+        """load_registry invokes prune and auto-register.
+
+        Mutant: changed = _prune_orphaned_types(data) -> changed = _prune_orphaned_types({}) reddens this.
+        """
+        mod = registry_ops
         data = _valid_registry()
         _write_registry(setup_flow_root, data)
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
@@ -264,9 +273,10 @@ class TestLoadRegistry:
             patch(f"{_MOD}._prune_orphaned_types", return_value=False) as mock_prune,
             patch(f"{_MOD}._auto_register_new_types", return_value=False) as mock_auto,
         ):
-            mod.load_registry()
-            mock_prune.assert_called_once()
-            mock_auto.assert_called_once()
+            result = mod.load_registry()
+            # Both passes run over the very registry load_registry returns.
+            mock_prune.assert_called_once_with(result)
+            mock_auto.assert_called_once_with(result)
 
 
 # =============================================================================
@@ -279,7 +289,7 @@ class TestSaveRegistry:
 
     def test_saves_valid_registry(self, setup_flow_root):
         """Writes valid registry JSON to disk."""
-        mod = _import_mod()
+        mod = registry_ops
         data = _valid_registry()
 
         result = mod.save_registry(data)
@@ -293,7 +303,7 @@ class TestSaveRegistry:
 
     def test_updates_metadata_on_save(self, setup_flow_root):
         """Updates last_updated and type_count in metadata."""
-        mod = _import_mod()
+        mod = registry_ops
         data = _valid_registry()
         data["metadata"]["last_updated"] = "1999-01-01"
         data["metadata"]["type_count"] = 0
@@ -307,7 +317,7 @@ class TestSaveRegistry:
 
     def test_returns_false_for_invalid_structure_not_dict(self, setup_flow_root):
         """Returns False when data is not a dict."""
-        mod = _import_mod()
+        mod = registry_ops
 
         result = mod.save_registry("not a dict")  # type: ignore[arg-type]
 
@@ -315,7 +325,7 @@ class TestSaveRegistry:
 
     def test_returns_false_for_missing_types_key(self, setup_flow_root):
         """Returns False when 'types' key is absent."""
-        mod = _import_mod()
+        mod = registry_ops
 
         result = mod.save_registry({"metadata": {}})
 
@@ -323,7 +333,7 @@ class TestSaveRegistry:
 
     def test_returns_false_on_os_error(self, setup_flow_root, monkeypatch, tmp_path):
         """Returns False when file write fails with OSError."""
-        mod = _import_mod()
+        mod = registry_ops
         data = _valid_registry()
         # Use a file as parent so mkdir fails on all platforms
         blocker = tmp_path / "blocker"
@@ -335,13 +345,20 @@ class TestSaveRegistry:
         assert result is False
 
     def test_logs_via_json_handler(self, setup_flow_root, mock_json_handler):
-        """Calls json_handler.log_operation on successful save."""
-        mod = _import_mod()
+        """Calls json_handler.log_operation on successful save.
+
+        Mutant: {"type_count": data["metadata"]["type_count"]} -> {"type_count": 0} reddens this.
+        """
+        mod = registry_ops
         data = _valid_registry()
 
         mod.save_registry(data)
 
-        mock_json_handler.assert_called()
+        mock_json_handler.assert_called_once_with(
+            "save_template_registry",
+            {"type_count": 2},
+            module_name="registry_ops",
+        )
 
     def test_plan_registry_save_retries_a_delete_pending_denial(self, tmp_path, monkeypatch):
         """handlers/registry/save_registry.py: a Windows delete-pending denial on
@@ -350,8 +367,6 @@ class TestSaveRegistry:
         It used to give up on the first denial (PermissionError is an OSError)
         and the registry write was lost.
         """
-        import aipass.flow.apps.handlers.registry.save_registry as plan_reg
-
         monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
         target = tmp_path / "fplan_registry.json"
         lock = target.with_suffix(".lock")
@@ -360,12 +375,14 @@ class TestSaveRegistry:
 
         with (
             patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
-            patch(f"{_PLAN_REG_MOD}.time.sleep"),
+            patch(f"{_PLAN_REG_MOD}._sleep") as sleep,
         ):
             result = plan_reg.save_registry(data, registry_file="fplan_registry.json")
 
         assert result is True
         assert len(attempts) == 2
+        sleep.assert_called_once()
+        assert sleep.call_args.args[0] > 0
         saved = json.loads(target.read_text(encoding="utf-8"))
         assert saved["plans"]["7"]["subject"] == "landed"
         assert not lock.exists()
@@ -374,41 +391,79 @@ class TestSaveRegistry:
         """handlers/registry/save_registry.py: a denial that never clears fails
         after exactly the budget, the caller returns False and logs the denial,
         and the helper's PermissionError is chained to the last denial.
+        Mutant: for attempt in range(_LOCK_RETRIES): -> for attempt in range(_LOCK_RETRIES - 1): reddens this.
+        Mutant: MODULE_NAME, target, e, exc_info=True) -> MODULE_NAME, target, str(e), exc_info=True) reddens this.
         """
-        import aipass.flow.apps.handlers.registry.save_registry as plan_reg
-
         monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
         target = tmp_path / "fplan_registry.json"
         before = {"plans": {}, "next_number": 1}
         target.write_text(json.dumps(before), encoding="utf-8")
         lock = target.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
+        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
         with (
             patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
-            patch(f"{_PLAN_REG_MOD}.time.sleep"),
+            patch(f"{_PLAN_REG_MOD}._sleep") as sleep,
         ):
             result = plan_reg.save_registry({"plans": {"1": {}}, "next_number": 2}, registry_file=target.name)
 
         assert result is False
-        assert len(attempts) == plan_reg._LOCK_RETRIES
         assert json.loads(target.read_text(encoding="utf-8")) == before
         # The logged arguments themselves, never str(call): a call's repr doubles
         # every backslash, so a Windows path is never a substring of it.
         logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
         assert str(lock) in logged
-        assert f"{plan_reg._LOCK_RETRIES} attempts" in logged
+        # The budget as the product reports it to the operator; the attempts
+        # actually made must match it exactly.
+        reported = re.search(r"still denied after (\d+) attempts", logged)
+        assert reported, logged
+        budget = int(reported.group(1))
+        assert budget > 1
+        assert len(attempts) == budget
+        # What each wait was given: positive, doubling, summed into the message.
+        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
+        # `(2**attempt)` growth each redden this.
+        delays = [c.args[0] for c in sleep.call_args_list]
+        assert len(delays) == budget
+        assert delays[0] > 0
+        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
+        assert f"({sum(delays):.2f}s waited)" in logged
+        # The cause chain, read through the public door: save_registry logs the
+        # exception itself, so the operator's log carries the last denial.
+        logged_errors = [arg for c in mock_logger.error.call_args_list for arg in c.args if isinstance(arg, OSError)]
+        assert len(logged_errors) == 1
+        assert isinstance(logged_errors[0], PermissionError)
+        assert logged_errors[0].__cause__ is raised[-1]
 
-        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
-        with (
-            patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
-            patch(f"{_PLAN_REG_MOD}.time.sleep"),
-            pytest.raises(PermissionError) as excinfo,
-        ):
-            plan_reg._acquire_lock(lock)
+    def test_plan_registry_lock_create_error_is_logged_as_itself(
+        self, tmp_path, monkeypatch, mock_logger, platform_create_answer
+    ):
+        """A lock create that fails with neither contention nor denial is not "after N retries".
 
-        assert excinfo.value.__cause__ is raised[-1]
-        assert len(attempts) == plan_reg._LOCK_RETRIES
+        The registry name fits the filesystem; its .lock sibling is 257 bytes, so
+        the exclusive create fails on disk. _acquire_lock used to answer False for
+        that - the same answer as contention - and the caller logged a retry
+        budget that was never spent. It now propagates. Which error a 257-byte
+        name raises is the platform's choice, so the test asks the platform first.
+        Mutant: `except OSError as exc:` + `raise` -> `return False` reddens this.
+        """
+        monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
+        name = "a" * 252 + ".js"
+        answer = platform_create_answer((tmp_path / name).with_suffix(".lock"))
+        assert isinstance(answer, OSError) and not isinstance(answer, (FileExistsError, PermissionError)), (
+            f"{sys.platform} answered {answer!r} to a 257-byte lock name: the premise of this test is gone"
+        )
+
+        result = plan_reg.save_registry({"plans": {}, "next_number": 1}, registry_file=name)
+
+        assert result is False
+        assert not (tmp_path / name).exists()
+        text = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
+        assert "retries" not in text
+        logged = [arg for c in mock_logger.error.call_args_list for arg in c.args if isinstance(arg, OSError)]
+        assert len(logged) == 1
+        assert type(logged[0]) is type(answer)
+        assert logged[0].errno == answer.errno
 
 
 # =============================================================================
@@ -421,7 +476,7 @@ class TestAddType:
 
     def test_adds_new_type_successfully(self, setup_flow_root):
         """Registers a new type when all validations pass."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "task_plans", ["task_template.md"])
@@ -439,7 +494,7 @@ class TestAddType:
 
     def test_rejects_duplicate_dir_name(self, setup_flow_root):
         """Returns False if dir_name is already registered."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -451,7 +506,7 @@ class TestAddType:
 
     def test_rejects_duplicate_prefix_case_insensitive(self, setup_flow_root):
         """Returns False if prefix already taken (case-insensitive)."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "task_plans", ["template.md"])
@@ -464,7 +519,7 @@ class TestAddType:
 
     def test_rejects_missing_template_dir(self, setup_flow_root):
         """Returns False if template directory does not exist."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -476,7 +531,7 @@ class TestAddType:
 
     def test_rejects_dir_without_md_files(self, setup_flow_root):
         """Returns False if template directory has no .md files."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "empty_plans")
@@ -489,7 +544,7 @@ class TestAddType:
 
     def test_creates_plan_registry_on_success(self, setup_flow_root):
         """Creates plan registry JSON for the new type."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "task_plans", ["task.md"])
@@ -515,7 +570,7 @@ class TestRemoveType:
 
     def test_removes_existing_type(self, setup_flow_root):
         """Successfully removes a non-protected type."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "task_plans", ["task.md"])
@@ -540,7 +595,7 @@ class TestRemoveType:
 
     def test_returns_false_if_not_found(self, setup_flow_root):
         """Returns False if dir_name is not in registry."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -552,7 +607,7 @@ class TestRemoveType:
 
     def test_returns_false_for_protected_flow_plans(self, setup_flow_root):
         """Cannot remove protected type flow_plans."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -564,7 +619,7 @@ class TestRemoveType:
 
     def test_returns_false_for_protected_dev_plans(self, setup_flow_root):
         """Cannot remove protected type dev_plans."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -585,7 +640,7 @@ class TestGetPrefixMap:
 
     def test_returns_all_registered_prefixes(self, setup_flow_root):
         """Returns {dir_name: prefix} for all types."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -598,7 +653,7 @@ class TestGetPrefixMap:
 
     def test_includes_custom_types(self, setup_flow_root):
         """Includes custom registered types in the map."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "task_plans", ["task.md"])
@@ -629,7 +684,7 @@ class TestGetTypeMap:
 
     def test_returns_default_entry(self, setup_flow_root):
         """Always includes 'default': 'flow_plans'."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -641,7 +696,7 @@ class TestGetTypeMap:
 
     def test_returns_shorthand_mappings(self, setup_flow_root):
         """Maps shorthand to dir_name for all types."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -654,7 +709,7 @@ class TestGetTypeMap:
 
     def test_includes_custom_type_shorthand(self, setup_flow_root):
         """Custom types are included with their shorthand."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "task_plans", ["task.md"])
@@ -684,7 +739,7 @@ class TestScanUnregistered:
 
     def test_finds_unregistered_dir(self, setup_flow_root):
         """Detects a template dir not in the registry."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "task_plans", ["task.md"])
@@ -699,7 +754,7 @@ class TestScanUnregistered:
 
     def test_skips_hidden_dirs(self, setup_flow_root):
         """Directories starting with '.' are ignored."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, ".hidden_plans", ["hidden.md"])
@@ -714,7 +769,7 @@ class TestScanUnregistered:
 
     def test_skips_underscore_dirs(self, setup_flow_root):
         """Directories starting with '_' are ignored."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "_private_plans", ["private.md"])
@@ -729,7 +784,7 @@ class TestScanUnregistered:
 
     def test_skips_dirs_without_md_files(self, setup_flow_root):
         """Dirs with no .md files are not returned."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "empty_plans")
@@ -744,7 +799,7 @@ class TestScanUnregistered:
 
     def test_returns_empty_when_all_registered(self, setup_flow_root):
         """Returns empty list when no unregistered dirs exist."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -757,7 +812,7 @@ class TestScanUnregistered:
 
     def test_returns_template_metadata(self, setup_flow_root):
         """Each result includes dir_name, template_count, and templates."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "audit_plans", ["audit_a.md", "audit_b.md"])
@@ -779,7 +834,7 @@ class TestScanUnregistered:
         """Returns empty list when templates/ directory does not exist."""
         import shutil
 
-        mod = _import_mod()
+        mod = registry_ops
         data = _valid_registry()
         _write_registry(setup_flow_root, data)
         tpl_dir = setup_flow_root / "templates"
@@ -803,7 +858,7 @@ class TestPruneOrphanedTypes:
 
     def test_prunes_orphaned_non_protected_type(self, setup_flow_root):
         """Removes entries whose template directory is missing."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         extra = {
@@ -823,7 +878,7 @@ class TestPruneOrphanedTypes:
 
     def test_does_not_prune_protected_types(self, setup_flow_root):
         """Protected types (flow_plans, dev_plans) survive even without dirs."""
-        mod = _import_mod()
+        mod = registry_ops
         data = _valid_registry()
 
         mod._prune_orphaned_types(data)
@@ -833,7 +888,7 @@ class TestPruneOrphanedTypes:
 
     def test_returns_false_when_nothing_to_prune(self, setup_flow_root):
         """Returns False when all non-protected types have directories."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -844,7 +899,7 @@ class TestPruneOrphanedTypes:
 
     def test_deletes_orphan_plan_registry_json(self, setup_flow_root):
         """Deletes the associated plan registry JSON when pruning."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         extra = {
@@ -874,7 +929,7 @@ class TestAutoRegisterNewTypes:
 
     def test_registers_new_template_dir(self, setup_flow_root):
         """Finds and registers a new template directory."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "task_plans", ["task.md"])
@@ -888,7 +943,7 @@ class TestAutoRegisterNewTypes:
 
     def test_skips_hidden_dirs(self, setup_flow_root):
         """Directories starting with '.' are skipped."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, ".hidden", ["secret.md"])
@@ -900,7 +955,7 @@ class TestAutoRegisterNewTypes:
 
     def test_skips_pycache(self, setup_flow_root):
         """__pycache__ directories are skipped."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "__pycache__", ["cache.md"])
@@ -912,7 +967,7 @@ class TestAutoRegisterNewTypes:
 
     def test_skips_underscore_dirs(self, setup_flow_root):
         """Directories starting with '_' are skipped."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "_internal", ["internal.md"])
@@ -926,7 +981,7 @@ class TestAutoRegisterNewTypes:
         """Returns False when templates/ directory does not exist."""
         import shutil
 
-        mod = _import_mod()
+        mod = registry_ops
         data = _valid_registry()
         tpl_dir = setup_flow_root / "templates"
         if tpl_dir.exists():
@@ -938,7 +993,7 @@ class TestAutoRegisterNewTypes:
 
     def test_returns_false_when_nothing_new(self, setup_flow_root):
         """Returns False when all dirs are already registered."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         data = _valid_registry()
@@ -949,7 +1004,7 @@ class TestAutoRegisterNewTypes:
 
     def test_handles_prefix_collision_single_char(self, setup_flow_root):
         """Skips registration when derived prefix collides and no fallback."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         # "f" would try FPLAN (collision), but len("f") == 1 so no 2-char fallback
@@ -962,7 +1017,7 @@ class TestAutoRegisterNewTypes:
 
     def test_creates_plan_registry_for_auto_registered(self, setup_flow_root):
         """Auto-registered types get a plan registry JSON created."""
-        mod = _import_mod()
+        mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "task_plans", ["task.md"])
@@ -986,7 +1041,7 @@ class TestDerivePrefix:
 
     def test_basic_derivation(self):
         """Derives first letter + 'PLAN' from dir name."""
-        mod = _import_mod()
+        mod = registry_ops
 
         result = mod._derive_prefix("task_plans", set())
 
@@ -994,7 +1049,7 @@ class TestDerivePrefix:
 
     def test_collision_falls_back_to_two_chars(self):
         """On collision, tries first two letters + 'PLAN'."""
-        mod = _import_mod()
+        mod = registry_ops
 
         result = mod._derive_prefix("task_plans", {"TPLAN"})
 
@@ -1002,7 +1057,7 @@ class TestDerivePrefix:
 
     def test_returns_none_on_double_collision(self):
         """Returns None when both single and double-char prefix collide."""
-        mod = _import_mod()
+        mod = registry_ops
 
         result = mod._derive_prefix("task_plans", {"TPLAN", "TAPLAN"})
 
@@ -1010,7 +1065,7 @@ class TestDerivePrefix:
 
     def test_single_char_dir_no_fallback(self):
         """Single-char dir name cannot fall back to 2-char prefix."""
-        mod = _import_mod()
+        mod = registry_ops
 
         result = mod._derive_prefix("t", {"TPLAN"})
 
@@ -1018,7 +1073,7 @@ class TestDerivePrefix:
 
     def test_empty_dir_name_gives_xplan(self):
         """Empty dir name (empty first_word) falls back to XPLAN."""
-        mod = _import_mod()
+        mod = registry_ops
 
         result = mod._derive_prefix("", set())
 
@@ -1031,7 +1086,7 @@ class TestDerivePrefix:
         is what made ``team_dev_plans`` derive TPLAN on a fresh install and it
         was changed under the 2026-09-07 ruling, so this pin moves with it.
         """
-        mod = _import_mod()
+        mod = registry_ops
 
         result = mod._derive_prefix("security_audit_plans", set())
 
@@ -1039,7 +1094,7 @@ class TestDerivePrefix:
 
     def test_team_dev_plans_derives_tdplan_on_a_fresh_install(self):
         """The ruled answer, with an EMPTY registry — no install history to lean on."""
-        mod = _import_mod()
+        mod = registry_ops
 
         assert mod._derive_prefix("team_dev_plans", set()) == "TDPLAN"
 
@@ -1049,7 +1104,7 @@ class TestDerivePrefix:
         The defect was that the answer moved with install history; a pin that
         only asks the empty case cannot see that coming back.
         """
-        mod = _import_mod()
+        mod = registry_ops
 
         answers = {
             mod._derive_prefix("team_dev_plans", set()),
@@ -1067,7 +1122,7 @@ class TestDerivePrefix:
         wrong the rule is. This is the pin that fails if a NEW template
         directory is added whose registered prefix the rule cannot reach.
         """
-        mod = _import_mod()
+        mod = registry_ops
         registry = mod.load_registry()
 
         mismatches = {

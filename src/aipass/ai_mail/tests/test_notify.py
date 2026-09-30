@@ -1,17 +1,19 @@
 # =================== AIPass ====================
 # Name: test_notify.py
 # Description: Tests for the notification feed writer
-# Version: 2.0.0
+# Version: 2.0.2
 # Created: 2026-04-03
-# Modified: 2026-08-11
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for notify module -- JSONL notification feed writer.
+"""Tests for apps/handlers/notify.py -- JSONL notification feed writer."""
 
-Every assertion here reads the real file the writer produced on a tmp_path
-feed. The only mocks are json_handler (audit log) and logger (output noise) --
-never the write path itself.
-"""
+# Every assertion here reads the real file the writer produced on a tmp_path
+# feed. The only mocks are json_handler (audit log) and logger (output noise) --
+# never the write path itself.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — the feed's JSON key names and path template in the module docstring
 
 import json
 import threading
@@ -83,7 +85,8 @@ def test_ts_is_iso8601_with_timezone_offset(feed):
 
     parsed = datetime.fromisoformat(_lines(feed)[0]["ts"])
     assert parsed.tzinfo is not None
-    assert parsed.utcoffset() is not None
+    # The offset is this machine's local one, stamped at write time.
+    assert parsed.utcoffset() == parsed.astimezone().utcoffset()
 
 
 def test_source_strips_leading_at_sign(feed):

@@ -102,6 +102,8 @@ from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored,
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# APPLIES_TO: its corpus is tests/ already - the rule is about a test asserting a date literal.
+APPLIES_TO = "tests"
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "CALENDAR_BOUND"

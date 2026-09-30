@@ -38,6 +38,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Only check entry points: apps/{branch}.py files
+# APPLIES_TO: entry-point navigation and output quality.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
 
 

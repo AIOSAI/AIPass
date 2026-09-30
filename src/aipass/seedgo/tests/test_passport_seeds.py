@@ -1,51 +1,55 @@
 # =================== AIPass ====================
 # Name: test_passport_seeds.py
 # Description: Repo pins for tracked passport seeds - shape, leak-guard, naming
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-27
 # =============================================
 
-"""Pins for the tracked passport seeds (TDPLAN-0017).
+"""Tests for the passport seeds that spawn/apps/modules/export_seeds.py writes (TDPLAN-0017)."""
 
-A seed is ``src/aipass/<branch>/.aipass/passport.seed.json``: the branch's
-evolved identity, TRACKED, so a fresh clone receives a soul instead of a blank
-template. The live ``.trinity/passport.json`` stays gitignored -- the ignore IS
-the pull protection -- and the seed is its shipped counterpart, MINUS the facts
-that belong to one machine.
+# Pins for the tracked passport seeds (TDPLAN-0017).
+#
+# A seed is ``src/aipass/<branch>/.aipass/passport.seed.json``: the branch's
+# evolved identity, TRACKED, so a fresh clone receives a soul instead of a blank
+# template. The live ``.trinity/passport.json`` stays gitignored -- the ignore IS
+# the pull protection -- and the seed is its shipped counterpart, MINUS the facts
+# that belong to one machine.
+#
+# Three rules, and the middle one is the reason this file exists
+# --------------------------------------------------------------
+# 1. SHAPE -- a seed parses and carries the 2.0 passport shape, because an
+#    invalid seed reaching mint would write a broken passport onto a new install.
+# 2. THE LEAK-GUARD -- no seed carries a machine-local field. ``registry_id``,
+#    ``citizen_id`` and ``registered`` are facts about one installation's
+#    registry, and ``citizenship.seed`` is the mint stamp a LIVE passport gets
+#    when it is born FROM a seed; a seed carrying its own stamp is a snake eating
+#    its tail. Live passports may carry all four. Seeds never may: these files are
+#    pushed to a public repo, so a leak here is published, and published is
+#    forever even after a later commit removes it.
+# 3. NAMING -- ``branch_info.branch_name`` matches the branch directory the seed
+#    sits in, so a copy-paste export cannot hand one branch another's identity.
+#
+# The guard is deliberately INDEPENDENT of the machinery it guards: it re-reads
+# the files from disk and re-derives the rules here rather than importing spawn's
+# exporter. A guard that asks the exporter what it exported would agree with it
+# about a bug.
+#
+# Zero seeds is a SKIP, never a pass
+# ----------------------------------
+# The exporter (``drone @spawn export-seeds``) lands in a parallel lane, so this
+# suite is written before its subject exists. An empty glob skips loudly and
+# names why. Because a suite that skips forever is itself a silent pass, the
+# discovery is pinned separately against a synthetic tree, and every rule is
+# proved RED against a synthetic violating seed -- so these pins are known to
+# bite before the first real seed is ever written.
+#
+# What is NOT judged here: extra top-level sections, prose, or dates. The seed is
+# a passport's identity carried forward; only the shape that mint depends on, the
+# fields that must never ship, and the name are pinned.
 
-Three rules, and the middle one is the reason this file exists
---------------------------------------------------------------
-1. SHAPE -- a seed parses and carries the 2.0 passport shape, because an
-   invalid seed reaching mint would write a broken passport onto a new install.
-2. THE LEAK-GUARD -- no seed carries a machine-local field. ``registry_id``,
-   ``citizen_id`` and ``registered`` are facts about one installation's
-   registry, and ``citizenship.seed`` is the mint stamp a LIVE passport gets
-   when it is born FROM a seed; a seed carrying its own stamp is a snake eating
-   its tail. Live passports may carry all four. Seeds never may: these files are
-   pushed to a public repo, so a leak here is published, and published is
-   forever even after a later commit removes it.
-3. NAMING -- ``branch_info.branch_name`` matches the branch directory the seed
-   sits in, so a copy-paste export cannot hand one branch another's identity.
-
-The guard is deliberately INDEPENDENT of the machinery it guards: it re-reads
-the files from disk and re-derives the rules here rather than importing spawn's
-exporter. A guard that asks the exporter what it exported would agree with it
-about a bug.
-
-Zero seeds is a SKIP, never a pass
-----------------------------------
-The exporter (``drone @spawn export-seeds``) lands in a parallel lane, so this
-suite is written before its subject exists. An empty glob skips loudly and
-names why. Because a suite that skips forever is itself a silent pass, the
-discovery is pinned separately against a synthetic tree, and every rule is
-proved RED against a synthetic violating seed -- so these pins are known to
-bite before the first real seed is ever written.
-
-What is NOT judged here: extra top-level sections, prose, or dates. The seed is
-a passport's identity carried forward; only the shape that mint depends on, the
-fields that must never ship, and the name are pinned.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — json's parse of a seed; a seed that does not parse fails SHAPE here
 
 import json
 from pathlib import Path
@@ -289,6 +293,9 @@ class TestEverySeedInTheRepo:
         are the fleet. That claim is here: one seed per citizen, where a citizen
         is a branch directory carrying `.aipass/`, so the count follows the fleet
         instead of being a literal somebody has to remember to bump.
+
+        Mutant: _seed_paths swaps the last seed for a copy of the first (same count,
+        wrong branch) in tests/test_passport_seeds.py — killed; the count alone survived it.
         """
         root = _repo_root()
         assert root is not None, "the repo root did not resolve - every seed test below would skip"
@@ -301,6 +308,9 @@ class TestEverySeedInTheRepo:
             f"missing: {sorted(set(citizens) - {_branch_of(path.values[0]) for path in params if path.values[0]})}"
         )
         assert len(citizens) > 1, "one citizen or none means the glob is not reading the fleet"
+        assert sorted(_branch_of(param.values[0]) for param in params if param.values[0]) == citizens, (
+            "the seed table names other branches than the citizens on disk"
+        )
 
     @pytest.mark.parametrize("seed", _seed_params())
     def test_the_seed_parses_and_carries_the_2_0_passport_shape(self, seed):

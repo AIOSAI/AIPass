@@ -12,4 +12,4 @@ The Commons - Apps Package
 Entry point and module orchestration for The Commons social network.
 """
 
-from . import handlers  # noqa: F401
+from . import handlers

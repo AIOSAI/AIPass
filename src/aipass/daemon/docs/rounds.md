@@ -12,7 +12,8 @@ The night watch doing its rounds (2026-09-10, DPLAN-0337 R2): one citizen a nigh
 |------|-------|
 | Job | `@daemon/rounds`, type `rotation`, in daemon's `.daemon/schedule.json` |
 | When | 05:00 window (+/-15 min — the first tick inside it fires, so about 04:45); `catch_up` off, a missed night is not woken late |
-| Who | **Framework fleet only** — citizens whose branch lives under this install's `src/aipass/` (17 on 2026-09-10). `projects/*` residents and every external root are out, whatever their class. Alphabetical by email. `@devpulse` never; managers excluded (`include_managers: false`) |
+| Who | **Framework fleet only** — citizens whose branch lives under this install's `src/aipass/` (17 on 2026-09-10). `projects/*` residents and every external root are out, whatever their class. Alphabetical by email. `@devpulse` never; managers excluded (`include_managers: false`). A citizen whose passport cannot be read is left off with a warning, whatever `include_managers` says: it may be a manager |
+| Turn order | One step past last night's target, wrapping at the end. A last target off the roster tonight (passport unreadable, class changed, branch gone) hands the turn to the next citizen after it in roster order, wrapping to the first — the rounds never restart at the top |
 | Wake | `fresh: true`, `model: opus`, `sender: @daemon`, `wake_back: false` |
 | Busy target | Logged as a miss, pointer advances, that citizen gets its next turn in the cycle |
 

@@ -1,22 +1,24 @@
 # =================== AIPass ====================
 # Name: test_upsert.py
 # Description: Tests for upsert_key delivery (repeat-signal collapsing)
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-10
-# Modified: 2026-08-10
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for upsert_key delivery.
+"""Tests for apps/handlers/email/delivery.py's upsert_key handling."""
 
-A repeating signal must occupy ONE inbox slot with a climbing counter, never
-a stack of identical messages. The rules under test:
+# A repeating signal must occupy ONE inbox slot with a climbing counter, never
+# a stack of identical messages. The rules under test:
+#
+# - match (same sender + same key + not closed) rewrites in place
+# - no match creates a normal new message at updates: 1
+# - a closed predecessor does NOT match — closing re-arms the signature
+# - an in-place update never wakes and never flips read status back to new
+# - upsert_key=None is byte-for-byte today's behavior
 
-- match (same sender + same key + not closed) rewrites in place
-- no match creates a normal new message at updates: 1
-- a closed predecessor does NOT match — closing re-arms the signature
-- an in-place update never wakes and never flips read status back to new
-- upsert_key=None is byte-for-byte today's behavior
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — _auto_register_contact()'s broad except Exception around contact registration
 
 import json
 import pytest
@@ -578,8 +580,8 @@ def test_parse_send_args_defaults_upsert_key_to_none():
     assert parse_send_args(["@target", "Subject", "Body"])["upsert_key"] is None
 
 
-def test_send_to_single_forwards_upsert_key():
-    """The mid-layer hands the key to delivery on email_data."""
+def test_send_to_single_forwards_upsert_key(recorded_bus):
+    """The mid-layer hands the key to delivery on email_data; the bus event stays keyless."""
     captured = {}
 
     def _fake_deliver(to_branch, email_data, on_delivered=None):
@@ -608,10 +610,11 @@ def test_send_to_single_forwards_upsert_key():
     assert ok is True
     assert err is None
     assert captured["upsert_key"] == "warn:disk"
+    assert recorded_bus.fires == [("email_sent", {"to": "@target", "subject": "Subject", "auto_execute": False})]
 
 
-def test_send_to_single_without_key_sends_nothing_extra():
-    """Default None leaves the payload exactly as it is today."""
+def test_send_to_single_without_key_sends_nothing_extra(recorded_bus):
+    """Default None leaves the payload, and the email_sent fire, exactly as they are today."""
     captured = {}
 
     def _fake_deliver(to_branch, email_data, on_delivered=None):
@@ -636,3 +639,4 @@ def test_send_to_single_without_key_sends_nothing_extra():
     )
 
     assert "upsert_key" not in captured
+    assert recorded_bus.fires == [("email_sent", {"to": "@target", "subject": "Subject", "auto_execute": False})]

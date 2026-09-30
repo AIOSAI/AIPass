@@ -1,14 +1,21 @@
 # =================== AIPass ====================
 # Name: test_central_writer.py
 # Description: Tests for central_writer -- branch inbox aggregation and central file writing
-# Version: 1.0.0
+# Version: 1.1.2
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for central_writer -- inbox stats aggregation, central file output."""
+"""Tests for apps/handlers/central_writer.py."""
+
+# Inbox stats aggregation, central file output.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — OSError handling around a disk write failure in json_handler
 
 import json
+import os
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -34,21 +41,21 @@ def _suppress_logger(monkeypatch):
 # --- extract_branch_name tests ----------------------------------------
 
 
-def test_extract_branch_name_standard_path():
+def test_extract_branch_name_standard_path(tmp_path):
     """Standard .ai_mail.local path extracts uppercase branch name."""
-    inbox = Path("/repo/src/aipass/seedgo/.ai_mail.local/inbox.json")
+    inbox = tmp_path / "repo" / "src" / "aipass" / "seedgo" / ".ai_mail.local" / "inbox.json"
     assert mod.extract_branch_name(inbox) == "SEEDGO"
 
 
-def test_extract_branch_name_nested_path():
+def test_extract_branch_name_nested_path(tmp_path):
     """Deeply nested path still extracts the immediate parent of .ai_mail.local."""
-    inbox = Path("/repo/src/aipass/deep/nested/drone/.ai_mail.local/inbox.json")
+    inbox = tmp_path / "repo" / "src" / "aipass" / "deep" / "nested" / "drone" / ".ai_mail.local" / "inbox.json"
     assert mod.extract_branch_name(inbox) == "DRONE"
 
 
-def test_extract_branch_name_lowercase_dir():
+def test_extract_branch_name_lowercase_dir(tmp_path):
     """Lowercase directory name is uppercased."""
-    inbox = Path("/tmp/prax/.ai_mail.local/inbox.json")
+    inbox = tmp_path / "prax" / ".ai_mail.local" / "inbox.json"
     assert mod.extract_branch_name(inbox) == "PRAX"
 
 
@@ -145,6 +152,51 @@ def test_find_all_inbox_files_discovers_inboxes(tmp_path, monkeypatch):
     assert names == {"seedgo", "drone"}
 
 
+def test_find_all_inbox_files_never_enters_a_sandbox_or_output_dir(tmp_path, monkeypatch):
+    """A mailbox planted under dropbox, .archive, docs.local, artifacts or system_logs is not counted.
+
+    The repo root itself stands inside a directory named dropbox: the prune judges the
+    names below the root, never the root's own path. Pinned red first (leg 3): the walk
+    counted the dropbox, docs.local, artifacts and system_logs plants.
+    """
+    root = tmp_path / "dropbox" / "repo"
+    monkeypatch.setattr(mod, "_REPO_ROOT", root)
+    live = root / "src" / "aipass" / "live" / ".ai_mail.local"
+    live.mkdir(parents=True)
+    (live / "inbox.json").write_text("{}", encoding="utf-8")
+    for pruned in ("dropbox", ".archive", "docs.local", "artifacts", "system_logs"):
+        planted = root / "src" / "aipass" / "live" / pruned / "planted" / ".ai_mail.local"
+        planted.mkdir(parents=True)
+        (planted / "inbox.json").write_text("{}", encoding="utf-8")
+
+    result = mod.find_all_inbox_files()
+
+    assert [p.parent.parent.name for p in result] == ["live"]
+
+
+# The only route to an unlistable directory is a permission bit: Windows
+# ignores mode 000 on directories and root reads through it, so both skip.
+@pytest.mark.skipif(
+    sys.platform == "win32" or getattr(os, "geteuid", lambda: -1)() == 0,
+    reason="mode 000 does not deny a directory listing on Windows or to root",
+)
+def test_find_all_inbox_files_raises_on_an_unreadable_subtree(tmp_path, monkeypatch):
+    """An unlistable directory raises; it never drops out of a list that looks complete."""
+    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
+    for branch in ("readable", "locked"):
+        mail_dir = tmp_path / branch / ".ai_mail.local"
+        mail_dir.mkdir(parents=True)
+        (mail_dir / "inbox.json").write_text("{}", encoding="utf-8")
+    locked = tmp_path / "locked"
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError) as excinfo:
+            mod.find_all_inbox_files()
+    finally:
+        locked.chmod(0o755)
+    assert excinfo.value.filename == str(locked)
+
+
 def test_find_all_inbox_files_skips_archive(tmp_path, monkeypatch):
     """Skips .ai_mail.local dirs inside .archive paths."""
     monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
@@ -213,6 +265,29 @@ def test_find_all_inbox_files_ignores_dir_without_inbox(tmp_path, monkeypatch):
 
     result = mod.find_all_inbox_files()
     assert len(result) == 0
+
+
+# --- get_valid_branch_names tests --------------------------------------
+
+
+def test_get_valid_branch_names_reads_the_registry_rows_uppercased(tmp_path):
+    """Every registry row's name comes back, uppercased, from the registry it is pointed at.
+
+    The aggregate tests patch this function out, so its body never ran. The
+    autouse sandboxed_central fixture points BRANCH_REGISTRY under tmp_path;
+    the registry written there is the only one read.
+
+    Mutant: `branch["name"].upper()` -> `branch["name"]` returns the rows as
+    written and is caught here.
+    """
+    registry = tmp_path / "central_sandbox" / "AIPASS_REGISTRY.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps({"branches": [{"name": "seedgo"}, {"name": "Drone"}, {"name": "AI_MAIL"}]}),
+        encoding="utf-8",
+    )
+
+    assert mod.get_valid_branch_names() == {"SEEDGO", "DRONE", "AI_MAIL"}
 
 
 # --- aggregate_branch_stats tests --------------------------------------
@@ -413,7 +488,7 @@ def test_find_all_inbox_files_does_not_descend_into_excluded_dirs(tmp_path, monk
     assert len(result) == 1, "only the non-excluded inbox may be returned"
     # Without this the test is BLIND: an implementation that never calls
     # os.walk leaves `visited` empty, and an empty list trespasses nowhere.
-    assert visited, "find_all_inbox_files must walk via os.walk so descent can be pruned"
+    assert Path(visited[0]) == tmp_path, "find_all_inbox_files must walk the root via os.walk so descent can be pruned"
     trespassed = [d for d in visited if any(part in Path(d).parts for part in (".backup", ".archive", "backups"))]
     assert not trespassed, f"walk descended into excluded trees: {trespassed}"
 

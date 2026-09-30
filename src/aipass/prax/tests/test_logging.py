@@ -1,17 +1,29 @@
 # =================== AIPass ====================
 # Name: test_logging.py
 # Description: Tests for prax logging subsystem
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for prax logging subsystem — covers introspection, config helpers,
-and template placeholder replacement."""
+"""Tests for apps/handlers/logging/introspection.py and setup.py."""
+
+# Tests for prax logging subsystem — covers introspection, config helpers,
+# and template placeholder replacement.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — get_calling_module_path, covered by tests/test_logging_handlers.py
+# seedgo: no-test-needed(through_the_command) — setup_system_logger, covered by tests/test_logging_handlers.py
+# seedgo: no-test-needed(through_the_command) — _resolve_caller_path on <stdin>, covered by tests/test_repo_root.py
+# seedgo: no-test-needed(stdlib) — get_calling_module, a Path.stem over the stack walk get_caller_info shares
+# seedgo: no-test-needed(stdlib) — get_captured_loggers_count, the size of _captured_loggers
 
 import copy
 import sys
+import threading
 from unittest.mock import MagicMock, patch
+
+from aipass.prax.apps.handlers.logging import setup as setup_handler
 
 
 # =============================================
@@ -22,47 +34,63 @@ from unittest.mock import MagicMock, patch
 class TestIsPraxInternal:
     """Tests for _is_prax_internal() — checks prax internal markers."""
 
-    def test_prax_logger_path(self, mock_prax_infrastructure):
+    def test_prax_logger_path(self, mock_prax_infrastructure, tmp_path):
         """Logger module path is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/home/user/src/aipass/prax/apps/modules/logger.py") is True
+        path = tmp_path / "src" / "aipass" / "prax" / "apps" / "modules" / "logger.py"
+        assert _is_prax_internal(str(path)) is True
 
-    def test_prax_handlers_path(self, mock_prax_infrastructure):
+    def test_prax_handlers_path(self, mock_prax_infrastructure, tmp_path):
         """Handler directory path is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/home/user/src/aipass/prax/apps/handlers/logging/setup.py") is True
+        path = tmp_path / "src" / "aipass" / "prax" / "apps" / "handlers" / "logging" / "setup.py"
+        assert _is_prax_internal(str(path)) is True
 
-    def test_prax_logger_filename(self, mock_prax_infrastructure):
+    def test_prax_paths_windows_form(self, mock_prax_infrastructure):
+        """Windows-form logger and handler paths are detected as prax internal.
+
+        Mutant: dropping the backslash-to-slash normalisation in _is_prax_internal reddens this.
+        """
+        from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
+
+        handler = "D:\\dev\\AIPass\\src\\aipass\\prax\\apps\\handlers\\logging\\setup.py"
+        logger_module = "D:\\dev\\AIPass\\src\\aipass\\prax\\apps\\modules\\logger.py"
+        assert _is_prax_internal(handler) is True
+        assert _is_prax_internal(logger_module) is True
+
+    def test_prax_logger_filename(self, mock_prax_infrastructure, tmp_path):
         """prax_logger.py filename is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/some/path/prax_logger.py") is True
+        assert _is_prax_internal(str(tmp_path / "some" / "path" / "prax_logger.py")) is True
 
-    def test_prax_handlers_filename(self, mock_prax_infrastructure):
+    def test_prax_handlers_filename(self, mock_prax_infrastructure, tmp_path):
         """prax_handlers.py filename is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/some/path/prax_handlers.py") is True
+        assert _is_prax_internal(str(tmp_path / "some" / "path" / "prax_handlers.py")) is True
 
-    def test_external_cli_path(self, mock_prax_infrastructure):
+    def test_external_cli_path(self, mock_prax_infrastructure, tmp_path):
         """CLI module path is not prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/home/user/src/aipass/cli/apps/cli.py") is False
+        path = tmp_path / "src" / "aipass" / "cli" / "apps" / "cli.py"
+        assert _is_prax_internal(str(path)) is False
 
-    def test_external_flow_path(self, mock_prax_infrastructure):
+    def test_external_flow_path(self, mock_prax_infrastructure, tmp_path):
         """Flow module path is not prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/home/user/src/aipass/flow/apps/flow.py") is False
+        path = tmp_path / "src" / "aipass" / "flow" / "apps" / "flow.py"
+        assert _is_prax_internal(str(path)) is False
 
-    def test_random_script_path(self, mock_prax_infrastructure):
+    def test_random_script_path(self, mock_prax_infrastructure, tmp_path):
         """Random script path is not prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/tmp/random_script.py") is False
+        assert _is_prax_internal(str(tmp_path / "random_script.py")) is False
 
     def test_empty_string(self, mock_prax_infrastructure):
         """Empty string returns False."""
@@ -119,11 +147,11 @@ class TestDetectBranchFromPath:
         drone_path = str(_AIPASS_PKG_ROOT / "drone" / "apps" / "branch.py")
         assert detect_branch_from_path(drone_path) == "drone"
 
-    def test_random_path_returns_none(self, mock_prax_infrastructure):
+    def test_random_path_returns_none(self, mock_prax_infrastructure, tmp_path):
         """Random path outside the project returns None."""
         from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
 
-        assert detect_branch_from_path("/tmp/random_script.py") is None
+        assert detect_branch_from_path(str(tmp_path / "random_script.py")) is None
 
     def test_empty_string_returns_none(self, mock_prax_infrastructure):
         """Empty string returns None."""
@@ -284,6 +312,76 @@ class TestSetupExternalRouting:
                         setup.setup_individual_logger("navigator", caller_path=fake_module)
 
         assert len(get_calls) == 0
+
+
+class TestConcurrentFirstCallsBuildOneLogger:
+    """A module's first log line, arriving on several threads at once, must build one handler set."""
+
+    THREADS = 8
+
+    def _sandbox(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup_handler, "get_system_logs_dir", lambda: tmp_path / "system_logs")
+        monkeypatch.setattr(setup_handler, "get_module_logs_dir", lambda branch: tmp_path / branch / "logs")
+        monkeypatch.setattr(setup_handler, "_system_logger", None)
+        monkeypatch.setattr(setup_handler, "_terminal_output_enabled", False)
+        monkeypatch.setattr(setup_handler, "_captured_loggers", {})
+
+    def test_a_later_line_is_written_once_after_a_racing_first_call(self, monkeypatch, tmp_path):
+        """api's twin ERROR lines (6b7f72e9): N racing first calls wrote every later line N times."""
+        self._sandbox(monkeypatch, tmp_path)
+        barrier = threading.Barrier(self.THREADS)
+
+        def first_call(i):
+            barrier.wait()
+            setup_handler.setup_individual_logger("race_probe", caller_branch="probe").error("root %d timed out", i)
+
+        threads = [threading.Thread(target=first_call, args=(i,)) for i in range(self.THREADS)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        built = setup_handler.setup_individual_logger("race_probe", caller_branch="probe")
+        try:
+            built.info("a later line")
+            local = (tmp_path / "probe" / "logs" / "race_probe.log").read_text(encoding="utf-8")
+            central = (tmp_path / "system_logs" / "probe_race_probe.log").read_text(encoding="utf-8")
+        finally:
+            for handler in list(built.handlers):
+                handler.close()
+                built.removeHandler(handler)
+
+        assert local.count("a later line") == 1
+        assert central.count("a later line") == 1
+        assert sorted(line.split(" | ")[-1] for line in local.splitlines() if "timed out" in line) == sorted(
+            f"root {i} timed out" for i in range(self.THREADS)
+        )
+
+    def test_racing_first_calls_build_the_logger_once(self, monkeypatch, tmp_path):
+        self._sandbox(monkeypatch, tmp_path)
+        built_reports = []
+        monkeypatch.setattr(
+            setup_handler, "_system_logger", MagicMock(info=lambda message: built_reports.append(message))
+        )
+        barrier = threading.Barrier(self.THREADS)
+        results = []
+
+        def first_call():
+            barrier.wait()
+            results.append(setup_handler.setup_individual_logger("build_probe", caller_branch="probe"))
+
+        threads = [threading.Thread(target=first_call) for _ in range(self.THREADS)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        for handler in list(results[0].handlers):
+            handler.close()
+            results[0].removeHandler(handler)
+
+        assert [m for m in built_reports if m.startswith("Creating logger")] == [
+            "Creating logger for module: build_probe"
+        ]
 
 
 # =============================================

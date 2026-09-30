@@ -1,32 +1,62 @@
 # =================== AIPass ====================
 # Name: test_trinity_standard.py
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-08-25
-# Modified: 2026-09-18
+# Modified: 2026-09-29
 # =============================================
 
-"""Trinity standard machinery — the pins that were red before the build.
+"""Tests for apps/handlers/json/entry_limits.py and the trinity-standard handlers around it."""
 
-Every class here corresponds to one item in the DPLAN-0318 machinery
-dispatch, and every test in it FAILED against the code as it stood on
-2026-08-25 before this file landed.
+# Trinity standard machinery — the pins that were red before the build.
+#
+# Every class here corresponds to one item in the DPLAN-0318 machinery
+# dispatch, and every test in it FAILED against the code as it stood on
+# 2026-08-25 before this file landed.
+#
+# The four measurement defects (B1, B2, B4) share one sin: *measurement that
+# cannot fail loud*.  A field the gate cannot measure was silently treated as
+# zero characters, and an off-by-one archived an entry the standard says to
+# keep.  The pins below assert the opposite property in each case: an
+# unmeasurable field is a VIOLATION, and keep-N keeps N.
 
-The four measurement defects (B1, B2, B4) share one sin: *measurement that
-cannot fail loud*.  A field the gate cannot measure was silently treated as
-zero characters, and an off-by-one archived an entry the standard says to
-keep.  The pins below assert the opposite property in each case: an
-unmeasurable field is a VIOLATION, and keep-N keeps N.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — render_tab() caps numbers and todo_context(): tests/test_tab_renderer.py
+# seedgo: no-test-needed(covered_elsewhere) — the lint command lane over lint_handler.run_lint(): tests/test_lint.py
 
 import json
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from aipass.memory.apps.handlers.json import entry_limits as el
+from aipass.memory.apps.handlers import write_fence
 from aipass.memory.apps.handlers.json import lint_handler
+from aipass.memory.apps.handlers.monitor import detector
+from aipass.memory.apps.handlers.templates import receipt
+from aipass.memory.apps.handlers.tracking import tab_renderer
+
+# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
+# whole path: a checkout that lives under a directory named dropbox must not hide itself.
+# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
+# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+_SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+
+def _walk(root: Path, pattern: str = "*.py") -> list[Path]:
+    """Every file under *root* matching *pattern*, outside the skipped directories."""
+    return sorted(path for path in root.rglob(pattern) if not _SKIPPED_DIRS.intersection(path.relative_to(root).parts))
+
+
+def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path: Path) -> None:
+    """Red first against a bare rglob. The root stands inside a directory named dropbox; live/ is the control."""
+    root = tmp_path / "dropbox" / "checkout"
+    for name in (*sorted(_SKIPPED_DIRS), "live"):
+        (root / name).mkdir(parents=True)
+        (root / name / "test_x.py").write_text("", encoding="utf-8")
+    assert _walk(root) == [root / "live" / "test_x.py"]
 
 
 _MEMORY_ROOT = Path(__file__).resolve().parents[1]
@@ -158,7 +188,10 @@ class TestUnmeasurableFieldIsAViolation:
         assert hits[0]["reason"] == "unmeasurable"
 
     def test_the_violation_still_carries_the_keys_its_consumers_print(self):
-        """@hooks edit_gate formats these with %d — a None would raise there."""
+        """@hooks edit_gate formats these with %d — a None would raise there.
+
+        Mutant: _violation publishes the entry's key in "container" — killed.
+        """
         before = {"observations": []}
         after = {"observations": [{"number": 1, "note": ["x"]}]}
         hit = el.changed_entries(before, after, _limits())[0]
@@ -166,6 +199,15 @@ class TestUnmeasurableFieldIsAViolation:
             assert key in hit
         assert isinstance(hit["length"], int)
         assert isinstance(hit["over_by"], int)
+        published = {key: hit[key] for key in ("entry_type", "container", "key", "length", "cap", "over_by")}
+        assert published == {
+            "entry_type": "observations",
+            "container": "observations",
+            "key": "0",
+            "length": 0,
+            "cap": 300,
+            "over_by": 0,
+        }
 
 
 # =============================================================================
@@ -228,20 +270,14 @@ class TestRendererReadsTheTemplate:
         assert "Automated file — add entries" not in source
 
     def test_usage_is_read_from_the_local_template_verbatim(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         expected = json.loads((_TEMPLATES / "LOCAL.template.json").read_text(encoding="utf-8"))
         assert tab_renderer.template_usage("local") == expected["document_metadata"]["_usage"]
 
     def test_usage_is_read_from_the_observations_template_verbatim(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         expected = json.loads((_TEMPLATES / "OBSERVATIONS.template.json").read_text(encoding="utf-8"))
         assert tab_renderer.template_usage("observations") == expected["document_metadata"]["_usage"]
 
     def test_the_semantics_sentence_is_the_template_line_minus_its_placeholder(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         template = json.loads((_TEMPLATES / "LOCAL.template.json").read_text(encoding="utf-8"))
         raw = template["sessions_meta"]
         assert raw.startswith("{{SESSIONS_META}}")
@@ -253,7 +289,6 @@ class TestRendererReadsTheTemplate:
         Prose is template-owned now; a second copy in the renderer is exactly
         the drift the one-source rule exists to end.
         """
-        from aipass.memory.apps.handlers.tracking import tab_renderer
 
         tab = tab_renderer.render_tab("todos", {}, {"entry_types": {"todos": {"max_chars": 150}}}, "memory")
         assert tab.startswith("⟦")
@@ -276,7 +311,6 @@ class TestRendererReadsTheTemplate:
 
     def test_an_unreadable_template_refuses_rather_than_inventing_prose(self, tmp_path, monkeypatch):
         """No silent fallback to a hardcoded sentence — that is the constant again."""
-        from aipass.memory.apps.handlers.tracking import tab_renderer
 
         monkeypatch.setattr(tab_renderer, "_TEMPLATES_DIR", tmp_path)
         with pytest.raises(FileNotFoundError):
@@ -307,8 +341,6 @@ class TestRefreshPreservesTheSemantics:
         return path
 
     def test_the_meta_line_is_tab_then_template_semantics(self, tmp_path):
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         path = self._local(tmp_path)
         rollover_cfg = {"defaults": {"local": {"sessions": {"count": 15}}}}
         limits_cfg = {"entry_types": {"sessions": {"field": "summary", "max_chars": 300}}}
@@ -320,8 +352,6 @@ class TestRefreshPreservesTheSemantics:
         assert written["sessions_meta"] == f"{tab} {tab_renderer.template_semantics('sessions')}"
 
     def test_refresh_restores_the_usage_from_the_template(self, tmp_path):
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         path = self._local(tmp_path)
         ok, _ = tab_renderer._refresh_local("memory", path, {"defaults": {}}, {"entry_types": {}})
         assert ok
@@ -330,7 +360,6 @@ class TestRefreshPreservesTheSemantics:
 
     def test_a_refresh_never_leaves_a_bare_tab(self, tmp_path):
         """The regression this pins: every rollover stripped the meaning."""
-        from aipass.memory.apps.handlers.tracking import tab_renderer
 
         path = self._local(tmp_path)
         tab_renderer._refresh_local("memory", path, {"defaults": {}}, {"entry_types": {}})
@@ -348,7 +377,8 @@ class TestNoHealthStamping:
     """The owner's ruling: status.health is deleted from the standard."""
 
     def test_the_rollover_extractor_writes_no_status_block(self, monkeypatch):
-        from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        from .test_handlers import _import_extractor
 
         extractor, _mocks = _import_extractor(monkeypatch)
         assert not hasattr(extractor, "_update_metadata_after_extraction")
@@ -376,7 +406,7 @@ class TestNoHealthStamping:
         """One sweep so the next copy of this cannot land quietly."""
         offenders = [
             str(path.relative_to(_MEMORY_ROOT))
-            for path in (_MEMORY_ROOT / "apps").rglob("*.py")
+            for path in _walk(_MEMORY_ROOT / "apps")
             if self._stamps_health(path.read_text(encoding="utf-8"))
         ]
         assert offenders == []
@@ -444,20 +474,23 @@ class TestKeepNKeepsN:
         ]
 
     def test_nothing_is_archived_at_exactly_the_limit(self, monkeypatch):
-        from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        from .test_handlers import _import_extractor
 
         ext, _ = _import_extractor(monkeypatch)
         assert ext._extract_tail_excess(self._entries(15), 15, 99, "sessions", "memory") == []
 
     def test_only_the_excess_is_archived_above_the_limit(self, monkeypatch):
-        from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        from .test_handlers import _import_extractor
 
         ext, _ = _import_extractor(monkeypatch)
         archived = ext._extract_tail_excess(self._entries(17), 15, 99, "sessions", "memory")
         assert [e["number"] for e in archived] == [2, 1]
 
     def test_a_file_settles_at_the_limit_not_one_below(self, monkeypatch):
-        from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        from .test_handlers import _import_extractor
 
         ext, _ = _import_extractor(monkeypatch)
         entries = self._entries(16)
@@ -473,8 +506,6 @@ class TestKeepNKeepsN:
             encoding="utf-8",
         )
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(
             detector.config_loader,
             "section",
@@ -489,8 +520,6 @@ class TestKeepNKeepsN:
             json.dumps({"document_metadata": {"schema_version": "3.0.0"}, "sessions": self._entries(16)}),
             encoding="utf-8",
         )
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(
             detector.config_loader,
@@ -509,8 +538,9 @@ class TestKeepNKeepsN:
         moving one threshold and forgetting the other, not a red-first pin;
         the red-first pins for B4 are the two "at exactly the limit" tests.
         """
-        from aipass.memory.apps.handlers.monitor import detector
-        from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+
+        # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        from .test_handlers import _import_extractor
 
         ext, _ = _import_extractor(monkeypatch)
         monkeypatch.setattr(
@@ -543,8 +573,6 @@ class TestTemplateVersionReceipt:
     """Which branches actually carry the current standard is a lookup, not an audit."""
 
     def test_template_versions_come_from_the_gold_source(self):
-        from aipass.memory.apps.handlers.templates import receipt
-
         local = json.loads((_TEMPLATES / "LOCAL.template.json").read_text(encoding="utf-8"))
         obs = json.loads((_TEMPLATES / "OBSERVATIONS.template.json").read_text(encoding="utf-8"))
         assert receipt.template_versions() == {
@@ -553,8 +581,6 @@ class TestTemplateVersionReceipt:
         }
 
     def test_write_receipt_stamps_the_spec_shape(self, tmp_path):
-        from aipass.memory.apps.handlers.templates import receipt
-
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         result = receipt.write_receipt(trinity, receipt.STAMPED_BY_PUSH)
@@ -566,8 +592,6 @@ class TestTemplateVersionReceipt:
         assert written["template_versions"] == receipt.template_versions()
 
     def test_only_the_three_sanctioned_lanes_may_stamp(self, tmp_path):
-        from aipass.memory.apps.handlers.templates import receipt
-
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         assert {receipt.STAMPED_BY_PUSH, receipt.STAMPED_BY_BIRTH, receipt.STAMPED_BY_RESET} == {
@@ -585,7 +609,6 @@ class TestTemplateVersionReceipt:
         resolution a real bump inside the same second is indistinguishable
         from no bump at all, and a test that passes on timing is not a test.
         """
-        from aipass.memory.apps.handlers.templates import receipt
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
@@ -603,7 +626,6 @@ class TestTemplateVersionReceipt:
 
     def test_the_renderer_never_invents_a_stamp_it_did_not_make(self, tmp_path):
         """No receipt = the renderer has no authority to claim a template version."""
-        from aipass.memory.apps.handlers.templates import receipt
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
@@ -612,11 +634,67 @@ class TestTemplateVersionReceipt:
         assert not (trinity / ".template_version.json").exists()
 
     def test_read_receipt_returns_none_when_absent(self, tmp_path):
-        from aipass.memory.apps.handlers.templates import receipt
-
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         assert receipt.read_receipt(trinity) is None
+
+    def test_an_unreadable_receipt_is_named_never_reported_absent(self, tmp_path):
+        """The renderer's bump names a broken receipt as broken, and leaves its bytes.
+
+        Until leg 3 of DPLAN-0354 read_receipt answered None here, the answer
+        for no receipt, so the bump said "No receipt ... only a push, birth, or
+        reset may create one" over a file that was there.
+        """
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        (trinity / receipt.RECEIPT_NAME).write_text("NOT JSON {{{", encoding="utf-8")
+        before = (trinity / receipt.RECEIPT_NAME).read_bytes()
+
+        result = receipt.bump_config_rendered(trinity)
+
+        assert result["success"] is False
+        assert "Unreadable receipt" in result["error"]
+        assert (trinity / receipt.RECEIPT_NAME).read_bytes() == before
+
+    def test_a_receipt_that_is_json_but_not_an_object_raises_and_says_so(self, tmp_path):
+        """Valid JSON with a list at the root is broken, never "no receipt".
+
+        Green on the tree from its first run; its proof is the mutant of leg 4
+        of DPLAN-0354 that answers None in place of the raise, and dies here.
+        """
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        path = trinity / receipt.RECEIPT_NAME
+        path.write_text("[1, 2]\n", encoding="utf-8")
+
+        with pytest.raises(receipt.ReceiptUnreadable) as caught:
+            receipt.read_receipt(trinity)
+
+        assert str(caught.value) == f"Unreadable receipt at {path}: root is list, not an object"
+
+    def test_a_stamp_over_a_broken_receipt_replaces_it_and_names_it(self, tmp_path, monkeypatch):
+        """The lane that delivered the templates writes the fact over a broken receipt, and warns.
+
+        Green on the tree from its first run; its proof is the mutant of leg 4
+        of DPLAN-0354 that raises again in place of the catch, and dies here.
+        """
+        log = MagicMock()
+        monkeypatch.setattr(receipt, "logger", log)
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        path = trinity / receipt.RECEIPT_NAME
+        path.write_text("NOT JSON {{{", encoding="utf-8")
+
+        result = receipt.write_receipt(trinity, receipt.STAMPED_BY_PUSH)
+
+        assert result["success"] is True
+        written = json.loads(path.read_text(encoding="utf-8"))
+        assert written["stamped_by"] == receipt.STAMPED_BY_PUSH
+        assert written["template_versions"] == receipt.template_versions()
+        warned = [call.args[0] for call in log.warning.call_args_list]
+        assert len(warned) == 1
+        assert warned[0].startswith(f"[receipt] Unreadable receipt at {path}: ")
+        assert warned[0].endswith(f" — replaced by the {receipt.STAMPED_BY_PUSH} stamp")
 
     def test_a_receipt_outside_the_aipass_root_is_neither_stamped_nor_bumped(self, tmp_path, monkeypatch):
         """The receipt lives in ``.trinity/`` — a branch memory file like its neighbours.
@@ -624,8 +702,6 @@ class TestTemplateVersionReceipt:
         Both lanes go through one writer, so both are pinned: the push's stamp
         and the renderer's bump.
         """
-        from aipass.memory.apps.handlers import write_fence
-        from aipass.memory.apps.handlers.templates import receipt
 
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         trinity = tmp_path / "other_root" / "src" / "x" / ".trinity"
@@ -671,9 +747,6 @@ class TestReceiptWiring:
     """Callable is not enough — it has to be called, and only where honest."""
 
     def test_the_renderer_bumps_the_receipt_after_a_refresh(self, tmp_path, monkeypatch):
-        from aipass.memory.apps.handlers.templates import receipt
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         trinity = tmp_path / ".trinity"
         trinity.mkdir(parents=True)
         local = trinity / "local.json"
@@ -693,8 +766,6 @@ class TestReceiptWiring:
 
     def test_a_refresh_on_a_branch_with_no_receipt_still_succeeds(self, tmp_path):
         """The bump is a record, not a gate — a missing receipt must not fail the render."""
-        from aipass.memory.apps.handlers.templates import receipt
-        from aipass.memory.apps.handlers.tracking import tab_renderer
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir(parents=True)
@@ -915,13 +986,10 @@ class TestTheTabHonoursPerBranchCharCaps:
         MagicMock — a cap assertion would then pass or fail for reasons that have
         nothing to do with the resolver. Hand it the real module.
         """
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
 
         monkeypatch.setattr(tab_renderer, "entry_limits", el)
 
     def test_an_overridden_cap_reaches_the_rendered_tab(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
-
         tab = tab_renderer.render_tab("sessions", self._rollover(), self._cfg(), "baud")
         assert "≤500 chars" in tab
         assert "≤500 chars · draft to 400 ⟧" in tab
@@ -935,21 +1003,16 @@ class TestTheTabHonoursPerBranchCharCaps:
         assert el.draft_target(cap) == draft
 
     def test_a_branch_without_an_override_still_reads_the_default(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
-
         tab = tab_renderer.render_tab("sessions", self._rollover(), self._cfg(), "memory")
         assert "≤300 chars" in tab
 
     def test_the_branch_name_is_matched_case_insensitively(self):
         """Registry casing varies (MEMORY vs memory); the override must not."""
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
 
         tab = tab_renderer.render_tab("sessions", self._rollover(), self._cfg(), "BAUD")
         assert "≤500 chars" in tab
 
     def test_todos_honours_it_too(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
-
         cfg = {
             "entry_types": {"todos": {"max_chars": 150, "field": "task"}},
             "per_branch": {"baud": {"todos": {"max_chars": 80}}},
@@ -962,7 +1025,6 @@ class TestTheTabHonoursPerBranchCharCaps:
         load_entry_limits() is what the write gate measures against; whatever it
         calls the cap is what the tab must print.
         """
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
 
         section = self._cfg()
         merged = el.resolve_entry_types(section, "baud")
@@ -981,7 +1043,6 @@ class TestTheReceiptsGoldVersionIsSchemaVersion:
         only schema_version reproduces it — and the receipt reports the STRUCTURE
         a branch was stamped with, which is what schema_version names.
         """
-        from aipass.memory.apps.handlers.templates import receipt  # noqa: PLC0415
 
         local = json.loads((_TEMPLATES / "LOCAL.template.json").read_text(encoding="utf-8"))
         obs = json.loads((_TEMPLATES / "OBSERVATIONS.template.json").read_text(encoding="utf-8"))

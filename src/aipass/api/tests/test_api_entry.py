@@ -3,10 +3,15 @@
 # Description: Tests for api.py entry point CLI
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for api.py — main entry point CLI for drone @api."""
+"""Tests for apps/api.py, the entry point CLI for drone @api."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — print_help's display text, beyond that it prints without error
+# seedgo: no-test-needed(windows_compat) — the win32 PYTHONUTF8 and stream reconfigure at import, the Windows CI lane
+# seedgo: no-test-needed(through_the_command) — each module's own commands, covered by that module's test file
 
 from unittest.mock import MagicMock, patch
 
@@ -124,7 +129,9 @@ class TestPrintIntrospection:
         """Shows error when no modules are discovered."""
         print_introspection()
 
-        mock_error.assert_called_once()
+        mock_error.assert_called_once_with(
+            "No modules discovered", suggestion="Run 'drone @api --help' for usage information"
+        )
 
     @patch(PATCH_ERROR)
     @patch(PATCH_CONSOLE)
@@ -149,7 +156,7 @@ class TestPrintHelp:
         """Help output renders without raising."""
         print_help()
 
-        mock_header.assert_called_once()
+        mock_header.assert_called_once_with("API Branch - API Operations")
         assert mock_console.print.call_count >= 1
 
 
@@ -398,14 +405,12 @@ class TestTheExitSeamCarriesARefusal:
         with (
             patch(PATCH_DISCOVER, return_value=[module]),
             patch(PATCH_JSON_HANDLER, autospec=True),
-            patch(PATCH_CONSOLE),
             patch(PATCH_LOGGER),
-            patch("aipass.cli.apps.modules.display.err_console"),
             patch("sys.argv", ["api.py"] + argv),
         ):
             return main()
 
-    def test_a_handled_refusal_exits_2(self):
+    def test_a_handled_refusal_exits_2(self, capsys):
         """The exact APLAN-0013 shape: a real command, a real failure, exit 0."""
 
         def refuse(command, args):
@@ -413,6 +418,7 @@ class TestTheExitSeamCarriesARefusal:
             return True
 
         assert self._run(["validate"], refuse) == 2
+        assert "No API key found for openrouter" in capsys.readouterr().err
 
     def test_a_handled_success_still_exits_0(self):
         """The seam must not turn every command into a failure."""

@@ -1,12 +1,16 @@
 # =================== AIPass ====================
 # Name: test_error_registry.py
 # Description: Unit tests for the error_registry handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-08-08
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for the error_registry handler -- dedup engine, circuit breaker, backoff."""
+"""Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — the errors command that reads this registry, in tests/test_errors.py
+# seedgo: no-test-needed(covered_elsewhere) — the dispatch gate on should_dispatch, in tests/test_error_detected.py
 
 import json
 import time
@@ -16,6 +20,10 @@ import pytest
 from unittest.mock import MagicMock
 from pathlib import Path
 
+# Bound as `er`, the name every test uses, so a reach into a private name
+# stays visible to the audit (through_the_command resolves import bindings).
+import aipass.trigger.apps.handlers.error_registry as er
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -23,49 +31,28 @@ from pathlib import Path
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Mock heavy infrastructure imports and redirect file paths to tmp_path."""
-    import sys
+def _registry_on_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Point every file the registry writes at tmp_path and start each test from a fresh breaker.
 
-    mock_logger = MagicMock()
-
-    # -- prax logger --------------------------------------------------------
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.get_direct_logger = MagicMock(return_value=mock_logger)
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
-
-    # -- trigger json handler -----------------------------------------------
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
-
-    # -- trigger config (TRIGGER_ROOT) --------------------------------------
-    from aipass.trigger.apps.config import atomic_write_json, read_text_with_retry
-
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = tmp_path
-    mock_config.atomic_write_json = atomic_write_json
-    # Real, not a mock: _load_registry parses what this returns, and a MagicMock
-    # here reads as an unreadable registry — which is now a distinct outcome.
-    mock_config.read_text_with_retry = read_text_with_retry
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
-
-    # Force re-import so the module picks up mocked sys.modules
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", raising=False)
+    The real module is imported once at the top; what it reaches outside is
+    patched here: REGISTRY_FILE and CB_STATE_FILE (both module constants built
+    off TRIGGER_ROOT at import, so the live trigger_json/ unless swapped),
+    json_handler.log_operation, and the logger. The breaker and the
+    per-fingerprint dicts are module state restored from the live
+    trigger_cb_state.json at import; each test gets empty ones.
+    """
+    json_dir = tmp_path / "trigger_json"
+    monkeypatch.setattr(er, "REGISTRY_FILE", json_dir / "error_registry.json")
+    monkeypatch.setattr(er, "CB_STATE_FILE", json_dir / "trigger_cb_state.json")
+    monkeypatch.setattr(er, "_circuit_breaker", er.CircuitBreakerState())
+    monkeypatch.setattr(er, "_fingerprint_dispatch_times", {})
+    monkeypatch.setattr(er, "_fingerprint_dispatch_count", {})
+    monkeypatch.setattr(er.json_handler, "log_operation", MagicMock(return_value=True))
+    monkeypatch.setattr(er, "logger", MagicMock())
 
 
 def _import_registry():
-    """Import the error_registry module fresh (after mocking)."""
-    import aipass.trigger.apps.handlers.error_registry as er
-
+    """Return the registry module; the autouse fixture has already put it on tmp_path."""
     return er
 
 
@@ -131,13 +118,27 @@ def test_normalize_strips_timestamps() -> None:
     assert "<timestamp>" in normalized
 
 
-def test_normalize_strips_paths() -> None:
+def test_normalize_strips_paths(tmp_path: Path) -> None:
     """normalize_message replaces absolute paths with a placeholder."""
     er = _import_registry()
-    raw = "Cannot read /home/user/project/data.json"
-    normalized = er.normalize_message(raw)
-    assert "/home/user" not in normalized
+    data_file = tmp_path / "project" / "data.json"
+    normalized = er.normalize_message(f"Cannot read {data_file}")
+    assert str(tmp_path) not in normalized
     assert "<path>" in normalized
+
+
+def test_normalize_strips_windows_paths() -> None:
+    """normalize_message replaces a drive-letter path with either separator (compass 458).
+
+    Two Windows errors differing only by path must share one fingerprint; a
+    pattern that begins with '/' replaced nothing in a backslash path and kept
+    the drive letter of a forward-slash one.
+    """
+    er = _import_registry()
+    backslash = er.normalize_message(r"failed at C:\work\AIPass\src\foo.py line 12")
+    forward = er.normalize_message("failed at D:/work/AIPass/src/bar.py line 99")
+    assert backslash == "failed at <path> line N"
+    assert forward == "failed at <path> line N"
 
 
 def test_normalize_strips_uuids() -> None:
@@ -179,7 +180,7 @@ def test_report_creates_new_entry(tmp_path: Path) -> None:
         error_type="ImportError",
         message="No module named 'foo'",
         component="FLOW",
-        log_path="/logs/flow.log",
+        log_path=str(tmp_path / "flow.log"),
         severity="high",
     )
 
@@ -350,6 +351,25 @@ def test_circuit_breaker_trips_after_threshold(tmp_path: Path) -> None:
     assert status["state"] == "open"
 
 
+def test_errors_outside_the_trip_window_do_not_trip_the_breaker(tmp_path: Path) -> None:
+    """Nine errors a window ago and one now are one error in the window, not ten.
+
+    Green on the tree from its first run; its proof is the mutant.
+    Mutant 2026-09-29: circuit_breaker_record_error reading its own clock reddens this.
+    """
+    _seed_registry(tmp_path)
+    er = _import_registry()
+    er.circuit_breaker_reset()
+    window = 60  # the default trip_window_seconds; the status does not report it
+    start = 1_000_000.0
+
+    for _ in range(9):
+        er.circuit_breaker_record_error(now=start)
+    er.circuit_breaker_record_error(now=start + window + 1)
+
+    assert er.get_circuit_breaker_status(now=start + window + 1)["state"] == "closed"
+
+
 def test_circuit_breaker_open_blocks_dispatch(tmp_path: Path) -> None:
     """Circuit breaker in open state blocks dispatch."""
     _seed_registry(tmp_path)
@@ -395,15 +415,16 @@ def test_circuit_breaker_half_open_allows_one_dispatch(tmp_path: Path) -> None:
     # Trip the breaker
     er.circuit_breaker_trip(reason="test")
 
-    # Simulate cooldown expiry by backdating opened_at
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 1
+    # A clock reading one second past the cooldown, handed in
+    tripped = er.get_circuit_breaker_status()
+    later = tripped["opened_at"] + tripped["cooldown_seconds"] + 1
 
     # First call transitions open -> half_open and allows dispatch
-    assert er.circuit_breaker_allows() is True
-    assert er._circuit_breaker.state == "half_open"
+    assert er.circuit_breaker_allows(now=later) is True
+    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
 
     # Second call in half_open should be blocked (probe already used)
-    assert er.circuit_breaker_allows() is False
+    assert er.circuit_breaker_allows(now=later) is False
 
 
 def test_circuit_breaker_half_open_error_reopens_with_doubled_cooldown(tmp_path: Path) -> None:
@@ -412,18 +433,19 @@ def test_circuit_breaker_half_open_error_reopens_with_doubled_cooldown(tmp_path:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    base_cooldown = er._circuit_breaker.base_cooldown
+    base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
     # Trip and expire cooldown
     er.circuit_breaker_trip(reason="test")
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 1
-    er.circuit_breaker_allows()  # Transition to half_open
+    later = er.get_circuit_breaker_status()["opened_at"] + base_cooldown + 1
+    er.circuit_breaker_allows(now=later)  # Transition to half_open
 
     # Record an error during half_open
-    er.circuit_breaker_record_error()
+    er.circuit_breaker_record_error(now=later)
 
-    assert er._circuit_breaker.state == "open"
-    assert er._circuit_breaker.cooldown_seconds == base_cooldown * 2
+    status = er.get_circuit_breaker_status(now=later)
+    assert status["state"] == "open"
+    assert status["cooldown_seconds"] == base_cooldown * 2
 
 
 # ===========================================================================
@@ -459,10 +481,8 @@ def test_should_dispatch_true_after_backoff_expires(tmp_path: Path) -> None:
     fp = "test_fingerprint_xyz"
     er.record_dispatch(fp)
 
-    # Backdate the dispatch timestamp past the 300s window
-    er._fingerprint_dispatch_times[fp] = [time.time() - 301]
-
-    assert er.should_dispatch(fp) is True
+    # A clock reading past the 300s window, handed in
+    assert er.should_dispatch(fp, now=time.time() + 301) is True
 
 
 def test_get_backoff_seconds_schedule() -> None:
@@ -486,8 +506,9 @@ def test_record_dispatch_increments_count(tmp_path: Path) -> None:
     er.record_dispatch(fp)
     er.record_dispatch(fp)
 
-    assert er._fingerprint_dispatch_count[fp] == 3
-    assert len(er._fingerprint_dispatch_times[fp]) == 3
+    assert er.get_dispatch_count(fp) == 3
+    # The third dispatch sets the backoff: one minute short of it, still held
+    assert er.should_dispatch(fp, now=time.time() + er.get_backoff_seconds(3) - 60) is False
 
 
 # ===========================================================================
@@ -538,8 +559,7 @@ def test_unsuppress_keeps_existing_backoff(tmp_path: Path) -> None:
     # Backoff from the pre-suppression dispatch still applies
     assert er.should_dispatch(fp) is False
 
-    er._fingerprint_dispatch_times[fp] = [time.time() - 301]
-    assert er.should_dispatch(fp) is True
+    assert er.should_dispatch(fp, now=time.time() + 301) is True
 
 
 def test_bookkeeping_continues_while_suppressed(tmp_path: Path) -> None:
@@ -795,6 +815,20 @@ def test_clear_resolved_keeps_non_resolved(tmp_path: Path) -> None:
     assert removed == 0
 
 
+def test_clear_resolved_unreadable_shape_returns_minus_one(tmp_path: Path) -> None:
+    """A registry clear_resolved cannot walk answers -1, never the 0 of "nothing to clear".
+
+    Red first 2026-09-27 against the old except that returned 0.
+    """
+    registry_file = tmp_path / "trigger_json" / "error_registry.json"
+    registry_file.parent.mkdir(parents=True, exist_ok=True)
+    registry_file.write_text(json.dumps({"errors": [], "metadata": {}}), encoding="utf-8")
+    er = _import_registry()
+
+    assert er.clear_resolved(days=7) == -1
+    assert json.loads(registry_file.read_text(encoding="utf-8"))["errors"] == []
+
+
 # ===========================================================================
 # 11. get_stats
 # ===========================================================================
@@ -1018,8 +1052,6 @@ class TestEmptyJsonResilience:
 
         er = _import_registry()
         result = er._load_registry()
-        assert isinstance(result, dict)
-        assert "errors" in result
         assert result["errors"] == {}
 
     def test_load_registry_corrupt_json(self, tmp_path: Path) -> None:
@@ -1031,8 +1063,7 @@ class TestEmptyJsonResilience:
 
         er = _import_registry()
         result = er._load_registry()
-        assert isinstance(result, dict)
-        assert "errors" in result
+        assert result["errors"] == {}
 
     def test_load_circuit_breaker_empty_config(self, tmp_path: Path) -> None:
         """_load_circuit_breaker_state returns default when its state file is empty."""
@@ -1134,6 +1165,20 @@ def test_purge_stale_returns_zero_on_empty_registry(tmp_path: Path) -> None:
     assert removed == 0
 
 
+def test_purge_stale_unreadable_shape_returns_minus_one(tmp_path: Path) -> None:
+    """A registry purge_stale cannot walk answers -1, never the 0 of "nothing stale".
+
+    Red first 2026-09-27 against the old except that returned 0.
+    """
+    registry_file = tmp_path / "trigger_json" / "error_registry.json"
+    registry_file.parent.mkdir(parents=True, exist_ok=True)
+    registry_file.write_text(json.dumps({"errors": [], "metadata": {}}), encoding="utf-8")
+    er = _import_registry()
+
+    assert er.purge_stale(days=30) == -1
+    assert json.loads(registry_file.read_text(encoding="utf-8"))["errors"] == []
+
+
 def test_purge_stale_custom_days(tmp_path: Path) -> None:
     """purge_stale respects custom days parameter."""
     _seed_registry(tmp_path)
@@ -1170,10 +1215,11 @@ def test_evaluate_state_transitions_open_to_half_open_after_cooldown(tmp_path: P
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    # Backdate opened_at so cooldown is expired
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 10
+    # A clock reading ten seconds past the cooldown, handed in
+    tripped = er.get_circuit_breaker_status()
+    later = tripped["opened_at"] + tripped["cooldown_seconds"] + 10
 
-    status = er.get_circuit_breaker_status()
+    status = er.get_circuit_breaker_status(now=later)
     assert status["state"] == "half_open"
 
 
@@ -1184,10 +1230,11 @@ def test_evaluate_state_no_transition_before_cooldown(tmp_path: Path) -> None:
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    # opened_at is now (cooldown is 300s), so it should stay open
-    assert er._circuit_breaker.state == "open"
+    tripped = er.get_circuit_breaker_status()
+    assert tripped["state"] == "open"
 
-    status = er.get_circuit_breaker_status()
+    # One second short of the cooldown it must stay open
+    status = er.get_circuit_breaker_status(now=tripped["opened_at"] + tripped["cooldown_seconds"] - 1)
     assert status["state"] == "open"
 
 
@@ -1197,9 +1244,7 @@ def test_evaluate_state_no_op_when_closed(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    assert er._circuit_breaker.state == "closed"
-
-    status = er.get_circuit_breaker_status()
+    status = er.get_circuit_breaker_status(now=time.time() + 86400)
     assert status["state"] == "closed"
 
 
@@ -1208,19 +1253,21 @@ def test_probe_succeeded_closes_breaker(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
     er.circuit_breaker_reset()
+    base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
     # Trip the breaker and expire cooldown to get to half_open
     er.circuit_breaker_trip(reason="test")
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 1
-    er.circuit_breaker_allows()  # Transitions to half_open
-    assert er._circuit_breaker.state == "half_open"
+    later = er.get_circuit_breaker_status()["opened_at"] + base_cooldown + 1
+    er.circuit_breaker_allows(now=later)  # Transitions to half_open
+    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
 
     er.circuit_breaker_probe_succeeded()
 
-    assert er._circuit_breaker.state == "closed"
-    assert er._circuit_breaker.cooldown_seconds == er._circuit_breaker.base_cooldown
-    assert er._circuit_breaker.opened_at == 0.0
-    assert er._circuit_breaker.recent_errors == []
+    status = er.get_circuit_breaker_status(now=later)
+    assert status["state"] == "closed"
+    assert status["cooldown_seconds"] == base_cooldown
+    assert status["opened_at"] == 0.0
+    assert status["recent_error_count"] == 0
 
 
 def test_probe_succeeded_noop_when_closed(tmp_path: Path) -> None:
@@ -1229,11 +1276,11 @@ def test_probe_succeeded_noop_when_closed(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    assert er._circuit_breaker.state == "closed"
+    assert er.get_circuit_breaker_status()["state"] == "closed"
 
     er.circuit_breaker_probe_succeeded()
 
-    assert er._circuit_breaker.state == "closed"
+    assert er.get_circuit_breaker_status()["state"] == "closed"
 
 
 def test_probe_succeeded_noop_when_open(tmp_path: Path) -> None:
@@ -1243,28 +1290,25 @@ def test_probe_succeeded_noop_when_open(tmp_path: Path) -> None:
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    assert er._circuit_breaker.state == "open"
+    assert er.get_circuit_breaker_status()["state"] == "open"
 
     er.circuit_breaker_probe_succeeded()
 
-    assert er._circuit_breaker.state == "open"
+    assert er.get_circuit_breaker_status()["state"] == "open"
 
 
 def test_status_returns_remaining_seconds(tmp_path: Path) -> None:
-    """get_circuit_breaker_status returns approximately correct remaining_seconds."""
+    """get_circuit_breaker_status returns the remaining cooldown at the reading it is handed."""
     _seed_registry(tmp_path)
     er = _import_registry()
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    cooldown = er._circuit_breaker.cooldown_seconds
-    # Backdate opened_at by 100 seconds so remaining ~ cooldown - 100
-    er._circuit_breaker.opened_at = time.time() - 100
+    tripped = er.get_circuit_breaker_status()
 
-    status = er.get_circuit_breaker_status()
-    expected_remaining = cooldown - 100
-    # Allow 2-second tolerance for timing
-    assert abs(status["remaining_seconds"] - expected_remaining) <= 2
+    # 100 seconds after the trip, exactly cooldown - 100 remain: the clock is handed in
+    status = er.get_circuit_breaker_status(now=tripped["opened_at"] + 100)
+    assert status["remaining_seconds"] == int(tripped["cooldown_seconds"] - 100)
 
 
 def test_status_remaining_zero_when_closed(tmp_path: Path) -> None:
@@ -1284,14 +1328,16 @@ def test_breaker_half_open_on_read_then_allows_probe(tmp_path: Path) -> None:
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    # Expire the cooldown
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 1
+    # A clock reading past the cooldown, handed in
+    tripped = er.get_circuit_breaker_status()
+    later = tripped["opened_at"] + tripped["cooldown_seconds"] + 1
 
     # First call: transitions open -> half_open, returns True (probe allowed)
-    result = er.circuit_breaker_allows()
+    result = er.circuit_breaker_allows(now=later)
     assert result is True
-    assert er._circuit_breaker.state == "half_open"
-    assert er._circuit_breaker.half_open_allow is False
+    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
+    # The probe slot is spent: a second ask is refused
+    assert er.circuit_breaker_allows(now=later) is False
 
 
 def test_breaker_closes_after_successful_probe_dispatch(tmp_path: Path) -> None:
@@ -1300,24 +1346,26 @@ def test_breaker_closes_after_successful_probe_dispatch(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    base_cooldown = er._circuit_breaker.base_cooldown
+    base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
     # Trip the breaker
     er.circuit_breaker_trip(reason="test")
-    assert er._circuit_breaker.state == "open"
+    tripped = er.get_circuit_breaker_status()
+    assert tripped["state"] == "open"
 
-    # Expire the cooldown
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 1
+    # A clock reading past the cooldown, handed in
+    later = tripped["opened_at"] + base_cooldown + 1
 
     # Probe dispatch: transitions open -> half_open and allows
-    assert er.circuit_breaker_allows() is True
-    assert er._circuit_breaker.state == "half_open"
+    assert er.circuit_breaker_allows(now=later) is True
+    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
 
     # Probe succeeded: transitions half_open -> closed
     er.circuit_breaker_probe_succeeded()
-    assert er._circuit_breaker.state == "closed"
-    assert er._circuit_breaker.cooldown_seconds == base_cooldown
-    assert er._circuit_breaker.opened_at == 0.0
+    status = er.get_circuit_breaker_status(now=later)
+    assert status["state"] == "closed"
+    assert status["cooldown_seconds"] == base_cooldown
+    assert status["opened_at"] == 0.0
 
 
 # ===========================================================================
@@ -1373,7 +1421,9 @@ def test_get_dispatch_count_matches_the_backing_counter(tmp_path: Path) -> None:
     er.record_dispatch(fp)
     er.record_dispatch(fp)
 
-    assert er.get_dispatch_count(fp) == er._fingerprint_dispatch_count[fp]
+    assert er.get_dispatch_count(fp) == 2
+    # Backoff reads the same counter: one minute short of the count-2 backoff, still held
+    assert er.should_dispatch(fp, now=time.time() + er.get_backoff_seconds(2) - 60) is False
 
 
 def test_get_dispatch_count_does_not_mutate_state(tmp_path: Path) -> None:
@@ -1391,7 +1441,7 @@ def test_get_dispatch_count_does_not_mutate_state(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _refuse_once(mp, target: Path):
+def _refuse_once(mp, er):
     """Refuse ONE read of target with a Windows sharing violation.
 
     The same transient os.replace already retries for, seen from the reading
@@ -1399,29 +1449,34 @@ def _refuse_once(mp, target: Path):
     and _load_registry has the identical shape: a refused read returns a blank
     registry, and every caller writes that blank straight back.
     """
-    real = Path.read_text
     state = {"left": 1, "seen": 0}
 
-    def read_text(self_path, *args, **kwargs):
-        if str(self_path) == str(target) and state["left"]:
-            state["left"] -= 1
-            state["seen"] += 1
-            raise PermissionError(13, "used by another process")
-        return real(self_path, *args, **kwargs)
+    class _RefusingPath(Path):
+        """The registry path, refusing its first read; only er.REGISTRY_FILE is swapped."""
 
-    mp.setattr(Path, "read_text", read_text)
+        def read_text(self, *args, **kwargs):
+            if state["left"]:
+                state["left"] -= 1
+                state["seen"] += 1
+                raise PermissionError(13, "used by another process")
+            return super().read_text(*args, **kwargs)
+
+    mp.setattr(er, "REGISTRY_FILE", _RefusingPath(er.REGISTRY_FILE))
     return state
 
 
 def test_a_refused_read_does_not_wipe_the_registry(tmp_path: Path) -> None:
-    """A sharing violation mid-write must not cost the whole registry."""
+    """A sharing violation mid-write must not cost the whole registry.
+
+    Mutant run 2026-09-27: _load_registry reads REGISTRY_FILE.read_text directly (no retry) -> red.
+    """
     _seed_registry(tmp_path)
     er = _import_registry()
     er.report(error_type="ImportError", message="first", component="FLOW")
     assert len(json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))["errors"]) == 1
 
     with pytest.MonkeyPatch.context() as mp:
-        state = _refuse_once(mp, er.REGISTRY_FILE)
+        state = _refuse_once(mp, er)
         er.report(error_type="ValueError", message="second", component="FLOW")
 
     assert state["seen"] == 1, "fixture refused nothing — test is vacuous"

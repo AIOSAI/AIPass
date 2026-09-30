@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: heal_registry.py
 # Description: Registry Doctrine Self-Heal Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-29
-# Modified: 2026-08-16
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -158,13 +158,16 @@ def _heal_missing_file_plans(
         save_registry_fn: Registry saver (injected)
 
     Returns:
-        List of heal-action dicts performed for this type.
+        List of heal-action dicts performed for this type; [] means nothing
+        needed healing.
+
+    Raises:
+        Whatever the loader raises. An unreadable registry is a failed sweep,
+        not an empty one: flow's leg 3 decision lets it reach the one caller
+        (heal_registry_doctrine_impl), which logs it as an error for this type
+        and goes on with the others.
     """
-    try:
-        registry = load_registry_fn(registry_file=registry_file)
-    except Exception as e:
-        logger.warning(f"[{MODULE_NAME}] Could not load '{registry_file}' — skipping {prefix} orphan sweep: {e}")
-        return []
+    registry = load_registry_fn(registry_file=registry_file)
 
     registry.setdefault("plans", {})
     open_before = {num for num, entry in registry["plans"].items() if entry.get("status") == "open"}

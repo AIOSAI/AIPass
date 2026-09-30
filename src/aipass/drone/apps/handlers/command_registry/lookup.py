@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lookup.py
 # Description: Command lookup and matching for custom command shortcuts
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-09-27
 # =============================================
 
 """Command Lookup and Matching for Custom Commands.
@@ -71,11 +71,19 @@ def match_command(args: list[str]) -> tuple[dict[str, Any], list[str]] | None:
     3. ``"plan create"`` (2 words)
     4. ``"plan"`` (1 word)
 
+    The operation log written on a hit is telemetry: a log write that raises
+    (``log_operation`` raises ``InvalidDocument`` on a malformed log) is logged
+    as a warning and the match still stands, so a command that matched runs.
+
     Args:
         args: List of whitespace-split user input tokens.
 
     Returns:
         Tuple of (command_dict, remaining_args) on match, None otherwise.
+
+    Raises:
+        Exception: whatever ``load_registry`` raises, and only that. A registry
+        that cannot load is a failure, never reported as "no match".
     """
     if not args:
         return None
@@ -85,16 +93,19 @@ def match_command(args: list[str]) -> tuple[dict[str, Any], list[str]] | None:
         commands = registry.get("commands", {})
     except Exception as exc:
         logger.error("[%s] Failed to load registry for matching: %s", MODULE_NAME, exc)
-        return None
+        raise
 
     for i in range(min(len(args), 4), 0, -1):
         candidate = " ".join(args[:i])
         if candidate in commands:
             remaining = args[i:]
-            json_handler.log_operation(
-                "match_command",
-                {"matched": candidate, "remaining_args": remaining},
-            )
+            try:
+                json_handler.log_operation(
+                    "match_command",
+                    {"matched": candidate, "remaining_args": remaining},
+                )
+            except Exception as exc:
+                logger.warning("[%s] match log for '%s' not written: %s", MODULE_NAME, candidate, exc)
             return (commands[candidate], remaining)
 
     return None

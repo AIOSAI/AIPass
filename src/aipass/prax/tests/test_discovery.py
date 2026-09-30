@@ -1,16 +1,20 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Unit tests for discovery handlers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
-"""Unit tests for PRAX discovery handlers.
+"""Tests for apps/handlers/discovery/filtering.py, scanner.py, scan.py and apps/modules/discover.py."""
 
-Tests filtering.should_ignore_path, scanner.scan_directory_safely,
-and scanner.discover_python_modules.
-"""
+# Unit tests for PRAX discovery handlers.
+#
+# Tests filtering.should_ignore_path, scanner.scan_directory_safely,
+# and scanner.discover_python_modules.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — start_file_watcher and stop_file_watcher, covered by tests/test_watcher.py
 
 import importlib
 import sys
@@ -89,37 +93,39 @@ def scanner_module(mock_ignore_patterns, mock_config_load, mock_prax_infrastruct
 class TestShouldIgnorePath:
     """Tests for filtering.should_ignore_path."""
 
-    def test_returns_bool(self, filtering_module):
+    def test_returns_bool(self, filtering_module, tmp_path):
         """should_ignore_path answers True or False, and the answer tracks the path."""
-        result = filtering_module.should_ignore_path(Path("/some/normal/file.py"))
+        result = filtering_module.should_ignore_path(tmp_path / "some" / "normal" / "file.py")
         assert isinstance(result, bool)
         # Which bool: False for a path holding no ignored component, True once
         # one of the configured patterns appears in it.
         assert result is False
-        assert filtering_module.should_ignore_path(Path("/some/.venv/file.py")) is True
+        assert filtering_module.should_ignore_path(tmp_path / "some" / ".venv" / "file.py") is True
         # Matching is per path COMPONENT, not substring: a directory that merely
         # starts with an ignored name is still walked.
-        assert filtering_module.should_ignore_path(Path("/some/node_modules_backup/file.py")) is False
+        assert filtering_module.should_ignore_path(tmp_path / "some" / "node_modules_backup" / "file.py") is False
 
-    def test_ignores_git_directory(self, filtering_module):
+    def test_ignores_git_directory(self, filtering_module, tmp_path):
         """.git paths should be ignored."""
-        assert filtering_module.should_ignore_path(Path("/repo/.git/objects/ab")) is True
+        assert filtering_module.should_ignore_path(tmp_path / "repo" / ".git" / "objects" / "ab") is True
 
-    def test_ignores_pycache(self, filtering_module):
+    def test_ignores_pycache(self, filtering_module, tmp_path):
         """__pycache__ paths should be ignored."""
-        assert filtering_module.should_ignore_path(Path("/project/__pycache__/mod.pyc")) is True
+        assert filtering_module.should_ignore_path(tmp_path / "project" / "__pycache__" / "mod.pyc") is True
 
-    def test_ignores_venv(self, filtering_module):
+    def test_ignores_venv(self, filtering_module, tmp_path):
         """.venv paths should be ignored."""
-        assert filtering_module.should_ignore_path(Path("/project/.venv/lib/python3/site.py")) is True
+        assert (
+            filtering_module.should_ignore_path(tmp_path / "project" / ".venv" / "lib" / "python3" / "site.py") is True
+        )
 
-    def test_ignores_node_modules(self, filtering_module):
+    def test_ignores_node_modules(self, filtering_module, tmp_path):
         """node_modules paths should be ignored."""
-        assert filtering_module.should_ignore_path(Path("/project/node_modules/pkg/index.js")) is True
+        assert filtering_module.should_ignore_path(tmp_path / "project" / "node_modules" / "pkg" / "index.js") is True
 
-    def test_normal_path_not_ignored(self, filtering_module):
+    def test_normal_path_not_ignored(self, filtering_module, tmp_path):
         """Regular project paths should not be ignored."""
-        assert filtering_module.should_ignore_path(Path("/project/src/module.py")) is False
+        assert filtering_module.should_ignore_path(tmp_path / "project" / "src" / "module.py") is False
 
     def test_root_path_not_ignored(self, filtering_module):
         """A bare root path should not be ignored."""
@@ -130,19 +136,19 @@ class TestShouldIgnorePath:
         assert filtering_module.should_ignore_path(Path("src/app/main.py")) is False
         assert filtering_module.should_ignore_path(Path("src/__pycache__/main.pyc")) is True
 
-    def test_deeply_nested_ignored_dir(self, filtering_module):
+    def test_deeply_nested_ignored_dir(self, filtering_module, tmp_path):
         """Ignored dir deep in the tree should still be caught."""
-        deep = Path("/a/b/c/d/.git/refs/heads/main")
+        deep = tmp_path / "a" / "b" / "c" / "d" / ".git" / "refs" / "heads" / "main"
         assert filtering_module.should_ignore_path(deep) is True
 
-    def test_similar_name_not_ignored(self, filtering_module):
+    def test_similar_name_not_ignored(self, filtering_module, tmp_path):
         """Directories with names similar to ignored patterns should pass."""
         # 'git_utils' is not '.git'
-        assert filtering_module.should_ignore_path(Path("/project/git_utils/helper.py")) is False
+        assert filtering_module.should_ignore_path(tmp_path / "project" / "git_utils" / "helper.py") is False
 
-    def test_logs_filtered_path(self, filtering_module, mock_prax_infrastructure):
+    def test_logs_filtered_path(self, filtering_module, mock_prax_infrastructure, tmp_path):
         """When a path is ignored, json_handler.log_operation should be called."""
-        filtering_module.should_ignore_path(Path("/repo/.git/config"))
+        filtering_module.should_ignore_path(tmp_path / "repo" / ".git" / "config")
         mocks = mock_prax_infrastructure
         mocks.json_handler.log_operation.assert_called()
 

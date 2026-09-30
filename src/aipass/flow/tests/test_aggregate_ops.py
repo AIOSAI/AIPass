@@ -1,16 +1,34 @@
-"""Tests for aggregate_ops -- helper functions and aggregation implementation."""
+# =================== AIPass ====================
+# Name: test_aggregate_ops.py
+# Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
+# Version: 1.0.0
+# Created: 2026-03-29
+# Modified: 2026-09-28
+# =============================================
+
+"""Tests for apps/handlers/plan/aggregate_ops.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import json
 import logging
 import os
+import re
+import sys
+from pathlib import Path
+from unittest.mock import call, patch
 
 import pytest
-from pathlib import Path
-from unittest.mock import patch
+
+import aipass.flow.apps.handlers.plan.aggregate_ops as mod
 
 
 # ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.handlers.plan.aggregate_ops"
+# The bus where it lives: aggregate_central_impl imports it inside the function,
+# so a patch on aggregate_ops itself bites nothing and the real event fires.
+_BUS = "aipass.trigger.apps.modules.core.trigger"
 
 # Captured before any test patches os.open: the stand-in below delegates here.
 _REAL_OS_OPEN = os.open
@@ -48,9 +66,7 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
 
 
 def _import(name: str):
-    """Import a function from aggregate_ops inside each test."""
-    import aipass.flow.apps.handlers.plan.aggregate_ops as mod
-
+    """Return a function from aggregate_ops for a test to call directly."""
     return getattr(mod, name)
 
 
@@ -178,11 +194,13 @@ class TestSaveBranchRegistry:
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
         data = {"plans": {"3": {"status": "closed"}}, "next_number": 4}
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = save_branch_registry(reg_file, data)
 
         assert result is True
         assert len(attempts) == 2
+        sleep.assert_called_once()
+        assert sleep.call_args.args[0] > 0
         saved = json.loads(reg_file.read_text(encoding="utf-8"))
         assert saved["plans"]["3"]["status"] == "closed"
         assert not lock.exists()
@@ -190,26 +208,37 @@ class TestSaveBranchRegistry:
     def test_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
         """A denial past the budget: exactly the budget of attempts, the caller
         returns False and logs the chained PermissionError, nothing is written.
+        Mutant: for attempt in range(_LOCK_RETRIES): -> for attempt in range(_LOCK_RETRIES - 1): reddens this.
         """
-        import aipass.flow.apps.handlers.plan.aggregate_ops as mod
-
         reg_file = tmp_path / "registry.json"
         before = {"plans": {}, "next_number": 1}
         reg_file.write_text(json.dumps(before), encoding="utf-8")
         lock = reg_file.with_suffix(".lock")
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = mod.save_branch_registry(reg_file, {"plans": {"1": {}}})
 
         assert result is False
-        assert len(attempts) == mod._LOCK_RETRIES
         assert json.loads(reg_file.read_text(encoding="utf-8")) == before
         logged = [arg for c in mock_logger.error.call_args_list for arg in c.args]
         denial = next((arg for arg in logged if isinstance(arg, PermissionError)), None)
         assert denial is not None, logged
         assert str(lock) in str(denial)
+        # What each wait was given: positive, doubling, summed into the message.
+        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
+        # `(2**attempt)` growth each redden this.
+        delays = [c.args[0] for c in sleep.call_args_list]
+        assert len(delays) == len(attempts)
+        assert delays[0] > 0
+        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
+        assert f"({sum(delays):.2f}s waited)" in str(denial)
         assert denial.__cause__ is raised[-1]
+        # The budget as the denial reports it; the attempts made must match it.
+        reported = re.search(r"still denied after (\d+) attempts", str(denial))
+        assert reported, str(denial)
+        assert int(reported.group(1)) > 1
+        assert len(attempts) == int(reported.group(1))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -455,6 +484,34 @@ class TestSaveCentral:
         result = save_central(bad_file, bad_dir, {})
         assert result is False
 
+    def test_lock_create_error_is_logged_as_itself(self, tmp_path, mock_logger, platform_create_answer):
+        """A lock create that fails with neither contention nor denial is not "after N retries".
+
+        The central file's name fits the filesystem; its .lock sibling is 257
+        bytes, so the exclusive create fails on disk. _acquire_lock used to
+        answer False for it, and save_central logged a retry budget that was
+        never spent. It now propagates to save_central's own error log. Which
+        error a 257-byte name raises is the platform's choice, so the test asks
+        the platform first.
+        Mutant: `lock_path, exc)` + `raise` -> `return False` reddens this.
+        """
+        save_central = _import("save_central")
+        central_file = tmp_path / ("a" * 252 + ".js")
+        answer = platform_create_answer(central_file.with_suffix(".lock"))
+        assert isinstance(answer, OSError) and not isinstance(answer, (FileExistsError, PermissionError)), (
+            f"{sys.platform} answered {answer!r} to a 257-byte lock name: the premise of this test is gone"
+        )
+
+        assert save_central(central_file, tmp_path, {"x": 1}) is False
+        assert not central_file.exists()
+        text = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
+        assert "retries" not in text
+        assert str(answer) in text
+        logged = [arg for c in mock_logger.warning.call_args_list for arg in c.args if isinstance(arg, OSError)]
+        assert len(logged) == 1
+        assert type(logged[0]) is type(answer)
+        assert logged[0].errno == answer.errno
+
     def test_delete_pending_denial_is_retried_and_write_lands(self, tmp_path):
         """save_central's lock takes the same retry: a delete-pending denial is
         waited out and PLANS.central.json holds the new data.
@@ -466,20 +523,21 @@ class TestSaveCentral:
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
         data = {"active_plans": [{"plan_id": "FPLAN-0001"}], "branches": {}}
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = save_central(central_file, central_dir, data)
 
         assert result is True
         assert len(attempts) == 2
+        sleep.assert_called_once()
+        assert sleep.call_args.args[0] > 0
         assert json.loads(central_file.read_text(encoding="utf-8")) == data
         assert not lock.exists()
 
     def test_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
         """A denial past the budget: exactly the budget of attempts, save_central
         returns False and logs the denial, and the old file is untouched.
+        Mutant: for attempt in range(_LOCK_RETRIES): -> for attempt in range(_LOCK_RETRIES - 1): reddens this.
         """
-        import aipass.flow.apps.handlers.plan.aggregate_ops as mod
-
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
         central_file = central_dir / "PLANS.central.json"
@@ -488,17 +546,26 @@ class TestSaveCentral:
         lock = central_file.with_suffix(".lock")
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = mod.save_central(central_file, central_dir, {"active_plans": [{}], "branches": {}})
 
         assert result is False
-        assert len(attempts) == mod._LOCK_RETRIES
         assert json.loads(central_file.read_text(encoding="utf-8")) == before
         # The logged arguments themselves, never str(call): a call's repr doubles
         # every backslash, so a Windows path is never a substring of it.
         logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
         assert str(lock) in logged
-        assert f"{mod._LOCK_RETRIES} attempts" in logged
+        # The budget as the product reports it; the attempts made must match it.
+        reported = re.search(r"still denied after (\d+) attempts", logged)
+        assert reported, logged
+        assert int(reported.group(1)) > 1
+        assert len(attempts) == int(reported.group(1))
+        # What each wait was given, as above.
+        delays = [c.args[0] for c in sleep.call_args_list]
+        assert len(delays) == len(attempts)
+        assert delays[0] > 0
+        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
+        assert f"({sum(delays):.2f}s waited)" in logged
 
 
 # ═══════════════════════════════════════════════════════════
@@ -530,6 +597,10 @@ class TestAggregateCentralImpl:
         assert result is True
 
     def test_aggregates_active_plans_across_branches(self, tmp_path):
+        """Two live plans in two branches aggregate, and the bus hears it once.
+
+        Mutant: active_count=len(all_active) -> active_count=0 reddens this.
+        """
         aggregate_central_impl = _import("aggregate_central_impl")
 
         # Create plan files on disk so they pass validation
@@ -564,9 +635,10 @@ class TestAggregateCentralImpl:
         }
         central_file.write_text(json.dumps(data), encoding="utf-8")
 
-        with patch(f"{_MOD}.trigger", create=True):
+        with patch(_BUS) as bus:
             result = aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
         assert result is True
+        bus.fire.assert_called_once_with("central_aggregated", active_count=2, closed_count=0, branches_count=2)
 
         saved = json.loads(central_file.read_text(encoding="utf-8"))
         assert saved["statistics"]["active_count"] == 2
@@ -576,6 +648,10 @@ class TestAggregateCentralImpl:
         assert saved["active_plans"][0]["plan_id"] == "FPLAN-0002"
 
     def test_recently_closed_limited_to_5(self, tmp_path):
+        """Seven closed plans publish a five-row window, and the event carries five.
+
+        Mutant: closed_count=len(recently_closed) -> closed_count=len(all_active) reddens this.
+        """
         aggregate_central_impl = _import("aggregate_central_impl")
 
         central_dir = tmp_path / ".ai_central"
@@ -602,9 +678,10 @@ class TestAggregateCentralImpl:
         }
         central_file.write_text(json.dumps(data), encoding="utf-8")
 
-        with patch(f"{_MOD}.trigger", create=True):
+        with patch(_BUS) as bus:
             result = aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
         assert result is True
+        bus.fire.assert_called_once_with("central_aggregated", active_count=0, closed_count=5, branches_count=1)
 
         saved = json.loads(central_file.read_text(encoding="utf-8"))
         assert len(saved["recently_closed"]) == 5
@@ -635,17 +712,21 @@ class TestAggregateCentralImpl:
             result = aggregate_central_impl(heal=True, central_file=central_file, central_dir=central_dir)
         assert result is False
 
-    def test_returns_false_on_exception(self):
+    def test_returns_false_on_exception(self, tmp_path):
         aggregate_central_impl = _import("aggregate_central_impl")
         with patch(f"{_MOD}.load_central", side_effect=RuntimeError("boom")):
             result = aggregate_central_impl(
                 heal=True,
-                central_file=Path("/fake/PLANS.central.json"),
-                central_dir=Path("/fake"),
+                central_file=tmp_path / "PLANS.central.json",
+                central_dir=tmp_path,
             )
         assert result is False
 
     def test_updates_generated_at(self, tmp_path):
+        """A run stamps generated_at and announces the one branch it read.
+
+        Mutant: branches_count=len(branches) -> branches_count=0 reddens this.
+        """
         aggregate_central_impl = _import("aggregate_central_impl")
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
@@ -666,8 +747,9 @@ class TestAggregateCentralImpl:
         }
         central_file.write_text(json.dumps(data), encoding="utf-8")
 
-        with patch(f"{_MOD}.trigger", create=True):
+        with patch(_BUS) as bus:
             aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
+        bus.fire.assert_called_once_with("central_aggregated", active_count=0, closed_count=0, branches_count=1)
 
         saved = json.loads(central_file.read_text(encoding="utf-8"))
         assert saved["generated_at"] != ""
@@ -720,35 +802,47 @@ class TestTotalClosedIsNotTruncated:
         return central_file, central_dir
 
     def test_branch_total_survives_the_window_cap(self, tmp_path):
-        """104 closed plans behind a 5-row window still report 104."""
+        """104 closed plans behind a 5-row window still report 104.
+
+        Mutant: trigger.fire( -> trigger.fire_off( reddens this.
+        """
         aggregate_central_impl = _import("aggregate_central_impl")
         central_file, central_dir = self._central(tmp_path, real_total=104)
 
-        with patch(f"{_MOD}.trigger", create=True):
+        with patch(_BUS) as bus:
             assert aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir) is True
+        bus.fire.assert_called_once_with("central_aggregated", active_count=0, closed_count=5, branches_count=1)
 
         stats = json.loads(central_file.read_text(encoding="utf-8"))["branches"]["busy"]["statistics"]
         assert stats["total_closed"] == 104
         assert stats["recently_closed_included"] == 5
 
     def test_total_closed_is_not_merely_the_window_size(self, tmp_path):
-        """The tell @prax named: total_closed == recently_closed_included on every branch."""
+        """The tell @prax named: total_closed == recently_closed_included on every branch.
+
+        Mutant: closed_count=len(recently_closed) -> closed_count=0 reddens this.
+        """
         aggregate_central_impl = _import("aggregate_central_impl")
         central_file, central_dir = self._central(tmp_path, real_total=104)
 
-        with patch(f"{_MOD}.trigger", create=True):
+        with patch(_BUS) as bus:
             aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
+        bus.fire.assert_called_once_with("central_aggregated", active_count=0, closed_count=5, branches_count=1)
 
         stats = json.loads(central_file.read_text(encoding="utf-8"))["branches"]["busy"]["statistics"]
         assert stats["total_closed"] != stats["recently_closed_included"]
 
     def test_top_level_total_is_not_a_sum_of_caps(self, tmp_path):
-        """Top level summed the per-branch caps — 126 published against 699 real."""
+        """Top level summed the per-branch caps — 126 published against 699 real.
+
+        Mutant: branches_count=len(branches) -> branches_count=len(branches) + 1 reddens this.
+        """
         aggregate_central_impl = _import("aggregate_central_impl")
         central_file, central_dir = self._central(tmp_path, real_total=104)
 
-        with patch(f"{_MOD}.trigger", create=True):
+        with patch(_BUS) as bus:
             aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
+        bus.fire.assert_called_once_with("central_aggregated", active_count=0, closed_count=5, branches_count=1)
 
         saved = json.loads(central_file.read_text(encoding="utf-8"))
         assert saved["statistics"]["total_closed"] == 104
@@ -756,29 +850,38 @@ class TestTotalClosedIsNotTruncated:
         assert saved["statistics"]["recently_closed_included"] == 5
 
     def test_run_twice_is_stable(self, tmp_path):
-        """Idempotency: re-aggregating must not re-truncate what it just fixed."""
+        """Idempotency: re-aggregating must not re-truncate what it just fixed.
+
+        Mutant: closed_count=len(recently_closed) -> closed_count=len(recently_closed) + 1 reddens this.
+        """
         aggregate_central_impl = _import("aggregate_central_impl")
         central_file, central_dir = self._central(tmp_path, real_total=104)
 
-        with patch(f"{_MOD}.trigger", create=True):
+        with patch(_BUS) as bus:
             aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
             first = json.loads(central_file.read_text(encoding="utf-8"))["branches"]["busy"]["statistics"]
             aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
             second = json.loads(central_file.read_text(encoding="utf-8"))["branches"]["busy"]["statistics"]
 
         assert first["total_closed"] == second["total_closed"] == 104
+        one_run = call("central_aggregated", active_count=0, closed_count=5, branches_count=1)
+        assert bus.fire.call_args_list == [one_run, one_run]
 
     @pytest.mark.real_logger
     def test_missing_upstream_total_warns_instead_of_publishing_silently(self, tmp_path, caplog):
-        """No upstream count = we cannot know the real total. Say so, don't invent one."""
+        """No upstream count = we cannot know the real total. Say so, don't invent one.
+
+        Mutant: trigger.fire( -> trigger.fire_off( reddens this.
+        """
         aggregate_central_impl = _import("aggregate_central_impl")
         central_file, central_dir = self._central(tmp_path, real_total=104)
         data = json.loads(central_file.read_text(encoding="utf-8"))
         del data["branches"]["busy"]["statistics"]["total_closed"]
         central_file.write_text(json.dumps(data), encoding="utf-8")
 
-        with patch(f"{_MOD}.trigger", create=True), caplog.at_level(logging.WARNING):
+        with patch(_BUS) as bus, caplog.at_level(logging.WARNING):
             aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
+        bus.fire.assert_called_once_with("central_aggregated", active_count=0, closed_count=5, branches_count=1)
 
         stats = json.loads(central_file.read_text(encoding="utf-8"))["branches"]["busy"]["statistics"]
         assert stats["total_closed"] == 5  # the window, honestly labelled as a floor

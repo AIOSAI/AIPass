@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: hardcoded_path_check.py
 # Description: Hardcoded Absolute Path Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-18
-# Modified: 2026-06-18
+# Modified: 2026-09-25
 # =============================================
 
 """Hardcoded Absolute Path Standards Checker Handler."""
@@ -16,6 +16,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# APPLIES_TO: Windows CI runs the suite, so /home/... in a test breaks the build.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 _POSIX_HOME = re.compile(r"/home/[a-zA-Z][a-zA-Z0-9_.-]+/")
@@ -101,6 +103,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "Hardcoded path",
                     "passed": True,
                     "message": "File skipped (non-target)",
+                    "declined": True,
                 }
             ],
             "score": 100,

@@ -1,35 +1,40 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_parked_is_not_collected.py
-# Description: The parked directory contributes no tests, and can be proven to
-# Version: 1.0.0
+# Description: The parked directory contributes no tests, proven by running collection
+# Version: 1.1.0
 # Created: 2026-08-19
-# Modified: 2026-08-19
+# Modified: 2026-09-27
 # =============================================
 
-"""The park stays parked (archive doctrine, 2026-08-18).
+"""Tests for tests/parked/conftest.py — the barrier that keeps the park at zero collected tests."""
 
-`tests/parked/` holds `scaffold(disabled).py` — the spawn/seedgo template's
-scaffold smoke test, which never ran in this branch and was moved here rather
-than deleted (DPLAN-0304 item 4). It lives there because `.archive/` is
-The owner's disposal zone, cleaned without warning, so nothing durable may sit
-in one.
-
-WHY THIS FILE EXISTS. A park protected only by a naming habit is protected
-until someone renames a file into it. @memory found that a `test_`-prefixed
-file is collected regardless of an added `(disabled)` suffix (2026-08-19) —
-so the directory carries a real barrier (`collect_ignore_glob` in its own
-conftest) and this file is what notices when either the barrier or the
-reason for it stops being true. Deliberately NOT a check that the conftest
-exists: a test asserting a file is present passes while its contents do
-nothing. These run collection and read the answer.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the parked scaffold still parses; it is a template copy that never runs here
+# seedgo: no-test-needed(constant) — the README's prose beyond the word "archive"; a reader, not an assert, judges it
 
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+
+# The park stays parked (archive doctrine, 2026-08-18).
+#
+# `tests/parked/` holds `scaffold(disabled).py` — the spawn/seedgo template's
+# scaffold smoke test, which never ran in this branch and was moved here rather
+# than deleted (DPLAN-0304 item 4). It lives there because `.archive/` is
+# the owner's disposal zone, cleaned without warning, so nothing durable may sit
+# in one.
+#
+# WHY THIS FILE EXISTS. A park protected only by a naming habit is protected
+# until someone renames a file into it. @memory found that a `test_`-prefixed
+# file is collected regardless of an added `(disabled)` suffix (2026-08-19) —
+# so the directory carries a real barrier (`collect_ignore_glob` in its own
+# conftest) and this file is what notices when either the barrier or the
+# reason for it stops being true. Deliberately NOT a check that the conftest
+# exists: a test asserting a file is present passes while its contents do
+# nothing. These run collection and read the answer.
 
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -43,6 +48,7 @@ def _collect(target: Path) -> subprocess.CompletedProcess:
         cwd=str(TESTS_DIR.parent),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
 

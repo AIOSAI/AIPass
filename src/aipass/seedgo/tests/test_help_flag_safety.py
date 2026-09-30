@@ -1,73 +1,58 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: Tests for help_flag_safety_check.py
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for help_flag_safety_check — a help flag ANYWHERE must explain, never execute.
+"""Tests for apps/handlers/aipass_standards/help_flag_safety_check.py."""
 
-Red-first: every failing case below was written and run against a missing
-checker, then against the checker, before the implementation satisfied it.
+# A help flag ANYWHERE must explain, never execute.
+#
+# Red-first: every failing case below was written and run against a missing
+# checker, then against the checker, before the implementation satisfied it.
+#
+# Real-world cases are pinned as inline SHAPES, transcribed from the branches
+# named in each comment. They deliberately do NOT read live fleet files. An
+# earlier version of this file asserted "these branches are still broken"; @api
+# fixed their defect within the hour and turned this suite red for it, which made
+# the tests punish the exact outcome the standard exists to produce. Fleet state
+# is a MEASUREMENT (see the calibration table in APLAN-0005), never an assertion.
+#
+# The single exception is seedgo's own defect below — this branch owns both sides,
+# so that one is a deliberate tripwire, not a dependency on someone else's churn.
 
-Real-world cases are pinned as inline SHAPES, transcribed from the branches
-named in each comment. They deliberately do NOT read live fleet files. An
-earlier version of this file asserted "these branches are still broken"; @api
-fixed their defect within the hour and turned this suite red for it, which made
-the tests punish the exact outcome the standard exists to produce. Fleet state
-is a MEASUREMENT (see the calibration table in APLAN-0005), never an assertion.
-
-The single exception is seedgo's own defect below — this branch owns both sides,
-so that one is a deliberate tripwire, not a dependency on someone else's churn.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — APPLIES_TO and AUDIT_SCOPE, the scope the audit reads
+# seedgo: no-test-needed(stdlib) — ast.parse's parsing; the product only walks the tree it returns
+# seedgo: no-test-needed(standard) — the check_completed record json_handler.log_operation writes
 
 from pathlib import Path
 
 import pytest
 from unittest.mock import MagicMock
 
+from aipass.seedgo.apps.handlers.aipass_standards import help_flag_safety_check
+from aipass.seedgo.apps.handlers.aipass_standards.help_flag_safety_check import check_module
+
 FLEET = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    import sys
+    """Mock heavy infrastructure the checker reads, at the seam it reads it from.
 
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    bypass_pkg = MagicMock()
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as real_is_bypassed
-
-    bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = real_is_bypassed
-    bypass_pkg.utils = bypass_utils
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.utils", bypass_utils)
-
-    monkeypatch.delitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.aipass_standards.help_flag_safety_check",
-        raising=False,
-    )
+    ``is_bypassed`` is left real: it is a pure function of the ``bypass_rules``
+    argument each call already passes explicitly (``None`` here, a literal list
+    in ``test_bypass_respected``), and with no rules it returns ``None`` before
+    touching a filesystem -- there is no live state for a stub to protect.
+    """
+    monkeypatch.setattr(help_flag_safety_check, "logger", MagicMock())
+    monkeypatch.setattr(help_flag_safety_check, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
 
 
 def _check(path):
-    from aipass.seedgo.apps.handlers.aipass_standards.help_flag_safety_check import check_module
-
     return check_module(str(path))
 
 
@@ -425,8 +410,8 @@ def test_result_shape(tmp_path):
     assert all({"name", "passed", "message"} <= set(c) for c in result["checks"])
 
 
-def test_missing_file():
-    result = _check("/nonexistent/apps/modules/thing.py")
+def test_missing_file(tmp_path):
+    result = _check(tmp_path / "apps" / "modules" / "thing.py")
     assert result["passed"] is False
     assert result["score"] == 0
 
@@ -444,8 +429,6 @@ def test_empty_file(tmp_path):
 
 def test_bypass_respected(tmp_path):
     mod = _branch(tmp_path, VULNERABLE)
-    from aipass.seedgo.apps.handlers.aipass_standards.help_flag_safety_check import check_module
-
     rules = [{"file": "apps/modules/thing.py", "standard": "help_flag_safety"}]
     result = check_module(str(mod), bypass_rules=rules)
     assert result["passed"] is True
@@ -688,16 +671,16 @@ def test_seedgo_is_in_scope_for_its_own_standard():
     branch's. The defect that motivated it lives on as a pinned shape
     (_DEFECTIVE_SHAPES["positional_subcommand_then_work_call"], transcribed
     from seedgo's own inbox_audit.py).
+
+    Mutant: seedgo's modules (or checklist.py alone) declined in apps/handlers/aipass_standards/help_flag_safety_check.py — killed.
     """
     modules = FLEET / "seedgo" / "apps" / "modules"
     if not modules.is_dir():
         pytest.skip("fleet file absent: seedgo/apps/modules")
-    scored = [
-        p.name
-        for p in sorted(modules.glob("*.py"))
-        if p.name != "__init__.py" and "not applicable" not in _check(p)["checks"][0]["message"]
-    ]
-    assert scored, "seedgo's own routing modules must be scored by seedgo's own standard"
+    candidates = [p for p in sorted(modules.glob("*.py")) if p.name != "__init__.py"]
+    routing = [p.name for p in candidates if "def handle_command" in p.read_text(encoding="utf-8")]
+    scored = [p.name for p in candidates if "not applicable" not in _check(p)["checks"][0]["message"]]
+    assert scored == routing, "every seedgo routing module must be scored by seedgo's own standard"
 
 
 # =============================================================================

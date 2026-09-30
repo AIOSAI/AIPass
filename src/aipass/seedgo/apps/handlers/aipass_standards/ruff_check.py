@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ruff_check.py
 # Description: Ruff Linter & Formatter Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-04-26
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -12,15 +12,19 @@ Ruff Linter & Formatter Standards Checker Handler
 Runs both ``ruff check`` (lint) and ``ruff format --check`` (formatting).
 
 Two modes:
-- check_branch(): runs ruff across entire apps/ tree (used by audit pipeline,
-  AUDIT_SCOPE = branch_level, ADVISORY = always-passes)
+- check_branch(): runs ruff across the branch's apps/ and tests/ (used by the
+  audit pipeline, AUDIT_SCOPE = branch_level); the row GATES and counts in the
+  branch's Overall
 - check_module(): runs ruff on a single file (used by checklist/per-file hooks,
   returns passed=False on violations so subagent_stop_gate can block)
 
 AUDIT_SCOPE: branch_level — audit pipeline uses check_branch() once per branch.
   Checkers that also implement check_module() are eligible for per-file checklist runs.
-ADVISORY: check_branch() surfaces violations but always passes (advisory score).
-          check_module() returns passed=False so checklist/hooks can block.
+GATING since 2026-09-25 (owner ruling 00:33, DPLAN-0354): advisory from
+  123f3af2 (2026-04-16, DPLAN-0137) until CI ruff went green fleet-wide.
+  Both modes return passed=False on any non-bypassed lint or format finding;
+  ruff missing is still a skip (passed True, score 100), and a timeout or an
+  unreadable ruff answer is still a 0.
 """
 
 import json
@@ -33,8 +37,9 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: ruff lints tests/ as well as apps/, the same corpus CI's gate reads.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "branch_level"
-ADVISORY = True
 
 # ruff format --check marks each unformatted file with this prefix; every other
 # stdout line is summary prose.
@@ -246,11 +251,10 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
 
     Returns:
         dict: {
-            'passed': bool (always True — advisory mode),
+            'passed': bool (False on any non-bypassed lint or format finding),
             'checks': [{'name': str, 'passed': bool, 'message': str}],
             'score': int,
             'standard': 'RUFF_CHECK',
-            'advisory': True
         }
     """
     bp = Path(branch_path)
@@ -266,7 +270,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             "checks": [{"name": "Ruff check", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
             "score": 100,
             "standard": "RUFF_CHECK",
-            "advisory": True,
         }
 
     # Graceful degradation: ruff not installed
@@ -281,7 +284,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             "score": 100,
             "status": "skipped",
             "standard": "RUFF_CHECK",
-            "advisory": True,
         }
 
     # Scan apps/ AND tests/ — CI's gate is `ruff check src/ tests/` from the repo root,
@@ -313,7 +315,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             "checks": [{"name": "Ruff check", "passed": False, "message": "ruff check timed out after 60s"}],
             "score": 0,
             "standard": "RUFF_CHECK",
-            "advisory": True,
         }
 
     # Parse JSON output (ruff exits 0=clean, 1=violations, 2+=error)
@@ -337,7 +338,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
                 ],
                 "score": 0,
                 "standard": "RUFF_CHECK",
-                "advisory": True,
             }
 
     # Filter bypassed violations
@@ -359,7 +359,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
         message = f"{count} violation(s) — {codes}{suffix}"
         checks.append({"name": "Ruff lint", "passed": False, "message": message})
 
-    # --- ruff format --check (advisory) ---
+    # --- ruff format --check ---
     fmt_files: list[str] = []
     try:
         fmt_proc = subprocess.run(
@@ -407,14 +407,12 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "ruff_check",
             "violations": count,
             "format_violations": fmt_count,
-            "advisory": True,
         },
     )
 
     return {
-        "passed": True,  # Advisory: never blocks the audit
+        "passed": count == 0 and fmt_count == 0,
         "checks": checks,
         "score": score,
         "standard": "RUFF_CHECK",
-        "advisory": True,
     }

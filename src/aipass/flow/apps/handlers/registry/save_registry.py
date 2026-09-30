@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: save_registry.py
 # Description: Save Registry Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-07
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -52,6 +52,15 @@ _LOCK_RETRIES = 10
 _LOCK_BACKOFF_BASE = 0.05
 
 
+def _sleep(seconds: float) -> None:
+    """time.sleep(seconds), the lock backoff's wait.
+
+    The reason is the tests alone: they patch this name so the backoff neither
+    waits nor replaces time.sleep for the whole process (flow's decision, leg 4).
+    """
+    time.sleep(seconds)
+
+
 def _acquire_lock(lock_path: Path) -> bool:
     """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff.
 
@@ -59,12 +68,12 @@ def _acquire_lock(lock_path: Path) -> bool:
     a held lock: it is retried on the same budget as FileExistsError.
 
     Returns:
-        True once acquired; False when the budget runs out on contention or
-        the create fails with any other OSError.
+        True once acquired; False only when the budget runs out on contention.
 
     Raises:
         PermissionError: The budget ran out and the last attempt was denied.
             Chained from that denial, so a real permissions problem surfaces.
+        OSError: The create failed with any other OSError, raised at once.
     """
     denial: PermissionError | None = None
     waited = 0.0
@@ -83,10 +92,12 @@ def _acquire_lock(lock_path: Path) -> bool:
                 "[%s] Lock denied on %s (delete-pending?), retry %d: %s", MODULE_NAME, lock_path, attempt + 1, exc
             )
         except OSError as exc:
+            # Neither contention nor denial: False would read as a spent retry
+            # budget, so it propagates to the caller (flow's decision, leg 3).
             logger.warning("[%s] Lock creation failed for %s: %s", MODULE_NAME, lock_path, exc)
-            return False
+            raise
         delay = _LOCK_BACKOFF_BASE * (2**attempt)
-        time.sleep(delay)
+        _sleep(delay)
         waited += delay
     if denial is not None:
         raise PermissionError(
@@ -157,5 +168,6 @@ def save_registry(registry: Dict[str, Any], registry_file: str | None = None) ->
         )
         return True
     except Exception as e:
-        logger.error(f"[{MODULE_NAME}] Failed to save registry to {target}: {e}")
+        # The exception itself is a log argument, so its cause chain stays readable.
+        logger.error("[%s] Failed to save registry to %s: %s", MODULE_NAME, target, e, exc_info=True)
         return False

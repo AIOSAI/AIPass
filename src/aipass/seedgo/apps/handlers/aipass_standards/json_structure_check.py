@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.3.0
+# Version: 3.3.1
 # Created: 2026-03-05
-# Modified: 2026-08-07
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -32,6 +32,8 @@ from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _is_
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: scan every .py file, not just entry point
+# APPLIES_TO: a test does not log_operation and should not.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 ALLOWED_JSON_SUBDIRS: frozenset[str] = frozenset({"custom_config"})
@@ -83,7 +85,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if path.name == "__init__.py":
         return {
             "passed": True,
-            "checks": [{"name": "JSON structure check", "passed": True, "message": "__init__.py file (skipped)"}],
+            "checks": [
+                {
+                    "name": "JSON structure check",
+                    "passed": True,
+                    "message": "__init__.py file (skipped)",
+                    "declined": True,
+                }
+            ],
             "score": 100,
             "standard": "JSON STRUCTURE",
         }
@@ -123,6 +132,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "JSON structure check",
                     "passed": True,
                     "message": "JSON handler infrastructure file (not applicable)",
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -141,6 +151,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                         "Declarations only — no functions or methods, so the module performs "
                         "no operations to log (not applicable)"
                     ),
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -160,6 +171,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                         "imports and holds no aipass import of any kind, so json_handler cannot "
                         "be imported here without a cycle (not applicable)"
                     ),
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -178,7 +190,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {
         "passed": True,
         "checks": [
-            {"name": "JSON structure check", "passed": True, "message": "Not in modules/ or handlers/ (not applicable)"}
+            {
+                "name": "JSON structure check",
+                "passed": True,
+                "message": "Not in modules/ or handlers/ (not applicable)",
+                "declined": True,
+            }
         ],
         "score": 100,
         "standard": "JSON STRUCTURE",
@@ -591,7 +608,7 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
         }
     )
 
-    return checks  # noqa: RET504
+    return checks
 
 
 def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules: list | None = None) -> List[Dict]:

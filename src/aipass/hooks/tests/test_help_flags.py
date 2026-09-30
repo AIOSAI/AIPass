@@ -1,24 +1,39 @@
-"""Tests for help-flag safety — a help flag anywhere means explain, never execute.
+# =================== AIPass ====================
+# Name: test_help_flags.py
+# Version: 1.0.0
+# Description: Help-flag safety — a help flag anywhere means explain, never execute
+# Branch: hooks
+# Created: 2026-08-13
+# Modified: 2026-09-28
+# =============================================
 
-Red-first canaries for DPLAN-0291 rule E / help_flag_safety. Every module below
-gated help at args[0] only, so a flag later on the line was discarded and the
-subcommand ran. The damage was real per module:
+"""Tests for apps/handlers/cli/help_flags.py and the modules that route through it."""
 
-    dismiss <alert-id> --help   -> removed the alert it was asked to describe
-    test --verbose --help       -> fired every hook with mock data
-    sessions reclaim --help     -> stopped live sessions, filtered on "-help"
-    feedback on --help          -> flipped the toggle
-    hooksound off --help        -> muted the fleet's hook audio
-    log --help                  -> dumped the log instead of explaining itself
+# Tests for help-flag safety — a help flag anywhere means explain, never execute.
+#
+# Red-first canaries for DPLAN-0291 rule E / help_flag_safety. Every module below
+# gated help at args[0] only, so a flag later on the line was discarded and the
+# subcommand ran. The damage was real per module:
+#
+#     dismiss <alert-id> --help   -> removed the alert it was asked to describe
+#     test --verbose --help       -> fired every hook with mock data
+#     sessions reclaim --help     -> stopped live sessions, filtered on "-help"
+#     feedback on --help          -> flipped the toggle
+#     hooksound off --help        -> muted the fleet's hook audio
+#     log --help                  -> dumped the log instead of explaining itself
+#
+# Each test mocks the damaging target and asserts it is NEVER called.
 
-Each test mocks the damaging target and asserts it is NEVER called.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that help_flags.py parses and imports, ruff and collection cover it
+# seedgo: no-test-needed(documentation) — each module's help text wording, the documentation checker covers it
+# seedgo: no-test-needed(constant) — HELP_FLAGS' spelling list beyond the members asserted here
 
 from unittest.mock import patch
 
 import pytest
 
-from aipass.hooks.apps import sound
+from aipass.hooks.apps import hooks, sound
 from aipass.hooks.apps.handlers.cli.help_flags import HELP_FLAGS, is_help_flag, wants_help
 from aipass.hooks.apps.modules import (
     alert_dismiss,
@@ -140,9 +155,10 @@ class TestHookTestNeverFiresOnHelp:
 
     def test_real_run_still_fires(self):
         with patch.object(hook_test, "run_test", return_value={}) as target:
-            with patch.object(hook_test, "print_results"):
+            with patch.object(hook_test, "print_results") as shown:
                 assert hook_test.handle_command("test", ["--verbose"]) is True
-        target.assert_called_once()
+        target.assert_called_once_with(verbose=True)
+        shown.assert_called_once_with({}, verbose=True)
 
 
 class TestSessionsReclaimNeverStopsSessionsOnHelp:
@@ -236,14 +252,17 @@ class TestEngineLogNeverDumpsOnHelp:
 class TestReadOnlyModulesStillAnswerHelp:
     """No damage to prevent here, but the answer must be help, not silence."""
 
-    def test_status_help_after_operand(self):
+    def test_status_help_after_operand(self, capsys):
         assert hookstatus.handle_command("status", ["anything", "--help"]) is True
+        assert "drone @hooks status --help    Show this help" in capsys.readouterr().err
 
-    def test_sandbox_help_after_operand(self):
+    def test_sandbox_help_after_operand(self, capsys):
         assert sandbox.handle_command("sandbox", ["anything", "--help"]) is True
+        assert "drone @hooks sandbox    Show sandbox module status" in capsys.readouterr().err
 
-    def test_verify_help_after_operand(self):
+    def test_verify_help_after_operand(self, capsys):
         assert wire_verify.handle_command("verify", ["anything", "--help"]) is True
+        assert "drone @hooks verify     Cross-check provider settings" in capsys.readouterr().err
 
 
 class TestHelpGateDoesNotHijackOtherModules:
@@ -279,8 +298,6 @@ class TestUnknownCommandNamesWhatFailed:
         import sys
         from unittest.mock import patch
 
-        from aipass.hooks.apps import hooks
-
         # Both consoles: the refusal moved to err_console on 2026-09-07 and a
         # helper watching only stdout would have read the move as silence.
         printed = []
@@ -305,9 +322,11 @@ class TestUnknownCommandNamesWhatFailed:
         assert code == 1
         assert "Unknown command: banana" in out
 
-    def test_known_verbs_still_succeed(self):
+    def test_known_verbs_still_succeed(self, tmp_path):
         from unittest.mock import patch
 
-        with patch("aipass.hooks.apps.sound.MUTE_FLAG"):
-            code, _ = self._main(["hooksound"])
+        # An absent flag under tmp_path: the status line must read it as ACTIVE.
+        with patch("aipass.hooks.apps.sound.MUTE_FLAG", tmp_path / "mute"):
+            code, out = self._main(["hooksound"])
         assert code == 0
+        assert "Hook sound control (ACTIVE)" in out

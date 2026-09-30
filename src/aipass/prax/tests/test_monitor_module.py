@@ -1,24 +1,30 @@
 # =================== AIPass ====================
 # Name: test_monitor_module.py
 # Description: Tests for the unified monitoring module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/modules/monitor.py
+"""Tests for apps/modules/monitor.py."""
 
-Covers:
-- handle_command() dispatching (introspection, help, run, unknown subcommands)
-- _get_watch_directories() registry-based directory enumeration
-- PID cache functions (_parse_lock_pid, _refresh_pid_cache, _get_pid_for_branch)
-- Threading management (_start_threads, _stop_threads, _display_worker)
-- Event rendering and emission (_render_event, _emit_watcher_event)
-- Inotify error handling and observer fallback
-- File/log watcher workers
-- Interactive loop and command dispatch
-- _print_status, _run_monitor orchestration
-"""
+# Covers:
+# - handle_command() dispatching (introspection, help, run, unknown subcommands)
+# - _get_watch_directories() registry-based directory enumeration
+# - PID cache functions (_parse_lock_pid, _refresh_pid_cache, _get_pid_for_branch)
+# - Threading management (_start_threads, _stop_threads, _display_worker)
+# - Event rendering and emission (_render_event, _emit_watcher_event)
+# - Inotify error handling and observer fallback
+# - File/log watcher workers
+# - Interactive loop and command dispatch
+# - _print_status, _run_monitor orchestration
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — _report_render_failures, covered by tests/test_display_resilience.py
+# seedgo: no-test-needed(through_the_command) — _standalone_run_args, covered by tests/test_display_resilience.py
+# seedgo: no-test-needed(through_the_command) — _rate_tracker_worker's scan_rates, covered by tests/test_rate_tracker.py
+# seedgo: no-test-needed(through_the_command) — the run -h screen, covered by tests/test_help_flag_safety.py
+# seedgo: no-test-needed(json_structure) — _run_monitor's log_operation("monitor_started") record, covered by that row
 
 import json
 import sys

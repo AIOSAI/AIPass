@@ -1,32 +1,41 @@
 # =================== AIPass ====================
 # Name: test_host_autostart.py
 # Description: Tests for the supervisor seam — a server that comes back on its own
+# Version: 1.0.0
+# Created: 2026-08-27
+# Modified: 2026-09-28
 # =============================================
 
-"""
-Tests for the Host API Autostart Lane
+"""Tests for apps/handlers/host/autostart.py and the host-api autostart verb that drives it."""
 
-On 2026-08-27 @baud's phone face went dark. host_api_serve.log showed normal
-traffic and then silence — no traceback, no shutdown line, which is what a
-reboot looks like from inside a log. A detached server dies with the machine and
-nothing brought it back.
+# Tests for the Host API Autostart Lane
+#
+# On 2026-08-27 @baud's phone face went dark. host_api_serve.log showed normal
+# traffic and then silence — no traceback, no shutdown line, which is what a
+# reboot looks like from inside a log. A detached server dies with the machine and
+# nothing brought it back.
+#
+# WHAT THESE TESTS GUARD MOST CAREFULLY are the two promises that make handing the
+# server to systemd safe rather than merely automatic, because both fail SILENTLY:
+#
+#     status must not lie. A unit-managed server writes no record file, so the old
+#     running() would have called a healthy server absent — at exactly the moment
+#     an operator needs the opposite.
+#
+#     stop must not be a trap. Signalling a supervised pid directly leaves the
+#     restart policy free to undo it, so the command prints success and the server
+#     is back before anyone finishes reading.
+#
+# And one that fails silently in systemd itself: StartLimitIntervalSec/Burst moved
+# from [Service] to [Unit] in v230, and the old spelling is not an error — it is
+# IGNORED. A rate limit in the wrong section is an absence wearing a config's
+# clothes.
 
-WHAT THESE TESTS GUARD MOST CAREFULLY are the two promises that make handing the
-server to systemd safe rather than merely automatic, because both fail SILENTLY:
-
-    status must not lie. A unit-managed server writes no record file, so the old
-    running() would have called a healthy server absent — at exactly the moment
-    an operator needs the opposite.
-
-    stop must not be a trap. Signalling a supervised pid directly leaves the
-    restart policy free to undo it, so the command prints success and the server
-    is back before anyone finishes reading.
-
-And one that fails silently in systemd itself: StartLimitIntervalSec/Burst moved
-from [Service] to [Unit] in v230, and the old spelling is not an error — it is
-IGNORED. A rate limit in the wrong section is an absence wearing a config's
-clothes.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that autostart.py parses and imports
+# seedgo: no-test-needed(constant) — RESTART_SECONDS, START_LIMIT_INTERVAL_SECONDS and START_LIMIT_BURST's values
+# seedgo: no-test-needed(external) — a real systemd; subprocess.run is scripted and is_supported pinned
+# seedgo: no-test-needed(external) — linger_enabled's real loginctl query; it is patched where it is read
 
 from pathlib import Path
 from typing import Any
@@ -114,7 +123,7 @@ class TestTheUnitSaysWhatItMeans:
     behaviour that quietly does not happen.
     """
 
-    def test_the_rate_limit_is_in_unit_not_service(self) -> None:
+    def test_the_rate_limit_is_in_unit_not_service(self, tmp_path: Path) -> None:
         """
         systemd moved StartLimit* to [Unit] in v230 and IGNORES it in [Service].
 
@@ -123,7 +132,8 @@ class TestTheUnitSaysWhatItMeans:
         up after ten minutes of impossible binds and one that retries forever
         into a growing log.
         """
-        text = host_autostart.unit_text(["/py", "/app.py"], Path("/branch"), Path("/branch/logs/x.log"))
+        branch = tmp_path / "branch"
+        text = host_autostart.unit_text(["/py", "/app.py"], branch, branch / "logs" / "x.log")
 
         unit_section = text.split("[Service]")[0]
         service_section = text.split("[Service]")[1]
@@ -133,15 +143,16 @@ class TestTheUnitSaysWhatItMeans:
         assert "StartLimitIntervalSec" not in service_section
         assert "StartLimitBurst" not in service_section
 
-    def test_both_streams_append_to_the_one_log(self) -> None:
+    def test_both_streams_append_to_the_one_log(self, tmp_path: Path) -> None:
         """
         Requirement three, and the reason this morning was diagnosable at all.
 
         `append:` rather than `file:` — file: TRUNCATES on every start, so the
         first restart after an outage would destroy the evidence of the outage.
         """
-        log = Path("/branch/logs/host_api_serve.log")
-        text = host_autostart.unit_text(["/py", "/app.py"], Path("/branch"), log)
+        branch = tmp_path / "branch"
+        log = branch / "logs" / "host_api_serve.log"
+        text = host_autostart.unit_text(["/py", "/app.py"], branch, log)
 
         assert f"StandardOutput=append:{log}" in text
         assert f"StandardError=append:{log}" in text
@@ -151,7 +162,7 @@ class TestTheUnitSaysWhatItMeans:
         assert "StandardOutput=file:" not in text
         assert "StandardError=file:" not in text
 
-    def test_the_unit_starts_the_server_the_same_way_a_detach_does(self) -> None:
+    def test_the_unit_starts_the_server_the_same_way_a_detach_does(self, tmp_path: Path) -> None:
         """
         One spelling of how this server starts, or the two drift.
 
@@ -159,18 +170,18 @@ class TestTheUnitSaysWhatItMeans:
         home directory where this tree cannot see it.
         """
         argv = host_lifetime.serve_argv("10.0.0.1", 8787)
-        text = host_autostart.unit_text(argv, Path("/branch"), Path("/log"))
+        text = host_autostart.unit_text(argv, tmp_path / "branch", tmp_path / "log")
 
         assert f"ExecStart={' '.join(argv)}" in text
 
-    def test_a_crash_restarts_and_a_clean_exit_does_not(self) -> None:
+    def test_a_crash_restarts_and_a_clean_exit_does_not(self, tmp_path: Path) -> None:
         """
         on-failure, never always.
 
         `always` would restart a server that exited cleanly because its bind was
         refused, turning a clear refusal into a spin.
         """
-        text = host_autostart.unit_text(["/py"], Path("/branch"), Path("/log"))
+        text = host_autostart.unit_text(["/py"], tmp_path / "branch", tmp_path / "log")
 
         assert "Restart=on-failure" in text
         assert "Restart=always" not in text
@@ -210,15 +221,18 @@ class TestTheProbeAnswersAbsenceAndFailureDifferently:
         with patch.object(host_autostart.subprocess, "run", return_value=_completed("4242\n")):
             assert host_autostart.supervised_pid() == 4242
 
-    def test_an_unreadable_pid_is_zero_and_never_raises(self, has_systemd: None) -> None:
+    def test_an_unreadable_pid_refuses_rather_than_reading_as_unsupervised(self, has_systemd: None) -> None:
         """
-        Garbage from a probe is a not-supervised answer, not a traceback.
+        Garbage from a probe is the absence of a measurement, so it refuses.
 
-        status is the command an operator runs when things are already strange;
-        it does not get to be the second strange thing.
+        Zero would say "no unit holds the server" and send running() to a record
+        the unit never writes. Every caller of running() already turns this
+        refusal into a status line, so no traceback reaches an operator
+        (api, fleet green leg 3).
         """
         with patch.object(host_autostart.subprocess, "run", return_value=_completed("banana")):
-            assert host_autostart.supervised_pid() == 0
+            with pytest.raises(host_autostart.SupervisorUnreachable):
+                host_autostart.supervised_pid()
 
     def test_a_negative_pid_is_zero_because_the_contract_says_zero(self, has_systemd: None) -> None:
         """
@@ -272,10 +286,11 @@ class TestTheProbeAnswersAbsenceAndFailureDifferently:
         gets the truth instead of an exception it would have to translate back
         into the same truth.
         """
-        with patch.object(host_autostart, "is_supported", lambda: False):
+        with patch.object(host_autostart, "is_supported", return_value=False) as gate:
             with patch.object(host_autostart.subprocess, "run") as run:
                 assert host_autostart.supervised_pid() == 0
                 run.assert_not_called()
+        gate.assert_called_once_with()
 
     def test_a_platform_without_systemd_never_shells_out(self, quiet: None) -> None:
         """
@@ -354,8 +369,8 @@ class TestStoppingGoesThroughTheSupervisor:
 class TestTheInstallStepsAreOrderedAndOutsideTheTree:
     """Installing means writing under a home directory — theirs to run, not mine."""
 
-    def test_the_unit_is_copied_before_it_is_enabled(self) -> None:
-        steps = host_autostart.install_commands(Path("/branch/logs/u.service"))
+    def test_the_unit_is_copied_before_it_is_enabled(self, tmp_path: Path) -> None:
+        steps = host_autostart.install_commands(tmp_path / "branch" / "logs" / "u.service")
         joined = " || ".join(steps)
 
         assert joined.index("cp ") < joined.index("daemon-reload") < joined.index("enable --now")
@@ -385,18 +400,18 @@ class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
     was written, and that is a promise the CLI makes, not the handler.
     """
 
-    def _report(self, linger: Any = True, conflict: Any = None) -> dict:
+    def _report(self, base: Path, linger: Any = True, conflict: Any = None) -> dict:
         """The handler's real report shape — unit, steps, linger, conflict."""
         return {
-            "unit": Path("/branch/logs/aipass-host-api.service"),
+            "unit": base / "branch" / "logs" / "aipass-host-api.service",
             "steps": ["cp /branch/logs/u.service ~/.config/systemd/user/", "systemctl --user enable --now x"],
             "linger": linger,
             "conflict": conflict,
         }
 
-    def test_the_verb_routes_and_prints_the_installation_steps(self, quiet_serve: dict) -> None:
+    def test_the_verb_routes_and_prints_the_installation_steps(self, quiet_serve: dict, tmp_path: Path) -> None:
         """The ordinary success path: every step reaches the operator's screen."""
-        report = self._report()
+        report = self._report(tmp_path)
 
         with patch.object(host_serve_module.host_lifetime, "autostart_report", return_value=report) as reporter:
             assert handle_command("host-api", ["autostart"]) is True
@@ -406,7 +421,7 @@ class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
         for step in report["steps"]:
             assert step in printed, f"the operator was not shown the step they have to run: {step}"
 
-    def test_lingering_being_off_is_a_warning_not_a_dim_note(self, quiet_serve: dict) -> None:
+    def test_lingering_being_off_is_a_warning_not_a_dim_note(self, quiet_serve: dict, tmp_path: Path) -> None:
         """
         The one report field whose absence is the original 08-27 failure.
 
@@ -417,14 +432,14 @@ class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
         """
         with patch.object(host_serve_module, "warning") as warned:
             with patch.object(
-                host_serve_module.host_lifetime, "autostart_report", return_value=self._report(linger=False)
+                host_serve_module.host_lifetime, "autostart_report", return_value=self._report(tmp_path, linger=False)
             ):
                 assert handle_command("host-api", ["autostart"]) is True
 
         warned.assert_called_once()
         assert "linger" in str(warned.call_args).lower()
 
-    def test_lingering_that_could_not_be_read_is_not_reported_as_off(self, quiet_serve: dict) -> None:
+    def test_lingering_that_could_not_be_read_is_not_reported_as_off(self, quiet_serve: dict, tmp_path: Path) -> None:
         """
         None is a third answer, and collapsing it into False cries wolf.
 
@@ -434,7 +449,7 @@ class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
         """
         with patch.object(host_serve_module, "warning") as warned:
             with patch.object(
-                host_serve_module.host_lifetime, "autostart_report", return_value=self._report(linger=None)
+                host_serve_module.host_lifetime, "autostart_report", return_value=self._report(tmp_path, linger=None)
             ):
                 assert handle_command("host-api", ["autostart"]) is True
 

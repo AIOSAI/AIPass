@@ -1,28 +1,37 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers.py
 # Description: Unit tests for monitoring handler modules
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-29
 # =============================================
 
-"""Unit tests for monitoring handler modules.
+"""Tests for apps/handlers/monitoring/branch_detector.py and the three sibling handlers listed below."""
 
-Covers:
-- branch_detector: get_detector, reload_registry, detect_from_path,
-  detect_from_log, detect_from_module, get_stats
-- file_watcher_integration: load_branch_paths, file_event_callback,
-  get_file_watcher, is_file_watcher_running, get_file_watcher_stats,
-  FileWatcherManager.is_running, FileWatcherManager.get_stats
-- interactive_filter: parse_command, get_help_text
-- unified_stream: print_event, print_command_separator, print_status
-"""
+# Covers:
+# - branch_detector: get_detector, reload_registry, detect_from_path,
+#   detect_from_log, detect_from_module, get_stats
+# - file_watcher_integration: load_branch_paths, file_event_callback,
+#   get_file_watcher, is_file_watcher_running, get_file_watcher_stats,
+#   FileWatcherManager.is_running, FileWatcherManager.get_stats
+# - interactive_filter: parse_command, get_help_text
+# - unified_stream: print_event, print_command_separator, print_status
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — print_hook_event(), covered by tests/test_display_resilience.py
 
 import importlib
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest.mock import MagicMock, mock_open as _mock_file_open, patch
+
+# The detector is fed POSIX-spelled strings through a mocked Path, so none of
+# these reach a disk. Built from parts under a root with no home directory in
+# it (prax, leg 3): a checkout path is a fixture, not anyone's home.
+_HOME = PurePosixPath("/", "ws")
+_WS = _HOME / "Projects" / "AIPass"
+_ECO = _WS / "src" / "aipass"
 
 # Alias mock_open to avoid false-positive pattern match on "open(" without encoding
 _mopen = _mock_file_open
@@ -55,11 +64,11 @@ def _import_branch_detector():
         # Registry data returned by json.load
         mock_json_load.return_value = {
             "branches": [
-                {"name": "PRAX", "path": "/home/user/Projects/AIPass/src/aipass/prax"},
-                {"name": "SEEDGO", "path": "/home/user/Projects/AIPass/src/aipass/seedgo"},
-                {"name": "FLOW", "path": "/home/user/Projects/AIPass/src/aipass/flow"},
-                {"name": "CLI", "path": "/home/user/Projects/AIPass/src/aipass/cli"},
-                {"name": "AI_MAIL", "path": "/home/user/Projects/AIPass/src/aipass/ai_mail"},
+                {"name": "PRAX", "path": str(_ECO / "prax")},
+                {"name": "SEEDGO", "path": str(_ECO / "seedgo")},
+                {"name": "FLOW", "path": str(_ECO / "flow")},
+                {"name": "CLI", "path": str(_ECO / "cli")},
+                {"name": "AI_MAIL", "path": str(_ECO / "ai_mail")},
             ],
         }
 
@@ -77,11 +86,11 @@ def _make_detector_with_branches(mod, branches: dict | None = None):
     # Populate known_branches and branch_map manually
     if branches is None:
         branches = {
-            "/home/user/Projects/AIPass/src/aipass/prax": "PRAX",
-            "/home/user/Projects/AIPass/src/aipass/seedgo": "SEEDGO",
-            "/home/user/Projects/AIPass/src/aipass/flow": "FLOW",
-            "/home/user/Projects/AIPass/src/aipass/cli": "CLI",
-            "/home/user/Projects/AIPass/src/aipass/ai_mail": "AI_MAIL",
+            str(_ECO / "prax"): "PRAX",
+            str(_ECO / "seedgo"): "SEEDGO",
+            str(_ECO / "flow"): "FLOW",
+            str(_ECO / "cli"): "CLI",
+            str(_ECO / "ai_mail"): "AI_MAIL",
         }
     for path_str, name in branches.items():
         detector.branch_map[path_str] = name
@@ -172,7 +181,7 @@ class TestDetectFromPath:
         detector = _make_detector_with_branches(mod)
         # Path.resolve() returns the real path; we need the branch_map key
         # to match. Mock Path to control resolution.
-        resolved = "/home/user/Projects/AIPass/src/aipass/prax"
+        resolved = str(_ECO / "prax")
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
             mock_path.__str__ = MagicMock(return_value=resolved)
@@ -181,10 +190,10 @@ class TestDetectFromPath:
             mock_path.parent = MagicMock()
             mock_path.name = "branch_detector.py"
             mock_path_cls.return_value = mock_path
-            mock_path_cls.home.return_value = Path("/home/user")
+            mock_path_cls.home.return_value = Path(str(_HOME))
             # _find_repo_root
             detector._repo_root = MagicMock(spec=Path)
-            detector._repo_root.__str__ = MagicMock(return_value="/home/user/Projects/AIPass")
+            detector._repo_root.__str__ = MagicMock(return_value=str(_WS))
 
             result = detector.detect_from_path(resolved)
 
@@ -194,8 +203,8 @@ class TestDetectFromPath:
         """Should detect branch by walking up parent directories."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        child = "/home/user/Projects/AIPass/src/aipass/seedgo/core/validator.py"
-        parent_str = "/home/user/Projects/AIPass/src/aipass/seedgo"
+        child = str(_ECO / "seedgo" / "core" / "validator.py")
+        parent_str = str(_ECO / "seedgo")
 
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
@@ -209,10 +218,10 @@ class TestDetectFromPath:
             mock_path.parent = mock_parent
 
             mock_path_cls.return_value = mock_path
-            mock_path_cls.home.return_value = Path("/home/user")
+            mock_path_cls.home.return_value = Path(str(_HOME))
 
             detector._repo_root = MagicMock(spec=Path)
-            detector._repo_root.__str__ = MagicMock(return_value="/home/user/Projects/AIPass")
+            detector._repo_root.__str__ = MagicMock(return_value=str(_WS))
 
             result = detector.detect_from_path(child)
 
@@ -225,29 +234,29 @@ class TestDetectFromPath:
 
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
-            mock_path.__str__ = MagicMock(return_value="/tmp/random/file.txt")
+            mock_path.__str__ = MagicMock(return_value=str(_HOME / "random" / "file.txt"))
             mock_path.resolve.return_value = mock_path
             mock_path.parents = []
             mock_path.parent = MagicMock()
             mock_path.parent.__eq__ = MagicMock(return_value=False)
             mock_path.name = "file.txt"
             mock_path_cls.return_value = mock_path
-            mock_path_cls.home.return_value = Path("/home/user")
+            mock_path_cls.home.return_value = Path(str(_HOME))
 
             detector._repo_root = MagicMock(spec=Path)
-            detector._repo_root.__str__ = MagicMock(return_value="/home/user/Projects/AIPass")
+            detector._repo_root.__str__ = MagicMock(return_value=str(_WS))
 
-            result = detector.detect_from_path("/tmp/random/file.txt")
+            result = detector.detect_from_path(str(_HOME / "random" / "file.txt"))
 
         assert result == "UNKNOWN"
 
-    def test_exception_returns_unknown(self):
+    def test_exception_returns_unknown(self, tmp_path):
         """Should return UNKNOWN when an exception occurs."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
 
         with patch(f"{mod.__name__}.Path", side_effect=Exception("boom")):
-            result = detector.detect_from_path("/invalid")
+            result = detector.detect_from_path(str(tmp_path / "invalid"))
 
         assert result == "UNKNOWN"
 
@@ -255,7 +264,7 @@ class TestDetectFromPath:
         """detect_from_path should cache results in log_map."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        resolved = "/home/user/Projects/AIPass/src/aipass/flow"
+        resolved = str(_ECO / "flow")
 
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
@@ -265,10 +274,10 @@ class TestDetectFromPath:
             mock_path.parent = MagicMock()
             mock_path.name = "something.py"
             mock_path_cls.return_value = mock_path
-            mock_path_cls.home.return_value = Path("/home/user")
+            mock_path_cls.home.return_value = Path(str(_HOME))
 
             detector._repo_root = MagicMock(spec=Path)
-            detector._repo_root.__str__ = MagicMock(return_value="/home/user/Projects/AIPass")
+            detector._repo_root.__str__ = MagicMock(return_value=str(_WS))
 
             detector.detect_from_path(resolved)
 
@@ -331,7 +340,7 @@ class TestDetectFromLog:
         # Use a POSIX-style path so the "/" in log_file check in detect_from_log
         # triggers the delegation. On Windows, tmp_path uses backslashes which
         # would not match the "/" check in the production code.
-        fake_log_path = "/fakedir/branch_output/something.log"
+        fake_log_path = str(_HOME / "branch_output" / "something.log")
         with patch.object(detector, "detect_from_path", return_value="CLI") as mock_dfp:
             result = detector.detect_from_log(fake_log_path)
 
@@ -474,8 +483,8 @@ class TestLoadBranchPaths:
 
         registry_data = {
             "branches": [
-                {"name": "PRAX", "path": "/home/user/prax"},
-                {"name": "CLI", "path": "/home/user/cli"},
+                {"name": "PRAX", "path": str(_HOME / "prax")},
+                {"name": "CLI", "path": str(_HOME / "cli")},
             ],
         }
 
@@ -499,9 +508,9 @@ class TestLoadBranchPaths:
 
         registry_data = {
             "branches": [
-                {"name": "PRAX", "path": "/home/user/prax"},
-                {"name": "CLI", "path": "/home/user/cli"},
-                {"name": "FLOW", "path": "/home/user/flow"},
+                {"name": "PRAX", "path": str(_HOME / "prax")},
+                {"name": "CLI", "path": str(_HOME / "cli")},
+                {"name": "FLOW", "path": str(_HOME / "flow")},
             ],
         }
 
@@ -580,51 +589,53 @@ class TestLoadBranchPaths:
 class TestFileEventCallback:
     """Tests for file_event_callback()."""
 
-    def test_creates_monitoring_event(self):
+    def test_creates_monitoring_event(self, tmp_path):
         """Should create and enqueue a MonitoringEvent."""
         mod, _, mock_eq, _ = _import_file_watcher_integration()
 
-        mod.file_event_callback("PRAX", "MODIFIED", "/some/file.py")
+        mod.file_event_callback("PRAX", "MODIFIED", str(tmp_path / "some" / "file.py"))
 
         mod.MonitoringEvent.assert_called_once()
         mod.global_queue.enqueue.assert_called_once()
 
-    def test_maps_event_types_correctly(self):
+    def test_maps_event_types_correctly(self, tmp_path):
         """A known event type gets its mapped action and the priority that goes with it."""
         mod, _, mock_eq, _ = _import_file_watcher_integration()
 
-        mod.file_event_callback("CLI", "CREATED", "/file.py")
+        changed_file = str(tmp_path / "file.py")
+        mod.file_event_callback("CLI", "CREATED", changed_file)
 
         kwargs = mod.MonitoringEvent.call_args.kwargs
         assert kwargs["action"] == "created"
         assert kwargs["priority"] == 2, "created is one of the three that outrank a modify"
         assert kwargs["event_type"] == "file"
         assert kwargs["branch"] == "CLI"
-        assert kwargs["message"] == "/file.py"
+        assert kwargs["message"] == changed_file
         assert kwargs["level"] == "info"
 
-    def test_handles_unknown_event_type(self):
+    def test_handles_unknown_event_type(self, tmp_path):
         """An event type outside the map is lowercased and falls to the default priority."""
         mod, _, mock_eq, _ = _import_file_watcher_integration()
 
-        mod.file_event_callback("FLOW", "RENAMED", "/file.py")
+        mod.file_event_callback("FLOW", "RENAMED", str(tmp_path / "file.py"))
 
         kwargs = mod.MonitoringEvent.call_args.kwargs
         assert kwargs["action"] == "renamed"
         assert kwargs["priority"] == 3, "an unmapped action takes the priority_map default"
         assert kwargs["branch"] == "FLOW"
 
-    def test_handles_exception(self):
+    def test_handles_exception(self, tmp_path):
         """A failing event build is swallowed: nothing is enqueued and the error is logged."""
         mod, _, mock_eq, _ = _import_file_watcher_integration()
         mod.MonitoringEvent.side_effect = Exception("boom")
 
-        assert mod.file_event_callback("PRAX", "MODIFIED", "/file.py") is None
+        changed_file = str(tmp_path / "file.py")
+        assert mod.file_event_callback("PRAX", "MODIFIED", changed_file) is None
 
         mock_eq.global_queue.enqueue.assert_not_called()
         mod.logger.error.assert_called_once()
         message = mod.logger.error.call_args.args[0]
-        assert "unexpected Exception (PRAX MODIFIED /file.py)" in message
+        assert f"unexpected Exception (PRAX MODIFIED {changed_file})" in message
         assert "file watching continues" in message
 
 
@@ -685,12 +696,12 @@ class TestGetFileWatcherStats:
         assert "running" in stats
         assert "watchdog_available" in stats
 
-    def test_reflects_manager_state(self):
+    def test_reflects_manager_state(self, tmp_path):
         """Stats should reflect current manager state."""
         mod, _, _, _ = _import_file_watcher_integration()
         watcher = mod.FileWatcherManager()
         watcher.running = True
-        watcher.branch_paths = [("PRAX", Path("/prax")), ("CLI", Path("/cli"))]
+        watcher.branch_paths = [("PRAX", tmp_path / "prax"), ("CLI", tmp_path / "cli")]
         setattr(mod, "_file_watcher", watcher)
         stats = mod.get_file_watcher_stats()
         assert stats["running"] is True
@@ -737,13 +748,13 @@ class TestFileWatcherManagerGetStats:
         assert stats["branch_names"] == []
         assert "watchdog_available" in stats
 
-    def test_stats_with_branches(self):
+    def test_stats_with_branches(self, tmp_path):
         """get_stats() should list watched branches."""
         mod, _, _, _ = _import_file_watcher_integration()
         mgr = mod.FileWatcherManager()
         mgr.branch_paths = [
-            ("SEEDGO", Path("/seedgo")),
-            ("DRONE", Path("/drone")),
+            ("SEEDGO", tmp_path / "seedgo"),
+            ("DRONE", tmp_path / "drone"),
         ]
         mgr.running = True
         stats = mgr.get_stats()
@@ -1031,7 +1042,7 @@ class TestPrintStatus:
 
 # Fake home base used across external-project tests to avoid
 # hardcoded /home/ paths that trip the SEEDGO log-structure checker.
-_FAKE_HOME = Path("/fakehome/user")
+_FAKE_HOME = Path(str(_HOME / "user"))
 _FAKE_PROJECTS = _FAKE_HOME / "Projects"
 
 
@@ -1054,7 +1065,7 @@ class TestExactCaseRegistries:
         real = tmp_path / "PROJECT_REGISTRY.json"
         windows_only = tmp_path / "project_registry.json"
         for path in (real, windows_only):
-            path.write_text("{}")
+            path.write_text("{}", encoding="utf-8")
 
         # Stand in for the Windows matcher: return BOTH, the way it would there.
         monkeypatch.setattr(type(tmp_path), "glob", lambda self, _pattern: iter([real, windows_only]))
@@ -1064,8 +1075,8 @@ class TestExactCaseRegistries:
     def test_the_exact_case_name_still_passes(self, tmp_path):
         mod = _import_branch_detector()
         real = tmp_path / "AIPASS_REGISTRY.json"
-        real.write_text("{}")
-        (tmp_path / "notes.json").write_text("{}")
+        real.write_text("{}", encoding="utf-8")
+        (tmp_path / "notes.json").write_text("{}", encoding="utf-8")
 
         assert mod._exact_case_registries(tmp_path) == [real]
 
@@ -1078,7 +1089,7 @@ class TestExactCaseRegistries:
         real = tmp_path / "PROJECT_REGISTRY.json"
         windows_only = tmp_path / "project_registry.json"
         for path in (real, windows_only):
-            path.write_text("{}")
+            path.write_text("{}", encoding="utf-8")
         monkeypatch.setattr(type(tmp_path), "glob", lambda self, _pattern: iter([real, windows_only]))
 
         unfiltered = sorted(tmp_path.glob("*_REGISTRY.json"))
@@ -1088,11 +1099,11 @@ class TestExactCaseRegistries:
 class TestFindRepoRoot:
     """Tests for BranchDetector._find_repo_root()."""
 
-    def test_cached_repo_root_returned(self):
+    def test_cached_repo_root_returned(self, tmp_path):
         """When _repo_root is already set, return it without walking."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        sentinel = Path("/cached/root")
+        sentinel = tmp_path / "cached" / "root"
         detector._repo_root = sentinel
         result = detector._find_repo_root()
         assert result is sentinel
@@ -1115,7 +1126,7 @@ class TestFindRepoRoot:
         root = tmp_path / "checkout"
         start = root / "src" / "aipass" / "prax" / "a.py"
         start.parent.mkdir(parents=True)
-        (root / "AIPASS_REGISTRY.json").write_text("{}")
+        (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
         monkeypatch.setattr(mod, "find_repo_root", lambda _start=None: repo_root_mod.find_repo_root(start))
 
         assert detector._find_repo_root() == root
@@ -1144,17 +1155,18 @@ class TestFindRepoRoot:
         assert resolved == tmp_path / "checkout"
         assert resolved != Path.cwd()
 
-    def test_the_answer_is_cached_per_instance(self):
+    def test_the_answer_is_cached_per_instance(self, tmp_path):
         """The cache survived the delegation — it is called per registry entry."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
         detector._repo_root = None
+        counted_root = tmp_path / "counted" / "root"
 
         calls = []
 
         def counting(start=None):
             calls.append(start)
-            return Path("/counted/root")
+            return counted_root
 
         original = mod.find_repo_root
         setattr(mod, "find_repo_root", counting)
@@ -1164,7 +1176,7 @@ class TestFindRepoRoot:
         finally:
             setattr(mod, "find_repo_root", original)
 
-        assert first == second == Path("/counted/root")
+        assert first == second == counted_root
         assert len(calls) == 1
 
 
@@ -1215,11 +1227,11 @@ class TestRegisterBranch:
 class TestLoadRegistry:
     """Tests for BranchDetector._load_registry()."""
 
-    def test_loads_branches_from_valid_registry(self):
+    def test_loads_branches_from_valid_registry(self, tmp_path):
         """Should populate known_branches from valid registry file."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod, branches={})
-        detector._repo_root = Path("/fake/root")
+        detector._repo_root = tmp_path / "fake" / "root"
 
         registry_data = {
             "branches": [
@@ -1643,12 +1655,12 @@ class TestDetectFromCompoundParts:
 class TestDetectFromExternalProjectPath:
     """Tests for BranchDetector._detect_from_external_project_path()."""
 
-    def test_path_not_under_projects(self):
+    def test_path_not_under_projects(self, tmp_path):
         """Should return None if path is not under ~/Projects/."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
 
-        path = Path("/tmp/some/random/file.py")
+        path = tmp_path / "some" / "random" / "file.py"
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path_cls.home.return_value = _FAKE_HOME
 
@@ -1771,35 +1783,35 @@ class TestDetectFromExternalProjectPath:
 class TestExtractBranchFromCentral:
     """Tests for BranchDetector._extract_branch_from_central()."""
 
-    def test_dot_central_json(self):
+    def test_dot_central_json(self, tmp_path):
         """Should extract branch name from .central.json filename."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        path = Path("/some/ai_mail/DRONE.central.json")
+        path = tmp_path / "some" / "ai_mail" / "DRONE.central.json"
         result = detector._extract_branch_from_central(str(path), path)
         assert result == "DRONE"
 
-    def test_underscore_central_json(self):
+    def test_underscore_central_json(self, tmp_path):
         """Should extract branch name from _central.json filename."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        path = Path("/some/dir/ai_mail/PRAX_central.json")
+        path = tmp_path / "some" / "dir" / "ai_mail" / "PRAX_central.json"
         result = detector._extract_branch_from_central("ai_mail/PRAX_central.json", path)
         assert result == "PRAX"
 
-    def test_returns_none_for_non_mail_path(self):
+    def test_returns_none_for_non_mail_path(self, tmp_path):
         """Should return None if path doesn't contain ai_mail or AI_MAIL."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        path = Path("/some/dir/config.json")
+        path = tmp_path / "some" / "dir" / "config.json"
         result = detector._extract_branch_from_central(str(path), path)
         assert result is None
 
-    def test_returns_none_for_non_central_filename(self):
+    def test_returns_none_for_non_central_filename(self, tmp_path):
         """Should return None for non-central filename in ai_mail path."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        path = Path("/ai_mail/inbox.json")
+        path = tmp_path / "ai_mail" / "inbox.json"
         result = detector._extract_branch_from_central("ai_mail/inbox.json", path)
         assert result is None
 
@@ -2050,16 +2062,17 @@ class TestDetectFromModuleAdditional:
 class TestPublicAPIFunctions:
     """Tests for module-level public API functions."""
 
-    def test_detect_branch_from_path_delegates(self):
+    def test_detect_branch_from_path_delegates(self, tmp_path):
         """detect_branch_from_path should delegate to get_detector."""
         mod = _import_branch_detector()
         mock_detector = MagicMock()
         mock_detector.detect_from_path.return_value = "PRAX"
         setattr(mod, "_detector_instance", mock_detector)
 
-        result = mod.detect_branch_from_path("/some/path")
+        some_path = str(tmp_path / "some" / "path")
+        result = mod.detect_branch_from_path(some_path)
         assert result == "PRAX"
-        mock_detector.detect_from_path.assert_called_once_with("/some/path")
+        mock_detector.detect_from_path.assert_called_once_with(some_path)
 
     def test_detect_branch_from_log_delegates(self):
         """detect_branch_from_log should delegate to get_detector."""

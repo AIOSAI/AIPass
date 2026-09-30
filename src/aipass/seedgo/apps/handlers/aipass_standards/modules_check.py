@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-03-08
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -93,7 +93,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not is_module:
         return {
             "passed": True,
-            "checks": [{"name": "Module check", "passed": True, "message": "Not a module file (skipped)"}],
+            "checks": [
+                {"name": "Module check", "passed": True, "message": "Not a module file (skipped)", "declined": True}
+            ],
             "score": 100,
             "standard": "MODULES",
         }
@@ -489,7 +491,12 @@ def check_thin_orchestration(content: str, module_path: str, bypass_rules: list 
 
     # Check bypass
     if is_bypassed(module_path, "modules", bypass_rules=bypass_rules):
-        return {"name": "Thin orchestration", "passed": True, "message": "Bypassed - thin orchestration check skipped"}
+        return {
+            "name": "Thin orchestration",
+            "passed": True,
+            "message": "Bypassed - thin orchestration check skipped",
+            "declined": True,
+        }
 
     try:
         tree = ast.parse(content, filename=module_path)

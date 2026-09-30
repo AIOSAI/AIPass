@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for prax tests
-# Version: 2.1.0
+# Version: 2.3.0
 # Created: 2025-11-08
-# Modified: 2026-08-09
+# Modified: 2026-09-29
 # =============================================
 
 """Shared pytest fixtures for prax tests.
@@ -25,6 +25,10 @@ import types
 import pytest
 from typing import Generator
 from unittest.mock import MagicMock
+
+# The real display, bound before any fixture stubs sys.modules: the two fixtures
+# below pin and reset the consoles the product actually prints through.
+from aipass.cli.apps.modules import display
 
 collect_ignore_glob = [".archive/*"]
 
@@ -109,6 +113,42 @@ def _resync_module_attrs() -> Generator[None, None, None]:
                 and f"{pkg_name}.{attr}" not in sys.modules
             ):
                 delattr(pkg, attr)
+
+
+# =============================================
+# CONSOLE WIDTH AND COMMAND STATE
+# =============================================
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next.
+
+    Declared above mock_prax_infrastructure so the reset runs after its sys.modules
+    stubs come out.
+    """
+    yield
+    display.reset_command_state()
+
+
+@pytest.fixture(autouse=True)
+def header_fires_into_a_recorder(monkeypatch) -> MagicMock:
+    """header() keeps the trigger it loaded in display._TRIGGER and fires
+    cli_header_displayed through it; a real console would open a call on the live
+    bus. Chosen by prax, leg 3, of the three cures: no file of cli is touched and
+    no test can forget it."""
+    recorder = MagicMock()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return recorder
 
 
 # =============================================

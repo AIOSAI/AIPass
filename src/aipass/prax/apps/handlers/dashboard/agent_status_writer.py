@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent_status_writer.py
 # Description: Agent Status Dashboard Write-Through
-# Version: 0.1.0
+# Version: 0.2.0
 # Created: 2026-02-25
-# Modified: 2026-03-09
+# Modified: 2026-09-24
 # =============================================
 
 """
@@ -77,10 +77,16 @@ def _get_all_branches() -> List[Dict[str, Any]]:
         if not registry.exists():
             return []
 
+        repo_root = _find_repo_root()
         data = json.loads(registry.read_text(encoding="utf-8"))
         branches = []
         for branch in data.get("branches", []):
-            branch_path = Path(branch.get("path", ""))
+            # Registry rows are repo-relative; an unjoined row resolves against
+            # whatever cwd the process started in — the branch is dropped, or a
+            # look-alike subtree there is taken for it. Same join as refresh.py
+            # and template_pusher.py. External projects register absolute rows.
+            raw_path = Path(branch.get("path", ""))
+            branch_path = raw_path if raw_path.is_absolute() else repo_root / raw_path
             if branch_path.exists():
                 branches.append({"name": branch.get("name", ""), "path": branch_path})
         return branches

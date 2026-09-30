@@ -1,8 +1,11 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_curation_explore_welcome_ops.py
+# Description: Tests for handlers/curation/curation_ops.py, rooms/explore_ops.py and welcome/welcome_ops.py
 # Date: 2026-04-03
 # Version: 1.0.0
+# Created: 2026-04-03
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,27 +17,60 @@
 #   - Mocks get_db, close_db, get_caller_branch, json_handler targeting SOURCE modules
 # =============================================
 
-"""
-Unit tests for the *ops* layer of curation, explore, and welcome handlers.
+"""Tests for apps/handlers/curation/curation_ops.py, rooms/explore_ops.py and welcome/welcome_ops.py."""
 
-These tests exercise the public functions that parse CLI args, acquire a DB
-connection, call into the query layer, and return result dicts.  The existing
-test_curation.py, test_explore_leaderboard.py, and test_welcome_engagement.py
-cover the lower-level query functions and module routing; this file focuses on
-the ops orchestration that sits above them.
-
-Covered modules:
-- commons.apps.handlers.curation.curation_ops
-    add_react, remove_react, show_reactions, pin_post_cmd, unpin_post_cmd,
-    show_pinned, show_trending
-- commons.apps.handlers.rooms.explore_ops
-    explore_rooms, list_secrets
-- commons.apps.handlers.welcome.welcome_ops
-    run_welcome (--dry-run and normal), _welcome_scan, _welcome_specific
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(duplicate) — query/routing covered by test_curation.py, test_explore_leaderboard.py
 
 import sqlite3
+from typing import Callable, List
 from unittest.mock import patch, MagicMock
+
+import pytest
+
+from aipass.commons.apps.handlers.curation.curation_ops import (
+    add_react,
+    pin_post_cmd,
+    remove_react,
+    show_pinned,
+    show_reactions,
+    show_trending,
+    unpin_post_cmd,
+)
+from aipass.commons.apps.handlers.rooms.explore_ops import explore_rooms, list_secrets
+from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
+from aipass.commons.apps.handlers.welcome.welcome_handler import create_welcome_post
+
+
+# =============================================================================
+# curation_ops -- a failed caller lookup (add_react's pin is at the foot of the file)
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        pytest.param(remove_react, ["post", "1", "thumbsup"], id="remove_react"),
+        pytest.param(pin_post_cmd, ["1"], id="pin_post_cmd"),
+        pytest.param(unpin_post_cmd, ["1"], id="unpin_post_cmd"),
+    ],
+)
+def test_curation_commands_refuse_naming_a_failed_caller_lookup(
+    command: Callable[[List[str]], dict], args: List[str]
+) -> None:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.curation.curation_ops.get_db") as db,
+    ):
+        result = command(args)
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
 
 
 # =============================================================================
@@ -120,8 +156,6 @@ def test_add_react_success_post(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """add_react with valid post target returns success with reaction info."""
-    from aipass.commons.apps.handlers.curation.curation_ops import add_react
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     post_id = _seed_post(initialized_db, "Hello", "general", "TEST_BRANCH")
 
@@ -155,8 +189,6 @@ def test_add_react_success_comment(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """add_react targeting a comment returns success."""
-    from aipass.commons.apps.handlers.curation.curation_ops import add_react
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     post_id = _seed_post(initialized_db, "Hello", "general", "TEST_BRANCH")
     comment_id = _seed_comment(initialized_db, post_id, "TEST_BRANCH")
@@ -173,8 +205,6 @@ def test_add_react_success_comment(
 
 def test_add_react_too_few_args() -> None:
     """add_react with fewer than 3 args returns usage error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import add_react
-
     result = add_react(["post", "1"])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -182,8 +212,6 @@ def test_add_react_too_few_args() -> None:
 
 def test_add_react_invalid_target_type() -> None:
     """add_react with invalid target type returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import add_react
-
     result = add_react(["thread", "1", "thumbsup"])
     assert result["success"] is False
     # The exact message, not a substring: the usage error two branches up also
@@ -194,8 +222,6 @@ def test_add_react_invalid_target_type() -> None:
 
 def test_add_react_non_numeric_id() -> None:
     """add_react with non-numeric ID returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import add_react
-
     result = add_react(["post", "abc", "thumbsup"])
     assert result["success"] is False
     assert "number" in result["error"]
@@ -203,8 +229,6 @@ def test_add_react_non_numeric_id() -> None:
 
 def test_add_react_invalid_reaction() -> None:
     """add_react with invalid reaction name returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import add_react
-
     result = add_react(["post", "1", "love"])
     assert result["success"] is False
     assert "Invalid reaction" in result["error"]
@@ -216,8 +240,6 @@ def test_add_react_invalid_reaction() -> None:
 )
 def test_add_react_no_caller(mock_caller: MagicMock) -> None:
     """add_react when caller cannot be detected returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import add_react
-
     result = add_react(["post", "1", "thumbsup"])
     assert result["success"] is False
     assert "calling branch" in result["error"]
@@ -236,8 +258,6 @@ def test_add_react_target_not_found(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """add_react for a non-existent post returns not-found error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import add_react
-
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
@@ -264,8 +284,6 @@ def test_remove_react_no_existing_reaction(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """remove_react when no reaction exists returns removed=False."""
-    from aipass.commons.apps.handlers.curation.curation_ops import remove_react
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     post_id = _seed_post(initialized_db, "Hello", "general", "TEST_BRANCH")
 
@@ -279,8 +297,6 @@ def test_remove_react_no_existing_reaction(
 
 def test_remove_react_too_few_args() -> None:
     """remove_react with fewer than 3 args returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import remove_react
-
     result = remove_react(["post"])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -288,16 +304,12 @@ def test_remove_react_too_few_args() -> None:
 
 def test_remove_react_invalid_target_type() -> None:
     """remove_react with invalid target type returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import remove_react
-
     result = remove_react(["thread", "1", "thumbsup"])
     assert result["success"] is False
 
 
 def test_remove_react_non_numeric_id() -> None:
     """remove_react with non-numeric ID returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import remove_react
-
     result = remove_react(["post", "xyz", "thumbsup"])
     assert result["success"] is False
     assert "number" in result["error"]
@@ -305,8 +317,6 @@ def test_remove_react_non_numeric_id() -> None:
 
 def test_remove_react_invalid_reaction() -> None:
     """remove_react with invalid reaction returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import remove_react
-
     result = remove_react(["post", "1", "love"])
     assert result["success"] is False
 
@@ -317,8 +327,6 @@ def test_remove_react_invalid_reaction() -> None:
 )
 def test_remove_react_no_caller(mock_caller: MagicMock) -> None:
     """remove_react when caller cannot be detected returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import remove_react
-
     result = remove_react(["post", "1", "thumbsup"])
     assert result["success"] is False
     assert "calling branch" in result["error"]
@@ -339,8 +347,6 @@ def test_show_reactions_empty(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """show_reactions on a post with no reactions returns empty dict."""
-    from aipass.commons.apps.handlers.curation.curation_ops import show_reactions
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     post_id = _seed_post(initialized_db, "Hello", "general", "TEST_BRANCH")
 
@@ -356,8 +362,6 @@ def test_show_reactions_empty(
 
 def test_show_reactions_too_few_args() -> None:
     """show_reactions with fewer than 2 args returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import show_reactions
-
     result = show_reactions(["post"])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -365,16 +369,12 @@ def test_show_reactions_too_few_args() -> None:
 
 def test_show_reactions_invalid_target() -> None:
     """show_reactions with invalid target type returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import show_reactions
-
     result = show_reactions(["thread", "1"])
     assert result["success"] is False
 
 
 def test_show_reactions_non_numeric_id() -> None:
     """show_reactions with non-numeric ID returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import show_reactions
-
     result = show_reactions(["post", "abc"])
     assert result["success"] is False
     assert "number" in result["error"]
@@ -402,8 +402,6 @@ def test_pin_post_cmd_success_by_author(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """pin_post_cmd by the post author succeeds."""
-    from aipass.commons.apps.handlers.curation.curation_ops import pin_post_cmd
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     post_id = _seed_post(initialized_db, "Pin Me", "general", "TEST_BRANCH")
 
@@ -435,8 +433,6 @@ def test_pin_post_cmd_success_by_system(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """SYSTEM can pin any post regardless of authorship."""
-    from aipass.commons.apps.handlers.curation.curation_ops import pin_post_cmd
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     post_id = _seed_post(initialized_db, "Pin Me", "general", "TEST_BRANCH")
 
@@ -461,8 +457,6 @@ def test_pin_post_cmd_rejected_non_author(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """Non-author, non-SYSTEM caller cannot pin a post."""
-    from aipass.commons.apps.handlers.curation.curation_ops import pin_post_cmd
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     _seed_agent(initialized_db, "OTHER_BRANCH")
     post_id = _seed_post(initialized_db, "No Pin", "general", "TEST_BRANCH")
@@ -493,8 +487,6 @@ def test_pin_post_cmd_already_pinned(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """Pinning an already-pinned post returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import pin_post_cmd
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     post_id = _seed_post(initialized_db, "Already Pinned", "general", "TEST_BRANCH", pinned=1)
 
@@ -508,8 +500,6 @@ def test_pin_post_cmd_already_pinned(
 
 def test_pin_post_cmd_no_args() -> None:
     """pin_post_cmd with no args returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import pin_post_cmd
-
     result = pin_post_cmd([])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -517,8 +507,6 @@ def test_pin_post_cmd_no_args() -> None:
 
 def test_pin_post_cmd_non_numeric() -> None:
     """pin_post_cmd with non-numeric ID returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import pin_post_cmd
-
     result = pin_post_cmd(["abc"])
     assert result["success"] is False
     assert "number" in result["error"]
@@ -530,8 +518,6 @@ def test_pin_post_cmd_non_numeric() -> None:
 )
 def test_pin_post_cmd_no_caller(mock_caller: MagicMock) -> None:
     """pin_post_cmd when caller cannot be detected returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import pin_post_cmd
-
     result = pin_post_cmd(["1"])
     assert result["success"] is False
     assert "calling branch" in result["error"]
@@ -550,8 +536,6 @@ def test_pin_post_cmd_post_not_found(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """pin_post_cmd for non-existent post returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import pin_post_cmd
-
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
@@ -582,8 +566,6 @@ def test_unpin_post_cmd_success(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """unpin_post_cmd on a pinned post by its author succeeds."""
-    from aipass.commons.apps.handlers.curation.curation_ops import unpin_post_cmd
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     post_id = _seed_post(initialized_db, "Unpin Me", "general", "TEST_BRANCH", pinned=1)
 
@@ -610,8 +592,6 @@ def test_unpin_post_cmd_rejected_non_author(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """Non-author, non-SYSTEM caller cannot unpin a post."""
-    from aipass.commons.apps.handlers.curation.curation_ops import unpin_post_cmd
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     _seed_agent(initialized_db, "OTHER_BRANCH")
     post_id = _seed_post(initialized_db, "Pinned", "general", "TEST_BRANCH", pinned=1)
@@ -625,8 +605,6 @@ def test_unpin_post_cmd_rejected_non_author(
 
 def test_unpin_post_cmd_no_args() -> None:
     """unpin_post_cmd with no args returns error."""
-    from aipass.commons.apps.handlers.curation.curation_ops import unpin_post_cmd
-
     result = unpin_post_cmd([])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -647,8 +625,6 @@ def test_show_pinned_no_pinned(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """show_pinned with no pinned posts returns empty list."""
-    from aipass.commons.apps.handlers.curation.curation_ops import show_pinned
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     _seed_post(initialized_db, "Not Pinned", "general", "TEST_BRANCH")
 
@@ -671,8 +647,6 @@ def test_show_pinned_with_room_filter(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """show_pinned with --room filter returns only pinned posts in that room."""
-    from aipass.commons.apps.handlers.curation.curation_ops import show_pinned
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     _seed_post(initialized_db, "General Pin", "general", "TEST_BRANCH", pinned=1)
     _seed_post(initialized_db, "Dev Pin", "dev", "TEST_BRANCH", pinned=1)
@@ -702,15 +676,13 @@ def test_show_trending_empty(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """show_trending with no engagement returns empty list."""
-    from aipass.commons.apps.handlers.curation.curation_ops import show_trending
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     _seed_post(initialized_db, "Quiet Post", "general", "TEST_BRANCH")
 
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = show_trending([])
+    result = show_trending()
     assert result["success"] is True
     assert result["posts"] == []
 
@@ -735,8 +707,6 @@ def test_explore_rooms_no_hidden_rooms(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """explore_rooms with no hidden rooms returns empty list."""
-    from aipass.commons.apps.handlers.rooms.explore_ops import explore_rooms
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     # Remove any hidden rooms that may have been seeded by init_db
     initialized_db.execute("UPDATE rooms SET hidden = 0")
@@ -745,7 +715,7 @@ def test_explore_rooms_no_hidden_rooms(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = explore_rooms([])
+    result = explore_rooms()
     assert result["success"] is True
     assert result["hidden_rooms"] == []
     assert result["rooms_visited"] == 0
@@ -766,8 +736,6 @@ def test_explore_rooms_with_hidden_rooms_no_reveal(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """explore_rooms with hidden rooms but < 3 rooms visited does not reveal."""
-    from aipass.commons.apps.handlers.rooms.explore_ops import explore_rooms
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     # Ensure no pre-existing hidden rooms interfere
     initialized_db.execute("UPDATE rooms SET hidden = 0")
@@ -777,7 +745,7 @@ def test_explore_rooms_with_hidden_rooms_no_reveal(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = explore_rooms([])
+    result = explore_rooms()
     assert result["success"] is True
     assert len(result["hidden_rooms"]) == 1
     assert result["hidden_rooms"][0]["name"] == "secret-lab"
@@ -799,8 +767,6 @@ def test_explore_rooms_reveals_after_3_rooms(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """explore_rooms reveals a hidden room when the caller has visited 3+ rooms."""
-    from aipass.commons.apps.handlers.rooms.explore_ops import explore_rooms
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     # Clear any pre-existing hidden rooms
     initialized_db.execute("UPDATE rooms SET hidden = 0")
@@ -817,7 +783,7 @@ def test_explore_rooms_reveals_after_3_rooms(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = explore_rooms([])
+    result = explore_rooms()
     assert result["success"] is True
     assert result["rooms_visited"] >= 3
     assert "revealed" in result
@@ -830,9 +796,7 @@ def test_explore_rooms_reveals_after_3_rooms(
 )
 def test_explore_rooms_no_caller(mock_caller: MagicMock) -> None:
     """explore_rooms when caller cannot be detected returns error."""
-    from aipass.commons.apps.handlers.rooms.explore_ops import explore_rooms
-
-    result = explore_rooms([])
+    result = explore_rooms()
     assert result["success"] is False
     assert "calling branch" in result["error"]
 
@@ -855,8 +819,6 @@ def test_list_secrets_none_discovered(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """list_secrets when no hidden rooms have been posted in returns empty."""
-    from aipass.commons.apps.handlers.rooms.explore_ops import list_secrets
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     # Clear any pre-existing hidden rooms
     initialized_db.execute("UPDATE rooms SET hidden = 0")
@@ -866,7 +828,7 @@ def test_list_secrets_none_discovered(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = list_secrets([])
+    result = list_secrets()
     assert result["success"] is True
     assert result["discovered"] == []
     assert result["total_hidden"] == 1
@@ -885,8 +847,6 @@ def test_list_secrets_with_discovered_room(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """list_secrets returns rooms where the caller has posted."""
-    from aipass.commons.apps.handlers.rooms.explore_ops import list_secrets
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     # Clear any pre-existing hidden rooms
     initialized_db.execute("UPDATE rooms SET hidden = 0")
@@ -897,7 +857,7 @@ def test_list_secrets_with_discovered_room(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = list_secrets([])
+    result = list_secrets()
     assert result["success"] is True
     assert len(result["discovered"]) == 1
     assert result["discovered"][0]["name"] == "hidden-cove"
@@ -917,8 +877,6 @@ def test_list_secrets_discovered_via_comment(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """list_secrets counts rooms discovered by commenting on a post in that room."""
-    from aipass.commons.apps.handlers.rooms.explore_ops import list_secrets
-
     _seed_agent(initialized_db, "TEST_BRANCH")
     _seed_agent(initialized_db, "OTHER_BRANCH")
     # Clear any pre-existing hidden rooms
@@ -933,7 +891,7 @@ def test_list_secrets_discovered_via_comment(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = list_secrets([])
+    result = list_secrets()
     assert result["success"] is True
     assert len(result["discovered"]) == 1
     assert result["discovered"][0]["name"] == "hidden-den"
@@ -945,9 +903,7 @@ def test_list_secrets_discovered_via_comment(
 )
 def test_list_secrets_no_caller(mock_caller: MagicMock) -> None:
     """list_secrets when caller cannot be detected returns error."""
-    from aipass.commons.apps.handlers.rooms.explore_ops import list_secrets
-
-    result = list_secrets([])
+    result = list_secrets()
     assert result["success"] is False
     assert "calling branch" in result["error"]
 
@@ -969,8 +925,6 @@ def test_run_welcome_dry_run_scan(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """run_welcome --dry-run with no specific branch lists unwelcomed branches."""
-    from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
-
     _seed_agent(initialized_db, "ALPHA")
     _seed_agent(initialized_db, "BETA")
 
@@ -997,8 +951,6 @@ def test_run_welcome_dry_run_specific_branch(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """run_welcome <branch> --dry-run reports whether the branch would be welcomed."""
-    from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
-
     _seed_agent(initialized_db, "gamma")
 
     mock_get_db.return_value = initialized_db
@@ -1023,9 +975,6 @@ def test_run_welcome_dry_run_already_welcomed(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """run_welcome <branch> --dry-run for already-welcomed branch reports would_welcome=False."""
-    from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
-    from aipass.commons.apps.handlers.welcome.welcome_handler import create_welcome_post
-
     _seed_agent(initialized_db, "DELTA")
     create_welcome_post(initialized_db, "DELTA")
 
@@ -1055,8 +1004,6 @@ def test_run_welcome_scan_welcomes_new_branches(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """run_welcome with no args scans and welcomes all unwelcomed branches."""
-    from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
-
     _seed_agent(initialized_db, "NEW_BRANCH")
 
     mock_get_db.return_value = initialized_db
@@ -1080,8 +1027,6 @@ def test_run_welcome_specific_branch_success(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """run_welcome <branch> creates a welcome post for that branch."""
-    from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
-
     _seed_agent(initialized_db, "epsilon")
 
     mock_get_db.return_value = initialized_db
@@ -1107,9 +1052,6 @@ def test_run_welcome_specific_already_welcomed(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """run_welcome <branch> when already welcomed returns already_welcomed=True."""
-    from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
-    from aipass.commons.apps.handlers.welcome.welcome_handler import create_welcome_post
-
     _seed_agent(initialized_db, "ZETA")
     create_welcome_post(initialized_db, "ZETA")
 
@@ -1132,11 +1074,63 @@ def test_run_welcome_specific_branch_not_found(
     initialized_db: sqlite3.Connection,
 ) -> None:
     """run_welcome <nonexistent_branch> returns not-found error."""
-    from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
-
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
     result = run_welcome(["NONEXISTENT"])
     assert result["success"] is False
     assert "not found" in result["error"]
+
+
+def test_add_react_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    The lookup raises before any database is opened.
+    """
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.curation.curation_ops.get_db") as db,
+    ):
+        result = add_react(["post", "1", "thumbsup"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_explore_rooms_refuses_naming_a_failed_caller_lookup():
+    """The explore family names a broken caller lookup too (DPLAN-0354 leg 3)."""
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db") as db,
+    ):
+        result = explore_rooms()
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_list_secrets_refuses_naming_a_failed_caller_lookup():
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db") as db,
+    ):
+        result = list_secrets()
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

@@ -1,24 +1,52 @@
-"""Tests for architecture_check and checklist coverage gaps."""
-
 # =================== AIPass ====================
 # Name: test_coverage_arch_checklist.py
 # Description: Line-coverage tests for architecture_check.py and checklist.py
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-27
 # =============================================
 
+"""Tests for apps/handlers/aipass_standards/architecture_check.py and apps/modules/checklist.py."""
+
+# Written to close the coverage gaps the two modules' own test files left.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
+# seedgo: no-test-needed(shared) — citizen_class resolution through spawn; tests/test_citizen_class_resolution.py
+# seedgo: no-test-needed(documentation) — the text print_help and print_introspection show
+
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import List
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock
+
+from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
+from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
+    check_domain_organization,
+    check_file_size,
+    check_handler_independence,
+    check_module,
+    is_bypassed,
+)
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.handlers.bypass import bypass_handler
+from aipass.seedgo.apps.modules import CommandRefused, checklist
+from aipass.seedgo.apps.modules.checklist import (
+    _is_applicable,
+    _is_entry_point,
+)
 
 
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
     return text.split("\n")
+
+
+def _windows_form(tmp_path: Path, *parts: str) -> str:
+    """The tmp_path-rebuilt path as Windows spells it: a drive letter and backslashes."""
+    return str(PureWindowsPath("C:/", *tmp_path.parts[1:], *parts))
 
 
 # ---------------------------------------------------------------------------
@@ -28,124 +56,87 @@ def _lines(text: str) -> List[str]:
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for architecture_check and checklist."""
-    import sys
+    """Patch architecture_check's and checklist's own seams, at the edge.
 
-    mock_logger = MagicMock()
-    mock_console = MagicMock()
-    mock_error = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
+    Both modules bind their dependencies with ``from X import Y`` at their own
+    import time, so the seam a test controls is the NAME on the consuming
+    module (``architecture_check.get_template_ignore_patterns``,
+    ``checklist.discover_checkers``, ...) -- patching the origin module after
+    import would never reach a name the consumer already copied in.
+    ``json_handler.log_operation`` is the one exception: every consumer reads
+    it live off the shared module object, and conftest's AIPASS_TEST_LOG_DIR
+    seam already keeps that call safe for real, so it is left untouched here.
+    """
+    monkeypatch.setattr(checklist, "error", MagicMock())
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path: {})
+    monkeypatch.setattr(checklist, "get_branch_from_path", lambda file_path: None)
+    monkeypatch.setattr(checklist, "load_bypass_rules", lambda branch_path: [])
 
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- cli ----------------------------------------------------------------
-    cli_mod = MagicMock()
-    cli_mod.console = mock_console
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
-
-    cli_apps = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", cli_apps)
-
-    cli_modules = MagicMock()
-    cli_modules.error = mock_error
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.json.json_handler",
-        json_mod,
-    )
-
-    # -- bypass handler (used by architecture_check) ------------------------
-    bypass_pkg = MagicMock()
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
-    bypass_pkg.ignore_handler = bypass_ignore
-
-    # Use real is_bypassed — it only does string matching and calls
-    # json_handler.log_operation. That call resolves json_handler from the real
-    # utils module globals, which sys.modules patching does not reach, so point
-    # it at the mock explicitly — otherwise these tests write to the shared
-    # seedgo_json/utils_log.json that xdist workers would race on.
-    from aipass.seedgo.apps.handlers.bypass import utils as real_bypass_utils
-
-    monkeypatch.setattr(real_bypass_utils, "json_handler", json_mod)
-
-    bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = real_bypass_utils.is_bypassed
-    bypass_pkg.utils = bypass_utils
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        bypass_ignore,
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.utils",
-        bypass_utils,
-    )
-
-    # -- bypass handler (used by checklist) ---------------------------------
-    bypass_handler_mod = MagicMock()
-    bypass_handler_mod.get_branch_from_path = MagicMock(return_value=None)
-    bypass_handler_mod.load_bypass_rules = MagicMock(return_value=[])
-    bypass_handler_mod._find_registry = MagicMock(return_value=Path("/fake/registry"))
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.bypass_handler",
-        bypass_handler_mod,
-    )
-
-    # -- branch_audit (discover_checkers) ------------------------------------
-    audit_pkg = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit", audit_pkg)
-    branch_audit_mod = MagicMock()
-    branch_audit_mod.discover_checkers = MagicMock(return_value={})
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.audit.branch_audit",
-        branch_audit_mod,
-    )
-
-    # Force genuine re-imports so modules pick up fresh mocks.
-    # Dropping the sys.modules entry alone is NOT enough: ``from pkg import mod``
-    # short-circuits on the parent package attribute, handing back a stale module
-    # object still bound to whatever mocks a neighbouring test file installed.
-    # Drop the attribute too — monkeypatch restores both on teardown.
-    from aipass.seedgo.apps import modules as seedgo_modules_pkg
-    from aipass.seedgo.apps.handlers import aipass_standards as standards_pkg
-
-    for pkg, mod_name in (
-        (standards_pkg, "aipass.seedgo.apps.handlers.aipass_standards.architecture_check"),
-        (seedgo_modules_pkg, "aipass.seedgo.apps.modules.checklist"),
-    ):
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
-        monkeypatch.delattr(pkg, mod_name.rsplit(".", 1)[1], raising=False)
+    monkeypatch.setattr(architecture_check, "get_template_ignore_patterns", lambda: [])
 
 
-def _pin_checklist_gates(checklist, monkeypatch):
+def _pin_checklist_gates(checklist, monkeypatch, sandbox: Path, pin_branch: bool = True):
     """Pin run_checklist's early-return gates so results never depend on test order.
 
-    ``is_throwaway_path`` matches pytest's own tmp_path, ``is_prototype_file``
-    reads the filesystem and ``_resolve_branch_path`` hits the real branch
-    registry (which then feeds ``is_seedgo_ignored``). Each resolves differently
-    depending on what a neighbouring test happened to import first, so every test
-    that drives run_checklist has to pin them explicitly.
+    ``is_throwaway_path`` matches pytest's own tmp_path, so the test's sandbox is
+    carved out of it and every other path keeps the real answer.
+    ``is_prototype_file`` stays real: it reads only the first lines of the file
+    the test wrote, which carries no marker. ``_resolve_branch_path`` hits the
+    real branch registry (which then feeds ``is_seedgo_ignored``) and resolves
+    differently depending on what a neighbouring test happened to import first,
+    so it is pinned unless the test drives the branch lookup itself.
     """
-    monkeypatch.setattr(checklist, "is_throwaway_path", lambda _path: False)
-    monkeypatch.setattr(checklist, "is_prototype_file", lambda _path: False)
-    monkeypatch.setattr(checklist, "_resolve_branch_path", lambda _path: None)
+    real_throwaway = checklist.is_throwaway_path
+    root = sandbox.resolve()
+    monkeypatch.setattr(
+        checklist, "is_throwaway_path", lambda path: real_throwaway(path) and not Path(path).is_relative_to(root)
+    )
+    if pin_branch:
+        monkeypatch.setattr(checklist, "_resolve_branch_path", lambda _path: None)
+
+
+def _run_one(tmp_path, monkeypatch, returned: dict, pin_branch: bool = True):
+    """run_checklist over one sample file with one all_files checker answering ``returned``."""
+    _pin_checklist_gates(checklist, monkeypatch, tmp_path, pin_branch=pin_branch)
+    probe = MagicMock()
+    probe.AUDIT_SCOPE = "all_files"
+    probe.check_module = MagicMock(return_value=returned)
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path: {"probe": probe})
+    f = tmp_path / "sample.py"
+    f.write_text("x = 1\n", encoding="utf-8")
+    return checklist.run_checklist(str(f)), probe
+
+
+def _baseline(tmp_path, monkeypatch, template: dict, branch_name: str = "mybranch", passport=None):
+    """check_template_baseline over a planted templates/citizen/; ``template`` maps path to text, None for a dir.
+
+    ``passport`` is the passport.json text; the default is a specialist, and
+    False plants no passport at all.
+    """
+    citizen = tmp_path / "templates" / "citizen"
+    citizen.mkdir(parents=True)
+    for relative, text in template.items():
+        target = citizen / relative
+        if text is None:
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", tmp_path / "templates")
+    branch = tmp_path / branch_name
+    (branch / "apps").mkdir(parents=True)
+    entry = branch / "apps" / "entry_under_test.py"
+    entry.write_text("# entry\n", encoding="utf-8")
+    if passport is not False:
+        (branch / ".trinity").mkdir()
+        text = passport if passport is not None else json.dumps({"identity": {"citizen_class": "specialist"}})
+        (branch / ".trinity" / "passport.json").write_text(text, encoding="utf-8")
+    return architecture_check.check_template_baseline(str(entry))
+
+
+def _rows(result) -> set:
+    """The names of the template rows a baseline scored."""
+    return {c["name"] for c in result}
 
 
 # ===========================================================================
@@ -156,77 +147,50 @@ def _pin_checklist_gates(checklist, monkeypatch):
 class TestIsBypassed:
     """Tests for is_bypassed helper."""
 
-    def test_no_bypass_rules_returns_false(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            is_bypassed,
-        )
+    def test_no_bypass_rules_returns_false(self, tmp_path):
 
-        assert is_bypassed("/some/file.py", "architecture", bypass_rules=None) is False
+        assert is_bypassed(str(tmp_path / "file.py"), "architecture", bypass_rules=None) is False
 
-    def test_empty_bypass_rules_returns_false(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            is_bypassed,
-        )
+    def test_empty_bypass_rules_returns_false(self, tmp_path):
 
-        assert is_bypassed("/some/file.py", "architecture", bypass_rules=[]) is False
+        assert is_bypassed(str(tmp_path / "file.py"), "architecture", bypass_rules=[]) is False
 
-    def test_matching_standard_and_file(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            is_bypassed,
-        )
+    def test_matching_standard_and_file(self, tmp_path):
 
         rules = [{"standard": "architecture", "file": "file.py"}]
-        assert is_bypassed("/some/file.py", "architecture", bypass_rules=rules) is True
+        assert is_bypassed(str(tmp_path / "file.py"), "architecture", bypass_rules=rules) is True
 
-    def test_non_matching_standard(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            is_bypassed,
-        )
+    def test_non_matching_standard(self, tmp_path):
 
         rules = [{"standard": "cli", "file": "file.py"}]
-        assert is_bypassed("/some/file.py", "architecture", bypass_rules=rules) is False
+        assert is_bypassed(str(tmp_path / "file.py"), "architecture", bypass_rules=rules) is False
 
-    def test_non_matching_file(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            is_bypassed,
-        )
+    def test_non_matching_file(self, tmp_path):
 
         rules = [{"standard": "architecture", "file": "other.py"}]
-        assert is_bypassed("/some/file.py", "architecture", bypass_rules=rules) is False
+        assert is_bypassed(str(tmp_path / "file.py"), "architecture", bypass_rules=rules) is False
 
-    def test_line_specific_bypass_match(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            is_bypassed,
-        )
+    def test_line_specific_bypass_match(self, tmp_path):
 
         rules = [{"standard": "architecture", "file": "file.py", "lines": [10, 20]}]
-        assert is_bypassed("/some/file.py", "architecture", line=10, bypass_rules=rules) is True
+        assert is_bypassed(str(tmp_path / "file.py"), "architecture", line=10, bypass_rules=rules) is True
 
-    def test_line_specific_bypass_no_match(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            is_bypassed,
-        )
+    def test_line_specific_bypass_no_match(self, tmp_path):
 
         rules = [{"standard": "architecture", "file": "file.py", "lines": [10, 20]}]
-        assert is_bypassed("/some/file.py", "architecture", line=15, bypass_rules=rules) is False
+        assert is_bypassed(str(tmp_path / "file.py"), "architecture", line=15, bypass_rules=rules) is False
 
-    def test_rule_without_standard_matches(self):
-        """Rule with no 'standard' key matches any standard."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            is_bypassed,
-        )
+    def test_rule_without_standard_matches_nothing(self, tmp_path):
+        """A rule with no 'standard' is a blank and silences nothing (owner, 2026-09-25 18:55)."""
 
         rules = [{"file": "file.py"}]
-        assert is_bypassed("/some/file.py", "architecture", bypass_rules=rules) is True
+        assert is_bypassed(str(tmp_path / "file.py"), "architecture", bypass_rules=rules) is False
 
-    def test_rule_without_file_matches(self):
-        """Rule with no 'file' key matches any file."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            is_bypassed,
-        )
+    def test_rule_without_file_matches_nothing(self, tmp_path):
+        """A rule with no 'file' is a blank and silences nothing (owner, 2026-09-25 18:55)."""
 
         rules = [{"standard": "architecture"}]
-        assert is_bypassed("/some/file.py", "architecture", bypass_rules=rules) is True
+        assert is_bypassed(str(tmp_path / "file.py"), "architecture", bypass_rules=rules) is False
 
 
 # ===========================================================================
@@ -239,9 +203,6 @@ class TestCheckModule:
 
     def test_bypassed_file(self, tmp_path):
         """File with full architecture bypass returns passed with score 100."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_module,
-        )
 
         f = tmp_path / "thing.py"
         f.write_text("x = 1\n", encoding="utf-8")
@@ -251,22 +212,16 @@ class TestCheckModule:
         assert result["score"] == 100
         assert result["checks"][0]["name"] == "Bypassed"
 
-    def test_nonexistent_file(self):
+    def test_nonexistent_file(self, tmp_path):
         """Missing file returns passed=False and score=0."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_module,
-        )
 
-        result = check_module("/nonexistent/path/file.py")
+        result = check_module(str(tmp_path / "nonexistent" / "path" / "file.py"))
         assert result["passed"] is False
         assert result["score"] == 0
         assert "not found" in result["checks"][0]["message"].lower()
 
     def test_unreadable_file(self, tmp_path):
         """File that raises on read returns error result."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_module,
-        )
 
         # Create a directory with the same name to cause read error
         bad = tmp_path / "bad.py"
@@ -277,9 +232,6 @@ class TestCheckModule:
 
     def test_handler_file_runs_independence_and_domain_checks(self, tmp_path):
         """Handler file runs handler independence and domain organization checks."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_module,
-        )
 
         handler_dir = tmp_path / "branch" / "apps" / "handlers" / "json"
         handler_dir.mkdir(parents=True)
@@ -292,9 +244,6 @@ class TestCheckModule:
 
     def test_init_file_skips_layer_check(self, tmp_path):
         """__init__.py files skip the layer location check."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_module,
-        )
 
         d = tmp_path / "branch" / "apps" / "modules"
         d.mkdir(parents=True)
@@ -306,9 +255,6 @@ class TestCheckModule:
 
     def test_entry_point_primary_triggers_template_baseline(self, tmp_path):
         """Primary entry point with passport triggers template baseline."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_module,
-        )
 
         branch = tmp_path / "mybranch"
         apps = branch / "apps"
@@ -324,9 +270,6 @@ class TestCheckModule:
 
     def test_secondary_entry_point_skips_template_baseline(self, tmp_path):
         """Secondary entry point (name != branch dir) does NOT trigger template baseline."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_module,
-        )
 
         branch = tmp_path / "mybranch"
         apps = branch / "apps"
@@ -339,9 +282,6 @@ class TestCheckModule:
 
     def test_score_calculation_75_threshold(self, tmp_path):
         """Score >= 75 passes, score < 75 fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_module,
-        )
 
         # File outside 3-layer pattern, but under size limit -> 1 pass, 1 fail = 50%
         d = tmp_path / "random"
@@ -362,9 +302,6 @@ class TestCheckFileSizeEdgeCases:
     """Edge cases for file size boundaries."""
 
     def test_exactly_300_lines(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_file_size,
-        )
 
         lines = ["x"] * 300
         result = check_file_size(lines, "f.py")
@@ -372,9 +309,6 @@ class TestCheckFileSizeEdgeCases:
         assert "good" in result["message"]
 
     def test_exactly_500_lines(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_file_size,
-        )
 
         lines = ["x"] * 500
         result = check_file_size(lines, "f.py")
@@ -382,9 +316,6 @@ class TestCheckFileSizeEdgeCases:
         assert "getting heavy" in result["message"]
 
     def test_exactly_700_lines_advisory(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_file_size,
-        )
 
         lines = ["x"] * 700
         result = check_file_size(lines, "f.py")
@@ -392,9 +323,6 @@ class TestCheckFileSizeEdgeCases:
         assert "advisory" in result["message"]
 
     def test_exactly_1500_lines_fails(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_file_size,
-        )
 
         lines = ["x"] * 1500
         result = check_file_size(lines, "f.py")
@@ -402,9 +330,6 @@ class TestCheckFileSizeEdgeCases:
         assert "must split" in result["message"]
 
     def test_empty_file(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_file_size,
-        )
 
         result = check_file_size([], "f.py")
         assert result["passed"] is True
@@ -419,54 +344,42 @@ class TestCheckFileSizeEdgeCases:
 class TestHandlerIndependenceEdgeCases:
     """Edge cases for handler independence."""
 
-    def test_import_with_comment(self):
+    def test_import_with_comment(self, tmp_path):
         """Import followed by a comment is still checked."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_handler_independence,
-        )
 
         lines = [
             "from seedgo.apps.modules.audit import run  # inline comment",
         ]
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/j.py")
+        result = check_handler_independence(lines, str(tmp_path / "seedgo" / "apps" / "handlers" / "json" / "j.py"))
         assert result is not None
         assert result["passed"] is False
 
-    def test_no_parent_branch_detected_generic_fail(self):
+    def test_no_parent_branch_detected_generic_fail(self, tmp_path):
         """When parent branch cannot be determined, generic fail message is used."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_handler_independence,
-        )
 
         lines = [
             "from something.apps.modules.stuff import thing",
         ]
         # Path with no 'apps' segment means parent_branch stays None
-        result = check_handler_independence(lines, "/random/path/handler.py")
+        result = check_handler_independence(lines, str(tmp_path / "random" / "path" / "handler.py"))
         assert result is not None
         assert result["passed"] is False
         assert "branch module" in result["message"]
 
-    def test_single_line_docstring_skipped(self):
+    def test_single_line_docstring_skipped(self, tmp_path):
         """Single-line docstring with import text is skipped."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_handler_independence,
-        )
 
         lines = [
             '"""from seedgo.apps.modules.audit import run"""',
             "def work():",
             "    pass",
         ]
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/j.py")
+        result = check_handler_independence(lines, str(tmp_path / "seedgo" / "apps" / "handlers" / "json" / "j.py"))
         assert result is not None
         assert result["passed"] is True
 
-    def test_single_quote_docstring(self):
+    def test_single_quote_docstring(self, tmp_path):
         """Single-quote triple-quoted docstrings are handled correctly."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_handler_independence,
-        )
 
         lines = [
             "'''",
@@ -475,31 +388,25 @@ class TestHandlerIndependenceEdgeCases:
             "def work():",
             "    pass",
         ]
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/j.py")
+        result = check_handler_independence(lines, str(tmp_path / "seedgo" / "apps" / "handlers" / "json" / "j.py"))
         assert result is not None
         assert result["passed"] is True
 
     def test_empty_module_path(self):
         """Empty module path does not crash."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_handler_independence,
-        )
 
         lines = ["import os"]
         result = check_handler_independence(lines, "")
         assert result is not None
         assert result["passed"] is True
 
-    def test_comment_line_skipped(self):
+    def test_comment_line_skipped(self, tmp_path):
         """Comment lines are skipped."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_handler_independence,
-        )
 
         lines = [
             "# from seedgo.apps.modules.audit import run",
         ]
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/j.py")
+        result = check_handler_independence(lines, str(tmp_path / "seedgo" / "apps" / "handlers" / "json" / "j.py"))
         assert result is not None
         assert result["passed"] is True
 
@@ -512,49 +419,34 @@ class TestHandlerIndependenceEdgeCases:
 class TestDomainOrganizationEdgeCases:
     """Additional domain organization tests."""
 
-    def test_common_technical_name_fails(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_domain_organization,
-        )
+    def test_common_technical_name_fails(self, tmp_path):
 
-        result = check_domain_organization("/branch/apps/handlers/common/file.py")
+        result = check_domain_organization(str(tmp_path / "branch" / "apps" / "handlers" / "common" / "file.py"))
         assert result is not None
         assert result["passed"] is False
 
-    def test_shared_technical_name_fails(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_domain_organization,
-        )
+    def test_shared_technical_name_fails(self, tmp_path):
 
-        result = check_domain_organization("/branch/apps/handlers/shared/file.py")
+        result = check_domain_organization(str(tmp_path / "branch" / "apps" / "handlers" / "shared" / "file.py"))
         assert result is not None
         assert result["passed"] is False
 
-    def test_lib_technical_name_fails(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_domain_organization,
-        )
+    def test_lib_technical_name_fails(self, tmp_path):
 
-        result = check_domain_organization("/branch/apps/handlers/lib/file.py")
+        result = check_domain_organization(str(tmp_path / "branch" / "apps" / "handlers" / "lib" / "file.py"))
         assert result is not None
         assert result["passed"] is False
 
-    def test_operations_technical_name_fails(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_domain_organization,
-        )
+    def test_operations_technical_name_fails(self, tmp_path):
 
-        result = check_domain_organization("/branch/apps/handlers/operations/file.py")
+        result = check_domain_organization(str(tmp_path / "branch" / "apps" / "handlers" / "operations" / "file.py"))
         assert result is not None
         assert result["passed"] is False
 
-    def test_handler_domain_is_file(self):
+    def test_handler_domain_is_file(self, tmp_path):
         """When handler path has file directly in handlers/, domain is the filename."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_domain_organization,
-        )
 
-        result = check_domain_organization("/branch/apps/handlers/my_handler.py")
+        result = check_domain_organization(str(tmp_path / "branch" / "apps" / "handlers" / "my_handler.py"))
         assert result is not None
         # my_handler.py is the "domain" — not a technical name, so it passes
         assert result["passed"] is True
@@ -566,253 +458,172 @@ class TestDomainOrganizationEdgeCases:
 
 
 class TestLoadIgnorePatterns:
-    """Tests for _load_ignore_patterns."""
+    """.spawn/.registry_ignore.json, read through check_template_baseline's rows."""
 
-    def test_no_ignore_file(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _load_ignore_patterns,
-        )
+    def test_no_ignore_file(self, tmp_path, monkeypatch):
+        """Mutant: ignore list invented, no file in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        result = _load_ignore_patterns(tmp_path)
-        assert result == {"ignore_files": [], "ignore_patterns": []}
+        result = _baseline(tmp_path, monkeypatch, {"README.md": "# readme\n"})
+        assert "File: README.md" in _rows(result)
 
-    def test_valid_ignore_file(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _load_ignore_patterns,
-        )
+    def test_valid_ignore_file(self, tmp_path, monkeypatch):
+        """Mutant: the file's ignore_files dropped in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        spawn_dir = tmp_path / ".spawn"
-        spawn_dir.mkdir()
-        ignore = spawn_dir / ".registry_ignore.json"
-        ignore.write_text(
-            json.dumps({"ignore_files": ["README.md"], "ignore_patterns": ["*.tmp"]}),
-            encoding="utf-8",
-        )
-        result = _load_ignore_patterns(tmp_path)
-        assert result["ignore_files"] == ["README.md"]
-        assert result["ignore_patterns"] == ["*.tmp"]
+        ignore = json.dumps({"ignore_files": ["README.md"], "ignore_patterns": ["*.tmp"]})
+        template = {".spawn/.registry_ignore.json": ignore, "README.md": "# readme\n", "data.tmp": "x\n"}
+        rows = _rows(_baseline(tmp_path, monkeypatch, template))
+        assert "File: README.md" not in rows
+        assert "File: data.tmp" not in rows
 
-    def test_malformed_ignore_file(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _load_ignore_patterns,
-        )
+    def test_malformed_ignore_file(self, tmp_path, monkeypatch):
+        """Mutant: bad file yields an ignore list in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        spawn_dir = tmp_path / ".spawn"
-        spawn_dir.mkdir()
-        ignore = spawn_dir / ".registry_ignore.json"
-        ignore.write_text("not json", encoding="utf-8")
-        result = _load_ignore_patterns(tmp_path)
-        assert result == {"ignore_files": [], "ignore_patterns": []}
+        template = {".spawn/.registry_ignore.json": "not json", "README.md": "# readme\n"}
+        assert "File: README.md" in _rows(_baseline(tmp_path, monkeypatch, template))
+
+
+def _ignoring(tmp_path, monkeypatch, files: list, patterns: list, template: dict) -> set:
+    """The rows of a baseline whose template carries this ignore config."""
+    ignore = json.dumps({"ignore_files": files, "ignore_patterns": patterns})
+    return _rows(_baseline(tmp_path, monkeypatch, {".spawn/.registry_ignore.json": ignore, **template}))
 
 
 class TestShouldIgnore:
-    """Tests for _should_ignore."""
+    """Each ignore rule, read through the rows check_template_baseline scores."""
 
-    def test_exact_filename_match(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _should_ignore,
-        )
+    def test_exact_filename_match(self, tmp_path, monkeypatch):
+        """Mutant: ignore_files' first name skipped in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        item = tmp_path / "README.md"
-        config = {"ignore_files": ["README.md"], "ignore_patterns": []}
-        assert _should_ignore(item, config) is True
+        rows = _ignoring(tmp_path, monkeypatch, ["README.md"], [], {"README.md": "x\n"})
+        assert "File: README.md" not in rows
 
-    def test_star_suffix_pattern(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _should_ignore,
-        )
+    def test_star_suffix_pattern(self, tmp_path, monkeypatch):
+        """Mutant: the * kept in a suffix pattern in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        item = tmp_path / "data.tmp"
-        config = {"ignore_files": [], "ignore_patterns": ["*.tmp"]}
-        assert _should_ignore(item, config) is True
+        rows = _ignoring(tmp_path, monkeypatch, [], ["*.tmp"], {"data.tmp": "x\n"})
+        assert "File: data.tmp" not in rows
 
-    def test_dot_star_prefix_pattern(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _should_ignore,
-        )
+    def test_dot_star_prefix_pattern(self, tmp_path, monkeypatch):
+        """Mutant: * kept in .prefix* pattern in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        item = tmp_path / ".hidden_file"
-        config = {"ignore_files": [], "ignore_patterns": [".hidden*"]}
-        assert _should_ignore(item, config) is True
+        rows = _ignoring(tmp_path, monkeypatch, [], [".hidden*"], {".hidden_file": "x\n"})
+        assert "File: .hidden_file" not in rows
 
-    def test_exact_pattern_match(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _should_ignore,
-        )
+    def test_exact_pattern_match(self, tmp_path, monkeypatch):
+        """Mutant: pattern matched in parents only in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        item = tmp_path / "__pycache__"
-        config = {"ignore_files": [], "ignore_patterns": ["__pycache__"]}
-        assert _should_ignore(item, config) is True
+        rows = _ignoring(tmp_path, monkeypatch, [], ["__pycache__"], {"__pycache__": None})
+        assert "Dir: __pycache__/" not in rows
 
-    def test_pattern_in_parts(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _should_ignore,
-        )
+    def test_pattern_in_parts(self, tmp_path, monkeypatch):
+        """Mutant: pattern matched on name only in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        item = tmp_path / "__pycache__" / "something.pyc"
-        item.parent.mkdir(parents=True, exist_ok=True)
-        config = {"ignore_files": [], "ignore_patterns": ["__pycache__"]}
-        assert _should_ignore(item, config) is True
+        rows = _ignoring(tmp_path, monkeypatch, [], ["__pycache__"], {"__pycache__/something.pyc": "x\n"})
+        assert "File: __pycache__/something.pyc" not in rows
 
-    def test_no_match(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _should_ignore,
-        )
+    def test_no_match(self, tmp_path, monkeypatch):
+        """Mutant: every item ignored in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        item = tmp_path / "good_file.py"
-        config = {"ignore_files": ["bad.py"], "ignore_patterns": ["*.tmp"]}
-        assert _should_ignore(item, config) is False
+        rows = _ignoring(tmp_path, monkeypatch, ["bad.py"], ["*.tmp"], {"good_file.py": "x\n"})
+        assert "File: good_file.py" in rows
 
 
 class TestGetCitizenClass:
-    """Tests for _get_citizen_class."""
+    """The passport's citizen_class, read through check_template_baseline."""
 
-    def test_no_passport(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _get_citizen_class,
-        )
+    def test_no_passport(self, tmp_path, monkeypatch):
+        """Mutant: no passport scored as failure in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        assert _get_citizen_class(tmp_path) is None
+        assert _baseline(tmp_path, monkeypatch, {}, passport=False) == []
 
-    def test_valid_passport(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _get_citizen_class,
-        )
+    def test_valid_passport(self, tmp_path, monkeypatch):
+        """Mutant: class read from wrong key in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        trinity = tmp_path / ".trinity"
-        trinity.mkdir()
-        passport = trinity / "passport.json"
-        passport.write_text(
-            json.dumps({"identity": {"citizen_class": "builder"}}),
-            encoding="utf-8",
-        )
-        assert _get_citizen_class(tmp_path) == "builder"
+        passport = json.dumps({"identity": {"citizen_class": "builder"}})
+        result = _baseline(tmp_path, monkeypatch, {}, passport=passport)
+        assert '"builder"' in result[0]["message"]
 
-    def test_malformed_passport(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _get_citizen_class,
-        )
+    def test_malformed_passport(self, tmp_path, monkeypatch):
+        """Mutant: bad passport yields a class in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        trinity = tmp_path / ".trinity"
-        trinity.mkdir()
-        passport = trinity / "passport.json"
-        passport.write_text("not json", encoding="utf-8")
-        assert _get_citizen_class(tmp_path) is None
+        result = _baseline(tmp_path, monkeypatch, {}, passport="not json")
+        assert result[0]["message"] == "No citizen_class in mybranch/.trinity/passport.json"
 
-    def test_passport_missing_citizen_class(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _get_citizen_class,
-        )
+    def test_passport_missing_citizen_class(self, tmp_path, monkeypatch):
+        """Mutant: missing class defaulted in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        trinity = tmp_path / ".trinity"
-        trinity.mkdir()
-        passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"identity": {}}), encoding="utf-8")
-        assert _get_citizen_class(tmp_path) is None
+        result = _baseline(tmp_path, monkeypatch, {}, passport=json.dumps({"identity": {}}))
+        assert result[0]["message"] == "No citizen_class in mybranch/.trinity/passport.json"
 
 
 class TestTransformPath:
-    """Tests for _transform_path."""
+    """Template paths as a branch reads them, through check_template_baseline's row names."""
 
-    def test_basic_placeholder_replacement(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _transform_path,
-        )
+    def test_basic_placeholder_replacement(self, tmp_path, monkeypatch):
+        """Mutant: {{BRANCH}} left unreplaced in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
-        result = _transform_path("{{BRANCH}}/apps/{{BRANCH}}.py", "mybranch")
-        assert result == "mybranch/apps/mybranch.py"
+        rows = _rows(_baseline(tmp_path, monkeypatch, {"{{BRANCH}}/apps/{{BRANCH}}.py": "x\n"}))
+        assert "File: mybranch/apps/mybranch.py" in rows
 
-    def test_hyphenated_branch_name(self):
-        """Hyphenated branch: placeholder replaced, then entry-point rename applied."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _transform_path,
-        )
+    def test_hyphenated_branch_name(self, tmp_path, monkeypatch):
+        """Hyphenated branch: placeholder replaced, then the entry-point rename applied.
 
-        result = _transform_path("apps/{{BRANCH}}.py", "my-branch")
+        Mutant: entry named from my_branch in apps/handlers/aipass_standards/architecture_check.py — killed.
+        """
+
+        rows = _rows(_baseline(tmp_path, monkeypatch, {"apps/{{BRANCH}}.py": "x\n"}, branch_name="my-branch"))
         # branch_lower="my_branch" replaces placeholder -> "apps/my_branch.py"
         # FILE_RENAMES maps "my_branch.py" -> "my-branch.py" (entry_point_name)
-        assert result == "apps/my-branch.py"
+        assert "File: apps/my-branch.py" in rows
 
-    def test_dotted_branch_name(self):
-        """Leading dot is stripped for entry point name."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _transform_path,
-        )
+    def test_dotted_branch_name(self, tmp_path, monkeypatch):
+        """A leading dot is stripped for the entry-point name.
 
-        result = _transform_path("apps/{{BRANCH}}.py", ".hidden")
-        # branch_lower = ".hidden" -> ".hidden", entry_point_name = "hidden"
-        # The placeholder replacement gives ".hidden.py"
-        # But FILE_RENAMES maps ".hidden.py" -> "hidden.py"
-        assert "hidden" in result
+        Mutant: the entry-point rename skipped in apps/handlers/aipass_standards/architecture_check.py — killed.
+        """
 
-    def test_no_placeholder(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _transform_path,
-        )
+        rows = _rows(_baseline(tmp_path, monkeypatch, {"apps/{{BRANCH}}.py": "x\n"}, branch_name=".hidden"))
+        # The placeholder replacement gives ".hidden.py"; FILE_RENAMES maps it to "hidden.py"
+        assert "File: apps/hidden.py" in rows
 
-        result = _transform_path("apps/modules/helper.py", "mybranch")
-        assert result == "apps/modules/helper.py"
+    def test_no_placeholder(self, tmp_path, monkeypatch):
+        """Mutant: rename keyed on any file in apps/handlers/aipass_standards/architecture_check.py — killed."""
+
+        rows = _rows(_baseline(tmp_path, monkeypatch, {"apps/modules/helper.py": "x\n"}))
+        assert "File: apps/modules/helper.py" in rows
 
 
 class TestScanTemplate:
-    """Tests for _scan_template."""
+    """The template scan, through check_template_baseline's rows."""
 
-    def test_scan_template_basic(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _scan_template,
-        )
+    def test_scan_template_basic(self, tmp_path, monkeypatch):
+        """Mutant: template dirs unlisted in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
         # Create a minimal template structure
-        (tmp_path / "apps").mkdir()
-        (tmp_path / "apps" / "modules").mkdir()
-        (tmp_path / "apps" / "entry.py").write_text("# entry\n", encoding="utf-8")
-        (tmp_path / "apps" / "modules" / "helper.py").write_text("# helper\n", encoding="utf-8")
+        template = {"apps/modules": None, "apps/entry.py": "# entry\n", "apps/modules/helper.py": "# helper\n"}
+        rows = _rows(_baseline(tmp_path, monkeypatch, template))
+        assert "Dir: apps/" in rows
+        assert "File: apps/entry.py" in rows
 
-        result = _scan_template(tmp_path)
-        assert "apps" in result["directories"]
-        assert any("entry.py" in f for f in result["files"])
-
-    def test_scan_template_with_ignore(self, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _scan_template,
-        )
+    def test_scan_template_with_ignore(self, tmp_path, monkeypatch):
+        """Mutant: ignore config unread in apps/handlers/aipass_standards/architecture_check.py — killed."""
 
         # Create template with an ignoreable file
-        (tmp_path / ".spawn").mkdir()
-        ignore = tmp_path / ".spawn" / ".registry_ignore.json"
-        ignore.write_text(
-            json.dumps({"ignore_files": ["README.md"], "ignore_patterns": []}),
-            encoding="utf-8",
-        )
-        (tmp_path / "apps").mkdir()
-        (tmp_path / "README.md").write_text("# readme\n", encoding="utf-8")
-        (tmp_path / "apps" / "entry.py").write_text("# entry\n", encoding="utf-8")
-
-        result = _scan_template(tmp_path)
+        rows = _ignoring(tmp_path, monkeypatch, ["README.md"], [], {"README.md": "# r\n", "apps/entry.py": "# e\n"})
         # README.md should be ignored
-        assert not any("README.md" in f for f in result["files"])
-        assert any("entry.py" in f for f in result["files"])
+        assert "File: README.md" not in rows
+        assert "File: apps/entry.py" in rows
 
     def test_scan_template_excludes_test_scaffold(self, tmp_path, monkeypatch):
-        import sys
-
-        _arch = "aipass.seedgo.apps.handlers.aipass_standards.architecture_check"
-        monkeypatch.delitem(sys.modules, _arch, raising=False)
-
-        _ignore = sys.modules["aipass.seedgo.apps.handlers.bypass.ignore_handler"]
-        monkeypatch.setattr(_ignore, "get_template_ignore_patterns", MagicMock(return_value=["test_scaffold.py"]))
-
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            _scan_template,
+        """Mutant: template-only files kept in apps/handlers/aipass_standards/architecture_check.py — killed."""
+        monkeypatch.setattr(
+            architecture_check, "get_template_ignore_patterns", MagicMock(return_value=["test_scaffold.py"])
         )
 
-        (tmp_path / "tests").mkdir()
-        (tmp_path / "tests" / "conftest.py").write_text("# conf\n", encoding="utf-8")
-        (tmp_path / "tests" / "test_scaffold.py").write_text("# scaffold\n", encoding="utf-8")
-
-        result = _scan_template(tmp_path)
-        assert not any("test_scaffold.py" in f for f in result["files"])
-        assert any("conftest.py" in f for f in result["files"])
+        template = {"tests/conftest.py": "# conf\n", "tests/test_scaffold.py": "# scaffold\n"}
+        rows = _rows(_baseline(tmp_path, monkeypatch, template))
+        assert "File: tests/test_scaffold.py" not in rows
+        assert "File: tests/conftest.py" in rows
 
 
 # ===========================================================================
@@ -840,10 +651,6 @@ class TestCheckTemplateBaselineFull:
         Mutation caught: `item.relative_to(root).as_posix()` becoming
         `str(item.relative_to(root))`, which answers "apps\\something.py" here.
         """
-        from pathlib import PureWindowsPath
-
-        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
-
         spelled = architecture_check._relative_spelling(
             PureWindowsPath(r"C:\templates\citizen\apps\something.py"),
             PureWindowsPath(r"C:\templates\citizen"),
@@ -853,12 +660,6 @@ class TestCheckTemplateBaselineFull:
 
     def test_spawn_templates_dir_missing(self, tmp_path, monkeypatch):
         """When SPAWN_TEMPLATES_DIR does not exist, returns failure."""
-        import sys
-
-        _arch = "aipass.seedgo.apps.handlers.aipass_standards.architecture_check"
-        monkeypatch.delitem(sys.modules, _arch, raising=False)
-        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
-
         monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", tmp_path / "nonexistent")
 
         branch = tmp_path / "mybranch"
@@ -885,13 +686,6 @@ class TestCheckTemplateBaselineFull:
         dir missing) — distinct from an unrecognised class, which never reaches
         the filesystem at all. Both are scored; only this one is about the disk.
         """
-        import sys
-
-        monkeypatch.delitem(
-            sys.modules, "aipass.seedgo.apps.handlers.aipass_standards.architecture_check", raising=False
-        )
-        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
-
         templates_dir = tmp_path / "templates"
         templates_dir.mkdir()  # root exists, templates/citizen/ deliberately does not
         monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", templates_dir)
@@ -915,13 +709,6 @@ class TestCheckTemplateBaselineFull:
 
     def test_template_baseline_full_match(self, tmp_path, monkeypatch):
         """All template items present in branch: full pass."""
-        import sys
-
-        monkeypatch.delitem(
-            sys.modules, "aipass.seedgo.apps.handlers.aipass_standards.architecture_check", raising=False
-        )
-        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
-
         # Create template dir
         templates_dir = tmp_path / "templates"
         citizen_template = templates_dir / "citizen"
@@ -951,13 +738,6 @@ class TestCheckTemplateBaselineFull:
 
     def test_template_baseline_missing_dir(self, tmp_path, monkeypatch):
         """Missing template directory is flagged."""
-        import sys
-
-        monkeypatch.delitem(
-            sys.modules, "aipass.seedgo.apps.handlers.aipass_standards.architecture_check", raising=False
-        )
-        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
-
         templates_dir = tmp_path / "templates"
         citizen_template = templates_dir / "citizen"
         citizen_template.mkdir(parents=True)
@@ -983,13 +763,6 @@ class TestCheckTemplateBaselineFull:
 
     def test_template_baseline_missing_file_bypassed(self, tmp_path, monkeypatch):
         """Bypassed missing template file is marked as passed."""
-        import sys
-
-        monkeypatch.delitem(
-            sys.modules, "aipass.seedgo.apps.handlers.aipass_standards.architecture_check", raising=False
-        )
-        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
-
         templates_dir = tmp_path / "templates"
         citizen_template = templates_dir / "citizen"
         citizen_template.mkdir(parents=True)
@@ -1023,13 +796,6 @@ class TestCheckTemplateBaselineFull:
 
     def test_template_baseline_missing_dir_bypassed(self, tmp_path, monkeypatch):
         """Bypassed missing template directory is marked as passed."""
-        import sys
-
-        monkeypatch.delitem(
-            sys.modules, "aipass.seedgo.apps.handlers.aipass_standards.architecture_check", raising=False
-        )
-        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
-
         templates_dir = tmp_path / "templates"
         citizen_template = templates_dir / "citizen"
         citizen_template.mkdir(parents=True)
@@ -1066,77 +832,81 @@ class TestCheckTemplateBaselineFull:
 class TestIsApplicable:
     """Tests for _is_applicable."""
 
-    def test_branch_level_with_check_module(self):
-        from aipass.seedgo.apps.modules.checklist import _is_applicable
+    def test_branch_level_with_check_module(self, tmp_path):
 
         checker = MagicMock()
         checker.AUDIT_SCOPE = "branch_level"
         checker.check_module = MagicMock()
-        assert _is_applicable(checker, "/some/file.py") is True
+        assert _is_applicable(checker, str(tmp_path / "file.py")) is True
 
-    def test_branch_level_without_check_module(self):
-        from aipass.seedgo.apps.modules.checklist import _is_applicable
+    def test_branch_level_without_check_module(self, tmp_path):
 
         checker = MagicMock(spec=[])
         checker.AUDIT_SCOPE = "branch_level"
-        assert _is_applicable(checker, "/some/file.py") is False
+        assert _is_applicable(checker, str(tmp_path / "file.py")) is False
 
-    def test_branch_level_non_python(self):
-        from aipass.seedgo.apps.modules.checklist import _is_applicable
+    def test_branch_level_non_python(self, tmp_path):
 
         checker = MagicMock()
         checker.AUDIT_SCOPE = "branch_level"
         checker.check_module = MagicMock()
-        assert _is_applicable(checker, "/some/file.txt") is False
+        assert _is_applicable(checker, str(tmp_path / "file.txt")) is False
 
-    def test_all_files_scope_python(self):
-        from aipass.seedgo.apps.modules.checklist import _is_applicable
-
-        checker = MagicMock()
-        checker.AUDIT_SCOPE = "all_files"
-        checker.check_module = MagicMock()
-        assert _is_applicable(checker, "/some/file.py") is True
-
-    def test_all_files_scope_non_python(self):
-        from aipass.seedgo.apps.modules.checklist import _is_applicable
+    def test_all_files_scope_python(self, tmp_path):
 
         checker = MagicMock()
         checker.AUDIT_SCOPE = "all_files"
         checker.check_module = MagicMock()
-        assert _is_applicable(checker, "/some/file.txt") is False
+        assert _is_applicable(checker, str(tmp_path / "file.py")) is True
 
-    def test_entry_point_scope_matches_entry(self):
-        from aipass.seedgo.apps.modules.checklist import _is_applicable
+    def test_all_files_scope_non_python(self, tmp_path):
+
+        checker = MagicMock()
+        checker.AUDIT_SCOPE = "all_files"
+        checker.check_module = MagicMock()
+        assert _is_applicable(checker, str(tmp_path / "file.txt")) is False
+
+    def test_entry_point_scope_matches_entry(self, tmp_path):
 
         checker = MagicMock()
         checker.AUDIT_SCOPE = "entry_point"
         checker.check_module = MagicMock()
-        assert _is_applicable(checker, "/branch/apps/branch.py") is True
+        assert _is_applicable(checker, str(tmp_path / "branch" / "apps" / "branch.py")) is True
 
-    def test_entry_point_scope_non_entry(self):
-        from aipass.seedgo.apps.modules.checklist import _is_applicable
+    def test_entry_point_scope_matches_entry_on_a_windows_path(self, tmp_path, monkeypatch):
+        """A drive letter and backslashes still name an entry point (compass 458).
+
+        Mutant: _is_entry_point's `file_path.replace("\\", "/")` back to `file_path` — killed.
+        """
+        # checklist's Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
+        monkeypatch.setattr(checklist, "Path", PureWindowsPath)
+        checker = MagicMock()
+        checker.AUDIT_SCOPE = "entry_point"
+        checker.check_module = MagicMock()
+        assert _is_applicable(checker, _windows_form(tmp_path, "branch", "apps", "branch.py")) is True
+        assert _is_applicable(checker, _windows_form(tmp_path, "branch", "apps", "modules", "helper.py")) is False
+
+    def test_entry_point_scope_non_entry(self, tmp_path):
 
         checker = MagicMock()
         checker.AUDIT_SCOPE = "entry_point"
         checker.check_module = MagicMock()
-        assert _is_applicable(checker, "/branch/apps/modules/helper.py") is False
+        assert _is_applicable(checker, str(tmp_path / "branch" / "apps" / "modules" / "helper.py")) is False
 
-    def test_no_check_module_returns_false(self):
-        from aipass.seedgo.apps.modules.checklist import _is_applicable
+    def test_no_check_module_returns_false(self, tmp_path):
 
         checker = MagicMock(spec=[])
         checker.AUDIT_SCOPE = "all_files"
-        assert _is_applicable(checker, "/some/file.py") is False
+        assert _is_applicable(checker, str(tmp_path / "file.py")) is False
 
-    def test_default_scope_is_entry_point(self):
+    def test_default_scope_is_entry_point(self, tmp_path):
         """Checker with no AUDIT_SCOPE defaults to entry_point."""
-        from aipass.seedgo.apps.modules.checklist import _is_applicable
 
         checker = MagicMock(spec=["check_module"])
         checker.check_module = MagicMock()
         # No AUDIT_SCOPE attribute -> defaults to "entry_point"
-        assert _is_applicable(checker, "/branch/apps/branch.py") is True
-        assert _is_applicable(checker, "/branch/apps/modules/helper.py") is False
+        assert _is_applicable(checker, str(tmp_path / "branch" / "apps" / "branch.py")) is True
+        assert _is_applicable(checker, str(tmp_path / "branch" / "apps" / "modules" / "helper.py")) is False
 
 
 # ===========================================================================
@@ -1149,11 +919,6 @@ class TestHandleCommandDirectoryMode:
 
     def test_directory_with_py_files(self, tmp_path, monkeypatch):
         """Directory mode runs checklist on all .py files."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
         d = tmp_path / "mydir"
         d.mkdir()
         (d / "first.py").write_text("x = 1\n", encoding="utf-8")
@@ -1161,18 +926,14 @@ class TestHandleCommandDirectoryMode:
         (d / "_private.py").write_text("z = 3\n", encoding="utf-8")
         (d / "readme.txt").write_text("not python\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", [str(d)])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", [str(d)]) is True
+
+        checked = sorted(Path(call.args[0]).name for call in ran.call_args_list)
+        assert checked == ["first.py", "second.py"], "directory mode must skip _private.py and readme.txt"
 
     def test_directory_with_no_py_files(self, tmp_path, monkeypatch):
         """Directory with no .py files shows error."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
-        from aipass.seedgo.apps.handlers.audit_tests import refusal
-        from aipass.seedgo.apps.modules import CommandRefused
 
         d = tmp_path / "emptydir"
         d.mkdir()
@@ -1187,13 +948,6 @@ class TestHandleCommandDirectoryMode:
 
     def test_directory_filters_underscore_files(self, tmp_path, monkeypatch):
         """Directory mode filters files starting with underscore."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
-        from aipass.seedgo.apps.handlers.audit_tests import refusal
-        from aipass.seedgo.apps.modules import CommandRefused
 
         d = tmp_path / "onlypriv"
         d.mkdir()
@@ -1216,39 +970,26 @@ class TestHandleCommandPackFlag:
 
     def test_pack_flag(self, tmp_path, monkeypatch):
         """--pack flag passes pack_name to run_checklist."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", ["--pack", "custom", str(f)])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", ["--pack", "custom", str(f)]) is True
+
+        ran.assert_called_once_with(str(f.resolve()), pack_name="custom", prototype=False)
 
     def test_short_pack_flag(self, tmp_path, monkeypatch):
         """-p flag is equivalent to --pack."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", ["-p", "custom", str(f)])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", ["-p", "custom", str(f)]) is True
+
+        ran.assert_called_once_with(str(f.resolve()), pack_name="custom", prototype=False)
 
     def test_no_file_after_pack_shows_error(self, monkeypatch):
         """--pack with no file specified shows error."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
-        from aipass.seedgo.apps.handlers.audit_tests import refusal
-        from aipass.seedgo.apps.modules import CommandRefused
 
         with pytest.raises(CommandRefused) as refused:
             checklist.handle_command("checklist", ["--pack", "custom"])
@@ -1256,16 +997,14 @@ class TestHandleCommandPackFlag:
 
     def test_unknown_flag_skipped(self, tmp_path, monkeypatch):
         """Unknown flags are skipped during argument parsing."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", ["--unknown", str(f)])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", ["--unknown", str(f)]) is True
+
+        # Skipped, not adopted as the file and not adopted as the pack.
+        ran.assert_called_once_with(str(f.resolve()), pack_name="aipass", prototype=False)
 
 
 # ===========================================================================
@@ -1274,31 +1013,26 @@ class TestHandleCommandPackFlag:
 
 
 class TestResolvePackPath:
-    """Tests for _resolve_pack_path."""
+    """A pack name resolved to its directory, through the command and run_checklist."""
 
-    def test_nonexistent_pack(self, monkeypatch):
-        import sys
+    def test_nonexistent_pack(self, tmp_path, monkeypatch, capsys):
+        """Mutant: every pack name resolved to a directory in apps/modules/checklist.py — killed."""
+        _pin_checklist_gates(checklist, monkeypatch, tmp_path)
+        f = tmp_path / "sample.py"
+        f.write_text("x = 1\n", encoding="utf-8")
 
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules.checklist import _resolve_pack_path
-
-        # Use monkeypatch to point handlers_dir to a tmp location
-        result = _resolve_pack_path("totally_bogus_pack_name_that_will_never_exist")
-        # If the real handlers dir exists but no matching pack, returns None
-        assert result is None
+        # The real handlers dir exists but holds no matching pack.
+        assert checklist.handle_command(
+            "checklist", ["--pack", "totally_bogus_pack_name_that_will_never_exist", str(f)]
+        )
+        out = capsys.readouterr().out
+        assert "[FAIL] — (error): Pack 'totally_bogus_pack_name_that_will_never_exist' not found" in out
 
     def test_pack_not_found_in_run_checklist(self, tmp_path, monkeypatch):
         """run_checklist returns error when pack is not found."""
-        import sys
+        _pin_checklist_gates(checklist, monkeypatch, tmp_path)
 
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
-        _pin_checklist_gates(checklist, monkeypatch)
-
-        # Make _resolve_pack_path return None
-        monkeypatch.setattr(checklist, "_resolve_pack_path", lambda name: None)
-
+        # No bogus_standards/ exists, so the real pack lookup answers None.
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
@@ -1314,83 +1048,57 @@ class TestResolvePackPath:
 
 
 class TestLoadBypassForFile:
-    """Tests for _load_bypass_for_file."""
+    """The bypass rules a checker is handed, through run_checklist."""
 
-    def test_no_branch_detected(self, monkeypatch):
-        """When get_branch_from_path returns None, returns empty list."""
-        import sys
+    def test_no_branch_detected(self, tmp_path, monkeypatch):
+        """Mutant: rules invented for a file in no branch in apps/modules/checklist.py — killed."""
+        _results, probe = _run_one(tmp_path, monkeypatch, {"passed": True, "checks": []}, pin_branch=False)
+        assert probe.check_module.call_args.kwargs["bypass_rules"] == []
 
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules.checklist import _load_bypass_for_file
-
-        result = _load_bypass_for_file("/some/file.py")
-        assert result == []
-
-    def test_branch_with_empty_path(self, monkeypatch):
-        """When branch has empty path, returns empty list."""
-        import sys
-
+    def test_branch_with_empty_path(self, tmp_path, monkeypatch):
+        """Mutant: an empty branch path loaded as a branch in apps/modules/checklist.py — killed."""
         monkeypatch.setattr(
-            sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"],
+            checklist,
             "get_branch_from_path",
             MagicMock(return_value={"name": "mybranch", "path": ""}),
         )
+        # Loading anything at all would hand these over; an empty path must load nothing.
+        monkeypatch.setattr(checklist, "load_bypass_rules", MagicMock(return_value=[{"standard": "loaded"}]))
 
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules.checklist import _load_bypass_for_file
+        _results, probe = _run_one(tmp_path, monkeypatch, {"passed": True, "checks": []}, pin_branch=False)
+        assert probe.check_module.call_args.kwargs["bypass_rules"] == []
 
-        result = _load_bypass_for_file("/some/file.py")
-        assert result == []
-
-    def test_branch_with_absolute_path(self, monkeypatch):
-        """When branch has absolute path, passes it directly to load_bypass_rules."""
-        import sys
-
+    def test_branch_with_absolute_path(self, tmp_path, monkeypatch):
+        """Mutant: the loaded rules dropped before the checker in apps/modules/checklist.py — killed."""
         mock_load = MagicMock(return_value=[{"standard": "arch"}])
         monkeypatch.setattr(
-            sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"],
+            checklist,
             "get_branch_from_path",
-            MagicMock(return_value={"name": "mybranch", "path": "/absolute/path/mybranch"}),
+            MagicMock(return_value={"name": "mybranch", "path": str(tmp_path / "absolute" / "path" / "mybranch")}),
         )
-        monkeypatch.setattr(
-            sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"],
-            "load_bypass_rules",
-            mock_load,
-        )
+        monkeypatch.setattr(checklist, "load_bypass_rules", mock_load)
 
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules.checklist import _load_bypass_for_file
+        _results, probe = _run_one(tmp_path, monkeypatch, {"passed": True, "checks": []}, pin_branch=False)
+        assert probe.check_module.call_args.kwargs["bypass_rules"] == [{"standard": "arch"}]
 
-        result = _load_bypass_for_file("/some/file.py")
-        assert result == [{"standard": "arch"}]
-
-    def test_branch_with_relative_path(self, monkeypatch):
-        """When branch has relative path, resolves relative to registry."""
-        import sys
-
+    def test_branch_with_relative_path(self, tmp_path, monkeypatch):
+        """Mutant: relative branch path resolved on CWD in apps/modules/checklist.py — killed."""
         mock_load = MagicMock(return_value=[])
         monkeypatch.setattr(
-            sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"],
+            checklist,
             "get_branch_from_path",
             MagicMock(return_value={"name": "mybranch", "path": "relative/path/mybranch"}),
         )
+        monkeypatch.setattr(checklist, "load_bypass_rules", mock_load)
         monkeypatch.setattr(
-            sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"],
-            "load_bypass_rules",
-            mock_load,
-        )
-        monkeypatch.setattr(
-            sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"],
+            bypass_handler,
             "_find_registry",
-            MagicMock(return_value=Path("/repo/root/registry.json")),
+            MagicMock(return_value=tmp_path / "repo_root" / "registry.json"),
         )
 
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules.checklist import _load_bypass_for_file
-
-        result = _load_bypass_for_file("/some/file.py")
-        mock_load.assert_called_once()
-        assert result == []
+        _results, probe = _run_one(tmp_path, monkeypatch, {"passed": True, "checks": []}, pin_branch=False)
+        mock_load.assert_called_once_with(str((tmp_path / "repo_root" / "relative" / "path" / "mybranch").resolve()))
+        assert probe.check_module.call_args.kwargs["bypass_rules"] == []
 
 
 # ===========================================================================
@@ -1399,44 +1107,48 @@ class TestLoadBypassForFile:
 
 
 class TestFormatFailureEdgeCases:
-    """Additional _format_failure tests for untested paths."""
+    """A failed checker's one-line detail, through run_checklist."""
 
-    def test_format_failure_no_checks_key(self):
-        """Result with no 'checks' key returns fallback."""
-        from aipass.seedgo.apps.modules.checklist import _format_failure
+    def test_format_failure_no_checks_key(self, tmp_path, monkeypatch):
+        """A failed result with no 'checks' key gets the fallback.
 
-        result = _format_failure({})
-        assert "no details" in result.lower()
+        Mutant: the no-details fallback emptied in apps/modules/checklist.py — killed.
+        """
 
-    def test_format_failure_all_passed(self):
-        """Result where all checks passed returns fallback."""
-        from aipass.seedgo.apps.modules.checklist import _format_failure
+        results, _probe = _run_one(tmp_path, monkeypatch, {"passed": False})
+        assert "no details" in results[0]["detail"].lower()
 
-        result = _format_failure({"checks": [{"passed": True, "message": "OK"}]})
-        assert "no details" in result.lower()
+    def test_format_failure_all_passed(self, tmp_path, monkeypatch):
+        """A failed result whose checks all passed gets the fallback.
 
-    def test_format_failure_three_failures(self):
-        """Multiple failures shows '+N more' suffix."""
-        from aipass.seedgo.apps.modules.checklist import _format_failure
+        Mutant: the no-details fallback emptied in apps/modules/checklist.py — killed.
+        """
 
-        result = _format_failure(
-            {
-                "checks": [
-                    {"passed": False, "message": "First issue"},
-                    {"passed": False, "message": "Second issue"},
-                    {"passed": False, "message": "Third issue"},
-                ]
-            }
+        results, _probe = _run_one(
+            tmp_path, monkeypatch, {"passed": False, "checks": [{"passed": True, "message": "OK"}]}
         )
-        assert "First issue" in result
-        assert "+2 more" in result
+        assert "no details" in results[0]["detail"].lower()
 
-    def test_format_failure_missing_message(self):
-        """Failed check with no message uses 'Unknown issue'."""
-        from aipass.seedgo.apps.modules.checklist import _format_failure
+    def test_format_failure_three_failures(self, tmp_path, monkeypatch):
+        """Mutant: the +N more count off by one in apps/modules/checklist.py — killed."""
 
-        result = _format_failure({"checks": [{"passed": False}]})
-        assert "Unknown issue" in result
+        returned = {
+            "passed": False,
+            "checks": [
+                {"passed": False, "message": "First issue"},
+                {"passed": False, "message": "Second issue"},
+                {"passed": False, "message": "Third issue"},
+            ],
+        }
+        results, _probe = _run_one(tmp_path, monkeypatch, returned)
+        assert "First issue" in results[0]["detail"]
+        assert "+2 more" in results[0]["detail"]
+
+    def test_format_failure_missing_message(self, tmp_path, monkeypatch):
+        """Mutant: the Unknown issue default blanked in apps/modules/checklist.py — killed."""
+
+        results, _probe = _run_one(tmp_path, monkeypatch, {"passed": False, "checks": [{"passed": False}]})
+        assert "Unknown issue" in results[0]["detail"]
 
 
 # ===========================================================================
@@ -1449,12 +1161,7 @@ class TestRunChecklistCheckerException:
 
     def test_checker_exception_captured(self, tmp_path, monkeypatch):
         """Checker that raises exception is captured as a failed result."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
-        _pin_checklist_gates(checklist, monkeypatch)
+        _pin_checklist_gates(checklist, monkeypatch, tmp_path)
 
         # Create a mock checker that raises
         bad_checker = MagicMock()
@@ -1471,7 +1178,7 @@ class TestRunChecklistCheckerException:
             "discover_checkers",
             lambda pack_path: {"bad_check": bad_checker, "good_check": good_checker},
         )
-        monkeypatch.setattr(checklist, "_resolve_pack_path", lambda name: Path("/fake/pack"))
+        monkeypatch.setattr(checklist, "_resolve_pack_path", lambda name: tmp_path / "fake_pack")
 
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
@@ -1486,12 +1193,7 @@ class TestRunChecklistCheckerException:
 
     def test_checker_returns_failure_with_details(self, tmp_path, monkeypatch):
         """Checker returning passed=False has detail populated from _format_failure."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
-        _pin_checklist_gates(checklist, monkeypatch)
+        _pin_checklist_gates(checklist, monkeypatch, tmp_path)
 
         fail_checker = MagicMock()
         fail_checker.AUDIT_SCOPE = "all_files"
@@ -1507,7 +1209,7 @@ class TestRunChecklistCheckerException:
             "discover_checkers",
             lambda pack_path: {"fail_check": fail_checker},
         )
-        monkeypatch.setattr(checklist, "_resolve_pack_path", lambda name: Path("/fake/pack"))
+        monkeypatch.setattr(checklist, "_resolve_pack_path", lambda name: tmp_path / "fake_pack")
 
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
@@ -1519,12 +1221,7 @@ class TestRunChecklistCheckerException:
 
     def test_no_applicable_checkers_returns_skip(self, tmp_path, monkeypatch):
         """When no checkers are applicable, returns skip result."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
-        _pin_checklist_gates(checklist, monkeypatch)
+        _pin_checklist_gates(checklist, monkeypatch, tmp_path)
 
         entry_only_checker = MagicMock()
         entry_only_checker.AUDIT_SCOPE = "entry_point"
@@ -1535,7 +1232,7 @@ class TestRunChecklistCheckerException:
             "discover_checkers",
             lambda pack_path: {"entry_check": entry_only_checker},
         )
-        monkeypatch.setattr(checklist, "_resolve_pack_path", lambda name: Path("/fake/pack"))
+        monkeypatch.setattr(checklist, "_resolve_pack_path", lambda name: tmp_path / "fake_pack")
 
         # Create a file that is NOT an entry point
         f = tmp_path / "helper.py"
@@ -1548,19 +1245,14 @@ class TestRunChecklistCheckerException:
 
     def test_no_checkers_discovered(self, tmp_path, monkeypatch):
         """When discover_checkers returns empty dict, returns error."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
-        _pin_checklist_gates(checklist, monkeypatch)
+        _pin_checklist_gates(checklist, monkeypatch, tmp_path)
 
         monkeypatch.setattr(
             checklist,
             "discover_checkers",
             lambda pack_path: {},
         )
-        monkeypatch.setattr(checklist, "_resolve_pack_path", lambda name: Path("/fake/pack"))
+        monkeypatch.setattr(checklist, "_resolve_pack_path", lambda name: tmp_path / "fake_pack")
 
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
@@ -1577,71 +1269,55 @@ class TestRunChecklistCheckerException:
 
 
 class TestPrintResults:
-    """Tests for _print_results output formatting."""
+    """The checklist's printed verdicts, through the command, read off stdout."""
 
-    def test_print_all_passed(self, monkeypatch):
-        """All passed results show green checkmarks and summary."""
-        import sys
+    @staticmethod
+    def _printed(tmp_path, capsys, results) -> str:
+        """`checklist <file>` with run_checklist answering ``results``; what the user reads."""
+        capsys.readouterr()
+        with patch.object(checklist, "run_checklist", return_value=results):
+            assert checklist.handle_command("checklist", [str(tmp_path / "file.py")]) is True
+        return capsys.readouterr().out
 
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules.checklist import _print_results
+    def test_print_all_passed(self, tmp_path, capsys):
+        """All-passed results show a checkmark per standard and the summary.
 
-        mock_cli = sys.modules["aipass.cli"]
-        mock_cli.console.reset_mock()
+        Mutant: the summary line's markup unclosed in apps/modules/checklist.py — killed.
+        """
 
         results = [
             {"standard": "architecture", "passed": True, "detail": None},
             {"standard": "documentation", "passed": True, "detail": None},
         ]
-        _print_results(results, "/some/file.py")
-        assert mock_cli.console.print.called
+        out = self._printed(tmp_path, capsys, results)
+        assert "✓ architecture" in out and "✓ documentation" in out
+        assert "All 2 standards passed" in out
 
-    def test_print_failed_with_detail(self, monkeypatch):
-        """Failed result with detail prints the detail message."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules.checklist import _print_results
-
-        mock_cli = sys.modules["aipass.cli"]
-        mock_cli.console.reset_mock()
+    def test_print_failed_with_detail(self, tmp_path, capsys):
+        """Mutant: the detail dropped from a finding in apps/modules/checklist.py — killed."""
 
         results = [{"standard": "architecture", "passed": False, "detail": "Missing docstring"}]
-        _print_results(results, "/some/file.py")
-        assert mock_cli.console.print.called
+        assert "[FAIL] — architecture: Missing docstring" in self._printed(tmp_path, capsys, results)
 
-    def test_print_failed_without_detail(self, monkeypatch):
-        """Failed result without detail still prints."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules.checklist import _print_results
-
-        mock_cli = sys.modules["aipass.cli"]
-        mock_cli.console.reset_mock()
+    def test_print_failed_without_detail(self, tmp_path, capsys):
+        """Mutant: the marker dropped from a detail-less finding in apps/modules/checklist.py — killed."""
 
         results = [{"standard": "architecture", "passed": False, "detail": ""}]
-        _print_results(results, "/some/file.py")
-        assert mock_cli.console.print.called
+        out = self._printed(tmp_path, capsys, results)
+        assert "[FAIL] — architecture\n" in out
 
-    def test_print_mixed_results(self, monkeypatch):
-        """Mixed results do not print 'All passed' summary."""
-        import sys
+    def test_print_mixed_results(self, tmp_path, capsys):
+        """Mixed results do not print the 'All passed' summary.
 
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules.checklist import _print_results
-
-        mock_cli = sys.modules["aipass.cli"]
-        mock_cli.console.reset_mock()
+        Mutant: the summary printed unconditionally in apps/modules/checklist.py — killed.
+        """
 
         results = [
             {"standard": "architecture", "passed": True, "detail": None},
             {"standard": "documentation", "passed": False, "detail": "Issues found"},
         ]
-        _print_results(results, "/some/file.py")
         # Check that "All X standards passed" was NOT printed
-        calls = [str(c) for c in mock_cli.console.print.call_args_list]
-        assert not any("All" in c and "passed" in c for c in calls)
+        assert "standards passed" not in self._printed(tmp_path, capsys, results)
 
 
 # ===========================================================================
@@ -1654,33 +1330,30 @@ class TestHandleCommandPathResolution:
 
     def test_absolute_path(self, tmp_path, monkeypatch):
         """Absolute file path is resolved directly."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", [str(f)])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", [str(f)]) is True
+
+        ran.assert_called_once_with(str(f.resolve()), pack_name="aipass", prototype=False)
 
     def test_relative_path_fallback_cwd(self, tmp_path, monkeypatch):
-        """Relative path falls back to CWD resolution."""
-        import sys
-
-        monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
-        from aipass.seedgo.apps.modules import checklist
-
-        # Monkeypatch _get_repo_root to return None (no git repo)
-        monkeypatch.setattr(checklist, "_get_repo_root", lambda: None)
+        """Mutant: the repo root never tried before CWD in apps/modules/checklist.py — killed."""
+        # No git repo: the repo root is asked first and answers None.
+        asked = []
+        monkeypatch.setattr(checklist, "_get_repo_root", lambda: asked.append("repo root"))
         monkeypatch.chdir(tmp_path)
 
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", ["sample.py"])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", ["sample.py"]) is True
+
+        # No repo root, so the bare name resolves against CWD — which is tmp_path.
+        ran.assert_called_once_with(str((tmp_path / "sample.py").resolve()), pack_name="aipass", prototype=False)
+        assert asked == ["repo root"]
 
 
 # ===========================================================================
@@ -1691,22 +1364,28 @@ class TestHandleCommandPathResolution:
 class TestIsEntryPointEdgeCases:
     """Additional _is_entry_point edge cases."""
 
-    def test_non_py_file(self):
-        from aipass.seedgo.apps.modules.checklist import _is_entry_point
+    def test_non_py_file(self, tmp_path):
 
-        assert _is_entry_point("/branch/apps/config.json") is False
+        assert _is_entry_point(str(tmp_path / "branch" / "apps" / "config.json")) is False
 
-    def test_nested_under_apps(self):
-        from aipass.seedgo.apps.modules.checklist import _is_entry_point
+    def test_nested_under_apps(self, tmp_path):
 
-        assert _is_entry_point("/branch/apps/handlers/thing.py") is False
+        assert _is_entry_point(str(tmp_path / "branch" / "apps" / "handlers" / "thing.py")) is False
 
-    def test_no_apps_in_path(self):
-        from aipass.seedgo.apps.modules.checklist import _is_entry_point
+    def test_no_apps_in_path(self, tmp_path):
 
-        assert _is_entry_point("/branch/src/thing.py") is False
+        assert _is_entry_point(str(tmp_path / "branch" / "src" / "thing.py")) is False
 
-    def test_valid_entry_point(self):
-        from aipass.seedgo.apps.modules.checklist import _is_entry_point
+    def test_valid_entry_point(self, tmp_path):
 
-        assert _is_entry_point("/branch/apps/branch.py") is True
+        assert _is_entry_point(str(tmp_path / "branch" / "apps" / "branch.py")) is True
+
+    def test_valid_entry_point_on_a_windows_path(self, tmp_path, monkeypatch):
+        """A drive letter and backslashes still name an entry point (compass 458).
+
+        Mutant: _is_entry_point's `file_path.replace("\\", "/")` back to `file_path` — killed.
+        """
+        # checklist's Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
+        monkeypatch.setattr(checklist, "Path", PureWindowsPath)
+        assert _is_entry_point(_windows_form(tmp_path, "branch", "apps", "branch.py")) is True
+        assert _is_entry_point(_windows_form(tmp_path, "branch", "apps", "handlers", "thing.py")) is False

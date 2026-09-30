@@ -1,21 +1,30 @@
-"""Tests for audit_display and branch_audit — targeting uncovered lines."""
-
 # =================== META ====================
 # Name: test_coverage_audit.py
 # Description: Unit tests for audit_display.py and branch_audit.py line coverage
-# Version: 1.0.0
+# Version: 1.3.0
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-29
 # =============================================
 
-# seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
-# seedgo:bypass standard=encapsulation reason="tests import handlers directly for unit testing"
+"""Tests for apps/handlers/audit/audit_display.py and apps/handlers/audit/branch_audit.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that audit_display.py and branch_audit.py parse and import
+# seedgo: no-test-needed(constant) — _FLEET_STATE_STYLE's colour names and _MAX_NAMED_RERUNS' value
 
 import types
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch
-from pathlib import Path
+
+from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
+from aipass.seedgo.apps.handlers.audit import audit_display, branch_audit
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
+    audit_ignore_match as real_audit_ignore_match,
+    is_seedgo_ignored as real_is_seedgo_ignored,
+    load_ignore_entries as real_load_ignore_entries,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -25,86 +34,38 @@ from pathlib import Path
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for audit_display and branch_audit."""
-    import sys
+    """Patch audit_display's and branch_audit's own seams with mocks.
 
+    audit_display and branch_audit are imported for real at module top, so
+    isolation is applied at the edge each one actually reads (its own bound
+    name for logger / warning / json_handler / ignore_handler / scan_branch)
+    instead of intercepting the packages in sys.modules. The console stays
+    real: it writes to stdout at print time, and the render tests read capsys.
+    """
     mock_logger = MagicMock()
-    mock_console = MagicMock()
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
-        is_seedgo_ignored as real_is_seedgo_ignored,
-        load_ignore_entries as real_load_ignore_entries,
-    )
 
     mock_ignore_handler = MagicMock()
     mock_ignore_handler.get_audit_ignore_patterns = MagicMock(return_value=[])
+    # The ignore list removes nothing here, as the empty pattern list above says.
+    mock_ignore_handler.audit_ignore_match = MagicMock(return_value=None)
+    mock_ignore_handler.ignored_tracked_source = MagicMock(return_value=[])
     mock_ignore_handler.is_seedgo_ignored = real_is_seedgo_ignored
     mock_ignore_handler.load_ignore_entries = real_load_ignore_entries
     mock_scan_branch = MagicMock(return_value=None)
 
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
+    # -- audit_display's own seams --------------------------------------
+    monkeypatch.setattr(audit_display, "warning", MagicMock())
+    monkeypatch.setattr(audit_display, "json_handler", mock_json_handler)
 
-    # -- cli ----------------------------------------------------------------
-    cli_mod = MagicMock()
-    cli_mod.console = mock_console
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.json.json_handler",
-        json_mod,
-    )
-
-    # -- bypass handler -----------------------------------------------------
-    bypass_pkg = MagicMock()
-    bypass_pkg.ignore_handler = mock_ignore_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        mock_ignore_handler,
-    )
-
-    # -- test_map function_scanner ------------------------------------------
-    test_map_pkg = MagicMock()
-    test_map_pkg.scan_branch = mock_scan_branch
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.test_map",
-        test_map_pkg,
-    )
-    scanner_mod = MagicMock()
-    scanner_mod.scan_branch = mock_scan_branch
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.test_map.function_scanner",
-        scanner_mod,
-    )
-
-    # -- audit package (must be a real module with __path__ pointing to the
-    #    actual directory so submodule imports like audit.audit_display work)
-    audit_pkg = types.ModuleType("aipass.seedgo.apps.handlers.audit")
-    audit_pkg.__path__ = [  # type: ignore[attr-defined]
-        str(Path(__file__).resolve().parents[1] / "apps" / "handlers" / "audit")
-    ]
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit", audit_pkg)
-
-    # Force re-imports so modules pick up fresh mocks
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.audit.audit_display",
-        "aipass.seedgo.apps.handlers.audit.branch_audit",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+    # -- branch_audit's own seams ----------------------------------------
+    monkeypatch.setattr(branch_audit, "logger", mock_logger)
+    monkeypatch.setattr(branch_audit, "json_handler", mock_json_handler)
+    monkeypatch.setattr(branch_audit, "ignore_handler", mock_ignore_handler)
+    monkeypatch.setattr(branch_audit, "dead_rules", MagicMock())
+    monkeypatch.setattr(branch_audit, "inert", MagicMock())
+    monkeypatch.setattr(branch_audit, "scan_branch", mock_scan_branch)
 
 
 # ===========================================================================
@@ -112,295 +73,186 @@ def _mock_infrastructure(monkeypatch):
 # ===========================================================================
 
 
+def _summary(capsys, scores: dict, results: dict | None = None, **extra) -> str:
+    """What print_branch_summary writes to stdout for one branch built from these fields.
+
+    The renderers are reached the way a user reaches them: the branch summary
+    hands each one the real console, which writes to stdout at print time, so
+    capsys reads what a terminal would show and nothing a mock merely received.
+    """
+    audit_result = {
+        "branch": {"name": "test_branch"},
+        "scores": scores,
+        "average": 70,
+        "files_checked": 0,
+        "results": results or {},
+        **extra,
+    }
+    capsys.readouterr()
+    audit_display.print_branch_summary(audit_result)
+    return capsys.readouterr().out
+
+
+def _failed_branch_check(name: str) -> str:
+    """The issues heading a branch-level finding prints under, for a standard called *name*."""
+    return f"{name} issues:"
+
+
 class TestFormatStandardName:
-    """Tests for _format_standard_name."""
+    """The standard's display name, as a branch-level finding prints it."""
 
-    def test_underscore_conversion(self):
-        """DEEP_NESTING becomes Deep Nesting."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _format_standard_name,
-        )
+    def test_underscore_conversion(self, capsys):
+        """DEEP_NESTING becomes Deep Nesting. Mutant: underscores kept in apps/handlers/audit/audit_display.py — killed."""
+        checks = {"DEEP_NESTING": {"checks": [{"passed": False, "message": "nested five deep"}]}}
+        out = _summary(capsys, {"DEEP_NESTING": 70}, checks)
+        assert _failed_branch_check("Deep Nesting") in out
 
-        assert _format_standard_name("DEEP_NESTING") == "Deep Nesting"
+    def test_lowercase_conversion(self, capsys):
+        """Lowercase deep_nesting becomes Deep Nesting. Mutant: underscores kept in apps/handlers/audit/audit_display.py — killed."""
+        checks = {"deep_nesting": {"checks": [{"passed": False, "message": "nested five deep"}]}}
+        out = _summary(capsys, {"deep_nesting": 70}, checks)
+        assert _failed_branch_check("Deep Nesting") in out
 
-    def test_lowercase_conversion(self):
-        """Lowercase deep_nesting becomes Deep Nesting."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _format_standard_name,
-        )
-
-        assert _format_standard_name("deep_nesting") == "Deep Nesting"
-
-    def test_single_word(self):
-        """Single word gets title-cased."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _format_standard_name,
-        )
-
-        assert _format_standard_name("architecture") == "Architecture"
+    def test_single_word(self, capsys):
+        """Single word gets title-cased (naming: architecture has its own renderer). Mutant: .title() dropped in apps/handlers/audit/audit_display.py — killed."""
+        checks = {"naming": {"checks": [{"passed": False, "message": "bad name"}]}}
+        out = _summary(capsys, {"naming": 70}, checks)
+        assert _failed_branch_check("Naming") in out
 
 
 class TestRenderViolations:
-    """Tests for _render_violations."""
+    """A standard's violation list, as the branch summary prints it."""
 
-    def test_basic_violations(self):
-        """Basic violations with path, score, and issues rendered."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_violations,
-        )
+    @staticmethod
+    def _naming(capsys, violations: list) -> str:
+        """The summary of a branch whose naming row carries *violations*."""
+        return _summary(capsys, {"naming": 60}, naming_violations=violations)
 
-        mock_con = MagicMock()
-        violations = [
-            {
-                "path": "/foo/bar.py",
-                "score": 60,
-                "issues": ["Bad indent", "Long line"],
-            },
-        ]
-        _render_violations("naming", violations, mock_con)
-        # header + file line + 2 issue lines = at least 4
-        assert mock_con.print.call_count >= 4
+    def test_basic_violations(self, capsys):
+        """Basic violations with path, score, and issues rendered. Mutant: only the first issue printed in apps/handlers/audit/audit_display.py — killed."""
+        out = self._naming(capsys, [{"path": "/foo/bar.py", "score": 60, "issues": ["Bad indent", "Long line"]}])
+        assert "NAMING VIOLATIONS (1 files):" in out
+        assert "/foo/bar.py (score: 60%)" in out
+        assert "• Bad indent" in out
+        assert "• Long line" in out
 
-    def test_file_key_fallback(self):
-        """Falls back to file key when path is missing."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_violations,
-        )
+    def test_file_key_fallback(self, capsys):
+        """Falls back to file key when path is missing. Mutant: the file fallback dropped in apps/handlers/audit/audit_display.py — killed."""
+        out = self._naming(capsys, [{"file": "bar.py", "score": 50, "issues": ["Something wrong"]}])
+        assert "✗ bar.py (score: 50%)" in out
 
-        mock_con = MagicMock()
-        violations = [
-            {
-                "file": "bar.py",
-                "score": 50,
-                "issues": ["Something wrong"],
-            },
-        ]
-        _render_violations("naming", violations, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("bar.py" in c for c in calls)
+    def test_message_fallback_when_no_issues(self, capsys):
+        """Shows message when issues list is empty. Mutant: the message fallback never taken in apps/handlers/audit/audit_display.py — killed."""
+        out = self._naming(capsys, [{"path": "/foo.py", "score": 0, "issues": [], "message": "General failure"}])
+        assert "• General failure" in out
 
-    def test_message_fallback_when_no_issues(self):
-        """Shows message when issues list is empty."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_violations,
-        )
+    def test_more_than_five_violations(self, capsys):
+        """Shows and N more when violations exceed 5. Mutant: the cap raised to 8 in apps/handlers/audit/audit_display.py — killed."""
+        out = self._naming(capsys, [{"path": f"/file{i}.py", "score": 10, "issues": []} for i in range(8)])
+        assert "... and 3 more" in out
+        assert "/file5.py" not in out
 
-        mock_con = MagicMock()
-        violations = [
-            {
-                "path": "/foo.py",
-                "score": 0,
-                "issues": [],
-                "message": "General failure",
-            },
-        ]
-        _render_violations("naming", violations, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("General failure" in c for c in calls)
+    def test_exactly_five_violations_no_more(self, capsys):
+        """No more message when exactly 5 violations. Mutant: the cap tested with >= in apps/handlers/audit/audit_display.py — killed."""
+        out = self._naming(capsys, [{"path": f"/file{i}.py", "score": 10, "issues": []} for i in range(5)])
+        assert "/file4.py" in out
+        assert "... and" not in out
 
-    def test_more_than_five_violations(self):
-        """Shows and N more when violations exceed 5."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_violations,
-        )
-
-        mock_con = MagicMock()
-        violations = [{"path": f"/file{i}.py", "score": 10, "issues": []} for i in range(8)]
-        _render_violations("naming", violations, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("3 more" in c for c in calls)
-
-    def test_exactly_five_violations_no_more(self):
-        """No more message when exactly 5 violations."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_violations,
-        )
-
-        mock_con = MagicMock()
-        violations = [{"path": f"/file{i}.py", "score": 10, "issues": []} for i in range(5)]
-        _render_violations("naming", violations, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert not any("more" in c for c in calls)
-
-    def test_no_path_no_file_key(self):
-        """Both path and file missing returns empty string for path."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_violations,
-        )
-
-        mock_con = MagicMock()
-        violations = [{"score": 0, "issues": ["err"]}]
-        _render_violations("naming", violations, mock_con)
-        assert mock_con.print.called
+    def test_no_path_no_file_key(self, capsys):
+        """Both path and file missing prints an empty path. Mutant: the empty default replaced in apps/handlers/audit/audit_display.py — killed."""
+        out = self._naming(capsys, [{"score": 0, "issues": ["err"]}])
+        assert "✗  (score: 0%)" in out
+        assert "• err" in out
 
 
 class TestRenderArchitectureViolations:
-    """Tests for _render_architecture_violations."""
+    """The architecture row's failed checks, as the branch summary prints them."""
 
-    def test_no_failed_checks(self):
-        """Returns early when all checks pass."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_architecture_violations,
-        )
+    @staticmethod
+    def _architecture(capsys, checks: list | None) -> str:
+        """The summary of a branch whose architecture row failed with *checks* (None: no result)."""
+        results = {} if checks is None else {"architecture": {"checks": checks}}
+        return _summary(capsys, {"architecture": 70}, results)
 
-        mock_con = MagicMock()
-        audit_result = {"results": {"architecture": {"checks": [{"passed": True, "name": "Dir: apps"}]}}}
-        _render_architecture_violations(audit_result, mock_con)
-        assert mock_con.print.call_count == 0
+    def test_no_failed_checks(self, capsys):
+        """Returns early when all checks pass. Mutant: the early return removed in apps/handlers/audit/audit_display.py — killed."""
+        out = self._architecture(capsys, [{"passed": True, "name": "Dir: apps"}])
+        assert "ARCHITECTURE VIOLATIONS" not in out
 
-    def test_missing_directories(self):
-        """Shows missing directories grouped."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_architecture_violations,
-        )
-
-        mock_con = MagicMock()
+    def test_missing_directories(self, capsys):
+        """Shows missing directories grouped. Mutant: 'Directory:' not grouped as a directory in apps/handlers/audit/audit_display.py — killed."""
         checks = [
             {"passed": False, "name": "Dir: apps", "message": "x"},
-            {
-                "passed": False,
-                "name": "Directory: tests",
-                "message": "x",
-            },
+            {"passed": False, "name": "Directory: tests", "message": "x"},
         ]
-        audit_result = {"results": {"architecture": {"checks": checks}}}
-        _render_architecture_violations(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("ARCHITECTURE VIOLATIONS" in c for c in calls)
-        assert any("Missing directories" in c for c in calls)
+        out = self._architecture(capsys, checks)
+        assert "ARCHITECTURE VIOLATIONS (2 missing):" in out
+        assert "Missing directories (2):" in out
+        assert "✗ apps" in out
+        assert "✗ tests" in out
 
-    def test_missing_files(self):
-        """Shows missing files grouped."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_architecture_violations,
-        )
+    def test_missing_files(self, capsys):
+        """Shows missing files grouped. Mutant: 'File:' checks not grouped in apps/handlers/audit/audit_display.py — killed."""
+        out = self._architecture(capsys, [{"passed": False, "name": "File: README.md", "message": "x"}])
+        assert "Missing files (1):" in out
+        assert "✗ README.md" in out
 
-        mock_con = MagicMock()
-        checks = [
-            {
-                "passed": False,
-                "name": "File: README.md",
-                "message": "x",
-            },
-        ]
-        audit_result = {"results": {"architecture": {"checks": checks}}}
-        _render_architecture_violations(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("Missing files" in c for c in calls)
+    def test_other_failures(self, capsys):
+        """Shows non-dir, non-file failures. Mutant: other failures never printed in apps/handlers/audit/audit_display.py — killed."""
+        out = self._architecture(capsys, [{"passed": False, "name": "Custom check", "message": "Something wrong"}])
+        assert "• Something wrong" in out
 
-    def test_other_failures(self):
-        """Shows non-dir, non-file failures."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_architecture_violations,
-        )
+    def test_more_than_five_dirs(self, capsys):
+        """Directories list truncated at 5 with more message. Mutant: the directory cap raised to 7 in apps/handlers/audit/audit_display.py — killed."""
+        out = self._architecture(capsys, [{"passed": False, "name": f"Dir: dir{i}"} for i in range(7)])
+        assert "... and 2 more" in out
+        assert "dir5" not in out
 
-        mock_con = MagicMock()
-        checks = [
-            {
-                "passed": False,
-                "name": "Custom check",
-                "message": "Something wrong",
-            },
-        ]
-        audit_result = {"results": {"architecture": {"checks": checks}}}
-        _render_architecture_violations(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("Something wrong" in c for c in calls)
+    def test_more_than_five_files(self, capsys):
+        """Files list truncated at 5 with more message. Mutant: the file cap raised to 8 in apps/handlers/audit/audit_display.py — killed."""
+        out = self._architecture(capsys, [{"passed": False, "name": f"File: file{i}.py"} for i in range(8)])
+        assert "... and 3 more" in out
+        assert "file5.py" not in out
 
-    def test_more_than_five_dirs(self):
-        """Directories list truncated at 5 with more message."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_architecture_violations,
-        )
+    def test_empty_results(self, capsys):
+        """No architecture result at all prints no violation block. Mutant: the early return removed in apps/handlers/audit/audit_display.py — killed."""
+        out = self._architecture(capsys, None)
+        assert "ARCHITECTURE VIOLATIONS" not in out
 
-        mock_con = MagicMock()
-        checks = [{"passed": False, "name": f"Dir: dir{i}"} for i in range(7)]
-        audit_result = {"results": {"architecture": {"checks": checks}}}
-        _render_architecture_violations(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("2 more" in c for c in calls)
-
-    def test_more_than_five_files(self):
-        """Files list truncated at 5 with more message."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_architecture_violations,
-        )
-
-        mock_con = MagicMock()
-        checks = [{"passed": False, "name": f"File: file{i}.py"} for i in range(8)]
-        audit_result = {"results": {"architecture": {"checks": checks}}}
-        _render_architecture_violations(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("3 more" in c for c in calls)
-
-    def test_empty_results(self):
-        """Empty results dict handled gracefully."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_architecture_violations,
-        )
-
-        mock_con = MagicMock()
-        _render_architecture_violations({}, mock_con)
-        assert mock_con.print.call_count == 0
-
-    def test_mixed_dirs_files_other(self):
-        """Mix of dirs, files, and other failures all render."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_architecture_violations,
-        )
-
-        mock_con = MagicMock()
+    def test_mixed_dirs_files_other(self, capsys):
+        """Mix of dirs, files, and other failures all render. Mutant: other failures never printed in apps/handlers/audit/audit_display.py — killed."""
         checks = [
             {"passed": False, "name": "Dir: apps"},
             {"passed": False, "name": "File: setup.py"},
-            {
-                "passed": False,
-                "name": "Config check",
-                "message": "Missing config",
-            },
+            {"passed": False, "name": "Config check", "message": "Missing config"},
         ]
-        audit_result = {"results": {"architecture": {"checks": checks}}}
-        _render_architecture_violations(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("Missing directories" in c for c in calls)
-        assert any("Missing files" in c for c in calls)
-        assert any("Missing config" in c for c in calls)
+        out = self._architecture(capsys, checks)
+        assert "Missing directories (1):" in out
+        assert "Missing files (1):" in out
+        assert "• Missing config" in out
 
 
 class TestRenderTypeErrors:
-    """Tests for _render_type_errors."""
+    """The type-error block, as the branch summary prints it."""
 
-    def test_no_type_errors_no_files_checked(self):
-        """No type errors and no files checked produces no output."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_type_errors,
-        )
+    def test_no_type_errors_no_files_checked(self, capsys):
+        """No type errors and no files checked produces no output. Mutant: the green line printed unconditionally in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(capsys, {"naming": 100}, type_errors=0, files_checked=0)
+        assert "TYPE ERRORS" not in out
+        assert "No type errors" not in out
 
-        mock_con = MagicMock()
-        _render_type_errors({"type_errors": 0, "files_checked": 0}, mock_con)
-        assert mock_con.print.call_count == 0
+    def test_no_type_errors_with_files_checked(self, capsys):
+        """No type errors but files checked shows green check. Mutant: the green line gated on > 5 files in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(capsys, {"naming": 100}, type_errors=0, files_checked=5)
+        assert "✓ No type errors" in out
 
-    def test_no_type_errors_with_files_checked(self):
-        """No type errors but files checked shows green check."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_type_errors,
-        )
-
-        mock_con = MagicMock()
-        _render_type_errors({"type_errors": 0, "files_checked": 5}, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("No type errors" in c for c in calls)
-
-    def test_type_errors_with_diagnostics(self):
-        """Type errors render file details and diagnostics."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_type_errors,
-        )
-
-        mock_con = MagicMock()
-        audit_result = {
-            "type_errors": 3,
-            "type_error_files": [
+    def test_type_errors_with_diagnostics(self, capsys):
+        """Type errors render file details and diagnostics. Mutant: no diagnostic lines printed in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(
+            capsys,
+            {"naming": 100},
+            type_errors=3,
+            type_error_files=[
                 {
                     "file": "module.py",
                     "errors": 2,
@@ -409,235 +261,147 @@ class TestRenderTypeErrors:
                         {"line": 20, "message": "Incompatible"},
                     ],
                 },
-                {
-                    "file": "other.py",
-                    "errors": 1,
-                    "diagnostics": [
-                        {"line": 5, "message": "Missing arg"},
-                    ],
-                },
+                {"file": "other.py", "errors": 1, "diagnostics": [{"line": 5, "message": "Missing arg"}]},
             ],
-            "files_checked": 10,
-        }
-        _render_type_errors(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("TYPE ERRORS" in c for c in calls)
-        assert any("module.py" in c for c in calls)
+            files_checked=10,
+        )
+        assert "TYPE ERRORS (3 errors):" in out
+        assert "✗ module.py (2 errors)" in out
+        assert "L10: Type mismatch" in out
+        assert "✗ other.py (1 errors)" in out
 
-    def test_type_error_file_cap_announces_itself(self):
-        """A cap that does not announce itself reads as a clean result (@prax, 83190864)."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_type_errors,
+    def test_type_error_file_cap_announces_itself(self, capsys):
+        """A cap that does not announce itself reads as a clean result (@prax, 83190864). Mutant: the file cap note gated on > 14 in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(
+            capsys,
+            {"naming": 100},
+            type_errors=14,
+            type_error_files=[{"file": f"m{n}.py", "errors": 1, "diagnostics": []} for n in range(14)],
+            files_checked=20,
         )
 
-        mock_con = MagicMock()
-        audit_result = {
-            "type_errors": 14,
-            "type_error_files": [{"file": f"m{n}.py", "errors": 1, "diagnostics": []} for n in range(14)],
-            "files_checked": 20,
-        }
-        _render_type_errors(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
+        assert "... and 4 more files" in out
 
-        assert any("... and 4 more files" in c for c in calls)
-
-    def test_type_error_diagnostic_cap_announces_itself(self):
-        """Per-file diagnostics are capped at 3 — the remainder must be declared."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_type_errors,
-        )
-
-        mock_con = MagicMock()
-        audit_result = {
-            "type_errors": 5,
-            "type_error_files": [
-                {
-                    "file": "m.py",
-                    "errors": 5,
-                    "diagnostics": [{"line": n, "message": f"err {n}"} for n in range(5)],
-                }
+    def test_type_error_diagnostic_cap_announces_itself(self, capsys):
+        """Per-file diagnostics are capped at 3 — the remainder must be declared. Mutant: the note gated on > 5 in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(
+            capsys,
+            {"naming": 100},
+            type_errors=5,
+            type_error_files=[
+                {"file": "m.py", "errors": 5, "diagnostics": [{"line": n, "message": f"err {n}"} for n in range(5)]}
             ],
-            "files_checked": 1,
-        }
-        _render_type_errors(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-
-        assert any("... and 2 more in this file" in c for c in calls)
-
-    def test_type_error_message_clip_is_marked(self):
-        """A clipped message must show it was clipped, not read as the whole error."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_type_errors,
+            files_checked=1,
         )
 
-        mock_con = MagicMock()
-        audit_result = {
-            "type_errors": 1,
-            "type_error_files": [{"file": "m.py", "errors": 1, "diagnostics": [{"line": 1, "message": "x" * 90}]}],
-            "files_checked": 1,
-        }
-        _render_type_errors(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
+        assert "... and 2 more in this file" in out
 
-        assert any("…" in c for c in calls)
-
-    def test_short_type_error_lists_declare_no_cap(self):
-        """Negative direction: a genuinely short list must not claim a remainder."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_type_errors,
+    def test_type_error_message_clip_is_marked(self, capsys):
+        """A clipped message must show it was clipped. Mutant: the clip unmarked in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(
+            capsys,
+            {"naming": 100},
+            type_errors=1,
+            type_error_files=[{"file": "m.py", "errors": 1, "diagnostics": [{"line": 1, "message": "x" * 90}]}],
+            files_checked=1,
         )
 
-        mock_con = MagicMock()
-        audit_result = {
-            "type_errors": 1,
-            "type_error_files": [{"file": "m.py", "errors": 1, "diagnostics": [{"line": 1, "message": "short"}]}],
-            "files_checked": 1,
-        }
-        _render_type_errors(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
+        assert "L1: " + "x" * 60 + "…" in out
 
-        assert not any("more" in c for c in calls)
-        assert not any("…" in c for c in calls)
-
-    def test_file_zero_errors_skipped(self):
-        """File with 0 errors in type_error_files is skipped."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_type_errors,
+    def test_short_type_error_lists_declare_no_cap(self, capsys):
+        """Negative direction: a short list must not claim a remainder. Mutant: every message marked clipped in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(
+            capsys,
+            {"naming": 100},
+            type_errors=1,
+            type_error_files=[{"file": "m.py", "errors": 1, "diagnostics": [{"line": 1, "message": "short"}]}],
+            files_checked=1,
         )
 
-        mock_con = MagicMock()
-        audit_result = {
-            "type_errors": 1,
-            "type_error_files": [
-                {
-                    "file": "clean.py",
-                    "errors": 0,
-                    "diagnostics": [],
-                },
-                {
-                    "file": "bad.py",
-                    "errors": 1,
-                    "diagnostics": [
-                        {"line": 1, "message": "err"},
-                    ],
-                },
+        assert "L1: short" in out
+        assert "... and" not in out
+        assert "…" not in out
+
+    def test_file_zero_errors_skipped(self, capsys):
+        """File with 0 errors in type_error_files is skipped. Mutant: zero-error files listed in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(
+            capsys,
+            {"naming": 100},
+            type_errors=1,
+            type_error_files=[
+                {"file": "clean.py", "errors": 0, "diagnostics": []},
+                {"file": "bad.py", "errors": 1, "diagnostics": [{"line": 1, "message": "err"}]},
             ],
-            "files_checked": 2,
-        }
-        _render_type_errors(audit_result, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert not any("clean.py" in c for c in calls)
-        assert any("bad.py" in c for c in calls)
-
-    def test_empty_audit_result(self):
-        """Missing keys handled gracefully."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_type_errors,
+            files_checked=2,
         )
+        assert "clean.py" not in out
+        assert "✗ bad.py (1 errors)" in out
 
-        mock_con = MagicMock()
-        _render_type_errors({}, mock_con)
-        assert mock_con.print.call_count == 0
+    def test_empty_audit_result(self, capsys):
+        """Missing type keys handled gracefully. Mutant: the green line printed unconditionally in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(capsys, {"naming": 100})
+        assert "TYPE ERRORS" not in out
+        assert "No type errors" not in out
 
 
 class TestRenderTestMap:
-    """Tests for _render_test_map."""
+    """The custom-test-opportunities line, as the branch summary prints it."""
 
-    def test_no_test_map(self):
-        """No test_map key produces no output."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_test_map,
+    def test_no_test_map(self, capsys):
+        """No test_map key produces no output. Mutant: a missing map read as one function in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(capsys, {"naming": 100})
+        assert "Custom Test Opportunities" not in out
+
+    def test_test_map_zero_functions(self, capsys):
+        """test_map with 0 total functions produces no output. Mutant: the zero guard removed in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(capsys, {"naming": 100}, test_map={"total_functions": 0})
+        assert "Custom Test Opportunities" not in out
+
+    def test_test_map_with_data(self, capsys):
+        """test_map with data renders summary. Mutant: the tested count read as 0 in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(
+            capsys, {"naming": 100}, test_map={"total_functions": 10, "tested_functions": 6, "branch": "seedgo"}
         )
+        assert "Custom Test Opportunities: 10 public functions, 6 tested. Run: drone @seedgo test_map @seedgo" in out
 
-        mock_con = MagicMock()
-        _render_test_map({}, mock_con)
-        assert mock_con.print.call_count == 0
-
-    def test_test_map_zero_functions(self):
-        """test_map with 0 total functions produces no output."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_test_map,
-        )
-
-        mock_con = MagicMock()
-        _render_test_map({"test_map": {"total_functions": 0}}, mock_con)
-        assert mock_con.print.call_count == 0
-
-    def test_test_map_with_data(self):
-        """test_map with data renders summary."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_test_map,
-        )
-
-        mock_con = MagicMock()
-        _render_test_map(
-            {
-                "test_map": {
-                    "total_functions": 10,
-                    "tested_functions": 6,
-                    "branch": "seedgo",
-                }
-            },
-            mock_con,
-        )
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("10 public functions" in c for c in calls)
-        assert any("6 tested" in c for c in calls)
-
-    def test_test_map_none(self):
-        """test_map explicitly None produces no output."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_test_map,
-        )
-
-        mock_con = MagicMock()
-        _render_test_map({"test_map": None}, mock_con)
-        assert mock_con.print.call_count == 0
+    def test_test_map_none(self, capsys):
+        """test_map explicitly None produces no output. Mutant: a missing map read as one function in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(capsys, {"naming": 100}, test_map=None)
+        assert "Custom Test Opportunities" not in out
 
 
 class TestRenderInfoLines:
     """Tests for _render_info_lines (non-scored signposts)."""
 
-    def test_no_info_lines(self):
-        """Missing info_lines key produces no output."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import _render_info_lines
+    def test_no_info_lines(self, capsys):
+        """Missing info_lines key produces no output. Mutant: a default info line in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(capsys, {"naming": 100})
+        assert "ⓘ" not in out
 
-        mock_con = MagicMock()
-        _render_info_lines({}, mock_con)
-        assert mock_con.print.call_count == 0
+    def test_empty_message_skipped(self, capsys):
+        """An entry with an empty message prints nothing. Mutant: the empty-message guard removed in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(capsys, {"naming": 100}, info_lines=[{"standard": "json_structure", "message": ""}])
+        assert "ⓘ" not in out
 
-    def test_empty_message_skipped(self):
-        """An entry with an empty message prints nothing."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import _render_info_lines
+    def test_info_lines_rendered(self, capsys):
+        """Each info line renders once, through the branch summary a user reaches.
 
-        mock_con = MagicMock()
-        _render_info_lines({"info_lines": [{"standard": "json_structure", "message": ""}]}, mock_con)
-        assert mock_con.print.call_count == 0
-
-    def test_info_lines_rendered(self):
-        """Each info line renders once, dimmed."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import _render_info_lines
-
-        mock_con = MagicMock()
-        _render_info_lines(
-            {
-                "info_lines": [
-                    {"standard": "json_structure", "message": "custom_config: cadence_config.json"},
-                    {"standard": "json_structure", "message": "second line"},
-                ]
-            },
-            mock_con,
+        It called the private renderer on a mocked console (seedgo, fleet green
+        leg 5). Mutant: the info line printed twice — killed.
+        """
+        out = _summary(
+            capsys,
+            {"naming": 100},
+            info_lines=[
+                {"standard": "json_structure", "message": "custom_config: cadence_config.json"},
+                {"standard": "json_structure", "message": "second line"},
+            ],
         )
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert len(calls) == 2
-        assert any("cadence_config.json" in c for c in calls)
-        assert all("[dim]" in c for c in calls)
+        lines = out.splitlines()
+        assert [line for line in lines if "ⓘ" in line] == ["  ⓘ custom_config: cadence_config.json", "  ⓘ second line"]
 
-    def test_rendered_at_full_score(self):
-        """A 100% branch still shows its info lines (context, not failure)."""
-        from aipass.seedgo.apps.handlers.audit import audit_display
-
-        mock_con = MagicMock()
+    def test_rendered_at_full_score(self, capsys):
+        """A 100% branch still shows its info lines. Mutant: info lines gated on avg < 100 in apps/handlers/audit/audit_display.py — killed."""
         audit_result = {
             "branch": {"name": "mybranch"},
             "scores": {"naming": 100},
@@ -645,99 +409,53 @@ class TestRenderInfoLines:
             "files_checked": 3,
             "info_lines": [{"standard": "json_structure", "message": "operator file: memory.config.json"}],
         }
-        with patch.object(audit_display, "console", mock_con):
-            audit_display.print_branch_summary(audit_result)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("memory.config.json" in c for c in calls)
+        audit_display.print_branch_summary(audit_result)
+        assert "ⓘ operator file: memory.config.json" in capsys.readouterr().out
 
 
 class TestRenderDeprecatedPatterns:
-    """Tests for _render_deprecated_patterns."""
+    """The deprecated-patterns block, as the branch summary prints it."""
 
-    def test_no_patterns(self):
-        """Empty deprecated_patterns produces no output."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_deprecated_patterns,
-        )
+    def test_no_patterns(self, capsys):
+        """Empty deprecated_patterns produces no output. Mutant: the empty guard removed in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(capsys, {"naming": 100}, deprecated_patterns=[])
+        assert "DEPRECATED PATTERNS" not in out
 
-        mock_con = MagicMock()
-        _render_deprecated_patterns({"deprecated_patterns": []}, mock_con)
-        assert mock_con.print.call_count == 0
+    def test_with_patterns(self, capsys):
+        """Deprecated patterns render correctly. Mutant: the message line blanked in apps/handlers/audit/audit_display.py — killed."""
+        patterns = [{"path": "/foo/DOCUMENTS", "message": "Rename DOCUMENTS/ to docs/"}]
+        out = _summary(capsys, {"naming": 100}, deprecated_patterns=patterns)
+        assert "DEPRECATED PATTERNS (1):" in out
+        assert "⚠ /foo/DOCUMENTS" in out
+        assert "→ Rename DOCUMENTS/ to docs/" in out
 
-    def test_with_patterns(self):
-        """Deprecated patterns render correctly."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_deprecated_patterns,
-        )
-
-        mock_con = MagicMock()
-        patterns = [
-            {
-                "path": "/foo/DOCUMENTS",
-                "message": "Rename DOCUMENTS/ to docs/",
-            },
-        ]
-        _render_deprecated_patterns({"deprecated_patterns": patterns}, mock_con)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("DEPRECATED PATTERNS" in c for c in calls)
-        assert any("DOCUMENTS" in c for c in calls)
-
-    def test_missing_key(self):
-        """Missing deprecated_patterns key produces no output."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            _render_deprecated_patterns,
-        )
-
-        mock_con = MagicMock()
-        _render_deprecated_patterns({}, mock_con)
-        assert mock_con.print.call_count == 0
+    def test_missing_key(self, capsys):
+        """Missing deprecated_patterns key produces no output. Mutant: the empty guard removed in apps/handlers/audit/audit_display.py — killed."""
+        out = _summary(capsys, {"naming": 100})
+        assert "DEPRECATED PATTERNS" not in out
 
 
-def _rendered(render, *args, **kwargs) -> str:
-    """Everything the shared console printed while *render* ran, as one string.
+def _rendered(capsys, render, *args, **kwargs) -> str:
+    """Everything *render* wrote to stdout while it ran, as one string.
 
-    THE ORACLE THE RENDER TESTS IN THIS FILE WERE MISSING (no_oracle, measured
-    2026-09-07: 17 units here). Calling a renderer and asserting nothing pins
-    one thing only - that it did not raise - so a renderer that printed
-    NOTHING AT ALL passed every one of them, which is the failure a display
-    module actually has. The console is the MagicMock the autouse fixture
-    installs, and reading its calls back is the only place a render is
-    observable from here.
-
-    Reset first, so each assertion reads its own render and not the tail of the
-    previous test's.
-
-    Args:
-        render: The display function under test.
-        *args: Passed straight through.
-        **kwargs: Passed straight through.
-
-    Returns:
-        Every printed argument joined, ready for a substring assertion.
+    Calling a renderer and asserting nothing pins only that it did not raise,
+    so a renderer that printed NOTHING AT ALL passed (no_oracle, 2026-09-07).
+    The console is the real one, so stdout is where a render is observable.
+    Drained first, so each assertion reads its own render.
     """
-    import sys
-
-    console = sys.modules["aipass.cli"].console
-    console.reset_mock()
+    capsys.readouterr()
     render(*args, **kwargs)
-    return " ".join(str(call) for call in console.print.call_args_list)
+    return capsys.readouterr().out
 
 
 class TestPrintIntrospection:
     """Tests for print_introspection."""
 
-    def test_introspection_produces_output(self):
-        """print_introspection produces console output."""
-        import sys
-
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_introspection,
-        )
-
-        mock_cli = sys.modules["aipass.cli"]
-        mock_cli.console.reset_mock()
-        print_introspection()
-        assert mock_cli.console.print.called
+    def test_introspection_produces_output(self, capsys):
+        """print_introspection names the module and its public API. Mutant: the title line blanked in apps/handlers/audit/audit_display.py — killed."""
+        out = _rendered(capsys, audit_display.print_introspection)
+        assert "audit_display Module" in out
+        assert "print_branch_summary(" in out
 
 
 class TestPrintBranchSummary:
@@ -767,7 +485,7 @@ class TestPrintBranchSummary:
             out.update(extra)
         return out
 
-    def test_basic_summary(self):
+    def test_basic_summary(self, capsys):
         """The summary renders for every score tier, and for a standard at 100.
 
         MERGED 2026-09-07 (FPLAN-0496, the DPLAN-0323 contested band). Four
@@ -781,11 +499,8 @@ class TestPrintBranchSummary:
 
         Mutation-checked at the merge: a renderer that raises on any one of
         these tiers reds this test.
+        Mutant: the branch name dropped from the header in apps/handlers/audit/audit_display.py — killed.
         """
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
         for scores, average in (
             ({"architecture": 90, "naming": 80}, 85),  # the baseline fixture
             ({"architecture": 95, "naming": 92}, 93),  # >= 90
@@ -793,12 +508,14 @@ class TestPrintBranchSummary:
             ({"architecture": 50, "naming": 60}, 55),  # < 75
             ({"naming": 100, "meta": 90}, 95),  # a 100 skips its violation render
         ):
-            rendered = _rendered(print_branch_summary, self._make_audit_result(scores=scores, average=average))
+            rendered = _rendered(
+                capsys, audit_display.print_branch_summary, self._make_audit_result(scores=scores, average=average)
+            )
 
             assert "test_branch" in rendered, f"the branch was not named at {average}"
             assert str(average) in rendered, f"the overall {average} was not rendered"
 
-    def test_the_header_states_what_it_measured_not_only_how_much(self, monkeypatch):
+    def test_the_header_states_what_it_measured_not_only_how_much(self, capsys):
         """The count is scoped out loud, because the corpus is not the branch.
 
         ``_collect_py_files`` walks ``apps/**/*.py`` and nothing else, so a bare
@@ -806,40 +523,24 @@ class TestPrintBranchSummary:
         is clean when a third of its Python was never opened. This asserts the
         SCOPE WORDS, not the number: a header that keeps the count and drops the
         qualifier is exactly the overclaim, and it would pass a count-only pin.
+        Mutant: the corpus detail dropped from the header in apps/handlers/audit/audit_display.py — killed.
         """
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
+        rendered = _rendered(capsys, audit_display.print_branch_summary, self._make_audit_result(files_checked=171))
+        assert "171 files measured" in rendered
+        assert "apps/ plus tests/" in rendered
+        assert "test_*.py and conftest.py" in rendered
 
-        from aipass.seedgo.apps.handlers.audit import audit_display
-
-        mock_con = MagicMock()
-        monkeypatch.setattr(audit_display, "console", mock_con)
-        print_branch_summary(self._make_audit_result(files_checked=171))
-        rendered = " ".join(str(c) for c in mock_con.print.call_args_list)
-        assert "171 production files measured" in rendered
-        assert "apps/ only" in rendered
-        assert "tests/ not in the corpus" in rendered
-
-    def test_the_scope_words_are_not_hardcoded_around_the_count(self, monkeypatch):
+    def test_the_scope_words_are_not_hardcoded_around_the_count(self, capsys):
         """Negative control on the pin above: the number still has to be real.
 
         A header that printed the qualifier with a constant would satisfy every
         assertion above while reporting the wrong corpus size.
+        Mutant: the corpus size defaulted to 171 in apps/handlers/audit/audit_display.py — killed.
         """
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
+        rendered = _rendered(capsys, audit_display.print_branch_summary, self._make_audit_result(files_checked=3))
+        assert "3 files measured" in rendered
 
-        from aipass.seedgo.apps.handlers.audit import audit_display
-
-        mock_con = MagicMock()
-        monkeypatch.setattr(audit_display, "console", mock_con)
-        print_branch_summary(self._make_audit_result(files_checked=3))
-        rendered = " ".join(str(c) for c in mock_con.print.call_args_list)
-        assert "3 production files measured" in rendered
-
-    def test_post_check_crash_prints_even_at_a_perfect_score(self):
+    def test_post_check_crash_prints_even_at_a_perfect_score(self, capsys):
         """A crashed post-check reaches the CONSOLE on a branch scoring 100.
 
         Not red before the fix — audit_display already had the catch-all lane
@@ -848,13 +549,8 @@ class TestPrintBranchSummary:
         100, and the score-driven renderer skips every standard at 100. The
         catch-all violation lane is the only thing that prints it, so it is
         pinned here rather than assumed.
+        Mutant: the catch-all lane reads no violations in apps/handlers/audit/audit_display.py — killed.
         """
-        import sys
-
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
         detail = (
             "log_structure post-check crashed on branch test_branch (TypeError: check_branch_post() "
             "got an unexpected keyword argument 'bypass_rules') — the branch's log_structure score "
@@ -869,21 +565,13 @@ class TestPrintBranchSummary:
                 ]
             },
         )
-        console = sys.modules["aipass.cli"].console
-        console.reset_mock()
+        printed = _rendered(capsys, audit_display.print_branch_summary, result)
 
-        print_branch_summary(result)
-
-        printed = " ".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
         assert "post-check crashed" in printed, "a 100 that excludes a check must say so on screen"
         assert "TypeError" in printed
 
-    def test_odd_number_of_scores(self):
-        """Odd number of scores renders last one alone."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
+    def test_odd_number_of_scores(self, capsys):
+        """Odd number of scores renders last one alone. Mutant: the unpaired last score not printed in apps/handlers/audit/audit_display.py — killed."""
         result = self._make_audit_result(
             scores={
                 "architecture": 90,
@@ -893,29 +581,21 @@ class TestPrintBranchSummary:
             average=80,
         )
 
-        rendered = _rendered(print_branch_summary, result)
+        rendered = _rendered(capsys, audit_display.print_branch_summary, result)
 
         # The third standard is the one a two-per-row renderer drops.
         assert "Meta" in rendered, "the odd standard was not rendered at all"
 
-    def test_empty_scores(self):
-        """Empty scores dict still renders overall."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
+    def test_empty_scores(self, capsys):
+        """Empty scores dict still renders overall. Mutant: Overall printed only when scores exist in apps/handlers/audit/audit_display.py — killed."""
         result = self._make_audit_result(scores={}, average=0)
 
-        rendered = _rendered(print_branch_summary, result)
+        rendered = _rendered(capsys, audit_display.print_branch_summary, result)
 
         assert "Overall" in rendered, "a branch with no scores still owes an Overall line"
 
-    def test_architecture_violations_displayed(self):
-        """Architecture score < 100 triggers arch violation render."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
+    def test_architecture_violations_displayed(self, capsys):
+        """Architecture score < 100 triggers arch violation render. Mutant: the architecture renderer not called in apps/handlers/audit/audit_display.py — killed."""
         result = self._make_audit_result(
             scores={"architecture": 70},
             average=70,
@@ -931,19 +611,15 @@ class TestPrintBranchSummary:
             },
         )
 
-        rendered = _rendered(print_branch_summary, result)
+        rendered = _rendered(capsys, audit_display.print_branch_summary, result)
 
         # The renderer strips the "Dir: " prefix and groups the failure under a
         # heading, so the check's own name is not what reaches the screen.
         assert "Missing directories" in rendered, "the failed check got no heading"
-        assert "apps" in rendered, "the directory that failed was not named"
+        assert "✗ apps" in rendered, "the directory that failed was not named"
 
-    def test_standard_violations_displayed(self):
-        """Standard with violations list gets rendered."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
+    def test_standard_violations_displayed(self, capsys):
+        """Standard with violations list gets rendered. Mutant: the scored violation list marked rendered but not printed in apps/handlers/audit/audit_display.py — killed."""
         result = self._make_audit_result(
             scores={"naming": 60},
             average=60,
@@ -958,16 +634,12 @@ class TestPrintBranchSummary:
             },
         )
 
-        rendered = _rendered(print_branch_summary, result)
+        rendered = _rendered(capsys, audit_display.print_branch_summary, result)
 
         assert "Bad name" in rendered, "the violation's own issue text was not rendered"
 
-    def test_branch_level_failed_checks(self):
-        """Failed checks but no violations list renders messages."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
+    def test_branch_level_failed_checks(self, capsys):
+        """Failed checks but no violations list renders messages. Mutant: passing checks kept as findings in apps/handlers/audit/audit_display.py — killed."""
         result = self._make_audit_result(
             scores={"dead_code": 70},
             average=70,
@@ -984,17 +656,13 @@ class TestPrintBranchSummary:
             },
         )
 
-        rendered = _rendered(print_branch_summary, result)
+        rendered = _rendered(capsys, audit_display.print_branch_summary, result)
 
         assert "Unused function foo()" in rendered, "a failed check with no violations list went unrendered"
         assert "OK" not in rendered, "a PASSING check must not be rendered as a finding"
 
-    def test_violations_not_in_scores_rendered(self):
-        """Violation lists not in scores are caught defensively."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
+    def test_violations_not_in_scores_rendered(self, capsys):
+        """Violation lists not in scores are caught defensively. Mutant: the catch-all lane reads no violations in apps/handlers/audit/audit_display.py — killed."""
         result = self._make_audit_result(
             scores={"naming": 100},
             average=100,
@@ -1007,16 +675,12 @@ class TestPrintBranchSummary:
             },
         ]
 
-        rendered = _rendered(print_branch_summary, result)
+        rendered = _rendered(capsys, audit_display.print_branch_summary, result)
 
         assert "Orphan violation" in rendered, "a violation list with no matching score was silently dropped"
 
-    def test_type_errors_rendered(self):
-        """Type errors section is rendered."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
+    def test_type_errors_rendered(self, capsys):
+        """Type errors section is rendered. Mutant: the type-error renderer not called in apps/handlers/audit/audit_display.py — killed."""
         result = self._make_audit_result(
             extra={
                 "type_errors": 2,
@@ -1032,16 +696,12 @@ class TestPrintBranchSummary:
             },
         )
 
-        rendered = _rendered(print_branch_summary, result)
+        rendered = _rendered(capsys, audit_display.print_branch_summary, result)
 
         assert "bad.py" in rendered, "the file carrying the type errors was not named"
 
-    def test_test_map_rendered(self):
-        """Test map section is rendered."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
+    def test_test_map_rendered(self, capsys):
+        """Test map section is rendered. Mutant: the test-map renderer not called in apps/handlers/audit/audit_display.py — killed."""
         result = self._make_audit_result(
             extra={
                 "test_map": {
@@ -1052,16 +712,12 @@ class TestPrintBranchSummary:
             },
         )
 
-        rendered = _rendered(print_branch_summary, result)
+        rendered = _rendered(capsys, audit_display.print_branch_summary, result)
 
-        assert "3" in rendered and "5" in rendered, "the test-map counts were not rendered"
+        assert "5 public functions, 3 tested" in rendered, "the test-map counts were not rendered"
 
-    def test_deprecated_patterns_rendered(self):
-        """Deprecated patterns section is rendered."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
+    def test_deprecated_patterns_rendered(self, capsys):
+        """Deprecated patterns section is rendered. Mutant: the deprecated-pattern renderer not called in apps/handlers/audit/audit_display.py — killed."""
         result = self._make_audit_result(
             extra={
                 "deprecated_patterns": [
@@ -1073,20 +729,17 @@ class TestPrintBranchSummary:
             },
         )
 
-        rendered = _rendered(print_branch_summary, result)
+        rendered = _rendered(capsys, audit_display.print_branch_summary, result)
 
         assert "Rename to docs/" in rendered, "the deprecated-pattern message was not rendered"
 
-    def test_system_averages_and_overall(self):
-        """system_averages and overall_system_avg args accepted."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
+    def test_system_averages_and_overall(self, capsys):
+        """system_averages and overall_system_avg args accepted. Mutant: the branch name dropped from the header in apps/handlers/audit/audit_display.py — killed."""
         result = self._make_audit_result()
 
         rendered = _rendered(
-            print_branch_summary,
+            capsys,
+            audit_display.print_branch_summary,
             result,
             system_averages={"naming": 85},
             overall_system_avg=87,
@@ -1094,26 +747,19 @@ class TestPrintBranchSummary:
 
         assert "test_branch" in rendered, "the branch summary rendered nothing at all"
 
-    def test_no_bypass_label_travels_with_the_branch_score(self):
-        """A --no-bypass summary says so — the score alone reads as a regression."""
-        from aipass.seedgo.apps.handlers.audit import audit_display
+    def test_no_bypass_label_travels_with_the_branch_score(self, capsys):
+        """A --no-bypass summary says so: the score alone reads as a regression.
 
-        mock_con = MagicMock()
-        with patch.object(audit_display, "console", mock_con):
-            audit_display.print_branch_summary(self._make_audit_result(), no_bypass=True)
-
-        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+        Mutant: no_bypass forced False in apps/handlers/audit/audit_display.py — killed.
+        """
+        printed = _rendered(
+            capsys, audit_display.print_branch_summary, self._make_audit_result(), no_bypass=True
+        ).upper()
         assert "BYPASSES DISABLED" in printed
 
-    def test_normal_branch_summary_makes_no_bypass_claim(self):
-        """Control — the label appears only when bypasses really were disabled."""
-        from aipass.seedgo.apps.handlers.audit import audit_display
-
-        mock_con = MagicMock()
-        with patch.object(audit_display, "console", mock_con):
-            audit_display.print_branch_summary(self._make_audit_result())
-
-        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+    def test_normal_branch_summary_makes_no_bypass_claim(self, capsys):
+        """Control: the label only when bypasses were disabled. Mutant: no_bypass forced True in apps/handlers/audit/audit_display.py — killed."""
+        printed = _rendered(capsys, audit_display.print_branch_summary, self._make_audit_result()).upper()
         assert "BYPASSES DISABLED" not in printed
 
 
@@ -1136,32 +782,25 @@ class TestPrintSystemSummary:
         }
 
     @staticmethod
-    def _rendered_lines(results: list, **kwargs) -> list:
-        """Every string print_system_summary hands to console.print, in order.
+    def _rendered_lines(capsys, results: list, **kwargs) -> list:
+        """Every line print_system_summary wrote to stdout, in order.
 
-        The autouse fixture mocks `aipass.cli`, so `audit_display.console` is a
-        MagicMock and stdout stays empty — `capsys` would see nothing. The call
-        args are the strings the module actually chose, and they arrive before
-        Rich renders them, so a pinned fragment can never be split by a wrap.
+        The console is the real one and conftest pins its width at 200, so no
+        pinned line here is long enough to be split by a wrap.
         """
-        from aipass.seedgo.apps.handlers.audit import audit_display
+        return _rendered(capsys, audit_display.print_system_summary, results, **kwargs).splitlines()
 
-        recorder = MagicMock()
-        with patch.object(audit_display, "console", recorder):
-            audit_display.print_system_summary(results, **kwargs)
-        return [str(call.args[0]) if call.args else "" for call in recorder.print.call_args_list]
-
-    def test_empty_results(self):
-        """An empty fleet divides by no branches: zeros throughout, no improvement areas."""
-        lines = self._rendered_lines([])
+    def test_empty_results(self, capsys):
+        """An empty fleet divides by no branches: zeros throughout, no improvement areas. Mutant: improvement areas always headed in apps/handlers/audit/audit_display.py — killed."""
+        lines = self._rendered_lines(capsys, [])
 
         assert "  Total branches:        0" in lines
         assert "  Average compliance:    0%" in lines
         assert "  Type errors:           0" in lines
-        assert "[bold]STANDARD AVERAGES:[/bold]" in lines
-        assert "[bold]TOP IMPROVEMENT AREAS:[/bold]" not in lines
+        assert "STANDARD AVERAGES:" in lines
+        assert "TOP IMPROVEMENT AREAS:" not in lines
 
-    def test_mixed_tiers(self):
+    def test_mixed_tiers(self, capsys):
         """A fleet spanning all three tiers renders, and so does an all-excellent one.
 
         MERGED 2026-09-07 (FPLAN-0496, the DPLAN-0323 contested band).
@@ -1174,6 +813,7 @@ class TestPrintSystemSummary:
         FPLAN-0509: it asserted nothing, so "renders" was the whole claim. Both
         lists now pin the tier counts they were chosen to exercise. Re-mutated:
         widening `excellent` to `average >= 96` reds it.
+        Mutant: excellent read as average >= 96 in apps/handlers/audit/audit_display.py — killed.
         """
         cases = [
             (
@@ -1207,29 +847,30 @@ class TestPrintSystemSummary:
         assert len(cases) == 2, "both the spread fleet and the merged all-excellent one must run"
 
         for results, expected in cases:
-            lines = self._rendered_lines(results)
+            lines = self._rendered_lines(capsys, results)
             for line in expected:
                 assert line in lines, f"{line!r} missing from {lines!r}"
 
-    def test_type_errors_in_summary(self):
-        """The type-error total is the fleet sum, counted alongside the branches carrying it."""
+    def test_type_errors_in_summary(self, capsys):
+        """The type-error total is the fleet sum, with the branches carrying it. Mutant: every branch counted as carrying errors in apps/handlers/audit/audit_display.py — killed."""
         lines = self._rendered_lines(
+            capsys,
             [
                 self._make_result("a", 85, type_errors=5),
                 self._make_result("b", 90, type_errors=0),
-            ]
+            ],
         )
 
         assert "  Type errors:           5 (1 branches)" in lines
 
-    def test_no_type_errors_green(self):
-        """A clean fleet prints the bare zero, without the branch-count parenthetical."""
-        lines = self._rendered_lines([self._make_result("a", 90)])
+    def test_no_type_errors_green(self, capsys):
+        """A clean fleet prints the bare zero, without the branch count. Mutant: the zero total takes the counted arm in apps/handlers/audit/audit_display.py — killed."""
+        lines = self._rendered_lines(capsys, [self._make_result("a", 90)])
 
         assert "  Type errors:           0" in lines
         assert not [line for line in lines if line.startswith("  Type errors:") and "branches)" in line]
 
-    def test_odd_standard_count(self):
+    def test_odd_standard_count(self, capsys):
         """An odd standard count renders the last one alone, at any tier of averages.
 
         MERGED 2026-09-07 (FPLAN-0496, the DPLAN-0323 contested band).
@@ -1241,6 +882,7 @@ class TestPrintSystemSummary:
         FPLAN-0509: the icons the merge note called "never asserted" are asserted
         here now, alongside the odd-one-out row. Re-mutated: stepping the pairing
         loop by 3 reds it, and so does moving the ✅ threshold to `>= 91`.
+        Mutant: the pairing loop stepped by 3 in apps/handlers/audit/audit_display.py — killed.
         """
         cases = [
             (
@@ -1261,44 +903,35 @@ class TestPrintSystemSummary:
         assert len(cases) == 2, "both the plain spread and the merged three-tier icon set must run"
 
         for scores, expected in cases:
-            lines = self._rendered_lines([self._make_result("a", 80, scores=scores)])
+            lines = self._rendered_lines(capsys, [self._make_result("a", 80, scores=scores)])
             paired, alone = expected
             assert paired in lines, f"{paired!r} missing from {lines!r}"
             assert alone in lines, f"the odd third standard did not render alone: {lines!r}"
 
-    def test_top_improvement_areas(self):
-        """The three worst standards are ranked, each with its own <75% branch count."""
+    def test_top_improvement_areas(self, capsys):
+        """The three worst standards are ranked, each with its own <75% branch count. Mutant: the count read as < 60 in apps/handlers/audit/audit_display.py — killed."""
         lines = self._rendered_lines(
+            capsys,
             [
                 self._make_result("a", 60, scores={"arch": 50, "naming": 70}),
                 self._make_result("b", 80, scores={"arch": 90, "naming": 70}),
-            ]
+            ],
         )
 
-        assert "[bold]TOP IMPROVEMENT AREAS:[/bold]" in lines
+        assert "TOP IMPROVEMENT AREAS:" in lines
         assert "  1. Arch            (avg: 70%, 1 branches <75%)" in lines
         assert "  2. Naming          (avg: 70%, 2 branches <75%)" in lines
 
-    def test_no_bypass_label_travels_with_the_fleet_average(self):
-        """The summary block is what gets copied out — it carries the label itself."""
-        from aipass.seedgo.apps.handlers.audit import audit_display
-
-        mock_con = MagicMock()
-        with patch.object(audit_display, "console", mock_con):
-            audit_display.print_system_summary([self._make_result("a", 95)], no_bypass=True)
-
-        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+    def test_no_bypass_label_travels_with_the_fleet_average(self, capsys):
+        """The summary block carries the label itself. Mutant: no_bypass forced False in apps/handlers/audit/audit_display.py — killed."""
+        printed = _rendered(
+            capsys, audit_display.print_system_summary, [self._make_result("a", 95)], no_bypass=True
+        ).upper()
         assert "BYPASSES DISABLED" in printed
 
-    def test_normal_system_summary_makes_no_bypass_claim(self):
-        """Control — a normal fleet summary carries no such label."""
-        from aipass.seedgo.apps.handlers.audit import audit_display
-
-        mock_con = MagicMock()
-        with patch.object(audit_display, "console", mock_con):
-            audit_display.print_system_summary([self._make_result("a", 95)])
-
-        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+    def test_normal_system_summary_makes_no_bypass_claim(self, capsys):
+        """Control: a normal fleet summary carries no such label. Mutant: no_bypass forced True in apps/handlers/audit/audit_display.py — killed."""
+        printed = _rendered(capsys, audit_display.print_system_summary, [self._make_result("a", 95)]).upper()
         assert "BYPASSES DISABLED" not in printed
 
 
@@ -1312,10 +945,6 @@ class TestDiscoverCheckers:
 
     def test_discover_from_path(self, tmp_path):
         """Discovers *_check.py modules with check_module."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            discover_checkers,
-        )
-
         standards_dir = tmp_path / "standards"
         standards_dir.mkdir()
         checker_file = standards_dir / "naming_check.py"
@@ -1326,52 +955,36 @@ class TestDiscoverCheckers:
             "    }\n",
             encoding="utf-8",
         )
-        result = discover_checkers(standards_dir)
+        result = branch_audit.discover_checkers(standards_dir)
         assert "naming" in result
 
     def test_skip_without_check_functions(self, tmp_path):
         """Skips modules without check_module or check_branch."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            discover_checkers,
-        )
-
         standards_dir = tmp_path / "standards"
         standards_dir.mkdir()
         checker_file = standards_dir / "bad_check.py"
         checker_file.write_text("x = 42\n", encoding="utf-8")
-        result = discover_checkers(standards_dir)
+        result = branch_audit.discover_checkers(standards_dir)
         assert "bad" not in result
 
     def test_skip_failing_load(self, tmp_path):
         """Skips modules that raise during exec_module."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            discover_checkers,
-        )
-
         standards_dir = tmp_path / "standards"
         standards_dir.mkdir()
         checker_file = standards_dir / "broken_check.py"
         checker_file.write_text("raise RuntimeError('broken')\n", encoding="utf-8")
-        result = discover_checkers(standards_dir)
+        result = branch_audit.discover_checkers(standards_dir)
         assert "broken" not in result
 
     def test_empty_directory(self, tmp_path):
         """Empty standards dir returns empty dict."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            discover_checkers,
-        )
-
         standards_dir = tmp_path / "standards"
         standards_dir.mkdir()
-        result = discover_checkers(standards_dir)
+        result = branch_audit.discover_checkers(standards_dir)
         assert result == {}
 
     def test_spec_none_skipped(self, tmp_path):
         """Files where spec_from_file_location returns None skipped."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            discover_checkers,
-        )
-
         standards_dir = tmp_path / "standards"
         standards_dir.mkdir()
         checker_file = standards_dir / "valid_check.py"
@@ -1386,15 +999,11 @@ class TestDiscoverCheckers:
             "importlib.util.spec_from_file_location",
             return_value=None,
         ):
-            result = discover_checkers(standards_dir)
+            result = branch_audit.discover_checkers(standards_dir)
         assert "valid" not in result
 
     def test_check_branch_function_discovered(self, tmp_path):
         """Modules with check_branch are discovered."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            discover_checkers,
-        )
-
         standards_dir = tmp_path / "standards"
         standards_dir.mkdir()
         checker_file = standards_dir / "branch_check.py"
@@ -1405,157 +1014,130 @@ class TestDiscoverCheckers:
             "    }\n",
             encoding="utf-8",
         )
-        result = discover_checkers(standards_dir)
+        result = branch_audit.discover_checkers(standards_dir)
         assert "branch" in result
 
 
+def _recording_checker(answer=None, scope: str = "all_files", include_init: bool = False) -> types.SimpleNamespace:
+    """A per-file checker that records the NAME of every file it is handed.
+
+    *answer* maps a file name to the result dict; the default passes everything
+    at 100. ``seen`` is the record the corpus tests read.
+    """
+    seen: list = []
+
+    def check_module(module_path, bypass_rules=None):
+        name = Path(module_path).name
+        seen.append(name)
+        if answer is not None:
+            return answer(name)
+        return {"passed": True, "score": 100, "checks": [{"passed": True, "message": "OK"}]}
+
+    return types.SimpleNamespace(
+        AUDIT_SCOPE=scope, FILE_FILTER=None, INCLUDE_INIT_FILES=include_init, check_module=check_module, seen=seen
+    )
+
+
+def _audit_corpus(monkeypatch, root: Path, checkers: dict, files=()) -> dict:
+    """audit_branch over a branch at *root* holding *files*, judged by *checkers*.
+
+    The entry file is ``entry.py`` at the branch root, never written and outside
+    apps/, so a file under apps/ reaches a checker only through the corpus.
+    tmp_path lies under the system temp root, which is_throwaway_path drops
+    wholesale; emptying the root list lets the real predicate judge each file.
+    The diagnostics loader would run pyright over the branch; it is silenced
+    here, and its own lane is pinned by test_diagnostics_checker_added.
+    """
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: checkers)
+    monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+    for rel in files:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text("pass", encoding="utf-8")
+    branch = {"name": "corpus", "entry_file": str(root / "entry.py"), "path": str(root)}
+    return branch_audit.audit_branch(branch, [])
+
+
+def _checked(checker: types.SimpleNamespace) -> set:
+    """The corpus file names a recording checker was handed, the entry file left out."""
+    return set(checker.seen) - {"entry.py"}
+
+
 class TestCollectPyFiles:
-    """Tests for _collect_py_files."""
+    """The corpus audit_branch walks: what reaches an all_files checker."""
 
-    def test_no_apps_dir(self, tmp_path):
-        """Returns empty list when apps/ does not exist."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _collect_py_files,
-        )
-
-        result = _collect_py_files(tmp_path)
-        assert result == []
+    def test_no_apps_dir(self, tmp_path, monkeypatch):
+        """No apps/ means an empty corpus, whatever sits at the root. Mutant: apps_dir read as the branch root in apps/handlers/audit/branch_audit.py — killed."""
+        checker = _recording_checker()
+        result = _audit_corpus(monkeypatch, tmp_path, {"naming": checker}, files=("setup.py",))
+        assert result["files_checked"] == 0
+        assert _checked(checker) == set()
 
     def test_collects_py_files(self, tmp_path, monkeypatch):
-        """Collects .py from apps/, excluding __init__.py."""
-        import sys
-
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _collect_py_files,
-        )
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-        (apps_dir / "__init__.py").write_text("", encoding="utf-8")
-        (apps_dir / "module.py").write_text("pass", encoding="utf-8")
-        subdir = apps_dir / "handlers"
-        subdir.mkdir()
-        (subdir / "handler.py").write_text("pass", encoding="utf-8")
-        result = _collect_py_files(tmp_path)
-        names = [f["name"] for f in result]
+        """Collects .py from apps/, excluding __init__.py. Mutant: __init__.py always collected in apps/handlers/audit/branch_audit.py — killed."""
+        checker = _recording_checker()
+        files = ("apps/__init__.py", "apps/module.py", "apps/handlers/handler.py")
+        _audit_corpus(monkeypatch, tmp_path, {"naming": checker}, files=files)
+        names = _checked(checker)
         assert "module.py" in names
         assert "handler.py" in names
         assert "__init__.py" not in names
 
     def test_collects_init_files_when_requested(self, tmp_path, monkeypatch):
-        """include_init=True keeps __init__.py — for import checkers that must not miss them."""
-        import sys
+        """INCLUDE_INIT_FILES keeps __init__.py, for import checkers that must not miss them.
 
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _collect_py_files,
-        )
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-        (apps_dir / "__init__.py").write_text("", encoding="utf-8")
-        (apps_dir / "module.py").write_text("pass", encoding="utf-8")
-        result = _collect_py_files(tmp_path, include_init=True)
-        names = [f["name"] for f in result]
+        Mutant: the init walk asked for no inits in apps/handlers/audit/branch_audit.py — killed.
+        """
+        checker = _recording_checker(include_init=True)
+        _audit_corpus(monkeypatch, tmp_path, {"handlers": checker}, files=("apps/__init__.py", "apps/module.py"))
+        names = _checked(checker)
         assert "module.py" in names
         assert "__init__.py" in names
 
     def test_respects_ignore_patterns(self, tmp_path, monkeypatch):
-        """Files matching ignore patterns are excluded."""
-        import sys
-
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
-        # Use a unique pattern that will NOT collide with the pytest tmp_path
-        # directory name (which includes the test function name).
-        mock_ign = sys.modules["aipass.seedgo.apps.handlers.bypass"].ignore_handler
-        mock_ign.get_audit_ignore_patterns.return_value = ["xskip_"]
-
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _collect_py_files,
-        )
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-        (apps_dir / "module.py").write_text("pass", encoding="utf-8")
-        (apps_dir / "xskip_bad.py").write_text("pass", encoding="utf-8")
-        result = _collect_py_files(tmp_path)
-        names = [f["name"] for f in result]
-        assert "module.py" in names
-        assert "xskip_bad.py" not in names
+        """Files matching ignore patterns are excluded. Mutant: the ignore match discarded in apps/handlers/audit/branch_audit.py — killed."""
+        # The real matcher over branch-relative paths: the tmp_path name cannot collide.
+        monkeypatch.setattr(branch_audit.ignore_handler, "audit_ignore_match", real_audit_ignore_match)
+        checker = _recording_checker()
+        files = ("apps/module.py", "apps/integrations/google/driver.py", "apps/handlers/integrations/call.py")
+        _audit_corpus(monkeypatch, tmp_path, {"naming": checker}, files=files)
+        assert sorted(_checked(checker)) == ["call.py", "module.py"]
 
     def test_excludes_disabled_files(self, tmp_path, monkeypatch):
-        """Files with (disabled) in the name are excluded from collection."""
-        import sys
-
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _collect_py_files,
-        )
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-        (apps_dir / "module.py").write_text("pass", encoding="utf-8")
-        (apps_dir / "dashboard_sync(disabled).py").write_text("pass", encoding="utf-8")
-        result = _collect_py_files(tmp_path)
-        names = [f["name"] for f in result]
+        """Files with (disabled) in the name are excluded. Mutant: the disabled-name test dropped in apps/handlers/audit/branch_audit.py — killed."""
+        checker = _recording_checker()
+        files = ("apps/module.py", "apps/dashboard_sync(disabled).py")
+        _audit_corpus(monkeypatch, tmp_path, {"naming": checker}, files=files)
+        names = _checked(checker)
         assert "module.py" in names
         assert "dashboard_sync(disabled).py" not in names
 
     def test_respects_seedgo_ignore_tools_dir(self, tmp_path, monkeypatch):
-        """Files under apps/tools/ are excluded via the global .seedgoignore default."""
-        import sys
-
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _collect_py_files,
-        )
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-        (apps_dir / "module.py").write_text("pass", encoding="utf-8")
-        tools_dir = apps_dir / "tools"
-        tools_dir.mkdir()
-        (tools_dir / "scratch.py").write_text("pass", encoding="utf-8")
-        result = _collect_py_files(tmp_path)
-        names = [f["name"] for f in result]
+        """Files under apps/tools/ are excluded via the global .seedgoignore default. Mutant: .seedgoignore not consulted in apps/handlers/audit/branch_audit.py — killed."""
+        checker = _recording_checker()
+        _audit_corpus(monkeypatch, tmp_path, {"naming": checker}, files=("apps/module.py", "apps/tools/scratch.py"))
+        names = _checked(checker)
         assert "module.py" in names
         assert "scratch.py" not in names
 
 
+def _branch_level(result: dict) -> types.SimpleNamespace:
+    """A branch-level checker whose whole-branch answer is *result*."""
+    return types.SimpleNamespace(AUDIT_SCOPE="branch_level", check_branch=lambda branch_path, bypass_rules=None: result)
+
+
 class TestExtractBranchLevelViolations:
-    """Tests for _extract_branch_level_violations."""
+    """A branch-level result's per-file findings, as audit_branch reports them."""
 
-    def test_empty_result(self):
-        """Empty dict returns empty list."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _extract_branch_level_violations,
-        )
+    def test_empty_result(self, tmp_path, monkeypatch):
+        """Empty result reports no violations and no crash. Mutant: checks read without a default in apps/handlers/audit/branch_audit.py — killed."""
+        result = _audit_corpus(monkeypatch, tmp_path, {"dead_code": _branch_level({})})
+        assert result["dead_code_violations"] == []
+        assert "error" not in result["results"]["dead_code"]
 
-        assert _extract_branch_level_violations({}) == []
-
-    def test_extracts_violations(self):
-        """Extracts violations from checks with list-type keys."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _extract_branch_level_violations,
-        )
-
-        result = {
+    def test_extracts_violations(self, tmp_path, monkeypatch):
+        """Extracts violations from checks with list-type keys. Mutant: each file keeps only its last finding in apps/handlers/audit/branch_audit.py — killed."""
+        found = {
             "checks": [
                 {
                     "name": "unused_check",
@@ -1576,18 +1158,14 @@ class TestExtractBranchLevelViolations:
                 },
             ]
         }
-        violations = _extract_branch_level_violations(result)
+        violations = _audit_corpus(monkeypatch, tmp_path, {"dead_code": _branch_level(found)})["dead_code_violations"]
         assert len(violations) == 1
         assert violations[0]["file"] == "/foo.py"
         assert len(violations[0]["issues"]) == 2
 
-    def test_skips_non_list_keys(self):
-        """Skips standard keys (name, passed, message, score)."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _extract_branch_level_violations,
-        )
-
-        result = {
+    def test_skips_non_list_keys(self, tmp_path, monkeypatch):
+        """Skips standard keys (name, passed, message, score). Mutant: no key skipped in apps/handlers/audit/branch_audit.py — killed."""
+        found = {
             "checks": [
                 {
                     "name": "check",
@@ -1597,15 +1175,13 @@ class TestExtractBranchLevelViolations:
                 },
             ]
         }
-        assert _extract_branch_level_violations(result) == []
+        result = _audit_corpus(monkeypatch, tmp_path, {"dead_code": _branch_level(found)})
+        assert result["dead_code_violations"] == []
+        assert "error" not in result["results"]["dead_code"]
 
-    def test_skips_items_without_file_key(self):
-        """Skips list items without a file key."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _extract_branch_level_violations,
-        )
-
-        result = {
+    def test_skips_items_without_file_key(self, tmp_path, monkeypatch):
+        """Skips list items without a file key. Mutant: the file-key guard dropped in apps/handlers/audit/branch_audit.py — killed."""
+        found = {
             "checks": [
                 {
                     "name": "check",
@@ -1615,15 +1191,13 @@ class TestExtractBranchLevelViolations:
                 },
             ]
         }
-        assert _extract_branch_level_violations(result) == []
+        result = _audit_corpus(monkeypatch, tmp_path, {"dead_code": _branch_level(found)})
+        assert result["dead_code_violations"] == []
+        assert "error" not in result["results"]["dead_code"]
 
-    def test_multiple_files(self):
-        """Groups violations by file path."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _extract_branch_level_violations,
-        )
-
-        result = {
+    def test_multiple_files(self, tmp_path, monkeypatch):
+        """Groups violations by file path. Mutant: every finding grouped under one file in apps/handlers/audit/branch_audit.py — killed."""
+        found = {
             "checks": [
                 {
                     "name": "dead",
@@ -1644,7 +1218,7 @@ class TestExtractBranchLevelViolations:
                 },
             ]
         }
-        violations = _extract_branch_level_violations(result)
+        violations = _audit_corpus(monkeypatch, tmp_path, {"dead_code": _branch_level(found)})["dead_code_violations"]
         assert len(violations) == 2
         files = {v["file"] for v in violations}
         assert "/a.py" in files
@@ -1652,101 +1226,57 @@ class TestExtractBranchLevelViolations:
 
 
 class TestRunAllFiles:
-    """Tests for _run_all_files."""
+    """The all_files lane of audit_branch: every corpus file through one checker."""
 
-    def test_basic_run(self):
-        """Basic run collects scores from passing checks."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _run_all_files,
+    def test_basic_run(self, tmp_path, monkeypatch):
+        """Basic run collects scores from passing checks. Mutant: each file's score recorded as 0 in apps/handlers/audit/branch_audit.py — killed."""
+        checker = _recording_checker(
+            lambda name: {"passed": True, "score": 90, "checks": [{"passed": True, "message": "OK"}]}
         )
+        result = _audit_corpus(monkeypatch, tmp_path, {"naming": checker}, files=("apps/foo.py",))
+        assert "foo.py" in _checked(checker)
+        assert result["scores"]["naming"] == 90
 
-        checker = MagicMock()
-        checker.check_module = MagicMock(
-            return_value={
-                "passed": True,
-                "score": 90,
-                "checks": [
-                    {"passed": True, "message": "OK"},
-                ],
-            }
-        )
-        checker.FILE_FILTER = None
-        files = [{"file": "/foo.py", "name": "foo.py"}]
-        violations, scores = _run_all_files(checker, "naming", files, [])
-        assert len(scores) == 1
-        assert scores[0] == 90
+    def test_checker_raises_exception(self, tmp_path, monkeypatch):
+        """Checker that raises is skipped. Mutant: the per-file catch narrowed to KeyError in apps/handlers/audit/branch_audit.py — killed."""
 
-    def test_checker_raises_exception(self):
-        """Checker that raises is skipped."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _run_all_files,
-        )
+        def boom(name):
+            raise RuntimeError("boom")
 
-        checker = MagicMock()
-        checker.check_module = MagicMock(side_effect=RuntimeError("boom"))
-        checker.FILE_FILTER = None
-        files = [{"file": "/foo.py", "name": "foo.py"}]
-        violations, scores = _run_all_files(checker, "naming", files, [])
-        assert violations == []
-        assert scores == []
+        result = _audit_corpus(monkeypatch, tmp_path, {"naming": _recording_checker(boom)}, files=("apps/foo.py",))
+        assert result["naming_violations"] == []
+        assert result["scores"]["naming"] == 0
 
-    def test_file_filter(self):
-        """FILE_FILTER skips non-matching files."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _run_all_files,
-        )
-
-        checker = MagicMock()
-        checker.check_module = MagicMock(
-            return_value={
-                "passed": True,
-                "score": 100,
-                "checks": [
-                    {"passed": True, "message": "OK"},
-                ],
-            }
-        )
+    def test_file_filter(self, tmp_path, monkeypatch):
+        """FILE_FILTER skips non-matching files. Mutant: FILE_FILTER ignored in apps/handlers/audit/branch_audit.py — killed."""
+        checker = _recording_checker()
         checker.FILE_FILTER = "handler"
-        files = [
-            {"file": "/handler.py", "name": "handler.py"},
-            {"file": "/module.py", "name": "module.py"},
-        ]
-        violations, scores = _run_all_files(checker, "naming", files, [])
-        assert checker.check_module.call_count == 1
+        _audit_corpus(monkeypatch, tmp_path, {"naming": checker}, files=("apps/handler.py", "apps/module.py"))
+        assert _checked(checker) == {"handler.py"}
 
-    def test_skipped_checks_excluded(self):
-        """Checks with skipped/not applicable excluded."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _run_all_files,
+    def test_a_declined_check_is_excluded_and_named(self, tmp_path, monkeypatch):
+        """A file stands down on the declined field, never on its message's words. Mutant: declined files averaged in apps/handlers/audit/branch_audit.py — killed."""
+
+        def answer(name):
+            if name == "foo.py":
+                return {
+                    "passed": True,
+                    "score": 100,
+                    "checks": [{"passed": True, "declined": True, "message": "Not a naming target"}],
+                }
+            return {"passed": True, "score": 40, "checks": [{"passed": True, "message": "fine"}]}
+
+        result = _audit_corpus(
+            monkeypatch, tmp_path, {"naming": _recording_checker(answer)}, files=("apps/foo.py", "apps/bar.py")
         )
+        assert result["scores"]["naming"] == 40
+        assert result["declined"] == {"naming": ["apps/foo.py"]}
 
-        checker = MagicMock()
-        checker.check_module = MagicMock(
-            return_value={
-                "passed": True,
-                "score": 100,
-                "checks": [
-                    {
-                        "passed": True,
-                        "message": "Skipped -- not applicable",
-                    }
-                ],
-            }
-        )
-        checker.FILE_FILTER = None
-        files = [{"file": "/foo.py", "name": "foo.py"}]
-        violations, scores = _run_all_files(checker, "naming", files, [])
-        assert scores == []
+    def test_failing_checks_collected(self, tmp_path, monkeypatch):
+        """Failing checks collected as violations. Mutant: failures kept only above score 50 in apps/handlers/audit/branch_audit.py — killed."""
 
-    def test_failing_checks_collected(self):
-        """Failing checks collected as violations."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _run_all_files,
-        )
-
-        checker = MagicMock()
-        checker.check_module = MagicMock(
-            return_value={
+        def answer(name):
+            return {
                 "passed": False,
                 "score": 40,
                 "checks": [
@@ -1754,10 +1284,9 @@ class TestRunAllFiles:
                     {"passed": True, "message": "OK"},
                 ],
             }
-        )
-        checker.FILE_FILTER = None
-        files = [{"file": "/bad.py", "name": "bad.py"}]
-        violations, scores = _run_all_files(checker, "naming", files, [])
+
+        result = _audit_corpus(monkeypatch, tmp_path, {"naming": _recording_checker(answer)}, files=("apps/bad.py",))
+        violations = [v for v in result["naming_violations"] if v["file"] == "bad.py"]
         assert len(violations) == 1
         assert violations[0]["score"] == 40
         assert "Bad naming" in violations[0]["issues"]
@@ -1768,20 +1297,12 @@ class TestLoadDiagnosticsChecker:
 
     def test_path_not_exists(self):
         """Returns None when diagnostics file does not exist."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _load_diagnostics_checker,
-        )
-
         with patch("pathlib.Path.exists", return_value=False):
-            result = _load_diagnostics_checker()
+            result = branch_audit._load_diagnostics_checker()
         assert result is None
 
     def test_spec_none(self):
         """Returns None when spec_from_file_location is None."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _load_diagnostics_checker,
-        )
-
         with (
             patch("pathlib.Path.exists", return_value=True),
             patch(
@@ -1789,15 +1310,11 @@ class TestLoadDiagnosticsChecker:
                 return_value=None,
             ),
         ):
-            result = _load_diagnostics_checker()
+            result = branch_audit._load_diagnostics_checker()
         assert result is None
 
     def test_exec_module_raises(self):
         """Returns None when exec_module raises."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _load_diagnostics_checker,
-        )
-
         mock_spec = MagicMock()
         mock_spec.loader.exec_module.side_effect = RuntimeError("fail")
         with (
@@ -1811,15 +1328,11 @@ class TestLoadDiagnosticsChecker:
                 return_value=MagicMock(),
             ),
         ):
-            result = _load_diagnostics_checker()
+            result = branch_audit._load_diagnostics_checker()
         assert result is None
 
     def test_successful_load(self):
         """Returns module when loading succeeds."""
-        from aipass.seedgo.apps.handlers.audit.branch_audit import (
-            _load_diagnostics_checker,
-        )
-
         mock_mod = MagicMock()
         mock_spec = MagicMock()
         with (
@@ -1833,7 +1346,7 @@ class TestLoadDiagnosticsChecker:
                 return_value=mock_mod,
             ),
         ):
-            result = _load_diagnostics_checker()
+            result = branch_audit._load_diagnostics_checker()
         assert result is mock_mod
 
 
@@ -1925,10 +1438,18 @@ def _real_module_checker(**hooks) -> types.SimpleNamespace:
 class TestAuditBranch:
     """Tests for audit_branch."""
 
+    @pytest.fixture(autouse=True)
+    def _no_diagnostics(self, monkeypatch):
+        """The real diagnostics loader runs pyright over the branch; silenced here.
+
+        Its lane is pinned by test_diagnostics_checker_added and
+        test_diagnostics_not_duplicated, which install a loader that answers.
+        scan_branch is already silenced by the module's autouse fixture.
+        """
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+
     def test_basic_audit(self, tmp_path, monkeypatch):
         """Basic audit with one entry-point checker."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker()
         monkeypatch.setattr(
@@ -1936,12 +1457,6 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"naming": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["branch"] == branch
@@ -1950,8 +1465,6 @@ class TestAuditBranch:
 
     def test_branch_level_checker(self, tmp_path, monkeypatch):
         """Branch-level checker calls check_branch."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker(
             scope="branch_level",
@@ -1968,20 +1481,12 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"dead_code": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["scores"]["dead_code"] == 85
 
     def test_branch_level_checker_exception(self, tmp_path, monkeypatch):
         """Branch-level checker that raises produces score 0."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker(
             scope="branch_level",
@@ -1994,12 +1499,6 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"broken": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["scores"]["broken"] == 0
@@ -2007,8 +1506,6 @@ class TestAuditBranch:
 
     def test_entry_point_checker_exception(self, tmp_path, monkeypatch):
         """Entry-point checker that raises produces score 0."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker()
         checker.check_module.side_effect = RuntimeError("crash")
@@ -2017,12 +1514,6 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"naming": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["scores"]["naming"] == 0
@@ -2030,8 +1521,6 @@ class TestAuditBranch:
 
     def test_all_files_scope(self, tmp_path, monkeypatch):
         """all_files scope runs checker on every file."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, branch_path = _setup_branch(tmp_path)
         apps_dir = Path(branch_path) / "apps"
         (apps_dir / "other.py").write_text("pass", encoding="utf-8")
@@ -2051,20 +1540,12 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"naming": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["scores"]["naming"] == 80
 
     def test_all_files_with_violations(self, tmp_path, monkeypatch):
         """all_files scope with failing checks updates results."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, branch_path = _setup_branch(tmp_path)
         apps_dir = Path(branch_path) / "apps"
         (apps_dir / "bad.py").write_text("pass", encoding="utf-8")
@@ -2097,20 +1578,12 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"naming": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert "naming_violations" in result
 
     def test_all_files_scope_include_init_files_opt_in(self, tmp_path, monkeypatch):
         """Checker with INCLUDE_INIT_FILES=True sees __init__.py; a normal checker does not."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, branch_path = _setup_branch(tmp_path)
         apps_dir = Path(branch_path) / "apps"
         (apps_dir / "__init__.py").write_text("pass", encoding="utf-8")
@@ -2120,20 +1593,14 @@ class TestAuditBranch:
         normal_checker = _make_checker(scope="all_files")
 
         # tmp_path lives under the system temp dir, which is_throwaway_path
-        # filters out wholesale — neutralize that so _collect_py_files sees
-        # the fixture's files, same as it would for a real branch on disk.
-        monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda path_str: False)
+        # filters out wholesale — empty its root list so the real predicate
+        # sees the fixture's files, same as it would for a real branch on disk.
+        monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
         monkeypatch.setattr(
             branch_audit,
             "discover_checkers",
             lambda pack_path=None: {"handlers": import_checker, "naming": normal_checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         branch_audit.audit_branch(branch, [])
 
@@ -2144,8 +1611,6 @@ class TestAuditBranch:
 
     def test_dynamic_post_check(self, tmp_path, monkeypatch):
         """check_branch_post discovered and called."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         post_violations = [
             {
@@ -2163,12 +1628,6 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"naming": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         # Post check: (100 + 50) / 2 = 75
@@ -2177,8 +1636,6 @@ class TestAuditBranch:
 
     def test_post_check_raises_exception(self, tmp_path, monkeypatch):
         """check_branch_post that raises is caught."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker(has_post=True)
         checker.check_branch_post.side_effect = RuntimeError("fail")
@@ -2187,12 +1644,6 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"naming": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["scores"]["naming"] == 100
@@ -2205,14 +1656,10 @@ class TestAuditBranch:
         all, and nothing in the output said so. A failure only a log knows
         about is indistinguishable from a success — that is what this pins.
         """
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker(has_post=True)
         checker.check_branch_post.side_effect = RuntimeError("boom")
         monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"naming": checker})
-        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
 
@@ -2234,8 +1681,6 @@ class TestAuditBranch:
         signature — so none of them could ever catch the mismatch that killed
         this lane in production. A real function object can.
         """
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, branch_path = _setup_branch(tmp_path)
         seen: list = []
 
@@ -2245,8 +1690,6 @@ class TestAuditBranch:
 
         checker = _real_module_checker(check_branch_post=check_branch_post)
         monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"naming": checker})
-        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, ["some-rule"])
 
@@ -2262,8 +1705,6 @@ class TestAuditBranch:
         except turned it into silence — the standard simply stopped running
         and no audit ever said so.
         """
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
 
         def check_branch_post(branch_path):  # the pre-fix log_structure signature
@@ -2271,8 +1712,6 @@ class TestAuditBranch:
 
         checker = _real_module_checker(check_branch_post=check_branch_post)
         monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"naming": checker})
-        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
 
@@ -2284,8 +1723,6 @@ class TestAuditBranch:
 
     def test_info_channel_collected_and_never_scored(self, tmp_path, monkeypatch):
         """check_branch_info lines reach output without touching the score."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker(has_info=True, info_result=["custom_config: cadence_config.json"])
         monkeypatch.setattr(
@@ -2293,8 +1730,6 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"naming": checker},
         )
-        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["info_lines"] == [{"standard": "naming", "message": "custom_config: cadence_config.json"}]
@@ -2303,8 +1738,6 @@ class TestAuditBranch:
 
     def test_info_check_raises_is_caught(self, tmp_path, monkeypatch):
         """check_branch_info that raises leaves the audit intact."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker(has_info=True)
         checker.check_branch_info.side_effect = RuntimeError("fail")
@@ -2313,8 +1746,6 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"naming": checker},
         )
-        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["info_lines"] == []
@@ -2326,8 +1757,6 @@ class TestAuditBranch:
         Driven by a REAL function, so the signature the pipeline uses is
         pinned by execution rather than by a mock that accepts anything.
         """
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, branch_path = _setup_branch(tmp_path)
         seen: list = []
 
@@ -2337,8 +1766,6 @@ class TestAuditBranch:
 
         checker = _real_module_checker(check_branch_observe=check_branch_observe)
         monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"naming": checker})
-        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, ["some-rule"])
 
@@ -2354,11 +1781,7 @@ class TestAuditBranch:
         branch's number moved with no code change. Observe mode is only
         honest if the lane's presence is invisible to every score.
         """
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
-        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         without = _real_module_checker()
         monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"log_structure": without})
@@ -2379,8 +1802,6 @@ class TestAuditBranch:
 
     def test_observe_lane_crash_is_attributable_and_still_scoreless(self, tmp_path, monkeypatch):
         """A broken observe lane says so — and still cannot touch a score."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
 
         def check_branch_observe(branch_path, bypass_rules=None):
@@ -2388,8 +1809,6 @@ class TestAuditBranch:
 
         checker = _real_module_checker(check_branch_observe=check_branch_observe)
         monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"naming": checker})
-        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
 
@@ -2402,23 +1821,17 @@ class TestAuditBranch:
 
     def test_checker_without_info_hook_skipped(self, tmp_path, monkeypatch):
         """A checker with no check_branch_info contributes no info lines."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         monkeypatch.setattr(
             branch_audit,
             "discover_checkers",
             lambda pack_path=None: {"naming": _make_checker()},
         )
-        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         assert branch_audit.audit_branch(branch, [])["info_lines"] == []
 
     def test_diagnostics_checker_added(self, tmp_path, monkeypatch):
         """Diagnostics checker loaded and added."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         diag_mod = MagicMock()
         diag_mod.check_branch = MagicMock(
@@ -2443,15 +1856,12 @@ class TestAuditBranch:
             "_load_diagnostics_checker",
             lambda: diag_mod,
         )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert "diagnostics" in result["scores"]
 
     def test_deprecated_documents_dir(self, tmp_path, monkeypatch):
         """DOCUMENTS/ directory detected as deprecated."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, branch_path = _setup_branch(tmp_path)
         (Path(branch_path) / "DOCUMENTS").mkdir()
 
@@ -2460,12 +1870,6 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert len(result["deprecated_patterns"]) == 1
@@ -2474,38 +1878,23 @@ class TestAuditBranch:
 
     def test_no_deprecated_without_documents(self, tmp_path, monkeypatch):
         """No deprecated patterns without DOCUMENTS/."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         monkeypatch.setattr(
             branch_audit,
             "discover_checkers",
             lambda pack_path=None: {},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["deprecated_patterns"] == []
 
     def test_scan_branch_exception(self, tmp_path, monkeypatch):
         """scan_branch exception caught, test_map is None."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         monkeypatch.setattr(
             branch_audit,
             "discover_checkers",
             lambda pack_path=None: {},
-        )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
         )
         monkeypatch.setattr(
             branch_audit,
@@ -2518,8 +1907,6 @@ class TestAuditBranch:
 
     def test_scan_branch_success(self, tmp_path, monkeypatch):
         """scan_branch success populates test_map."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         scan_result = {
             "total_functions": 10,
@@ -2533,11 +1920,6 @@ class TestAuditBranch:
         )
         monkeypatch.setattr(
             branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(
-            branch_audit,
             "scan_branch",
             MagicMock(return_value=scan_result),
         )
@@ -2547,28 +1929,18 @@ class TestAuditBranch:
 
     def test_no_checkers_zero_average(self, tmp_path, monkeypatch):
         """No checkers returns average 0."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         monkeypatch.setattr(
             branch_audit,
             "discover_checkers",
             lambda pack_path=None: {},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["average"] == 0
 
     def test_implicit_branch_level(self, tmp_path, monkeypatch):
         """Checker without check_module treated as branch-level."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker(
             scope="entry_point",
@@ -2585,20 +1957,12 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"implicit": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["scores"]["implicit"] == 75
 
     def test_pack_path_forwarded(self, tmp_path, monkeypatch):
         """pack_path argument forwarded to discover_checkers."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         captured: dict = {}
 
@@ -2608,12 +1972,6 @@ class TestAuditBranch:
             return {}
 
         monkeypatch.setattr(branch_audit, "discover_checkers", mock_discover)
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         pack = tmp_path / "custom_standards"
         branch_audit.audit_branch(branch, [], pack_path=pack)
@@ -2621,8 +1979,6 @@ class TestAuditBranch:
 
     def test_diagnostics_not_duplicated(self, tmp_path, monkeypatch):
         """Existing diagnostics not overwritten by loader."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         existing = _make_checker(
             scope="branch_level",
@@ -2648,15 +2004,12 @@ class TestAuditBranch:
             "_load_diagnostics_checker",
             lambda: different,
         )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["scores"]["diagnostics"] == 80
 
     def test_branch_level_violations_extraction(self, tmp_path, monkeypatch):
         """Branch-level results have violations extracted."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker(
             scope="branch_level",
@@ -2686,20 +2039,12 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"dead_code": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert len(result["dead_code_violations"]) == 1
 
     def test_output_diagnostics_fields(self, tmp_path, monkeypatch):
         """Output includes type_errors and type_error_files."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         diag = _make_checker(
             scope="branch_level",
@@ -2718,12 +2063,6 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"diagnostics": diag},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["type_errors"] == 3
@@ -2731,8 +2070,6 @@ class TestAuditBranch:
 
     def test_post_check_empty_scores(self, tmp_path, monkeypatch):
         """Post-check with empty scores does not change score."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, _ = _setup_branch(tmp_path)
         checker = _make_checker(
             has_post=True,
@@ -2743,12 +2080,6 @@ class TestAuditBranch:
             "discover_checkers",
             lambda pack_path=None: {"naming": checker},
         )
-        monkeypatch.setattr(
-            branch_audit,
-            "_load_diagnostics_checker",
-            lambda: None,
-        )
-        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
         result = branch_audit.audit_branch(branch, [])
         assert result["scores"]["naming"] == 100

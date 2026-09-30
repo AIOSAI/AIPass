@@ -177,7 +177,9 @@ def lock_state() -> dict:
 
     reason = _cannot_tell_reason(logind_reason, dbus_reason)
     detail = f"Cannot tell whether the screen is locked. {logind_why} {dbus_why}"
-    logger.warning("lock_state cannot tell (%s): %s", reason, detail)
+    # An answer handed to the caller, not a fault here: @api polls this every
+    # few seconds, and a WARNING per poll escalated as a 280-hour repeat.
+    logger.info("lock_state cannot tell (%s): %s", reason, detail)
     return _state(False, None, None, session_id, reason, detail)
 
 

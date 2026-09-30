@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_footer.py
 # Description: Tests for email footer handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for email footer handler -- get_footer, append_footer."""
+"""Tests for apps/handlers/email/footer.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(generated) — the __main__ block's console preview of get_footer()'s output
 
 import pytest
 from unittest.mock import MagicMock

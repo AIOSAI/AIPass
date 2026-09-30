@@ -3,7 +3,7 @@
 # Description: Time Capsule Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -66,7 +66,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command == "capsule":
         result = _handle_seal(args)
     elif command == "capsules":
-        result = _handle_list(args)
+        result = _handle_list()
     elif command == "open":
         result = _handle_open(args)
     else:
@@ -107,8 +107,8 @@ def _handle_seal(args: List[str]) -> bool:
     return True
 
 
-def _handle_list(args: List[str]) -> bool:
-    result = list_capsules(args)
+def _handle_list() -> bool:
+    result = list_capsules()
     if not result["success"]:
         error(result["error"])
         return True

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bypass_handler.py
 # Description: Bypass Configuration Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -211,12 +211,13 @@ def is_bypassed(file_path: str, branch_path: str, standard: str, line: Optional[
 
     for rule in bypass_rules:
         # Check if rule matches this file and standard
-        rule_file = rule.get("file", "")
-        rule_standard = rule.get("standard", "")
+        rule_file = rule.get("file") or ""
+        rule_standard = rule.get("standard") or ""
 
-        if rule_file and rule_file != rel_path:
+        # Active only when it names both a file and a standard (owner, 2026-09-25 18:55).
+        if not rule_file or rule_file != rel_path:
             continue
-        if rule_standard and rule_standard != standard:
+        if rule_standard != standard:
             continue
 
         # Check line-specific bypass

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Trigger package paths, cwd-free module resolve, atomic JSON writes, recursion-safe trail logger
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2026-03-09
-# Modified: 2026-08-31
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -29,7 +29,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 
 try:
     from aipass.prax import append_jsonl as _append_jsonl
@@ -204,7 +204,12 @@ _LOCK_ATTEMPTS = 100
 _LOCK_BACKOFF_SECONDS = 0.05
 
 
-def replace_with_retry(source: str, destination: str) -> None:
+def replace_with_retry(
+    source: str,
+    destination: str,
+    replace_fn: Optional[Callable[[str, str], None]] = None,
+    sleep_fn: Optional[Callable[[float], None]] = None,
+) -> None:
     """Move a staged file into place, tolerating Windows sharing violations.
 
     Public, where the fleet's copies are module-private: config.py IS this
@@ -214,22 +219,33 @@ def replace_with_retry(source: str, destination: str) -> None:
     Args:
         source: Staged file to move.
         destination: The live document being replaced.
+        replace_fn: The move; None (every product caller) is os.replace.
+        sleep_fn: The backoff wait; None (every product caller) is time.sleep.
+            Both exist for the tests alone: a sharing violation is handed in
+            without replacing os.replace or time.sleep for the whole process.
 
     Raises:
         PermissionError: Still blocked after every attempt.
         OSError: Any non-sharing failure, immediately.
     """
+    replace = replace_fn or os.replace
+    sleep = sleep_fn or time.sleep
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
-            os.replace(source, destination)
+            replace(source, destination)
             return
         except PermissionError:
             if attempt == _REPLACE_ATTEMPTS - 1:
                 raise
-            time.sleep(_REPLACE_BACKOFF_SECONDS)
+            sleep(_REPLACE_BACKOFF_SECONDS)
 
 
-def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
+def read_text_with_retry(
+    path: Path,
+    encoding: str = "utf-8",
+    read_fn: Optional[Callable[..., str]] = None,
+    sleep_fn: Optional[Callable[[float], None]] = None,
+) -> str:
     """Read a document, tolerating Windows sharing violations.
 
     The mirror of replace_with_retry, and the half that was missing. While one
@@ -242,6 +258,11 @@ def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
     Args:
         path: Document to read.
         encoding: Text encoding.
+        read_fn: The read, called as read_fn(path, encoding=encoding); None
+            (every product caller) is path.read_text, the object's own method.
+        sleep_fn: The backoff wait; None (every product caller) is time.sleep.
+            Both exist for the tests alone: a refused read is handed in
+            without replacing Path.read_text or time.sleep for the whole process.
 
     Returns:
         The file's contents.
@@ -250,13 +271,16 @@ def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
         PermissionError: Still refused after every attempt.
         OSError: Any non-sharing failure, immediately.
     """
+    sleep = sleep_fn or time.sleep
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
-            return path.read_text(encoding=encoding)
+            if read_fn is None:
+                return path.read_text(encoding=encoding)
+            return read_fn(path, encoding=encoding)
         except PermissionError:
             if attempt == _REPLACE_ATTEMPTS - 1:
                 raise
-            time.sleep(_REPLACE_BACKOFF_SECONDS)
+            sleep(_REPLACE_BACKOFF_SECONDS)
     raise AssertionError("unreachable: the loop above either returns or raises")
 
 
@@ -287,28 +311,31 @@ def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = Tr
         raise
 
 
-def _try_lock_win32(lock_file) -> bool:
+def _try_lock_win32(lock_file, msvcrt_module: Any = None) -> bool:
     """One non-blocking attempt at the sidecar's byte lock.
 
     Args:
         lock_file: Open file object for the sidecar.
+        msvcrt_module: The locking primitive; None imports msvcrt at call time.
+            The seam exists for the tests, which drive the win32 arm on any host.
 
     Returns:
         True if the lock was taken, False if someone else holds it.
     """
-    # typeshed gates msvcrt's members behind sys.platform == "win32", so a
-    # checker running on Linux cannot see them. They exist where this runs.
-    import msvcrt
+    if msvcrt_module is None:
+        import msvcrt as msvcrt_module
 
     try:
         lock_file.seek(0)
-        msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+        msvcrt_module.locking(lock_file.fileno(), msvcrt_module.LK_NBLCK, 1)
         return True
     except OSError:
         return False
 
 
-def _acquire_lock_win32(lock_file) -> None:
+def _acquire_lock_win32(
+    lock_file, msvcrt_module: Any = None, sleep_fn: Optional[Callable[[float], None]] = None
+) -> None:
     """Poll for the lock — Windows has no blocking flock.
 
     Locking a byte past EOF is legal on Windows, which is why the sidecar
@@ -316,52 +343,71 @@ def _acquire_lock_win32(lock_file) -> None:
 
     Args:
         lock_file: Open file object for the sidecar.
+        msvcrt_module: The locking primitive; None imports msvcrt at call time.
+        sleep_fn: The wait between attempts; None is time.sleep at call time.
+            Both seams exist for the tests: patching time.sleep or sys.modules
+            reaches every reader in the process.
 
     Raises:
         OSError: Still held after _LOCK_ATTEMPTS tries.
     """
-    import msvcrt
+    if msvcrt_module is None:
+        import msvcrt as msvcrt_module
+    sleep = sleep_fn or time.sleep
 
     for _attempt in range(_LOCK_ATTEMPTS - 1):
-        if _try_lock_win32(lock_file):
+        if _try_lock_win32(lock_file, msvcrt_module):
             return
-        time.sleep(_LOCK_BACKOFF_SECONDS)
+        sleep(_LOCK_BACKOFF_SECONDS)
 
     # The final attempt is deliberately unguarded: the caller gets the real
     # OSError from the OS rather than a synthesised one, and the one outcome
     # this function must never have is returning without the lock.
     lock_file.seek(0)
-    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+    msvcrt_module.locking(lock_file.fileno(), msvcrt_module.LK_NBLCK, 1)
 
 
-def _acquire_lock(lock_file) -> None:
+def _acquire_lock(
+    lock_file,
+    platform: Optional[str] = None,
+    msvcrt_module: Any = None,
+    sleep_fn: Optional[Callable[[float], None]] = None,
+) -> None:
     """Take an exclusive OS lock on an open .lock sidecar.
 
     Args:
         lock_file: Open file object for the sidecar.
+        platform: The platform name; None reads sys.platform at call time.
+        msvcrt_module: Handed to the win32 arm; None imports msvcrt there.
+        sleep_fn: Handed to the win32 arm; None is time.sleep there.
+            The seams exist for the tests, which drive the win32 arm on any host.
 
     Raises:
         OSError: The lock was still held after every attempt.
     """
-    if sys.platform == "win32":
-        _acquire_lock_win32(lock_file)
+    if platform == "win32" or (platform is None and sys.platform == "win32"):
+        _acquire_lock_win32(lock_file, msvcrt_module, sleep_fn)
     else:
         import fcntl
 
         fcntl.flock(lock_file, fcntl.LOCK_EX)
 
 
-def _release_lock(lock_file) -> None:
+def _release_lock(lock_file, platform: Optional[str] = None, msvcrt_module: Any = None) -> None:
     """Release the lock taken by _acquire_lock.
 
     Args:
         lock_file: The same open file object that was locked.
+        platform: The platform name; None reads sys.platform at call time.
+        msvcrt_module: The locking primitive; None imports msvcrt at call time.
+            The seams exist for the tests, which drive the win32 arm on any host.
     """
-    if sys.platform == "win32":
-        import msvcrt
+    if platform == "win32" or (platform is None and sys.platform == "win32"):
+        if msvcrt_module is None:
+            import msvcrt as msvcrt_module
 
         lock_file.seek(0)
-        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        msvcrt_module.locking(lock_file.fileno(), msvcrt_module.LK_UNLCK, 1)
     else:
         import fcntl
 
@@ -369,7 +415,12 @@ def _release_lock(lock_file) -> None:
 
 
 @contextmanager
-def json_file_lock(path: Path):
+def json_file_lock(
+    path: Path,
+    platform: Optional[str] = None,
+    msvcrt_module: Any = None,
+    sleep_fn: Optional[Callable[[float], None]] = None,
+):
     """Acquire exclusive lock for a JSON file's read-modify-write cycle.
 
     A .lock sidecar is held for the whole cycle, so two processes cannot each
@@ -387,6 +438,11 @@ def json_file_lock(path: Path):
 
     Args:
         path: The JSON file to lock (lock acquired on path.with_suffix('.lock'))
+        platform: The platform name; None reads sys.platform at call time.
+        msvcrt_module: The win32 locking primitive; None imports msvcrt at call time.
+        sleep_fn: The win32 wait between attempts; None is time.sleep at call time.
+            The three seams exist for the tests, which drive the win32 arm on
+            any host; no product caller hands them in.
 
     Raises:
         OSError: The lock could not be acquired within the bounded wait.
@@ -396,14 +452,21 @@ def json_file_lock(path: Path):
     # "a+" not "w": truncating a sidecar another process holds a byte lock on
     # is a sharing violation on Windows, and the file's contents are irrelevant.
     with open(lock_path, "a+", encoding="utf-8") as lock_f:
-        _acquire_lock(lock_f)
+        _acquire_lock(lock_f, platform, msvcrt_module, sleep_fn)
         try:
             yield
         finally:
-            _release_lock(lock_f)
+            _release_lock(lock_f, platform, msvcrt_module)
 
 
-def atomic_create_json(path: Path, data, indent: int = 2, ensure_ascii: bool = True, encoding: str = "utf-8") -> bool:
+def atomic_create_json(
+    path: Path,
+    data,
+    indent: int = 2,
+    ensure_ascii: bool = True,
+    encoding: str = "utf-8",
+    link_fn: Optional[Callable[[str, str], None]] = None,
+) -> bool:
     """Create a JSON document ONLY if nothing is there. Never overwrites.
 
     "Ensure this file exists" and "write this file" are different operations,
@@ -428,29 +491,33 @@ def atomic_create_json(path: Path, data, indent: int = 2, ensure_ascii: bool = T
         indent: json.dump indent.
         ensure_ascii: json.dump ensure_ascii.
         encoding: Text encoding.
+        link_fn: The create-or-fail link; None is os.link at call time. The
+            seam exists for the tests, which hand in a filesystem without hard
+            links; no product caller hands it in.
 
     Returns:
         True if this call created the file, False if it was already there.
+
+    Raises:
+        OSError: The filesystem cannot link (no hard links), or the write failed.
+            The document is left as it was.
     """
+    link = link_fn or os.link
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding=encoding) as f:
             json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii)
         try:
-            os.link(tmp_path, str(path))
+            link(tmp_path, str(path))
             return True
         except FileExistsError:
             return False
-        except OSError as exc:
-            # No hard links here (some network mounts, FAT). Create-or-fail is
-            # not available, so this degrades to the replacing write and the
-            # race above is open again on such a filesystem. Said out loud
-            # rather than hidden: a silent fallback is how the first version
-            # of this looked correct.
-            logger.warning(f"atomic_create_json: no link support at {path.parent}, falling back to replace: {exc}")
-            replace_with_retry(tmp_path, str(path))
-            return True
+        # Any other OSError (no hard links: some network mounts, FAT) raises.
+        # It used to degrade to the replacing write and return True, which is
+        # the overwrite this function exists to refuse; it has no product
+        # caller today (fleet green leg 5, 2026-09-29), so no caller is left
+        # expecting the degrade.
     except BaseException:
         raise
     finally:
@@ -486,7 +553,7 @@ def _archive_legacy_file(path: Path) -> bool:
         return False
 
 
-def migrate_json_file(legacy_path: Path, new_path: Path) -> bool:
+def migrate_json_file(legacy_path: Path, new_path: Path) -> bool | None:
     """Move live JSON state from a legacy path to its new home, losslessly.
 
     Idempotent and safe to call on every read — it stats the legacy path and
@@ -514,7 +581,9 @@ def migrate_json_file(legacy_path: Path, new_path: Path) -> bool:
         new_path: New file location
 
     Returns:
-        True if the legacy file was migrated or archived on this call
+        True if the legacy file was migrated or archived on this call. False
+        if there was nothing to move. None if the legacy file was unreadable
+        and left in place: a migration left undone, not one that was unneeded.
     """
     if new_path.exists() or not legacy_path.exists():
         return False
@@ -525,7 +594,7 @@ def migrate_json_file(legacy_path: Path, new_path: Path) -> bool:
             data = json.loads(legacy_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, ValueError) as exc:
             logger.warning(f"migration of {legacy_path.name} skipped, unreadable: {exc}")
-            return False
+            return None
         atomic_write_json(new_path, data)
         return _archive_legacy_file(legacy_path)
 

@@ -1,20 +1,22 @@
-"""Tests for the gateway_boundary standard.
-
-The standard says: a branch may write its OWN storage, and may ask another
-branch to write theirs through their door, but may not reach into another
-branch's storage and write it by hand.
-
-Every false-positive guard below corresponds to a real fleet measurement made
-while calibrating this checker (59 hits -> 1). The guards are the standard.
-"""
-
 # =================== META ====================
 # Name: test_gateway_boundary.py
 # Description: Tests for the gateway boundary standards checker
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/aipass_standards/gateway_boundary_check.py."""
+
+# The standard says: a branch may write its OWN storage, and may ask another
+# branch to write theirs through their door, but may not reach into another
+# branch's storage and write it by hand.
+#
+# Every false-positive guard below corresponds to a real fleet measurement made
+# while calibrating this checker (59 hits -> 1). The guards are the standard.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that gateway_boundary_check.py parses and imports
 
 from pathlib import Path
 

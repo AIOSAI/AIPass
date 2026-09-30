@@ -1,3 +1,11 @@
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Shared fixtures for the drone suite
+# Version: 1.0.3
+# Created: 2026-03-05
+# Modified: 2026-09-28
+# =============================================
+
 """Shared pytest fixtures for drone tests."""
 
 import os
@@ -14,11 +22,18 @@ import shutil
 import sys
 from pathlib import Path
 from typing import Generator
-from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.cli.apps.modules import display
+from aipass.drone.apps.handlers import router_handler
 from aipass.drone.apps.handlers.json import json_handler
+
+# Directories no source walk of this suite enters, written here rather than imported
+# from seedgo's handlers (whose guard refuses another branch's caller). dropbox and
+# .archive: the project owner's ruling of 2026-09-27 20:37/20:42, a dropbox is ignored
+# by all and is a sandbox like .archive. __pycache__: bytecode, never source.
+SANDBOX_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
 # handler's tests, the DPLAN-0059 stamp trio, the json-dir seam suite) that must
@@ -26,8 +41,23 @@ from aipass.drone.apps.handlers.json import json_handler
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
 @pytest.fixture(autouse=True)
-def _clean_identity_dedupe() -> Generator[None, None, None]:
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
+
+
+@pytest.fixture(autouse=True)
+def _clean_identity_dedupe(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give every test a fresh caller-identity dedupe set.
 
     router_handler suppresses repeated identity messages for the life of the
@@ -35,15 +65,13 @@ def _clean_identity_dedupe() -> Generator[None, None, None]:
     log line depends on which tests ran before it — the exact order-dependent
     flake that only surfaces when someone runs a single test in isolation.
 
-    Reaches the module-private set on purpose. Production never needs to forget
+    Hands the module a new empty set, the state a fresh process starts in, and
+    monkeypatch puts the original back after. Production never needs to forget
     what it has already logged, so exporting a reset() just to serve this
-    fixture would put a test-only function in the shipped API.
+    fixture would put a test-only function in the shipped API (drone's decision,
+    DPLAN-0354 fleet green leg 3).
     """
-    from aipass.drone.apps.handlers import router_handler
-
-    router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
-    yield
-    router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
+    monkeypatch.setattr(router_handler, "_LOGGED_IDENTITY_SIGNATURES", set())
 
 
 @pytest.fixture(autouse=True)
@@ -166,51 +194,8 @@ def sample_registry(temp_test_dir: Path) -> Path:
         ],
     }
     registry_path = temp_test_dir / "AIPASS_REGISTRY.json"
-    registry_path.write_text(json.dumps(registry, indent=2))
+    registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_path
-
-
-@pytest.fixture()
-def sample_data() -> dict:
-    """Provide reusable sample data dict with required keys."""
-    return {
-        "created": "2026-01-01",
-        "last_updated": "2026-01-15",
-        "entries": [
-            {"id": 1, "name": "alpha", "status": "active"},
-            {"id": 2, "name": "beta", "status": "pending"},
-        ],
-        "metadata": {
-            "source": "test_fixture",
-            "version": "1.0.0",
-        },
-    }
-
-
-@pytest.fixture()
-def mock_logger() -> MagicMock:
-    """Standalone mock logger for testing logging calls."""
-    mock = MagicMock(spec=logging.Logger)
-    mock.debug = MagicMock()
-    mock.info = MagicMock()
-    mock.warning = MagicMock()
-    mock.error = MagicMock()
-    mock.critical = MagicMock()
-    return mock
-
-
-@pytest.fixture()
-def mock_json_handler() -> MagicMock:
-    """Standalone mock json_handler for isolation tests."""
-    handler = MagicMock()
-    handler.load_json = MagicMock(return_value={})
-    handler.save_json = MagicMock(return_value=True)
-    handler.ensure_json_exists = MagicMock(return_value=True)
-    handler.ensure_module_jsons = MagicMock(return_value=True)
-    handler.get_json_path = MagicMock(return_value=Path(tempfile.gettempdir()) / "mock.json")
-    handler.validate_json_structure = MagicMock(return_value=True)
-    handler.log_operation = MagicMock(return_value=True)
-    return handler
 
 
 # ---------------------------------------------------------------------------
@@ -245,9 +230,29 @@ def pytest_configure(config):
     )
 
 
+def python_sources(root: Path) -> list[Path]:
+    """Every ``.py`` under *root*, sorted: the walk both source sweeps share.
+
+    Never from a directory SANDBOX_DIRS names, judged on the parts BELOW *root*, so a
+    root that itself stands inside a dropbox is still walked. A dropbox and an
+    .archive are sandboxes (owner ruling): nothing looks into them.
+    """
+    return sorted(p for p in root.rglob("*.py") if not SANDBOX_DIRS.intersection(p.relative_to(root).parts[:-1]))
+
+
+def host_platform() -> str:
+    """The platform the collection hook branches on: ``sys.platform``.
+
+    Its own name for the test and no other reason: the hook's Windows answer is
+    checked from a machine that is not Windows by supplying the platform here,
+    rather than by replacing ``sys.platform`` for the whole process.
+    """
+    return sys.platform
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip deletable-cwd tests on Windows only, and say the whole reason."""
-    if sys.platform != "win32":
+    if host_platform() != "win32":
         return
     skip = pytest.mark.skip(reason=WINDOWS_CWD_REASON)
     for item in items:

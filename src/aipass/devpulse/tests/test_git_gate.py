@@ -3,25 +3,20 @@
 # Description: Regex coverage for git_gate handler (DPLAN-0163, migrated DPLAN-0184)
 # Version: 2.0.0
 # Created: 2026-05-03
-# Modified: 2026-05-22
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for git_gate security handler.
+"""Tests for src/aipass/hooks/apps/handlers/security/git_gate.py through handle(), the hook engine's door."""
 
-Originally tested the standalone .claude/hooks/git_gate.py script.
-Post DPLAN-0184, git_gate is a native handler at
-src/aipass/hooks/apps/handlers/security/git_gate.py.
-Tests now call the handler's internal functions directly.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — the re module's matching engine under the gate's patterns
 
 import json
+from pathlib import Path
 
 import pytest
 
-from aipass.hooks.apps.handlers.security.git_gate import (
-    _check_bash,
-    _check_edit,
-)
+from aipass.hooks.apps.handlers.security import git_gate
 
 
 def _is_blocked(result: dict) -> bool:
@@ -36,13 +31,13 @@ def _is_blocked(result: dict) -> bool:
 
 
 def _bash(cmd: str) -> dict:
-    """Run a Bash command through the git gate check."""
-    return _check_bash({"command": cmd})
+    """Run a Bash command through the git gate's hook entry."""
+    return git_gate.handle({"tool_name": "Bash", "tool_input": {"command": cmd}})
 
 
-def _edit(path: str, cwd: str = "/home/user/project") -> dict:
-    """Run an edit path through the git gate check."""
-    return _check_edit({"file_path": path}, cwd)
+def _edit(path: Path, cwd: Path) -> dict:
+    """Run an edit path through the git gate's hook entry."""
+    return git_gate.handle({"tool_name": "Edit", "tool_input": {"file_path": str(path)}, "cwd": str(cwd)})
 
 
 class TestGitWriteBlocking:
@@ -157,7 +152,7 @@ class TestReadVerbsAllowed:
             "git grep TODO",
             "git archive HEAD",
             "git for-each-ref",
-            "git -C /tmp/x log",
+            "git -C sub/x log",
         ],
     )
     def test_allows_read_verbs(self, cmd):
@@ -249,35 +244,35 @@ class TestEditBlocking:
     @pytest.mark.parametrize(
         "path",
         [
-            "/home/user/.claude/settings.json",
-            "/home/user/.claude/settings.local.json",
-            "/home/user/.claude/hooks/git_gate.py",
-            "/home/user/.claude/hooks/pre_edit_gate.py",
-            "/repo/.git/hooks/pre-commit",
+            "home/.claude/settings.json",
+            "home/.claude/settings.local.json",
+            "home/.claude/hooks/git_gate.py",
+            "home/.claude/hooks/pre_edit_gate.py",
+            "repo/.git/hooks/pre-commit",
         ],
     )
-    def test_blocks_protected_paths(self, path):
+    def test_blocks_protected_paths(self, path, tmp_path):
         """Enforcement-layer files are protected from edits."""
-        assert _is_blocked(_edit(path)), f"Should block edit: {path}"
+        assert _is_blocked(_edit(tmp_path / path, tmp_path / "project")), f"Should block edit: {path}"
 
     @pytest.mark.parametrize(
         "path",
         [
-            "/home/user/project/src/main.py",
-            "/home/user/.claude/CLAUDE.md",
-            "/home/user/project/.git/config",
-            "/home/user/project/src/aipass/devpulse/apps/handler.py",
+            "home/project/src/main.py",
+            "home/.claude/CLAUDE.md",
+            "home/project/.git/config",
+            "home/project/src/aipass/devpulse/apps/handler.py",
         ],
     )
-    def test_allows_normal_paths(self, path):
+    def test_allows_normal_paths(self, path, tmp_path):
         """Normal project files are not blocked."""
-        assert not _is_blocked(_edit(path)), f"Should allow edit: {path}"
+        assert not _is_blocked(_edit(tmp_path / path, tmp_path / "project")), f"Should allow edit: {path}"
 
-    def test_trusted_editors_bypass(self):
+    def test_trusted_editors_bypass(self, tmp_path):
         """Trusted branches (devpulse, seedgo) can edit protected paths."""
-        result = _check_edit(
-            {"file_path": "/home/user/.claude/hooks/test.py"},
-            "/home/user/src/aipass/devpulse/something",
+        result = _edit(
+            tmp_path / "home" / ".claude" / "hooks" / "test.py",
+            tmp_path / "home" / "src" / "aipass" / "devpulse" / "something",
         )
         assert not _is_blocked(result), "devpulse should be trusted editor"
 

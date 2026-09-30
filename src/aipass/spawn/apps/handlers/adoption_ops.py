@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: adoption_ops.py
 # Description: The target-exists lane — adopt a passported directory, or birth one from its tracked seed
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-27
 # =============================================
 
 """The target-exists lane of ``spawn create`` (split out of modules/core.py).
 
-``_spawn_agent`` handles three shapes of an EXISTING target directory:
+``spawn_agent`` handles three shapes of an EXISTING target directory:
 
 - live passport present  -> ``adopt_existing`` — register it, seat an owner,
   stamp a receipt if none, sync missing template files.
@@ -45,7 +45,7 @@ __all__ = ["adopt_existing", "birth_from_seed", "error_result"]
 
 
 def error_result(message):
-    """Return error result dict in ``_spawn_agent``'s format."""
+    """Return error result dict in ``spawn_agent``'s format."""
     return {
         "success": False,
         "error": message,
@@ -90,7 +90,7 @@ def birth_from_seed(target, seed_file, purpose, profile, registry_path):
         registry_path: Path to the registry, or None to auto-discover.
 
     Returns:
-        Result dict matching ``_spawn_agent``'s format, with ``seeded: True``.
+        Result dict matching ``spawn_agent``'s format, with ``seeded: True``.
     """
     branch_lower = normalize_branch_name(get_branch_name(target), "lower")
     reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
@@ -160,7 +160,7 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id=""):
             was not written by us — lets add_to_registry mint the entry's own.
 
     Returns:
-        Result dict matching _spawn_agent return format.
+        Result dict matching spawn_agent return format.
     """
     folder_name = get_branch_name(target)
     branch_upper = normalize_branch_name(folder_name, "upper")
@@ -225,7 +225,9 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id=""):
     try:
         from aipass.spawn.apps.handlers.update_ops import update_branch
 
-        update_result = update_branch(branch_lower)
+        # The registry adoption just wrote travels to the lookup: the CWD's
+        # registry may be another project's (spawn's decision, DPLAN-0354 leg 3).
+        update_result = update_branch(branch_lower, registry_path=reg_path)
         update_additions = update_result.get("additions", 0)
         if update_result.get("errors"):
             logger.warning("[spawn] Template update had errors for %s: %s", branch_upper, update_result["errors"])

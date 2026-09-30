@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete handler
-# Version: 1.4.0
+# Version: 1.4.3
 # Created: 2026-06-02
-# Modified: 2026-09-11
+# Modified: 2026-09-28
 # =============================================
 
 """Contained safe-delete handler.
@@ -292,6 +292,22 @@ def _standing_inside(resolved: Path, cwd: Path | None) -> str:
     return f" — this process is standing in {cwd}; run drone rm from outside {resolved}"
 
 
+def _remove_tree(path: Path) -> None:
+    """Remove a directory tree in rm's direct lane — where the host answers.
+
+    Every guard before this in _safe_delete_direct is drone's own verdict; this
+    is where the operating system answers, and it can refuse on its own terms
+    (Windows' WinError 32 on a tree the process stands in). It is the direct
+    lane's only tree removal, not every one: the broker daemon removes trees
+    with its own shutil.rmtree call in apps/handlers/broker/daemon.py.
+
+    Why this is its own function is the test, said plainly: tests/test_rm.py
+    stands Windows' refusal in for it on a POSIX host, to pin the message
+    _safe_delete_direct adds when the caller stands in the tree.
+    """
+    shutil.rmtree(path)
+
+
 def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
     """Delete paths directly (unsandboxed mode — current behavior)."""
     roots = get_allowed_roots()
@@ -390,7 +406,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             if absolute.is_symlink():
                 absolute.unlink()
             elif resolved.is_dir():
-                shutil.rmtree(resolved)
+                _remove_tree(resolved)
             else:
                 resolved.unlink()
             message = f"Deleted: {resolved}"
@@ -555,7 +571,10 @@ def stale_sweep(request: StaleRequest) -> StaleReport:
 
     Each DIR must resolve under the project root (the temp roots the plain lane
     also allows are not swept here) and outside the carve-outs. The walk never
-    enters a carve-out directory and never follows a symlink.
+    enters a carve-out directory, a dropbox or an .archive, and never follows a
+    symlink. A DIR the user names that itself lies inside a sandbox is swept all
+    the same: a path a user names is the user's word, as drone rm of a file in a
+    dropbox is (drone's decision, DPLAN-0354 fleet green leg 3 ruling 11).
 
     The sibling-branch fence is crossed here and only here, by design
     (DPLAN-0338, the owner's go 2026-09-11): a stale staging temp is no citizen's
@@ -676,7 +695,8 @@ def _find_stale(
             continue
         visited.add(here)
         report.folders_scanned += 1
-        dirnames[:] = [name for name in dirnames if name not in _CARVEOUT_DIRS]
+        # A dropbox or an .archive is a sandbox nothing looks into (owner ruling).
+        dirnames[:] = [name for name in dirnames if name not in _CARVEOUT_DIRS and name not in (".archive", "dropbox")]
         if not here.name.endswith(_STALE_FOLDER_SUFFIX):
             continue
         for name in filenames:

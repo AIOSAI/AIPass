@@ -1,18 +1,25 @@
-"""Tests for standards_audit module."""
-
 # =================== META ====================
 # Name: test_standards_audit.py
 # Description: Unit tests for the standards_audit module and the seedgo-audit CI gate
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
-import time
+"""Tests for apps/modules/standards_audit.py and the seedgo-audit CI gate."""
+
+# Tests for the standards_audit module.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(standard) — each checker's own verdict; every <row>_check.py has its own test file
+# seedgo: no-test-needed(covered) — the audit-tests lane's own run, in tests/test_audit_tests_lane.py
+
+import tempfile
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
+from typing import cast
 
 
 # ---------------------------------------------------------------------------
@@ -20,140 +27,54 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 
-#: The REAL discovery handler, bound before any fixture replaces it in sys.modules.
-from aipass.seedgo.apps.handlers.audit import discovery as real_discovery  # noqa: E402
-
-#: The REAL argv parser, bound the same way and for the opposite reason: it is
-#: pure grammar with no infrastructure to mock away, and a MagicMock in its
-#: place answers `wants_help` truthily — every audit in this file then prints
-#: help and audits nothing, which is exactly what happened when the parser was
-#: first split out of the module (2026-09-07).
-from aipass.seedgo.apps.handlers.audit import argv as real_argv  # noqa: E402
+#: The REAL discovery handler. `standards_audit`'s own `discovery` binding is
+#: replaced per-test below (see `_mock_infrastructure`), so this stays the
+#: genuine module for the tests that exercise discovery's own rules directly.
+from aipass.seedgo.apps.handlers.audit import discovery as real_discovery
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.handlers.context_standards import startup_budget_check
+from aipass.seedgo.apps.modules import CommandRefused, standards_audit
+from aipass.seedgo.apps.modules import audit_tests as lane
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock all heavy infrastructure imports so the module loads cleanly.
-
-    The standards_audit module imports aipass.prax, aipass.cli, aipass.drone,
-    and several seedgo handlers at module level.  We intercept those before
-    the first import so tests run fast and without side effects.
-    """
-    import sys
-
-    # Build lightweight stand-ins
-    mock_logger = MagicMock()
-    mock_console = MagicMock()
-    # Rich's Progress does real arithmetic on the console clock and branches on
-    # its terminal flags. A bare MagicMock makes it compare MagicMock with
-    # MagicMock (TypeError on the second task update) and warn about Jupyter,
-    # so the audit's progress bar needs these three answered honestly.
-    mock_console.get_time = time.monotonic
-    mock_console.is_jupyter = False
-    mock_console.is_terminal = False
-    mock_header = MagicMock()
-    mock_error = MagicMock()
-    mock_warning = MagicMock()
-    mock_json_handler = MagicMock()
+def _mock_infrastructure(monkeypatch, tmp_path):
+    """Replace the seams standards_audit reads, so tests run fast and without side effects."""
+    # The console is NOT replaced: standards_audit prints through aipass.cli's
+    # real console, which writes to sys.stdout at print time, so a test reads
+    # what the user reads with capsys (width pinned by conftest).
     mock_normalize = MagicMock(side_effect=lambda x: x.lstrip("@").upper())
 
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- cli ----------------------------------------------------------------
-    cli_mod = MagicMock()
-    cli_mod.console = mock_console
-    cli_mod.header = mock_header
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
-
-    cli_apps = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", cli_apps)
-
-    cli_modules = MagicMock()
-    cli_modules.error = mock_error
-    cli_modules.warning = mock_warning
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # -- seedgo audit handlers -----------------------------------------------
-    discovery_mod = MagicMock()
-    discovery_mod.discover_branches = MagicMock(return_value=[])
-    discovery_mod._is_branch_private = MagicMock(return_value=False)
-    discovery_mod.check_internal_access = MagicMock(return_value=True)
+    mock_discovery = MagicMock()
     # Pack discovery and the pack-kind refusal live in the handler. A bare
     # MagicMock answers both with a MagicMock, which is truthy, iterates empty
     # and reads as "packs found, none of them" - so the return values are
     # spelled out rather than inherited from the mock's willingness to answer.
-    discovery_mod.SCORING_PACK_KIND = "standards"
-    discovery_mod.discover_packs = MagicMock(return_value={"aipass": Path("handlers/aipass_standards")})
-    discovery_mod.non_scoring_packs = MagicMock(return_value={"tests_pytest": "execution"})
-    discovery_mod.pack_kind = MagicMock(return_value="standards")
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit.discovery", discovery_mod)
-    # `from ...audit import discovery` reads the ATTRIBUTE off the package
-    # before it looks in sys.modules, so a bare package mock would hand back a
-    # different object than the one configured above - the module-level patch
-    # would silently not apply.
-    audit_pkg = MagicMock()
-    audit_pkg.discovery = discovery_mod
-    audit_pkg.argv = real_argv
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit", audit_pkg)
+    mock_discovery.discover_packs = MagicMock(return_value={"aipass": Path("handlers/aipass_standards")})
+    mock_discovery.non_scoring_packs = MagicMock(return_value={"tests_pytest": "execution"})
 
-    branch_audit_mod = MagicMock()
-    branch_audit_mod.audit_branch = MagicMock(return_value={"scores": {}, "average": 100})
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit.branch_audit", branch_audit_mod)
-
-    audit_display_mod = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit.audit_display", audit_display_mod)
-
-    # The audit package itself is a MagicMock above, so this submodule cannot be
-    # imported for real — without a stand-in the module only imports when some
-    # other test file happened to load artifact.py first. Also keeps every test
-    # in this file off the real .seedgo/ artifact on disk.
-    artifact_mod = MagicMock()
-    artifact_mod.write_audit_artifact = MagicMock(return_value=Path("/tmp/last_audit.json"))
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit.artifact", artifact_mod)
-
-    # -- bypass handler -----------------------------------------------------
-    bypass_mod = MagicMock()
-    bypass_mod.load_bypass_rules = MagicMock(return_value=[])
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.bypass_handler", bypass_mod)
-
-    # -- drone --------------------------------------------------------------
-    drone_mod = MagicMock()
-    drone_mod.normalize_branch_arg = mock_normalize
-    monkeypatch.setitem(sys.modules, "aipass.drone", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.drone.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.drone.apps.modules", drone_mod)
-
-    # Force re-import so the mocks take effect
-    monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.standards_audit", raising=False)
-
-    yield
-
-    # The re-import under mocks minted a NEW module object, and the import
-    # system hung it on the parent package as an attribute. monkeypatch
-    # restores sys.modules but never recorded that attribute — and records
-    # nothing at all when the module had never been imported before this
-    # file ran — so the mock-bound corpse outlives the test, and
-    # `from ... import standards_audit` in ANOTHER test file hands it back:
-    # its console is a MagicMock that prints nowhere (the CI 3.12/gw1 flake
-    # where capsys read ''). Scrub both homes here; monkeypatch's own undo
-    # then restores the real module wherever one was recorded, and the next
-    # from-import rebinds the package attribute to the real thing.
-    sys.modules.pop("aipass.seedgo.apps.modules.standards_audit", None)
-    _parent = sys.modules.get("aipass.seedgo.apps.modules")
-    if _parent is not None and hasattr(_parent, "standards_audit"):
-        delattr(_parent, "standards_audit")
+    monkeypatch.setattr(standards_audit, "logger", MagicMock())
+    monkeypatch.setattr(standards_audit, "header", MagicMock())
+    monkeypatch.setattr(standards_audit, "error", MagicMock())
+    monkeypatch.setattr(standards_audit, "warning", MagicMock())
+    monkeypatch.setattr(standards_audit, "json_handler", MagicMock())
+    # Rebound to a stand-in object rather than mutated in place: the real
+    # discovery module is the SAME object as `real_discovery` above (both name
+    # the one import), and several tests below exercise `real_discovery`'s own
+    # functions for real -- patching attributes onto the shared module would
+    # mock those tests out from under them too.
+    monkeypatch.setattr(standards_audit, "discovery", mock_discovery)
+    monkeypatch.setattr(standards_audit, "discover_branches", MagicMock(return_value=[]))
+    monkeypatch.setattr(standards_audit, "_is_branch_private", MagicMock(return_value=False))
+    monkeypatch.setattr(standards_audit, "check_internal_access", MagicMock(return_value=True))
+    monkeypatch.setattr(standards_audit, "audit_branch_incremental", MagicMock())
+    monkeypatch.setattr(standards_audit, "cache_tag", MagicMock())
+    monkeypatch.setattr(standards_audit, "print_branch_summary", MagicMock())
+    monkeypatch.setattr(standards_audit, "print_system_summary", MagicMock())
+    # Keeps every test in this file off the real .seedgo/ artifact on disk.
+    monkeypatch.setattr(standards_audit, "write_audit_artifact", MagicMock(return_value=tmp_path / "last_audit.json"))
+    monkeypatch.setattr(standards_audit, "load_bypass_rules", MagicMock(return_value=[]))
+    monkeypatch.setattr(standards_audit, "normalize_branch_arg", mock_normalize)
 
 
 # ---------------------------------------------------------------------------
@@ -163,52 +84,64 @@ def _mock_infrastructure(monkeypatch):
 
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("not_audit", []) is False
+    assert standards_audit.handle_command("not_audit", []) is False
 
 
 def test_handle_command_accepts_audit_name():
-    """handle_command recognises 'audit' as its command."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    result = handle_command("audit", [])
-    assert result is True
+    """'audit' reaches this module's own introspection, not just a True."""
+    with patch.object(standards_audit, "_show_audit_introspection") as shown:
+        assert standards_audit.handle_command("audit", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_accepts_standards_audit_name():
-    """handle_command recognises 'standards_audit' as its command."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    result = handle_command("standards_audit", [])
-    assert result is True
+    """'standards_audit' is the same door, not a near miss returning True."""
+    with patch.object(standards_audit, "_show_audit_introspection") as shown:
+        assert standards_audit.handle_command("standards_audit", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_help_flag():
-    """--help flag is handled without error."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    result = handle_command("audit", ["--help"])
-    assert result is True
+    """--help explains and audits no branch."""
+    with (
+        patch.object(standards_audit, "print_help") as helped,
+        patch.object(standards_audit, "audit_branch_incremental") as audited,
+    ):
+        assert standards_audit.handle_command("audit", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert audited.call_args_list == []
 
 
 def test_handle_command_h_flag():
-    """-h flag is handled without error."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
+    """A help flag anywhere in the line answers before anything executes.
 
-    result = handle_command("audit", ["-h"])
-    assert result is True
+    `audit aipass -h` puts the flag past args[0], so only the wider scan in
+    handle_command catches it. That scan is the whole point of
+    help_flag_safety — "a question must never execute" — and a fleet audit is
+    the most expensive thing this branch can be tricked into running. Both
+    outcomes return True.
+    """
+    with (
+        patch.object(standards_audit, "print_help") as helped,
+        patch.object(standards_audit, "audit_branch_incremental") as audited,
+    ):
+        assert standards_audit.handle_command("audit", ["aipass", "-h"]) is True
+    helped.assert_called_once_with()
+    assert audited.call_args_list == []
 
 
 def test_handle_command_help_word():
-    """'help' word is handled without error."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
+    """The bare word 'help' reaches the same door as the flags."""
+    with (
+        patch.object(standards_audit, "print_help") as helped,
+        patch.object(standards_audit, "audit_branch_incremental") as audited,
+    ):
+        assert standards_audit.handle_command("audit", ["help"]) is True
+    helped.assert_called_once_with()
+    assert audited.call_args_list == []
 
-    result = handle_command("audit", ["help"])
-    assert result is True
 
-
-def test_print_introspection_runs():
+def test_print_introspection_runs(capsys: pytest.CaptureFixture[str]) -> None:
     """print_introspection names the module and both pack lanes.
 
     "console.print OR header was called" is true of a function that prints one
@@ -216,38 +149,30 @@ def test_print_introspection_runs():
     real run (2026-09-07). The third is the one that matters most: this module
     scores STANDARDS packs and must say out loud which discovered packs it is
     NOT scoring, or a reader takes the absence of `tests_pytest` for a missing
-    pack rather than another lane.
+    pack rather than another lane. Read from stdout through capsys since 2026-09-27.
+    Mutant: `Not scored here (other lanes):` to `Not scored here:` — killed.
     """
-    import sys
-    from aipass.seedgo.apps.modules.standards_audit import print_introspection
-
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    mock_cli.header.reset_mock()
-    result = print_introspection()
-    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
+    capsys.readouterr()
+    result = standards_audit.print_introspection()
+    printed = capsys.readouterr().out
     assert result is None
     assert "standards_audit Module" in printed, f"introspection never named the module: {printed!r}"
     assert "Discovered Packs:" in printed, f"introspection never listed the packs: {printed!r}"
     assert "Not scored here (other lanes):" in printed, f"introspection hid the non-scoring packs: {printed!r}"
 
 
-def test_print_help_runs():
+def test_print_help_runs(capsys: pytest.CaptureFixture[str]) -> None:
     """print_help prints its banner and the honest-score flag.
 
     Same reason as the introspection test above. `--no-bypass` is pinned rather
     than a decorative line: it is the flag that produces the second number every
     APLAN publishes, and help that stops documenting it is the reason a branch
     reports only its bypassed score.
+    Mutant: help's `audit aipass --no-bypass` example to `audit aipass` — killed.
     """
-    import sys
-    from aipass.seedgo.apps.modules.standards_audit import print_help
-
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    mock_cli.header.reset_mock()
-    result = print_help()
-    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
+    capsys.readouterr()
+    result = standards_audit.print_help()
+    printed = capsys.readouterr().out
     assert result is None
     assert "Standards Audit Module" in printed, f"help never named the module: {printed!r}"
     assert "audit aipass --no-bypass" in printed, f"help never documented --no-bypass: {printed!r}"
@@ -260,14 +185,8 @@ def test_handle_command_unknown_pack():
     `drone @seedgo audit not_a_real_subarg_xyz` printed the ❌ line and exited
     0, so a script checking $? read it as a clean audit.
     """
-    import pytest
-
-    from aipass.seedgo.apps.handlers.audit_tests import refusal
-    from aipass.seedgo.apps.modules import CommandRefused
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
     with pytest.raises(CommandRefused) as refused:
-        handle_command("audit", ["nonexistent_pack"])
+        standards_audit.handle_command("audit", ["nonexistent_pack"])
     assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
     assert refused.value.token == "nonexistent_pack"
 
@@ -306,9 +225,7 @@ def test_discover_packs_returns_dict(tmp_path):
 
 def test_handle_command_unknown_command_returns_false():
     """unknown_command: handle_command returns False for unrecognized commands."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("invalid_command", []) is False
+    assert standards_audit.handle_command("invalid_command", []) is False
 
 
 # ---------------------------------------------------------------------------
@@ -327,24 +244,17 @@ def _wire_branches(monkeypatch, *names):
     bypass_rules each branch was actually audited with — the only place the
     flag's effect is observable.
     """
-    import sys
-
+    tmp = tempfile.gettempdir()
     discover = MagicMock(
         return_value=[
-            {"name": n, "path": f"/tmp/{n.lower()}", "entry_file": f"/tmp/{n.lower()}/apps/{n.lower()}.py"}
+            {"name": n, "path": f"{tmp}/{n.lower()}", "entry_file": f"{tmp}/{n.lower()}/apps/{n.lower()}.py"}
             for n in names
         ]
     )
-    monkeypatch.setattr(sys.modules["aipass.seedgo.apps.handlers.audit.discovery"], "discover_branches", discover)
-    monkeypatch.setattr(
-        sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"],
-        "load_bypass_rules",
-        MagicMock(return_value=list(_LOADED_RULES)),
-    )
+    monkeypatch.setattr(standards_audit, "discover_branches", discover)
+    monkeypatch.setattr(standards_audit, "load_bypass_rules", MagicMock(return_value=list(_LOADED_RULES)))
     audit_mock = MagicMock(return_value={"branch": {"name": names[0]}, "scores": {"cli": 100}, "average": 100})
-    monkeypatch.setattr(
-        sys.modules["aipass.seedgo.apps.handlers.audit.branch_audit"], "audit_branch_incremental", audit_mock
-    )
+    monkeypatch.setattr(standards_audit, "audit_branch_incremental", audit_mock)
     return audit_mock
 
 
@@ -353,20 +263,15 @@ def _rules_per_branch(audit_mock):
     return [call.args[1] for call in audit_mock.call_args_list]
 
 
-def _console_text():
-    """Everything the module printed this test, as one string."""
-    import sys
-
-    mock_console = sys.modules["aipass.cli"].console
-    return "\n".join(str(c.args[0]) if c.args else "" for c in mock_console.print.call_args_list)
+def _console_text(capsys: pytest.CaptureFixture[str]) -> str:
+    """Everything the module printed to stdout since the last read, as one string."""
+    return capsys.readouterr().out
 
 
 def test_no_bypass_after_branch_arg_disables_every_rule(monkeypatch):
     """'audit aipass @flow --no-bypass' audits with an empty rule set."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", ["aipass", "@flow", "--no-bypass", "--no-artifact"]) is True
+    assert standards_audit.handle_command("audit", ["aipass", "@flow", "--no-bypass", "--no-artifact"]) is True
     assert _rules_per_branch(audit_mock) == [[]]
 
 
@@ -378,57 +283,47 @@ def test_no_bypass_before_branch_arg_disables_every_rule(monkeypatch):
     asserted because only one of them could ever be the one that works.
     """
     audit_mock = _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", ["aipass", "--no-bypass", "@flow", "--no-artifact"]) is True
+    assert standards_audit.handle_command("audit", ["aipass", "--no-bypass", "@flow", "--no-artifact"]) is True
     assert _rules_per_branch(audit_mock) == [[]]
 
 
 def test_no_bypass_applies_to_every_branch_of_a_fleet_run(monkeypatch):
     """'audit aipass --no-bypass' (no branch arg) disables rules fleet-wide."""
     audit_mock = _wire_branches(monkeypatch, "FLOW", "PRAX")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", ["aipass", "--no-bypass", "--no-artifact"]) is True
+    assert standards_audit.handle_command("audit", ["aipass", "--no-bypass", "--no-artifact"]) is True
     assert _rules_per_branch(audit_mock) == [[], []]
 
 
 def test_normal_run_still_applies_the_loaded_bypass_rules(monkeypatch):
     """Control — without the flag the branch's own rules are still passed through."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", ["aipass", "@flow", "--no-artifact"]) is True
+    assert standards_audit.handle_command("audit", ["aipass", "@flow", "--no-artifact"]) is True
     assert _rules_per_branch(audit_mock) == [_LOADED_RULES]
 
 
-def test_no_bypass_run_announces_itself(monkeypatch):
-    """A suppressed-rules run says so — no reader may mistake it for a normal one."""
-    _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
+def test_no_bypass_run_announces_itself(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """A suppressed-rules run says so — no reader may mistake it for a normal one.
 
-    handle_command("audit", ["aipass", "@flow", "--no-bypass", "--no-artifact"])
-    text = _console_text().upper()
+    Mutant: the summary's `if no_bypass:` announcement to `if False:` — killed.
+    """
+    _wire_branches(monkeypatch, "FLOW")
+    standards_audit.handle_command("audit", ["aipass", "@flow", "--no-bypass", "--no-artifact"])
+    text = _console_text(capsys).upper()
     assert "BYPASS" in text and "DISABLED" in text, "A --no-bypass run must declare that bypasses are off"
 
 
-def test_normal_run_makes_no_bypass_claim(monkeypatch):
+def test_normal_run_makes_no_bypass_claim(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Control — the declaration is not printed on a normal run."""
     _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    handle_command("audit", ["aipass", "@flow", "--no-artifact"])
-    assert "BYPASSES DISABLED" not in _console_text().upper()
+    standards_audit.handle_command("audit", ["aipass", "@flow", "--no-artifact"])
+    assert "BYPASSES DISABLED" not in _console_text(capsys).upper()
 
 
-def test_help_documents_the_no_bypass_flag():
+def test_help_documents_the_no_bypass_flag(capsys: pytest.CaptureFixture[str]) -> None:
     """--help lists --no-bypass — help text must match runtime behaviour."""
-    import sys
-    from aipass.seedgo.apps.modules.standards_audit import print_help
-
-    sys.modules["aipass.cli"].console.reset_mock()
-    print_help()
-    assert "--no-bypass" in _console_text()
+    capsys.readouterr()
+    standards_audit.print_help()
+    assert "--no-bypass" in _console_text(capsys)
 
 
 def test_help_text_at_prefix_consistency():
@@ -436,6 +331,7 @@ def test_help_text_at_prefix_consistency():
 
     Scans help text strings in seedgo.py and all modules for branch name
     patterns that should use @ prefix but don't.
+    Mutant: help's `audit aipass @flow --no-bypass` to `audit aipass flow --no-bypass` — killed.
     """
     import re
 
@@ -484,7 +380,7 @@ def test_help_text_at_prefix_consistency():
             if match:
                 violations.append(f"{fpath.name}:{i}: bare '{match.group(1)}' (should be '@{match.group(1)}')")
 
-    assert not violations, f"Help text has {len(violations)} bare branch references (missing @):\n" + "\n".join(
+    assert violations == [], f"Help text has {len(violations)} bare branch references (missing @):\n" + "\n".join(
         violations
     )
 
@@ -497,18 +393,14 @@ def test_artifact_flag_does_not_swallow_a_help_token(monkeypatch):
     destination path and a full audit ran. A help flag anywhere means explain.
     """
     audit_mock = _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", ["aipass", "--artifact", "--help"]) is True
+    assert standards_audit.handle_command("audit", ["aipass", "--artifact", "--help"]) is True
     assert audit_mock.call_count == 0
 
 
 def test_artifact_flag_still_takes_a_real_destination(monkeypatch):
     """Control — a genuine path after --artifact is still consumed as the path."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", ["aipass", "@flow", "--artifact", "out.json"]) is True
+    assert standards_audit.handle_command("audit", ["aipass", "@flow", "--artifact", "out.json"]) is True
     assert audit_mock.call_count == 1
 
 
@@ -524,9 +416,7 @@ def _refusal_text():
     -- a real console would wrap the line and split the very command the
     assertions are about.
     """
-    import sys
-
-    calls = sys.modules["aipass.cli.apps.modules"].error.call_args_list
+    calls = cast(MagicMock, standards_audit.error).call_args_list
     return "\n".join(str(call.args[0]) if call.args else "" for call in calls)
 
 
@@ -544,11 +434,8 @@ def _refuse(argv: list):
     used to read `handle_command(...) is True` now reads the code instead -
     the same claim, made where it is now load-bearing.
     """
-    from aipass.seedgo.apps.modules import CommandRefused
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
     with pytest.raises(CommandRefused) as refused:
-        handle_command("audit", argv)
+        standards_audit.handle_command("audit", argv)
     return refused.value
 
 
@@ -576,7 +463,7 @@ def test_the_refusal_names_the_token_and_gives_the_working_command(monkeypatch):
     assert "did you mean: drone @seedgo audit tests @backup" in _refusal_text()
 
 
-def test_the_refusal_exits_non_zero_and_cites_argv(monkeypatch):
+def test_the_refusal_exits_non_zero_and_cites_argv(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
     _wire_branches(monkeypatch, "BACKUP")
 
     refused = _refuse(["-tests", "@backup"])
@@ -585,7 +472,7 @@ def test_the_refusal_exits_non_zero_and_cites_argv(monkeypatch):
     # The code is printed beside the law, and it is not a pass — AND the
     # process leaves with it. Printing "exit code: 7" over an exit 0 was the
     # defect the 2026-09-07 fleet sweep named.
-    assert "exit code: 7" in _console_text()
+    assert "exit code: 7" in _console_text(capsys)
     assert refused.code == 7
 
 
@@ -611,9 +498,7 @@ def test_the_first_unrecognized_token_is_the_one_reported(monkeypatch):
 def test_a_help_flag_beside_an_unknown_token_still_explains(monkeypatch):
     """help_flag_safety outranks ARGV: a question is answered, never refused."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", ["-tests", "--help"]) is True
+    assert standards_audit.handle_command("audit", ["-tests", "--help"]) is True
     assert not _refused_argv(), "a help flag anywhere means explain, and explaining is not refusing"
     assert audit_mock.call_count == 0
 
@@ -636,9 +521,7 @@ def test_a_help_flag_beside_an_unknown_token_still_explains(monkeypatch):
 def test_every_valid_audit_invocation_still_runs(monkeypatch, argv):
     """A refusal that rejects a valid command is worse than the bug it fixes."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", argv) is True
+    assert standards_audit.handle_command("audit", argv) is True
     assert not _refused_argv(), f"{argv} is documented usage and must not be refused"
     assert audit_mock.call_count == 1, f"{argv} must still audit the branch"
 
@@ -647,9 +530,7 @@ def test_every_valid_audit_invocation_still_runs(monkeypatch, argv):
 def test_every_valid_non_auditing_invocation_still_answers(monkeypatch, argv):
     """The forms that print rather than audit: still no refusal."""
     _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", argv) is True
+    assert standards_audit.handle_command("audit", argv) is True
     assert not _refused_argv(), f"{argv} is documented usage and must not be refused"
 
 
@@ -665,16 +546,7 @@ def _wire_lane(monkeypatch):
     and a test that actually ran a suite would prove the copy-runner works
     while proving nothing about the word that reached it.
 
-    Imported through `import_module`, never `from ... import standards_audit`:
-    the autouse fixture drops the module from `sys.modules` but the PACKAGE
-    still holds an attribute of the same name, so the short form hands back the
-    previous test's module object and the patch lands on something the verb
-    under test never reads -- and the real lane runs a real suite.
     """
-    import importlib
-
-    standards_audit = importlib.import_module("aipass.seedgo.apps.modules.standards_audit")
-
     calls: list = []
 
     def _record(command, args):
@@ -691,9 +563,7 @@ def _wire_lane(monkeypatch):
 def _forwarded(monkeypatch, argv):
     """The argument list `audit <argv>` handed the lane, or None if it never did."""
     calls = _wire_lane(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", argv) is True
+    assert standards_audit.handle_command("audit", argv) is True
     return calls[0][1] if calls else None
 
 
@@ -717,9 +587,7 @@ def test_the_lane_is_claimed_under_its_own_verb_name(monkeypatch):
     wrong flag list -- the drift Law ARGV exists to prevent.
     """
     calls = _wire_lane(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    handle_command("audit", ["tests", "@backup"])
+    standards_audit.handle_command("audit", ["tests", "@backup"])
 
     assert calls and calls[0][0] == "audit-tests"
 
@@ -752,23 +620,33 @@ def test_every_lane_argument_is_forwarded_verbatim(monkeypatch, tail):
 def test_the_forwarded_line_parses_exactly_as_the_alias_does(monkeypatch):
     """`audit tests X` and `audit-tests X` reach the lane's parser identically.
 
-    Asserted through the lane's OWN `_parse`, not through a restated
+    Asserted through the lane's OWN parser, not through a restated
     expectation: the two spellings are the same command only if the thing that
-    reads them cannot tell them apart.
+    reads them cannot tell them apart. Reached through the lane's `audit-tests`
+    command since 2026-09-27; runner.run is the recorder, so no suite runs.
+    Mutant: standards_audit's `handle_command("audit-tests", args[1:])` to `args[2:]` — killed.
     """
-    from aipass.seedgo.apps.modules import audit_tests as lane
-
     argv = ["@backup", "--budget", "300", "--prove-refusal"]
 
     forwarded = _forwarded(monkeypatch, ["tests", *argv])
     assert forwarded is not None, "the audit verb never handed the lane anything"
-    assert lane._parse(forwarded) == lane._parse(argv)
+
+    parsed: list = []
+
+    def _record_run(argument, options=None):
+        """What the lane's parser produced, handed to the runner; nothing is run."""
+        parsed.append((argument, options))
+        return [], 0
+
+    monkeypatch.setattr(lane.runner, "run", _record_run)
+    assert lane.handle_command("audit-tests", forwarded) is True
+    assert lane.handle_command("audit-tests", argv) is True
+    assert parsed[0][0] == "@backup"
+    assert parsed[0] == parsed[1]
 
 
 def test_the_hyphenated_alias_still_claims_the_lane():
     """`audit-tests` did not stop working when `audit tests` became canonical."""
-    from aipass.seedgo.apps.modules import audit_tests as lane
-
     assert "audit-tests" in lane.COMMANDS
     assert lane.handle_command("audit-tests", []) is True
     assert lane.handle_command("audit", []) is False, "the lane must not claim the audit verb"
@@ -777,9 +655,7 @@ def test_the_hyphenated_alias_still_claims_the_lane():
 def test_the_lane_word_is_recognised_before_pack_validation(monkeypatch):
     """`tests` is not a pack, and must never be reported as an unknown one."""
     _wire_branches(monkeypatch, "BACKUP")
-    import sys
-
-    sys.modules["aipass.cli.apps.modules"].error.reset_mock()
+    cast(MagicMock, standards_audit.error).reset_mock()
     _forwarded(monkeypatch, ["tests", "@backup"])
 
     assert "Unknown pack" not in _refusal_text()
@@ -813,10 +689,8 @@ def _collide(monkeypatch):
     seen fire is a guard nobody knows works, and the day someone adds
     `handlers/tests_standards/` is the day it has to be right the first time.
     """
-    import sys
-
     monkeypatch.setattr(
-        sys.modules["aipass.seedgo.apps.handlers.audit.discovery"],
+        standards_audit.discovery,
         "discover_packs",
         MagicMock(
             return_value={"aipass": Path("handlers/aipass_standards"), "tests": Path("handlers/tests_standards")}
@@ -837,35 +711,40 @@ def test_a_pack_named_tests_makes_the_word_ambiguous_and_it_refuses(monkeypatch)
     assert audit_mock.call_count == 0, "the pack must not be picked silently"
 
 
-def test_the_ambiguity_refusal_names_both_meanings(monkeypatch):
+def test_the_ambiguity_refusal_names_both_meanings(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
     """A refusal that says only 'ambiguous' leaves the reader to guess what collided."""
     _wire_branches(monkeypatch, "BACKUP")
     _wire_lane(monkeypatch)
     _collide(monkeypatch)
 
     _refuse(["tests", "@backup"])
-    text = _refusal_text() + "\n" + _console_text()
+    text = _refusal_text() + "\n" + _console_text(capsys)
 
     assert "'tests'" in text
     assert "audit-tests lane" in text, "the execution lane is one of the two meanings"
     assert "standards pack" in text, "the pack is the other"
 
 
-def test_the_ambiguity_refusal_offers_an_unambiguous_spelling_for_each(monkeypatch):
+def test_the_ambiguity_refusal_offers_an_unambiguous_spelling_for_each(
+    monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Naming the collision is half the fix; the other half is how to say each one."""
     _wire_branches(monkeypatch, "BACKUP")
     _wire_lane(monkeypatch)
     _collide(monkeypatch)
 
     _refuse(["tests", "@backup"])
-    text = _console_text()
+    text = _console_text(capsys)
 
     assert "drone @seedgo audit-tests <target>" in text
     assert "drone @seedgo audit tests_standards" in text
 
 
-def test_the_ambiguity_refusal_cites_argv_and_its_exit_code(monkeypatch):
-    """The existing vocabulary, not a parallel one: same law, same code 7."""
+def test_the_ambiguity_refusal_cites_argv_and_its_exit_code(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """The existing vocabulary, not a parallel one: same law, same code 7.
+
+    Mutant: the `law: ... exit code: {refused.code}` console line to `pass` — killed.
+    """
     _wire_branches(monkeypatch, "BACKUP")
     _wire_lane(monkeypatch)
     _collide(monkeypatch)
@@ -873,7 +752,7 @@ def test_the_ambiguity_refusal_cites_argv_and_its_exit_code(monkeypatch):
     refused = _refuse(["tests", "@backup"])
 
     assert _refusal_text().startswith("REFUSED: [ARGV]")
-    assert "exit code: 7" in _console_text()
+    assert "exit code: 7" in _console_text(capsys)
     assert refused.code == 7, "the printed code and the carried code are one number"
 
 
@@ -886,9 +765,7 @@ def test_a_pack_named_tests_is_still_reachable_by_its_directory_name(monkeypatch
     audit_mock = _wire_branches(monkeypatch, "FLOW")
     calls = _wire_lane(monkeypatch)
     _collide(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", ["tests_standards", "@flow", "--no-artifact"]) is True
+    assert standards_audit.handle_command("audit", ["tests_standards", "@flow", "--no-artifact"]) is True
 
     assert calls == [], "the directory name is the pack's spelling, never the lane's"
     assert not _refused_argv()
@@ -916,9 +793,7 @@ def test_the_lane_word_leaves_every_ordinary_pack_audit_alone(monkeypatch, argv)
     """A parsing special case that captured a normal audit would be the worse bug."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
     calls = _wire_lane(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", argv) is True
+    assert standards_audit.handle_command("audit", argv) is True
     assert calls == [], f"{argv} is a standards audit and must never reach the execution lane"
     assert not _refused_argv(), f"{argv} is documented usage and must not be refused"
     assert audit_mock.call_count == 1, f"{argv} must still audit the branch"
@@ -929,9 +804,7 @@ def test_the_lane_word_leaves_every_printing_invocation_alone(monkeypatch, argv)
     """The forms that print rather than audit: still no lane, still no refusal."""
     _wire_branches(monkeypatch, "FLOW")
     calls = _wire_lane(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", argv) is True
+    assert standards_audit.handle_command("audit", argv) is True
     assert calls == []
     assert not _refused_argv()
 
@@ -947,9 +820,9 @@ def test_the_lane_word_leaves_every_printing_invocation_alone(monkeypatch, argv)
 # branch's source to answer.
 
 #: This branch's real `handlers/` directory, reached through the real discovery
-#: handler bound above -- the autouse fixture replaces the module in sys.modules
-#: for every test in this file, so asking for the path through the mock would
-#: hand back a MagicMock.
+#: handler bound above -- `standards_audit.discovery` is a per-test stand-in
+#: (see `_mock_infrastructure`), so asking for the path through it would hand
+#: back a MagicMock.
 _HANDLERS_DIR = Path(real_discovery.__file__).resolve().parent.parent
 
 
@@ -984,12 +857,8 @@ def test_the_context_pack_holds_only_the_startup_budget_checker():
 
 def _wire_context_pack(monkeypatch):
     """Make `context` resolve to this branch's real pack directory."""
-    import sys
-
     packs = {"aipass": Path("handlers/aipass_standards"), "context": _HANDLERS_DIR / "context_standards"}
-    monkeypatch.setattr(
-        sys.modules["aipass.seedgo.apps.handlers.audit.discovery"], "discover_packs", MagicMock(return_value=packs)
-    )
+    monkeypatch.setattr(standards_audit.discovery, "discover_packs", MagicMock(return_value=packs))
     return packs
 
 
@@ -1002,9 +871,7 @@ def test_audit_context_with_no_branch_audits_every_branch(monkeypatch):
     """
     audit_mock = _wire_branches(monkeypatch, "FLOW", "PRAX")
     _wire_context_pack(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", ["context", "--no-artifact"]) is True
+    assert standards_audit.handle_command("audit", ["context", "--no-artifact"]) is True
     assert audit_mock.call_count == 2, "every discovered branch gets a row"
     assert {call.kwargs["pack_path"].name for call in audit_mock.call_args_list} == {"context_standards"}
 
@@ -1013,9 +880,7 @@ def test_audit_context_standards_reaches_the_same_pack(monkeypatch):
     """The directory's own name is an unambiguous spelling for its pack."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
     _wire_context_pack(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
-
-    assert handle_command("audit", ["context_standards", "@flow", "--no-artifact"]) is True
+    assert standards_audit.handle_command("audit", ["context_standards", "@flow", "--no-artifact"]) is True
     assert audit_mock.call_args.kwargs["pack_path"].name == "context_standards"
 
 
@@ -1027,8 +892,6 @@ def test_audit_context_refuses_an_unknown_branch_by_name(monkeypatch):
     has watched: printing the ❌ line and exiting 0 is the exact defect the
     2026-09-07 fleet sweep found here.
     """
-    from aipass.seedgo.apps.handlers.audit_tests import refusal
-
     audit_mock = _wire_branches(monkeypatch, "FLOW")
     _wire_context_pack(monkeypatch)
 
@@ -1077,7 +940,14 @@ def _run_ci_gate(cwd):
     import subprocess
     import sys
 
-    return subprocess.run([sys.executable, str(CI_GATE)], cwd=str(cwd), capture_output=True, text=True, timeout=300)
+    return subprocess.run(
+        [sys.executable, str(CI_GATE)],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=300,
+    )
 
 
 def test_the_ci_gate_goes_red_when_a_gated_readme_grows_past_its_cap(tmp_path):
@@ -1086,8 +956,6 @@ def test_the_ci_gate_goes_red_when_a_gated_readme_grows_past_its_cap(tmp_path):
     Run end to end through the real script, so what is pinned is the exit code
     a workflow step reads -- not a helper somebody could stop calling.
     """
-    from aipass.seedgo.apps.handlers.context_standards import startup_budget_check
-
     cap, reason = startup_budget_check.readme_cap()
     assert cap is not None, f"the shipped pack.json must publish a README cap: {reason}"
     fleet = _fixture_fleet(tmp_path, overgrown={"README.md": "x" * (cap + 1)})

@@ -3,7 +3,7 @@
 # Description: Room management orchestration module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-08-11
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -89,7 +89,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if subcommand == "create":
         result = _handle_create_room(sub_args)
     elif subcommand == "list":
-        result = _handle_list_rooms(sub_args)
+        result = _handle_list_rooms()
     elif subcommand == "join":
         result = _handle_join_room(sub_args)
     elif subcommand == "leave":
@@ -127,9 +127,9 @@ def _handle_create_room(args: List[str]) -> bool:
     return True
 
 
-def _handle_list_rooms(args: List[str]) -> bool:
+def _handle_list_rooms() -> bool:
     """List rooms and display as a Rich table."""
-    result = list_rooms(args)
+    result = list_rooms()
 
     if not result["success"]:
         error(result["error"])

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, seedgo checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-08-30
+# Modified: 2026-09-28
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -21,7 +21,6 @@ from pathlib import Path
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
-STATE_FILE = Path(__file__).parent.parent.parent.parent.parent / ".diagnostics_state.json"
 SKIP_EXTENSIONS = {".md", ".txt", ".log", ".csv", ".html"}
 
 PYTHON_PATTERNS = {
@@ -163,9 +162,24 @@ def _run_python_checks(file_path: str) -> list[str]:
     return errors
 
 
-def _run_ruff_lint_structured(file_path: str) -> list[dict]:
-    if "/.claude/hooks/" in file_path:
-        return []
+def _no_answer(unanswered: list[str] | None, check: str, why: str) -> None:
+    """A check that did not judge the file answers None, and says why (devpulse's decision B, leg 4).
+
+    The caller logs the arm; this records the check and the why for the advisory line.
+    """
+    if unanswered is not None:
+        unanswered.append(f"{check} ({why})")
+
+
+def _run_ruff_lint_structured(file_path: str, unanswered: list[str] | None = None) -> list[dict] | None:
+    """ruff's errors in *file_path*, [] when it judged the file clean.
+
+    None when ruff did not judge the file: a provider hook file it skips by design, a
+    return code that is no answer, an empty or unparseable answer, a timeout, any other
+    failure. The why is appended to *unanswered*.
+    """
+    if "/.claude/hooks/" in file_path.replace("\\", "/"):
+        return _no_answer(unanswered, "ruff", "skipped: a provider hook file")
     try:
         result = subprocess.run(
             [sys.executable, "-m", "ruff", "check", "--select=E,F,W", "--output-format=json", file_path],
@@ -175,12 +189,12 @@ def _run_ruff_lint_structured(file_path: str) -> list[dict]:
         )
         if result.returncode not in (0, 1):
             logger.info("[HOOKS] auto_fix: ruff structured lint error: %s", result.stderr.strip())
-            return []
+            return _no_answer(unanswered, "ruff", f"exit {result.returncode}: {result.stderr.strip()[:100]}")
         if not result.stdout.strip():
-            return []
+            return _no_answer(unanswered, "ruff", "an empty answer")
         violations = json.loads(result.stdout)
         if not isinstance(violations, list):
-            return []
+            return _no_answer(unanswered, "ruff", "an answer that is no list")
         errors: list[dict] = []
         for v in violations[:10]:
             line = v.get("location", {}).get("row", 0)
@@ -190,16 +204,24 @@ def _run_ruff_lint_structured(file_path: str) -> list[dict]:
         return errors
     except json.JSONDecodeError as exc:
         logger.info("[HOOKS] auto_fix: ruff JSON parse failed: %s", exc)
+        return _no_answer(unanswered, "ruff", f"unparseable answer: {exc}")
     except subprocess.TimeoutExpired:
         logger.info("[HOOKS] auto_fix: ruff structured lint timed out")
+        return _no_answer(unanswered, "ruff", "timed out")
     except Exception as exc:
         logger.info("[HOOKS] auto_fix: ruff structured lint failed: %s", exc)
-    return []
+        return _no_answer(unanswered, "ruff", f"failed: {exc}")
 
 
-def _run_pyright_check(file_path: str) -> list[dict]:
-    if "/.claude/hooks/" in file_path:
-        return []
+def _run_pyright_check(file_path: str, unanswered: list[str] | None = None) -> list[dict] | None:
+    """pyright's errors in *file_path*, [] when it judged the file clean.
+
+    None when pyright did not judge the file: a provider hook file it skips by design,
+    an unparseable answer, pyright not installed, a timeout, any other failure. The why
+    is appended to *unanswered*.
+    """
+    if "/.claude/hooks/" in file_path.replace("\\", "/"):
+        return _no_answer(unanswered, "pyright", "skipped: a provider hook file")
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pyright", "--outputjson", file_path],
@@ -211,7 +233,7 @@ def _run_pyright_check(file_path: str) -> list[dict]:
             data = json.loads(result.stdout)
         except (json.JSONDecodeError, ValueError) as exc:
             logger.info("[HOOKS] auto_fix: pyright JSON parse failed: %s", exc)
-            return []
+            return _no_answer(unanswered, "pyright", f"unparseable answer: {exc}")
 
         errors: list[dict] = []
         for diag in data.get("generalDiagnostics", []):
@@ -222,14 +244,26 @@ def _run_pyright_check(file_path: str) -> list[dict]:
         return errors[:10]
     except FileNotFoundError:
         logger.info("[HOOKS] auto_fix: pyright not installed")
+        return _no_answer(unanswered, "pyright", "not installed")
     except subprocess.TimeoutExpired:
         logger.info("[HOOKS] auto_fix: pyright timed out")
+        return _no_answer(unanswered, "pyright", "timed out")
     except Exception as exc:
         logger.info("[HOOKS] auto_fix: pyright failed: %s", exc)
-    return []
+        return _no_answer(unanswered, "pyright", f"failed: {exc}")
 
 
 _CHECKLIST_MARKER_FALLBACK = "[FAIL]"
+
+
+def _load_checklist_module():
+    """Import @seedgo's checklist module, where the finding marker is published.
+
+    A seam: the tests are the reason it exists. They replace this function by name
+    in place of patching importlib.import_module, which replaces it process-wide.
+    It changes no verdict. The decision is hooks', leg 4.
+    """
+    return importlib.import_module("aipass.seedgo.apps.modules.checklist")
 
 
 def _checklist_marker() -> str:
@@ -249,7 +283,7 @@ def _checklist_marker() -> str:
     quiet fallback is how the first one lasted.
     """
     try:
-        checklist = importlib.import_module("aipass.seedgo.apps.modules.checklist")
+        checklist = _load_checklist_module()
     except Exception as exc:
         logger.warning(
             "[HOOKS] auto_fix: seedgo checklist module unreadable (%s) — using fallback marker %r",
@@ -297,7 +331,7 @@ def _parse_checklist_findings(stdout: str, marker: str) -> list[str]:
 
 
 def _run_seedgo_checklist(file_path: str) -> list[str]:
-    if "/.claude/hooks/" in file_path:
+    if "/.claude/hooks/" in file_path.replace("\\", "/"):
         return []
     aipass_home = os.environ.get("AIPASS_HOME", "")
     if not aipass_home:
@@ -331,16 +365,19 @@ def _run_seedgo_checklist(file_path: str) -> list[str]:
     return []
 
 
-def _save_diagnostics_state(file_path: str, errors: list[dict]) -> None:
-    try:
-        if errors:
-            state = {"file": str(Path(file_path).resolve()), "errors": errors}
-            STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
-        else:
-            if STATE_FILE.exists():
-                STATE_FILE.unlink()
-    except Exception as exc:
-        logger.info("[HOOKS] auto_fix: state file write failed: %s", exc)
+def _record_diagnostics(seat: str, file_path: str, answers: list[list[dict] | None]) -> None:
+    """Record what the structured checks found, in this seat's own entry alone.
+
+    Errors found are written. The entry is removed only when every check judged the file
+    and found nothing: a check that gave no answer (None) never clears an open error
+    (devpulse's decision B, leg 4). The state's one definition is diagnostics_state's.
+    """
+    ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
+    found = [error for answer in answers if answer for error in answer]
+    if found:
+        ds.save_seat(seat, file_path, found)
+    elif all(answer is not None for answer in answers):
+        ds.clear_seat(seat)
 
 
 def _check_emoji_list(items: list, key: str) -> str | None:
@@ -410,6 +447,7 @@ def handle(hook_data: dict) -> dict:
             return {"stdout": "", "exit_code": 0}
 
         errors: list[str] = []
+        unanswered: list[str] = []
 
         if file_path.endswith(".py"):
             errors = _run_python_checks(file_path)
@@ -418,17 +456,22 @@ def handle(hook_data: dict) -> dict:
             for v in seedgo_violations:
                 errors.append(f"SEEDGO: {v}")
 
-            type_errors = _run_pyright_check(file_path)
-            for te in type_errors:
+            type_errors = _run_pyright_check(file_path, unanswered)
+            for te in type_errors or []:
                 errors.append(f"TYPE: L{te['line']}: {te['message']}")
 
-            ruff_lint_errors = _run_ruff_lint_structured(file_path)
-            _save_diagnostics_state(file_path, ruff_lint_errors + type_errors)
+            ruff_lint_errors = _run_ruff_lint_structured(file_path, unanswered)
+            seat = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state").seat_key(hook_data)
+            _record_diagnostics(seat, file_path, [ruff_lint_errors, type_errors])
 
         elif file_path.endswith(".json"):
             errors = _run_json_checks(file_path)
         else:
             return {"stdout": "", "exit_code": 0}
+
+        no_answer = ""
+        if unanswered:
+            no_answer = f"NO ANSWER from {'; '.join(unanswered)}: this edit cleared no recorded error"
 
         if errors:
             error_text = "\n".join(f"  - {e}" for e in errors)
@@ -437,6 +480,8 @@ def handle(hook_data: dict) -> dict:
                 f"{error_text}\n\n"
                 f"Fix these errors in {Path(file_path).name} now. Do not skip or defer."
             )
+            if no_answer:
+                context = f"{context}\n{no_answer}"
             result = {
                 "hookSpecificOutput": {
                     "hookEventName": "PostToolUse",
@@ -446,7 +491,7 @@ def handle(hook_data: dict) -> dict:
             }
             return {"stdout": json.dumps(result), "exit_code": 0, "sound": "auto fix diagnostics"}
 
-        result = {"systemMessage": "[diagnostics] ok"}
+        result = {"systemMessage": f"[diagnostics] {no_answer or 'ok'}"}
         return {"stdout": json.dumps(result), "exit_code": 0}
 
     except Exception as exc:

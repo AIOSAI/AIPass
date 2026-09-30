@@ -1,16 +1,37 @@
-"""Tests for seedgo checker handlers — batch 9 (readme_check, trigger_check)."""
-
 # =================== META ====================
 # Name: test_checkers_batch9.py
 # Description: Unit tests for readme_check and trigger_check
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-27
 # =============================================
 
-import pytest
+"""Tests for apps/handlers/aipass_standards/readme_check.py and apps/handlers/aipass_standards/trigger_check.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that readme_check.py and trigger_check.py parse and import
+# seedgo: no-test-needed(documentation) — that the public check functions carry docstrings
+# seedgo: no-test-needed(stdlib) — datetime.strptime's refusal of a date that does not exist
+
 from typing import List
-from unittest.mock import MagicMock
+
+from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
+    check_command_list,
+    check_directory_tree,
+    check_last_updated_freshness,
+    check_module_list,
+    check_readme_exists,
+    check_required_sections,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
+    check_handler_naming,
+    check_missing_trigger_events,
+    check_no_logger_imports,
+    check_no_print_statements,
+    check_trigger_import_pattern,
+    is_handler_layer,
+    is_trigger_handler,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -23,59 +44,6 @@ def _lines(text: str) -> List[str]:
     return text.split("\n")
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for standards checkers."""
-    import sys
-
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # -- bypass handler -----------------------------------------------------
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as real_is_bypassed
-
-    bypass_pkg = MagicMock()
-    bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = real_is_bypassed
-    bypass_pkg.utils = bypass_utils
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
-    bypass_pkg.ignore_handler = bypass_ignore
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.utils", bypass_utils)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        bypass_ignore,
-    )
-
-    # Force re-imports so checkers pick up fresh mocks
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.aipass_standards.readme_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.trigger_check",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
-
-
 # ===========================================================================
 # 1. readme_check -- check_readme_exists
 # ===========================================================================
@@ -86,10 +54,6 @@ def test_readme_exists_present(tmp_path):
     readme = tmp_path / "README.md"
     readme.write_text("# Branch\n", encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_readme_exists,
-    )
-
     result = check_readme_exists(readme)
     assert result["passed"] is True
 
@@ -97,10 +61,6 @@ def test_readme_exists_present(tmp_path):
 def test_readme_exists_missing(tmp_path):
     """README.md missing fails."""
     readme = tmp_path / "README.md"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_readme_exists,
-    )
 
     result = check_readme_exists(readme)
     assert result["passed"] is False
@@ -111,7 +71,7 @@ def test_readme_exists_missing(tmp_path):
 # ===========================================================================
 
 
-def test_required_sections_all_present():
+def test_required_sections_all_present(tmp_path):
     """README with all required section groups passes."""
     lines: List[str] = [
         "# Branch",
@@ -126,15 +86,11 @@ def test_required_sections_all_present():
         "Details here.",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_required_sections,
-    )
-
-    result = check_required_sections(lines, "/fake/apps/entry.py")
+    result = check_required_sections(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
 
 
-def test_required_sections_missing_commands():
+def test_required_sections_missing_commands(tmp_path):
     """README missing Commands/Usage section fails."""
     lines: List[str] = [
         "# Branch",
@@ -146,16 +102,12 @@ def test_required_sections_missing_commands():
         "Details.",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_required_sections,
-    )
-
-    result = check_required_sections(lines, "/fake/apps/entry.py")
+    result = check_required_sections(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is False
     assert "Commands/Usage" in result["message"]
 
 
-def test_required_sections_alternate_names():
+def test_required_sections_alternate_names(tmp_path):
     """README with alternate section names (Usage, Directory Structure, Provides To) passes."""
     lines: List[str] = [
         "# Branch",
@@ -170,11 +122,7 @@ def test_required_sections_alternate_names():
         "Other branches.",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_required_sections,
-    )
-
-    result = check_required_sections(lines, "/fake/apps/entry.py")
+    result = check_required_sections(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
 
 
@@ -194,11 +142,7 @@ def test_last_updated_freshness_date_present(tmp_path):
     branch_root.mkdir()
     (branch_root / "apps").mkdir()
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_last_updated_freshness,
-    )
-
-    result = check_last_updated_freshness(lines, branch_root, "/fake/apps/entry.py")
+    result = check_last_updated_freshness(lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
     assert "present" in result["message"]
 
@@ -214,11 +158,7 @@ def test_last_updated_freshness_bold_format(tmp_path):
     branch_root.mkdir()
     (branch_root / "apps").mkdir()
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_last_updated_freshness,
-    )
-
-    result = check_last_updated_freshness(lines, branch_root, "/fake/apps/entry.py")
+    result = check_last_updated_freshness(lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
     assert "2026-05-18" in result["message"]
 
@@ -234,16 +174,12 @@ def test_last_updated_freshness_malformed_date(tmp_path):
     branch_root.mkdir()
     (branch_root / "apps").mkdir()
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_last_updated_freshness,
-    )
-
-    result = check_last_updated_freshness(lines, branch_root, "/fake/apps/entry.py")
+    result = check_last_updated_freshness(lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is False
     assert "Malformed" in result["message"]
 
 
-def test_last_updated_freshness_missing():
+def test_last_updated_freshness_missing(tmp_path):
     """README without Last Updated date fails."""
     lines: List[str] = [
         "# Branch",
@@ -251,13 +187,9 @@ def test_last_updated_freshness_missing():
         "",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_last_updated_freshness,
+    result = check_last_updated_freshness(
+        lines, tmp_path / "missing", (tmp_path / "fake" / "apps" / "entry.py").as_posix()
     )
-
-    from pathlib import Path
-
-    result = check_last_updated_freshness(lines, Path("/nonexistent"), "/fake/apps/entry.py")
     assert result["passed"] is False
     assert "Last Updated" in result["message"]
 
@@ -268,12 +200,10 @@ def test_last_updated_freshness_bypassed(tmp_path):
     branch_root = tmp_path / "mybranch"
     branch_root.mkdir()
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_last_updated_freshness,
+    bypass = [{"file": (tmp_path / "fake" / "apps" / "entry.py").as_posix(), "standard": "readme"}]
+    result = check_last_updated_freshness(
+        lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix(), bypass
     )
-
-    bypass = [{"file": "/fake/apps/entry.py", "standard": "readme"}]
-    result = check_last_updated_freshness(lines, branch_root, "/fake/apps/entry.py", bypass)
     assert result["passed"] is True
 
 
@@ -301,15 +231,11 @@ def test_directory_tree_accurate(tmp_path):
         "```",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_directory_tree,
-    )
-
-    result = check_directory_tree(lines, branch_root, "/fake/apps/entry.py")
+    result = check_directory_tree(lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
 
 
-def test_directory_tree_no_tree_section():
+def test_directory_tree_no_tree_section(tmp_path):
     """README without a tree block passes (optional)."""
     lines: List[str] = [
         "# Branch",
@@ -318,13 +244,7 @@ def test_directory_tree_no_tree_section():
         "Some content.",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_directory_tree,
-    )
-
-    from pathlib import Path
-
-    result = check_directory_tree(lines, Path("/nonexistent"), "/fake/apps/entry.py")
+    result = check_directory_tree(lines, tmp_path / "missing", (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
     assert result["message"] == "No directory tree block found (optional check)"
 
@@ -348,11 +268,7 @@ def test_module_list_all_mentioned(tmp_path):
         "This branch has audit and report modules.",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_module_list,
-    )
-
-    result = check_module_list(lines, branch_root, "/fake/apps/entry.py")
+    result = check_module_list(lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
 
 
@@ -368,11 +284,7 @@ def test_module_list_missing_module(tmp_path):
         "No modules mentioned here.",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_module_list,
-    )
-
-    result = check_module_list(lines, branch_root, "/fake/apps/entry.py")
+    result = check_module_list(lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is False
     assert "secret_module" in result["message"]
 
@@ -384,11 +296,7 @@ def test_module_list_no_modules_dir(tmp_path):
 
     lines: List[str] = ["# Branch"]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_module_list,
-    )
-
-    result = check_module_list(lines, branch_root, "/fake/apps/entry.py")
+    result = check_module_list(lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
 
 
@@ -397,7 +305,7 @@ def test_module_list_no_modules_dir(tmp_path):
 # ===========================================================================
 
 
-def test_command_list_present():
+def test_command_list_present(tmp_path):
     """Commands section with content passes."""
     lines: List[str] = [
         "# Branch",
@@ -409,16 +317,12 @@ def test_command_list_present():
         "## Other",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_command_list,
-    )
-
-    result = check_command_list(lines, "/fake/apps/entry.py")
+    result = check_command_list(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
     assert "2 content lines" in result["message"]
 
 
-def test_command_list_empty():
+def test_command_list_empty(tmp_path):
     """Commands section with no content fails."""
     lines: List[str] = [
         "# Branch",
@@ -428,16 +332,12 @@ def test_command_list_empty():
         "## Other Section",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_command_list,
-    )
-
-    result = check_command_list(lines, "/fake/apps/entry.py")
+    result = check_command_list(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is False
     assert "empty" in result["message"].lower()
 
 
-def test_command_list_missing():
+def test_command_list_missing(tmp_path):
     """No Commands section at all fails."""
     lines: List[str] = [
         "# Branch",
@@ -446,11 +346,7 @@ def test_command_list_missing():
         "Content here.",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_command_list,
-    )
-
-    result = check_command_list(lines, "/fake/apps/entry.py")
+    result = check_command_list(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is False
     assert "No Commands" in result["message"]
 
@@ -460,22 +356,19 @@ def test_command_list_missing():
 # ===========================================================================
 
 
-def test_is_handler_layer_true():
+def test_is_handler_layer_true(tmp_path):
     """File in handlers/ directory is handler layer."""
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        is_handler_layer,
+    assert (
+        is_handler_layer((tmp_path / "src" / "aipass" / "seedgo" / "apps" / "handlers" / "audit" / "ops.py").as_posix())
+        is True
     )
 
-    assert is_handler_layer("/src/aipass/seedgo/apps/handlers/audit/ops.py") is True
 
-
-def test_is_handler_layer_false():
+def test_is_handler_layer_false(tmp_path):
     """File in modules/ directory is not handler layer."""
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        is_handler_layer,
+    assert (
+        is_handler_layer((tmp_path / "src" / "aipass" / "seedgo" / "apps" / "modules" / "audit.py").as_posix()) is False
     )
-
-    assert is_handler_layer("/src/aipass/seedgo/apps/modules/audit.py") is False
 
 
 # ===========================================================================
@@ -483,22 +376,14 @@ def test_is_handler_layer_false():
 # ===========================================================================
 
 
-def test_is_trigger_handler_true():
+def test_is_trigger_handler_true(tmp_path):
     """File in trigger handlers/events/ is a trigger handler."""
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        is_trigger_handler,
-    )
-
-    assert is_trigger_handler("/apps/handlers/events/trigger_on_audit.py") is True
+    assert is_trigger_handler((tmp_path / "apps" / "handlers" / "events" / "trigger_on_audit.py").as_posix()) is True
 
 
-def test_is_trigger_handler_false():
+def test_is_trigger_handler_false(tmp_path):
     """File not in trigger handlers/events/ is not a trigger handler."""
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        is_trigger_handler,
-    )
-
-    assert is_trigger_handler("/apps/modules/audit.py") is False
+    assert is_trigger_handler((tmp_path / "apps" / "modules" / "audit.py").as_posix()) is False
 
 
 # ===========================================================================
@@ -506,29 +391,21 @@ def test_is_trigger_handler_false():
 # ===========================================================================
 
 
-def test_no_logger_imports_clean():
+def test_no_logger_imports_clean(tmp_path):
     """Handler without prax logger imports passes."""
     content = "def handle_event(**kwargs):\n    pass\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_no_logger_imports,
-    )
-
-    result = check_no_logger_imports(content, lines, "/fake/handler.py")
+    result = check_no_logger_imports(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result["passed"] is True
 
 
-def test_no_logger_imports_violation():
+def test_no_logger_imports_violation(tmp_path):
     """Handler importing prax logger fails."""
     content = "from prax import logger\n\ndef handle_event(**kwargs):\n    pass\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_no_logger_imports,
-    )
-
-    result = check_no_logger_imports(content, lines, "/fake/handler.py")
+    result = check_no_logger_imports(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result["passed"] is False
     assert "recursion" in result["message"]
 
@@ -538,43 +415,31 @@ def test_no_logger_imports_violation():
 # ===========================================================================
 
 
-def test_no_print_statements_clean():
+def test_no_print_statements_clean(tmp_path):
     """Handler without print statements passes."""
     content = "def handle_event(**kwargs):\n    return True\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_no_print_statements,
-    )
-
-    result = check_no_print_statements(content, lines, "/fake/handler.py")
+    result = check_no_print_statements(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result["passed"] is True
 
 
-def test_no_print_statements_violation():
+def test_no_print_statements_violation(tmp_path):
     """Handler with print() fails."""
     content = 'def handle_event(**kwargs):\n    print("debug")\n'
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_no_print_statements,
-    )
-
-    result = check_no_print_statements(content, lines, "/fake/handler.py")
+    result = check_no_print_statements(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result["passed"] is False
     assert "print()" in result["message"]
 
 
-def test_no_print_in_main_block_ok():
+def test_no_print_in_main_block_ok(tmp_path):
     """print() inside __main__ block is allowed."""
     content = 'def handle_event(**kwargs):\n    return True\n\nif __name__ == "__main__":\n    print("testing")\n'
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_no_print_statements,
-    )
-
-    result = check_no_print_statements(content, lines, "/fake/handler.py")
+    result = check_no_print_statements(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result["passed"] is True
 
 
@@ -583,58 +448,44 @@ def test_no_print_in_main_block_ok():
 # ===========================================================================
 
 
-def test_trigger_import_pattern_correct():
+def test_trigger_import_pattern_correct(tmp_path):
     """Correct trigger import pattern passes."""
     content = 'from trigger import trigger\n\ndef do_work():\n    trigger.fire("event")\n'
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_trigger_import_pattern,
-    )
-
-    result = check_trigger_import_pattern(content, lines, "/fake/module.py")
+    result = check_trigger_import_pattern(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is not None
     assert result["passed"] is True
 
 
-def test_trigger_import_pattern_missing():
+def test_trigger_import_pattern_missing(tmp_path):
     """trigger.fire() without import fails."""
     content = 'def do_work():\n    trigger.fire("event")\n'
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_trigger_import_pattern,
-    )
-
-    result = check_trigger_import_pattern(content, lines, "/fake/module.py")
+    result = check_trigger_import_pattern(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is not None
     assert result["passed"] is False
     assert "missing proper import" in result["message"]
 
 
-def test_trigger_import_pattern_no_trigger():
+def test_trigger_import_pattern_no_trigger(tmp_path):
     """File not using trigger returns None."""
     content = "def do_work():\n    return True\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_trigger_import_pattern,
-    )
-
-    result = check_trigger_import_pattern(content, lines, "/fake/module.py")
+    result = check_trigger_import_pattern(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is None
 
 
-def test_trigger_import_pattern_trigger_branch():
+def test_trigger_import_pattern_trigger_branch(tmp_path):
     """Trigger branch file is exempt (self-reference)."""
     content = 'def fire(event):\n    trigger.fire("event")\n'
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_trigger_import_pattern,
+    result = check_trigger_import_pattern(
+        content, lines, (tmp_path / "src" / "aipass" / "trigger" / "apps" / "modules" / "core.py").as_posix()
     )
-
-    result = check_trigger_import_pattern(content, lines, "/src/aipass/trigger/apps/modules/core.py")
     assert result is not None
     assert result["passed"] is True
 
@@ -644,44 +495,32 @@ def test_trigger_import_pattern_trigger_branch():
 # ===========================================================================
 
 
-def test_handler_naming_correct():
+def test_handler_naming_correct(tmp_path):
     """Handler function with handle_ prefix passes."""
     content = "def handle_audit_complete(**kwargs):\n    pass\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_handler_naming,
-    )
-
-    result = check_handler_naming(content, lines, "/fake/handler.py")
+    result = check_handler_naming(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result is not None
     assert result["passed"] is True
 
 
-def test_handler_naming_bad():
+def test_handler_naming_bad(tmp_path):
     """Handler function without handle_ prefix fails."""
     content = "def onHandleEvent(**kwargs):\n    pass\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_handler_naming,
-    )
-
-    result = check_handler_naming(content, lines, "/fake/handler.py")
+    result = check_handler_naming(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result is not None
     assert result["passed"] is False
 
 
-def test_handler_naming_no_handlers():
+def test_handler_naming_no_handlers(tmp_path):
     """File with no handler functions returns None."""
     content = "def do_work():\n    pass\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_handler_naming,
-    )
-
-    result = check_handler_naming(content, lines, "/fake/handler.py")
+    result = check_handler_naming(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result is None
 
 
@@ -690,44 +529,32 @@ def test_handler_naming_no_handlers():
 # ===========================================================================
 
 
-def test_missing_trigger_events_lifecycle():
+def test_missing_trigger_events_lifecycle(tmp_path):
     """Lifecycle function without trigger.fire() is flagged."""
     content = "def create_branch():\n    pass\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
-    )
-
-    result = check_missing_trigger_events(content, lines, "/fake/module.py")
+    result = check_missing_trigger_events(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is not None
     assert result["passed"] is False
     assert "create_" in result["message"]
 
 
-def test_missing_trigger_events_with_fire():
+def test_missing_trigger_events_with_fire(tmp_path):
     """Lifecycle function with trigger.fire() passes (returns None)."""
     content = 'def create_branch():\n    trigger.fire("branch_created")\n'
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
-    )
-
-    result = check_missing_trigger_events(content, lines, "/fake/module.py")
+    result = check_missing_trigger_events(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is None
 
 
-def test_missing_trigger_events_no_patterns():
+def test_missing_trigger_events_no_patterns(tmp_path):
     """File with no event-like patterns returns None."""
     content = "def do_work():\n    return True\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
-    )
-
-    result = check_missing_trigger_events(content, lines, "/fake/module.py")
+    result = check_missing_trigger_events(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is None
 
 
@@ -736,31 +563,23 @@ def test_missing_trigger_events_no_patterns():
 # ===========================================================================
 
 
-def test_find_pattern_lines_detects_unlink():
+def test_find_pattern_lines_detects_unlink(tmp_path):
     """Inline .unlink() without trigger.fire() is flagged."""
     content = "def cleanup():\n    path.unlink()\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
-    )
-
-    result = check_missing_trigger_events(content, lines, "/fake/module.py")
+    result = check_missing_trigger_events(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is not None
     assert result["passed"] is False
     assert ".unlink()" in result["message"]
 
 
-def test_find_pattern_lines_detects_rename():
+def test_find_pattern_lines_detects_rename(tmp_path):
     """Inline .rename() without trigger.fire() is flagged."""
     content = "def move_file():\n    path.rename(new_path)\n"
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
-    )
-
-    result = check_missing_trigger_events(content, lines, "/fake/module.py")
+    result = check_missing_trigger_events(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is not None
     assert result["passed"] is False
     assert ".rename()" in result["message"]
@@ -823,51 +642,47 @@ def shutdown_logging_system():
 '''
 
 
-def test_per_function_prax_logger_shape_accepts():
+def test_per_function_prax_logger_shape_accepts(tmp_path):
     """Lifecycle doors that fire in their OWN bodies pass (live prax precedent)."""
     content = _PRAX_LOGGER_SHAPE
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
+    assert (
+        check_missing_trigger_events(
+            content, lines, (tmp_path / "fake" / "prax" / "apps" / "modules" / "logger.py").as_posix()
+        )
+        is None
     )
 
-    assert check_missing_trigger_events(content, lines, "/fake/prax/apps/modules/logger.py") is None
 
-
-def test_per_function_prax_logger_shape_rejects_when_fires_move_out():
+def test_per_function_prax_logger_shape_rejects_when_fires_move_out(tmp_path):
     """An unrelated fire elsewhere in the file no longer covers the lifecycle doors."""
     content = _PRAX_LOGGER_SHAPE_BROKEN
     lines = _lines(content)
     assert "trigger.fire(" in content  # the file still fires — file-level flag would pass it
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
+    result = check_missing_trigger_events(
+        content, lines, (tmp_path / "fake" / "prax" / "apps" / "modules" / "logger.py").as_posix()
     )
-
-    result = check_missing_trigger_events(content, lines, "/fake/prax/apps/modules/logger.py")
     assert result is not None
     assert result["passed"] is False
     assert "initialize_*_system" in result["message"]
     assert "shutdown_*_system" in result["message"]
 
 
-def test_fire_in_one_function_does_not_exempt_another():
-    """A fire in function A is not an exemption for function B in the same file."""
+def test_fire_in_one_function_does_not_exempt_another(tmp_path):
+    """A fire in function A is not an exemption for function B in the same file. Mutant: a violation reported as passing in apps/handlers/aipass_standards/trigger_check.py — killed."""
     content = 'def create_thing():\n    trigger.fire("thing_created")\n\n\ndef delete_thing():\n    pass\n'
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
-    )
-
-    result = check_missing_trigger_events(content, lines, "/fake/module.py")
+    result = check_missing_trigger_events(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is not None
+    assert result["passed"] is False
     assert "delete_*" in result["message"]
     assert "create_*" not in result["message"]
 
 
-def test_one_hop_delegation_acquits():
+def test_one_hop_delegation_acquits(tmp_path):
     """Delegating the fire to a local helper is still firing (aipass install.py shape)."""
     content = (
         "def _fire_lock_removed(path, reason):\n"
@@ -879,52 +694,44 @@ def test_one_hop_delegation_acquits():
     )
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
-    )
-
-    assert check_missing_trigger_events(content, lines, "/fake/module.py") is None
+    assert check_missing_trigger_events(content, lines, (tmp_path / "fake" / "module.py").as_posix()) is None
 
 
-def test_pattern10_unlink_scoped_to_enclosing_function():
-    """An .unlink() is answered by the function it sits in, not by the whole file."""
+def test_pattern10_unlink_scoped_to_enclosing_function(tmp_path):
+    """An .unlink() is answered by the function it sits in, not by the whole file. Mutant: a violation reported as passing in apps/handlers/aipass_standards/trigger_check.py — killed."""
     content = 'def purge_cache(path):\n    trigger.fire("cache_purged")\n\n\ndef wipe_state(path):\n    path.unlink()\n'
     lines = _lines(content)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
-    )
-
-    result = check_missing_trigger_events(content, lines, "/fake/module.py")
+    result = check_missing_trigger_events(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is not None
+    assert result["passed"] is False
     assert ".unlink() file deletion on lines [6]" in result["message"]
 
 
-def test_pattern10_module_level_keeps_file_level_behaviour():
-    """A call outside any function has no function body to ask, so the file answers."""
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
-    )
-
+def test_pattern10_module_level_keeps_file_level_behaviour(tmp_path):
+    """A call outside any function has no function body to ask, so the file answers. Mutant: a violation reported as passing in apps/handlers/aipass_standards/trigger_check.py — killed."""
     exempt = 'trigger.fire("started")\nPath("a").unlink()\n'
-    assert check_missing_trigger_events(exempt, _lines(exempt), "/fake/module.py") is None
+    assert check_missing_trigger_events(exempt, _lines(exempt), (tmp_path / "fake" / "module.py").as_posix()) is None
 
     bare = 'Path("a").unlink()\n'
-    result = check_missing_trigger_events(bare, _lines(bare), "/fake/module.py")
+    result = check_missing_trigger_events(bare, _lines(bare), (tmp_path / "fake" / "module.py").as_posix())
     assert result is not None
+    assert result["passed"] is False
     assert ".unlink()" in result["message"]
 
 
-def test_unparseable_file_falls_back_to_file_level():
-    """A file that does not parse keeps the old behaviour instead of dropping the check."""
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
-        check_missing_trigger_events,
+def test_unparseable_file_falls_back_to_file_level(tmp_path):
+    """A file that does not parse keeps the old behaviour instead of dropping the check. Mutant: a violation reported as passing in apps/handlers/aipass_standards/trigger_check.py — killed."""
+    broken_exempt = 'def create_thing(:\n    trigger.fire("thing_created")\n'
+    assert (
+        check_missing_trigger_events(broken_exempt, _lines(broken_exempt), (tmp_path / "fake" / "module.py").as_posix())
+        is None
     )
 
-    broken_exempt = 'def create_thing(:\n    trigger.fire("thing_created")\n'
-    assert check_missing_trigger_events(broken_exempt, _lines(broken_exempt), "/fake/module.py") is None
-
     broken_bare = "def create_thing(:\n    pass\n"
-    result = check_missing_trigger_events(broken_bare, _lines(broken_bare), "/fake/module.py")
+    result = check_missing_trigger_events(
+        broken_bare, _lines(broken_bare), (tmp_path / "fake" / "module.py").as_posix()
+    )
     assert result is not None
+    assert result["passed"] is False
     assert "create_*" in result["message"]

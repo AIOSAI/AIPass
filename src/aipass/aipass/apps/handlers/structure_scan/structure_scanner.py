@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: structure_scanner.py
 # Description: Project structure validation for aipass doctor
-# Version: 1.1.0
+# Version: 1.1.3
 # Created: 2026-05-14
-# Modified: 2026-09-15
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -16,6 +16,7 @@ Display concerns belong to the doctor module.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional
 
@@ -40,6 +41,13 @@ class PlacementIssue(NamedTuple):
     actual_path: str
     expected_pattern: str
     severity: str  # "warn" or "fail"
+
+
+class PackagesUnknown(NamedTuple):
+    """A root whose declared package names could not be read — unknown, not "none"."""
+
+    root: str
+    reason: str
 
 
 class PollutionHit(NamedTuple):
@@ -93,7 +101,19 @@ def find_project_root(start: Path) -> Optional[Path]:
 # =============================================================================
 
 
-_SCAN_SKIP_DIRS = {".archive", ".backup", ".venv", ".git", "__pycache__", "node_modules", ".chroma", "templates"}
+# dropbox and .archive are sandboxes nothing looks into (the owner's ruling of
+# 09-27, 20:42) -- a branch copied into a dropbox is not an agent.
+_SCAN_SKIP_DIRS = {
+    "dropbox",
+    ".archive",
+    ".backup",
+    ".venv",
+    ".git",
+    "__pycache__",
+    "node_modules",
+    ".chroma",
+    "templates",
+}
 
 
 def scan_agents(project_root: Path) -> List[AgentInfo]:
@@ -104,7 +124,8 @@ def scan_agents(project_root: Path) -> List[AgentInfo]:
     """
     agents: List[AgentInfo] = []
     for passport_path in sorted(project_root.rglob(".trinity/passport.json")):
-        if any(skip in passport_path.parts for skip in _SCAN_SKIP_DIRS):
+        # Parts relative to the project: a parent of the project named dropbox is not a sandbox.
+        if any(skip in passport_path.relative_to(project_root).parts for skip in _SCAN_SKIP_DIRS):
             continue
         agent_dir = passport_path.parent.parent
         if agent_dir == project_root:
@@ -140,31 +161,43 @@ def scan_agents(project_root: Path) -> List[AgentInfo]:
 # =============================================================================
 
 
-def _detect_package_names(project_root: Path) -> set:
+def _detect_package_names(project_root: Path, why: List[str]) -> Optional[set]:
     """Read pyproject.toml to find declared package directory names.
 
+    Args:
+        project_root: The root whose pyproject.toml is read.
+        why: Receives the reason when the answer is None.
+
     Returns:
-        Set of package names (e.g. {'aipass', 'aipl'}), empty if none found.
+        Set of package names (e.g. {'aipass', 'aipl'}), empty when pyproject.toml
+        is absent or declares none. None when the file is there but could not be
+        read: no TOML parser (Python 3.10 has no tomllib, and tomli is only there
+        if another package brought it) or the parse failed. Unknown is not "no
+        packages", so the caller must not measure placement against it.
     """
     pyproject = project_root / "pyproject.toml"
     if not pyproject.exists():
         return set()
 
     try:
-        import tomllib  # noqa: F811 — stdlib 3.11+
+        import tomllib  # stdlib 3.11+
     except ImportError:
         try:
             import tomli as tomllib  # type: ignore[no-redef]
         except ImportError:
-            logger.info("[structure_scan] no TOML parser available — skipping package detection")
-            return set()
+            version = f"{sys.version_info[0]}.{sys.version_info[1]}"
+            reason = f"no TOML parser: Python {version} has no tomllib and tomli is not installed"
+            logger.warning("[structure_scan] %s — package names unknown for %s", reason, project_root)
+            why.append(reason)
+            return None
 
     try:
         with open(pyproject, "rb") as f:
             data = tomllib.load(f)
     except Exception as exc:
         logger.warning("[structure_scan] pyproject.toml parse error: %s", exc)
-        return set()
+        why.append(f"pyproject.toml could not be parsed: {exc}")
+        return None
 
     names: set = set()
 
@@ -246,28 +279,45 @@ def resident_root(agent: AgentInfo, project_root: Path) -> Optional[Path]:
 # =============================================================================
 
 
-def check_placement(agents: List[AgentInfo], project_root: Path) -> List[PlacementIssue]:
+def check_placement(
+    agents: List[AgentInfo],
+    project_root: Path,
+    unknown: Optional[List[PackagesUnknown]] = None,
+) -> List[PlacementIssue]:
     """Check whether each agent is in src/<package>/<agent>/ or src/<agent>/.
 
     When pyproject.toml defines packages, agents at src/<name>/ where name
-    is not a declared package are flagged as misplaced siblings.
+    is not a declared package are flagged as misplaced siblings. When a root's
+    package names are unknown (None), nothing is measured against them: the
+    root goes into ``unknown`` once, for doctor to show, never as a placement
+    issue.
 
     Each agent is measured against the root that CLAIMS it (resident_root) and
     only then against the scan's own project_root, so a registered citizen of a
     project under projects/ is read at its own src/ instead of being reported as
     misplaced forever.
 
+    Args:
+        agents: The discovered agents.
+        project_root: The framework project root the scan started from.
+        unknown: Receives one PackagesUnknown per root whose package names
+            could not be read; the default discards them (_doctor_fix).
+
     Returns:
         List of PlacementIssue for agents in unexpected locations.
     """
     issues: List[PlacementIssue] = []
-    packages_by_root: Dict[Path, set] = {}
+    packages_by_root: Dict[Path, Optional[set]] = {}
+    unknown_roots: List[PackagesUnknown] = unknown if unknown is not None else []
 
     for agent in agents:
         home = resident_root(agent, project_root) or project_root
         src_dir = home / "src"
         if home not in packages_by_root:
-            packages_by_root[home] = _detect_package_names(home)
+            why: List[str] = []
+            packages_by_root[home] = _detect_package_names(home, why)
+            if packages_by_root[home] is None:  # unknown, not "no packages": shown, never measured against
+                unknown_roots.append(PackagesUnknown(str(home), "; ".join(why)))
         package_names = packages_by_root[home]
 
         rel = None

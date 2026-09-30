@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_display.py
 # Description: Audit Display Module
-# Version: 1.2.0
+# Version: 1.6.0
 # Created: 2026-03-05
-# Modified: 2026-09-15
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -26,7 +26,7 @@ from collections import defaultdict
 # Prax logger (system-wide, always first)
 
 # CLI services (display/output formatting)
-from aipass.cli import console
+from aipass.cli import console, warning
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.audit.discovery import DEFAULT_PACK_CORPUS
@@ -325,6 +325,49 @@ def _render_deprecated_patterns(audit_result: dict, console_obj) -> None:
 # =============================================================================
 
 
+#: How many re-run checkers to name before the line stops being readable. A
+#: pack-wide bust never reaches here (it fails the branch stamp and reports
+#: nothing cached), so this only trims the rare many-checkers-edited run.
+_MAX_NAMED_RERUNS = 4
+
+
+def cache_tag(audit_result: dict) -> str:
+    """The `(cached)` suffix for a branch line — and what a PARTIAL hit says.
+
+    A full hit reads `(cached)`. A run that served most of the cache and re-ran
+    a little used to read as nothing at all, identical to a cold scan, so a
+    working cache and a broken one looked the same from the outside. The owner
+    diagnosed a clobbering bug in 2026-09-21 from timings alone because of it.
+
+    Now it says what it re-did:
+
+        (cached: 51 of 53 checkers; re-ran imports, named_encoding)
+        (cached: 98 of 101 files)
+
+    Both clauses appear when both are true. Nothing is printed for a cold run,
+    a `--full` run or a stamp bust: there was no cache to serve, and claiming
+    a fraction of one would be worse than silence.
+    """
+    if audit_result.get("_cache_hit"):
+        return " [dim](cached)[/dim]"
+    partial = audit_result.get("_cache_partial")
+    if not partial:
+        return ""
+    parts = []
+    if partial["checkers_cached"] < partial["checkers_total"]:
+        parts.append(f"{partial['checkers_cached']} of {partial['checkers_total']} checkers")
+    if partial["files_cached"] < partial["files_total"]:
+        parts.append(f"{partial['files_cached']} of {partial['files_total']} files")
+    if not parts:
+        return ""
+    reran = partial.get("reran") or []
+    named = ", ".join(reran[:_MAX_NAMED_RERUNS])
+    if len(reran) > _MAX_NAMED_RERUNS:
+        named += f" (+{len(reran) - _MAX_NAMED_RERUNS} more)"
+    detail = f"; re-ran {named}" if reran else ""
+    return f" [dim](cached: {', '.join(parts)}{detail})[/dim]"
+
+
 def print_branch_summary(
     audit_result: Dict,
     system_averages: Dict[str, int] | None = None,
@@ -363,7 +406,7 @@ def print_branch_summary(
     corpus_noun = audit_result.get("corpus_noun") or DEFAULT_PACK_CORPUS["noun"]
     corpus_detail = audit_result.get("corpus_detail") or DEFAULT_PACK_CORPUS["detail"]
     corpus_size = audit_result.get("corpus_size", files_checked)
-    cached_tag = " [dim](cached)[/dim]" if audit_result.get("_cache_hit") else ""
+    cached_tag = cache_tag(audit_result)
     no_bypass_tag = " [bold yellow][BYPASSES DISABLED][/bold yellow]" if no_bypass else ""
     console.print()
     console.print(
@@ -388,6 +431,25 @@ def print_branch_summary(
             console.print(f"{left_display}  {right_display}")
         else:
             console.print(left_display)
+
+    # The files each row did not judge, so a 100 over a partial corpus says so.
+    declined = audit_result.get("declined") or {}
+    if declined:
+        counts = ", ".join(f"{name.title()} {len(files)} declined" for name, files in sorted(declined.items()))
+        console.print(f"  [dim]Not judged: {counts}[/dim]")
+
+    # What the audit ignore list removed, and any tracked source it should not have.
+    ignored = audit_result.get("ignored") or {}
+    if ignored:
+        counts = ", ".join(f"{pattern} {len(files)}" for pattern, files in sorted(ignored.items()))
+        console.print(f"  [dim]Ignored by the audit list: {counts}[/dim]")
+    for rel in audit_result.get("ignored_tracked") or []:
+        warning(f"Ignore list drops tracked source: {rel}")
+    # Bypass rules that match nothing, and inline bypass comments nothing reads.
+    for dead in audit_result.get("bypass_dead") or []:
+        warning(f"Dead bypass rule [{dead['index']}] {dead['file']} / {dead['standard']}: {dead['why']}")
+    for marker in audit_result.get("bypass_markers") or []:
+        warning(f"Inline bypass comment, read by nothing: {marker}")
 
     # Overall score
     overall_icon = "✅" if avg >= 90 else "⚠️" if avg >= 75 else "❌"

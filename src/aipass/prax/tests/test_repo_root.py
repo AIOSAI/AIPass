@@ -1,8 +1,9 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_repo_root.py - Repo-Root Resolution Pins
-# Date: 2026-08-31
-# Version: 1.0.0
+# =================== AIPass ====================
+# Name: test_repo_root.py
+# Description: Repo-Root Resolution Pins
+# Version: 1.1.0
+# Created: 2026-08-31
+# Modified: 2026-09-29
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -15,35 +16,43 @@
 #     working directory in-process cannot get back
 # =============================================
 
-"""Pins for repo-root resolution that must never read the process CWD.
+"""Tests for apps/handlers/repo_root.py and the introspection/dashboard modules it guards."""
 
-@memory reported on 2026-08-31, with a full traceback: config/load.py's
-_find_repo_root ended `return Path.cwd()`, and because nearly every handler in
-AIPass does `logger = get_system_logger()` at module level, that walk runs during
-IMPORT. A process whose working directory has been deleted crashed importing
-almost anything; a registry-less checkout (every clean CI clone — the registry is
-gitignored) silently resolved system_logs/ against wherever the shell stood.
+# Pins for repo-root resolution that must never read the process CWD.
+#
+# @memory reported on 2026-08-31, with a full traceback: config/load.py's
+# _find_repo_root ended `return Path.cwd()`, and because nearly every handler in
+# AIPass does `logger = get_system_logger()` at module level, that walk runs during
+# IMPORT. A process whose working directory has been deleted crashed importing
+# almost anything; a registry-less checkout (every clean CI clone — the registry is
+# gitignored) silently resolved system_logs/ against wherever the shell stood.
+#
+# Prax carried EIGHT copies of that function. The cure is one shared module, and
+# the guard against the ninth copy is structural: an AST sweep, with a positive
+# control so it cannot be quietly silenced.
+#
+# The sweep found a second crash site @memory's traceback could not reach, because
+# their caller was a real absolute file: introspection.detect_branch_from_path
+# resolves the CALLER's path, and a pseudo-filename like <stdin> is relative, so
+# resolve() reads the cwd there too.
 
-Prax carried EIGHT copies of that function. The cure is one shared module, and
-the guard against the ninth copy is structural: an AST sweep, with a positive
-control so it cannot be quietly silenced.
-
-The sweep found a second crash site @memory's traceback could not reach, because
-their caller was a real absolute file: introspection.detect_branch_from_path
-resolves the CALLER's path, and a pseudo-filename like <stdin> is relative, so
-resolve() reads the cwd there too.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(error_handling) — resolved_file answering the unresolved path on OSError, covered by that row
+# seedgo: no-test-needed(error_handling) — find_repo_root walking past an unreadable directory, covered by that row
 
 import ast
+import json
 import os
 import subprocess
 import sys
 import textwrap
+from datetime import datetime
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 import pytest
 
 from aipass.prax.apps.handlers import repo_root as repo_root_mod
+from aipass.prax.apps.handlers.dashboard import agent_status_writer
 
 
 def _answer(result) -> str:
@@ -256,7 +265,9 @@ def _run_without_a_working_directory(body: str, world: str = _INJECT_DEAD_CWD, m
     # produces no usable stack filename so introspection bails early; a `<stdin>`
     # caller produces a RELATIVE pseudo-filename, which is exactly what
     # detect_branch_from_path then hands to resolve().
-    return subprocess.run([sys.executable, "-"], input=script, capture_output=True, text=True, timeout=120)
+    return subprocess.run(
+        [sys.executable, "-"], input=script, capture_output=True, text=True, encoding="utf-8", timeout=120
+    )
 
 
 # =============================================================================
@@ -332,7 +343,7 @@ class TestFindRepoRoot:
     def test_the_marker_wins_when_present(self, tmp_path):
         root = tmp_path / "checkout"
         (root / "src" / "aipass" / "prax").mkdir(parents=True)
-        (root / repo_root_mod.REGISTRY_MARKER).write_text("{}")
+        (root / repo_root_mod.REGISTRY_MARKER).write_text("{}", encoding="utf-8")
         assert repo_root_mod.find_repo_root(root / "src" / "aipass" / "prax" / "a.py") == root
 
     def test_a_registry_less_checkout_resolves_to_the_checkout(self, tmp_path):
@@ -351,7 +362,7 @@ class TestFindRepoRoot:
         """
         foreign = tmp_path / "someone_elses_checkout"
         (foreign / "src" / "aipass" / "prax").mkdir(parents=True)
-        (foreign / repo_root_mod.REGISTRY_MARKER).write_text("{}")
+        (foreign / repo_root_mod.REGISTRY_MARKER).write_text("{}", encoding="utf-8")
         monkeypatch.chdir(foreign)
 
         # Walking this relative start reaches Path(".") — which IS the foreign
@@ -528,7 +539,7 @@ class TestCallerPathResolution:
 
         branch_dir = tmp_path / "src" / "aipass" / "someoneelse" / "apps"
         branch_dir.mkdir(parents=True)
-        (branch_dir / "mod.py").write_text("")
+        (branch_dir / "mod.py").write_text("", encoding="utf-8")
         monkeypatch.chdir(branch_dir)
 
         assert introspection._resolve_caller_path("mod.py") is None
@@ -537,10 +548,10 @@ class TestCallerPathResolution:
         from aipass.prax.apps.handlers.logging import introspection
 
         real = tmp_path / "mod.py"
-        real.write_text("")
+        real.write_text("", encoding="utf-8")
         assert introspection._resolve_caller_path(str(real)) == real.resolve()
 
-    def test_an_unresolvable_absolute_path_is_an_answer_not_a_crash(self, monkeypatch):
+    def test_an_unresolvable_absolute_path_is_an_answer_not_a_crash(self, monkeypatch, tmp_path):
         """Branch detection is a routing hint. Not knowing where the caller lives
         must never take down the caller's import."""
         from aipass.prax.apps.handlers.logging import introspection
@@ -549,7 +560,8 @@ class TestCallerPathResolution:
             raise OSError("no cwd")
 
         monkeypatch.setattr(Path, "resolve", boom)
-        assert introspection._resolve_caller_path("/absolute/but/unresolvable.py") is None
+        unresolvable = str(tmp_path / "unresolvable.py")
+        assert introspection._resolve_caller_path(unresolvable) is None
 
 
 class TestBothConstructionsAgree:
@@ -637,11 +649,23 @@ def _module_key(relative: PurePath) -> str:
     return relative.as_posix()
 
 
+# dropbox (hand-offs inbound to a branch) and .archive are not live code, per
+# the ruling of 2026-09-27 20:42 relayed by @devpulse; __pycache__ holds no
+# source. Matched by name RELATIVE to the walk root, so a root that itself sits
+# inside a directory of one of these names is still walked.
+_NOT_LIVE = {"dropbox", ".archive", "__pycache__"}
+
+
+def _not_live(path: Path, root: Path) -> bool:
+    """True when a directory between root and path is one the sweeps skip by name."""
+    return bool(_NOT_LIVE.intersection(path.relative_to(root).parts))
+
+
 def _modules_reading_the_cwd(root: Path) -> dict:
     """AST scan: which files call Path.cwd() or os.getcwd()?"""
     found = {}
     for path in sorted(root.rglob("*.py")):
-        if ".archive" in path.parts or "__pycache__" in path.parts:
+        if _not_live(path, root):
             continue
         # Deliberately NOT skipped. A module in prax's own tree that will not
         # parse is a hole in this sweep, and a sweep that skips its holes reports
@@ -682,8 +706,21 @@ class TestNoPrivateCwdFallback:
         reports the same green as a clean tree."""
         planted = tmp_path / "apps" / "planted.py"
         planted.parent.mkdir(parents=True)
-        planted.write_text("from pathlib import Path\n\n\ndef f():\n    return Path.cwd()\n")
+        planted.write_text("from pathlib import Path\n\n\ndef f():\n    return Path.cwd()\n", encoding="utf-8")
         assert _modules_reading_the_cwd(tmp_path / "apps")
+
+    def test_the_sweep_skips_not_live_trees_by_name_under_its_own_root(self, tmp_path):
+        """dropbox and .archive under the walk root are not live code and are skipped.
+
+        The root itself sits inside a directory named dropbox: a skip matched on
+        the absolute path would skip the whole tree and report a clean sweep.
+        """
+        root = tmp_path / "dropbox" / "apps"
+        body = "from pathlib import Path\n\n\ndef f():\n    return Path.cwd()\n"
+        for planted in (root / "live.py", root / "dropbox" / "handed.py", root / ".archive" / "old.py"):
+            planted.parent.mkdir(parents=True, exist_ok=True)
+            planted.write_text(body, encoding="utf-8")
+        assert set(_modules_reading_the_cwd(root)) == {_module_key(PurePath("apps", "live.py"))}
 
     def test_the_allowlist_matches_a_windows_spelled_key(self):
         """@devpulse's Windows CI leg: the sweep convicted an EXEMPTED line.
@@ -725,7 +762,7 @@ class TestEveryLaneUsesTheSharedResolver:
     def test_every_find_repo_root_delegates_to_the_shared_resolver(self):
         private = {}
         for path in sorted(APPS_DIR.rglob("*.py")):
-            if ".archive" in path.parts or "__pycache__" in path.parts:
+            if _not_live(path, APPS_DIR):
                 continue
             if path == Path(repo_root_mod.__file__).resolve():
                 continue
@@ -749,8 +786,10 @@ class TestEveryLaneUsesTheSharedResolver:
     def test_the_delegation_sweep_can_actually_see_a_violation(self, tmp_path):
         """Positive control: a sweep that looks nowhere reports the same green."""
         planted = tmp_path / "planted.py"
-        planted.write_text("from pathlib import Path\n\n\ndef _find_repo_root():\n    return Path.cwd()\n")
-        tree = ast.parse(planted.read_text())
+        planted.write_text(
+            "from pathlib import Path\n\n\ndef _find_repo_root():\n    return Path.cwd()\n", encoding="utf-8"
+        )
+        tree = ast.parse(planted.read_text(encoding="utf-8"))
         offenders = [
             node.lineno
             for node in ast.walk(tree)
@@ -812,12 +851,8 @@ def _docstrings(tree: ast.AST) -> list:
 
 
 def _tree_modules() -> list:
-    """Every live module under apps/, excluding archives and bytecode."""
-    return [
-        path
-        for path in sorted(APPS_DIR.rglob("*.py"))
-        if ".archive" not in path.parts and "__pycache__" not in path.parts
-    ]
+    """Every live module under apps/, excluding dropbox, archives and bytecode."""
+    return [path for path in sorted(APPS_DIR.rglob("*.py")) if not _not_live(path, APPS_DIR)]
 
 
 class TestNothingCallsInspectStack:
@@ -889,8 +924,8 @@ class TestNothingCallsInspectStack:
     def test_the_matcher_convicts_a_planted_call_at_the_right_line(self, tmp_path):
         """Positive control, through the REAL matcher rather than a copy of it."""
         planted = tmp_path / "planted.py"
-        planted.write_text("import inspect\n\n\ndef f():\n    return inspect.stack()[1]\n")
-        assert _inspect_stack_calls(ast.parse(planted.read_text())) == [5]
+        planted.write_text("import inspect\n\n\ndef f():\n    return inspect.stack()[1]\n", encoding="utf-8")
+        assert _inspect_stack_calls(ast.parse(planted.read_text(encoding="utf-8"))) == [5]
 
     def test_the_matcher_does_not_convict_the_docstring_that_explains_the_ban(self):
         """The guard's docstring says `inspect.stack()` and must stay legal.
@@ -984,6 +1019,7 @@ class TestCallerAttributionWithoutAWorkingDirectory:
                 ),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=120,
             )
             verdicts[name] = probe.stdout.strip()
@@ -1120,7 +1156,9 @@ class TestTheGuardsUndeterminableCallerBranch:
             )
             + textwrap.dedent(body)
         )
-        return subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        return subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
 
     def test_the_branch_is_reachable_and_the_guard_returns_from_it(self):
         """Both arming probes, then the claim — in that order, in one child.
@@ -1291,6 +1329,7 @@ class TestACallerNameIsNotAlwaysAModuleName:
                 ),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=120,
             )
             verdicts[name] = _answer(probe)
@@ -1300,3 +1339,93 @@ class TestACallerNameIsNotAlwaysAModuleName:
             "realpath-denied": "DIED",
             "ntpath-shaped": "DIED",
         }, f"the Windows emulation does not read like the Windows runner did: {verdicts}"
+
+
+class TestRegistryRowsResolveAgainstTheRepoRoot:
+    """agent_status_writer — the same defect one door along.
+
+    @devpulse's read-only survey of every write path (DPLAN-0349, mail
+    2026-09-18) found the registry row taken as ``Path(branch["path"])`` with no
+    repo-root join, while refresh.py and template_pusher.py both join. The
+    registry stores REPO-RELATIVE rows, so an unjoined row resolves against
+    wherever the process started: the branch is dropped when the cwd has no such
+    subtree, and matched against a look-alike subtree when it does.
+
+    Read through the public section builder: the resolved path is where the
+    dispatch lock is looked for, so a lock the builder reports is a path it
+    resolved.
+    """
+
+    DEAD_PID = 999999999
+
+    @staticmethod
+    def _lock(branch_dir: Path) -> None:
+        """Lay a dispatch lock of a process that cannot be alive."""
+        mail = branch_dir / "ai_mail.local"
+        mail.mkdir(parents=True, exist_ok=True)
+        (mail / ".dispatch.lock").write_text(
+            json.dumps(
+                {
+                    "pid": TestRegistryRowsResolveAgainstTheRepoRoot.DEAD_PID,
+                    "timestamp": datetime.now().isoformat(),
+                    "branch": branch_dir.name,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _registry(repo: Path, name: str, row: str) -> None:
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "AIPASS_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": name, "path": row}]}), encoding="utf-8"
+        )
+
+    def _world(self, tmp_path, monkeypatch):
+        """A repo root holding one relative registry row, with the process
+        standing somewhere else entirely."""
+        repo = tmp_path / "checkout"
+        self._registry(repo, "somebranch", "src/aipass/somebranch")
+        (repo / "src" / "aipass" / "somebranch").mkdir(parents=True)
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        monkeypatch.setattr(agent_status_writer, "_find_repo_root", lambda: repo)
+
+        return repo, elsewhere
+
+    def test_a_relative_row_resolves_against_the_repo_root(self, tmp_path, monkeypatch):
+        repo, _ = self._world(tmp_path, monkeypatch)
+        self._lock(repo / "src" / "aipass" / "somebranch")
+
+        section = agent_status_writer.build_agent_status_section()
+
+        assert [a["branch"] for a in section["stale_agents"]] == ["somebranch"]
+
+    def test_a_look_alike_subtree_under_the_cwd_is_not_the_branch(self, tmp_path, monkeypatch):
+        """The half a plain exists() check cannot see.
+
+        Dropping a branch shows up as a missing dashboard section. Reading — and
+        then writing — a decoy of the same shape under the cwd is silent.
+        """
+        _, elsewhere = self._world(tmp_path, monkeypatch)
+        self._lock(elsewhere / "src" / "aipass" / "somebranch")
+
+        section = agent_status_writer.build_agent_status_section()
+
+        assert section["stale_agents"] == []
+        assert section["active_agents"] == []
+
+    def test_an_absolute_row_is_taken_as_written(self, tmp_path, monkeypatch):
+        """External projects register absolute rows — the join must not double them."""
+        outside = tmp_path / "other_project" / "branch"
+        outside.mkdir(parents=True)
+        self._lock(outside)
+        repo = tmp_path / "checkout"
+        self._registry(repo, "outsider", str(outside))
+        monkeypatch.setattr(agent_status_writer, "_find_repo_root", lambda: repo)
+
+        section = agent_status_writer.build_agent_status_section()
+
+        assert [a["branch"] for a in section["stale_agents"]] == ["outsider"]

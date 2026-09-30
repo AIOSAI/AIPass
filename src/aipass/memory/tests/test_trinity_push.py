@@ -1,35 +1,50 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-09-15
+# Modified: 2026-09-29
 # =============================================
 
-"""Trinity push — the pins that make the prune lane safe to run.
+"""Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
 
-THE ONE LAW under test
-----------------------
-``vectorize -> verify -> prune`` is an ORDER, and every step of it can fail.
-The tests in :class:`TestNothingIsPrunedWithoutProof` exist because the cheap
-implementation of this lane — store, assume, delete — is exactly the shape
-that deleted four months of @ai_mail's mail into a collection that had never
-been created.  A store call's own success flag is the writer's opinion; the
-read-back is the evidence.  If the evidence is missing, mismatched, or simply
-never arrives, NOTHING may leave the live file.
+# Trinity push — the pins that make the prune lane safe to run.
+#
+# THE ONE LAW under test
+# ----------------------
+# ``vectorize -> verify -> prune`` is an ORDER, and every step of it can fail.
+# The tests in :class:`TestNothingIsPrunedWithoutProof` exist because the cheap
+# implementation of this lane — store, assume, delete — is exactly the shape
+# that deleted four months of @ai_mail's mail into a collection that had never
+# been created.  A store call's own success flag is the writer's opinion; the
+# read-back is the evidence.  If the evidence is missing, mismatched, or simply
+# never arrives, NOTHING may leave the live file.
+#
+# Every test here was written against the behaviour required, not the behaviour
+# found: the whole module is new, so "red first" means each pin fails against a
+# push that skips its step (see the mutation notes in the class docstrings).
 
-Every test here was written against the behaviour required, not the behaviour
-found: the whole module is new, so "red first" means each pin fails against a
-push that skips its step (see the mutation notes in the class docstrings).
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — the real store behind get_by_ids_subprocess(); a fake store_client stands in
+# seedgo: no-test-needed(covered_elsewhere) — compose_meta() text the push writes: tests/test_tab_renderer.py
 
 import copy
 import json
+import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.monitor import detector
+from aipass.memory.apps.handlers.rollover import orchestrator
+from aipass.memory.apps.handlers.templates import push_report
+from aipass.memory.apps.handlers.tracking import tab_renderer
+from aipass.memory.apps.modules import push as push_module
+from aipass.seedgo.apps.handlers.aipass_standards import trinity_check
+from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
 from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.templates import trinity_push as tp
 
@@ -200,8 +215,6 @@ def _seedgo_renders_the_retired_todos_tab() -> bool:
 
     A changed mirror signature counts as landed: the checker pin then runs strict.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
-
     try:
         line = trinity_groups.expected_meta_line("todos", "guinea", _config(), "prose")
     except TypeError:
@@ -524,8 +537,6 @@ class TestTheMachineFrame:
 
     def test_the_gold_templates_spell_the_branch_placeholder_as_spawn_does(self):
         """spawn renders {{BRANCH}} lowercase; gold must match or spawn-templates reverts spawn."""
-        from aipass.memory.apps.handlers.monitor import detector
-
         assert sorted(path.name for path in detector._TEMPLATE_MAP.values()) == [
             "LOCAL.template.json",
             "OBSERVATIONS.template.json",
@@ -820,8 +831,6 @@ class TestThePushedFileIsCanonical:
 
     def test_a_pushed_branch_satisfies_the_trinity_checker(self, tmp_path):
         pytest.importorskip("aipass.seedgo.apps.handlers.aipass_standards.trinity_check")
-        from aipass.seedgo.apps.handlers.aipass_standards import trinity_check
-
         local = {
             "document_metadata": {"created": "2026-01-01", "status": {"health": "healthy"}},
             "sessions": [_entry(2), _entry(1, findings=["drift"])],
@@ -881,21 +890,15 @@ class TestRefreshIsScopable:
     """One citizen's rollover must not rewrite the whole fleet's files."""
 
     def test_refresh_all_tabs_accepts_a_branch_list(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         import inspect
 
         assert "branches" in inspect.signature(tab_renderer.refresh_all_tabs).parameters
 
     def test_a_scoped_refresh_only_visits_the_named_branch(self, monkeypatch):
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         visited = []
         tmp = Path(tempfile.gettempdir())
         registry = [{"name": "alpha", "path": str(tmp / "alpha")}, {"name": "beta", "path": str(tmp / "beta")}]
         monkeypatch.setattr(tab_renderer, "_refresh_one_file", lambda *a, **k: (visited.append(a[1]), (0, 1, []))[1])
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(detector, "_read_registry", lambda: registry, raising=False)
 
         tab_renderer.refresh_all_tabs(branches=["alpha"])
@@ -904,14 +907,10 @@ class TestRefreshIsScopable:
 
     def test_an_unscoped_refresh_still_visits_everyone(self, monkeypatch):
         """The fleet-wide behaviour is still available — for lanes that mean it."""
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         visited = []
         tmp = Path(tempfile.gettempdir())
         registry = [{"name": "alpha", "path": str(tmp / "alpha")}, {"name": "beta", "path": str(tmp / "beta")}]
         monkeypatch.setattr(tab_renderer, "_refresh_one_file", lambda *a, **k: (visited.append(a[1]), (0, 1, []))[1])
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(detector, "_read_registry", lambda: registry, raising=False)
 
         tab_renderer.refresh_all_tabs()
@@ -938,8 +937,6 @@ class TestTheFleetGate:
     """A fleet write needs --confirm; a dry-run and a single branch do not."""
 
     def test_a_bare_fleet_push_is_refused(self, monkeypatch):
-        from aipass.memory.apps.modules import push as push_module
-
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda *a, **k: ran.append(a))
 
@@ -950,8 +947,6 @@ class TestTheFleetGate:
         assert ran == []
 
     def test_a_fleet_push_without_confirm_never_reaches_the_engine(self, monkeypatch):
-        from aipass.memory.apps.modules import push as push_module
-
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda *a, **k: ran.append(a))
 
@@ -961,8 +956,6 @@ class TestTheFleetGate:
         assert ran == []
 
     def test_confirm_lets_a_fleet_push_through(self, monkeypatch):
-        from aipass.memory.apps.modules import push as push_module
-
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda branch, dry: ran.append((branch, dry)))
 
@@ -971,8 +964,6 @@ class TestTheFleetGate:
         assert ran == [(None, False)]
 
     def test_a_single_branch_push_does_not_need_confirm(self, monkeypatch):
-        from aipass.memory.apps.modules import push as push_module
-
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda branch, dry: ran.append((branch, dry)))
 
@@ -982,8 +973,6 @@ class TestTheFleetGate:
 
     def test_a_help_flag_anywhere_beats_the_push(self, monkeypatch):
         """The lesson from `rollover push --help` performing the reset it was asked to describe."""
-        from aipass.memory.apps.modules import push as push_module
-
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda *a, **k: ran.append(a))
 
@@ -1186,8 +1175,6 @@ class TestTodosMoveToTheBacklog:
         assert result["branches"][0]["todo_reasons"] == {"overflow": 2}
 
     def test_a_backlog_that_does_not_read_back_refuses_the_branch_and_leaves_local_json(self, tmp_path, monkeypatch):
-        from aipass.memory.apps.handlers.rollover import todo_roll
-
         root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(1)], "sessions": [_entry(1)]})
         before = (root / ".trinity" / "local.json").read_bytes()
         real_write = todo_roll.write_memory_file
@@ -1294,8 +1281,6 @@ class TestTodosMoveToTheBacklog:
     # -- the dry run and the second push ------------------------------------------
 
     def test_a_dry_run_writes_nothing_and_prints_the_branch_and_fleet_lines(self, tmp_path, monkeypatch):
-        from aipass.memory.apps.handlers.templates import push_report
-
         todos = [self._legacy(2), {"task": "fix drone help"}]
         root = _branch(tmp_path, self.BRANCH, {"todos": todos})
         local_before = (root / ".trinity" / "local.json").read_bytes()
@@ -1314,8 +1299,6 @@ class TestTodosMoveToTheBacklog:
         assert f"TODOS TO BACKLOG: 2 across 1 branches, {chars:,} chars" in lines
 
     def test_a_second_push_after_the_migration_moves_nothing(self, tmp_path, monkeypatch):
-        from aipass.memory.apps.handlers.templates import push_report
-
         root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(2), self._legacy(1)]})
         self._push(monkeypatch, tmp_path, root, dry_run=False)
         after_first = self._backlog(tmp_path).read_bytes()
@@ -1331,8 +1314,6 @@ class TestTodosMoveToTheBacklog:
         assert len(sessions) == len(sessions_after_first)
 
     def test_the_executed_report_counts_what_moved(self, tmp_path, monkeypatch):
-        from aipass.memory.apps.handlers.templates import push_report
-
         root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(1), self._todo(2)]})
         result = self._push(monkeypatch, tmp_path, root, dry_run=False)
         rendered = push_report.render(result, "@guinea")
@@ -1342,7 +1323,6 @@ class TestTodosMoveToTheBacklog:
 
     def test_a_clean_desk_and_an_emptied_one_do_not_render_the_same(self, tmp_path, monkeypatch):
         """@ai_mail, 2026-08-27: 'an empty todos[] reads as a clean desk'."""
-        from aipass.memory.apps.handlers.templates import push_report
 
         def rendered(sub: str, todos: list) -> str:
             root = _branch(tmp_path / sub, self.BRANCH, {"todos": todos})
@@ -1396,6 +1376,47 @@ class TestTodosMoveToTheBacklog:
 
         assert tp.is_canonical("sessions", note, {"field": "summary", "max_chars": 300})
         assert f"40 todo(s) moved to {backlog}" in note["summary"]
+
+
+# =============================================================================
+# THE PUSH LOOP OVER A REGISTRY THAT TURNS UNREADABLE (DPLAN-0354 leg 4)
+# =============================================================================
+
+
+class TestThePushLoopOverARegistryThatTurnsUnreadable:
+    """The loop with the real local-store lookup over a registry under tmp_path.
+
+    Every other push pin replaces the destinations whole, so the None the
+    lookup answers on an unreadable registry (leg 3b) never reached the loop.
+    Here it does: the entries go to the global store, are verified there and
+    pruned; the lookup logs the registry it could not read. Green from its
+    first run; its proof is the mutants of the lookup's catch, which die here.
+    """
+
+    def test_the_entries_reach_the_global_store_when_the_registry_cannot_be_read(self, monkeypatch, tmp_path):
+        repo = tmp_path / "repo"
+        root = _branch(repo, "guinea", {"sessions": [_entry(2), _entry(1, extra="drift")]})
+        registry = repo / "AIPASS_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": [{"name": "guinea", "path": "guinea"}]}), encoding="utf-8")
+        monkeypatch.setattr(detector, "_REPO_ROOT", repo)
+        monkeypatch.setattr(write_fence, "ROOT", repo)
+        monkeypatch.setattr(tp, "resolve_scope", lambda branch=None: _scope(root))
+        monkeypatch.setattr(tp.config_loader, "load", lambda: _config())
+        log = MagicMock()
+        monkeypatch.setattr(orchestrator, "logger", log)
+        # The push resolves the lookup lazily, through sys.modules: the real module patched here is registered there.
+        monkeypatch.setitem(sys.modules, orchestrator.__name__, orchestrator)
+        assert orchestrator.get_branch_local_chroma_path("guinea") == root / ".chroma"
+
+        registry.write_text("NOT JSON {{{", encoding="utf-8")
+        store = FakeStore("honest")
+        result = tp.push(branch="guinea", dry_run=False, store_client=store, backup_root=tmp_path / ".backup")
+
+        assert result["success"] is True
+        assert [entry["pruned"] for entry in result["branches"]] == [1]
+        assert list(store.shelves) == [str(None)]
+        errors = [call.args[0] for call in log.error.call_args_list]
+        assert any(str(registry) in text for text in errors)
 
 
 # =============================================================================

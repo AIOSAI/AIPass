@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_inbox_cleanup.py
 # Description: Tests for inbox cleanup handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for inbox cleanup handler -- mark_all_read, mark_as_opened, mark_as_closed."""
+"""Tests for apps/handlers/email/inbox_cleanup.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
 
 import json
 from contextlib import contextmanager
@@ -16,6 +19,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.email.inbox_cleanup as mod
+import aipass.ai_mail.apps.handlers.email.inbox_ops as ops_mod
 
 
 # ---- Fixtures ------------------------------------------------
@@ -403,8 +407,6 @@ def test_sweep_closed_archive_failure_still_removes(tmp_path: Path, monkeypatch)
 
 def test_sweep_closed_on_read_via_load_inbox(tmp_path: Path, monkeypatch):
     """Closed message injected by raw JSON edit is swept on next load_inbox."""
-    import aipass.ai_mail.apps.handlers.email.inbox_ops as ops_mod
-
     monkeypatch.setattr(ops_mod, "_get_inbox_lock", lambda: _noop_lock)
 
     mailbox = tmp_path / ".ai_mail.local"

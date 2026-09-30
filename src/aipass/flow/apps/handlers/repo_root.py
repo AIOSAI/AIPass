@@ -211,7 +211,7 @@ def _record_fallback(caller: str, marker: str, current: Path) -> None:
             {"caller": caller, "marker": marker, "searched_from": str(current), "resolved": str(SOURCE_ROOT)},
             module_name=MODULE_NAME,
         )
-    except Exception as exc:  # noqa: BLE001 - an audit line must never take an import down
+    except Exception as exc:  # an audit line must never take an import down
         logger.debug(f"[{caller}] repo_root fallback not recorded: {type(exc).__name__}: {exc}")
 
 

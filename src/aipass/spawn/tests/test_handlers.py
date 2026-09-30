@@ -1,15 +1,29 @@
 # =================== META ====================
 # Name: test_handlers.py
 # Description: Tests for spawn update handler modules
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for spawn handler modules: meta_ops, json_ops."""
+"""Tests for apps/handlers/meta_ops.py and apps/handlers/json_ops.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/meta_ops.py and apps/handlers/json_ops.py parse and import
+# seedgo: no-test-needed(documentation) — docstrings on the handler functions this file exercises
 
 import pytest
 from pathlib import Path
+
+from aipass.spawn.apps.handlers import meta_ops
+from aipass.spawn.apps.handlers.json_ops import backup_json, deep_merge
+from aipass.spawn.apps.handlers.meta_ops import (
+    compute_file_hash,
+    generate_branch_meta,
+    get_template_dir,
+    load_branch_meta,
+    save_branch_meta,
+)
 
 
 # =============================================================================
@@ -22,7 +36,6 @@ class TestComputeFileHash:
 
     def test_returns_12_char_hex_string(self, tmp_path):
         """Hash result should be exactly 12 hex characters."""
-        from aipass.spawn.apps.handlers.meta_ops import compute_file_hash
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("hello world", encoding="utf-8")
@@ -34,7 +47,6 @@ class TestComputeFileHash:
 
     def test_same_content_same_hash(self, tmp_path):
         """Same content should produce same hash."""
-        from aipass.spawn.apps.handlers.meta_ops import compute_file_hash
 
         file_a = tmp_path / "a.txt"
         file_b = tmp_path / "b.txt"
@@ -45,7 +57,6 @@ class TestComputeFileHash:
 
     def test_different_content_different_hash(self, tmp_path):
         """Different content should produce different hashes."""
-        from aipass.spawn.apps.handlers.meta_ops import compute_file_hash
 
         file_a = tmp_path / "a.txt"
         file_b = tmp_path / "b.txt"
@@ -56,14 +67,12 @@ class TestComputeFileHash:
 
     def test_nonexistent_file_returns_empty(self, tmp_path):
         """Non-existent file should return empty string."""
-        from aipass.spawn.apps.handlers.meta_ops import compute_file_hash
 
         result = compute_file_hash(tmp_path / "nonexistent.txt")
         assert result == ""
 
     def test_directory_returns_empty(self, tmp_path):
         """Directory (not file) should return empty string."""
-        from aipass.spawn.apps.handlers.meta_ops import compute_file_hash
 
         result = compute_file_hash(tmp_path)
         assert result == ""
@@ -74,7 +83,6 @@ class TestGenerateBranchMeta:
 
     def test_produces_valid_structure(self, tmp_path):
         """Generated meta should have metadata, file_tracking, directory_tracking."""
-        from aipass.spawn.apps.handlers.meta_ops import generate_branch_meta
 
         # Create a mock branch directory with some files
         branch_dir = tmp_path / "test_branch"
@@ -122,7 +130,6 @@ class TestGenerateBranchMeta:
 
     def test_matches_files_by_path(self, tmp_path):
         """Files matching template paths should be tracked with correct IDs."""
-        from aipass.spawn.apps.handlers.meta_ops import generate_branch_meta
 
         branch_dir = tmp_path / "my_branch"
         branch_dir.mkdir()
@@ -149,7 +156,6 @@ class TestGenerateBranchMeta:
 
     def test_matches_directories(self, tmp_path):
         """Directories matching template paths should be tracked."""
-        from aipass.spawn.apps.handlers.meta_ops import generate_branch_meta
 
         branch_dir = tmp_path / "branch"
         branch_dir.mkdir()
@@ -171,13 +177,53 @@ class TestGenerateBranchMeta:
         assert "d002" in result["directory_tracking"]
         assert result["directory_tracking"]["d001"]["current_path"] == "apps"
 
+    def test_never_enters_a_branch_dropbox_or_archive(self, tmp_path, monkeypatch):
+        """A living branch's dropbox and .archive are neither read nor tracked.
+
+        The rule is the owner of the project's, 09-27 20:42, in paraphrase:
+        nothing looks into a dropbox, a sandbox like .archive. The template
+        ships dropbox/README.md and .archive/README.md, so the scan used to list
+        and hash whatever a branch had dropped there. Ran red before the scan
+        skipped them (spawn's decision, DPLAN-0354 leg 4).
+        """
+        branch_dir = tmp_path / "dropbox" / "branch"
+        for rel in ("README.md", "dropbox/README.md", "dropbox/dropped.md", ".archive/README.md"):
+            (branch_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+            (branch_dir / rel).write_text("# same bytes", encoding="utf-8")
+
+        template_registry = {
+            "metadata": {"version": "1.0.0"},
+            "files": {
+                "f001": {"current_name": "README.md", "path": "README.md", "content_hash": "x"},
+                "f002": {"current_name": "README.md", "path": "dropbox/README.md", "content_hash": "x"},
+                "f003": {"current_name": "README.md", "path": ".archive/README.md", "content_hash": "x"},
+            },
+            "directories": {
+                "d001": {"current_name": "dropbox", "path": "dropbox"},
+                "d002": {"current_name": ".archive", "path": ".archive"},
+            },
+        }
+        hashed: list[Path] = []
+        real_hash = meta_ops.compute_file_hash
+
+        def recording_hash(path):
+            hashed.append(Path(path))
+            return real_hash(path)
+
+        monkeypatch.setattr(meta_ops, "compute_file_hash", recording_hash)
+
+        result = generate_branch_meta(branch_dir, template_registry)
+
+        assert hashed == [branch_dir / "README.md"]
+        assert set(result["file_tracking"]) == {"f001"}
+        assert {"d001", "d002"} <= set(result["directory_tracking"])
+
 
 class TestLoadSaveBranchMeta:
     """Tests for load_branch_meta() and save_branch_meta()."""
 
     def test_save_and_load_roundtrip(self, tmp_path):
         """Saved metadata should load back identically."""
-        from aipass.spawn.apps.handlers.meta_ops import load_branch_meta, save_branch_meta
 
         meta = {
             "metadata": {"version": "1.0.0", "branch_name": "test"},
@@ -194,7 +240,6 @@ class TestLoadSaveBranchMeta:
 
     def test_load_missing_returns_none(self, tmp_path):
         """Loading from directory without .branch_meta.json should return None."""
-        from aipass.spawn.apps.handlers.meta_ops import load_branch_meta
 
         result = load_branch_meta(tmp_path)
         assert result is None
@@ -209,7 +254,6 @@ class TestGetTemplateDir:
         There is exactly ONE template dir now (DPLAN-0319 R3) and it is named for
         what it is, not for a class — both "manager" and "specialist" land here.
         """
-        from aipass.spawn.apps.handlers.meta_ops import get_template_dir
 
         result = get_template_dir()
         assert isinstance(result, Path)
@@ -218,15 +262,12 @@ class TestGetTemplateDir:
 
     def test_both_classes_resolve_the_same_dir(self):
         """The class is validated, it does not pick a scaffold."""
-        from aipass.spawn.apps.handlers.meta_ops import get_template_dir
 
         assert get_template_dir("manager") == get_template_dir("specialist")
 
     def test_retired_class_refuses_by_name(self):
         """A retired class never resolves a template — it is refused, not mapped."""
         import pytest
-
-        from aipass.spawn.apps.handlers.meta_ops import get_template_dir
 
         with pytest.raises(ValueError, match="retired citizen class"):
             get_template_dir("aipass_framework")
@@ -242,7 +283,6 @@ class TestDeepMerge:
 
     def test_preserves_existing_values(self):
         """Existing scalar values should be kept over template defaults."""
-        from aipass.spawn.apps.handlers.json_ops import deep_merge
 
         template = {"name": "default", "status": "new"}
         existing = {"name": "my_custom_name", "status": "active"}
@@ -254,7 +294,6 @@ class TestDeepMerge:
 
     def test_adds_template_keys(self):
         """Keys in template but not in existing should be added."""
-        from aipass.spawn.apps.handlers.json_ops import deep_merge
 
         template = {"name": "", "version": "1.0.0", "new_field": "default_val"}
         existing = {"name": "mine"}
@@ -267,7 +306,6 @@ class TestDeepMerge:
 
     def test_keeps_extra_existing_keys(self):
         """Keys in existing but not in template should be preserved."""
-        from aipass.spawn.apps.handlers.json_ops import deep_merge
 
         template = {"name": ""}
         existing = {"name": "mine", "custom_key": "custom_value"}
@@ -279,7 +317,6 @@ class TestDeepMerge:
 
     def test_nested_dict_merge(self):
         """Nested dicts should be merged recursively."""
-        from aipass.spawn.apps.handlers.json_ops import deep_merge
 
         template = {"metadata": {"version": "2.0", "new_key": "new_default"}}
         existing = {"metadata": {"version": "1.0", "user_key": "user_val"}}
@@ -292,7 +329,6 @@ class TestDeepMerge:
 
     def test_lists_keep_existing(self):
         """Non-empty existing lists should be preserved."""
-        from aipass.spawn.apps.handlers.json_ops import deep_merge
 
         template = {"items": ["a", "b"]}
         existing = {"items": ["x", "y", "z"]}
@@ -303,7 +339,6 @@ class TestDeepMerge:
 
     def test_empty_existing_list_uses_template(self):
         """Empty existing list should use template list if non-empty."""
-        from aipass.spawn.apps.handlers.json_ops import deep_merge
 
         template = {"items": ["default_item"]}
         existing = {"items": []}
@@ -314,7 +349,6 @@ class TestDeepMerge:
 
     def test_none_existing_uses_template(self):
         """None existing should return template data."""
-        from aipass.spawn.apps.handlers.json_ops import deep_merge
 
         template = {"key": "value"}
         result = deep_merge(template, None)
@@ -323,7 +357,6 @@ class TestDeepMerge:
 
     def test_empty_string_existing_uses_template(self):
         """Empty string existing with non-empty template should use template."""
-        from aipass.spawn.apps.handlers.json_ops import deep_merge
 
         template = {"name": "template_default"}
         existing = {"name": ""}
@@ -343,7 +376,6 @@ class TestBackupJson:
 
     def test_creates_backup_file(self, tmp_path):
         """Backup should create a copy in .recovery/ directory."""
-        from aipass.spawn.apps.handlers.json_ops import backup_json
 
         source = tmp_path / "data.json"
         source.write_text('{"key": "value"}', encoding="utf-8")
@@ -360,7 +392,6 @@ class TestBackupJson:
 
     def test_custom_backup_dir(self, tmp_path):
         """backup_dir override should place backup in the specified directory."""
-        from aipass.spawn.apps.handlers.json_ops import backup_json
 
         source = tmp_path / "config.json"
         source.write_text('{"a": 1}', encoding="utf-8")
@@ -376,7 +407,6 @@ class TestBackupJson:
 
     def test_raises_on_missing_source(self, tmp_path):
         """Should raise FileNotFoundError for non-existent source."""
-        from aipass.spawn.apps.handlers.json_ops import backup_json
 
         with pytest.raises(FileNotFoundError):
             backup_json(tmp_path / "nonexistent.json")

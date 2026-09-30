@@ -1,18 +1,19 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch2.py
 # Description: Tests for checker handlers batch 2
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for 8 seedgo checker handlers:
-  error_handling, handlers, hardcoded_key, help_text,
-  imports, introspection, log_handler, log_level.
+"""Tests for apps/handlers/aipass_standards/error_handling_check.py and seven batch-2 sibling checkers."""
 
-Each checker gets 3 tests: clean pass, violation caught, bypass respected.
-"""
+# Covers handlers, hardcoded_key, help_text, imports, introspection, log_handler
+# and log_level. Each checker gets 3 tests: clean pass, violation caught, bypass
+# respected.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the eight checker modules under test parse and import
 
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -370,6 +371,82 @@ sys.path.insert(0, "/some/path")
         bypass = [{"file": "bypass_imports.py", "standard": "imports"}]
         result = check_imports(fp, bypass_rules=bypass)
         assert result["score"] == 100
+
+
+class TestTheLoggerSubRuleIsProductionOnly:
+    """A test file owes no logger; the checker's other five sub-rules still run.
+
+    When tests/ joined the audit corpus (2026-09-21) this one sub-rule scored
+    42 of @memory's 43 test files at 80% for not importing a logger they were
+    right not to import. The gate is on the PATH, not on APPLIES_TO, because
+    ordering, namespace, AIPASS_ROOT and sys.path all read the same in a test.
+    """
+
+    # Over twenty code lines on purpose: the logger sub-rule already exempts
+    # small files, so a short sample would pass for the wrong reason and the
+    # production half of this class would prove nothing.
+    NO_LOGGER = """\
+import os
+from pathlib import Path
+
+from aipass.seedgo.apps.handlers.json import json_handler
+
+ROOT = Path(os.sep)
+NAMES = ("alpha", "beta", "gamma")
+
+
+def collect(base):
+    found = []
+    for name in NAMES:
+        candidate = base / name
+        if candidate.exists():
+            found.append(candidate)
+    return found
+
+
+def describe(base):
+    entries = collect(base)
+    if not entries:
+        return "nothing"
+    return ", ".join(entry.name for entry in entries)
+
+
+def record(base):
+    json_handler.log_operation("described", {"base": str(base), "detail": describe(base)})
+    return True
+"""
+
+    def _in(self, tmp_path: Path, *parts: str) -> str:
+        """The same source, written at whichever path the test is about."""
+        target = tmp_path.joinpath(*parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(self.NO_LOGGER, encoding="utf-8")
+        return str(target)
+
+    def test_a_test_file_without_a_logger_scores_a_hundred(self, tmp_path: Path) -> None:
+        assert check_imports(self._in(tmp_path, "tests", "test_thing.py"))["score"] == 100
+
+    def test_a_conftest_without_a_logger_scores_a_hundred(self, tmp_path: Path) -> None:
+        """conftest.py is a test file by name, wherever it sits."""
+        assert check_imports(self._in(tmp_path, "conftest.py"))["score"] == 100
+
+    def test_the_same_source_under_apps_is_still_convicted(self, tmp_path: Path) -> None:
+        """Byte-identical content, production path: proves the gate reads the PATH."""
+        result = check_imports(self._in(tmp_path, "apps", "modules", "thing.py"))
+
+        failed = [c["name"] for c in result["checks"] if not c["passed"]]
+        assert failed == ["Prax logger import (recommended)"]
+
+    def test_a_test_file_is_still_convicted_for_hacking_sys_path(self, tmp_path: Path) -> None:
+        """The other sub-rules did not move: only the logger one is gated."""
+        target = tmp_path / "tests" / "test_hacky.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('import sys\nsys.path.insert(0, "x")\n' + self.NO_LOGGER, encoding="utf-8")
+
+        result = check_imports(str(target))
+
+        failed = [c["name"] for c in result["checks"] if not c["passed"]]
+        assert failed == ["No sys.path hacking"]
 
 
 # ===================================================================

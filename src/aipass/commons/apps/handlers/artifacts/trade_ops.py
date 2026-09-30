@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trade_ops.py
 # Description: Trading & Ephemeral Item Operations Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -54,7 +54,11 @@ RARITY_COLORS = {
 
 
 def _resolve_branch_name(mention: str) -> Optional[str]:
-    """Resolve a @mention to a branch name (lowercase-normalized)."""
+    """Resolve a @mention to a branch name (lowercase-normalized).
+
+    Returns None when no registered branch has that name. An unreadable
+    registry raises instead, so "not found" never stands in for "could not look".
+    """
     name = mention.lstrip("@").lower()
 
     if not os.path.exists(BRANCH_REGISTRY_PATH):
@@ -69,7 +73,7 @@ def _resolve_branch_name(mention: str) -> Optional[str]:
         return None
     except Exception:
         logger.error("[trade_ops] Failed to resolve branch name from registry")
-        return None
+        raise
 
 
 def _now_utc() -> str:
@@ -87,7 +91,8 @@ def sweep_expired() -> int:
     Sweep-on-access: delete artifacts where expires_at < now.
 
     Returns:
-        Number of artifacts swept
+        Number of artifacts swept, or -1 if the sweep failed (a count is
+        never negative, so -1 cannot be read as "nothing expired")
     """
     try:
         conn = get_db()
@@ -118,7 +123,7 @@ def sweep_expired() -> int:
 
     except Exception as e:
         logger.error(f"Sweep expired failed: {e}")
-        return 0
+        return -1
 
 
 # =============================================================================
@@ -144,13 +149,20 @@ def gift_artifact(args: List[str]) -> dict:
         logger.warning("[trade_ops] Non-numeric artifact ID provided for gift")
         return {"success": False, "error": "Artifact ID must be a number"}
 
-    recipient = _resolve_branch_name(args[1])
+    try:
+        recipient = _resolve_branch_name(args[1])
+    except Exception as exc:
+        logger.warning(f"[trade_ops] gift stopped: branch registry unreadable: {exc}")
+        return {"success": False, "error": f"Branch registry unreadable: {exc}"}
     if not recipient:
         return {"success": False, "error": f"Branch '{args[1]}' not found in BRANCH_REGISTRY"}
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch."}
 
@@ -224,13 +236,20 @@ def trade_artifact(args: List[str]) -> dict:
         logger.warning("[trade_ops] Non-numeric artifact IDs provided for trade")
         return {"success": False, "error": "Artifact IDs must be numbers"}
 
-    partner = _resolve_branch_name(args[2])
+    try:
+        partner = _resolve_branch_name(args[2])
+    except Exception as exc:
+        logger.warning(f"[trade_ops] trade stopped: branch registry unreadable: {exc}")
+        return {"success": False, "error": f"Branch registry unreadable: {exc}"}
     if not partner:
         return {"success": False, "error": f"Branch '{args[2]}' not found in BRANCH_REGISTRY"}
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch."}
 
@@ -336,9 +355,12 @@ def drop_item(args: List[str]) -> dict:
         else:
             i += 1
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch."}
 
@@ -398,8 +420,14 @@ def find_item(args: List[str]) -> dict:
 
     Usage: commons find <artifact_id>
 
+    The expired-item sweep runs first. When it fails (sweep_expired answers -1) the find still runs,
+    because the find checks the item's own expires_at, and the success answer carries
+    sweep_failed True so the command can say so (commons' decision, DPLAN-0354 leg 3: the sweep's
+    failure used to be dropped here, so expired drops piled up with nobody told). A refusal
+    answer does not carry it: the refusal is already the loud line, and the sweep failure is logged.
+
     Returns:
-        Dict with success, artifact details, finder
+        Dict with success, artifact details, finder, sweep_failed
     """
     if not args:
         return {"success": False, "error": "Usage: commons find <artifact_id>"}
@@ -410,11 +438,14 @@ def find_item(args: List[str]) -> dict:
         logger.warning("[trade_ops] Non-numeric artifact ID provided for find")
         return {"success": False, "error": "Artifact ID must be a number"}
 
-    sweep_expired()
+    sweep_failed = sweep_expired() == -1
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch."}
 
@@ -475,6 +506,7 @@ def find_item(args: List[str]) -> dict:
             "room_found": artifact["room_found"] or "unknown",
             "creator": artifact["creator"],
             "finder": finder,
+            "sweep_failed": sweep_failed,
         }
 
     except Exception as e:
@@ -505,7 +537,11 @@ def mint_event_artifact(args: List[str]) -> dict:
     branches = []
     warnings = []
     for mention in mentions:
-        branch = _resolve_branch_name(mention)
+        try:
+            branch = _resolve_branch_name(mention)
+        except Exception as exc:
+            logger.warning(f"[trade_ops] mint stopped: branch registry unreadable: {exc}")
+            return {"success": False, "error": f"Branch registry unreadable: {exc}"}
         if branch:
             branches.append(branch)
         else:

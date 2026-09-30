@@ -1,8 +1,11 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_curation.py - Curation Subsystem Tests
+# Description: Tests for apps/handlers/curation/reaction_queries.py, pin_queries.py and trending_queries.py
 # Date: 2026-03-28
 # Version: 1.0.0
+# Created: 2026-03-28
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,14 +17,10 @@
 #   - Mocks prax logger and json_handler to avoid side-effect dependencies
 # =============================================
 
-"""
-Unit tests for the curation subsystem.
+"""Tests for apps/handlers/curation/reaction_queries.py, pin_queries.py and trending_queries.py."""
 
-Covers:
-- reaction_queries: add, remove, get counts, get detailed, summary string
-- pin_queries: pin, unpin, get pinned, is_pinned checks
-- trending_queries: empty results and engagement-based ranking
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/curation/ parses and imports
 
 import sqlite3
 from unittest.mock import patch
@@ -87,9 +86,9 @@ def _seed_comment(conn: sqlite3.Connection, post_id: int) -> int:
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
-def test_add_reaction_new_returns_true(mock_json: object, initialized_db: object) -> None:
+def test_add_reaction_new_returns_true(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """Adding a new reaction to a post should return True."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     result = add_reaction(conn, "TEST_BRANCH", "thumbsup", post_id=post_id)
@@ -97,9 +96,9 @@ def test_add_reaction_new_returns_true(mock_json: object, initialized_db: object
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
-def test_add_reaction_duplicate_returns_false(mock_json: object, initialized_db: object) -> None:
+def test_add_reaction_duplicate_returns_false(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """Adding the same reaction a second time should return False."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     add_reaction(conn, "TEST_BRANCH", "thumbsup", post_id=post_id)
@@ -108,9 +107,9 @@ def test_add_reaction_duplicate_returns_false(mock_json: object, initialized_db:
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
-def test_add_reaction_invalid_type_returns_false(mock_json: object, initialized_db: object) -> None:
+def test_add_reaction_invalid_type_returns_false(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """An invalid reaction name should be rejected immediately."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     result = add_reaction(conn, "TEST_BRANCH", "invalid_emoji", post_id=post_id)
@@ -118,9 +117,9 @@ def test_add_reaction_invalid_type_returns_false(mock_json: object, initialized_
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
-def test_add_reaction_comment_target(mock_json: object, initialized_db: object) -> None:
+def test_add_reaction_comment_target(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """Reactions can target a comment instead of a post."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
     comment_id = _seed_comment(conn, post_id)
 
@@ -133,9 +132,9 @@ def test_add_reaction_comment_target(mock_json: object, initialized_db: object) 
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
-def test_add_reaction_both_targets_returns_false(mock_json: object, initialized_db: object) -> None:
+def test_add_reaction_both_targets_returns_false(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """Providing both post_id and comment_id should be rejected."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     result = add_reaction(conn, "TEST_BRANCH", "agree", post_id=post_id, comment_id=99)
@@ -148,9 +147,9 @@ def test_add_reaction_both_targets_returns_false(mock_json: object, initialized_
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
-def test_remove_reaction_existing_returns_true(mock_json: object, initialized_db: object) -> None:
+def test_remove_reaction_existing_returns_true(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """Removing an existing reaction should return True."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     add_reaction(conn, "TEST_BRANCH", "celebrate", post_id=post_id)
@@ -158,9 +157,9 @@ def test_remove_reaction_existing_returns_true(mock_json: object, initialized_db
     assert result is True
 
 
-def test_remove_reaction_nonexistent_returns_false(initialized_db: object) -> None:
+def test_remove_reaction_nonexistent_returns_false(initialized_db: sqlite3.Connection) -> None:
     """Removing a reaction that was never added should return False."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     result = remove_reaction(conn, "TEST_BRANCH", "thinking", post_id=post_id)
@@ -173,9 +172,9 @@ def test_remove_reaction_nonexistent_returns_false(initialized_db: object) -> No
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
-def test_get_reactions_returns_correct_counts(mock_json: object, initialized_db: object) -> None:
+def test_get_reactions_returns_correct_counts(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """get_reactions should return accurate per-type counts."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     # Second agent
@@ -196,9 +195,9 @@ def test_get_reactions_returns_correct_counts(mock_json: object, initialized_db:
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
-def test_get_reactions_detailed_returns_agent_names(mock_json: object, initialized_db: object) -> None:
+def test_get_reactions_detailed_returns_agent_names(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """get_reactions_detailed should map reaction types to agent name lists."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     conn.execute(
@@ -216,9 +215,9 @@ def test_get_reactions_detailed_returns_agent_names(mock_json: object, initializ
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
-def test_get_reaction_summary_formatted_string(mock_json: object, initialized_db: object) -> None:
+def test_get_reaction_summary_formatted_string(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """get_reaction_summary should return an emoji-count formatted string."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     add_reaction(conn, "TEST_BRANCH", "thumbsup", post_id=post_id)
@@ -230,10 +229,10 @@ def test_get_reaction_summary_formatted_string(mock_json: object, initialized_db
 
 
 def test_get_reaction_summary_empty_returns_empty_string(
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """get_reaction_summary with no reactions should return an empty string."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     summary = get_reaction_summary(conn, post_id=post_id)
@@ -246,9 +245,9 @@ def test_get_reaction_summary_empty_returns_empty_string(
 
 
 @patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
-def test_pin_post_success(mock_json: object, initialized_db: object) -> None:
+def test_pin_post_success(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """Pinning an existing post should return True and set pinned=1."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     result = pin_post(conn, post_id)
@@ -257,9 +256,9 @@ def test_pin_post_success(mock_json: object, initialized_db: object) -> None:
 
 
 @patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
-def test_unpin_post_success(mock_json: object, initialized_db: object) -> None:
+def test_unpin_post_success(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """Unpinning a pinned post should return True and set pinned=0."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     pin_post(conn, post_id)
@@ -269,9 +268,9 @@ def test_unpin_post_success(mock_json: object, initialized_db: object) -> None:
 
 
 @patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
-def test_get_pinned_posts_returns_only_pinned(mock_json: object, initialized_db: object) -> None:
+def test_get_pinned_posts_returns_only_pinned(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """get_pinned_posts should return only posts with pinned=1."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     # Before pinning, list should be empty
@@ -286,9 +285,9 @@ def test_get_pinned_posts_returns_only_pinned(mock_json: object, initialized_db:
 
 
 @patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
-def test_get_pinned_posts_filters_by_room(mock_json: object, initialized_db: object) -> None:
+def test_get_pinned_posts_filters_by_room(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """get_pinned_posts with room_name should filter to that room only."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _seed_agent_and_post(conn)  # post in "general"
 
     # Create a second post in "dev"
@@ -312,17 +311,17 @@ def test_get_pinned_posts_filters_by_room(mock_json: object, initialized_db: obj
     assert dev_pinned[0]["room_name"] == "dev"
 
 
-def test_is_pinned_false_for_unpinned_post(initialized_db: object) -> None:
+def test_is_pinned_false_for_unpinned_post(initialized_db: sqlite3.Connection) -> None:
     """is_pinned should return False for a post that has not been pinned."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     assert is_pinned(conn, post_id) is False
 
 
-def test_is_pinned_false_for_nonexistent_post(initialized_db: object) -> None:
+def test_is_pinned_false_for_nonexistent_post(initialized_db: sqlite3.Connection) -> None:
     """is_pinned should return False for a post ID that does not exist."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     assert is_pinned(conn, 99999) is False
 
 
@@ -332,9 +331,9 @@ def test_is_pinned_false_for_nonexistent_post(initialized_db: object) -> None:
 
 
 @patch("aipass.commons.apps.handlers.curation.trending_queries.json_handler", autospec=True)
-def test_get_trending_posts_empty(mock_json: object, initialized_db: object) -> None:
+def test_get_trending_posts_empty(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """get_trending_posts with no engagement data should return an empty list."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _seed_agent_and_post(conn)
 
     trending = get_trending_posts(conn, hours=24, min_engagement=1)
@@ -346,10 +345,10 @@ def test_get_trending_posts_empty(mock_json: object, initialized_db: object) -> 
 def test_get_trending_posts_with_engagement(
     mock_reaction_json: object,
     mock_trending_json: object,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Posts with enough recent engagement should appear in trending results."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
     # Add agents for engagement

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: normalize.py
 # Description: Memory File Schema Normalizer
-# Version: 0.5.0
+# Version: 0.6.0
 # Created: 2026-01-22
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -34,8 +34,21 @@ _MEMORY_ROOT = Path(__file__).parents[3]  # normalize.py -> schema/ -> handlers/
 _SORTED_CONTAINERS = ("sessions", "key_learnings", "todos", "observations")
 
 
+class TemplateUnreadable(ValueError):
+    """The gold-source template for a memory file exists in name and cannot be read."""
+
+
 def _load_template(file_path: Path) -> Dict[str, Any] | None:
-    """Load the matching template for a memory file (local or observations)."""
+    """Load the matching template for a memory file (local or observations).
+
+    Returns None only for a file with no template (neither local nor
+    observations).
+
+    Raises:
+        TemplateUnreadable: the template cannot be read. It used to answer None
+            too, so the conformance pass was skipped with no warning in the
+            result (DPLAN-0354 leg 3).
+    """
     templates_dir = _MEMORY_ROOT / "templates"
     name = file_path.name.lower()
 
@@ -49,9 +62,8 @@ def _load_template(file_path: Path) -> Dict[str, Any] | None:
     try:
         with open(tmpl_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception as e:
-        logger.warning(f"[normalize] Failed to load template {tmpl_path}: {e}")
-        return None
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+        raise TemplateUnreadable(f"Unreadable template {tmpl_path}: {e}") from e
 
 
 def _strip_orphan_keys(data: Dict, allowed: set, level_name: str, changes: list) -> None:
@@ -202,7 +214,11 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
         changes.append("Removed redundant root 'status'")
 
     # Template-conformance: strip orphan keys at every level
-    template = _load_template(file_path)
+    try:
+        template = _load_template(file_path)
+    except TemplateUnreadable as e:
+        warnings.append(f"{e} — template conformance skipped")
+        template = None
     if template is not None:
         tmpl_meta = template.get("document_metadata", {})
 

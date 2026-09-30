@@ -1,3 +1,11 @@
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Shared test fixtures for spawn test suite
+# Version: 1.2.1
+# Created: 2026-03-07
+# Modified: 2026-09-29
+# =============================================
+
 """Shared test fixtures for spawn test suite."""
 
 import os
@@ -8,15 +16,17 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
-import json
-import shutil
 import pytest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
+
+import aipass.spawn.apps.handlers.file_ops as file_ops
+from aipass.cli.apps.modules import display
 
 
 # ---------------------------------------------------------------------------
-# Registry backup/restore — prevents test ghost entries in AIPASS_REGISTRY.json
+# Live registry tripwire — no test reads or writes AIPASS_REGISTRY.json
 # ---------------------------------------------------------------------------
 
 
@@ -26,27 +36,33 @@ def _find_registry_path() -> Path:
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _protect_registry(tmp_path_factory):
-    """Backup AIPASS_REGISTRY.json before the test session, restore after.
+def _live_registry_is_never_written():
+    """Fail the session if any test moved the live AIPASS_REGISTRY.json.
 
-    Prevents tests that call spawn_agent/grant_passport without a
-    registry_path override from permanently polluting the real registry.
-
-    The backup lives under pytest's tmp dir, never beside the real registry:
-    writing it into the repo root meant a crashed or killed suite orphaned an
-    AIPASS_REGISTRY.json.test_backup there (flagged by @backup, APLAN-0007).
+    This used to be a backup-and-restore (_protect_registry). A restore is a
+    repair, not a seal: a run killed midway left whatever a test had written,
+    and copy2 put the old mtime back, so a rewrite of equal bytes never showed.
+    Every test now hands the product a tmp_path registry (DPLAN-0354 leg 2).
+    This fixture only watches: sha256 and mtime before, the same after. On a
+    move it puts the bytes back so the fleet keeps its citizens, and fails.
     """
     reg = _find_registry_path()
-    backup = tmp_path_factory.mktemp("registry_backup") / "AIPASS_REGISTRY.json.test_backup"
-
-    if reg.exists():
-        shutil.copy2(reg, backup)
+    if not reg.exists():
+        yield
+        return
+    before = reg.read_bytes()
+    mtime = reg.stat().st_mtime_ns
 
     yield
 
-    if backup.exists():
-        shutil.copy2(backup, reg)
-        backup.unlink()
+    after = reg.read_bytes() if reg.exists() else b""
+    moved = after != before or not reg.exists() or reg.stat().st_mtime_ns != mtime
+    if moved:
+        reg.write_bytes(before)
+        pytest.fail(
+            "a test wrote the live AIPASS_REGISTRY.json - hand the product a tmp_path registry",
+            pytrace=False,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -54,12 +70,31 @@ def _protect_registry(tmp_path_factory):
 # ---------------------------------------------------------------------------
 
 
+# What the template-tree walks below never enter. The rule is the owner of the
+# project's, 09-27 20:42, in paraphrase: a dropbox is ignored by all, nothing
+# looks into it and no process runs out of it, a sandbox like .archive.
+# templates/.archive is such an archive. templates/citizen/dropbox and
+# templates/citizen/.archive are not: they are the templates of those places,
+# shipped content copied into every newborn, and these guards watch them. So
+# the walks skip __pycache__ anywhere and .archive only at the root of the walk,
+# names read relative to that root (spawn's decision, DPLAN-0354 leg 4).
+_WALK_SKIP_DIRS = frozenset({"__pycache__"})
+_ROOT_ARCHIVE = ".archive"
+
+
+def _walk_skips(relative_parts: tuple[str, ...]) -> bool:
+    """True for a path under templates/.archive or any __pycache__."""
+    return bool(relative_parts) and (
+        relative_parts[0] == _ROOT_ARCHIVE or bool(_WALK_SKIP_DIRS.intersection(relative_parts))
+    )
+
+
 def _shipped_templates_root() -> Path:
     """The template tree spawn ships, as it sits in the repo."""
     return Path(__file__).resolve().parents[1] / "templates"
 
 
-def _template_tree_stats() -> dict[str, tuple[int, int]]:
+def _template_tree_stats(root: Path | None = None) -> dict[str, tuple[int, int]]:
     """(size, mtime_ns) per file under templates/ — cheap enough to run per test.
 
     stat, not bytes: the failure this guards is a WRITE, and a write that
@@ -72,18 +107,34 @@ def _template_tree_stats() -> dict[str, tuple[int, int]]:
     pathlib version cost ~17ms a call against ~3.7ms here — 26s of suite time
     for the same answer.
     """
-    root = _shipped_templates_root()
+    root = root if root is not None else _shipped_templates_root()
     if not root.is_dir():
         return {}
 
     stats: dict[str, tuple[int, int]] = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [name for name in dirnames if name != "__pycache__"]
+        at_root = dirpath == str(root)
+        dirnames[:] = [
+            name for name in dirnames if name not in _WALK_SKIP_DIRS and not (at_root and name == _ROOT_ARCHIVE)
+        ]
         for filename in filenames:
             full = os.path.join(dirpath, filename)
             info = os.stat(full)
             stats[os.path.relpath(full, root)] = (info.st_size, info.st_mtime_ns)
     return stats
+
+
+def _template_snapshot(root: Path) -> dict[Path, bytes]:
+    """Bytes per file under root — what the session net puts back.
+
+    Parts are read relative to root, so a checkout that itself sits under a
+    directory named like a sandbox is still walked.
+    """
+    return {
+        path: path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and not _walk_skips(path.relative_to(root).parts)
+    }
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -93,10 +144,7 @@ def _restore_shipped_templates():
     The per-test guard below names the culprit; this one makes sure a suite that
     fails does not also leave the working tree dirty for the next reader.
     """
-    root = _shipped_templates_root()
-    snapshot = {
-        path: path.read_bytes() for path in root.rglob("*") if path.is_file() and "__pycache__" not in path.parts
-    }
+    snapshot = _template_snapshot(_shipped_templates_root())
 
     yield
 
@@ -127,28 +175,48 @@ def _shipped_templates_are_read_only():
     )
 
 
-@pytest.fixture
-def sample_data():
-    """Pre-populated JSON test data for spawn operations."""
-    return {
-        "metadata": {"version": "1.0.0", "created": "2026-03-27"},
-        "files": {"F001": {"path": "test.py", "hash": "abc123"}},
-        "directories": {"D001": {"path": "apps/"}},
-    }
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
 
 
-@pytest.fixture
-def mock_infrastructure(tmp_path):
-    """Mock filesystem structure mimicking a spawned branch."""
-    branch = tmp_path / "test_branch"
-    for d in ["apps/modules", "apps/handlers", ".trinity", ".aipass"]:
-        (branch / d).mkdir(parents=True)
-    passport = {
-        "branch_info": {"branch_name": "test_branch"},
-        "identity": {"citizen_class": "specialist"},
-    }
-    (branch / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
-    return branch
+class _BusRecorder:
+    """Stands where display._TRIGGER stands: records each fire, answers like an idle bus."""
+
+    def __init__(self) -> None:
+        self.fired: list[tuple[str, dict[str, Any]]] = []
+
+    def fire(self, event: str, **data: Any) -> dict[str, Any]:
+        """Record one fire; nothing is dispatched."""
+        self.fired.append((event, data))
+        return {"event": event, "handlers": 0, "ran": 0, "failed": 0}
+
+
+@pytest.fixture(autouse=True)
+def cli_trigger_bus(monkeypatch) -> _BusRecorder:
+    """Every test's cli header fires into a recorder, never the real trigger bus.
+
+    display.header() lazy-loads the real trigger behind _TRIGGER_LOADED and
+    fires cli_header_displayed through _TRIGGER; the bus probe (2026-09-27)
+    counted 12 such fires reaching the real bus from spawn's suite. Autouse, so
+    no test can forget it, and no file of cli is touched: _TRIGGER_LOADED=True
+    stops the lazy import, _TRIGGER is the recorder (spawn's decision,
+    DPLAN-0354 leg 3). tests/test_conftest_fixtures.py pins it.
+    """
+    recorder = _BusRecorder()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return recorder
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state():
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture
@@ -180,9 +248,7 @@ def mock_json_handler():
     Uses patch.object on the module reference held by file_ops to avoid
     stale-reference issues when other test suites reload json_handler.
     """
-    import aipass.spawn.apps.handlers.file_ops as _fo
-
-    with patch.object(_fo.json_handler, "log_operation") as m:
+    with patch.object(file_ops.json_handler, "log_operation") as m:
         m.return_value = True
         yield m
 
@@ -203,3 +269,58 @@ def _isolate_spawn_json(tmp_path, monkeypatch) -> Path:
     """
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
     return tmp_path / "spawn" / "spawn_json"
+
+
+# ---------------------------------------------------------------------------
+# Shared builders — imported by name from test files
+# ---------------------------------------------------------------------------
+
+MACHINE_REGISTRY_ID = "11111111-1111-4111-8111-111111111111"
+MACHINE_CITIZEN_ID = "22222222-2222-4222-8222-222222222222"
+
+
+def make_passport(branch: str = "wanderer") -> dict:
+    """A live 2.0 passport, in canonical order — the shape the fleet carries.
+
+    Lives here, not in test_passport_seeds.py, so test_cli_routing.py does not
+    fail its collection when that file cannot import (DPLAN-0354 leg 4).
+    """
+    return {
+        "document_metadata": {
+            "document_type": "branch_identity",
+            "document_name": f"{branch}.PASSPORT",
+            "version": "2.0.0",
+            "schema_version": "2.0.0",
+            "created": "2026-03-05",
+            "last_updated": "2026-08-28",
+            "managed_by": branch,
+            "tags": ["identity", "passport", "branch_profile"],
+        },
+        "branch_info": {
+            "branch_name": branch,
+            "alias": "",
+            "path": f"src/aipass/{branch}",
+            "module": f"aipass.{branch}",
+            "email": f"@{branch}",
+            "created": "2026-03-05",
+            "git_branch": "dev",
+        },
+        "citizenship": {
+            "registered": True,
+            "residency": "core",
+            "registry_id": MACHINE_REGISTRY_ID,
+            "citizen_id": MACHINE_CITIZEN_ID,
+            "registry_path": ".aipass/registry.json",
+            "communications": True,
+            "memory": True,
+        },
+        "identity": {
+            "citizen_class": "specialist",
+            "role": "wanderer",
+            "purpose": "Walks the fleet — an identity worth shipping.",
+            "what_i_do": ["Walk", "Report"],
+            "what_i_dont_do": ["Guess"],
+            "traits": ["curious"],
+            "principles": ["Code is truth - fail honestly"],
+        },
+    }

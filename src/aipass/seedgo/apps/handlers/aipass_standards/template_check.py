@@ -30,6 +30,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: an unresolved spawn marker is unresolved wherever it sits.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "branch_level"
 ADVISORY = True
 

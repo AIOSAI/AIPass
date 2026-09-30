@@ -1,31 +1,37 @@
 # =================== AIPass ====================
 # Name: test_tab_renderer.py
 # Description: Tests for tab_renderer handler (FPLAN-0285)
-# Version: 1.3.0
+# Version: 1.3.2
 # Created: 2026-06-25
-# Modified: 2026-09-18
+# Modified: 2026-09-29
 # =============================================
 
-"""
-Tests for the tab_renderer handler.
+"""Tests for apps/handlers/tracking/tab_renderer.py."""
 
-Covers:
-  1. render_tab() — correct strings for each section type.
-  2. render_tab() — per-branch overrides from config.
-  3. render_tab() — fallback to defaults when branch not in per_branch.
-  4. _reorder_keys() — canonical key ordering.
-  5. refresh_all_tabs() — reads config and writes tabs (mocked I/O).
-  6. Key ordering verification after tab insertion.
-  7. The todos tab: pad size, backlog file, next #N from pad + backlog (DPLAN-0345).
-"""
+# Tests for the tab_renderer handler.
+#
+# Covers:
+#   1. render_tab() — correct strings for each section type.
+#   2. render_tab() — per-branch overrides from config.
+#   3. render_tab() — fallback to defaults when branch not in per_branch.
+#   4. _reorder_keys() — canonical key ordering.
+#   5. refresh_all_tabs() — reads config and writes tabs (mocked I/O).
+#   6. Key ordering verification after tab insertion.
+#   7. The todos tab: pad size, backlog file, next #N from pad + backlog (DPLAN-0345).
 
-import importlib
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — template_usage(), template_semantics(): tests/test_trinity_standard.py
+# seedgo: no-test-needed(covered_elsewhere) — receipt.bump_config_rendered() per refresh: tests/test_trinity_standard.py
+
 import json
-import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.json.config_loader import resolve_limits
+from aipass.memory.apps.handlers.tracking import tab_renderer
 
 
 # ---------------------------------------------------------------------------
@@ -34,30 +40,16 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _fresh_tab_renderer(monkeypatch):
-    """Drop cached module so each test gets a fresh import.
+def _quiet_tab_renderer(monkeypatch):
+    """The real module, imported once at the top; its log and operation log replaced at its edge.
 
-    A bare ``sys.modules.pop`` here is one-way: the eviction outlives the
-    test and every later test in the same process inherits it. That is how
-    two receipt tests in test_trinity_standard.py went red on one worker,
-    on one interpreter, on one run, on a commit that changed version
-    strings only -- this file evicted the real handlers.json package, and
-    the next lazy submodule import landed on conftest's stand-in instead.
-    ``monkeypatch.delitem`` gives the same fresh import and puts the real
-    module back at teardown, so the eviction cannot escape the test.
+    Until leg 4 of DPLAN-0354 each test evicted the module (and the json
+    package) from sys.modules and imported it again, so the module a test
+    held was whatever the import found then. Now every test holds the one
+    module this file imported, and nothing it logs reaches a live log.
     """
-    stale = [name for name in sys.modules if "tab_renderer" in name]
-    stale += ["aipass.memory.apps.handlers.json", "aipass.memory.apps.handlers.json.json_handler"]
-    for name in stale:
-        monkeypatch.delitem(sys.modules, name, raising=False)
-    yield
-
-
-def _get_module():
-    """Import and return the tab_renderer module."""
-    return importlib.import_module(
-        "aipass.memory.apps.handlers.tracking.tab_renderer",
-    )
+    monkeypatch.setattr(tab_renderer, "json_handler", MagicMock())
+    monkeypatch.setattr(tab_renderer, "logger", MagicMock())
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +96,7 @@ SAMPLE_ENTRY_LIMITS_CFG = {
 
 class TestRenderTabKeyLearnings:
     def test_default_branch(self):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(
             "key_learnings",
             SAMPLE_ROLLOVER_CFG,
@@ -119,7 +111,7 @@ class TestRenderTabKeyLearnings:
         assert tab.endswith("value ≤200 chars · draft to 160 ⟧")
 
     def test_per_branch_override(self):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(
             "key_learnings",
             SAMPLE_ROLLOVER_CFG,
@@ -136,7 +128,7 @@ class TestRenderTabKeyLearnings:
 
 class TestRenderTabSessions:
     def test_sessions_default(self):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(
             "sessions",
             SAMPLE_ROLLOVER_CFG,
@@ -150,7 +142,7 @@ class TestRenderTabSessions:
         assert tab.endswith("summary ≤300 chars · draft to 240 ⟧")
 
     def test_sessions_per_branch(self):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(
             "sessions",
             SAMPLE_ROLLOVER_CFG,
@@ -167,7 +159,7 @@ class TestRenderTabSessions:
 
 class TestRenderTabObservations:
     def test_observations_default(self):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(
             "observations",
             SAMPLE_ROLLOVER_CFG,
@@ -180,7 +172,7 @@ class TestRenderTabObservations:
         assert tab.endswith("note ≤300 chars · draft to 240 ⟧")
 
     def test_observations_per_branch(self):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(
             "observations",
             SAMPLE_ROLLOVER_CFG,
@@ -212,7 +204,7 @@ def _backlog_file(path: Path, numbers: list) -> Path:
 
 class TestRenderTabTodos:
     def test_the_pad_size_and_caps_come_from_config(self):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(
             "todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory", {"branch_dir": "memory", "next_number": 12}
         )
@@ -221,14 +213,14 @@ class TestRenderTabTodos:
         )
 
     def test_the_pad_size_honours_per_branch(self):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(
             "todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "devpulse", {"branch_dir": "devpulse", "next_number": 1}
         )
         assert tab.startswith("⟦ pad of 4 · oldest roll to .backup/todo/devpulse/backlog.json · ")
 
     def test_without_branch_context_the_tab_says_unknown_not_a_number(self):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab("todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory")
         assert tab == (
             "⟦ pad of 7 · oldest roll to .backup/todo/<branch>/backlog.json · task ≤150 chars · draft to 120"
@@ -236,7 +228,7 @@ class TestRenderTabTodos:
         )
 
     def test_no_configured_pad_size_says_nothing_rolls(self):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(
             "todos", SAMPLE_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory", {"branch_dir": "memory", "next_number": 3}
         )
@@ -244,7 +236,7 @@ class TestRenderTabTodos:
 
     def test_the_tab_carries_numbers_only(self):
         """Prose is the template's; the RULE sentence and the old literal never come back."""
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab("todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory")
         assert "RULE: DELETE" not in tab
         assert "cap ~10" not in tab
@@ -254,7 +246,7 @@ class TestRenderTabTodos:
 
 class TestTodoContext:
     def test_next_number_is_the_highest_on_pad_or_in_backlog_plus_one(self, tmp_path):
-        mod = _get_module()
+        mod = tab_renderer
         state = mod.todo_roll.read_backlog(_backlog_file(tmp_path / "backlog.json", [30, "31"]))
 
         ctx = mod.todo_context("memory", [{"number": 4}, {"number": True}, "note"], state)
@@ -262,28 +254,28 @@ class TestTodoContext:
         assert ctx == {"branch_dir": "memory", "next_number": 31}
 
     def test_an_empty_pad_and_no_backlog_start_at_one(self, tmp_path):
-        mod = _get_module()
+        mod = tab_renderer
         state = mod.todo_roll.read_backlog(tmp_path / "absent.json")
         assert mod.todo_context("memory", [], state) == {"branch_dir": "memory", "next_number": 1}
 
     def test_an_unusable_backlog_gives_no_number(self, tmp_path):
-        mod = _get_module()
+        mod = tab_renderer
         bad = tmp_path / "backlog.json"
         bad.write_text("[1, 2]", encoding="utf-8")
         assert mod.todo_context("memory", [], mod.todo_roll.read_backlog(bad))["next_number"] is None
 
     def test_a_pad_that_is_not_a_list_gives_no_number(self, tmp_path):
-        mod = _get_module()
+        mod = tab_renderer
         state = mod.todo_roll.read_backlog(tmp_path / "absent.json")
         assert mod.todo_context("memory", {"a": 1}, state)["next_number"] is None
 
     def test_no_branch_gives_no_context(self):
-        mod = _get_module()
+        mod = tab_renderer
         assert mod.todo_context(None, []) == {"branch_dir": None, "next_number": None}
 
     def test_refresh_names_the_branch_directory_and_derives_the_number(self, tmp_path, monkeypatch):
         """The registry name (backup) is not the directory (backup_dir); the backlog follows the directory."""
-        mod = _get_module()
+        mod = tab_renderer
         seen = []
 
         def backlog_for(branch_dir, backup_root=None):
@@ -310,7 +302,7 @@ class TestTodoContext:
         )
 
     def test_the_backlogs_high_water_lifts_the_number_and_a_bool_does_not(self, tmp_path):
-        mod = _get_module()
+        mod = tab_renderer
         path = _backlog_file(tmp_path / "backlog.json", [9])
         document = json.loads(path.read_text(encoding="utf-8"))
         document["document_metadata"]["high_water"] = 50
@@ -323,7 +315,7 @@ class TestTodoContext:
 
     def test_the_tab_this_renderer_wrote_is_a_floor_and_hash_question_is_not(self, tmp_path):
         """floor_from_tab reads compose_meta's own output glyph for glyph; #? and foreign text give no floor."""
-        mod = _get_module()
+        mod = tab_renderer
         state = mod.todo_roll.read_backlog(tmp_path / "absent.json")
         rendered = mod.compose_meta(
             "todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory", {"branch_dir": "memory", "next_number": 30}
@@ -341,7 +333,7 @@ class TestTodoContext:
 
     def test_the_rendered_tab_never_walks_backwards_after_a_deletion(self, tmp_path, monkeypatch):
         """Delete the highest todo by hand and re-render: next #N holds, because the old tab is the floor."""
-        mod = _get_module()
+        mod = tab_renderer
         monkeypatch.setattr(
             mod.todo_roll, "backlog_path_for", lambda branch_dir, backup_root=None: tmp_path / "absent.json"
         )
@@ -377,7 +369,7 @@ class TestTodoContext:
 
 class TestReorderKeys:
     def test_local_key_order(self):
-        mod = _get_module()
+        mod = tab_renderer
         data = {
             "sessions": [],
             "document_metadata": {},
@@ -395,7 +387,7 @@ class TestReorderKeys:
         assert keys[-1] == "extra_field"
 
     def test_observations_key_order(self):
-        mod = _get_module()
+        mod = tab_renderer
         data = {
             "observations": [],
             "document_metadata": {},
@@ -413,7 +405,7 @@ class TestReorderKeys:
 
     def test_meta_before_array(self):
         """Meta key must appear immediately before its corresponding array."""
-        mod = _get_module()
+        mod = tab_renderer
         data = {
             "document_metadata": {},
             "todos": [],
@@ -458,7 +450,7 @@ class TestRefreshAllTabs:
 
     def test_writes_tabs_to_files(self, tmp_path):
         """refresh_all_tabs reads config, walks branches, writes tabs."""
-        mod = _get_module()
+        mod = tab_renderer
 
         # Set up branch dir with .trinity files
         branch_dir = tmp_path / "src" / "aipass" / "test_branch"
@@ -532,9 +524,7 @@ class TestRefreshAllTabs:
         receipt beside them. Vera Studio's files carried that promise for a
         project whose rollover memory was never supposed to run.
         """
-        from aipass.memory.apps.handlers import write_fence
-
-        mod = _get_module()
+        mod = tab_renderer
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         branch_dir = tmp_path / "other_root" / "src" / "x"
         trinity = branch_dir / ".trinity"
@@ -568,7 +558,7 @@ class TestRefreshAllTabs:
 
     def test_key_order_after_refresh(self, tmp_path):
         """After refresh, keys are in canonical order."""
-        mod = _get_module()
+        mod = tab_renderer
 
         branch_dir = tmp_path / "src" / "aipass" / "ordered_branch"
         trinity = branch_dir / ".trinity"
@@ -630,7 +620,7 @@ class TestRefreshAllTabs:
 
     def test_empty_registry(self):
         """refresh_all_tabs returns early if no branches in registry."""
-        mod = _get_module()
+        mod = tab_renderer
 
         mock_config = {
             "rollover": SAMPLE_ROLLOVER_CFG,
@@ -655,7 +645,7 @@ class TestRefreshAllTabs:
 
     def test_no_templates_updated_key(self, tmp_path):
         """refresh_all_tabs result dict has no templates_updated key (literal-baking removed)."""
-        mod = _get_module()
+        mod = tab_renderer
         mock_config = {
             "rollover": SAMPLE_ROLLOVER_CFG,
             "entry_limits": SAMPLE_ENTRY_LIMITS_CFG,
@@ -675,7 +665,7 @@ class TestRefreshAllTabs:
 
     def test_missing_file_skipped(self, tmp_path):
         """Branch with missing .trinity files is skipped, not errored."""
-        mod = _get_module()
+        mod = tab_renderer
 
         branch_dir = tmp_path / "src" / "aipass" / "empty_branch"
         branch_dir.mkdir(parents=True)
@@ -722,7 +712,7 @@ class TestRefreshAllTabs:
 
 class TestRenderAllMetaTabs:
     def test_returns_four_keys(self):
-        mod = _get_module()
+        mod = tab_renderer
         mock_config = {
             "rollover": SAMPLE_ROLLOVER_CFG,
             "entry_limits": SAMPLE_ENTRY_LIMITS_CFG,
@@ -741,7 +731,7 @@ class TestRenderAllMetaTabs:
         }
 
     def test_values_are_rendered_strings(self):
-        mod = _get_module()
+        mod = tab_renderer
         mock_config = {
             "rollover": SAMPLE_ROLLOVER_CFG,
             "entry_limits": SAMPLE_ENTRY_LIMITS_CFG,
@@ -759,7 +749,7 @@ class TestRenderAllMetaTabs:
         assert "{{" not in tabs["TODOS_META"]
 
     def test_a_named_branch_directory_reaches_the_todos_tab(self, tmp_path, monkeypatch):
-        mod = _get_module()
+        mod = tab_renderer
         monkeypatch.setattr(
             mod.todo_roll, "backlog_path_for", lambda branch_dir, backup_root=None: tmp_path / "no.json"
         )
@@ -772,7 +762,7 @@ class TestRenderAllMetaTabs:
         )
 
     def test_uses_defaults_not_per_branch(self):
-        mod = _get_module()
+        mod = tab_renderer
         mock_config = {
             "rollover": SAMPLE_ROLLOVER_CFG,
             "entry_limits": SAMPLE_ENTRY_LIMITS_CFG,
@@ -806,14 +796,12 @@ class TestTabAgreesWithTheEngine:
 
     @staticmethod
     def _engine_count(rollover_cfg, branch, section):
-        from aipass.memory.apps.handlers.json.config_loader import resolve_limits
-
         return resolve_limits(rollover_cfg, branch)[section]["count"]
 
     def test_per_branch_entry_missing_its_file_block_falls_back_like_the_engine(self):
         """A per_branch entry with no ``local`` block must inherit the DEFAULT,
         not a hard-coded 15 — the drift that made this class necessary."""
-        mod = _get_module()
+        mod = tab_renderer
         cfg = {
             "defaults": {
                 "local": {"sessions": {"count": 25, "auto_compact_cap": 3}, "key_learnings": {"count": 25}},
@@ -831,7 +819,7 @@ class TestTabAgreesWithTheEngine:
     def test_no_limit_anywhere_names_no_number(self):
         """When nothing is configured the engine enforces nothing, so the tab
         must not invent a count."""
-        mod = _get_module()
+        mod = tab_renderer
         cfg = {
             "defaults": {"observations": {"observations": {"count": 15}}},
             "per_branch": {"victim": {"observations": {"observations": {"count": 15}}}},
@@ -845,7 +833,7 @@ class TestTabAgreesWithTheEngine:
 
     @pytest.mark.parametrize("section", ["sessions", "key_learnings", "observations"])
     def test_override_matches_the_engine(self, section):
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(section, SAMPLE_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "devpulse")
         assert f"keep {self._engine_count(SAMPLE_ROLLOVER_CFG, 'devpulse', section)}" in tab
 
@@ -853,7 +841,7 @@ class TestTabAgreesWithTheEngine:
     def test_unconfigured_branch_matches_the_engine(self, section):
         """A branch with no per_branch entry at all — the common case for a
         freshly spawned citizen before the first push."""
-        mod = _get_module()
+        mod = tab_renderer
         tab = mod.render_tab(section, SAMPLE_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "newborn")
         assert f"keep {self._engine_count(SAMPLE_ROLLOVER_CFG, 'newborn', section)}" in tab
 
@@ -862,6 +850,6 @@ class TestTabAgreesWithTheEngine:
         A re-introduced ``count`` fallback in this file is the bug coming back."""
         import inspect
 
-        src = inspect.getsource(_get_module().render_tab)
+        src = inspect.getsource(tab_renderer.render_tab)
         assert 'get("count", ' not in src
         assert "resolve_limits" in src

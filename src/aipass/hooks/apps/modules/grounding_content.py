@@ -457,7 +457,7 @@ def grounding_report(hook_data: dict) -> tuple[list[tuple[str, str]], list[str]]
     for label in SECTION_ORDER:
         try:
             content = loaders[label](hook_data)
-        except Exception as exc:  # noqa: BLE001 - any loader failure is a failure, whatever its type
+        except Exception as exc:  # any loader failure is a failure, whatever its type
             failures.append(_unhomed(f"{label}: loading it raised {type(exc).__name__}: {exc}"))
             continue
         if content and content.strip():

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_generator.py
 # Description: README Section Auto-Generator
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -64,6 +64,9 @@ MARKER_PREFIX = "<!-- AUTO:"
 MARKER_SUFFIX = " -->"
 MARKER_CLOSE_PREFIX = "<!-- /AUTO:"
 
+# Tree comment for a file whose text could not be read
+UNREADABLE_COMMENT = "(unreadable)"
+
 
 # =============================================================================
 # SECTION GENERATORS
@@ -85,33 +88,32 @@ def generate_tree_section(branch_path: str) -> str:
         branch_path: Absolute path to the branch root directory
 
     Returns:
-        Fenced code block string with directory tree, or empty string on failure
+        Fenced code block string with directory tree, or empty string when
+        the branch directory is missing or holds nothing to show
+
+    Raises:
+        OSError: the tree could not be read. generate_all_sections records it.
     """
     branch_dir = Path(branch_path)
 
     if not branch_dir.exists():
         return ""
 
-    try:
-        lines = []
-        # Start with the branch root
-        lines.append(f"{branch_dir}/")
+    lines = []
+    # Start with the branch root
+    lines.append(f"{branch_dir}/")
 
-        # Build tree with smart depth control:
-        # - apps/ gets full depth (4 levels)
-        # - docs/, tests/, tools/, templates/ get 2 levels
-        # - Data dirs (logs, *_json, ai_mail.local) get collapsed
-        _build_tree(branch_dir, lines, prefix="", depth_remaining=4, is_apps_subtree=False)
+    # Build tree with smart depth control:
+    # - apps/ gets full depth (4 levels)
+    # - docs/, tests/, tools/, templates/ get 2 levels
+    # - Data dirs (logs, *_json, ai_mail.local) get collapsed
+    _build_tree(branch_dir, lines, prefix="", depth_remaining=4, is_apps_subtree=False)
 
-        if len(lines) <= 1:
-            return ""
-
-        tree_text = "\n".join(lines)
-        return f"```\n{tree_text}\n```"
-
-    except Exception:
-        logger.info("Failed to generate tree for %s", branch_path)
+    if len(lines) <= 1:
         return ""
+
+    tree_text = "\n".join(lines)
+    return f"```\n{tree_text}\n```"
 
 
 def _should_skip_entry(name: str) -> bool:
@@ -215,12 +217,19 @@ def _build_tree(
                 if effective_depth > 0:
                     _build_tree(entry, lines, prefix + child_prefix, effective_depth, child_is_apps)
         else:
-            comment = _get_file_comment(entry)
-            suffix = f"  # {comment}" if comment else ""
+            file_comment = _get_file_comment(entry)
+            if file_comment is None:
+                file_comment = UNREADABLE_COMMENT
+            suffix = f"  # {file_comment}" if file_comment else ""
             lines.append(f"{prefix}{connector}{entry.name}{suffix}")
 
 
-def _get_file_comment(file_path: Path) -> str:
+def _read_source(file_path: Path) -> str:
+    """Read one tree file's text; the seam a test replaces to make a read fail."""
+    return file_path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _get_file_comment(file_path: Path) -> Optional[str]:
     """
     Get a brief comment for a file based on its docstring or header.
 
@@ -228,7 +237,8 @@ def _get_file_comment(file_path: Path) -> str:
         file_path: Path to the file
 
     Returns:
-        Short description string, or empty string
+        Short description string, empty string when the file has none,
+        or None when the file could not be read (the tree marks it unreadable)
     """
     if not file_path.suffix == ".py":
         return ""
@@ -236,7 +246,7 @@ def _get_file_comment(file_path: Path) -> str:
         return ""
 
     try:
-        content = file_path.read_text(encoding="utf-8", errors="ignore")
+        content = _read_source(file_path)
         # Try to extract from META header Name line
         name_match = re.search(r"^# Name:\s*\S+\s*-\s*(.+)$", content, re.MULTILINE)
         if name_match:
@@ -250,7 +260,7 @@ def _get_file_comment(file_path: Path) -> str:
                 return first_line
     except (OSError, UnicodeDecodeError):
         logger.info("Cannot read file for comment extraction: %s", file_path)
-        return ""
+        return None
 
     return ""
 
@@ -367,7 +377,12 @@ def generate_commands_section(branch_path: str) -> str:
         branch_path: Absolute path to the branch root directory
 
     Returns:
-        Markdown formatted commands section, or empty string on failure
+        Markdown formatted commands section, or empty string when there is
+        no entry point or its help names no commands
+
+    Raises:
+        subprocess.TimeoutExpired: --help did not answer in 15 seconds.
+        OSError: the entry point could not be run. generate_all_sections records both.
     """
     branch_dir = Path(branch_path)
     branch_name = branch_dir.name
@@ -380,34 +395,26 @@ def generate_commands_section(branch_path: str) -> str:
     if not entry_point.exists():
         return ""
 
-    try:
-        env = os.environ.copy()
-        env["COLUMNS"] = "500"
+    env = os.environ.copy()
+    env["COLUMNS"] = "500"
 
-        result = subprocess.run(
-            [sys.executable, str(entry_point), "--help"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            env=env,
-            cwd=str(branch_dir),
-        )
+    result = subprocess.run(
+        [sys.executable, str(entry_point), "--help"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env=env,
+        cwd=str(branch_dir),
+    )
 
-        output = result.stdout or ""
-        if not output:
-            output = result.stderr or ""
+    output = result.stdout or ""
+    if not output:
+        output = result.stderr or ""
 
-        if not output.strip():
-            return ""
-
-        return _parse_help_output(output)
-
-    except subprocess.TimeoutExpired:
-        logger.info("Help command timed out for %s", branch_name)
+    if not output.strip():
         return ""
-    except Exception:
-        logger.info("Help command failed for %s", branch_name)
-        return ""
+
+    return _parse_help_output(output)
 
 
 def _parse_commands_line(help_text: str) -> List[str]:
@@ -500,7 +507,11 @@ def generate_header_section(branch_path: str) -> str:
         branch_path: Absolute path to the branch root directory
 
     Returns:
-        Formatted header markdown, or empty string on failure
+        Formatted header markdown, or empty string when there is no passport
+
+    Raises:
+        json.JSONDecodeError, OSError: the passport could not be read.
+            generate_all_sections records it.
     """
     branch_dir = Path(branch_path)
     branch_name = branch_dir.name.upper().replace("-", "_")
@@ -510,11 +521,7 @@ def generate_header_section(branch_path: str) -> str:
     if not id_file.exists():
         return ""
 
-    try:
-        data = json.loads(id_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        logger.info("Cannot read passport for header generation: %s", id_file)
-        return ""
+    data = json.loads(id_file.read_text(encoding="utf-8"))
 
     branch_info = data.get("branch_info", {})
 
@@ -554,7 +561,7 @@ def generate_last_updated() -> str:
 # =============================================================================
 
 
-def generate_all_sections(branch_path: str) -> dict:
+def generate_all_sections(branch_path: str, errors: Optional[List[str]] = None) -> dict:
     """
     Generate all auto-populatable README sections for a branch.
 
@@ -563,10 +570,11 @@ def generate_all_sections(branch_path: str) -> dict:
 
     Args:
         branch_path: Absolute path to the branch root directory
+        errors: If given, each failed section appends "<name> section failed: <error>"
 
     Returns:
         Dict with section names as keys, generated content as values.
-        Failed sections have empty string values.
+        Failed sections have empty string values and are named in errors.
     """
     sections = {}
 
@@ -581,9 +589,11 @@ def generate_all_sections(branch_path: str) -> dict:
     for name, generator in generators.items():
         try:
             sections[name] = generator()
-        except Exception:
-            logger.info("Section generator %s failed for %s", name, branch_path)
+        except Exception as exc:
+            logger.info("Section generator %s failed for %s: %s", name, branch_path, exc)
             sections[name] = ""
+            if errors is not None:
+                errors.append(f"{name} section failed: {exc}")
 
     json_handler.log_operation("readme_generated", {"branch": branch_path, "sections": list(sections.keys())})
     return sections
@@ -615,7 +625,7 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
         Dict with:
             'updated': list of section names that were updated
             'missing_markers': list of section names without markers
-            'errors': list of error messages
+            'errors': list of error messages, one per section that failed
             'dry_run': whether this was a dry run
     """
     result = {
@@ -637,8 +647,8 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
         result["errors"].append(f"Failed to read README.md: {e}")
         return result
 
-    # Generate all sections
-    sections = generate_all_sections(branch_path)
+    # Generate all sections; a section that fails is named in result["errors"]
+    sections = generate_all_sections(branch_path, result["errors"])
 
     # Map section names to marker names
     marker_map = {
@@ -663,7 +673,11 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
             # Replace content between markers
             pattern = re.compile(re.escape(open_marker) + r".*?" + re.escape(close_marker), re.DOTALL)
             replacement = f"{open_marker}\n{section_content}\n{close_marker}"
-            updated_content = pattern.sub(replacement, updated_content)
+            # A callable hands the text over verbatim. As a string, re.sub reads
+            # it as a template: the tree's first line is the branch path, and on
+            # Windows "C:\Users" is the escape \U, so every update raised
+            # re.error (PR#774 Windows lane, 2026-09-21).
+            updated_content = pattern.sub(lambda _match: replacement, updated_content)
             result["updated"].append(section_name)
         else:
             result["missing_markers"].append(section_name)

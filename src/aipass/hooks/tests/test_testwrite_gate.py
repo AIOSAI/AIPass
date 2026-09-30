@@ -1,61 +1,68 @@
 # =================== AIPass ====================
 # Name: test_testwrite_gate.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-09-10
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for testwrite_gate — the owner's 2026-09-01 no-agent-test-creation ruling.
+"""Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
 
-The owner ruled (devpulse DPLAN-0323) that agents are stripped of self-directed
-test creation while @seedgo's test_quality v5 pack lands, enforced by a hook
-behind a JSON switch so the way back is a field flip and not a rebuild.
+# testwrite_gate — the owner's 2026-09-01 no-agent-test-creation ruling.
+#
+# The owner ruled (devpulse DPLAN-0323) that agents are stripped of self-directed
+# test creation while @seedgo's test_quality v5 pack lands, enforced by a hook
+# behind a JSON switch so the way back is a field flip and not a rebuild.
+#
+# SEQUENCE, stated plainly because it was not test-first: the handler was written
+# first and these pins after it. The red evidence is therefore a mutation sweep
+# run afterwards rather than a red-then-green sequence — 13 mutants, all killed,
+# including a baseline mutant that stubs the gate to allow everything and reds 25
+# of the 53 pins below. One of the 13 SURVIVED the first round and is why the
+# ``writing_enabled`` contract pin exists: flipping the missing-policy constructor
+# to claim writing was ON killed nothing, because the gate reads ``error`` first.
+#
+# The file is organised by the question each block answers:
+#
+#  1. The switch does all three of its jobs: off blocks, a branch in ``allow``
+#     passes, ``on`` passes for everyone.
+#  2. The ruling stays where the owner drew it: creation is blocked, editing an
+#     existing test is not.
+#  3. Both lanes answer the same. The scripted lane reuses ``bash_writes``, so a
+#     ``cat > tests/test_x.py`` is refused exactly like a Write.
+#  4. The fail mode is OBSERVABLE, not merely chosen: missing and corrupt policy
+#     files both refuse, and both safety properties that make fail-closed
+#     survivable — ordinary work never reads the policy, and the policy file
+#     itself is always writable — have pins of their own.
+#  5. The admin seat passes on a VERIFIED grant only, and never on a directory
+#     name, mirroring test_edit_gate_bash.py's discipline.
+#
+# POSIX literals in this suite STAY (devpulse ruling, 2026-09-08): the literal
+# IS the test data - a command string is what the gate reads, spelled as agents
+# type it.
+#
+# A path put INTO a command string is spelled with as_posix(), the form bash takes
+# on every OS (C:/... on Windows). str() handed windows-setup a raw
+# C:\Users\... cd target. Bash eats those backslashes, and the gate's reading
+# of that did what bash would: cd'd into a directory named C:Users..., so an
+# existing test looked like a new one (devpulse 401ee814, PR #762).
 
-SEQUENCE, stated plainly because it was not test-first: the handler was written
-first and these pins after it. The red evidence is therefore a mutation sweep
-run afterwards rather than a red-then-green sequence — 13 mutants, all killed,
-including a baseline mutant that stubs the gate to allow everything and reds 25
-of the 53 pins below. One of the 13 SURVIVED the first round and is why the
-``writing_enabled`` contract pin exists: flipping the missing-policy constructor
-to claim writing was ON killed nothing, because the gate reads ``error`` first.
-
-The file is organised by the question each block answers:
-
- 1. The switch does all three of its jobs: off blocks, a branch in ``allow``
-    passes, ``on`` passes for everyone.
- 2. The ruling stays where the owner drew it: creation is blocked, editing an
-    existing test is not.
- 3. Both lanes answer the same. The scripted lane reuses ``bash_writes``, so a
-    ``cat > tests/test_x.py`` is refused exactly like a Write.
- 4. The fail mode is OBSERVABLE, not merely chosen: missing and corrupt policy
-    files both refuse, and both safety properties that make fail-closed
-    survivable — ordinary work never reads the policy, and the policy file
-    itself is always writable — have pins of their own.
- 5. The admin seat passes on a VERIFIED grant only, and never on a directory
-    name, mirroring test_edit_gate_bash.py's discipline.
-
-POSIX literals in this suite STAY (devpulse ruling, 2026-09-08): the literal
-IS the test data - a command string is what the gate reads, spelled as agents
-type it.
-
-A path put INTO a command string is spelled with as_posix(), the form bash takes
-on every OS (C:/... on Windows). str() handed windows-setup a raw
-C:\\Users\\... cd target. Bash eats those backslashes, and the gate's reading
-of that did what bash would: cd'd into a directory named C:Users..., so an
-existing test looked like a new one (devpulse 401ee814, PR #762).
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — EDIT_TOOLS and ADMIN_SEAT's literal values; the gate's use of them is pinned
+# seedgo: no-test-needed(generated) — bash_writes.write_targets' command parse, owned by tests/test_edit_gate_bash.py
 
 import json
+import os
 import tempfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 import pytest
 
-from aipass.hooks.apps.handlers.security.testwrite_gate import handle
-from aipass.hooks.apps.modules import testgate_policy, testwrite_targets
+from aipass.hooks.apps.handlers.security import testwrite_gate
+from aipass.hooks.apps.handlers.security.testwrite_gate import _is_test_run, handle, template_pointer
+from aipass.hooks.apps.modules import bash_writes, testgate_policy, testwrite_targets
 
 _RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller"
 
@@ -87,7 +94,12 @@ def project(tmp_path: Path) -> dict:
       src/aipass/hooks/tests/test_existing.py
       src/aipass/devpulse/                the admin seat
     """
-    root = tmp_path / "AIPass"
+    return _build_project(tmp_path)
+
+
+def _build_project(base: Path) -> dict:
+    """The tree ``project`` hands out, built under *base* — a test picks the parent's name."""
+    root = base / "AIPass"
     (root / ".aipass").mkdir(parents=True)
     (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
 
@@ -171,7 +183,7 @@ class TestTheSwitch:
         assert '"agent_test_writing" to "on"' in reason
         assert "drone @hooks testwrite" in reason
 
-    def test_the_refusal_names_what_the_ask_must_CARRY(self, project: dict):
+    def test_the_refusal_names_what_the_ask_must_carry(self, project: dict):
         """The owner's awareness ruling: blocking without teaching is half a gate.
 
         The navmap house rule is not "mail @devpulse", it is "mail @devpulse with
@@ -237,8 +249,6 @@ class TestBothLanesAnswerTheSame:
 
     def test_the_scripted_lane_reuses_bash_writes(self, project: dict):
         """One shell reader for both gates. Two would eventually disagree."""
-        from aipass.hooks.apps.handlers.security import testwrite_gate
-
         _policy(project)
         with patch.object(testwrite_gate, "testwrite_targets_bash", return_value=[]) as seam:
             assert _run(project["seat"], command=f"echo x > {project['new_test']}")["exit_code"] == 0
@@ -257,8 +267,6 @@ class TestBothLanesAnswerTheSame:
 
     def test_an_unparseable_command_allows_and_logs(self, project: dict):
         """bash_writes' own contract: a command it could not read taught it nothing."""
-        from aipass.hooks.apps.handlers.security import testwrite_gate
-
         _policy(project)
         with patch.object(testwrite_gate, "testwrite_targets_bash", side_effect=ValueError("lexer died")):
             assert _run(project["seat"], command="something ; unreadable")["exit_code"] == 0
@@ -277,7 +285,7 @@ class TestTheFailModeIsObservable:
         assert "test_write_policy.json" in reason
         assert "agent_test_writing" in reason
 
-    def test_the_missing_refusal_names_the_RULING_it_stands_in_for(self, project: dict):
+    def test_the_missing_refusal_names_the_ruling_it_stands_in_for(self, project: dict):
         """The message a fresh project actually hits, so it carries the most weight.
 
         `aipass init` stamps the gate but not a policy, so most projects meet this
@@ -378,8 +386,6 @@ class TestTheAdminSeat:
         edit_gate's own suite convicted the same shape in its half within the
         minute. The delegation must not become a way in.
         """
-        from aipass.hooks.apps.handlers.security import testwrite_gate
-
         _policy(project)
         with patch.object(testwrite_gate, "_module", side_effect=ImportError("no admin_seat")):
             assert testwrite_gate._is_admin_seat(project["admin_seat"]) is False
@@ -527,11 +533,518 @@ class TestRunningTestsIsNotWritingThem:
 
     def test_the_exemption_is_only_the_module_form(self):
         """A bare script argument named pytest must not buy the exemption."""
-        from aipass.hooks.apps.handlers.security.testwrite_gate import _is_test_run
-
         assert _is_test_run(["python3", "-m", "pytest", "tests/x.py"])
         assert _is_test_run(["python", "-m", "unittest"])
         assert not _is_test_run(["python3", "pytest", "tests/x.py"])
         assert not _is_test_run(["python3", "-c", "import pytest"])
         assert not _is_test_run(["python3", "-m", "pip", "install", "pytest"])
         assert not _is_test_run(["python3", "-m"])
+
+
+class TestNamingAPathIsNotWritingIt:
+    """Three seats, one shape: DATA read as a target (devpulse DPLAN-0352, 09-19).
+
+    @seedgo was refused for an interpreter one-liner that PRINTED a test path
+    while measuring the fleet; @canary for a path literal inside a heredoc; this
+    branch for both. Nothing was being created in any of them — the interpreter
+    breadth that fences a foreign project convicted on a string.
+
+    The cure reads the program's OWN text for a write verb, in the grammar that
+    text is written in, and stands down when there is none. What it must never
+    do is claim that evidence about text it did not read: a script FILE keeps
+    the broad reading, pinned in the class above.
+    """
+
+    def test_an_inline_program_that_only_names_a_test_path_is_allowed(self, project):
+        _policy(project)
+        body = "pri" + "nt('" + project["new_test"] + "')"
+        assert not _blocked(_run(project["seat"], command='python3 -c "' + body + '"'))
+
+    def test_a_heredoc_that_only_names_a_test_path_is_allowed(self, project):
+        """@canary's and @seedgo's shape: a path literal in a measuring script."""
+        _policy(project)
+        body = "pa" + "th = '" + project["new_test"] + "'"
+        assert not _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{body}\nEOF"))
+
+    def test_a_heredoc_that_writes_is_still_refused(self, project):
+        """MUTATION-CHECK: the stand-down must key on the write verb, not on the heredoc."""
+        _policy(project)
+        body = "Path('" + project["new_test"] + "').write_te" + "xt('x')"
+        assert _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{body}\nEOF"))
+
+    def test_a_program_that_shells_out_is_still_refused(self, project):
+        """The write verb is then in a string this parser does not read as code,
+        so the shelling-out itself has to count as the evidence."""
+        _policy(project)
+        body = "import os; os.sys" + "tem('touch " + project["new_test"] + "')"
+        assert _blocked(_run(project["seat"], command='python3 -c "' + body + '"'))
+
+    @pytest.mark.parametrize(
+        ("parent", "form"),
+        [
+            pytest.param("popen-gw0", "", id="popen-gw0"),
+            pytest.param("spawn", "", id="spawn"),
+            pytest.param("spawn", ", '{base}/aipass/spawn'", id="word-last"),
+            pytest.param("spawn", ", '{doubled}'", id="windows-doubled-backslashes"),
+            pytest.param("spawn", ", '{doubled_last}'", id="windows-doubled-word-last"),
+            pytest.param("spawn", ", r'{single}'", id="windows-raw-string"),
+            pytest.param("spawn", ", '~/spawn/notes.md'", id="home-and-the-word-first"),
+            pytest.param("system", ", 'docs/system.md'", id="file-named-after-a-word"),
+            pytest.param("exec", ", '--exec-path'", id="git-flag"),
+            pytest.param("spawn", ", './spawn'", id="dot-slash-word-last"),
+            pytest.param("system", ", 'filesystem'", id="word-inside-a-longer-word"),
+            pytest.param("spawn", ", r'spawn\\tests'", id="word-first-single-backslash"),
+            pytest.param("spawn", ", 'spawn\\\\tests'", id="word-first-doubled-backslash"),
+        ],
+    )
+    def test_a_shelling_word_inside_a_named_path_is_not_code(self, tmp_path, parent, form):
+        """xdist names its temp dirs popen-gw0: the word sat in the PATH, not the program,
+        and four pins here went red under -n 2 (compass 460, item 1). The further forms
+        are devpulse's path specimens of leg 2c, each one path the program only names."""
+        project = _build_project(tmp_path / parent)
+        _policy(project)
+        # The word closing an absolute path, and opening a relative one: each side of
+        # the boundary has a spelling of its own to stand down on.
+        names = [Path(project["new_test"]).as_posix(), (tmp_path / parent).as_posix(), f"{parent}/x"]
+        single = str(PureWindowsPath(tmp_path / "aipass" / "spawn" / "tests"))
+        doubled_last = str(PureWindowsPath(tmp_path / "aipass" / "spawn")).replace("\\", "\\\\")
+        doubled = single.replace("\\", "\\\\")
+        extra = form.format(base=tmp_path.as_posix(), single=single, doubled=doubled, doubled_last=doubled_last)
+        body = "pri" + "nt(" + ", ".join(f"'{name}'" for name in names) + extra + ")"
+        assert not _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{body}\nEOF"))
+
+    @pytest.mark.parametrize(
+        ("verb", "template"),
+        [
+            ("system", "python3 -c \"import os; os.{verb}('touch {path}')\""),
+            ("popen", "python3 -c \"import os; os.{verb}('touch {path}')\""),
+            ("spawn", "node -e \"require('child_process').{verb}('touch', ['{path}'])\""),
+            ("exec", "node -e \"require('child_process').{verb}('touch {path}')\""),
+            ("execSync", "node -e \"require('child_process').{verb}('touch {path}')\""),
+            ("check_call", "python3 -c \"{verb}(['touch', '{path}'])\""),
+            ("check_output", "python3 -c \"{verb}(['touch', '{path}'])\""),
+            ("subprocess", "python3 -c \"import {verb} as s; s.run(['touch', '{path}'])\""),
+        ],
+    )
+    def test_each_shelling_word_used_as_code_is_still_refused(self, project, verb, template):
+        """One refusal pin per word, each body carrying no other word of the list, so
+        dropping any one word from the pattern turns exactly its pin red."""
+        _policy(project)
+        command = template.format(verb=verb, path=Path(project["new_test"]).as_posix())
+        assert _blocked(_run(project["seat"], command=command))
+
+    @pytest.mark.parametrize(
+        ("interpreter", "name", "body"),
+        [
+            *[
+                ("python3", name, "import os\nos.{name}('touch', ['touch', '{path}'])")
+                for name in ("execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe")
+            ],
+            *[
+                ("python3", name, "import os\nos.{name}(1, 'touch', ['touch', '{path}'])")
+                for name in ("spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe")
+            ],
+            ("python3", "posix_spawn", "import os\nos.{name}('touch', ['touch', '{path}'], {{}})"),
+            ("python3", "posix_spawnp", "import os\nos.{name}('touch', ['touch', '{path}'], {{}})"),
+            ("python3", "startfile", "import os\nos.{name}('{path}')"),
+            ("python3", "create_subprocess_exec", "import asyncio\nasyncio.{name}('touch', '{path}')"),
+            ("python3", "create_subprocess_shell", "import asyncio\nasyncio.{name}('touch {path}')"),
+            ("python3", "Popen", "{name}(['touch', '{path}'])"),
+            ("python3", "popen2", "import os\nos.{name}('touch {path}')"),
+            ("python3", "popen3", "import os\nos.{name}('touch {path}')"),
+            *[
+                ("node", name, "const cp = require('child_' + 'process')\ncp.{name}('touch', ['{path}'])")
+                for name in ("execFile", "execFileSync", "spawnSync")
+            ],
+            *[("php", name, "<?php {name}('touch {path}');") for name in ("shell_exec", "passthru", "proc_open")],
+            *[("ruby", name, "require 'open3'\nOpen3.{name}('touch', '{path}')") for name in ("capture2", "capture3")],
+        ],
+    )
+    def test_each_name_added_by_compass_480_is_refused_as_a_call(self, project, interpreter, name, body):
+        """One refusal pin per name devpulse added under reading 1 alone (leg 3, compass 480),
+        each body carrying no word of the older list, so dropping one name turns exactly its pin
+        red. The program is handed to the gate in a heredoc and only read: nothing runs it."""
+        _policy(project)
+        program = body.format(name=name, path=Path(project["new_test"]).as_posix())
+        assert _blocked(_run(project["seat"], command=f"{interpreter} - <<'EOF'\n{program}\nEOF"))
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "execvp",
+            "spawnvp",
+            "posix_spawn",
+            "startfile",
+            "create_subprocess_exec",
+            "Popen",
+            "popen2",
+            "execFileSync",
+            "shell_exec",
+            "capture3",
+        ],
+    )
+    def test_a_name_added_by_compass_480_inside_a_named_path_is_not_code(self, project, name):
+        """One let-through pin per family: the new names stand under reading 1 alone, so a path
+        that holds one and no call bracket is still only named (compass 480, condition 1)."""
+        _policy(project)
+        named = Path(project["new_test"]).as_posix()
+        program = f"print('{named}', 'notes/{name}/x.md', 'notes/{name}-gw0')"
+        assert not _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{program}\nEOF"))
+
+    @pytest.mark.parametrize(
+        ("interpreter", "verb", "body"),
+        [
+            pytest.param("python3", "system", "from os import *\n0-{verb}('touch {path}')", id="a-hyphen-call"),
+            pytest.param("python3", "exec", "src = '{path}'\n0-{verb}(src)", id="b-hyphen-builtin"),
+            pytest.param("python3", "popen", "from os import *\nx = 1/{verb}('touch {path}')", id="c-slash-call"),
+            pytest.param("node", "spawn", "require('cross-{verb}')('touch', ['{path}'])", id="d-hyphen-require"),
+            pytest.param("python3", "popen", "from os import *\nx = {verb}\\\n('touch {path}')", id="e-continuation"),
+            pytest.param(
+                "python3",
+                "system",
+                "from os import *\nf = {verb}\\\n if 1 else 0\nf('touch {path}')",
+                id="f-alias-continuation",
+            ),
+            pytest.param(
+                "python3", "exec", "src = '{path}'\ne = {verb}\\\n if 1 else 0\ne(src)", id="g-alias-continuation"
+            ),
+            pytest.param(
+                "node",
+                "exec",
+                "const c = require('child_' + 'process')\nc.{verb}/**/('touch {path}')",
+                id="h-block-comment",
+            ),
+            pytest.param(
+                "node",
+                "exec",
+                "const c = require('child_' + 'process')\nc.{verb}//x\n('touch {path}')",
+                id="i-line-comment",
+            ),
+            pytest.param(
+                "python3",
+                "system",
+                "import os\ngetattr(os, '/{verb}'.strip('/'))('touch {path}')",
+                id="j-slice-after-slash",
+            ),
+            pytest.param(
+                "python3", "popen", "import os\ngetattr(os, '-{verb}'[1:])('touch {path}')", id="k-slice-after-hyphen"
+            ),
+            pytest.param(
+                "python3",
+                "exec",
+                "import os\nos.execvp('find', ['find', '.', '-{verb}', 'touch', '{path}', ';'])",
+                id="m-find-flag",
+            ),
+            pytest.param(
+                "python3", "popen", "from os import *\nx = 1/{verb}\\\n('touch {path}')", id="n-slash-and-continuation"
+            ),
+            pytest.param(
+                "node", "spawn", "import cs from 'cross-{verb}'\ncs.sync('touch', ['{path}'])", id="v1-es-import"
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "const cs = await import('cross-{verb}')\ncs.sync('touch', ['{path}'])",
+                id="v2-dynamic-import",
+            ),
+            pytest.param(
+                "node", "exec", "import sh from '{verb}-sh'\nsh('touch {path}')", id="v3-es-import-word-first"
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "const p = require.resolve('cross-{verb}')\nrequire(p)('touch', ['{path}'])",
+                id="v4-require-resolve",
+            ),
+            pytest.param("node", "spawn", "import 'cross-{verb}'\nconsole.log('{path}')", id="k2-bare-import"),
+            pytest.param(
+                "node", "spawn", "require(`cross-{verb}`)('touch', ['{path}'])", id="t1-require-template-string"
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "const cs = await import(`cross-{verb}`)\ncs.sync('touch', ['{path}'])",
+                id="t2-import-template-string",
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "import {{ createRequire }} from 'module'\nconst r = createRequire(import.meta.url)\n"
+                "r('cross-{verb}')('touch', ['{path}'])",
+                id="c1-create-require",
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "const m = 'cross-{verb}'\nconst {{ createRequire }} = require('module')\n"
+                "createRequire(__filename)(m)('touch', ['{path}'])",
+                id="c2-create-require-name-first",
+            ),
+            pytest.param("node", "spawn", "require(\"x`y-{verb}\")('touch', ['{path}'])", id="g1-grave-in-double"),
+            pytest.param(
+                "node", "spawn", "require('./a`b/cross-{verb}')('touch', ['{path}'])", id="g2-grave-in-single"
+            ),
+            pytest.param(
+                "node",
+                "exec",
+                "const m = await import(\"pkg`s/{verb}-sh\")\nm('touch', ['{path}'])",
+                id="g3-grave-in-import",
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "require(require.resolve('a`b/cross-{verb}'))('touch', ['{path}'])",
+                id="g4-grave-in-resolve",
+            ),
+            pytest.param(
+                "node", "spawn", "require(\"a'b/cross-{verb}\")('touch', ['{path}'])", id="q1-apostrophe-in-double"
+            ),
+            pytest.param("node", "spawn", "require('a\"b-{verb}')('touch', ['{path}'])", id="q2-double-in-single"),
+            pytest.param(
+                "node", "spawn", "require(`a'b/cross-{verb}`)('touch', ['{path}'])", id="q3-plain-quote-in-template"
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "require(`a${{\"b\"}}c/cross-{verb}`)('touch', ['{path}'])",
+                id="t3-quoted-part-in-template",
+            ),
+        ],
+    )
+    def test_a_shelling_word_beside_a_path_character_in_code_is_refused(self, project, interpreter, verb, body):
+        """Code forms that touch a hyphen, a slash or a backslash like a path does (devpulse, leg 2b).
+
+        The program is handed to the gate as a string in a heredoc and only read: nothing runs it."""
+        _policy(project)
+        program = body.format(verb=verb, path=Path(project["new_test"]).as_posix())
+        assert _blocked(_run(project["seat"], command=f"{interpreter} - <<'EOF'\n{program}\nEOF"))
+
+    def test_an_es_import_of_a_local_file_beside_a_named_path_is_allowed(self, tmp_path):
+        """The loader reading (leg 2d) holds a word only inside the quoted module name: a local
+        module named without one, printed beside a path that holds one, stays a name."""
+        project = _build_project(tmp_path / "spawn")
+        _policy(project)
+        named = Path(project["new_test"]).as_posix()
+        program = f"import u from './notes/util.js'\nconsole.log('{named}', 'src/aipass/spawn/x.md')"
+        assert not _blocked(_run(project["seat"], command=f"node - <<'EOF'\n{program}\nEOF"))
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param("require('./lib/a.js')('notes/x-spawn/y.md')", id="a1-word-path-later"),
+            pytest.param("require(\"./a.js\")('it`s', 'notes/spawn/x.md')", id="a2-other-quote-later"),
+            pytest.param("require(`./lib/a.js`)('notes/exec-notes.md')", id="a3-template-local"),
+            pytest.param("import('./a.js').then(m=>m.log('d/x-spawn', '{path}'))", id="a4-import-local"),
+            pytest.param("require('./a');console.log('n/spawn/x');require(\"./b\")", id="a5-two-loaders"),
+        ],
+    )
+    def test_a_loader_of_a_local_file_beside_a_word_path_is_allowed(self, project, body):
+        """The loader reading ends a name at the quote that opened it (leg 3b): a local module
+        named without a word of the list stays a name, and a path holding one in a later string
+        is only named. Each program also names the new test file, so the stand-down answers."""
+        _policy(project)
+        named = Path(project["new_test"]).as_posix()
+        program = body.format(path=named) + f"\nconsole.log('{named}')"
+        assert not _blocked(_run(project["seat"], command=f"node - <<'EOF'\n{program}\nEOF"))
+
+    def test_a_shell_program_is_read_in_shell_grammar(self, project):
+        """`>` is a redirection in a shell and a comparison in python — learning 245.
+
+        Handing one matcher both grammars is what refused a read-only awk filter
+        on a live turn, so the two vocabularies stay apart.
+        """
+        _policy(project)
+        new_test = Path(project["new_test"]).as_posix()
+        assert _blocked(_run(project["seat"], command=f'bash -c "echo x > {new_test}"'))
+        assert not _blocked(_run(project["seat"], command=f"python3 -c \"print(3 > 2, '{new_test}')\""))
+
+    def test_the_fence_beside_it_keeps_the_full_breadth(self, project):
+        """edit_gate must not inherit this narrowing: a path an interpreter HOLDS
+        still cannot be told from one it writes, and that breadth is what fences
+        a foreign project. The reason string keeps the label it reads."""
+        held = bash_writes.write_targets(f"python3 -c \"print('{project['new_test']}')\"", project["seat"])
+        assert held, "the path must still be REPORTED — only this gate stands down on it"
+        assert all(bash_writes.HELD_BY_INTERPRETER in why for _target, why in held)
+        assert all(bash_writes.NO_WRITE_VERB in why for _target, why in held)
+
+
+class TestAnOperandPathlibCannotExpand:
+    """devpulse's decision C, leg 4: a tilde word pathlib cannot expand, in bash_writes._resolve.
+
+    The shell leaves ~nosuchuser as it is when no such user exists, so the write lands
+    under the working directory in a directory of that literal name. Before leg 4 the
+    operand was dropped and neither fence saw a target. Where the platform does expand
+    the word (Windows builds ~user from the profile directory and never refuses), the
+    reader names what the platform names, so the test asks the platform first.
+    """
+
+    OPERAND = "~nosuchuser/tests/test_brand_new.py"
+
+    def _expected(self, seat: str) -> Path:
+        """The shell's reading: os.path leaves an unknown user's word as it is, as bash does."""
+        return Path(seat) / os.path.expanduser(self.OPERAND)
+
+    def test_a_redirect_into_an_unknown_users_home_names_the_target_under_cwd(self, project: dict):
+        _policy(project)
+        expected = self._expected(project["seat"])
+        command = f"echo x > {self.OPERAND}"
+
+        targets = [target for target, _ in bash_writes.write_targets(command, project["seat"])]
+        result = _run(project["seat"], command=command)
+
+        assert targets == [expected]
+        assert _blocked(result) is (Path(project["seat"]) in expected.parents)
+
+    def test_the_same_word_for_an_existing_file_is_judged_as_an_edit(self, project: dict):
+        """The path pin: the literal directory exists under the seat, so the write edits a test."""
+        _policy(project, block_test_edits=True)
+        expected = self._expected(project["seat"])
+        literal = Path(project["seat"]) / self.OPERAND
+        literal.parent.mkdir(parents=True)
+        literal.write_text("def test_x():\n    assert True\n", encoding="utf-8")
+
+        result = _run(project["seat"], command=f"echo x >> {self.OPERAND}")
+
+        assert _blocked(result) is (expected == literal)
+
+
+class TestTheTemplatePointer:
+    """@seedgo's contract, this branch's hook — DPLAN-0354, devpulse c3ab29d2.
+
+    @seedgo houses the fleet's test template and distributes it as a page in each
+    branch's own ``tests/``, beside a receipt. On a PostToolUse touching
+    ``tests/**`` this branch injects exactly one line naming that LOCAL page and
+    the checklist to run next.
+
+    The page's presence is the whole question, read per call: a branch with no
+    page is unstamped, and the line is SUPPRESSED rather than pointing at a file
+    that is not there. Nothing here reads seedgo's manifest.
+
+    It prints nothing — there is no console channel to capture. The handler
+    returns a PostToolUse document and the ENGINE writes it (output_merge folds
+    it in beside auto_fix's), so every assertion below reads the returned
+    document through the handler's own entry point.
+    """
+
+    LINE_HEAD = "Test template v1: "
+
+    def _stamp(self, project: dict, version: str = "1.0.0") -> Path:
+        """Give the branch a page and a receipt, the way seedgo's bump does."""
+        page = project["tests_dir"] / "TEST_TEMPLATE.md"
+        page.write_text("# Test template v1\n", encoding="utf-8")
+        receipt = project["tests_dir"] / ".template_version.json"
+        receipt.write_text(
+            json.dumps({"template_versions": {"test_template": version}, "stamped_by": "test"}),
+            encoding="utf-8",
+        )
+        return page
+
+    def _pointer(self, cwd: str, *, file_path: str | None = None, command: str | None = None, tool: str = "Edit"):
+        tool_input = {"command": command} if command is not None else {"file_path": file_path}
+        return template_pointer(
+            {"tool_name": "Bash" if command is not None else tool, "tool_input": tool_input, "cwd": cwd}
+        )
+
+    def _context(self, result: dict) -> str:
+        own = json.loads(result["stdout"])["hookSpecificOutput"]
+        assert own["hookEventName"] == "PostToolUse", "the merged document must name its own event"
+        return own["additionalContext"]
+
+    def test_the_line_appears_when_the_page_is_there(self, project):
+        self._stamp(project)
+        line = self._context(self._pointer(project["seat"], file_path=project["existing"]))
+
+        assert line.startswith(self.LINE_HEAD)
+        assert line.count("\n") == 0, "exactly one line, per the contract"
+        assert line.endswith("tests/test_existing.py")
+        assert "tests/TEST_TEMPLATE.md" in line
+        assert "drone @seedgo checklist " in line
+
+    def test_the_line_is_suppressed_when_the_branch_has_no_page(self, project):
+        """An unstamped branch. Pointing at a file that is not there is worse
+        than saying nothing, so the document is empty rather than wrong."""
+        result = self._pointer(project["seat"], file_path=project["existing"])
+
+        assert result["stdout"] == ""
+        assert result["exit_code"] == 0
+
+    @pytest.mark.parametrize("key", ["not_a_test", "new_conftest"])
+    def test_a_path_outside_a_test_tree_never_gets_a_line(self, project, key):
+        """new_conftest is the control: it IS in tests/, so only not_a_test proves
+        the tree test rather than the filename one."""
+        self._stamp(project)
+        result = self._pointer(project["seat"], file_path=project[key])
+
+        if key == "not_a_test":
+            assert result["stdout"] == ""
+        else:
+            assert "TEST_TEMPLATE.md" in self._context(result)
+
+    def test_the_scripted_lane_gets_the_same_line(self, project):
+        """The gate's own target walk answers both lanes, so a shell write into
+        tests/ is pointed at the page exactly like an Edit."""
+        self._stamp(project)
+        target = Path(project["existing"]).as_posix()
+        line = self._context(self._pointer(project["seat"], command=f"echo x >> {target}"))
+
+        assert line.startswith(self.LINE_HEAD)
+        assert line.endswith("tests/test_existing.py")
+
+    def test_any_file_under_the_tree_counts_not_only_a_collectable_one(self, project):
+        """The contract is tests/**, which is wider than the gate's own question."""
+        self._stamp(project)
+        corpus = project["tests_dir"] / "fixtures" / "corpus.json"
+        corpus.parent.mkdir(parents=True)
+        corpus.write_text("{}", encoding="utf-8")
+
+        assert self._context(self._pointer(project["seat"], file_path=str(corpus))).endswith("fixtures/corpus.json")
+
+    def test_a_nested_test_tree_gets_its_own_page(self, project):
+        """MUTATION-CHECK, and it survived the first sweep: the docstring said
+        "innermost on purpose" while nothing pinned it, so an outermost walk
+        passed every other pin here. The page sits beside the suite it
+        describes, so the inner tree's own page is the right pointer."""
+        self._stamp(project)
+        inner = project["tests_dir"] / "integration" / "tests"
+        inner.mkdir(parents=True)
+        (inner / "TEST_TEMPLATE.md").write_text("# inner page\n", encoding="utf-8")
+        inner_test = inner / "test_inner.py"
+        inner_test.write_text("def test_x():\n    assert True\n", encoding="utf-8")
+
+        line = self._context(self._pointer(project["seat"], file_path=str(inner_test)))
+
+        assert "integration/tests/TEST_TEMPLATE.md" in line, line
+
+    def test_the_version_is_read_from_the_receipt_per_call(self, project):
+        """A bump must not need a restart: the receipt is read on every call."""
+        self._stamp(project)
+        first = self._context(self._pointer(project["seat"], file_path=project["existing"]))
+        self._stamp(project, version="2.3.1")
+        second = self._context(self._pointer(project["seat"], file_path=project["existing"]))
+
+        assert first.startswith("Test template v1: ")
+        assert second.startswith("Test template v2: ")
+
+    def test_a_page_with_no_readable_receipt_still_points(self, project):
+        """The PAGE decides whether the line appears; the receipt only spells the
+        number, so a stamp that half-landed costs one word, never the pointer."""
+        self._stamp(project)
+        (project["tests_dir"] / ".template_version.json").write_text("{not json", encoding="utf-8")
+
+        assert self._context(self._pointer(project["seat"], file_path=project["existing"])).startswith(self.LINE_HEAD)
+
+    def test_a_pointer_defect_costs_the_line_and_nothing_else(self, project):
+        """A courtesy is never a wall: this handler runs AFTER the write."""
+        self._stamp(project)
+        with patch(
+            "aipass.hooks.apps.modules.testwrite_targets.in_test_tree",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = self._pointer(project["seat"], file_path=project["existing"])
+
+        assert result == {"stdout": "", "exit_code": 0}
+
+    def test_an_unrelated_tool_is_not_read_at_all(self, project):
+        self._stamp(project)
+
+        assert self._pointer(project["seat"], file_path=project["existing"], tool="Read")["stdout"] == ""

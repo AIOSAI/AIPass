@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_flag_safety_check.py
 # Description: Help-Flag Safety Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -1061,8 +1061,15 @@ def _result(passed: bool, name: str, message: str, score: int) -> Dict:
 
 
 def _skip(message: str) -> Dict:
-    """A file this standard has nothing to say about."""
+    """A file this standard judged and found nothing to convict."""
     return _result(True, "Help-flag safety", message, 100)
+
+
+def _decline(message: str) -> Dict:
+    """A file this standard does not judge: out of the row's average."""
+    result = _skip(message)
+    result["checks"][0]["declined"] = True
+    return result
 
 
 def _describe_consumption(consumption: Sequence[Tuple[str, str, int]], gate_line: int) -> str:
@@ -1181,7 +1188,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     # router_normalises) but never blamed: in AIPass the router is allowed to
     # delegate help handling to the modules below it.
     if path.name == "__init__.py" or path.parent.name != "modules" or path.parent.parent.name != "apps":
-        return _skip("Not a routing module (apps/modules/*.py) -- not applicable")
+        return _decline("Not a routing module (apps/modules/*.py) -- not applicable")
 
     try:
         source = path.read_text(encoding="utf-8")
@@ -1190,7 +1197,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(False, "File readable", f"Error reading file: {exc}", 0)
 
     if not source.strip():
-        return _skip("Empty file skipped")
+        return _decline("Empty file skipped")
 
     try:
         tree = ast.parse(source, filename=str(path))
@@ -1200,7 +1207,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     closure = routing_closure(tree)
     if not closure:
-        return _skip("No handle_command() routing function -- not applicable")
+        return _decline("No handle_command() routing function -- not applicable")
 
     for func in closure:
         scan = has_whole_list_scan(func)

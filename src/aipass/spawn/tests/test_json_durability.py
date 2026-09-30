@@ -1,30 +1,21 @@
 # =================== META ====================
 # Name: test_json_durability.py
 # Description: Torn-write durability tests for spawn's JSON/text write paths
-# Version: 1.1.0
+# Version: 1.1.3
 # Created: 2026-08-16
-# Modified: 2026-08-18
+# Modified: 2026-09-29
 # =============================================
 
-"""Durability tests for every spawn write path that touches a live file.
+"""Tests for apps/handlers/atomic_write.py and the write paths it makes durable."""
 
-The defect these pin: ``open(path, 'w')`` / ``Path.write_text(...)`` truncate the
-target in place, so a concurrent reader can land between the truncate and the
-write and read an empty or half-written file. Measured on spawn's passport write
-path before the fix: 38.17% of concurrent reads came back unusable.
-
-The required shape is stage-to-temp (``tempfile.mkstemp(dir=target.parent)``),
-write, ``fsync``, close, then ``os.replace`` — an atomic same-filesystem rename.
-A reader either sees the whole old file or the whole new file, never a gap.
-
-Each test class states which sites were genuinely RED before the fix; the sites
-that were already safe (``meta_ops`` / ``regenerate_registry_ops`` staged through
-a temp already) say so rather than pretending.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — docstrings on the handler functions this file drives
+# seedgo: no-test-needed(stdlib) — tempfile.mkstemp's filename-uniqueness guarantee
 
 import ast
 import errno
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -35,6 +26,31 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from aipass.spawn.apps.handlers import file_ops, regenerate_registry_ops
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
+from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
+from aipass.spawn.apps.handlers.registry import save_registry
+from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
+from aipass.spawn.apps.handlers.update_ops import _merge_json
+import aipass.spawn.apps.handlers.atomic_write as aw
+import aipass.spawn.apps.handlers.registry as registry_mod
+
+logger = logging.getLogger(__name__)
+
+# The defect these pin: ``open(path, 'w')`` / ``Path.write_text(...)`` truncate the
+# target in place, so a concurrent reader can land between the truncate and the
+# write and read an empty or half-written file. Measured on spawn's passport write
+# path before the fix: 38.17% of concurrent reads came back unusable.
+#
+# The required shape is stage-to-temp (``tempfile.mkstemp(dir=target.parent)``),
+# write, ``fsync``, close, then ``os.replace`` — an atomic same-filesystem rename.
+# A reader either sees the whole old file or the whole new file, never a gap.
+#
+# Each test class states which sites were genuinely RED before the fix; the sites
+# that were already safe (``meta_ops`` / ``regenerate_registry_ops`` staged through
+# a temp already) say so rather than pretending.
 
 
 # =============================================================================
@@ -53,6 +69,25 @@ RACE_WARMUP_SECONDS = 20.0
 # Marker embedded in the payload a test wants to fail. Both fault injectors below
 # fire only when they see it, so pytest's own I/O is never disturbed.
 SENTINEL = "SPAWN-DURABILITY-FAULT-a1b2c3"
+
+
+class _ModuleView:
+    """atomic_write's OWN binding of a stdlib module, with named functions swapped.
+
+    Every fault and spy in this file is installed as ``monkeypatch.setattr(aw,
+    "os", _ModuleView(os, replace=...))`` — the consuming module's name, never an
+    attribute on the shared ``os`` / ``tempfile`` module, which would reach every
+    thread in the process (same rule as the ``aw.time`` stub below). Every write
+    site under test routes through atomic_write_text, so this one binding is the
+    whole surface. Anything not overridden falls through to the real module.
+    """
+
+    def __init__(self, real, **overrides):
+        self._real = real
+        self.__dict__.update(overrides)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
 
 
 class _Racer:
@@ -79,10 +114,10 @@ class _Racer:
         self._lock = threading.Lock()
         # One-way flags, set by the threads the instant they first succeed, so
         # run() can watch the race come alive. The per-thread counters above are
-        # only merged at join time, which is far too late to wait on. A bool
-        # that goes False -> True exactly once needs no lock under the GIL.
-        self._saw_read = False
-        self._saw_write = False
+        # only merged at join time, which is far too late to wait on. Events, so
+        # run() blocks on the real condition and wakes the instant it holds.
+        self._saw_read = threading.Event()
+        self._saw_write = threading.Event()
 
     def _writer(self):
         n = 0
@@ -99,7 +134,7 @@ class _Racer:
             # the call under test decided there was nothing to write.
             if self.write_once(n) is True:
                 effective += 1
-                self._saw_write = True
+                self._saw_write.set()
             n += 1
         with self._lock:
             self.writes += effective
@@ -127,25 +162,28 @@ class _Racer:
                 # skip reason has to be able to tell them apart — that is the
                 # difference between a slow starter and a starved scheduler.
                 missing += 1
+                logger.debug("racer: target absent: %s", self.target)
                 continue
-            except PermissionError:
+            except PermissionError as exc:
                 # Windows refuses the open while a concurrent os.replace is in
                 # flight. A refused open is share-mode semantics — not a torn
                 # document, and not counted as a read. Counted separately so a
                 # run starved by share-mode collisions says so out loud.
                 refused += 1
+                logger.debug("racer: open refused: %s (%s)", self.target, exc)
                 continue
             reads += 1
-            self._saw_read = True
+            self._saw_read.set()
             if raw == "":
                 empty += 1
                 continue
             try:
                 json.loads(raw)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
                 # The defect this whole file exists to catch: a half-written
                 # document. Recorded, and assert_clean fails on it.
                 unparseable += 1
+                logger.warning("racer: torn read of %s: %s", self.target, exc)
         with self._lock:
             self.reads += reads
             self.empty += empty
@@ -168,10 +206,12 @@ class _Racer:
         for t in threads:
             t.start()
 
+        # Block on the real condition, bounded by ONE shared deadline: the two
+        # waits together never exceed ``warmup``.
         deadline = time.monotonic() + warmup
-        while time.monotonic() < deadline and not (self._saw_read and self._saw_write):
-            time.sleep(0.005)
-        self.warmed_up = self._saw_read and self._saw_write
+        self._saw_read.wait(timeout=warmup)
+        self._saw_write.wait(timeout=max(0.0, deadline - time.monotonic()))
+        self.warmed_up = self._saw_read.is_set() and self._saw_write.is_set()
 
         time.sleep(seconds)
         self._stop = True
@@ -252,47 +292,40 @@ def write_fails_midway(monkeypatch):
     """Make the write syscall fail for any payload carrying SENTINEL.
 
     Models a disk filling up between the open and the write — the exact failure
-    the atomic shape exists to survive. Both mechanisms are covered so the test
-    is honest against either implementation:
+    the atomic shape exists to survive. The fault is installed on atomic_write's
+    own ``os`` binding (``_ModuleView``), which is the staged temp write every
+    site under test reaches. A durable path loses the temp file and keeps the
+    target.
 
-    * ``Path.write_text`` truncates the target and then fails, which is precisely
-      what the real ``write_text`` does under ENOSPC (it opens with mode 'w').
-    * ``os.write`` fails, which is what the staged temp write hits.
+    This used to also swap ``pathlib.Path.write_text`` process-wide, to be honest
+    against the pre-fix raw sites. Those sites are gone, and
+    TestNoRawTruncatingWritesInSource reds the day one grows back; a site that
+    regressed past atomic_write would also escape this fault entirely, so the
+    "failed write" tests below would see a write that SUCCEEDED and go red.
 
-    A durable path loses the temp file and keeps the target; the raw path has
-    already destroyed the target by the time it fails.
+    Mutant: os.unlink(tmp_path) -> pass (temp orphaned on failure) -> red (2 tests).
     """
-    import os as _os
-    import pathlib
-
-    real_write_text = pathlib.Path.write_text
-    real_os_write = _os.write
-
-    def fake_write_text(self, data, *args, **kwargs):
-        if isinstance(data, str) and SENTINEL in data:
-            # Faithful to write_text: the file is opened 'w' (truncated) first.
-            with open(self, "w", encoding="utf-8"):
-                pass
-            raise OSError(errno.ENOSPC, "No space left on device")
-        return real_write_text(self, data, *args, **kwargs)
+    real_os_write = os.write
 
     def fake_os_write(fd, data):
         if isinstance(data, (bytes, bytearray)) and SENTINEL.encode() in data:
             raise OSError(errno.ENOSPC, "No space left on device")
         return real_os_write(fd, data)
 
-    monkeypatch.setattr(pathlib.Path, "write_text", fake_write_text)
-    monkeypatch.setattr(_os, "write", fake_os_write)
+    monkeypatch.setattr(aw, "os", _ModuleView(os, write=fake_os_write))
     yield
     monkeypatch.undo()
 
 
 @pytest.fixture
 def mkstemp_spy(monkeypatch):
-    """Record every ``tempfile.mkstemp`` call's staging directory."""
-    import tempfile as _tempfile
+    """Record every ``tempfile.mkstemp`` call's staging directory.
 
-    real_mkstemp = _tempfile.mkstemp
+    Installed on atomic_write's own ``tempfile`` binding, not the shared module.
+
+    Mutant: mkstemp(dir=path.parent) -> mkstemp(dir=path.parent.parent) -> red (7 tests).
+    """
+    real_mkstemp = tempfile.mkstemp
     calls = []
 
     def spy(*args, **kwargs):
@@ -300,7 +333,7 @@ def mkstemp_spy(monkeypatch):
         calls.append({"dir": kwargs.get("dir"), "path": Path(path)})
         return fd, path
 
-    monkeypatch.setattr(_tempfile, "mkstemp", spy)
+    monkeypatch.setattr(aw, "tempfile", _ModuleView(tempfile, mkstemp=spy))
     return calls
 
 
@@ -419,7 +452,6 @@ class TestConcurrentReaderNeverSeesTornFile:
 
     def test_passport_write_is_never_read_torn(self, passport_world):
         """sync_registry_ops.fix_owner_identity — another citizen's identity file."""
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         reg = passport_world["registry"]
 
@@ -436,20 +468,17 @@ class TestConcurrentReaderNeverSeesTornFile:
 
     def test_template_registry_write_is_never_read_torn(self, spawned_branch):
         """file_ops.regenerate_template_registry — .spawn/.template_registry.json."""
-        from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
 
         target = spawned_branch / ".spawn" / ".template_registry.json"
 
         def write_once(n):
-            regenerate_template_registry(spawned_branch)
+            file_ops.regenerate_template_registry(spawned_branch)
             return True
 
         _Racer(target, write_once).run().assert_clean()
 
     def test_json_merge_write_is_never_read_torn(self, merge_world):
         """update_ops._merge_json — a live branch's JSON during update --apply."""
-        from aipass.spawn.apps.handlers.json import json_handler
-        from aipass.spawn.apps.handlers.update_ops import _merge_json
 
         dest = merge_world["dest"]
 
@@ -468,7 +497,6 @@ class TestConcurrentReaderNeverSeesTornFile:
 
     def test_branch_meta_write_is_never_read_torn(self, spawned_branch):
         """meta_ops.save_branch_meta — already temp-staged; regression pin only."""
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         target = spawned_branch / ".spawn" / ".branch_meta.json"
 
@@ -482,17 +510,16 @@ class TestConcurrentReaderNeverSeesTornFile:
 
     def test_regenerated_template_registry_is_never_read_torn(self, tmp_path):
         """regenerate_registry_ops — already temp-staged; regression pin only."""
-        from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 
         template_dir = tmp_path / "some_template"
         template_dir.mkdir()
         for i in range(5):
             (template_dir / f"file_{i}.py").write_text(f"# {i}\n" * 20, encoding="utf-8")
-        regenerate_template_registry(template_dir)
+        regenerate_registry_ops.regenerate_template_registry(template_dir)
         target = template_dir / ".spawn" / ".template_registry.json"
 
         def write_once(n):
-            return "error" not in regenerate_template_registry(template_dir)
+            return "error" not in regenerate_registry_ops.regenerate_template_registry(template_dir)
 
         _Racer(target, write_once).run().assert_clean()
 
@@ -513,42 +540,37 @@ class TestNoTempLitterSurvives:
     """
 
     def test_successful_passport_write_leaves_no_temp(self, passport_world):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         fix_owner_identity(registry_path=passport_world["registry"], dry_run=False)
 
         assert _stray_temps(passport_world["passport"].parent) == []
 
     def test_successful_branch_meta_write_leaves_no_temp(self, spawned_branch):
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         assert save_branch_meta(spawned_branch, {"metadata": {}, "files": {}}) is True
 
         assert _stray_temps(spawned_branch / ".spawn") == []
 
     def test_successful_template_registry_write_leaves_no_temp(self, spawned_branch):
-        from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
 
-        regenerate_template_registry(spawned_branch)
+        file_ops.regenerate_template_registry(spawned_branch)
 
         assert _stray_temps(spawned_branch / ".spawn") == []
 
     def test_failed_registry_regeneration_leaves_no_temp(self, tmp_path, monkeypatch):
         """RED before the fix: orphaned .template_registry.tmp after a failure."""
-        from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 
         template_dir = tmp_path / "some_template"
         template_dir.mkdir()
         (template_dir / f"marker_{SENTINEL}.py").write_text("# payload\n", encoding="utf-8")
 
         with write_fails_midway(monkeypatch):
-            result = regenerate_template_registry(template_dir)
+            result = regenerate_registry_ops.regenerate_template_registry(template_dir)
 
         assert "error" in result, "a failed registry write must report an error"
         assert _stray_temps(template_dir / ".spawn") == []
 
     def test_failed_branch_meta_write_leaves_no_temp(self, spawned_branch, monkeypatch):
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         with write_fails_midway(monkeypatch):
             ok = save_branch_meta(spawned_branch, {"metadata": {"marker": SENTINEL}, "files": {}})
@@ -572,7 +594,6 @@ class TestFailedWriteKeepsOldContent:
 
     def test_helper_raises_on_write_failure(self, tmp_path, monkeypatch):
         """The shared helper must RAISE, never swallow. RED by absence pre-fix."""
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "thing.json"
         target.write_text('{"old": true}\n', encoding="utf-8")
@@ -606,7 +627,6 @@ class TestFailedWriteKeepsOldContent:
         which is a claim about the migration, not about durability. The fields are
         pinned separately instead, so a regression in either one is named.
         """
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         passport = passport_world["passport"]
         reg = passport_world["registry"]
@@ -634,7 +654,6 @@ class TestFailedWriteKeepsOldContent:
 
     def test_failed_json_merge_keeps_old_file(self, merge_world, monkeypatch):
         """RED before the fix: the branch's live JSON was left empty."""
-        from aipass.spawn.apps.handlers.update_ops import _merge_json
 
         dest = merge_world["dest"]
         merge_world["template"].write_text(json.dumps({"section": {"marker": SENTINEL}}), encoding="utf-8")
@@ -648,7 +667,6 @@ class TestFailedWriteKeepsOldContent:
         assert json.loads(dest.read_text(encoding="utf-8")) == before
 
     def test_failed_branch_meta_write_keeps_old_meta(self, spawned_branch, monkeypatch):
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         target = spawned_branch / ".spawn" / ".branch_meta.json"
         save_branch_meta(spawned_branch, {"metadata": {"round": "first"}, "files": {}})
@@ -683,59 +701,52 @@ class TestTempStagedBesideTarget:
         )
 
     def test_passport_stages_beside_passport(self, passport_world, mkstemp_spy):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         fix_owner_identity(registry_path=passport_world["registry"], dry_run=False)
 
         self._assert_staged_in(mkstemp_spy, passport_world["passport"].parent)
 
     def test_template_registry_stages_beside_registry(self, spawned_branch, mkstemp_spy):
-        from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
 
-        regenerate_template_registry(spawned_branch)
+        file_ops.regenerate_template_registry(spawned_branch)
 
         self._assert_staged_in(mkstemp_spy, spawned_branch / ".spawn")
 
     def test_json_merge_stages_beside_target(self, merge_world, mkstemp_spy):
-        from aipass.spawn.apps.handlers.update_ops import _merge_json
 
         _merge_json(merge_world["template"], merge_world["dest"], {}, False, False, merge_world["backup"])
 
         self._assert_staged_in(mkstemp_spy, merge_world["dest"].parent)
 
     def test_branch_meta_stages_beside_meta(self, spawned_branch, mkstemp_spy):
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         save_branch_meta(spawned_branch, {"metadata": {}, "files": {}})
 
         self._assert_staged_in(mkstemp_spy, spawned_branch / ".spawn")
 
     def test_regenerated_registry_stages_beside_registry(self, tmp_path, mkstemp_spy):
-        from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 
         template_dir = tmp_path / "some_template"
         template_dir.mkdir()
         (template_dir / "a.py").write_text("# a\n", encoding="utf-8")
 
-        regenerate_template_registry(template_dir)
+        regenerate_registry_ops.regenerate_template_registry(template_dir)
 
         self._assert_staged_in(mkstemp_spy, template_dir / ".spawn")
 
     def test_copied_template_file_stages_beside_target(self, tmp_path, mkstemp_spy):
-        from aipass.spawn.apps.handlers.file_ops import copy_template
 
         template = tmp_path / "tpl"
         template.mkdir()
         (template / "hello.md").write_text("# hello {{BRANCH}}\n", encoding="utf-8")
         target = tmp_path / "out"
 
-        copy_template(template, target, {"BRANCH": "durable"})
+        file_ops.copy_template(template, target, {"BRANCH": "durable"})
 
         self._assert_staged_in(mkstemp_spy, target)
 
     def test_update_addition_stages_beside_target(self, tmp_path, mkstemp_spy):
         """update_ops' ADDITION arm — a missing template file written into a branch."""
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         # Driven through the helper directly: the ADDITION arm needs a whole
         # branch + registry world, and the property under test is the staging
@@ -763,7 +774,6 @@ class TestStagingNameIsUnique:
     """
 
     def test_branch_meta_staging_names_are_unique(self, spawned_branch, mkstemp_spy):
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         for i in range(5):
             save_branch_meta(spawned_branch, {"metadata": {"round": i}, "files": {}})
@@ -773,14 +783,13 @@ class TestStagingNameIsUnique:
         assert len(set(names)) == 5, f"staging name collided across writes: {names}"
 
     def test_regenerated_registry_staging_names_are_unique(self, tmp_path, mkstemp_spy):
-        from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 
         template_dir = tmp_path / "some_template"
         template_dir.mkdir()
         (template_dir / "a.py").write_text("# a\n", encoding="utf-8")
 
         for _ in range(5):
-            regenerate_template_registry(template_dir)
+            regenerate_registry_ops.regenerate_template_registry(template_dir)
 
         names = [c["path"].name for c in mkstemp_spy if Path(c["dir"]) == template_dir / ".spawn"]
         assert len(names) == 5, f"expected 5 staged temps, recorded {len(names)}: {names}"
@@ -796,7 +805,6 @@ class TestAtomicWriteHelper:
     """The single choke point every fixed site routes through."""
 
     def test_writes_exact_bytes(self, tmp_path):
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "out.json"
         payload = json.dumps({"unicode": "café — ok", "n": 1}, indent=2, ensure_ascii=False) + "\n"
@@ -806,7 +814,6 @@ class TestAtomicWriteHelper:
         assert target.read_text(encoding="utf-8") == payload
 
     def test_overwrites_existing_target(self, tmp_path):
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "out.json"
         target.write_text("old\n", encoding="utf-8")
@@ -817,18 +824,18 @@ class TestAtomicWriteHelper:
         assert _stray_temps(tmp_path) == []
 
     def test_uses_os_replace_not_path_rename(self, tmp_path, monkeypatch):
-        """Path.rename cannot overwrite on Windows; os.replace can."""
-        import os as _os
-        import aipass.spawn.apps.handlers.atomic_write as aw
+        """Path.rename cannot overwrite on Windows; os.replace can.
 
+        Mutant: os.replace(source, destination) -> os.rename(source, destination) -> red.
+        """
         seen = []
-        real_replace = _os.replace
+        real_replace = os.replace
 
         def spy(src, dst):
             seen.append((src, dst))
             return real_replace(src, dst)
 
-        monkeypatch.setattr(aw.os, "replace", spy)
+        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=spy))
         target = tmp_path / "out.json"
         target.write_text("old\n", encoding="utf-8")
 
@@ -837,14 +844,21 @@ class TestAtomicWriteHelper:
         assert len(seen) == 1, "the swap must go through os.replace"
 
     def test_fsyncs_before_swap(self, tmp_path, monkeypatch):
-        """Durability across power loss needs the bytes flushed before the rename."""
-        import os as _os
-        import aipass.spawn.apps.handlers.atomic_write as aw
+        """Durability across power loss needs the bytes flushed before the rename.
 
+        Mutant: os.fsync(fd) deleted -> red.
+        """
         order = []
-        real_fsync, real_replace = _os.fsync, _os.replace
-        monkeypatch.setattr(aw.os, "fsync", lambda fd: (order.append("fsync"), real_fsync(fd))[1])
-        monkeypatch.setattr(aw.os, "replace", lambda s, d: (order.append("replace"), real_replace(s, d))[1])
+        real_fsync, real_replace = os.fsync, os.replace
+        monkeypatch.setattr(
+            aw,
+            "os",
+            _ModuleView(
+                os,
+                fsync=lambda fd: (order.append("fsync"), real_fsync(fd))[1],
+                replace=lambda s, d: (order.append("replace"), real_replace(s, d))[1],
+            ),
+        )
 
         aw.atomic_write_text(tmp_path / "out.json", "data\n")
 
@@ -852,7 +866,6 @@ class TestAtomicWriteHelper:
 
     def test_encoding_failure_raises_and_leaves_no_temp(self, tmp_path):
         """A surrogate payload must not silently land, and must not litter."""
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "out.json"
 
@@ -883,22 +896,38 @@ class TestReplaceRetriesThroughSharingViolations:
     before this sweep, so these are the first eyes on it.
     """
 
-    def test_helper_exists_and_is_bounded(self):
-        import aipass.spawn.apps.handlers.atomic_write as aw
+    def test_helper_exists_and_is_bounded(self, tmp_path, monkeypatch):
+        """The SHIPPED bound and backoff, measured through the public write.
 
-        assert hasattr(aw, "_replace_with_retry"), (
-            "_replace_with_retry missing — a sharing violation still kills the write"
-        )
-        assert aw._REPLACE_ATTEMPTS > 1, "a single attempt is not a retry"
-        assert aw._REPLACE_BACKOFF_SECONDS > 0, "a zero backoff spins instead of waiting"
+        Read off what atomic_write_text actually does against a swap that never
+        unblocks, rather than off the private constants: more than one attempt
+        (a single attempt is not a retry), and every wait between them is a real,
+        non-zero wait (a zero backoff spins instead of waiting). aw's own ``time``
+        binding is stubbed, so the ~200ms of shipped backoff is recorded, not slept.
+
+        Mutant: _REPLACE_ATTEMPTS = 40 -> _REPLACE_ATTEMPTS = 1 -> red.
+        """
+        attempts = []
+        sleeps = []
+
+        def blocked(src, dst):
+            attempts.append(dst)
+            raise PermissionError(13, "sharing violation", str(dst))
+
+        monkeypatch.setattr(aw, "time", SimpleNamespace(sleep=sleeps.append))
+        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=blocked))
+
+        with pytest.raises(PermissionError):
+            atomic_write_text(tmp_path / "out.json", "new\n")
+
+        assert len(attempts) > 1, "a single attempt is not a retry"
+        assert len(sleeps) == len(attempts) - 1
+        assert all(s > 0 for s in sleeps), f"a zero backoff spins instead of waiting: {sleeps}"
 
     def test_retries_through_a_transient_sharing_violation(self, tmp_path, monkeypatch):
         """Two sharing violations then success — the write still lands."""
-        import os as _os
-        import aipass.spawn.apps.handlers.atomic_write as aw
-
         calls = {"count": 0}
-        real_replace = _os.replace
+        real_replace = os.replace
 
         def flaky(src, dst):
             calls["count"] += 1
@@ -906,7 +935,7 @@ class TestReplaceRetriesThroughSharingViolations:
                 raise PermissionError(13, "sharing violation", str(dst))
             return real_replace(src, dst)
 
-        monkeypatch.setattr(aw.os, "replace", flaky)
+        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=flaky))
         target = tmp_path / "out.json"
         target.write_text("old\n", encoding="utf-8")
 
@@ -917,8 +946,13 @@ class TestReplaceRetriesThroughSharingViolations:
         assert _stray_temps(tmp_path) == []
 
     def test_retry_is_bounded_and_raises(self, tmp_path, monkeypatch):
-        """A swap that never unblocks raises instead of retrying forever."""
-        import aipass.spawn.apps.handlers.atomic_write as aw
+        """A swap that never unblocks raises instead of retrying forever.
+
+        The bound is set by the test (3), so the count is compared to a number
+        this test chose, not read back off the product.
+
+        Mutant: attempt == _REPLACE_ATTEMPTS - 1 -> attempt == _REPLACE_ATTEMPTS - 2 -> red.
+        """
 
         calls = {"count": 0}
 
@@ -926,15 +960,16 @@ class TestReplaceRetriesThroughSharingViolations:
             calls["count"] += 1
             raise PermissionError(13, "sharing violation", str(dst))
 
-        monkeypatch.setattr(aw.os, "replace", blocked)
+        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=blocked))
         monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0)
+        monkeypatch.setattr(aw, "_REPLACE_ATTEMPTS", 3)
         target = tmp_path / "out.json"
         target.write_text("old\n", encoding="utf-8")
 
         with pytest.raises(PermissionError):
             aw.atomic_write_text(target, "new\n")
 
-        assert calls["count"] == aw._REPLACE_ATTEMPTS, "bound not honoured"
+        assert calls["count"] == 3, "bound not honoured"
         assert target.read_text(encoding="utf-8") == "old\n", "the live file was damaged"
         assert _stray_temps(tmp_path) == []
 
@@ -957,15 +992,24 @@ class TestReplaceRetriesThroughSharingViolations:
         module's binding, not something upstream of it. atomic_write uses
         nothing from ``time`` but ``sleep`` (one call site, line 73), so a stub
         carrying only ``sleep`` is the whole surface.
+
+        Bound and backoff are set by the test (4 attempts, 0.25s), so the
+        expected list is built from numbers this test chose.
+
+        Mutant: time.sleep(_REPLACE_BACKOFF_SECONDS) -> time.sleep(0) -> red.
         """
-        import aipass.spawn.apps.handlers.atomic_write as aw
 
         sleeps = []
         monkeypatch.setattr(aw, "time", SimpleNamespace(sleep=sleeps.append))
+        monkeypatch.setattr(aw, "_REPLACE_ATTEMPTS", 4)
+        monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0.25)
         monkeypatch.setattr(
-            aw.os,
-            "replace",
-            lambda src, dst: (_ for _ in ()).throw(PermissionError(13, "sharing violation", str(dst))),
+            aw,
+            "os",
+            _ModuleView(
+                os,
+                replace=lambda src, dst: (_ for _ in ()).throw(PermissionError(13, "sharing violation", str(dst))),
+            ),
         )
         target = tmp_path / "out.json"
         target.write_text("old\n", encoding="utf-8")
@@ -974,11 +1018,10 @@ class TestReplaceRetriesThroughSharingViolations:
             aw.atomic_write_text(target, "new\n")
 
         # One wait between each pair of attempts — never after the last, which raises.
-        assert sleeps == [aw._REPLACE_BACKOFF_SECONDS] * (aw._REPLACE_ATTEMPTS - 1)
+        assert sleeps == [0.25, 0.25, 0.25]
 
     def test_non_permission_error_propagates_immediately(self, tmp_path, monkeypatch):
         """A cross-device rename will not fix itself in 200ms — do not wait it out."""
-        import aipass.spawn.apps.handlers.atomic_write as aw
 
         calls = {"count": 0}
 
@@ -986,7 +1029,7 @@ class TestReplaceRetriesThroughSharingViolations:
             calls["count"] += 1
             raise OSError(errno.EXDEV, "invalid cross-device link")
 
-        monkeypatch.setattr(aw.os, "replace", broken)
+        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=broken))
         monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0)
 
         with pytest.raises(OSError) as caught:
@@ -1010,7 +1053,6 @@ class TestSaveRegistryStaysAtomic:
     """
 
     def test_save_registry_delegates_to_json_handler(self, tmp_path, monkeypatch):
-        import aipass.spawn.apps.handlers.registry as registry_mod
 
         seen = {}
 
@@ -1025,7 +1067,6 @@ class TestSaveRegistryStaysAtomic:
         assert seen["path"] == reg
 
     def test_save_registry_write_is_never_read_torn(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import save_registry
 
         reg = tmp_path / "AIPASS_REGISTRY.json"
         branches = [_entry(f"B{i}", f"b{i}") for i in range(12)]
@@ -1043,8 +1084,12 @@ class TestSaveRegistryStaysAtomic:
 
 # Directories under apps/ the guard does not scan. Parked code does not run, so
 # a revivable file carrying an old shape is not a live defect; flagging it would
-# only pressure someone into weakening the guard. Both are clean today.
-_UNSCANNED_DIRS = {"__pycache__", ".archive"}
+# only pressure someone into weakening the guard. Both are clean today. dropbox
+# joins them under the owner of the project's rule of 09-27 20:42, in
+# paraphrase: a dropbox is ignored by all, nothing looks into it and no process
+# runs out of it, a sandbox like .archive. That this walk skips it, and by these
+# three literal names, is spawn's decision (DPLAN-0354 leg 3).
+_UNSCANNED_DIRS = {"__pycache__", ".archive", "dropbox"}
 
 # A mode string with 'w' or 'a' truncates or appends the target in place.
 _TRUNCATING_MODE_CHARS = ("w", "a")
@@ -1123,7 +1168,7 @@ def scan_for_raw_writes(apps_dir: Path | None = None) -> list[str]:
     findings: list[str] = []
 
     for py_file in sorted(apps_dir.rglob("*.py")):
-        if _UNSCANNED_DIRS.intersection(py_file.parts):
+        if _UNSCANNED_DIRS.intersection(py_file.relative_to(apps_dir).parts):
             continue
         source = py_file.read_text(encoding="utf-8")
         finder = _RawWriteFinder(source, py_file.relative_to(apps_dir.parent).as_posix())
@@ -1135,6 +1180,24 @@ def scan_for_raw_writes(apps_dir: Path | None = None) -> list[str]:
 
 class TestNoRawTruncatingWritesInSource:
     """Guard: the shape that caused this whole defect cannot reappear in apps/."""
+
+    def test_guard_never_walks_into_a_dropbox(self, tmp_path):
+        """The walk skips a dropbox; the same write beside it is still reported.
+
+        The owner of the project's rule (09-27 20:42, paraphrase): nothing looks
+        into a dropbox. The skip by name is spawn's decision, DPLAN-0354 leg 3.
+        Ran red before _UNSCANNED_DIRS named dropbox: the planted write was reported.
+        """
+        raw_write = "def save(path, text):\n    with open(path, 'w', encoding='utf-8') as f:\n        f.write(text)\n"
+        dropbox = tmp_path / "apps" / "dropbox"
+        dropbox.mkdir(parents=True)
+        (dropbox / "dropped.py").write_text(raw_write, encoding="utf-8")
+        (tmp_path / "apps" / "live.py").write_text(raw_write, encoding="utf-8")
+
+        findings = scan_for_raw_writes(tmp_path / "apps")
+
+        assert len(findings) == 1
+        assert findings[0].startswith("apps/live.py")
 
     def test_apps_source_has_no_raw_truncating_writes(self):
         findings = scan_for_raw_writes()
@@ -1306,7 +1369,6 @@ class TestRacerReportsWeatherHonestly:
 
     def test_a_clean_exercised_race_still_passes(self, tmp_path):
         """The normal path is untouched."""
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "live.json"
 
@@ -1325,7 +1387,6 @@ class TestRacerReportsWeatherHonestly:
         This is the half that turns weather into latency: the timed window does
         not open until both sides have proven they are live.
         """
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "slow.json"
 
@@ -1342,21 +1403,21 @@ class TestRacerReportsWeatherHonestly:
 
 
 @contextmanager
-def _target(content):
+def _target(tmp_path: Path, content):
     """A _Racer over a throwaway file with a known final state, zero samples.
 
     ``content=None`` leaves the target absent. The counters start at zero on
     purpose: these pins measure what the DIRECT read contributes, so the
-    sampling readers must have contributed nothing.
+    sampling readers must have contributed nothing. Lives in the test's own
+    tmp_path, never a bare system temp dir.
     """
-    with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "final_state.json"
-        if content is not None:
-            target.write_text(content, encoding="utf-8")
-        racer = _Racer(target, lambda n: True)
-        racer.reads = 0
-        racer.writes = 0
-        yield racer
+    target = tmp_path / "final_state.json"
+    if content is not None:
+        target.write_text(content, encoding="utf-8")
+    racer = _Racer(target, lambda n: True)
+    racer.reads = 0
+    racer.writes = 0
+    yield racer
 
 
 def _verdict(racer):
@@ -1395,9 +1456,9 @@ class TestTheFinalStateIsCheckedDirectly:
     fails.
     """
 
-    def test_a_torn_file_nobody_sampled_is_a_red_not_a_skip(self):
+    def test_a_torn_file_nobody_sampled_is_a_red_not_a_skip(self, tmp_path):
         """reads == 0 must not launder a file that is torn right now."""
-        with _target('{"half') as racer:
+        with _target(tmp_path, '{"half') as racer:
             verdict, message = _verdict(racer)
 
         assert verdict == "FAILED", (
@@ -1407,31 +1468,31 @@ class TestTheFinalStateIsCheckedDirectly:
         assert "torn" in message.lower()
         assert "UNPARSEABLE" in message
 
-    def test_an_empty_file_nobody_sampled_is_a_red_not_a_skip(self):
-        with _target("") as racer:
+    def test_an_empty_file_nobody_sampled_is_a_red_not_a_skip(self, tmp_path):
+        with _target(tmp_path, "") as racer:
             verdict, message = _verdict(racer)
 
         assert verdict == "FAILED", f"an empty target was reported {verdict}: {message}"
         assert "EMPTY" in message
 
-    def test_a_missing_target_is_still_a_skip_not_a_tear(self):
+    def test_a_missing_target_is_still_a_skip_not_a_tear(self, tmp_path):
         """Never created is not torn — the distinction the skip exists for."""
-        with _target(None) as racer:
+        with _target(tmp_path, None) as racer:
             verdict, message = _verdict(racer)
 
         assert verdict == "SKIPPED", f"a never-created target was reported {verdict}"
         assert "final=absent" in message
 
-    def test_a_whole_file_at_the_end_does_not_invent_a_tear(self):
+    def test_a_whole_file_at_the_end_does_not_invent_a_tear(self, tmp_path):
         """Positive control — the direct read must not manufacture reds."""
-        with _target('{"round": 7}\n') as racer:
+        with _target(tmp_path, '{"round": 7}\n') as racer:
             racer.reads = 5
             racer.writes = 5
             verdict, message = _verdict(racer)
 
         assert verdict == "PASSED", f"a whole file was reported {verdict}: {message}"
 
-    def test_an_unreadable_target_is_not_convicted_as_torn(self):
+    def test_an_unreadable_target_is_not_convicted_as_torn(self, tmp_path):
         """Share-mode / permission refusal is not evidence of tearing.
 
         The world here is built by chmod, and chmod does not build it
@@ -1447,12 +1508,13 @@ class TestTheFinalStateIsCheckedDirectly:
         the test says so with what it measured. @memory's ruling, applied —
         probe the host, do not skipif what a probe can measure.
         """
-        with _target('{"whole": true}') as racer:
+        with _target(tmp_path, '{"whole": true}') as racer:
             racer.target.chmod(0o000)
             try:
                 try:
                     racer.target.read_text(encoding="utf-8")
-                except OSError:
+                except OSError as exc:
+                    logger.debug("probe: chmod 0o000 made the target unreadable: %s", exc)
                     unreadable = True
                 else:
                     unreadable = False

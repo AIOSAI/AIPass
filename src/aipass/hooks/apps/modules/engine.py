@@ -90,6 +90,16 @@ def _run_hook(hook_cmd: str, stdin_data: str, timeout_s: int = 30) -> dict:
         return {"exit_code": -1, "stdout": "", "stderr": str(exc), "elapsed_ms": round(elapsed_ms, 1)}
 
 
+def _import_handler_module(module_path: str):
+    """Import the module of one handler.
+
+    A seam: the tests are the reason it exists. They replace this function by name
+    in place of patching importlib.import_module, which replaces it process-wide.
+    It changes no verdict. The decision is hooks', leg 4.
+    """
+    return importlib.import_module(module_path)
+
+
 def _run_handler(handler_path: str, hook_data: dict, timeout_s: int = 30) -> dict:
     """Call a handler function directly (no subprocess). Module imports handler.
 
@@ -113,7 +123,7 @@ def _run_handler(handler_path: str, hook_data: dict, timeout_s: int = 30) -> dic
                 "stderr": f"handler namespace refused: {handler_path}",
                 "elapsed_ms": round(elapsed_ms, 1),
             }
-        module = importlib.import_module(module_path)
+        module = _import_handler_module(module_path)
         handler_func = getattr(module, func_name)
 
         outcome = {}
@@ -506,7 +516,7 @@ def _record_injection(event_type: str, outputs: list, merged: str, payload: dict
         from aipass.hooks.apps.modules import injection_ledger
 
         injection_ledger.record(event_type, outputs, merged, payload)
-    except Exception as exc:  # noqa: BLE001 - crash isolation: the ledger must never break a dispatch
+    except Exception as exc:  # crash isolation: the ledger must never break a dispatch
         logger.warning("[HOOKS] injection_ledger failed, %s injection unrecorded: %s", event_type, exc)
 
 

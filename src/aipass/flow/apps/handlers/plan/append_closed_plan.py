@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: append_closed_plan.py
 # Description: Closed Plans Local Registry Handler
-# Version: 0.1.0
+# Version: 0.2.0
 # Created: 2026-03-03
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -13,7 +13,6 @@ Appends a closed plan entry to the branch's CLOSED_PLANS.local.json file.
 Creates the file if it doesn't exist.
 """
 
-# ruff: noqa: E402
 import json
 import os
 import re
@@ -23,17 +22,26 @@ from pathlib import Path
 # INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
-_PKG_ROOT = module_file(__file__).parents[4]
-
 # External: Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 MODULE_NAME = "append_closed_plan"
 CLOSED_PLANS_FILE = "CLOSED_PLANS.local.json"
 
 _LOCK_RETRIES = 10
 _LOCK_BACKOFF_BASE = 0.05
+
+
+def _sleep(seconds: float) -> None:
+    """time.sleep(seconds), the lock backoff's wait.
+
+    The reason is the tests alone: they patch this name so the backoff neither
+    waits nor replaces time.sleep for the whole process (flow's decision, leg 4).
+    """
+    time.sleep(seconds)
 
 
 def _acquire_append_lock(lock_path: Path) -> bool:
@@ -66,7 +74,7 @@ def _acquire_append_lock(lock_path: Path) -> bool:
                 "[%s] Lock denied on %s (delete-pending?), retry %d: %s", MODULE_NAME, lock_path, attempt + 1, exc
             )
         delay = _LOCK_BACKOFF_BASE * (2**attempt)
-        time.sleep(delay)
+        _sleep(delay)
         waited += delay
     if denial is not None:
         raise PermissionError(

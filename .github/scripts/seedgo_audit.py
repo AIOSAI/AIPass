@@ -48,7 +48,74 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 49  # docs_page added 2026-09-19 (DPLAN-0351, the docs/*.md page shape)
+EXPECTED_STANDARDS = 80  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
+#                          oversize_test_file, import_site and through_the_command became scored rows.
+#                          A branch with no test files reports them not_applicable, so the count holds there too.
+#                          +1 the same day: named_encoding, test template v1 item 21.
+#                          +1 on 2026-09-22: literal_path, test template v1 item 22.
+#                          +1 the same day: file_top, test template v1 items 5, 6 and 7.
+#                          +1 the same day: mock_console, test template v1 item 14.
+#                          +1 the same day: state_leak, test template v1 item 18.
+#                          +1 the same day: conftest_fixtures, test template v1 item 20.
+#                          +2 the same day: no_product_call and duplicate_test, the first two CRACK
+#                          classes from the eyes-on review of backup's tests. Not template items -- the
+#                          ten above passed all 107 tests that carry a finding. These measure what shape
+#                          cannot see: whether a test reaches the product at all, and whether another
+#                          test in the same file already asserts everything it asserts.
+#                          +2 the same day: discarded_patch and weak_oracle, CRACK classes R and D
+#                          (dispatch eb5602d0). R convicts a mock of the branch's OWN code that nothing
+#                          ever observes; D convicts a test whose WHOLE oracle cannot fail. D is scored
+#                          only on the forms that cannot be right -- the soft forms ride as a count.
+#                          +2 the same day: flag_never_passed and uncalled_public_function, CRACK classes
+#                          P and O (dispatch cb55cc37). Both are branch_level -- the first tests-only
+#                          rules that compare a branch's apps/ against its whole tests/ tree. P convicts
+#                          a --flag a parser reads that no test ever hands it; O convicts a public
+#                          function of a test file's DECLARED SUBJECT that no test calls.
+#                          +4 on 2026-09-23: constant_predicate, sleep_in_test, stdlib_patch and
+#                          unused_conftest_fixture, CRACK classes C, N, Q and G (dispatch f66ac9d0).
+#                          C convicts a bool-returning constant lambda handed to the product; N convicts
+#                          any sleep in a test; Q convicts a patch whose target resolves to stdlib rather
+#                          than aipass; G convicts a conftest fixture the branch never requests. C and Q
+#                          score only what cannot be right -- inert None stubs and unresolvable local
+#                          targets ride as counts. Measured: cli and seedgo both consult 69.
+#                          +3 the same day: declared_pass_contradiction, self_set_assert and
+#                          unconsumed_side_effect, CRACK classes H, E and F (dispatch 0035b7bb) --
+#                          the last of the mechanical classes. H convicts a declared pass the file
+#                          itself breaks; E convicts an assert that only reads back what the test
+#                          wrote; F convicts a multi-answer side_effect no assertion counts. H and E
+#                          score only what cannot be right -- prose declarations, dotted stdlib names
+#                          and durability re-reads ride as counts. Measured: cli and seedgo consult 72.
+#                          +1 the same day: accepted_and_never_used_parameter, CRACK class M (dispatch
+#                          a752532e) -- the pack's first PRODUCTION-only crack rule, and the first that
+#                          reads a branch's whole apps/ tree to decide who owns a signature. It convicts
+#                          a parameter no path in the body reads, and acquits four shapes that say the
+#                          signature belongs to somebody else: the branch never calls the function, the
+#                          name is handed off as a value, the def is an except-ImportError shim, or the
+#                          name is defined twice. Class L was CHECKED and NOT built -- unused_function
+#                          already convicts its specimen. Measured: cli and seedgo consult 73.
+#                          +2 on 2026-09-25: stale_header_date and declared_pass_symbol_resolves, pair
+#                          one of the template compliance review (dispatch 303ca9e3). stale_header_date
+#                          is the first checker to READ GIT: a Modified: date older than the file's last
+#                          commit (an uncommitted file is judged as of today). It DECLINES on a shallow
+#                          clone, so this job's fetch-depth: 0 is load-bearing for it.
+#                          declared_pass_symbol_resolves convicts a declared-pass name that resolves
+#                          nowhere in apps/ or the stdlib. Measured: cli and seedgo consult 75.
+#                          +2 on 2026-09-25: retired_token_docstring and module_scope_side_effect, pair
+#                          two of the template compliance review (dispatch 41554e9d). The first convicts
+#                          the retired v4 test_quality keyword vocabulary (c1e0eeed^) used as bait in a
+#                          test docstring; the second convicts a side effect a test_*.py runs at import
+#                          (conftest.py exempt). Measured: cli and seedgo consult 77.
+#                          +1 on 2026-09-25: subprocess_text_true, pair three (dispatch 2122a278) - a
+#                          subprocess call in text mode with no encoding=, named_encoding's hazard one
+#                          pipe over (named_encoding judges open/read_text/write_text only, so this is
+#                          a new standard, not a widening). Measured: cli and seedgo consult 78.
+#                          +1 on 2026-09-25: os_walk_onerror, product pack pair one (dispatch 8314efac) - an
+#                          os.walk call with no onerror=, which swallows scandir errors. The first rule of the
+#                          product pack; its sibling logged_fallback was measured and STOPPED for the owner.
+#                          Measured: cli consults 79.
+#                          +1 on 2026-09-25: logged_fallback, product pack pair one's second half (dispatch
+#                          3144dd93, owner 12:17 'narrow it then land it') - an except returning a literal
+#                          default the success path can also return; silent_catch's log acquittal closed.
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"

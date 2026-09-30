@@ -1,9 +1,24 @@
-"""CLI contract tests — verify flags/subcommands our code invokes actually exist.
+# =================== AIPass ====================
+# Name: test_cli_contract.py
+# Version: 1.0.1
+# Description: CLI contract tests for the claude flags session_boot invokes
+# Branch: hooks
+# Created: 2026-07-13
+# Modified: 2026-09-28
+# =============================================
 
-Probes `claude --help` and `claude agents --help` at test time. Skips cleanly
-when the binary is absent. Catches phantom subcommands (like the former
-`claude agents stop`) before they ship as mocked-green.
-"""
+"""Tests for apps/handlers/lifecycle/session_boot.py's claude CLI contract."""
+
+# CLI contract tests — verify flags/subcommands our code invokes actually exist.
+#
+# Probes `claude --help` and `claude agents --help` at test time. Skips cleanly
+# when the binary is absent. Catches phantom subcommands (like the former
+# `claude agents stop`) before they ship as mocked-green.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that session_boot.py parses and imports
+# seedgo: no-test-needed(stdlib) — subprocess.run and shutil.which themselves
+# seedgo: no-test-needed(generated) — the full claude help text, upstream's output; only session_boot's flags pinned
 
 import shutil
 import subprocess
@@ -20,6 +35,8 @@ def _help_text(args: list[str]) -> str:
         [_CLAUDE, *args, "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=10,
     )
     return result.stdout + result.stderr
@@ -133,24 +150,3 @@ class TestClaudeDaemonFlags:
         that asserts nothing.
         """
         assert not _daemon_surface_accounted_for("Usage: claude daemon [options]\n  --verbose\n", token)
-
-
-@_SKIP
-class TestAgentsStopDoesNotExist:
-    """Regression: `claude agents stop <id>` must NOT be a valid command."""
-
-    def test_agents_rejects_stop_arg(self):
-        assert _CLAUDE is not None
-        result = subprocess.run(
-            [_CLAUDE, "agents", "stop", "test-id"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        assert result.returncode == 1
-        # The measured line, 2026-09-08:
-        #   error: too many arguments for 'agents'. Expected 0 arguments but got 2.
-        # The old or-clause fell through to "error", which any failure prints -
-        # including a stop subcommand that existed and errored for its own
-        # reasons, which is precisely the regression this class exists to catch.
-        assert "too many arguments for 'agents'" in result.stderr

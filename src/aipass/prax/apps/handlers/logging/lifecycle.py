@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lifecycle.py
 # Description: Logging System Lifecycle Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-09
+# Modified: 2026-09-24
 # =============================================
 
 """
@@ -52,7 +52,7 @@ def run_initialize(module_name: str) -> Dict[str, Any]:
     6. Start file watcher
 
     Args:
-        module_name: Name of the calling module (for log prefixes)
+        module_name: Name of the calling module — recorded on the operation
 
     Returns:
         Dict with initialization results:
@@ -84,7 +84,10 @@ def run_initialize(module_name: str) -> Dict[str, Any]:
     # Start file watcher
     start_file_watcher()
 
-    log_operation("Logging system initialized", {"modules_discovered": len(modules), "consolidated_logger": True})
+    log_operation(
+        "Logging system initialized",
+        {"initiated_by": module_name, "modules_discovered": len(modules), "consolidated_logger": True},
+    )
 
     json_handler.log_operation("lifecycle_event", {"event": "initialized", "modules_count": len(modules)})
 
@@ -104,7 +107,7 @@ def run_shutdown(module_name: str) -> None:
     3. Log shutdown operation
 
     Args:
-        module_name: Name of the calling module (for log prefixes)
+        module_name: Name of the calling module — recorded on the operation
     """
     # Stop file watcher
     stop_file_watcher()
@@ -112,4 +115,4 @@ def run_shutdown(module_name: str) -> None:
     # Restore original logger
     restore_original_logger()
 
-    log_operation("Logging system shutdown", {})
+    log_operation("Logging system shutdown", {"initiated_by": module_name})

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-04-14
-# Modified: 2026-08-22
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -28,12 +28,14 @@ FPLAN-0451, FPLAN-0452.
 """
 
 import importlib
+import os
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.watchdog import presenter
+from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 
 _VALID_SUBCOMMANDS = ["agent", "baseline", "timer", "schedule", "status", "cancel", "list"]
 _DEFAULT_AGENT_TIMEOUT = 600
@@ -333,20 +335,61 @@ def _handle_schedule(sub_args: List[str]) -> bool:
     return True
 
 
+def _sign_in_wire() -> dict | None:
+    """The live ``baseline_wire`` that delivers this session's completions, or None.
+
+    The same test the statusline paints green on: a registered watch of type
+    ``baseline_wire`` whose ``metadata.session`` is this session (env
+    ``CLAUDE_CODE_SESSION_ID``; with none set, any session) and whose pid is
+    alive. A pure read: nothing is pruned or written here.
+    """
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    for watch in _registry.list_active(prune_stale=False):
+        if watch.get("type") != "baseline_wire":
+            continue
+        if session and watch.get("metadata", {}).get("session", "") != session:
+            continue
+        pid = watch.get("pid")
+        if isinstance(pid, int) and _registry.is_pid_alive(pid):
+            return watch
+    return None
+
+
+def _agent_handler():
+    """The agent handler, imported on first use: its scanner walks a transcript tree.
+
+    The seam a test replaces to run the router without a real watch.
+    """
+    return importlib.import_module("aipass.devpulse.apps.handlers.watchdog.agent")
+
+
 def _handle_agent(sub_args: List[str]) -> bool:
     """Parse `agent <id> [--timeout N]` and invoke the agent handler."""
     if not sub_args:
         error("Usage: watchdog agent <branch> [--timeout SECONDS]")
         return True
 
-    # Reminder, not an error: this call blocks until the agent exits, so it must
-    # run via the Monitor tool (not run_in_background) for the wake to fire on
-    # completion. MUST go to stderr: the Monitor tool treats every STDOUT line
-    # as a wake event, so a stdout banner fires a spurious wake at arm time —
-    # stdout carries completion/stall events only (#634 contract; VERA feedback
-    # 315c005e). error() is also wrong — ❌ trips the exit-code fail-flag on an
-    # otherwise-successful watch (#661 output_routing).
-    err_console.print("[dim]watchdog agent: invoke via Monitor tool, not run_in_background[/dim]")
+    # This verb watches ONE job for stalls. It is not the sign-in: completions
+    # are delivered by the baseline wire (DPLAN-0317 r4), and with none armed
+    # they queue as MISSED while the statusline reads idle. On 2026-09-25 a day
+    # of `watchdog agent` wires left 27 completions queued that way, so the arm
+    # line now states which case this is. MUST go to stderr: the Monitor tool
+    # treats every STDOUT line as a wake event, so stdout carries completion and
+    # stall events only (#634 contract; VERA feedback 315c005e). error() is also
+    # wrong: ❌ trips the exit-code fail-flag on an otherwise-successful watch
+    # (#661 output_routing).
+    wire = _sign_in_wire()
+    if wire is None:
+        err_console.print(
+            "[bold red]watchdog agent: no sign-in wire for this session[/bold red] — this verb watches one job "
+            "for stalls; completions queue as MISSED and the statusline reads idle until "
+            "[bold]drone @devpulse watchdog baseline --once[/bold] is armed (Bash run_in_background)."
+        )
+    else:
+        err_console.print(
+            f"[dim]watchdog agent: stall watch only; wire {wire.get('handle')} delivers this session's "
+            "completions[/dim]"
+        )
 
     timeout = _DEFAULT_AGENT_TIMEOUT
     positional: List[str] = []
@@ -371,8 +414,7 @@ def _handle_agent(sub_args: List[str]) -> bool:
 
     agent_id = positional[0]
 
-    agent_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.agent")
-    result = agent_mod.watch_agent(agent_id, timeout_seconds=timeout)
+    result = _agent_handler().watch_agent(agent_id, timeout_seconds=timeout)
 
     state = result.get("agent_state", "unknown")
     reason = result.get("reason", "")

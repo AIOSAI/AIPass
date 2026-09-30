@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: filesystem_handler.py
 # Description: FileSystem Event Handler
-# Version: 0.1.1
+# Version: 0.2.0
 # Created: 2026-03-08
-# Modified: 2026-08-08
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -514,15 +514,18 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
             branch = detect_branch_from_path(str(file_path))
 
+            # Markers use forward slashes; match on a local copy so Windows paths match too
+            norm = path_str.replace("\\", "/")
+
             # Claude Code JSONL files: parse agent activity
-            if file_path.suffix == ".jsonl" and ".claude/projects/" in path_str:
-                if "/subagents/" in path_str:
+            if file_path.suffix == ".jsonl" and ".claude/projects/" in norm:
+                if "/subagents/" in norm:
                     branch = branch + " agent"
                 if self._parse_agent_activity(file_path, branch):
                     return
 
             # Codex JSONL files: parse agent activity
-            if file_path.suffix == ".jsonl" and ".codex/sessions/" in path_str:
+            if file_path.suffix == ".jsonl" and ".codex/sessions/" in norm:
                 codex_branch = self._get_codex_branch(file_path, path_str)
                 if self._parse_codex_activity(file_path, codex_branch):
                     return

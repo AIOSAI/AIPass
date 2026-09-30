@@ -3,17 +3,21 @@
 # Description: Tests for Google API retry handler with SSL error detection
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for apps/handlers/google/retry.py -- SSL retry logic.
+"""Tests for apps/handlers/google/retry.py, the SSL retry logic."""
 
-Tests:
-- is_ssl_error: SSLError, BrokenPipeError, ConnectionResetError, ValueError,
-  keyword-based detection
-- api_call_with_retry: first-try success, retry success, exhausted retries,
-  non-SSL immediate raise, rebuild_service_fn invocation
-"""
+# Tests:
+# - is_ssl_error: SSLError, BrokenPipeError, ConnectionResetError, ValueError,
+#   keyword-based detection
+# - api_call_with_retry: first-try success, retry success, exhausted retries,
+#   non-SSL immediate raise, rebuild_service_fn invocation
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that retry.py parses and imports
+# seedgo: no-test-needed(stdlib) — time.sleep's real delay; it is patched, the backoff is not waited out
+# seedgo: no-test-needed(network) — a real Google call; api_call_with_retry is handed a stand-in request
 
 from __future__ import annotations
 
@@ -142,3 +146,7 @@ class TestApiCallWithRetry:
 
         assert result == {"ok": True}
         assert rebuild_fn.call_count == 2
+        # Implied by the result (the third answer comes only from a third call); kept as the
+        # line that shows the unconsumed_side_effect row every queued answer is consumed,
+        # which the checker does not read from a return (api, fleet green leg 4).
+        assert request.execute.call_count == 3

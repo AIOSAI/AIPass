@@ -1,41 +1,46 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Registry globs must not widen on a case-insensitive filesystem
+# Version: 1.0.2
 # Created: 2026-08-31
-# Modified: 2026-09-12
+# Modified: 2026-09-29
 # =============================================
 
-"""Case-insensitive-filesystem defence for every ``*_REGISTRY.json`` walk.
+"""Tests for apps/handlers/paths.py's registry glob readers on a case-insensitive filesystem."""
 
-THE DEFECT. On Windows the ``pathlib`` glob matcher folds case, so
-``*_REGISTRY.json`` also matches ``*_registry.json``. This repo is full of bait —
-237 lowercase files on this machine at the time of writing:
-``drone_command_registry.json`` sits directly beside drone's tree, every branch
-carries ``.spawn/.template_registry.json`` (pathlib ``*`` matches dotfiles, unlike
-the ``glob`` module), and @flow keeps ten ``flow_json/*_registry.json`` plan
-counters. Found on ef029782's windows-setup leg, root-caused by @drone.
+# Case-insensitive-filesystem defence for every ``*_REGISTRY.json`` walk.
+#
+# THE DEFECT. On Windows the ``pathlib`` glob matcher folds case, so
+# ``*_REGISTRY.json`` also matches ``*_registry.json``. This repo is full of bait —
+# 237 lowercase files on this machine at the time of writing:
+# ``drone_command_registry.json`` sits directly beside drone's tree, every branch
+# carries ``.spawn/.template_registry.json`` (pathlib ``*`` matches dotfiles, unlike
+# the ``glob`` module), and @flow keeps ten ``flow_json/*_registry.json`` plan
+# counters. Found on ef029782's windows-setup leg, root-caused by @drone.
+#
+# MACOS IS THE SUBTLER HOST, and this file had it wrong until FPLAN-0554 (macOS
+# runs 34707762639 and 34707861282, darwin Python 3.13.15). Its VOLUME folds case,
+# so a lookup by name finds a lowercase twin, but CPython matches a wildcard with
+# the posix flavour's rule, which is case-sensitive on darwin too. The volume and
+# the matcher are two facts, and a probe of one predicts nothing about the other.
+#
+# WHY IT MATTERS HERE. My sites are identity-bearing: they answer "which project is
+# this" and "which registry names the caller". A command table read as a trust
+# anchor is the directory-name-as-identity species, back through a different door.
+#
+# THE INSTRUMENT. These pins run on Linux. ``case_insensitive_fs`` wraps
+# ``Path.glob`` to also yield the case-folded pattern's matches — @devpulse's shape,
+# and a faithful emulation of the Windows matcher, because the bait that exists on
+# disk is lowercase. ``folding_volume`` is the other half: lookups by name fold and
+# wildcards are left to whatever matcher is installed, so alone it is the macOS
+# world and stacked on the first it is the Windows one. The instrument's own
+# honesty is pinned two ways: a POSITIVE control that widens a listing *through
+# the instrument itself* (never through a re-implementation of its logic — that
+# mistake cost @aipass a pin that proved nothing while visiting zero files), and a
+# NEGATIVE control proving the instrument can still say no.
 
-MACOS IS THE SUBTLER HOST, and this file had it wrong until FPLAN-0554 (macOS
-runs 34707762639 and 34707861282, darwin Python 3.13.15). Its VOLUME folds case,
-so a lookup by name finds a lowercase twin, but CPython matches a wildcard with
-the posix flavour's rule, which is case-sensitive on darwin too. The volume and
-the matcher are two facts, and a probe of one predicts nothing about the other.
-
-WHY IT MATTERS HERE. My sites are identity-bearing: they answer "which project is
-this" and "which registry names the caller". A command table read as a trust
-anchor is the directory-name-as-identity species, back through a different door.
-
-THE INSTRUMENT. These pins run on Linux. ``case_insensitive_fs`` wraps
-``Path.glob`` to also yield the case-folded pattern's matches — @devpulse's shape,
-and a faithful emulation of the Windows matcher, because the bait that exists on
-disk is lowercase. ``folding_volume`` is the other half: lookups by name fold and
-wildcards are left to whatever matcher is installed, so alone it is the macOS
-world and stacked on the first it is the Windows one. The instrument's own
-honesty is pinned two ways: a POSITIVE control that widens a listing *through
-the instrument itself* (never through a re-implementation of its logic — that
-mistake cost @aipass a pin that proved nothing while visiting zero files), and a
-NEGATIVE control proving the instrument can still say no.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the real Windows/macOS case-folding behavior; emulated here, not run there
 
 import ast
 import fnmatch
@@ -47,6 +52,14 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
+from aipass.ai_mail.apps.handlers.paths import find_project_root, registries_in
+from aipass.ai_mail.apps.handlers.users import branch_detection as bd
+from aipass.ai_mail.apps.handlers.email.reply import _validate_reply_path
+from aipass.ai_mail.apps.handlers.registry.read import (
+    get_caller_project_branches,
+    get_project_tree_branches,
+    resident_registry_paths,
+)
 
 REAL_GLOB = Path.glob
 
@@ -305,8 +318,6 @@ def _real_registry(directory: Path, name: str = "PROJECT_REGISTRY.json") -> Path
 
 def _claims_of_the_negative_control(directory: Path) -> None:
     """The negative control's claims, run on the host and in every emulated world."""
-    from aipass.ai_mail.apps.handlers.paths import registries_in
-
     decoy = _decoy(directory)
 
     if _matcher_folds_case(directory):
@@ -325,8 +336,6 @@ def _claims_of_the_negative_control(directory: Path) -> None:
 
 def _claims_of_the_link(directory: Path) -> None:
     """The link's claims: the raw glob follows the MATCHER probe, the reader refuses either way."""
-    from aipass.ai_mail.apps.handlers.paths import registries_in
-
     folds = _matcher_folds_case(directory)
     decoy = _decoy(directory)
 
@@ -381,8 +390,6 @@ class TestTheInstrumentIsHonest:
         reproduced on Linux rather than left to the next CI train to discover.
         """
         assert _matcher_folds_case(tmp_path) is True
-
-        from aipass.ai_mail.apps.handlers.paths import registries_in
 
         decoy = _decoy(tmp_path)
         assert decoy in list(tmp_path.glob("*_REGISTRY.json"))
@@ -533,8 +540,6 @@ class TestFindProjectRootIgnoresLowercaseCounters:
     the fence compare two different questions."""
 
     def test_a_lowercase_counter_does_not_become_a_project_root(self, tmp_path, case_insensitive_fs):
-        from aipass.ai_mail.apps.handlers.paths import find_project_root
-
         project = tmp_path / "project"
         _real_registry(project)
         nested = project / "branch" / "apps"
@@ -546,8 +551,6 @@ class TestFindProjectRootIgnoresLowercaseCounters:
     def test_the_real_registry_is_still_found(self, tmp_path, case_insensitive_fs):
         """The other half. A filter that refuses everything passes every
         did-not-pick-the-decoy assertion in this file."""
-        from aipass.ai_mail.apps.handlers.paths import find_project_root
-
         project = tmp_path / "project"
         _real_registry(project)
         nested = project / "branch" / "apps"
@@ -559,8 +562,6 @@ class TestFindProjectRootIgnoresLowercaseCounters:
         """SUFFIX only, never the stem. External projects name registries after
         themselves — Vera-Studio_REGISTRY.json, vera_studio_REGISTRY.json — and a
         filter keyed on the stem would delete real citizens to fix a bug."""
-        from aipass.ai_mail.apps.handlers.paths import find_project_root
-
         for stem in ("Vera-Studio", "vera_studio", "feel_good_app"):
             project = tmp_path / stem
             _real_registry(project, f"{stem}_REGISTRY.json")
@@ -575,8 +576,6 @@ class TestCallerRegistryNeverResolvesToACounter:
     a decoy does not merely add a candidate — it ends the walk."""
 
     def test_the_impostor_registry_is_never_returned(self, tmp_path, monkeypatch, case_insensitive_fs):
-        from aipass.ai_mail.apps.handlers.users import branch_detection as bd
-
         project = tmp_path / "project"
         real = _real_registry(project)
         caller = project / "src" / "seat"
@@ -591,8 +590,6 @@ class TestCallerRegistryNeverResolvesToACounter:
     def test_a_caller_identity_lookup_does_not_seat_the_impostor(self, tmp_path, monkeypatch, case_insensitive_fs):
         """The assertion that is about WHO, not about which file. Both registries
         are well-formed and both name a branch; only one of them is real."""
-        from aipass.ai_mail.apps.handlers.users import branch_detection as bd
-
         project = tmp_path / "project"
         _real_registry(project)
         caller = project / "src" / "seat"
@@ -603,7 +600,8 @@ class TestCallerRegistryNeverResolvesToACounter:
         monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", tmp_path / "AIPASS_REGISTRY.json")
 
         assert bd._lookup_branch_by_name("impostor") is None
-        assert bd._lookup_branch_by_name("genuine") is not None
+        genuine = bd._lookup_branch_by_name("genuine")
+        assert genuine is not None and genuine["email"] == "@genuine"
 
 
 class TestReplyPathValidationIsNotSatisfiedByACounter:
@@ -612,8 +610,6 @@ class TestReplyPathValidationIsNotSatisfiedByACounter:
     is the outbound direction of the same defect."""
 
     def test_a_counter_ancestor_does_not_validate_a_reply_path(self, tmp_path, case_insensitive_fs):
-        from aipass.ai_mail.apps.handlers.email.reply import _validate_reply_path
-
         stray = tmp_path / "not-a-project"
         _decoy(stray)
         inbox = stray / "seat" / ".ai_mail.local" / "inbox.json"
@@ -625,8 +621,6 @@ class TestReplyPathValidationIsNotSatisfiedByACounter:
         assert "REGISTRY" in reason
 
     def test_a_real_registry_ancestor_still_validates(self, tmp_path, case_insensitive_fs):
-        from aipass.ai_mail.apps.handlers.email.reply import _validate_reply_path
-
         project = tmp_path / "project"
         _real_registry(project)
         inbox = project / "seat" / ".ai_mail.local" / "inbox.json"
@@ -643,8 +637,6 @@ class TestResidentAndProjectTreeDiscovery:
     resident roster and the verified-admin cross-project bridge."""
 
     def test_resident_discovery_skips_lowercase_counters(self, tmp_path, case_insensitive_fs):
-        from aipass.ai_mail.apps.handlers.registry.read import resident_registry_paths
-
         projects = tmp_path / "projects"
         real = _real_registry(projects / "Genuine")
         _decoy(projects / "Counterfeit")
@@ -652,8 +644,6 @@ class TestResidentAndProjectTreeDiscovery:
         assert resident_registry_paths(tmp_path) == [real]
 
     def test_project_tree_bridge_never_admits_the_impostor(self, tmp_path, case_insensitive_fs):
-        from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
-
         projects = tmp_path / "projects"
         _real_registry(projects / "Genuine")
         _decoy(projects / "Counterfeit")
@@ -663,8 +653,6 @@ class TestResidentAndProjectTreeDiscovery:
         assert "@genuine" in found
 
     def test_caller_project_branches_skips_the_counter(self, tmp_path, case_insensitive_fs):
-        from aipass.ai_mail.apps.handlers.registry.read import get_caller_project_branches
-
         project = tmp_path / "project"
         _real_registry(project)
         caller = project / "src" / "seat"
@@ -701,11 +689,26 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
             return "registry" in arg.id.lower() or "registry" in str(module_constants.get(arg.id, "")).lower()
         return False
 
-    def _registry_glob_calls(self):
+    @staticmethod
+    def _sources(root):
+        """Every .py under root, never inside a dropbox, .archive or __pycache__.
+
+        Written here, not imported: seedgo's handlers guard refuses a caller from
+        another branch. dropbox and .archive are the owner's ruling of 09-27 (a
+        dropbox is a sandbox like .archive); apps/handlers/.archive holds retired
+        .py files today, which the bare rglob read. Names are judged relative to
+        root. Every other directory is walked, tools, docs and logs included.
+        """
+        skip = frozenset({"dropbox", ".archive", "__pycache__"})
+        for source in root.rglob("*.py"):
+            if not skip.intersection(source.relative_to(root).parts[:-1]):
+                yield source
+
+    def _registry_glob_calls(self, root=None):
         """Every ``.glob(...)``/``.rglob(...)`` reaching for a registry pattern,
         outside the one filtered reader."""
         offenders = []
-        for source in self.HANDLERS.rglob("*.py"):
+        for source in self._sources(root or self.HANDLERS):
             tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
             constants = {
                 target.id: node.value.value
@@ -728,7 +731,7 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
         """Positive control for the AST walk itself. If the parser visits nothing
         — wrong root, renamed package — the ban below passes vacuously and
         reports a clean tree it never read."""
-        seen = [s.name for s in self.HANDLERS.rglob("*.py")]
+        seen = [s.name for s in self._sources(self.HANDLERS)]
         assert len(seen) > 20, f"the walk must actually reach the handler tree, saw {len(seen)}"
         assert self.READER_FILE in seen
 
@@ -751,6 +754,27 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
         assert self._mentions_registry(by_name, module_constants) is True
         assert self._mentions_registry(by_literal, {}) is True
         assert self._mentions_registry(innocent, {}) is False
+
+    def test_the_ban_never_reads_a_dropbox_or_an_archive(self, tmp_path):
+        """A registry glob planted in a dropbox or .archive under the walked root is
+        not read; the same glob in live source is. The live file is the control:
+        without it an empty walk would pass.
+
+        The root stands inside a directory named dropbox, so a filter on the whole
+        path would drop live.py too. The runner cannot serve a test module: this pin
+        stands on red first alone (the filter removed, both plants came back).
+        """
+        root = tmp_path / "dropbox" / "root"
+        root.mkdir(parents=True)
+        glob_line = 'd.glob("*_REGISTRY.json")\n'
+        (root / "live.py").write_text(glob_line, encoding="utf-8")
+        for skipped in ("dropbox", ".archive"):
+            (root / skipped).mkdir()
+            (root / skipped / "planted.py").write_text(glob_line, encoding="utf-8")
+
+        offenders = self._registry_glob_calls(root)
+
+        assert [name for name, _line, _arg in offenders] == ["live.py"]
 
     def test_only_the_shared_reader_globs_for_registries(self):
         offenders = [o for o in self._registry_glob_calls() if o[0] != self.READER_FILE]

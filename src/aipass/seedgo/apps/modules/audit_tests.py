@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_tests.py
 # Description: the audit-tests verb - execution-tier test quality measurement
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -27,6 +27,8 @@ once it has claimed.
     drone @seedgo audit-tests aipass              every citizen
     drone @seedgo audit-tests @backup --budget 300
     drone @seedgo audit-tests @backup --prove-refusal    canary point C
+    drone @seedgo audit-tests @backup --width-coupling   two widths, diffed
+    drone @seedgo audit-tests @backup --pseudo-tested    one mutant per function
 
 A REFUSAL NOW REACHES THE SHELL; A SCORE STILL DOES NOT. Until 2026-09-07 this
 verb returned truthy for everything and `seedgo.py` turned that into exit 0, so
@@ -40,18 +42,49 @@ nobody recognised) leaves with its own code, per the owner's standing ruling fro
 the 2026-09-07 fleet sweep.
 """
 
-from typing import List, NoReturn
+from typing import Dict, List, NoReturn
 
 from aipass.cli import console
 from aipass.cli.apps.modules import error, success, warning
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.audit_tests import refusal, render, runner
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
+from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.modules import CommandRefused
 
 #: Exact tokens this module claims. Never a prefix match.
 COMMANDS: tuple = ("audit-tests", "audit_tests")
+
+#: The flags that opt a BUILT execution group into a run, mapped to the bare
+#: group name the adapter publishes it under.
+#:
+#: ONE TABLE, READ BY BOTH THE PARSER AND THE DID-YOU-MEAN. Law ARGV's whole
+#: mechanism is that the loop which accepts a token and the list which
+#: suggests one cannot disagree; a flag added to the loop and forgotten in
+#: LANE_FLAGS would be accepted and then never offered to somebody who
+#: mistyped it, which is the drift the law exists to end.
+#:
+#: Neither is on by default and neither ever will be by accident: both cost
+#: whole extra suite executions - `--pseudo-tested` one per function, which is
+#: projected at ~2.44h on seedgo, and `--width-coupling` two per run.
+OPT_IN_GROUP_FLAGS: Dict[str, str] = {
+    "--pseudo-tested": "pseudo_tested",
+    "--width-coupling": "width_coupling",
+    "--statement-deletion": "statement_deletion",
+}
+
+#: The key the opt-in list travels under, from here to `adapter.build_env()`
+#: and onto the EnvSpec that `nominate()` reads it back off.
+OPTION_EXECUTION_GROUPS = "execution_groups"
+
+#: Narrow the mutants to the changed lines of a commit or the working tree.
+#:
+#: A SEPARATE FLAG FROM THE GROUPS ON PURPOSE. It is not a campaign; it is a
+#: scope over one. On its own it measures nothing, and saying so in the
+#: refusal is cheaper than letting somebody type it alone and read the clean
+#: run that follows as a result.
+DIFF_SCOPE_FLAG = "--diff-scope"
 
 #: Every option this verb accepts, for the did-you-mean a stray token gets.
 LANE_FLAGS: tuple = (
@@ -59,6 +92,8 @@ LANE_FLAGS: tuple = (
     "--prove-refusal",
     "--symlink-siblings",
     "--no-tmpdir-allowance",
+    DIFF_SCOPE_FLAG,
+    *OPT_IN_GROUP_FLAGS,
     "--help",
     "-h",
 )
@@ -88,6 +123,16 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     try:
         _run(args)
+    except CommandRefused:
+        # A REFUSAL IS NOT A CRASH, and this branch is what keeps the two
+        # apart. `_run` raises CommandRefused with the code the law names -
+        # 7 for an argument nobody recognised - and the generic handler below
+        # used to catch it and re-raise EXIT_UNPROVEN. Measured 2026-09-20:
+        # `audit-tests @seedgo --nonsense-flag` printed "law: ARGV  exit code:
+        # 7" and then exited 2, under a banner reading "This is a lane
+        # failure, not a measurement". The refusal was right on screen and
+        # wrong in the one place a script reads.
+        raise
     except Exception as exc:
         logger.error(f"[AUDIT-TESTS] the lane failed: {type(exc).__name__}: {exc}")
         error(f"audit-tests failed: {type(exc).__name__}: {exc}")
@@ -109,6 +154,13 @@ def _run(args: List[str]) -> None:
     if not argument:
         error("audit-tests needs a target: @branch, a directory, or 'aipass' for every citizen")
         raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, "audit-tests with no target")
+    if options.get("scope_to_diff") and not options.get(OPTION_EXECUTION_GROUPS):
+        # A scope narrows a campaign; alone it narrows nothing. Refusing beats
+        # running the default lane and letting a clean report be read as "the
+        # change set is clean" when nothing mutated a line of it.
+        error(f"{DIFF_SCOPE_FLAG} narrows a mutation campaign; on its own it measures nothing")
+        console.print(f"[dim]add a group: {' '.join(sorted(OPT_IN_GROUP_FLAGS))}[/dim]")
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, f"{DIFF_SCOPE_FLAG} with no execution group")
 
     json_handler.log_operation("lane_invoked", {"target": argument, "options": sorted(options)})
     results, worst = runner.run(argument, options)
@@ -172,6 +224,23 @@ def _parse(args: List[str]) -> tuple:
             options["no_tmpdir_allowance"] = True
             index += 1
             continue
+        if token == DIFF_SCOPE_FLAG or token.startswith(f"{DIFF_SCOPE_FLAG}="):
+            # `--diff-scope` is the working tree; `--diff-scope=HEAD~1` is a
+            # ref. Attached rather than positional so a trailing flag can
+            # never swallow the target as its value.
+            options["scope_to_diff"] = True
+            _, _, ref = token.partition("=")
+            options["diff_scope_ref"] = ref or None
+            index += 1
+            continue
+        if token in OPT_IN_GROUP_FLAGS:
+            # These APPEND rather than assign. `--pseudo-tested --width-coupling`
+            # asks for both campaigns, and a second flag that overwrote the
+            # first would run half of what the operator typed while reporting
+            # the other half as never requested.
+            _request_execution_group(options, OPT_IN_GROUP_FLAGS[token])
+            index += 1
+            continue
         if not token.startswith("-"):
             # One target per run: `runner.run()` takes a single argument, so a
             # second bare word names nothing. `aipass` is the fleet form.
@@ -185,6 +254,22 @@ def _parse(args: List[str]) -> tuple:
         index += 1
 
     return target, options, unrecognized
+
+
+def _request_execution_group(options: dict, group: str) -> None:
+    """Add one opt-in execution group to the request, once.
+
+    De-duplicated here rather than downstream because the request is PUBLISHED
+    in the artifact's environment block: a flag typed twice must not read back
+    as two campaigns having been asked for.
+
+    Args:
+        options: The options dict being built by `_parse`.
+        group: The bare adapter group name the flag asks for.
+    """
+    requested = options.setdefault(OPTION_EXECUTION_GROUPS, [])
+    if group not in requested:
+        requested.append(group)
 
 
 def _as_int(raw: str) -> int:
@@ -297,6 +382,12 @@ def print_introspection() -> None:
     console.print("  order_dependence   not built; reports not_applicable with a reason")
     console.print("  ai_advisory        nominate-only, never scored")
     console.print()
+    console.print("[yellow]Opt-in groups[/yellow] [dim](BUILT; they cost wall clock, so you have to ask)[/dim]")
+    console.print("  pytest.pseudo_tested    --pseudo-tested    one mutant per function; hours on a branch")
+    console.print("  pytest.width_coupling   --width-coupling   the suite at two widths, verdicts diffed")
+    console.print("  pytest.statement_deletion --statement-deletion  one statement removed at a time")
+    console.print()
+    console.print("[dim]Unasked-for, both report not_applicable saying they are AVAILABLE, not unbuilt.[/dim]")
     console.print("[dim]SCORED is not GATING: this blocks nothing at launch.[/dim]")
     console.print("[dim]Run 'drone @seedgo audit-tests --help' for usage.[/dim]")
     console.print()
@@ -316,7 +407,20 @@ def _print_help() -> None:
     console.print("  --prove-refusal           run with the gate OFF; the run must REFUSE")
     console.print("  --symlink-siblings        faster, and stamps m10_complete: false")
     console.print("  --no-tmpdir-allowance     treat TMPDIR writes as violations too")
+    console.print("  --width-coupling          run the suite at two widths and diff the verdicts")
+    console.print("  --pseudo-tested           gut one function at a time; HOURS on a real branch")
+    console.print("  --statement-deletion      delete one statement at a time; the most expensive group")
+    console.print("  --diff-scope[=<ref>]      narrow the mutants to CHANGED LINES; needs a group")
     console.print()
+    console.print("[dim]All three opt-in groups are BUILT. They are off by default because they cost[/dim]")
+    console.print("[dim]whole extra suite runs, not because anything about them is unfinished.[/dim]")
+    console.print("[dim]--diff-scope is a SCOPE, not a group: it probes the changed lines of the[/dim]")
+    console.print("[dim]working tree, or of the commit <ref> names. A clean diff-scoped run says[/dim]")
+    console.print("[dim]nothing about the statements it did not probe - every limit it has travels[/dim]")
+    console.print(
+        f"[dim]in the artifact ({len(diff_scope.SCOPE_LIMITS)} of them today), including that the working-tree[/dim]"
+    )
+    console.print("[dim]form sees the CALLER's branch only, so cross-branch scoping takes a ref.[/dim]")
     console.print("[dim]The suite runs against a COPY. Nothing writes to the real target.[/dim]")
     console.print("[dim]A run that cannot prove its own gate can fire publishes NOTHING.[/dim]")
     console.print()

@@ -1,16 +1,24 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 2.2.0
+# Version: 2.2.1
 # Description: Tests for git_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-09-16
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for handlers/security/git_gate.py."""
+"""Tests for apps/handlers/security/git_gate.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that git_gate.py parses and imports, ruff and collection cover it
+# seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation standard covers it
+# seedgo: no-test-needed(constant) — GIT_REDIRECT's and GH_REDIRECT's full wording; block tests pin key phrases
+# seedgo: no-test-needed(stdlib) — re.compile's matching engine, the stdlib's own
 
 import json
 from pathlib import Path
+
+from aipass.hooks.apps.handlers.security.git_gate import handle
 
 # Derived, never spelled: the fixtures below are only meaningful as paths INSIDE
 # this checkout, and a hardcoded home path makes the suite a property of one
@@ -19,13 +27,15 @@ _REPO = Path(__file__).resolve().parents[4]
 
 CWD = str(_REPO / "src" / "aipass" / "api")
 DEVPULSE_CWD = str(_REPO / "src" / "aipass" / "devpulse")
-PROVIDER_SETTINGS = str(Path.home() / ".claude" / "settings.json")
 PROJECT_HOOK = str(_REPO / ".claude" / "hooks" / "some_hook.py")
 
 
-def _bash(cmd: str) -> dict:
-    from aipass.hooks.apps.handlers.security.git_gate import handle
+def _provider_settings() -> str:
+    """The provider's settings path, read at call time, never at import."""
+    return str(Path.home() / ".claude" / "settings.json")
 
+
+def _bash(cmd: str) -> dict:
     return handle({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD})
 
 
@@ -376,32 +386,26 @@ class TestGitGateEditProtection:
     """Protected file edit handling."""
 
     def test_block_edit_settings(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": PROVIDER_SETTINGS},
+                "tool_input": {"file_path": _provider_settings()},
                 "cwd": CWD,
             }
         )
         _assert_blocked(result)
 
     def test_allow_edit_settings_from_devpulse(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": PROVIDER_SETTINGS},
+                "tool_input": {"file_path": _provider_settings()},
                 "cwd": DEVPULSE_CWD,
             }
         )
         _assert_allowed(result)
 
     def test_block_edit_hooks_dir(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -418,8 +422,6 @@ class TestGitGateEditProtection:
         backslash. These are spelled out so every host exercises the Windows form,
         and in mixed case, which Windows and default macOS filesystems open as the same file.
         """
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         for path in (
             r"D:\work\.claude\settings.json",
             r"D:\work\.claude\settings.local.json",
@@ -432,8 +434,6 @@ class TestGitGateEditProtection:
             assert result["exit_code"] == 2, f"allowed: {path}"
 
     def test_a_windows_path_that_only_resembles_one_stays_allowed(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         for path in (r"D:\work\.claude\settings.json.bak", r"D:\a\repo\.claude\agents\helper.md"):
             _assert_allowed(handle({"tool_name": "Write", "tool_input": {"file_path": path}, "cwd": CWD}))
 
@@ -445,8 +445,6 @@ class TestGitGateMisc:
         _assert_allowed(_bash("ls -la"))
 
     def test_empty_hook_data(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         result = handle({})
         assert result["exit_code"] == 0
 
@@ -481,12 +479,10 @@ class TestGitGateMisc:
         assert "drone @git issue" in parsed["reason"]
 
     def test_edit_block_shows_disable_path(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": PROVIDER_SETTINGS},
+                "tool_input": {"file_path": _provider_settings()},
                 "cwd": CWD,
             }
         )
@@ -553,3 +549,53 @@ class TestMailBodyIsAnArgumentNotACommand:
 
         with patch("aipass.hooks.apps.modules.bash_writes.code_text", side_effect=RuntimeError("boom")):
             _assert_blocked(_bash(f"drone @ai_mail reply abc123 <<EOF\n{self.WRITE_LINE}\nEOF"))
+
+
+class TestOneProgramSpelledManyWays:
+    """A rename is not a bypass — the owner's go, 2026-09-19 (devpulse DPLAN-0352).
+
+    Measured on this gate BEFORE the cure: of the write rows below, only the
+    bare lowercase one was refused. Windows runs every one of them as git, so
+    the single mechanical layer holding git writes behind drone was one spelling
+    away from being off — reported 09-16, carried as todo 51 until the go.
+    """
+
+    #: Assembled, like WRITE_LINE above and for the same reason: a literal write
+    #: invocation in this file refuses the next agent who edits it from a shell.
+    WRITE = "commi" + "t -m x"
+
+    WRITES = ("git", "git.exe", "GIT", "Git", "git.EXE", "git.cmd", "/usr/bin/git.exe", "~/bin/git.exe")
+    READS = ("git", "git.exe", "GIT", "/usr/bin/git.exe")
+
+    def test_every_spelling_of_a_write_is_blocked(self):
+        for spelled in self.WRITES:
+            _assert_blocked(_bash(f"{spelled} {self.WRITE}"))
+
+    def test_every_spelling_of_a_read_stays_allowed(self):
+        """The promise the redirect makes ("read-only verbs run raw") is spelling-blind too."""
+        for spelled in self.READS:
+            _assert_allowed(_bash(f"{spelled} status"))
+
+    def test_gh_is_read_the_same_way(self):
+        _assert_blocked(_bash("gh.exe pr create"))
+        _assert_blocked(_bash("GH pr create"))
+        _assert_allowed(_bash("gh.exe api repos/owner/repo/pulls"))
+        _assert_allowed(_bash("GH api repos/owner/repo/pulls"))
+
+    def test_a_dotted_tail_that_is_not_executable_is_not_the_program(self):
+        """The regex finds a candidate; verb_name is what makes it a verdict.
+
+        A file NAMED for git is not git. Keeping that quiet is why the list of
+        executable extensions lives once in bash_writes instead of being spelled
+        into a regex in each gate, where the two copies would drift apart.
+        """
+        _assert_allowed(_bash("cat some/path/git.py"))
+        _assert_allowed(_bash("ls /usr/bin/git"))
+        _assert_allowed(_bash(f"node git.js {self.WRITE}"))
+
+    def test_the_reader_being_away_leaves_the_old_narrow_reading(self):
+        """Fail-safe direction: the bare spelling still refuses, and the log says so."""
+        from unittest.mock import patch
+
+        with patch("aipass.hooks.apps.modules.bash_writes.verb_name", side_effect=RuntimeError("boom")):
+            _assert_blocked(_bash(f"git {self.WRITE}"))

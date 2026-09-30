@@ -3,16 +3,19 @@
 # Description: Tests for cross-branch import protection guard
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for apps/handlers/__init__.py -- cross-branch import protection.
+"""Tests for apps/handlers/__init__.py -- cross-branch import protection."""
 
-Tests:
-- _extract_branch_name: extracts branch from path segments
-- _find_real_caller: walks call stack, returns (filepath, import_line) tuple
-- _guard_branch_access: allows /api/ callers, blocks others, handles None caller
-"""
+# Tests:
+# - _extract_branch_name: extracts branch from path segments
+# - _find_real_caller: walks call stack, returns (filepath, import_line) tuple
+# - _guard_branch_access: allows /api/ callers, blocks others, handles None caller
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the guard's import-time call in handlers/__init__.py; conftest stubs it
+# seedgo: no-test-needed(constant) — the ACCESS DENIED banner's layout beyond its one matched phrase
 
 from __future__ import annotations
 
@@ -34,7 +37,7 @@ _guard_mod = importlib.util.module_from_spec(_spec)
 
 # Patch _guard_branch_access to a no-op before exec so the module-level call
 # does not block us during test collection.
-_original_guard = None
+_ORIGINAL_GUARD = None
 
 
 def _noop_guard() -> None:
@@ -59,24 +62,24 @@ _MOD_NAME = "_guard_impl"
 class TestExtractBranchName:
     """Verifies branch name extraction from file paths."""
 
-    def test_memory_branch(self) -> None:
+    def test_memory_branch(self, tmp_path: Path) -> None:
         """Path containing 'memory' extracts the next segment."""
-        path = "/home/user/Projects/memory/archive/loader.py"
+        path = str(tmp_path / "Projects" / "memory" / "archive" / "loader.py")
         assert _extract_branch_name(path) == "archive"
 
-    def test_seedgo_branch(self) -> None:
+    def test_seedgo_branch(self, tmp_path: Path) -> None:
         """Path containing 'seedgo' extracts the next segment."""
-        path = "/home/user/Projects/seedgo/core/checks.py"
+        path = str(tmp_path / "Projects" / "seedgo" / "core" / "checks.py")
         assert _extract_branch_name(path) == "core"
 
-    def test_vscode_branch(self) -> None:
+    def test_vscode_branch(self, tmp_path: Path) -> None:
         """Path containing '.vscode' extracts the next segment."""
-        path = "/home/user/.vscode/extensions/some_ext/main.py"
+        path = str(tmp_path / ".vscode" / "extensions" / "some_ext" / "main.py")
         assert _extract_branch_name(path) == "extensions"
 
-    def test_aipass_before_apps_returns_aipass(self) -> None:
+    def test_aipass_before_apps_returns_aipass(self, tmp_path: Path) -> None:
         """Path with 'aipass' immediately before 'apps' returns 'aipass'."""
-        path = "/home/user/Projects/aipass/apps/modules/bridge.py"
+        path = str(tmp_path / "Projects" / "aipass" / "apps" / "modules" / "bridge.py")
         assert _extract_branch_name(path) == "aipass"
 
     def test_unknown_path(self) -> None:
@@ -94,10 +97,16 @@ class TestFindRealCaller:
     """Verifies the stack-walking caller-detection helper."""
 
     def test_returns_tuple(self) -> None:
-        """Result must be a two-element tuple."""
+        """Result must be a two-element tuple: the caller's file and its source line.
+
+        api, fleet green leg 3: the tuple's two slots are pinned to their values -
+        this file, resolved, and the very line that made the call.
+        """
         result = _find_real_caller()
         assert isinstance(result, tuple)
-        assert len(result) == 2
+        filepath, import_line = result
+        assert Path(filepath) == Path(__file__).resolve()
+        assert import_line == "result = _find_real_caller()"
 
     def test_the_caller_it_finds_from_here_is_this_file(self) -> None:
         """
@@ -129,9 +138,10 @@ class TestFindRealCaller:
 class TestGuardBranchAccess:
     """Verifies the import guard via controlled mock scenarios."""
 
-    def test_allows_api_branch_caller(self) -> None:
+    def test_allows_api_branch_caller(self, tmp_path: Path) -> None:
         """Caller whose resolved path contains /api/ passes through."""
-        fake_caller = "/home/user/Projects/AIPass/src/aipass/api/apps/modules/bridge.py"
+        src = tmp_path / "Projects" / "AIPass" / "src"
+        fake_caller = str(src / "aipass" / "api" / "apps" / "modules" / "bridge.py")
         with patch.object(
             _guard_mod,
             "_find_real_caller",
@@ -144,7 +154,7 @@ class TestGuardBranchAccess:
             # pass-through mean something.
             assert _guard_branch_access() is None
 
-        foreign = "/home/user/Projects/AIPass/src/aipass/baud/apps/modules/thing.py"
+        foreign = str(src / "aipass" / "baud" / "apps" / "modules" / "thing.py")
         with patch.object(
             _guard_mod,
             "_find_real_caller",
@@ -153,9 +163,9 @@ class TestGuardBranchAccess:
             with pytest.raises(ImportError, match="ACCESS DENIED"):
                 _guard_branch_access()
 
-    def test_blocks_non_api_branch_caller(self) -> None:
+    def test_blocks_non_api_branch_caller(self, tmp_path: Path) -> None:
         """Caller outside /api/ triggers ImportError with ACCESS DENIED."""
-        fake_caller = "/home/user/Projects/AIPass/src/aipass/backup/apps/sync.py"
+        fake_caller = str(tmp_path / "Projects" / "AIPass" / "src" / "aipass" / "backup" / "apps" / "sync.py")
         with patch.object(
             _guard_mod,
             "_find_real_caller",
@@ -171,9 +181,11 @@ class TestGuardBranchAccess:
             "_find_real_caller",
             return_value=(None, None),
         ):
-            with patch("inspect.stack", return_value=[]):
-                # An unresolvable caller is ALLOWED, deliberately: refusing what
-                # cannot be identified would break every legitimate entry the
-                # frame walk cannot see. Asserted rather than left implicit, so
-                # the day that policy flips this test says so.
-                assert _guard_branch_access() is None
+            # An unresolvable caller is ALLOWED, deliberately: refusing what
+            # cannot be identified would break every legitimate entry the
+            # frame walk cannot see. Asserted rather than left implicit, so
+            # the day that policy flips this test says so.
+            # api, fleet green leg 3: the inspect.stack patch that sat here is
+            # gone - the guard walks sys._getframe and never calls inspect.stack,
+            # so the patch bit nothing.
+            assert _guard_branch_access() is None

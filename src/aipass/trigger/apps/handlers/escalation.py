@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-08
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -30,6 +30,19 @@ RULES (the owner, S193 / DPLAN-0283):
       stays silent here too unless escalate_suppressed is turned on.
     - Counting is unconditional; only the SENDING is gated. A signature that
       never escalates is still fully auditable in the state file.
+
+THE AGED-WARNING LANE (devpulse go, 2026-09-19):
+    Repetition into a manager's inbox that nobody reads for a day is not a
+    signal, it is a pile. A WARNING still repeating `warning_age_hours` after
+    it was FIRST seen stops going to the manager: it becomes a registry row at
+    level WARNING (never dispatched — only medic dispatches, off error events),
+    and one upserted mail goes to the branch that LOGGED it, on the same
+    thread. The manager gets one roll-up per `rollup_hours` naming every open
+    row instead. The owner is the logging branch, never a name parsed out of
+    the message text: @memory's lines say "only @verify can cure it", and
+    routing @verify's fault is @memory's job. With no registered owner to mail,
+    the manager digest stays — the signal is never dropped for want of an
+    address.
 
 COUNTING UNIT vs MAIL UNIT:
     A signature is the counting unit: one normalized condition. The mail unit
@@ -81,6 +94,12 @@ MAX_SAMPLE_CHARS = 500
 # How many sibling signatures a thread's digest lists before it summarises.
 MAX_ROSTER_LINES = 15
 MAX_ROSTER_MESSAGE_CHARS = 160
+
+# How many open rows the manager's roll-up lists before it summarises.
+MAX_ROLLUP_LINES = 30
+
+# The roll-up occupies one thread in the manager's inbox, forever.
+ROLLUP_UPSERT_KEY = "escalation:rollup"
 
 # Email send callback (set by the module layer — handlers never import modules).
 _send_email: Optional[Callable[..., bool]] = None
@@ -253,6 +272,69 @@ def compute_signature(level: str, branch: str, module: str, message: str) -> str
     """
     raw = f"{level.upper()}|{branch.upper()}|{module}|{_normalize(message)}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _registry_report(**kwargs: Any) -> Dict[str, Any]:
+    """Open or increment a registry row. The seam tests replace.
+
+    Args:
+        **kwargs: Forwarded to error_registry.report()
+
+    Returns:
+        The registry entry dict, or {} when the registry is unreachable
+    """
+    try:
+        from aipass.trigger.apps.handlers.error_registry import report
+
+        return report(**kwargs)
+    except Exception as exc:
+        logger.warning(f"registry row not opened: {exc}")
+        return {}
+
+
+def _age_hours(entry: Dict[str, Any], now: float) -> Optional[float]:
+    """Return how many hours ago this signature was FIRST seen.
+
+    Args:
+        entry: Signature state entry
+        now: Current epoch time
+
+    Returns:
+        Age in hours, or None when the stamp cannot be read — an unreadable
+        stamp must never decide that a signal has aged out of the manager's lane
+    """
+    try:
+        return (now - datetime.fromisoformat(entry.get("first_seen", "")).timestamp()) / 3600.0
+    except ValueError:
+        logger.warning(f"unreadable first_seen, staying on the manager digest: {entry.get('first_seen')!r}")
+        return None
+
+
+def _aged_owner(level: str, entry: Dict[str, Any], cfg: Dict[str, Any], now: float) -> Optional[Tuple[str, float]]:
+    """Decide whether this repeat belongs to its own branch now, and whose it is.
+
+    Args:
+        level: WARNING or ERROR
+        entry: Signature state entry
+        cfg: Escalation config section
+        now: Current epoch time
+
+    Returns:
+        (recipient address, age in hours), or None to keep the manager digest
+    """
+    limit = float(cfg.get("warning_age_hours", 24) or 0)
+    if level != "WARNING" or limit <= 0:
+        return None
+
+    age = _age_hours(entry, now)
+    if age is None or age < limit:
+        return None
+
+    branch = str(entry.get("branch", ""))
+    if not branch or not _has_registered_owner(branch):
+        return None
+
+    return f"@{branch.lower()}", age
 
 
 def thread_key(level: str, branch: str, module: str) -> str:
@@ -465,7 +547,8 @@ def record_warning(
         raw_line: Full log line, kept as a digest sample
 
     Returns:
-        Decision dict, or None when the lane is off or the input is unusable
+        Decision dict, or None when the lane is off or the input is unusable;
+        outcome "record_failed" when counting raised
     """
     return _record("WARNING", branch, module, message, log_file, raw_line, fingerprint="")
 
@@ -488,7 +571,8 @@ def record_error(
         raw_line: Full log line, kept as a digest sample
 
     Returns:
-        Decision dict, or None when the lane is off or the input is unusable
+        Decision dict, or None when the lane is off or the input is unusable;
+        outcome "record_failed" when counting raised
     """
     return _record("ERROR", branch, module, message, log_file, raw_line, fingerprint=fingerprint)
 
@@ -517,7 +601,9 @@ def _record(
         fingerprint: Registry fingerprint (errors only)
 
     Returns:
-        Decision dict {signature, count, outcome} or None
+        Decision dict {signature, count, outcome}; None when the lane chose not
+        to count (off, ignored branch, unusable input); outcome "record_failed"
+        with an empty signature when counting itself raised
     """
     try:
         if not branch or not module or not message:
@@ -579,6 +665,8 @@ def _record(
             if window_count >= threshold:
                 siblings = _thread_siblings(signatures, signature, entry)
                 outcome = _evaluate_digest(signature, entry, cfg, window_count, window_seconds, now, siblings)
+                if outcome == "aged_owner_mail":
+                    _maybe_send_rollup(state, cfg, now)
 
             _prune(signatures, int(cfg.get("max_signatures", 500)))
             atomic_write_json(STATE_FILE, state)
@@ -587,7 +675,7 @@ def _record(
 
     except Exception as exc:
         logger.warning(f"escalation record failed for {branch}/{module}: {exc}")
-        return None
+        return {"signature": "", "count": 0, "outcome": "record_failed"}
 
 
 def _evaluate_digest(
@@ -649,6 +737,10 @@ def _evaluate_digest(
             outcome="not_eligible",
         )
         return "not_eligible"
+
+    aged = _aged_owner(level, entry, cfg, now)
+    if aged is not None:
+        return _send_aged_notice(signature, entry, window_count, window_seconds, siblings, aged)
 
     recipient = str(cfg.get("digest_recipient", "@devpulse"))
     subject, body = build_digest(signature, entry, window_count, window_seconds, reason, recipient, siblings)
@@ -736,6 +828,278 @@ def _evaluate_digest(
         },
     )
     return "sent"
+
+
+def _send_aged_notice(
+    signature: str,
+    entry: Dict[str, Any],
+    window_count: int,
+    window_seconds: int,
+    siblings: Optional[List[Tuple[str, Dict[str, Any]]]],
+    aged: Tuple[str, float],
+) -> str:
+    """Open a registry row and mail the branch that logged this repeat.
+
+    Args:
+        signature: Repeat signature
+        entry: Mutable state entry for this signature
+        window_count: Occurrences inside the window
+        window_seconds: Window length in seconds
+        siblings: Other signatures in the same thread
+        aged: (recipient address, age in hours) from _aged_owner
+
+    Returns:
+        Outcome string: aged_owner_mail / send_failed
+    """
+    recipient, age = aged
+    branch = str(entry.get("branch", ""))
+
+    row = _registry_report(
+        error_type="WARNING",
+        message=str(entry.get("message", "")),
+        component=branch.upper(),
+        log_path=str(entry.get("log_file", "")),
+        severity="low",
+    )
+    fingerprint = str(row.get("fingerprint", ""))
+
+    subject, body = build_aged_notice(
+        signature, entry, window_count, window_seconds, recipient, siblings, age, fingerprint
+    )
+
+    if _send_email is None:
+        logger.warning(
+            "aged notice not sent — no email callback wired",
+            signature=signature,
+            branch=branch,
+            outcome="send_failed",
+        )
+        return "send_failed"
+
+    upsert_result: Dict[str, Any] = {}
+    try:
+        # The owner's thread, keyed exactly like the manager's was: one live
+        # message per subject. auto_execute stays False — this is mail the
+        # owner reads on their own time, never a wake and never a task.
+        sent = _send_email(
+            to_branch=recipient,
+            subject=subject,
+            message=body,
+            auto_execute=False,
+            reply_to="@trigger",
+            from_branch="@trigger",
+            upsert_key=thread_key("WARNING", branch, str(entry.get("module", ""))),
+            upsert_result=upsert_result,
+        )
+    except Exception as exc:
+        logger.warning(f"aged notice raised for {signature}: {exc}", outcome="send_failed")
+        return "send_failed"
+
+    if not sent:
+        # No cooldown stamp on a failed send — the next occurrence retries.
+        logger.warning(
+            "aged notice delivery failed",
+            signature=signature,
+            branch=branch,
+            outcome="send_failed",
+        )
+        return "send_failed"
+
+    entry["last_digest"] = datetime.now().isoformat()
+    entry["digests_sent"] = int(entry.get("digests_sent", 0)) + 1
+    entry["occurrences"] = []
+    entry.setdefault("aged_since", datetime.now().isoformat())
+    entry["aged_notices"] = int(entry.get("aged_notices", 0)) + 1
+    if fingerprint:
+        entry["registry_fingerprint"] = fingerprint
+
+    logger.info(
+        "aged warning mailed to its owner",
+        signature=signature,
+        branch=branch,
+        count=window_count,
+        recipient=recipient,
+        age_hours=round(age, 1),
+        registry_fingerprint=fingerprint[:12],
+        upsert_action=upsert_result.get("upsert_action"),
+        outcome="aged_owner_mail",
+    )
+    json_handler.log_operation(
+        "escalation_aged_notice_sent",
+        {
+            "signature": signature,
+            "branch": branch,
+            "recipient": recipient,
+            "age_hours": round(age, 1),
+            "registry_fingerprint": fingerprint,
+        },
+    )
+    return "aged_owner_mail"
+
+
+def _rollup_is_due(state: Dict[str, Any], current: List[str], hours: float, now: float) -> bool:
+    """Decide whether the manager's roll-up should be written again.
+
+    The roll-up owns ONE thread, so a refresh costs the reader nothing — it
+    rewrites the message they already have. Cadence therefore only paces
+    repeats of an UNCHANGED list; a list that grew is news, and a roll-up
+    naming yesterday's rows is worse than a second write.
+
+    Args:
+        state: State document carrying the last roll-up stamp and row list
+        current: Open aged signatures, sorted
+        hours: Roll-up cadence in hours
+        now: Current epoch time
+
+    Returns:
+        True when the roll-up should be sent
+    """
+    if current != state.get("rollup_rows"):
+        return True
+
+    last_sent = str(state.get("rollup_last_sent", ""))
+    if not last_sent:
+        return True
+
+    try:
+        return now - datetime.fromisoformat(last_sent).timestamp() >= hours * 3600
+    except ValueError:
+        # An unreadable stamp must not mute the manager forever.
+        logger.warning(f"bad rollup stamp, sending anyway: {last_sent!r}")
+        return True
+
+
+def _maybe_send_rollup(state: Dict[str, Any], cfg: Dict[str, Any], now: float) -> None:
+    """Mail the manager one roll-up of every open aged row, at most per window.
+
+    Silent-failure contract: the roll-up is a courtesy line on top of the
+    owner's mail, so nothing here may break the record that already happened.
+
+    Args:
+        state: Mutable state document (the roll-up stamp lives here)
+        cfg: Escalation config section
+        now: Current epoch time
+    """
+    try:
+        hours = float(cfg.get("rollup_hours", 24) or 0)
+        if hours <= 0 or _send_email is None:
+            return
+
+        rows = [(sig, entry) for sig, entry in state.get("signatures", {}).items() if entry.get("aged_since")]
+        if not rows:
+            return
+        rows.sort(key=lambda kv: _seen_order(kv[1]), reverse=True)
+
+        current = sorted(sig for sig, _entry in rows)
+        if not _rollup_is_due(state, current, hours, now):
+            return
+
+        recipient = str(cfg.get("digest_recipient", "@devpulse"))
+        subject, body = build_rollup(rows, recipient, hours)
+        if _send_email(
+            to_branch=recipient,
+            subject=subject,
+            message=body,
+            auto_execute=False,
+            reply_to="@trigger",
+            from_branch="@trigger",
+            upsert_key=ROLLUP_UPSERT_KEY,
+            upsert_result={},
+        ):
+            state["rollup_last_sent"] = datetime.now().isoformat()
+            state["rollup_rows"] = current
+            logger.info("aged roll-up sent", rows=len(rows), recipient=recipient, outcome="rollup_sent")
+    except Exception as exc:
+        logger.warning(f"roll-up failed: {exc}", outcome="rollup_failed")
+
+
+def build_rollup(rows: List[Tuple[str, Dict[str, Any]]], recipient: str, hours: float) -> tuple:
+    """Build the manager's roll-up of open aged rows.
+
+    Args:
+        rows: [(signature, entry), ...], newest first
+        recipient: Roll-up recipient address
+        hours: The roll-up cadence, hours
+
+    Returns:
+        (subject, body)
+    """
+    lines = [
+        f"  {sig}  @{entry.get('branch', '?').lower()}/{entry.get('module', '?')}  "
+        f"x{entry.get('total_count', 0)} lifetime  aged since {entry.get('aged_since', 'unknown')}  "
+        f"registry {str(entry.get('registry_fingerprint', ''))[:12] or 'none'}"
+        for sig, entry in rows[:MAX_ROLLUP_LINES]
+    ]
+    if len(rows) > MAX_ROLLUP_LINES:
+        lines.append(f"  ... and {len(rows) - MAX_ROLLUP_LINES} more")
+    row_block = "\n".join(lines)
+
+    subject = f"[ROLL-UP] {len(rows)} warning(s) repeating past their age limit"
+    body = f"""Warnings that outlived their age limit — each one now belongs to the branch
+that logged it, not to this inbox. One line per open row, every {hours:.0f}h.
+
+{row_block}
+
+Each row is mailed to its own branch on its own thread and carries a registry
+row: drone @trigger errors list, then suppress (benign, silent) or resolve
+(fixed — a recurrence is signal again).
+
+---
+This is an EMAIL, not a dispatch — nothing was woken. The repeat digests for
+these signatures have stopped; this line replaces them.
+Sent to {recipient} by @trigger."""
+
+    return subject, body
+
+
+def build_aged_notice(
+    signature: str,
+    entry: Dict[str, Any],
+    window_count: int,
+    window_seconds: int,
+    recipient: str,
+    siblings: Optional[List[Tuple[str, Dict[str, Any]]]],
+    age: float,
+    fingerprint: str,
+) -> tuple:
+    """Build the mail the logging branch gets once a warning has aged.
+
+    Args:
+        signature: Repeat signature
+        entry: State entry for this signature
+        window_count: Occurrences inside the window
+        window_seconds: Window length in seconds
+        recipient: The logging branch's address
+        siblings: Other signatures in the same thread
+        age: Age in hours since first seen
+        fingerprint: Registry fingerprint for the row just opened
+
+    Returns:
+        (subject, body)
+    """
+    subject, body = build_digest(
+        signature,
+        entry,
+        window_count,
+        window_seconds,
+        f"repeating for {age:.0f}h — this is yours now, not the manager's",
+        recipient,
+        siblings,
+    )
+    subject = subject.replace("[REPEAT]", f"[REPEAT {age:.0f}h]", 1)
+
+    header = f"""This warning has been repeating for {age:.0f} hours, so it stops going to the
+manager and comes to you — you are the branch that LOGGED it. If the line names
+another branch as the one who can cure it, routing it is your call, not mine.
+
+Registry row : {fingerprint or "not opened — the registry was unreachable"}
+  fixed it      -> drone @trigger errors resolve {fingerprint[:12] or "<id>"}
+  it is benign  -> drone @trigger errors suppress {fingerprint[:12] or "<id>"} "why"
+Nothing was dispatched: this lane never wakes anyone, and medic does not
+dispatch warnings at all.
+
+"""
+    return subject, header + body
 
 
 def build_digest(
@@ -863,6 +1227,7 @@ def get_stats() -> Dict[str, Any]:
     errors = sum(1 for e in signatures.values() if e.get("level") != "WARNING")
     digests = sum(int(e.get("digests_sent", 0)) for e in signatures.values())
     in_cooldown = sum(1 for e in signatures.values() if e.get("last_digest"))
+    aged = sum(1 for e in signatures.values() if e.get("aged_since"))
     return {
         "enabled": bool(cfg.get("enabled", True)),
         "digest_recipient": cfg.get("digest_recipient", "@devpulse"),
@@ -870,6 +1235,8 @@ def get_stats() -> Dict[str, Any]:
         "error_threshold": cfg.get("error_threshold", 5),
         "window_minutes": cfg.get("window_minutes", 60),
         "cooldown_minutes": cfg.get("cooldown_minutes", 360),
+        "warning_age_hours": cfg.get("warning_age_hours", 24),
+        "rollup_hours": cfg.get("rollup_hours", 24),
         "escalate_suppressed": bool(cfg.get("escalate_suppressed", False)),
         "watch_branch_log_warnings": bool(cfg.get("watch_branch_log_warnings", True)),
         "ignore_branches": cfg.get("ignore_branches", []),
@@ -878,6 +1245,7 @@ def get_stats() -> Dict[str, Any]:
         "tracked_errors": errors,
         "digests_sent": digests,
         "signatures_digested": in_cooldown,
+        "aged_signatures": aged,
         "state_file": str(STATE_FILE),
         "config_file": str(config_loader.CONFIG_PATH),
         "email_wired": _send_email is not None,

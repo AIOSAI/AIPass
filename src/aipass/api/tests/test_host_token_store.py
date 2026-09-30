@@ -3,37 +3,42 @@
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-17
+# Modified: 2026-09-29
 # =============================================
 
-"""
-Tests for the Token Store's Accountability Fields
+"""Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
 
-Devpulse's ruling, granted 2026-08-14 after an operate-scoped token appeared on
-this machine and the store could not say who minted it. Three fields:
+# Tests for the Token Store's Accountability Fields
+#
+# Devpulse's ruling, granted 2026-08-14 after an operate-scoped token appeared on
+# this machine and the store could not say who minted it. Three fields:
+#
+#   minted_by   - best-effort provenance. WHO ran issue-token.
+#   revoked_at  - when a token stopped working.
+#   last_used   - whether a live token is actually live, or merely un-revoked.
+#
+# THE HAZARD THESE TESTS EXIST FOR, and it is not the fields.
+#
+# `last_used` means a write on EVERY authenticated request, against a JSON file
+# that issue and revoke also write. Two things could go wrong, and the second one
+# is the dangerous one:
+#
+#   1. Two writers race and one update is lost. For telemetry, survivable.
+#   2. A telemetry write, holding a record list it read BEFORE a revoke landed,
+#      writes that stale list back — and un-revokes the token. A revoked device
+#      starts working again because somebody looked at a timestamp.
+#
+# So the load-bearing test in this file is not "last_used is written". It is
+# "a concurrent revoke survives a touch". Telemetry must never undo security.
+#
+# And one more: a truncated store reads as empty, which denies every request. With
+# per-request writes that window stops being theoretical, so the write is atomic —
+# a reader sees the old file or the new one, never half of either.
 
-  minted_by   - best-effort provenance. WHO ran issue-token.
-  revoked_at  - when a token stopped working.
-  last_used   - whether a live token is actually live, or merely un-revoked.
-
-THE HAZARD THESE TESTS EXIST FOR, and it is not the fields.
-
-`last_used` means a write on EVERY authenticated request, against a JSON file
-that issue and revoke also write. Two things could go wrong, and the second one
-is the dangerous one:
-
-  1. Two writers race and one update is lost. For telemetry, survivable.
-  2. A telemetry write, holding a record list it read BEFORE a revoke landed,
-     writes that stale list back — and un-revokes the token. A revoked device
-     starts working again because somebody looked at a timestamp.
-
-So the load-bearing test in this file is not "last_used is written". It is
-"a concurrent revoke survives a touch". Telemetry must never undo security.
-
-And one more: a truncated store reads as empty, which denies every request. With
-per-request writes that window stops being theoretical, so the write is atomic —
-a reader sees the old file or the new one, never half of either.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — scope_allows() and resolve_token(), tests/test_host_api.py
+# seedgo: no-test-needed(covered) — the failed-auth audit line, tests/test_host_auth_audit.py
+# seedgo: no-test-needed(stdlib) — secrets.token_urlsafe's randomness itself
 
 import importlib.util
 import json
@@ -47,6 +52,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.modules import host_api as host_api_module
 
@@ -413,7 +419,9 @@ class TestOlderRecordsStillWork:
             stored.pop("minted_by", None)
         host_tokens.save_tokens(records)
 
-        assert host_tokens.verify_token(raw) is not None
+        verified = host_tokens.verify_token(raw)
+        assert verified is not None
+        assert verified["id"] == record["id"]
 
     def test_a_version_one_record_lists_without_inventing_a_minter(self, store: Path) -> None:
         """
@@ -453,8 +461,6 @@ class TestTheServerTouchesOnEveryAuthenticatedRequest:
 
     def test_a_successful_verification_touches_the_token(self, store: Path) -> None:
         """Where 'last_used' actually comes from."""
-        from aipass.api.apps.handlers.host import server as host_server
-
         from fastapi.testclient import TestClient
 
         record, raw = host_tokens.issue_token("pixel-8", scope="read")
@@ -470,8 +476,6 @@ class TestTheServerTouchesOnEveryAuthenticatedRequest:
 
     def test_a_refused_request_touches_nothing(self, store: Path) -> None:
         """A rejected token was not used — it was presented and refused."""
-        from aipass.api.apps.handlers.host import server as host_server
-
         from fastapi.testclient import TestClient
 
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
@@ -667,59 +671,80 @@ class TestTheListingSaysWhatTheStoreNowKnows:
     unanswerable at the place it gets asked.
     """
 
-    def _lines(self, printer: Any) -> str:
-        """Everything the listing printed, as one searchable blob."""
-        return "\n".join(str(call.args[0]) if call.args else "" for call in printer.print.call_args_list)
+    def _listing(self, capsys: pytest.CaptureFixture) -> str:
+        """Run the operator's own command and return what it printed."""
+        assert host_api_module.handle_command("host-api", ["list-tokens"]) is True
+        out, _ = capsys.readouterr()
+        return out
 
-    def test_the_listing_names_the_minter(self, minted_by_baud: Path) -> None:
+    def test_the_listing_names_the_minter(self, minted_by_baud: Path, capsys: pytest.CaptureFixture) -> None:
         """The exact question that could not be answered on the night."""
         host_tokens.issue_token("phase6-verify", scope="operate")
+        capsys.readouterr()
 
-        with patch.object(host_api_module, "console") as printer, patch.object(host_api_module, "header"):
-            host_api_module._cmd_list_tokens()
+        assert "minted by baud" in self._listing(capsys)
 
-        assert "minted by baud" in self._lines(printer)
-
-    def test_an_unused_token_says_so_rather_than_showing_a_blank(self, store: Path) -> None:
+    def test_an_unused_token_says_so_rather_than_showing_a_blank(
+        self, store: Path, capsys: pytest.CaptureFixture
+    ) -> None:
         """Minted-but-never-presented is a different state from live."""
         host_tokens.issue_token("pixel-8", scope="read")
+        capsys.readouterr()
 
-        with patch.object(host_api_module, "console") as printer, patch.object(host_api_module, "header"):
-            host_api_module._cmd_list_tokens()
+        assert "never used" in self._listing(capsys)
 
-        assert "never used" in self._lines(printer)
-
-    def test_a_revoked_token_shows_when_it_died(self, store: Path) -> None:
+    def test_a_revoked_token_shows_when_it_died(self, store: Path, capsys: pytest.CaptureFixture) -> None:
         """Revoked is a state; revoked_at is the thing an incident needs."""
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
         host_tokens.revoke_token(record["id"])
+        capsys.readouterr()
 
-        with patch.object(host_api_module, "console") as printer, patch.object(host_api_module, "header"):
-            host_api_module._cmd_list_tokens()
+        assert "revoked 20" in self._listing(capsys)
 
-        assert "revoked 20" in self._lines(printer)
-
-    def test_a_used_token_shows_a_readable_time_not_an_iso_blob(self, store: Path) -> None:
+    def test_a_used_token_shows_a_readable_time_not_an_iso_blob(
+        self, store: Path, capsys: pytest.CaptureFixture
+    ) -> None:
         """An operator reads this at a terminal, so microseconds are noise."""
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
         host_tokens.touch_token(record["id"])
+        capsys.readouterr()
 
-        with patch.object(host_api_module, "console") as printer, patch.object(host_api_module, "header"):
-            host_api_module._cmd_list_tokens()
-
-        printed = self._lines(printer)
+        printed = self._listing(capsys)
         assert "last used 20" in printed
         assert "never used" not in printed
 
-    def test_an_unparseable_stamp_is_shown_raw_and_never_as_nothing(self) -> None:
+    @pytest.mark.parametrize(
+        ("stamp", "provenance"),
+        [
+            ("not-a-time", "minted by unknown · last used not-a-time"),
+            (None, "minted by unknown · never used"),
+            ("2026-09-28T05:41:07.123456", "minted by unknown · last used 2026-09-28 05:41"),
+        ],
+        ids=["hand-edited", "never-presented", "presented"],
+    )
+    def test_an_unparseable_stamp_is_shown_raw_and_never_as_nothing(
+        self, store: Path, capsys: pytest.CaptureFixture, stamp: str | None, provenance: str
+    ) -> None:
         """
         A stamp that renders as an empty string reads as 'absent'.
 
         Hand-edited stores exist. Showing the odd value is how someone notices;
-        showing nothing is how it stays wrong.
+        showing nothing is how it stays wrong. One rendering per case, so a red
+        names the rendering that broke (api, fleet green leg 4).
         """
-        assert host_api_module._stamp("not-a-time") == "not-a-time"
-        assert host_api_module._provenance({"minted_by": "", "last_used": None}) == "minted by unknown · never used"
+        host_tokens.issue_token("one-token", scope="read")
+        records = host_tokens.load_tokens()
+        for stored in records:
+            stored["minted_by"] = ""
+            stored["last_used"] = stamp
+        host_tokens.save_tokens(records)
+        capsys.readouterr()
+
+        # Pinned exactly, line by line (api, fleet green leg 3): a substring passed a
+        # provenance line with anything around it. Mutants: the unknown-minter word,
+        # 'never used', and the stamp format each changed.
+        lines = {line.strip() for line in self._listing(capsys).splitlines()}
+        assert provenance in lines
 
 
 def test_the_reserved_comment_is_gone(store: Any) -> None:

@@ -1,33 +1,36 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_auth_audit.py
 # Description: Tests for failed-auth auditing with peer address (security C1)
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for Failed-Auth Auditing
+"""Tests for apps/handlers/host/server.py, its failed-auth audit with the peer address."""
 
-Security review condition C1, granted 2026-08-14. Before this, a rejected request
-produced a logger.warning and nothing else: no structured audit line and no peer
-address anywhere, so the honest answer to "which device has been knocking, and
-how often" was "I cannot tell you". On a loopback socket that was tolerable. On
-the tailnet bind it is not.
+# Tests for Failed-Auth Auditing
+#
+# Security review condition C1, granted 2026-08-14. Before this, a rejected request
+# produced a logger.warning and nothing else: no structured audit line and no peer
+# address anywhere, so the honest answer to "which device has been knocking, and
+# how often" was "I cannot tell you". On a loopback socket that was tolerable. On
+# the tailnet bind it is not.
+#
+# TWO PROPERTIES THIS FILE EXISTS TO HOLD TOGETHER, because they pull against each
+# other and it would be easy to fix one by breaking the other:
+#
+#   1. The AUDIT distinguishes why a request was refused — no credentials, an
+#      unrecognised token, or a scope refusal — so an operator can read the record.
+#   2. The RESPONSE does not. A caller cannot tell "no header" from "bad token"
+#      from "revoked", because that difference is a probing oracle. Same status,
+#      same code, same message.
+#
+# And the third, absolute one: the raw token never reaches the audit. Not the
+# value, not a prefix — a prefix leaks entropy for free.
 
-TWO PROPERTIES THIS FILE EXISTS TO HOLD TOGETHER, because they pull against each
-other and it would be easy to fix one by breaking the other:
-
-  1. The AUDIT distinguishes why a request was refused — no credentials, an
-     unrecognised token, or a scope refusal — so an operator can read the record.
-  2. The RESPONSE does not. A caller cannot tell "no header" from "bad token"
-     from "revoked", because that difference is a probing oracle. Same status,
-     same code, same message.
-
-And the third, absolute one: the raw token never reaches the audit. Not the
-value, not a prefix — a prefix leaks entropy for free.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(duplicate_test) — issue_token() and revoke_token() themselves, tests/test_host_api.py
+# seedgo: no-test-needed(duplicate_test) — _audit_socket_refusal on the websocket lane, tests/test_host_attach.py
 
 from pathlib import Path
 from typing import Any

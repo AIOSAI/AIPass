@@ -1,20 +1,27 @@
 # =================== AIPass ====================
 # Name: test_config.py
 # Description: Tests for prax config handlers (load + ignore_patterns)
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-29
-# Modified: 2026-08-04
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for prax config handlers — covers load.py functions
-(get_system_logs_dir, get_module_logs_dir, lines_to_bytes,
-get_debug_prints_enabled, load_log_config) and ignore_patterns.py
-(load_ignore_patterns_from_config)."""
+"""Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
+
+# Tests for prax config handlers — covers load.py functions
+# (get_system_logs_dir, get_module_logs_dir, lines_to_bytes,
+# get_debug_prints_enabled, load_log_config) and ignore_patterns.py
+# (load_ignore_patterns_from_config).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stderr_routing) — _warn_routing's warning when a log is routed away, covered by that row
 
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
+
+from aipass.prax.apps.handlers.config import ignore_patterns as ip_mod
+from aipass.prax.apps.handlers.config import load as load_mod
 
 
 # =============================================
@@ -22,18 +29,18 @@ from unittest.mock import MagicMock
 # =============================================
 
 
-def _fresh_import_load(monkeypatch, tmp_path):
-    """Import load module with a fresh state and patched paths.
+def _patch_load_world(monkeypatch, tmp_path):
+    """Point load.py's module-level paths at tmp_path and record its json_handler.
 
-    Clears cached module, patches PRAX_ROOT and ECOSYSTEM_ROOT to tmp_path
-    so directory creation goes to tmp_path, then reloads.
+    PRAX_ROOT and ECOSYSTEM_ROOT go to tmp_path so directory creation lands there.
+    The redirect variable is cleared below so real path resolution runs, which is
+    why json_handler must be a recorder: with no redirect it would write prax_json.
     """
-    # Evict cached modules
-    for key in list(sys.modules.keys()):
-        if "aipass.prax.apps.handlers.config" in key:
-            sys.modules.pop(key, None)
-
-    import aipass.prax.apps.handlers.config.load as load_mod
+    monkeypatch.setattr(load_mod, "json_handler", MagicMock())
+    # The warn-once latches are per process; each test starts with them clear, as a
+    # fresh process does.
+    monkeypatch.setattr(load_mod, "_config_schema_warned", False)
+    monkeypatch.setattr(load_mod, "_bad_level_warned", set())
 
     # Patch module-level paths to use tmp_path
     prax_root = tmp_path / "prax"
@@ -54,17 +61,10 @@ def _fresh_import_load(monkeypatch, tmp_path):
     # Suppress sys.modules-based pytest detection so tests can verify prod paths
     monkeypatch.setattr(load_mod, "_is_pytest_session", lambda: False)
 
-    return load_mod
 
-
-def _fresh_import_ignore(monkeypatch, tmp_path):
-    """Import ignore_patterns module with a fresh state and patched paths."""
-    for key in list(sys.modules.keys()):
-        if "aipass.prax.apps.handlers.config" in key:
-            sys.modules.pop(key, None)
-
-    import aipass.prax.apps.handlers.config.ignore_patterns as ip_mod
-
+def _patch_ignore_world(monkeypatch, tmp_path):
+    """Point ignore_patterns.py's config paths at tmp_path and record its json_handler."""
+    monkeypatch.setattr(ip_mod, "json_handler", MagicMock())
     prax_root = tmp_path / "prax"
     prax_root.mkdir(exist_ok=True)
     prax_json_dir = prax_root / "prax_json"
@@ -72,8 +72,6 @@ def _fresh_import_ignore(monkeypatch, tmp_path):
 
     monkeypatch.setattr(ip_mod, "PRAX_JSON_DIR", prax_json_dir)
     monkeypatch.setattr(ip_mod, "PRAX_LOGGER_CONFIG_FILE", prax_json_dir / "prax_logger_config.json")
-
-    return ip_mod
 
 
 # =============================================
@@ -85,7 +83,7 @@ class TestGetSystemLogsDir:
     """Tests for get_system_logs_dir()."""
 
     def test_returns_path(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         # Patch _find_repo_root to return tmp_path
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         result = load_mod.get_system_logs_dir()
@@ -94,20 +92,20 @@ class TestGetSystemLogsDir:
         assert result.name == "system_logs"
 
     def test_returns_system_logs_subdir(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         result = load_mod.get_system_logs_dir()
         assert result == tmp_path / "system_logs"
 
     def test_creates_directory(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         result = load_mod.get_system_logs_dir()
         assert result.exists()
         assert result.is_dir()
 
     def test_caches_result(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         call_count = 0
 
         def counting_find():
@@ -130,7 +128,7 @@ class TestGetModuleLogsDir:
     """Tests for get_module_logs_dir(module_name)."""
 
     def test_returns_path(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         result = load_mod.get_module_logs_dir("flow")
         assert isinstance(result, Path)
@@ -141,7 +139,7 @@ class TestGetModuleLogsDir:
         assert result == tmp_path / "system_logs" / "external" / "flow"
 
     def test_existing_module_under_ecosystem(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         # Create the module directory so the first branch is taken
         module_dir = tmp_path / "flow"
         module_dir.mkdir()
@@ -150,7 +148,7 @@ class TestGetModuleLogsDir:
         assert result.exists()
 
     def test_fallback_to_src_root(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         # ECOSYSTEM_ROOT is tmp_path (parent of prax_root).
         # src_root is ECOSYSTEM_ROOT.parent. Create module there.
         src_root = tmp_path.parent
@@ -163,7 +161,7 @@ class TestGetModuleLogsDir:
 
     def test_unknown_module_routes_to_system_logs_external(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Unknown modules must NOT create dirs in ECOSYSTEM_ROOT (log-leak regression)."""
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         result = load_mod.get_module_logs_dir("unknown_branch")
@@ -176,7 +174,7 @@ class TestGetModuleLogsDir:
 
     def test_aipass_caller_cwd_routes_to_caller_project(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Regression: AIPASS_CALLER_CWD directs logs to caller project root, not ECOSYSTEM_ROOT."""
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         # Set up a mock caller project with a .git marker
         caller_project = tmp_path / "caller_project"
@@ -202,7 +200,7 @@ class TestPytestCurrentTestRouting:
     """PYTEST_CURRENT_TEST env var routes logs to temp dir, not production."""
 
     def test_system_logs_routed_to_temp(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests/test_foo.py::test_bar (call)")
         result = load_mod.get_system_logs_dir()
         assert "aipass_test_logs" in str(result)
@@ -211,7 +209,7 @@ class TestPytestCurrentTestRouting:
         assert not (tmp_path / "system_logs").exists()
 
     def test_module_logs_routed_to_temp(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests/test_foo.py::test_bar (call)")
         (tmp_path / "flow").mkdir()
         result = load_mod.get_module_logs_dir("flow")
@@ -221,7 +219,7 @@ class TestPytestCurrentTestRouting:
         assert not (tmp_path / "flow" / "logs").exists()
 
     def test_aipass_test_log_dir_takes_precedence(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         override = tmp_path / "custom_test_logs"
         override.mkdir()
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(override))
@@ -230,7 +228,7 @@ class TestPytestCurrentTestRouting:
         assert result == override / "system"
 
     def test_no_pytest_env_uses_production_path(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         result = load_mod.get_system_logs_dir()
@@ -246,30 +244,30 @@ class TestLinesToBytes:
     """Tests for lines_to_bytes(num_lines, avg_line_length)."""
 
     def test_returns_int(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         result = load_mod.lines_to_bytes(100)
         assert isinstance(result, int)
         # Which int: the line budget times the 200-byte default line.
         assert result == 20_000
 
     def test_default_avg_line_length(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         assert load_mod.lines_to_bytes(100) == 100 * 200
 
     def test_custom_avg_line_length(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         assert load_mod.lines_to_bytes(50, avg_line_length=100) == 5000
 
     def test_zero_lines(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         assert load_mod.lines_to_bytes(0) == 0
 
     def test_one_line(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         assert load_mod.lines_to_bytes(1) == 200
 
     def test_large_value(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         assert load_mod.lines_to_bytes(1_000_000) == 1_000_000 * 200
 
 
@@ -282,7 +280,7 @@ class TestGetDebugPrintsEnabled:
     """Tests for get_debug_prints_enabled()."""
 
     def test_returns_bool(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         result = load_mod.get_debug_prints_enabled()
         assert isinstance(result, bool)
         # Which bool: tmp_path carries no prax_logger_config.json, and the
@@ -290,40 +288,40 @@ class TestGetDebugPrintsEnabled:
         assert result is False
 
     def test_false_when_config_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         # No config file exists
         assert load_mod.get_debug_prints_enabled() is False
 
     def test_true_when_enabled_in_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(json.dumps({"config": {"debug_prints_enabled": True}}), encoding="utf-8")
         assert load_mod.get_debug_prints_enabled() is True
 
     def test_false_when_disabled_in_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(json.dumps({"config": {"debug_prints_enabled": False}}), encoding="utf-8")
         assert load_mod.get_debug_prints_enabled() is False
 
     def test_false_when_key_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(json.dumps({"config": {}}), encoding="utf-8")
         assert load_mod.get_debug_prints_enabled() is False
 
     def test_false_on_invalid_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text("{{not valid json", encoding="utf-8")
         assert load_mod.get_debug_prints_enabled() is False
 
     def test_false_on_empty_config_object(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(json.dumps({}), encoding="utf-8")
@@ -339,14 +337,14 @@ class TestLoadLogConfig:
     """Tests for load_log_config()."""
 
     def test_returns_dict(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         result = load_mod.load_log_config()
         assert isinstance(result, dict)
         # Which dict: exactly the four sections callers index, no more.
         assert set(result) == {"system_logs", "local_logs", "log_format", "date_format"}
 
     def test_default_keys_present(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         result = load_mod.load_log_config()
         assert "system_logs" in result
         assert "local_logs" in result
@@ -354,7 +352,7 @@ class TestLoadLogConfig:
         assert "date_format" in result
 
     def test_defaults_when_no_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         result = load_mod.load_log_config()
         assert result["system_logs"]["max_lines"] == 1000
         assert result["local_logs"]["max_lines"] == 250
@@ -362,7 +360,7 @@ class TestLoadLogConfig:
         assert result["local_logs"]["log_level"] == "INFO"
 
     def test_loads_from_config_file(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_data = {
@@ -384,7 +382,7 @@ class TestLoadLogConfig:
         assert result["date_format"] == "%H:%M:%S"
 
     def test_falls_back_on_invalid_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text("not json at all!", encoding="utf-8")
@@ -395,7 +393,7 @@ class TestLoadLogConfig:
         assert result["local_logs"]["max_lines"] == 250
 
     def test_partial_config_uses_defaults(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         # Config with only system_logs — local_logs should fall back to default
@@ -407,7 +405,7 @@ class TestLoadLogConfig:
         assert result["local_logs"] == load_mod.DEFAULT_LOCAL_LOGS
 
     def test_empty_config_object(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(json.dumps({}), encoding="utf-8")
@@ -417,7 +415,7 @@ class TestLoadLogConfig:
         assert result["local_logs"] == load_mod.DEFAULT_LOCAL_LOGS
 
     def test_log_format_defaults(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         result = load_mod.load_log_config()
         assert "asctime" in result["log_format"]
         assert "%Y-%m-%d" in result["date_format"]
@@ -426,12 +424,12 @@ class TestLoadLogConfig:
         # Retained history scales with backup_count, so this number IS the
         # forensic window: 1 -> 3 triples the floor and doubles the ceiling.
         # Measured 2026-08-04, hooks_engine.log held 45 min at 1 backup.
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         assert load_mod.DEFAULT_SYSTEM_LOGS["backup_count"] == 3
         assert load_mod.DEFAULT_LOCAL_LOGS["backup_count"] == 3
 
     def test_warns_when_config_file_has_no_log_sections(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         mock_logger = MagicMock()
         monkeypatch.setattr(load_mod, "logger", mock_logger)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
@@ -448,7 +446,7 @@ class TestLoadLogConfig:
         assert mock_logger.warning.call_args[0][2] == "system_logs or local_logs"
 
     def test_warning_names_only_the_missing_section(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         mock_logger = MagicMock()
         monkeypatch.setattr(load_mod, "logger", mock_logger)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
@@ -464,7 +462,7 @@ class TestLoadLogConfig:
     def test_schema_warning_fires_once_per_process(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         # Every logger init fleet-wide calls this, and prax's own log sits in the
         # directory prax watches — an unguarded warning would feed itself.
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         mock_logger = MagicMock()
         monkeypatch.setattr(load_mod, "logger", mock_logger)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
@@ -477,7 +475,7 @@ class TestLoadLogConfig:
         assert mock_logger.warning.call_count == 1
 
     def test_no_warning_when_both_sections_present(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         mock_logger = MagicMock()
         monkeypatch.setattr(load_mod, "logger", mock_logger)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
@@ -506,7 +504,7 @@ class TestLoadIgnorePatternsFromConfig:
     """Tests for load_ignore_patterns_from_config()."""
 
     def test_returns_set(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
+        _patch_ignore_world(monkeypatch, tmp_path)
         result = ip_mod.load_ignore_patterns_from_config()
         assert isinstance(result, set)
         # Which set: the defaults, and "archive.local" is one of them --
@@ -514,7 +512,7 @@ class TestLoadIgnorePatternsFromConfig:
         assert "archive.local" in result
 
     def test_defaults_when_no_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
+        _patch_ignore_world(monkeypatch, tmp_path)
         result = ip_mod.load_ignore_patterns_from_config()
         assert ".git" in result
         assert "__pycache__" in result
@@ -522,12 +520,12 @@ class TestLoadIgnorePatternsFromConfig:
         assert "node_modules" in result
 
     def test_defaults_match_module_constant(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
+        _patch_ignore_world(monkeypatch, tmp_path)
         result = ip_mod.load_ignore_patterns_from_config()
         assert result == ip_mod.DEFAULT_IGNORE_FOLDERS
 
     def test_loads_custom_patterns(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
+        _patch_ignore_world(monkeypatch, tmp_path)
         config_file = ip_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_data = {"config": {"ignore_patterns": ["custom_dir", "another_dir", ".hidden"]}}
@@ -538,7 +536,7 @@ class TestLoadIgnorePatternsFromConfig:
 
     def test_returns_set_from_list(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Config stores patterns as a list; result must be a set."""
-        ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
+        _patch_ignore_world(monkeypatch, tmp_path)
         config_file = ip_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_data = {"config": {"ignore_patterns": ["a", "b", "a"]}}
@@ -549,7 +547,7 @@ class TestLoadIgnorePatternsFromConfig:
         assert result == {"a", "b"}
 
     def test_empty_patterns_falls_back(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
+        _patch_ignore_world(monkeypatch, tmp_path)
         config_file = ip_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_data = {"config": {"ignore_patterns": []}}
@@ -559,7 +557,7 @@ class TestLoadIgnorePatternsFromConfig:
         assert result == ip_mod.DEFAULT_IGNORE_FOLDERS
 
     def test_falls_back_on_invalid_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
+        _patch_ignore_world(monkeypatch, tmp_path)
         config_file = ip_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text("{broken json", encoding="utf-8")
@@ -568,7 +566,7 @@ class TestLoadIgnorePatternsFromConfig:
         assert result == ip_mod.DEFAULT_IGNORE_FOLDERS
 
     def test_falls_back_on_missing_config_key(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
+        _patch_ignore_world(monkeypatch, tmp_path)
         config_file = ip_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(json.dumps({"other_key": True}), encoding="utf-8")
@@ -591,54 +589,54 @@ class TestResolveLogLevel:
     """
 
     def test_defaults_to_info_when_nothing_configured(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
 
         assert load_mod.resolve_log_level() == "INFO"
         assert load_mod.resolve_log_level(None) == "INFO"
 
     def test_honours_configured_level(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
 
         assert load_mod.resolve_log_level("DEBUG") == "DEBUG"
         assert load_mod.resolve_log_level("WARNING") == "WARNING"
 
     def test_level_name_is_case_insensitive(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
 
         assert load_mod.resolve_log_level("debug") == "DEBUG"
         assert load_mod.resolve_log_level("  Warning  ") == "WARNING"
 
     def test_env_var_overrides_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setenv(load_mod.LOG_LEVEL_ENV, "DEBUG")
 
         assert load_mod.resolve_log_level("ERROR") == "DEBUG"
 
     def test_empty_env_var_is_ignored(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """An exported-but-empty var must not shadow a real config value."""
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setenv(load_mod.LOG_LEVEL_ENV, "")
 
         assert load_mod.resolve_log_level("WARNING") == "WARNING"
 
     def test_numeric_level_passes_through(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
 
         assert load_mod.resolve_log_level(10) == 10
 
     def test_invalid_value_falls_back_to_default(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """A typo must not silently pick a level nobody asked for."""
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
 
         assert load_mod.resolve_log_level("VERBOSE") == "INFO"
 
     def test_invalid_value_warns(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
         load_mod._bad_level_warned.clear()
         warnings = []
@@ -651,7 +649,7 @@ class TestResolveLogLevel:
 
     def test_invalid_value_warns_once_per_value(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Level resolution runs on every logger init fleet-wide — one typo, one warning."""
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
         load_mod._bad_level_warned.clear()
         warnings = []
@@ -663,7 +661,7 @@ class TestResolveLogLevel:
         assert len(warnings) == 1
 
     def test_bad_env_still_falls_through_to_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setenv(load_mod.LOG_LEVEL_ENV, "NOPE")
         load_mod._bad_level_warned.clear()
 
@@ -674,24 +672,24 @@ class TestLevelToInt:
     """Tests for level_to_int() — used to pick the permissive tier."""
 
     def test_converts_level_names(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
 
         assert load_mod.level_to_int("DEBUG") == 10
         assert load_mod.level_to_int("INFO") == 20
         assert load_mod.level_to_int("WARNING") == 30
 
     def test_passes_ints_through(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
 
         assert load_mod.level_to_int(10) == 10
 
     def test_unknown_name_reads_as_info(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
 
         assert load_mod.level_to_int("NONSENSE") == 20
 
     def test_debug_is_more_permissive_than_info(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """min() over the two tiers must pick DEBUG — the property setup.py relies on."""
-        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        _patch_load_world(monkeypatch, tmp_path)
 
         assert min(load_mod.level_to_int("DEBUG"), load_mod.level_to_int("INFO")) == 10

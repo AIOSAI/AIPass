@@ -1,20 +1,16 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_memory_health.py - Memory Health Handler Tests
-# Date: 2026-03-24
-# Version: 1.0.0
-# Category: daemon/tests
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.1.0 (2026-08-15): limits-field tests -> container/schema_version tests + real .trinity pin
-#   - v1.0.0 (2026-03-24): Initial creation - memory health tests
-#
-# CODE STANDARDS:
-#   - Pytest conventions
-#   - Temp dir isolation via tmp_path
+# =================== AIPass ====================
+# Name: test_memory_health.py
+# Description: Memory health handler tests — .trinity files present, well-shaped and fresh
+# Version: 1.2.0
+# Created: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the memory health handler."""
+"""Tests for apps/handlers/monitoring/memory_health.py — a branch's .trinity files present, valid and fresh."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — os.stat's mtime and json.load's parse; only what the handler does with them
+# seedgo: no-test-needed(constant) — FRESHNESS_WARNING_DAYS / FRESHNESS_RED_DAYS; each threshold test passes its own
 
 import json
 import os
@@ -90,7 +86,7 @@ class TestCheckMemoryFilesExist:
     def test_all_files_present(self, tmp_path: Path) -> None:
         """All required and optional files present returns clean result."""
         branch = _setup_full_branch(tmp_path)
-        result = mh.check_memory_files_exist(str(branch), "TESTBRANCH")
+        result = mh.check_memory_files_exist(str(branch))
 
         assert result["all_required_present"] is True
         assert result["missing_required"] == []
@@ -102,7 +98,7 @@ class TestCheckMemoryFilesExist:
         """Empty directory has all files missing."""
         branch = tmp_path / "EMPTY"
         branch.mkdir()
-        result = mh.check_memory_files_exist(str(branch), "EMPTY")
+        result = mh.check_memory_files_exist(str(branch))
 
         assert result["all_required_present"] is False
         assert ".trinity/local.json" in result["missing_required"]
@@ -116,7 +112,7 @@ class TestCheckMemoryFilesExist:
         branch.mkdir()
         (branch / "README.md").write_text("# Readme", encoding="utf-8")
 
-        result = mh.check_memory_files_exist(str(branch), "PARTIAL")
+        result = mh.check_memory_files_exist(str(branch))
 
         assert result["all_required_present"] is False
         assert ".trinity/local.json" in result["missing_required"]
@@ -129,7 +125,7 @@ class TestCheckMemoryFilesExist:
         trinity.mkdir(parents=True)
         _write_json(trinity / "local.json", {})
 
-        result = mh.check_memory_files_exist(str(branch), "NO_README")
+        result = mh.check_memory_files_exist(str(branch))
 
         assert result["all_required_present"] is False
         assert "README.md" in result["missing_required"]
@@ -142,7 +138,7 @@ class TestCheckMemoryFilesExist:
         trinity.mkdir(parents=True)
         _write_json(trinity / "observations.json", {})
 
-        result = mh.check_memory_files_exist(str(branch), "WITH_OBS")
+        result = mh.check_memory_files_exist(str(branch))
 
         assert result["optional"][".trinity/observations.json"] is True
         assert ".trinity/observations.json" not in result["missing_optional"]
@@ -153,7 +149,7 @@ class TestCheckMemoryFilesExist:
         branch.mkdir()
         _write_json(branch / "DASHBOARD.local.json", {})
 
-        result = mh.check_memory_files_exist(str(branch), "WITH_DASH")
+        result = mh.check_memory_files_exist(str(branch))
 
         assert result["optional"]["DASHBOARD.local.json"] is True
         assert "DASHBOARD.local.json" not in result["missing_optional"]
@@ -164,7 +160,7 @@ class TestCheckMemoryFilesExist:
         branch.mkdir()
         (branch / "README.md").mkdir()  # directory, not file
 
-        result = mh.check_memory_files_exist(str(branch), "DIR_TRICK")
+        result = mh.check_memory_files_exist(str(branch))
 
         assert result["required"]["README.md"] is False
         assert "README.md" in result["missing_required"]
@@ -424,14 +420,18 @@ class TestCheckFreshness:
         assert result["status"] == "OK"
 
     def test_days_ago_is_rounded(self, tmp_path: Path) -> None:
-        """days_ago value is a numeric type."""
+        """days_ago value is a numeric type, rounded to two places.
+
+        Mutant killed: round(days_ago, 2) removed.
+        """
         f = tmp_path / "rounded.json"
         f.write_text("{}", encoding="utf-8")
+        stamp = time.time() - (1.23456 * 86400)
+        os.utime(f, (stamp, stamp))
 
         result = mh.check_freshness(str(f))
 
-        assert result["days_ago"] is not None
-        assert isinstance(result["days_ago"], (int, float))
+        assert result["days_ago"] == 1.23
 
 
 # =============================================
@@ -627,11 +627,13 @@ class TestRealTrinityFiles:
 
         Freshness and optional-file status are free to vary; a structure issue
         on a healthy, fully-populated branch is the noise this replaced.
+        Mutant killed: the log_operation call removed from get_memory_health_status.
         """
         branch = _setup_full_branch(tmp_path)
 
-        with patch.object(mh.json_handler, "log_operation"):
+        with patch.object(mh.json_handler, "log_operation") as log:
             result = mh.get_memory_health_status(str(branch), "DAEMON")
+        log.assert_called_once_with("memory_health_check", {"branch": "DAEMON"})
 
         # The floor, and it pins names rather than a count. An empty
         # structure_checks would make the loop a silent pass, and a health

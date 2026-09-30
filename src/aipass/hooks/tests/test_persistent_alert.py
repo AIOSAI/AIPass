@@ -1,20 +1,24 @@
 # =================== AIPass ====================
 # Name: test_persistent_alert.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for handlers/prompt/persistent_alert.py and modules/alert_dismiss.py.
+"""Tests for apps/handlers/prompt/persistent_alert.py and apps/modules/alert_dismiss.py."""
 
-A banner announces on arrival and then repeats only on the cadence beat, so the
-gate is held open for every test here and TestAlertCadence pins the gate itself.
-The announce guards are redirected into tmp for the same reason: they are keyed
-by the LIVE session id, so on a real seat the suite read guard files written by
-the session running it.
-"""
+# A banner announces on arrival and then repeats only on the cadence beat, so the
+# gate is held open for every test here and TestAlertCadence pins the gate itself.
+# The announce guards are redirected into tmp for the same reason: they are keyed
+# by the LIVE session id, so on a real seat the suite read guard files written by
+# the session running it.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/prompt/persistent_alert.py and modules/alert_dismiss.py parse and import
+# seedgo: no-test-needed(constant) — HELP_COMMANDS' display strings in alert_dismiss
+# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing the default guard directory
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -22,6 +26,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from aipass.hooks.apps.handlers.prompt import persistent_alert
+from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
+from aipass.hooks.apps.modules.alert_dismiss import _dismiss_alert, handle_command
 
 _MODULE = "aipass.hooks.apps.handlers.prompt.persistent_alert"
 _CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
@@ -33,7 +41,8 @@ def _isolated_guards_and_open_beat(tmp_path, monkeypatch):
     guards = tmp_path / "alert-guards"
     guards.mkdir()
     monkeypatch.setattr(f"{_MODULE}._GUARD_DIR", guards)
-    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda *_a, **_k: True)
+    # Open only for the alert loader's own beat: a handler asking the wrong loader stays shut.
+    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda loader_name, *_a, **_k: loader_name == "alert")
 
 
 def _make_alert(
@@ -68,7 +77,6 @@ class TestPersistentAlertHandler:
     """Banner injection behavior."""
 
     def test_banner_injected_when_alerts_exist(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -86,7 +94,6 @@ class TestPersistentAlertHandler:
         assert "drone @hooks dismiss" in result["stdout"]
 
     def test_no_banner_when_no_alerts_file(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -101,7 +108,6 @@ class TestPersistentAlertHandler:
         assert result["exit_code"] == 0
 
     def test_no_banner_when_empty_alerts(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -116,7 +122,6 @@ class TestPersistentAlertHandler:
         assert result["stdout"] == ""
 
     def test_no_banner_when_no_aipass_dir(self):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         with patch(
             "aipass.hooks.apps.handlers.prompt.persistent_alert._find_aipass_dir",
@@ -128,7 +133,6 @@ class TestPersistentAlertHandler:
         assert result["exit_code"] == 0
 
     def test_multiple_alerts_all_shown(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -150,7 +154,6 @@ class TestPersistentAlertHandler:
         assert "[CRITICAL] Second" in result["stdout"]
 
     def test_source_and_id_in_banner(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -166,7 +169,6 @@ class TestPersistentAlertHandler:
         assert "abc-123" in result["stdout"]
 
     def test_body_included_in_banner(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -181,7 +183,6 @@ class TestPersistentAlertHandler:
         assert "Log rate exceeds 50/s" in result["stdout"]
 
     def test_no_body_line_when_body_empty(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -202,7 +203,6 @@ class TestExpiredAlertCleanup:
     """Auto-cleaning of expired alerts."""
 
     def test_expired_alerts_removed(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -224,12 +224,11 @@ class TestExpiredAlertCleanup:
         assert "active" in result["stdout"]
         assert "expired" not in result["stdout"]
 
-        saved = json.loads((aipass_dir / "alerts.json").read_text())
+        saved = json.loads((aipass_dir / "alerts.json").read_text(encoding="utf-8"))
         assert len(saved["alerts"]) == 1
         assert saved["alerts"][0]["id"] == "active"
 
     def test_all_expired_returns_empty(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -245,7 +244,6 @@ class TestExpiredAlertCleanup:
         assert result["stdout"] == ""
 
     def test_future_expiry_kept(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -261,7 +259,6 @@ class TestExpiredAlertCleanup:
         assert "still-valid" in result["stdout"]
 
     def test_corrupt_json_returns_empty(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -281,7 +278,6 @@ class TestAlertSound:
     """Sound fires once per alert per session (session-keyed tempdir guard)."""
 
     def test_sound_on_first_injection(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -297,7 +293,6 @@ class TestAlertSound:
         assert "1 active alert" in result["sound"]
 
     def test_no_sound_on_repeat_injection(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -341,7 +336,6 @@ class TestAlertSound:
         importlib.reload(persistent_alert)
 
     def test_sound_on_new_alert_added(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -371,7 +365,6 @@ class TestAlertSound:
         assert "2 active alerts" in result["sound"]
 
     def test_different_sessions_both_hear_sound(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -388,7 +381,6 @@ class TestAlertSound:
         assert "sound" in second
 
     def test_no_sound_when_no_alerts(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -407,7 +399,6 @@ class TestAlertBannerCap:
     """Banner truncates at _MAX_ALERTS_SHOWN with a hidden-count note."""
 
     def test_cap_truncates_and_notes_hidden_count(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -426,7 +417,6 @@ class TestAlertBannerCap:
         assert "...and 3 more" in result["stdout"]
 
     def test_under_cap_no_hidden_note(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -445,7 +435,6 @@ class TestAlertBodyCap:
     """DPLAN-0347 row 3: a body is cut at 300 chars, and the cut says where the full text lives."""
 
     def _banner(self, tmp_path, body):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -482,10 +471,9 @@ class TestAlertCadence:
         return aipass_dir
 
     def test_arrival_announces_even_when_the_beat_says_skip(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = self._seat(tmp_path)
-        monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda *_a, **_k: False)
+        monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda loader_name, *_a, **_k: loader_name != "alert")
         with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
             result = persistent_alert.handle({"session_id": "s-arrival"})
 
@@ -493,7 +481,6 @@ class TestAlertCadence:
         assert "sound" in result
 
     def test_an_announced_alert_is_held_until_the_beat(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = self._seat(tmp_path, alert_id="beat-2")
         seen: list[str] = []
@@ -511,7 +498,6 @@ class TestAlertCadence:
         assert result == {"stdout": "", "exit_code": 0}
 
     def test_the_beat_re_injects_the_standing_alert(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = self._seat(tmp_path, alert_id="beat-3")
         with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
@@ -523,7 +509,6 @@ class TestAlertCadence:
 
     def test_a_cadence_failure_keeps_the_banner_and_warns(self, tmp_path, monkeypatch, caplog):
         """Fail-open, loudly: an alert nobody sees is worse than one seen too often."""
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = self._seat(tmp_path, alert_id="beat-4")
 
@@ -543,7 +528,6 @@ class TestAlertDismiss:
     """drone @hooks dismiss behavior."""
 
     def test_dismiss_removes_by_id(self, tmp_path):
-        from aipass.hooks.apps.modules.alert_dismiss import _dismiss_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -562,12 +546,11 @@ class TestAlertDismiss:
             result = _dismiss_alert("remove")
 
         assert result is True
-        saved = json.loads((aipass_dir / "alerts.json").read_text())
+        saved = json.loads((aipass_dir / "alerts.json").read_text(encoding="utf-8"))
         assert len(saved["alerts"]) == 1
         assert saved["alerts"][0]["id"] == "keep"
 
     def test_dismiss_nonexistent_returns_false(self, tmp_path):
-        from aipass.hooks.apps.modules.alert_dismiss import _dismiss_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -582,7 +565,6 @@ class TestAlertDismiss:
         assert result is False
 
     def test_dismiss_no_alerts_file(self, tmp_path):
-        from aipass.hooks.apps.modules.alert_dismiss import _dismiss_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -596,7 +578,6 @@ class TestAlertDismiss:
         assert result is False
 
     def test_dismiss_no_aipass_dir(self):
-        from aipass.hooks.apps.modules.alert_dismiss import _dismiss_alert
 
         with patch(
             "aipass.hooks.apps.modules.alert_dismiss._find_aipass_dir",
@@ -607,7 +588,6 @@ class TestAlertDismiss:
         assert result is False
 
     def test_handle_command_routes_dismiss(self, tmp_path):
-        from aipass.hooks.apps.modules.alert_dismiss import handle_command
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -620,15 +600,17 @@ class TestAlertDismiss:
             result = handle_command("dismiss", ["cmd-test"])
 
         assert result is True
-        saved = json.loads((aipass_dir / "alerts.json").read_text())
+        saved = json.loads((aipass_dir / "alerts.json").read_text(encoding="utf-8"))
         assert len(saved["alerts"]) == 0
 
     def test_handle_command_ignores_other_commands(self):
-        from aipass.hooks.apps.modules.alert_dismiss import handle_command
 
         assert handle_command("status", []) is False
 
-    def test_handle_command_help(self):
-        from aipass.hooks.apps.modules.alert_dismiss import handle_command
+    def test_handle_command_help(self, capsys):
+        """--help prints the help screen and dismisses nothing - not even an id named --help."""
+        with patch("aipass.hooks.apps.modules.alert_dismiss._dismiss_alert") as mock_dismiss:
+            assert handle_command("dismiss", ["--help"]) is True
 
-        assert handle_command("dismiss", ["--help"]) is True
+        assert "dismiss — Remove an alert" in capsys.readouterr().err
+        mock_dismiss.assert_not_called()

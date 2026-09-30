@@ -1,8 +1,11 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_space_catchup.py - Space Ops, Room State Extras, Catchup & Search Tests
+# Description: Tests for apps/handlers/rooms/space_ops.py, room_state_ops.py and search/database queries
 # Date: 2026-03-29
 # Version: 1.0.0
+# Created: 2026-03-29
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -15,13 +18,13 @@
 #   - Mocks prax logger, json_handler, get_db, close_db as needed
 # =============================================
 
-"""
-Unit tests for space_ops, room_state personality setters, catchup queries,
-FTS sync/backfill, and room log export.
-"""
+"""Tests for apps/handlers/rooms/space_ops.py, room_state_ops.py and apps/handlers/search/search_queries.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/rooms/, search/, database/ parses and imports
 
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 
 from aipass.commons.apps.handlers.rooms.room_state_ops import (
@@ -67,7 +70,8 @@ def _seed_agent_and_post(conn: sqlite3.Connection) -> int:
         ("Test Post", "Some interesting content here", "general", "TEST_BRANCH"),
     )
     conn.commit()
-    return cursor.lastrowid  # type: ignore[return-value]
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
 
 
 def _seed_comment(conn: sqlite3.Connection, post_id: int, content: str = "A comment") -> int:
@@ -77,7 +81,8 @@ def _seed_comment(conn: sqlite3.Connection, post_id: int, content: str = "A comm
         (post_id, "TEST_BRANCH", content),
     )
     conn.commit()
-    return cursor.lastrowid  # type: ignore[return-value]
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
 
 
 # =============================================================================
@@ -85,8 +90,7 @@ def _seed_comment(conn: sqlite3.Connection, post_id: int, content: str = "A comm
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.rooms.room_state_ops.logger")
-def test_set_mood(mock_logger: object, initialized_db: sqlite3.Connection) -> None:
+def test_set_mood(initialized_db: sqlite3.Connection) -> None:
     """set_mood should update the mood column on a room."""
     ok = set_mood(initialized_db, "general", "celebratory")
     assert ok is True
@@ -95,8 +99,7 @@ def test_set_mood(mock_logger: object, initialized_db: sqlite3.Connection) -> No
     assert row["mood"] == "celebratory"
 
 
-@patch("aipass.commons.apps.handlers.rooms.room_state_ops.logger")
-def test_set_flavor(mock_logger: object, initialized_db: sqlite3.Connection) -> None:
+def test_set_flavor(initialized_db: sqlite3.Connection) -> None:
     """set_flavor should update the flavor_text column on a room."""
     ok = set_flavor(initialized_db, "general", "A cozy gathering place")
     assert ok is True
@@ -105,8 +108,7 @@ def test_set_flavor(mock_logger: object, initialized_db: sqlite3.Connection) -> 
     assert row["flavor_text"] == "A cozy gathering place"
 
 
-@patch("aipass.commons.apps.handlers.rooms.room_state_ops.logger")
-def test_set_entrance(mock_logger: object, initialized_db: sqlite3.Connection) -> None:
+def test_set_entrance(initialized_db: sqlite3.Connection) -> None:
     """set_entrance should update the entrance_message column on a room."""
     ok = set_entrance(initialized_db, "general", "Welcome, traveler!")
     assert ok is True
@@ -121,18 +123,16 @@ def test_set_entrance(mock_logger: object, initialized_db: sqlite3.Connection) -
 
 
 @patch("aipass.commons.apps.handlers.rooms.space_ops.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.rooms.space_ops.logger")
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
 def test_get_room_enter_data(
-    mock_get_db: object,
+    mock_get_db: MagicMock,
     mock_close: object,
-    mock_logger: object,
     mock_json: object,
     initialized_db: sqlite3.Connection,
 ) -> None:
     """get_room_enter_data should return room info, post count, and decorations."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
     _seed_agent_and_post(initialized_db)
 
     result = get_room_enter_data("general")
@@ -144,17 +144,15 @@ def test_get_room_enter_data(
     assert isinstance(result["decorations"], dict)
 
 
-@patch("aipass.commons.apps.handlers.rooms.space_ops.logger")
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
 def test_record_visit(
-    mock_get_db: object,
+    mock_get_db: MagicMock,
     mock_close: object,
-    mock_logger: object,
     initialized_db: sqlite3.Connection,
 ) -> None:
     """record_visit should insert a row into room_visits."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
 
     record_visit("general", "TEST_BRANCH")
 
@@ -166,17 +164,15 @@ def test_record_visit(
     assert row["visitor"] == "TEST_BRANCH"
 
 
-@patch("aipass.commons.apps.handlers.rooms.space_ops.logger")
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
 def test_get_room_look_data(
-    mock_get_db: object,
+    mock_get_db: MagicMock,
     mock_close: object,
-    mock_logger: object,
     initialized_db: sqlite3.Connection,
 ) -> None:
     """get_room_look_data should return room description and recent posts."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
     _seed_agent_and_post(initialized_db)
 
     result = get_room_look_data("general")
@@ -189,19 +185,17 @@ def test_get_room_look_data(
 
 @patch("aipass.commons.apps.handlers.rooms.room_state_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.rooms.space_ops.logger")
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
 def test_place_decoration(
-    mock_get_db: object,
+    mock_get_db: MagicMock,
     mock_close: object,
-    mock_logger: object,
     mock_json_space: object,
     mock_json_state: object,
     initialized_db: sqlite3.Connection,
 ) -> None:
     """place_decoration should insert a decor_ state key for the room."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
 
     result = place_decoration("general", "potted_plant", "A leafy fern", "TEST_BRANCH")
 
@@ -210,17 +204,15 @@ def test_place_decoration(
     assert result["error"] is None
 
 
-@patch("aipass.commons.apps.handlers.rooms.space_ops.logger")
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
 def test_get_visitors_data(
-    mock_get_db: object,
+    mock_get_db: MagicMock,
     mock_close: object,
-    mock_logger: object,
     initialized_db: sqlite3.Connection,
 ) -> None:
     """get_visitors_data should return visitors from visits and post authors."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
     _seed_agent_and_post(initialized_db)
 
     # Also record a visit

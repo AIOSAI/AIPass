@@ -3,107 +3,112 @@
 # Description: Tests for the roots roster and the widened name fence
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the four-kind name fence and /v1/roots (FPLAN-0443 Phase 1).
+"""Tests for apps/handlers/host/reads.py's four-kind name fence and the /v1/roots route."""
 
-The owner, 2026-08-18: "rn I can only see into agent files... I cant explore
-home. or project files outside agents."
+# Tests for the four-kind name fence and /v1/roots (FPLAN-0443 Phase 1).
+#
+# The owner, 2026-08-18: "rn I can only see into agent files... I cant explore
+# home. or project files outside agents."
+#
+# THE FENCE IS NOT DELETED HERE, IT LEARNS MORE WORDS. The client still sends a
+# NAME and the server still decides what it means; what changed is that there are
+# now four kinds of name instead of one. So every test below that proves a root
+# resolves is paired with one proving the containment underneath still refuses —
+# a wider fence that stopped fencing would be the whole point thrown away.
+#
+# THE EXPOSURE IS ON THE RECORD, not smuggled: with a `home` root and the owner's
+# FULLY OPEN ruling (FPLAN-0443 Notes, his standing S247 line), a read-scope token
+# reads ~/.ssh and friends from the phone. The fixture below builds a `.ssh` and
+# the tests read through it deliberately, because a test suite that quietly
+# avoided the case would leave the ruling undocumented in the one place that runs.
+#
+# Tests — resolve_root, the four kinds:
+# - branch kind answers exactly what resolve_branch_root answers
+# - branch kind with no name is refused (the existing sentence, unchanged)
+# - home kind resolves to the home directory
+# - aipass kind resolves to the seat's own repository root
+# - project kind resolves through @baud's census, never a composed path
+# - project kind matches the census spelling exactly, refusing a near miss
+# - an unknown kind is refused and the sentence names the four
+# - an EMPTY kind is refused here — the branch default lives in the read lane
+# - project kind with no name is refused
+# - census failure is ReadUnavailable in @baud's own words
+# - unknown project name is ReadRefused, not a 503
+# - a census row pointing nowhere is ReadUnavailable
+# - a census row naming no path is ReadUnavailable, never the server's cwd
+# - a registry row naming no path is ReadUnavailable, never the server's cwd
+# - a home that is not a directory is ReadUnavailable
+#
+# Tests — kinds that name nothing refuse a name:
+# - a nameless root may name ITSELF (branch=home&root=home) — the carve-out
+# - the stand-in must equal the kind exactly, not merely resemble it
+# - a read stands on home through the stand-in, the wire shape end to end
+# - home with any OTHER name is refused rather than silently ignoring it
+# - aipass with a name is refused
+# - home with a project is refused (a project cannot scope a home directory)
+# - project kind with a project parameter is refused
+# - branch kind still honours project (the foreign-branch lane, untouched)
+#
+# Tests — the fence covers every root:
+# - '..' refused under home
+# - an absolute name refused under a project root
+# - a symlink out of home refused by the post-resolution check
+# - an ordinary nested read under home is allowed (the fence is not a wall)
+#
+# Tests — reads standing on a root:
+# - list_dir on home lists home's own level
+# - read_file on home returns the file's bytes
+# - the answer names the root it stood on
+# - noise directories are still filtered outside a branch
+# - the audit record names the root, so a home read is not indistinguishable
+#   from a branch read in the trail
+#
+# Tests — absent root is today's answer plus the floor (the pin, re-frozen):
+# - list_dir's document is its four keys plus `floor`, nothing else moved
+# - read_file's document is its five keys plus `floor`
+#
+# Tests — the floor (@devpulse's rider, the copy-path button):
+# - every lane carries the absolute path of the root it stood on
+# - the floor is absolute, and follows the ROOT rather than the descent
+# - floor + entry path is a real file — the composition the face performs
+# - a file read carries it too, for the Reader's own button
+# - naming the branch kind explicitly answers the same thing plus the root
+#
+# Tests — the roster:
+# - carries home, aipass and every project the census knows
+# - the anchor project is not published twice under two kinds
+# - labels: home says home, aipass and projects say their own directory
+# - no branch rows — agents already have a door, and a branch row could not
+#   carry the project that qualifies it
+# - a census failure refuses the WHOLE roster rather than serving a partial one
+# - every published row resolves (the roster cannot advertise a floor the fence
+#   would refuse)
+#
+# Tests — the route roll-call (found while adding a door):
+# - every registered /v1 route is named in the record create_app writes
+# - a new door appears in it without being added by hand
+#
+# Tests — routes:
+# - GET /v1/roots: 401 without a token
+# - GET /v1/roots: 200 with the roster
+# - GET /v1/roots: 503 when the census cannot be produced
+# - GET /v1/dir: root=home lists home
+# - GET /v1/dir: branch=home&root=home — the phone's actual request, served
+# - GET /v1/dir: branch=aipass&root=aipass — the other stand-in
+# - GET /v1/files: a file reads through the stand-in
+# - GET /v1/files: root=home reads a file
+# - GET /v1/dir: an unknown root is 400 in the error envelope
+# - GET /v1/dir: root=home with a branch is 400, never a silent drop
+# - GET /v1/files: no root and no branch is 400 from the fence, not 422 from
+#   validation — the one visible shift this round
+# - GET /v1/dir: no root at all answers the pre-roots document exactly
 
-THE FENCE IS NOT DELETED HERE, IT LEARNS MORE WORDS. The client still sends a
-NAME and the server still decides what it means; what changed is that there are
-now four kinds of name instead of one. So every test below that proves a root
-resolves is paired with one proving the containment underneath still refuses —
-a wider fence that stopped fencing would be the whole point thrown away.
-
-THE EXPOSURE IS ON THE RECORD, not smuggled: with a `home` root and the owner's
-FULLY OPEN ruling (FPLAN-0443 Notes, his standing S247 line), a read-scope token
-reads ~/.ssh and friends from the phone. The fixture below builds a `.ssh` and
-the tests read through it deliberately, because a test suite that quietly
-avoided the case would leave the ruling undocumented in the one place that runs.
-
-Tests — resolve_root, the four kinds:
-- branch kind answers exactly what resolve_branch_root answers
-- branch kind with no name is refused (the existing sentence, unchanged)
-- home kind resolves to the home directory
-- aipass kind resolves to the seat's own repository root
-- project kind resolves through @baud's census, never a composed path
-- project kind matches the census spelling exactly, refusing a near miss
-- an unknown kind is refused and the sentence names the four
-- an EMPTY kind is refused here — the branch default lives in the read lane
-- project kind with no name is refused
-- census failure is ReadUnavailable in @baud's own words
-- unknown project name is ReadRefused, not a 503
-- a census row pointing nowhere is ReadUnavailable
-- a census row naming no path is ReadUnavailable, never the server's cwd
-- a registry row naming no path is ReadUnavailable, never the server's cwd
-- a home that is not a directory is ReadUnavailable
-
-Tests — kinds that name nothing refuse a name:
-- a nameless root may name ITSELF (branch=home&root=home) — the carve-out
-- the stand-in must equal the kind exactly, not merely resemble it
-- a read stands on home through the stand-in, the wire shape end to end
-- home with any OTHER name is refused rather than silently ignoring it
-- aipass with a name is refused
-- home with a project is refused (a project cannot scope a home directory)
-- project kind with a project parameter is refused
-- branch kind still honours project (the foreign-branch lane, untouched)
-
-Tests — the fence covers every root:
-- '..' refused under home
-- an absolute name refused under a project root
-- a symlink out of home refused by the post-resolution check
-- an ordinary nested read under home is allowed (the fence is not a wall)
-
-Tests — reads standing on a root:
-- list_dir on home lists home's own level
-- read_file on home returns the file's bytes
-- the answer names the root it stood on
-- noise directories are still filtered outside a branch
-- the audit record names the root, so a home read is not indistinguishable
-  from a branch read in the trail
-
-Tests — absent root is today's answer plus the floor (the pin, re-frozen):
-- list_dir's document is its four keys plus `floor`, nothing else moved
-- read_file's document is its five keys plus `floor`
-
-Tests — the floor (@devpulse's rider, the copy-path button):
-- every lane carries the absolute path of the root it stood on
-- the floor is absolute, and follows the ROOT rather than the descent
-- floor + entry path is a real file — the composition the face performs
-- a file read carries it too, for the Reader's own button
-- naming the branch kind explicitly answers the same thing plus the root
-
-Tests — the roster:
-- carries home, aipass and every project the census knows
-- the anchor project is not published twice under two kinds
-- labels: home says home, aipass and projects say their own directory
-- no branch rows — agents already have a door, and a branch row could not
-  carry the project that qualifies it
-- a census failure refuses the WHOLE roster rather than serving a partial one
-- every published row resolves (the roster cannot advertise a floor the fence
-  would refuse)
-
-Tests — the route roll-call (found while adding a door):
-- every registered /v1 route is named in the record create_app writes
-- a new door appears in it without being added by hand
-
-Tests — routes:
-- GET /v1/roots: 401 without a token
-- GET /v1/roots: 200 with the roster
-- GET /v1/roots: 503 when the census cannot be produced
-- GET /v1/dir: root=home lists home
-- GET /v1/dir: branch=home&root=home — the phone's actual request, served
-- GET /v1/dir: branch=aipass&root=aipass — the other stand-in
-- GET /v1/files: a file reads through the stand-in
-- GET /v1/files: root=home reads a file
-- GET /v1/dir: an unknown root is 400 in the error envelope
-- GET /v1/dir: root=home with a branch is 400, never a silent drop
-- GET /v1/files: no root and no branch is 400 from the fence, not 422 from
-  validation — the one visible shift this round
-- GET /v1/dir: no root at all answers the pre-roots document exactly
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(duplicate_test) — the branch read lane with no root, tests/test_host_read_lane.py
+# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api.py
 
 import json
 import sys
@@ -339,7 +344,7 @@ class TestKindsThatNameNothingRefuseAName:
     lets a caller believe an answer is scoped when it is not.
     """
 
-    def test_a_nameless_root_may_name_ITSELF(self, world: dict) -> None:
+    def test_a_nameless_root_may_name_itself(self, world: dict) -> None:
         """THE CARVE-OUT (@devpulse's ruling, 2026-08-18), measured not guessed.
 
         @baud's picker sends the first path component for EVERY root, and the
@@ -356,7 +361,7 @@ class TestKindsThatNameNothingRefuseAName:
         assert host_reads.resolve_root(host_reads.ROOT_HOME, host_reads.ROOT_HOME) == world["home"].resolve()
         assert host_reads.resolve_root(host_reads.ROOT_AIPASS, host_reads.ROOT_AIPASS) == world["root"].resolve()
 
-    def test_the_stand_in_is_the_kind_EXACTLY(self, world: dict) -> None:
+    def test_the_stand_in_is_the_kind_exactly(self, world: dict) -> None:
         """Equal to the kind, not merely close to it. The word came from a
         roster this server published, so an exact comparison is a comparison
         against our own spelling — the same rule the project names follow.

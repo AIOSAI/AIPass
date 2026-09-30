@@ -1,25 +1,16 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_machine_vitals.py - The machine_vitals() contract
-# Date: 2026-09-12
+# =================== AIPass ====================
+# Name: test_machine_vitals.py
+# Description: The machine_vitals() contract
 # Version: 1.1.0
+# Created: 2026-09-12
+# Modified: 2026-09-27
 # Category: skills/tests
 # =============================================
 
-"""The machine_vitals() contract on the system_status skill (FPLAN-0561 row 1).
+"""Tests for lib/system_status/handler.py's machine_vitals() contract (FPLAN-0561 row 1)."""
 
-The host API relays this dict verbatim and BAUD's phone draws it, so what is
-pinned here is the shape a consumer reads: the section set, the closed reason
-codes and their sentences, per-section absence, the whole-function refusal, the
-baseline the skill owns, the sensor allowlist, the read-only sysfs range read,
-a manufactured macOS, the no_range branch, and the per-core cpu read
-(FPLAN-0586).
-
-Nothing here asks the live machine for a reading. psutil is a stand-in with
-numbers this host does not have, the clock is one the test moves, and the sysfs
-tree is built in tmp_path - so the suite is green on a host with no sensor chips
-at all, and a case can only pass if the handler asked the stand-in.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the skill's handler module parses and imports
 
 import builtins
 import io
@@ -52,6 +43,8 @@ _Swap = namedtuple("sswap", ["total", "used", "free", "percent", "sin", "sout"])
 _Temp = namedtuple("shwtemp", ["label", "current", "high", "critical"])
 _Fan = namedtuple("sfan", ["label", "current"])
 
+# The host API relays this dict verbatim and BAUD's phone draws it, so what is
+# pinned here is the shape a consumer reads.
 # The contract, written out rather than read back from the handler - a pin that
 # mirrors the module's own table can never disagree with it.
 BASE_KEYS = ["available", "reason", "sentence", "detail"]
@@ -313,6 +306,10 @@ def fresh_process(monkeypatch):
     monkeypatch.setattr(status, "_BASELINES", {})
 
 
+# Nothing here asks the live machine for a reading. psutil is a stand-in with
+# numbers this host does not have, the clock is one the test moves, and the
+# sysfs tree is built in tmp_path - so the suite is green on a host with no
+# sensor chips at all, and a case can only pass if the handler asked the stand-in.
 @pytest.fixture()
 def clock(monkeypatch):
     fake = _Clock()

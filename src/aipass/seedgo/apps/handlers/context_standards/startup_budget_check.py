@@ -120,7 +120,7 @@ from aipass.seedgo.apps.handlers.module_root import module_file
 
 try:
     from aipass.hooks.apps.modules import grounding_content as hooks_grounding
-except Exception as exc:  # noqa: BLE001 - an unimportable owner is a row, not a dead pack
+except Exception as exc:  # an unimportable owner is a row, not a dead pack
     hooks_grounding = None
     _HOOKS_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 else:
@@ -128,7 +128,7 @@ else:
 
 try:
     from aipass.prax.apps.modules import dashboard as prax_dashboard
-except Exception as exc:  # noqa: BLE001
+except Exception as exc:
     prax_dashboard = None
     _PRAX_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 else:

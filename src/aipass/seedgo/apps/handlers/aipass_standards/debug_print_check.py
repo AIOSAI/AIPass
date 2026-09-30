@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: debug_print_check.py
 # Description: Debug Print Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -22,6 +22,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: a stray print in a test pollutes the same stdout a test asserts on.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 # Matches a bare print( call: not preceded by a word char, dot, or #
@@ -169,6 +171,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "Debug print calls",
                     "passed": True,
                     "message": "__init__.py skipped",
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -184,6 +187,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "Debug print calls",
                     "passed": True,
                     "message": "Test file skipped",
+                    "declined": True,
                 }
             ],
             "score": 100,

@@ -3,10 +3,14 @@
 # Description: Tests for feedback module command routing
 # Version: 1.0.0
 # Created: 2026-04-11
-# Modified: 2026-07-10
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for feedback module — command routing via handle_command()."""
+"""Tests for apps/modules/feedback.py, driven through handle_command()."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(help_flag_safety) — that handle_command calls _wants_help before acting
+# seedgo: no-test-needed(constant) — the Rich colour tags in HELP_TEXT and print_introspection()
 
 from unittest.mock import patch
 
@@ -85,25 +89,27 @@ class TestCommandRouting:
         assert feedback_module.handle_command("help", []) is False
         assert feedback_module.handle_command("mail", []) is False
 
-    def test_bare_feedback_shows_summary(self, empty_inbox):
-        """Should show summary for bare 'feedback' command."""
-        result = feedback_module.handle_command("feedback", [])
-        assert result is True
+    def test_bare_feedback_shows_summary(self, empty_inbox, capsys):
+        """Bare 'feedback' prints the inbox summary (mutant: the summary line dropped)."""
+        assert feedback_module.handle_command("feedback", []) is True
+        assert "Feedback: No feedback messages." in capsys.readouterr().err
 
-    def test_feedback_help(self, empty_inbox):
-        """Should show help text."""
-        result = feedback_module.handle_command("feedback", ["--help"])
-        assert result is True
+    def test_feedback_help(self, empty_inbox, capsys):
+        """--help prints the usage table (mutant: the help print dropped)."""
+        assert feedback_module.handle_command("feedback", ["--help"]) is True
+        assert "feedback clear --all            Remove all read messages" in capsys.readouterr().out
 
-    def test_feedback_help_alias(self, empty_inbox):
-        """Should accept 'help' as alias for --help."""
-        result = feedback_module.handle_command("feedback", ["help"])
-        assert result is True
+    def test_feedback_help_alias(self, empty_inbox, capsys):
+        """'help' is an alias for --help (mutant: 'help' dropped from _wants_help)."""
+        assert feedback_module.handle_command("feedback", ["help"]) is True
+        assert "feedback clear --all            Remove all read messages" in capsys.readouterr().out
 
-    def test_feedback_inbox(self, populated_inbox):
-        """Should list messages."""
-        result = feedback_module.handle_command("feedback", ["inbox"])
-        assert result is True
+    def test_feedback_inbox(self, populated_inbox, capsys):
+        """'inbox' lists every message by id (mutant: inbox prints the summary instead)."""
+        assert feedback_module.handle_command("feedback", ["inbox"]) is True
+        err = capsys.readouterr().err
+        assert "aaa11111" in err
+        assert "bbb22222" in err
 
     def test_feedback_view(self, populated_inbox):
         """Should view a specific message."""
@@ -115,10 +121,10 @@ class TestCommandRouting:
         msg = next(m for m in data["messages"] if m["id"] == "aaa11111")
         assert msg["read"] is True
 
-    def test_feedback_view_no_id(self, populated_inbox):
-        """Should handle view without ID gracefully."""
-        result = feedback_module.handle_command("feedback", ["view"])
-        assert result is True
+    def test_feedback_view_no_id(self, populated_inbox, capsys):
+        """view without an id prints its usage (mutant: the usage error dropped)."""
+        assert feedback_module.handle_command("feedback", ["view"]) is True
+        assert "Usage: feedback view <id>" in capsys.readouterr().err
 
     def test_feedback_clear(self, populated_inbox):
         """Should clear a specific message."""
@@ -137,10 +143,11 @@ class TestCommandRouting:
         data = storage.load_inbox()
         assert all(not m["read"] for m in data["messages"])
 
-    def test_feedback_clear_no_args(self, populated_inbox):
-        """Should handle clear without args gracefully."""
-        result = feedback_module.handle_command("feedback", ["clear"])
-        assert result is True
+    def test_feedback_clear_no_args(self, populated_inbox, capsys):
+        """clear without args prints its usage and removes nothing (mutant: the usage error dropped)."""
+        assert feedback_module.handle_command("feedback", ["clear"]) is True
+        assert "Usage: feedback clear <id> | feedback clear --all" in capsys.readouterr().err
+        assert [m["id"] for m in storage.load_inbox()["messages"]] == ["aaa11111", "bbb22222"]
 
     def test_feedback_send(self, empty_inbox):
         """Should accept feedback from an agent."""
@@ -177,20 +184,21 @@ class TestCommandRouting:
         assert result is True
         mock_reply.assert_called_once_with("aaa11111", "Good point!")
 
-    def test_feedback_reply_no_args(self, populated_inbox):
-        """Should handle reply with insufficient args."""
-        result = feedback_module.handle_command("feedback", ["reply"])
-        assert result is True  # Handled (shows usage)
+    def test_feedback_reply_no_args(self, populated_inbox, capsys):
+        """reply without args prints its usage (mutant: the usage error dropped)."""
+        assert feedback_module.handle_command("feedback", ["reply"]) is True
+        assert 'Usage: feedback reply <id> "message"' in capsys.readouterr().err
 
-    def test_feedback_reply_no_body(self, populated_inbox):
-        """Should handle reply with ID but no body."""
-        result = feedback_module.handle_command("feedback", ["reply", "aaa11111"])
-        assert result is True  # Handled (shows usage)
+    def test_feedback_reply_no_body(self, populated_inbox, capsys):
+        """reply with an id but no body prints its usage and adds no reply (mutant: `< 2` -> `< 1`)."""
+        assert feedback_module.handle_command("feedback", ["reply", "aaa11111"]) is True
+        assert 'Usage: feedback reply <id> "message"' in capsys.readouterr().err
+        assert storage.load_inbox()["messages"][0]["thread"] == []
 
-    def test_unknown_subcommand(self, empty_inbox):
-        """Should handle unknown subcommands gracefully."""
-        result = feedback_module.handle_command("feedback", ["nonexistent"])
-        assert result is True  # Handled (shows error + hint)
+    def test_unknown_subcommand(self, empty_inbox, capsys):
+        """An unknown subcommand is refused by name (mutant: the error dropped)."""
+        assert feedback_module.handle_command("feedback", ["nonexistent"]) is True
+        assert "Unknown feedback subcommand: nonexistent" in capsys.readouterr().err
 
 
 class TestOwnerGate:
@@ -215,11 +223,12 @@ class TestOwnerGate:
         data = storage.load_inbox()
         assert data["total_messages"] == 1  # send bypassed the gate
 
-    def test_help_open_for_non_owner(self, empty_inbox):
-        """--help bypasses the owner gate."""
+    def test_help_open_for_non_owner(self, empty_inbox, capsys):
+        """--help bypasses the owner gate (mutant: the gate moved above the help check)."""
         with patch.object(feedback_module, "_guard_caller", return_value=False):
             result = feedback_module.handle_command("feedback", ["--help"])
         assert result is True
+        assert "feedback --help                 Show this help" in capsys.readouterr().out
 
     def test_help_goes_to_stdout_so_a_redirect_captures_it(self, empty_inbox, capsys):
         """`feedback --help > usage.txt` used to write an EMPTY FILE.

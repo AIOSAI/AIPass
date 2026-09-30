@@ -1,34 +1,39 @@
 # =================== AIPass ====================
 # Name: test_json_durability.py
-# Version: 2.0.0
+# Version: 2.0.1
 # Description: Torn-write durability tests for hooks' arbitrary-path json module
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-16
-# Modified: 2026-09-03
+# Modified: 2026-09-28
 # =============================================
 
-"""Torn-write durability for the json files module.
+"""Tests for apps/handlers/json/files.py's torn-write durability."""
 
-Axis 1 of the fleet defect: a write that truncates the target in place leaves a
-window where every concurrent reader sees an empty file. Measured on the
-handler this module was carved out of, before the fix: 587 of 1023 reads
-unusable (57.4%), three runs 56.7-57.5%.
+# Torn-write durability for the json files module.
+#
+# Axis 1 of the fleet defect: a write that truncates the target in place leaves a
+# window where every concurrent reader sees an empty file. Measured on the
+# handler this module was carved out of, before the fix: 587 of 1023 reads
+# unusable (57.4%), three runs 56.7-57.5%.
+#
+# DPLAN-0325 moved the nine standard names to the fleet's one json service, whose
+# behaviour seedgo's cross-branch contract pins once for everyone. What stayed
+# here is what stayed in hooks: ``read_json_file`` / ``write_json_file`` and the
+# atomic write beneath them, in ``apps/handlers/json/files.py``. They write
+# the TRUST REGISTRY and a project's alerts file — a torn registry read is every
+# hook in the project going dark — so the mechanism keeps its own pins. The tests
+# that pinned the service half moved verbatim to
+# ``tests/.archive/deleted_2026-09-03_json_durability.py``.
 
-DPLAN-0325 moved the nine standard names to the fleet's one json service, whose
-behaviour seedgo's cross-branch contract pins once for everyone. What stayed
-here is what stayed in hooks: ``read_json_file`` / ``write_json_file`` and the
-atomic write beneath them, in ``apps/handlers/json/files.py``. They write
-the TRUST REGISTRY and a project's alerts file — a torn registry read is every
-hook in the project going dark — so the mechanism keeps its own pins. The tests
-that pinned the service half moved verbatim to
-``tests/.archive/deleted_2026-09-03_json_durability.py``.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(json_handler) — the nine standard json names, pinned by seedgo's cross-branch contract
+# seedgo: no-test-needed(stdlib) — os.replace's atomicity and json.dumps' encoding
+# seedgo: no-test-needed(documentation) — that read_json_file / write_json_file carry docstrings
 
 import json
 import re
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -140,10 +145,14 @@ class TestSourceGuard:
     )
     def test_guard_catches_mutations(self, mutation: str):
         """MUTATION-CHECK: a guard that catches nothing is a green light, not a test."""
-        assert TRUNCATING_OPEN.search(mutation) is not None
+        caught = TRUNCATING_OPEN.search(mutation)
+        # The guard must land on the truncating open call itself, not merely somewhere.
+        assert caught is not None and caught.start() == mutation.index("open(")
 
     def test_guard_catches_write_text_mutation(self):
-        assert WRITE_TEXT.search('json_path.write_text(json.dumps(data), encoding="utf-8")') is not None
+        mutation = 'json_path.write_text(json.dumps(data), encoding="utf-8")'
+        caught = WRITE_TEXT.search(mutation)
+        assert caught is not None and caught.start() == mutation.index(".write_text(")
 
 
 class TestContractPreserved:
@@ -154,7 +163,9 @@ class TestContractPreserved:
     """
 
     def test_write_json_file_returns_none(self, tmp_path: Path):
-        assert json_files.write_json_file(tmp_path / "a.json", {"a": 1}) is None
+        target = tmp_path / "a.json"
+        assert json_files.write_json_file(target, {"a": 1}) is None
+        assert json.loads(target.read_text(encoding="utf-8")) == {"a": 1}
 
     def test_write_json_file_round_trips_non_ascii(self, tmp_path: Path):
         target = tmp_path / "unicode.json"
@@ -207,7 +218,7 @@ class TestConcurrentReadsStayUsable:
                             "filler": "x" * 4000,
                         },
                     )
-            except Exception as error:  # noqa: BLE001 - surfaced through write_failures below
+            except Exception as error:  # surfaced through write_failures below
                 with lock:
                     write_failures.append(error)
 
@@ -225,8 +236,9 @@ class TestConcurrentReadsStayUsable:
                 # models a real reader — no fleet workload spin-reads a config file
                 # — and weakens no content check below. At the top of the pass so
                 # the `continue` paths yield too: a refused open means a replace is
-                # in flight, exactly when re-spinning hurts most.
-                time.sleep(0.001)
+                # in flight, exactly when re-spinning hurts most. An Event wait,
+                # not a sleep: the yield ends the moment the writers finish.
+                stop.wait(0.001)
                 try:
                     raw = target.read_text(encoding="utf-8")
                 except PermissionError:

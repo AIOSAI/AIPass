@@ -1,17 +1,24 @@
 # =================== AIPass ====================
 # Name: test_filesystem_handler.py
 # Description: Unit tests for filesystem_handler.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-29
 # =============================================
 
-"""Unit tests for MonitoringFileHandler.
+"""Tests for apps/handlers/monitoring/filesystem_handler.py."""
 
-Covers: __init__, watchdog event methods, agent activity parsing
-(Claude Code, Codex), branch detection, model tag helpers,
-internal event processing, and display name building.
-"""
+# Unit tests for MonitoringFileHandler.
+#
+# Covers: __init__, watchdog event methods, agent activity parsing
+# (Claude Code, Codex), branch detection, model tag helpers,
+# internal event processing, and display name building.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — should_monitor, covered by tests/test_monitoring_filters.py
+# seedgo: no-test-needed(through_the_command) — get_priority, covered by tests/test_monitoring_filters.py
+# seedgo: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(json_structure) — the shape of __init__'s file_change_handled log_operation record
 
 import importlib
 import json
@@ -25,6 +32,7 @@ _mopen = _mock_file_open
 
 _INJECTED_MODULES = [
     "watchdog",
+    "watchdog.observers",
     "watchdog.events",
     "aipass.prax.apps.handlers.monitoring.event_queue",
     "aipass.prax.apps.handlers.monitoring.branch_detector",
@@ -61,7 +69,10 @@ def _import_filesystem_handler():
         """Stub base class for watchdog handler."""
 
     mock_watchdog_events.FileSystemEventHandler = FakeFileSystemEventHandler
+    # The parent package runs log_watcher, which imports watchdog.observers,
+    # so the stub serves that name too and the file passes when run alone.
     sys.modules["watchdog"] = MagicMock()
+    sys.modules["watchdog.observers"] = MagicMock()
     sys.modules["watchdog.events"] = mock_watchdog_events
 
     # Mock monitoring sub-modules
@@ -253,14 +264,14 @@ class TestOnDeleted:
 class TestOnMoved:
     """Tests for on_moved."""
 
-    def test_move_to_trash(self):
+    def test_move_to_trash(self, tmp_path):
         """Move to Trash should emit deleted event."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
         event = MagicMock()
         event.is_directory = False
         event.src_path = "/some/file.py"
-        event.dest_path = "/home/user/.local/share/Trash/files/file.py"
+        event.dest_path = str(tmp_path / ".local" / "share" / "Trash" / "files" / "file.py")
         with patch.object(handler, "_handle_event") as mock_handle:
             handler.on_moved(event)
             mock_handle.assert_called_once_with("deleted", "/some/file.py")
@@ -332,11 +343,11 @@ class TestOnMoved:
 class TestFormatToolAction:
     """Tests for _format_tool_action static method."""
 
-    def test_read_tool(self):
+    def test_read_tool(self, tmp_path):
         """Should format Read tool with short filename."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._format_tool_action({"name": "Read", "input": {"file_path": "/home/user/src/file.py"}})
+        result = cls._format_tool_action({"name": "Read", "input": {"file_path": str(tmp_path / "src" / "file.py")}})
         assert "Read" in result
         assert "file.py" in result
 
@@ -580,11 +591,11 @@ class TestExtractActionFromEntry:
 class TestBranchFromCwd:
     """Tests for _branch_from_cwd static method."""
 
-    def test_aipass_branch(self):
+    def test_aipass_branch(self, tmp_path):
         """Should extract branch name after aipass in path."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._branch_from_cwd("/home/user/Projects/AIPass/src/aipass/prax")
+        result = cls._branch_from_cwd(str(tmp_path / "Projects" / "AIPass" / "src" / "aipass" / "prax"))
         assert result == "PRAX"
 
     def test_empty_string(self):
@@ -602,18 +613,18 @@ class TestBranchFromCwd:
             result = cls._branch_from_cwd("/opt/src/myproject/subdir")
         assert result == "MYPROJECT"
 
-    def test_no_aipass_no_src(self):
+    def test_no_aipass_no_src(self, tmp_path):
         """Should return None when no recognizable pattern."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._branch_from_cwd("/tmp/random/dir")
+        result = cls._branch_from_cwd(str(tmp_path / "random" / "dir"))
         assert result is None
 
-    def test_aipass_at_end_of_path(self):
+    def test_aipass_at_end_of_path(self, tmp_path):
         """Should return None when aipass is the last segment."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._branch_from_cwd("/home/user/aipass")
+        result = cls._branch_from_cwd(str(tmp_path / "aipass"))
         assert result is None
 
     def test_projects_external_detected(self):
@@ -645,46 +656,47 @@ class TestBranchFromCwd:
 class TestReadCodexCwd:
     """Tests for _read_codex_cwd."""
 
-    def test_reads_cwd_from_session_meta(self):
+    def test_reads_cwd_from_session_meta(self, tmp_path):
         """Should read CWD from first line of Codex JSONL."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        meta_line = json.dumps({"type": "session_meta", "payload": {"cwd": "/home/user/project"}})
+        cwd = str(tmp_path / "project")
+        meta_line = json.dumps({"type": "session_meta", "payload": {"cwd": cwd}})
         with patch("builtins.open", _mopen(read_data=meta_line + "\n")):
-            result = handler._read_codex_cwd("/fake/session.jsonl")
-        assert result == "/home/user/project"
+            result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
+        assert result == cwd
 
-    def test_empty_first_line(self):
+    def test_empty_first_line(self, tmp_path):
         """Should return None for empty first line."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         with patch("builtins.open", _mopen(read_data="\n")):
-            result = handler._read_codex_cwd("/fake/session.jsonl")
+            result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
         assert result is None
 
-    def test_not_session_meta(self):
+    def test_not_session_meta(self, tmp_path):
         """Should return None if first line is not session_meta type."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         meta_line = json.dumps({"type": "event_msg", "payload": {}})
         with patch("builtins.open", _mopen(read_data=meta_line + "\n")):
-            result = handler._read_codex_cwd("/fake/session.jsonl")
+            result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
         assert result is None
 
-    def test_os_error(self):
+    def test_os_error(self, tmp_path):
         """Should return None on OSError."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         with patch("builtins.open", side_effect=OSError("no file")):
-            result = handler._read_codex_cwd("/fake/session.jsonl")
+            result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
         assert result is None
 
-    def test_json_decode_error(self):
+    def test_json_decode_error(self, tmp_path):
         """Should return None on JSONDecodeError."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         with patch("builtins.open", _mopen(read_data="not json\n")):
-            result = handler._read_codex_cwd("/fake/session.jsonl")
+            result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
         assert result is None
 
 
@@ -696,44 +708,44 @@ class TestReadCodexCwd:
 class TestGetCodexBranch:
     """Tests for _get_codex_branch."""
 
-    def test_cached_branch(self):
+    def test_cached_branch(self, tmp_path):
         """Should return cached branch if present."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         handler._session_branches["key1"] = "CACHED"
-        result = handler._get_codex_branch("/fake/file.jsonl", "key1")
+        result = handler._get_codex_branch(str(tmp_path / "file.jsonl"), "key1")
         assert result == "CACHED"
 
-    def test_reads_cwd_and_detects_branch(self):
+    def test_reads_cwd_and_detects_branch(self, tmp_path):
         """Should read CWD and detect branch from it."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         meta_line = json.dumps(
             {
                 "type": "session_meta",
-                "payload": {"cwd": "/home/user/Projects/AIPass/src/aipass/prax"},
+                "payload": {"cwd": str(tmp_path / "Projects" / "AIPass" / "src" / "aipass" / "prax")},
             }
         )
         with patch("builtins.open", _mopen(read_data=meta_line + "\n")):
-            result = handler._get_codex_branch("/fake/file.jsonl", "key2")
+            result = handler._get_codex_branch(str(tmp_path / "file.jsonl"), "key2")
         assert result == "PRAX"
         assert handler._session_branches["key2"] == "PRAX"
 
-    def test_no_cwd_returns_codex(self):
+    def test_no_cwd_returns_codex(self, tmp_path):
         """Should return CODEX when CWD cannot be read."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         with patch("builtins.open", _mopen(read_data="\n")):
-            result = handler._get_codex_branch("/fake/file.jsonl", "key3")
+            result = handler._get_codex_branch(str(tmp_path / "file.jsonl"), "key3")
         assert result == "CODEX"
 
-    def test_cwd_but_no_branch_returns_codex(self):
+    def test_cwd_but_no_branch_returns_codex(self, tmp_path):
         """Should return CODEX when CWD has no branch pattern."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        meta_line = json.dumps({"type": "session_meta", "payload": {"cwd": "/tmp/nowhere"}})
+        meta_line = json.dumps({"type": "session_meta", "payload": {"cwd": str(tmp_path / "nowhere")}})
         with patch("builtins.open", _mopen(read_data=meta_line + "\n")):
-            result = handler._get_codex_branch("/fake/file.jsonl", "key4")
+            result = handler._get_codex_branch(str(tmp_path / "file.jsonl"), "key4")
         assert result == "CODEX"
 
 
@@ -1541,7 +1553,7 @@ class TestCheckCommandIndicator:
 class TestHandleEvent:
     """Tests for _handle_event."""
 
-    def test_basic_file_event(self):
+    def test_basic_file_event(self, tmp_path):
         """Should create and enqueue a file event."""
         mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
@@ -1550,19 +1562,19 @@ class TestHandleEvent:
         mock_bd.detect_branch_from_path.return_value = "PRAX"
         handler._handle_event(
             "modified",
-            "/home/user/src/aipass/prax/apps/test.py",
+            str(tmp_path / "src" / "aipass" / "prax" / "apps" / "test.py"),
         )
         queue.enqueue.assert_called()
 
-    def test_skips_unmonitored_files(self):
+    def test_skips_unmonitored_files(self, tmp_path):
         """Should skip files that should_monitor returns False for."""
         mod, _, _, mock_filters, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
         mock_filters.should_monitor.return_value = False
-        handler._handle_event("modified", "/tmp/ignored.txt")
+        handler._handle_event("modified", str(tmp_path / "ignored.txt"))
         queue.enqueue.assert_not_called()
 
-    def test_claude_code_jsonl(self):
+    def test_claude_code_jsonl(self, tmp_path):
         """Should parse Claude Code JSONL files."""
         mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
@@ -1571,11 +1583,11 @@ class TestHandleEvent:
         with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
             handler._handle_event(
                 "modified",
-                "/home/user/.claude/projects/abc/session.jsonl",
+                str(tmp_path / ".claude" / "projects" / "abc" / "session.jsonl"),
             )
             mock_parse.assert_called_once()
 
-    def test_claude_code_subagent(self):
+    def test_claude_code_subagent(self, tmp_path):
         """Should tag subagent JSONL files with agent suffix."""
         mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
@@ -1584,12 +1596,12 @@ class TestHandleEvent:
         with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
             handler._handle_event(
                 "modified",
-                "/home/user/.claude/projects/abc/subagents/session.jsonl",
+                str(tmp_path / ".claude" / "projects" / "abc" / "subagents" / "session.jsonl"),
             )
             call_args = mock_parse.call_args
             assert "PRAX agent" in str(call_args)
 
-    def test_codex_jsonl(self):
+    def test_codex_jsonl(self, tmp_path):
         """Should parse Codex JSONL files."""
         mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
@@ -1603,11 +1615,60 @@ class TestHandleEvent:
             ) as mock_parse:
                 handler._handle_event(
                     "modified",
-                    "/home/user/.codex/sessions/session.jsonl",
+                    str(tmp_path / ".codex" / "sessions" / "session.jsonl"),
                 )
                 mock_parse.assert_called_once()
 
-    def test_exception_caught(self):
+    def test_claude_code_jsonl_windows_form(self):
+        """A Windows-form Claude Code JSONL path is still parsed as agent activity.
+
+        Mutant: testing ".claude/projects/" against the raw path_str again reddens this.
+        """
+        mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
+        handler = _make_handler(mod, queue=queue)
+        mock_filters.should_monitor.return_value = True
+        mock_bd.detect_branch_from_path.return_value = "PRAX"
+        with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
+            handler._handle_event("modified", "D:\\dev\\.claude\\projects\\abc\\session.jsonl")
+            mock_parse.assert_called_once()
+
+    def test_claude_code_subagent_windows_form(self):
+        """A Windows-form subagent JSONL path is still tagged with the agent suffix.
+
+        Mutant: testing "/subagents/" against the raw path_str again reddens this.
+        """
+        mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
+        handler = _make_handler(mod, queue=queue)
+        mock_filters.should_monitor.return_value = True
+        mock_bd.detect_branch_from_path.return_value = "PRAX"
+        with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
+            handler._handle_event(
+                "modified",
+                "D:\\dev\\.claude\\projects\\abc\\subagents\\session.jsonl",
+            )
+            assert mock_parse.call_args.args[1] == "PRAX agent"
+
+    def test_codex_jsonl_windows_form(self):
+        """A Windows-form Codex JSONL path is still parsed, and the raw path goes on unchanged.
+
+        Mutant: testing ".codex/sessions/" against the raw path_str again reddens this.
+        """
+        mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
+        handler = _make_handler(mod, queue=queue)
+        mock_filters.should_monitor.return_value = True
+        mock_bd.detect_branch_from_path.return_value = "CODEX"
+        raw = "D:\\dev\\.codex\\sessions\\session.jsonl"
+        with patch.object(handler, "_get_codex_branch", return_value="PRAX") as mock_branch:
+            with patch.object(
+                handler,
+                "_parse_codex_activity",
+                return_value=True,
+            ) as mock_parse:
+                handler._handle_event("modified", raw)
+                mock_parse.assert_called_once()
+                assert mock_branch.call_args.args[1] == raw
+
+    def test_exception_caught(self, tmp_path):
         """A failure inside the handler costs the event, never the watcher.
 
         The observable consequence of the guard: the event is DROPPED (no
@@ -1617,36 +1678,37 @@ class TestHandleEvent:
         mod, mock_eq, _, mock_filters, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
         mock_filters.should_monitor.side_effect = Exception("boom")
+        failing_path = str(tmp_path / "file.py")
 
         with patch.object(mod, "logger") as log:
-            assert handler._handle_event("modified", "/some/file.py") is None
+            assert handler._handle_event("modified", failing_path) is None
 
         mock_eq.MonitoringEvent.assert_not_called()
         queue.enqueue.assert_not_called()
         message = log.error.call_args.args[0]
-        assert "/some/file.py" in message, "the report must name the file that failed"
+        assert failing_path in message, "the report must name the file that failed"
         assert "Exception on modified" in message, "the report must name the error type and the action"
         assert "file watching continues" in message
 
-    def test_priority_levels_mapped(self):
+    def test_priority_levels_mapped(self, tmp_path):
         """Should map priority levels correctly."""
         mod, mock_eq, mock_bd, mock_filters, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
         mock_filters.should_monitor.return_value = True
         mock_filters.get_priority.return_value = "error"
         mock_bd.detect_branch_from_path.return_value = "PRAX"
-        handler._handle_event("modified", "/home/user/src/aipass/prax/test.py")
+        handler._handle_event("modified", str(tmp_path / "src" / "aipass" / "prax" / "test.py"))
         call_kwargs = mock_eq.MonitoringEvent.call_args
         assert "error" in str(call_kwargs)
 
-    def test_unknown_priority_defaults_to_info(self):
+    def test_unknown_priority_defaults_to_info(self, tmp_path):
         """Should default to info for unknown priority levels."""
         mod, mock_eq, mock_bd, mock_filters, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
         mock_filters.should_monitor.return_value = True
         mock_filters.get_priority.return_value = "custom_level"
         mock_bd.detect_branch_from_path.return_value = "PRAX"
-        handler._handle_event("modified", "/home/user/src/aipass/prax/test.py")
+        handler._handle_event("modified", str(tmp_path / "src" / "aipass" / "prax" / "test.py"))
         call_kwargs = mock_eq.MonitoringEvent.call_args
         assert "info" in str(call_kwargs)
 
@@ -1659,44 +1721,44 @@ class TestHandleEvent:
 class TestBuildDisplayName:
     """Tests for _build_display_name static method."""
 
-    def test_apps_prefix(self):
+    def test_apps_prefix(self, tmp_path):
         """Should return path from apps onwards."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._build_display_name(Path("/home/user/src/aipass/prax/apps/handlers/test.py"))
+        result = cls._build_display_name(tmp_path / "src" / "aipass" / "prax" / "apps" / "handlers" / "test.py")
         assert result == "apps/handlers/test.py"
 
-    def test_handlers_prefix(self):
+    def test_handlers_prefix(self, tmp_path):
         """Should return path from handlers onwards."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._build_display_name(Path("/home/user/handlers/monitoring/file.py"))
+        result = cls._build_display_name(tmp_path / "handlers" / "monitoring" / "file.py")
         assert result == "handlers/monitoring/file.py"
 
-    def test_modules_prefix(self):
+    def test_modules_prefix(self, tmp_path):
         """Should return path from modules onwards."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._build_display_name(Path("/home/user/modules/logger.py"))
+        result = cls._build_display_name(tmp_path / "modules" / "logger.py")
         assert result == "modules/logger.py"
 
-    def test_docs_prefix(self):
+    def test_docs_prefix(self, tmp_path):
         """Should return path from docs onwards."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._build_display_name(Path("/home/user/docs/readme.md"))
+        result = cls._build_display_name(tmp_path / "docs" / "readme.md")
         assert result == "docs/readme.md"
 
-    def test_templates_prefix(self):
+    def test_templates_prefix(self, tmp_path):
         """Should return path from templates onwards."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._build_display_name(Path("/home/user/templates/base.html"))
+        result = cls._build_display_name(tmp_path / "templates" / "base.html")
         assert result == "templates/base.html"
 
-    def test_no_known_prefix(self):
+    def test_no_known_prefix(self, tmp_path):
         """Should return filename when no known prefix found."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._build_display_name(Path("/home/user/random/file.py"))
+        result = cls._build_display_name(tmp_path / "random" / "file.py")
         assert result == "file.py"

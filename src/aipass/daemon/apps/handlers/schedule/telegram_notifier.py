@@ -15,7 +15,7 @@ and never raises. The tick MUST keep firing jobs regardless.
 """
 
 from aipass.prax import logger
-from aipass.daemon.apps.handlers.json import json_handler  # noqa: F401
+from aipass.daemon.apps.handlers.json import json_handler
 
 
 def _send(message: str) -> bool:
@@ -25,7 +25,7 @@ def _send(message: str) -> bool:
     daemon emits lifecycle pings through the skills telegram notifier.
     """
     try:
-        from aipass.skills.lib.telegram.apps.handlers.notifier import (  # noqa: E501
+        from aipass.skills.lib.telegram.apps.handlers.notifier import (
             send_telegram_notification,
         )
 

@@ -1,27 +1,26 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_lifecycle.py - Integration test for full skill lifecycle
-# Date: 2026-03-07
+# =================== AIPass ====================
+# Name: test_lifecycle.py
+# Description: Integration test for full skill lifecycle
 # Version: 1.0.0
+# Created: 2026-03-07
+# Modified: 2026-09-27
 # Category: skills/tests
 # =============================================
 
-"""Integration tests for the full skill lifecycle: create -> discover -> load -> run."""
+"""Tests for apps/modules/creator.py, discovery.py and runner.py: create -> discover -> load -> run."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file under apps/modules and apps/handlers parses and imports
 
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
-skills_root = Path(__file__).resolve().parent.parent.parent
-if str(skills_root) not in sys.path:
-    sys.path.insert(0, str(skills_root))
-
-from aipass.skills.apps.handlers.template import copy_template, get_template  # noqa: E402
-from aipass.skills.apps.modules.creator import create_skill  # noqa: E402
-from aipass.skills.apps.modules.discovery import discover_skills_in_path, parse_frontmatter  # noqa: E402, F401
-from aipass.skills.apps.handlers.loader_handler import import_handler, parse_full_skill_md  # noqa: E402
-from aipass.skills.apps.modules.runner import run_skill  # noqa: E402
+from aipass.skills.apps.handlers.template import copy_template, get_template
+from aipass.skills.apps.modules.creator import create_skill
+from aipass.skills.apps.modules.discovery import discover_skills_in_path, parse_frontmatter  # noqa: F401
+from aipass.skills.apps.handlers.loader_handler import import_handler, parse_full_skill_md
+from aipass.skills.apps.modules.runner import run_skill
 
 
 class TestFullLifecycle:
@@ -42,7 +41,7 @@ class TestFullLifecycle:
         assert (skill_path / "SKILL.md").exists()
 
         # Verify placeholder replacement
-        content = (skill_path / "SKILL.md").read_text()
+        content = (skill_path / "SKILL.md").read_text(encoding="utf-8")
         assert "test-md" in content
         assert "{{SKILL_NAME}}" not in content
 
@@ -164,7 +163,7 @@ class TestTemplates:
             target = Path(tmpdir) / "my-skill"
             result = copy_template(template["path"], target, "my-skill")
             assert result["success"] is True
-            content = (target / "SKILL.md").read_text()
+            content = (target / "SKILL.md").read_text(encoding="utf-8")
             assert "my-skill" in content
             assert "{{SKILL_NAME}}" not in content
         finally:

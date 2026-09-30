@@ -11,7 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-from .path.module_paths import branch_root, module_file  # noqa: F401  (re-exported)
+from .path.module_paths import branch_root, module_file  # (re-exported)
 
 MY_BRANCH = "backup"
 
@@ -45,15 +45,45 @@ def _spell_for_kinship(path: str, *, windows: bool) -> str:
     return spelled.lower() if windows else spelled
 
 
+def _kin_segments(path: str, *, windows: bool) -> list[str]:
+    """Split a path into the segments the kinship test compares.
+
+    Split on "/" AFTER ``_spell_for_kinship``, never on ``os.sep`` and never
+    through ``Path.parts``: a backslashed Windows path read by a POSIX
+    interpreter is ONE segment, so splitting on the wrong separator would make
+    this comparison answer differently on the two operating systems -- the same
+    one-sided reading of the dialect that caused round 5.
+
+    A trailing separator is dropped so ``<root>/`` and ``<root>`` are the same
+    place.
+    """
+    segments = _spell_for_kinship(path, windows=windows).split("/")
+    while len(segments) > 1 and segments[-1] == "":
+        segments.pop()
+    return segments
+
+
 def _is_kin(caller_file: str, branch_root: str, *, windows: bool | None = None) -> bool:
     """Is ``caller_file`` inside ``branch_root``?
+
+    Compared SEGMENT by segment, never as plain text. Text containment admitted
+    a sibling whose name merely EXTENDS this branch's -- ``backup_old`` and
+    ``backup2`` both contain ``backup`` -- so another branch's tree reached in
+    through a name, which is the one thing this fence exists to refuse. It also
+    admitted an unpacked copy of the branch nested under any other root.
+
+    The root's segments must appear as one whole, unbroken run of the caller's.
+    For an absolute POSIX root the leading EMPTY segment anchors that run at
+    position 0, which is what makes ``/tmp/<root>/apps/x.py`` foreign.
 
     Pure, and parametrised on the dialect, so the Windows reading is testable
     from Linux -- the defect needs a backslash, not a Windows box.
     """
     if windows is None:
         windows = _IS_WINDOWS
-    return _spell_for_kinship(branch_root, windows=windows) in _spell_for_kinship(caller_file, windows=windows)
+    root = _kin_segments(branch_root, windows=windows)
+    caller = _kin_segments(caller_file, windows=windows)
+    return any(caller[i : i + len(root)] == root for i in range(len(caller) - len(root) + 1))
 
 
 def _find_real_caller():

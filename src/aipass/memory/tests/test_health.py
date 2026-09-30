@@ -1,92 +1,73 @@
 # =================== AIPass ====================
 # Name: test_health.py
 # Description: Tests for the branch health module (entry-count + entry-size wrapper)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-09-28
 # =============================================
 
-"""
-Tests for apps/modules/health.py -- get_branch_health().
+"""Tests for apps/modules/health.py -- get_branch_health()."""
 
-health.get_branch_health() wraps two existing read-only checks (rollover
-entry-count via handlers/monitor/detector.py, character-cap entry-size via
-handlers/json/lint_handler.py) into one public function for @daemon to
-import from its modules/ layer.
+# health.get_branch_health() wraps two existing read-only checks (rollover
+# entry-count via handlers/monitor/detector.py, character-cap entry-size via
+# handlers/json/lint_handler.py) into one public function for @daemon to
+# import from its modules/ layer.
+#
+# Covers:
+#   - Unknown branch returns success=False with an error message
+#   - A known branch with no violations and no rollover due (default shape)
+#   - A known branch where entry-count DOES trigger rollover (True branch)
+#   - A known branch with planted entry-size violations
+#   - A memory_type whose .trinity file is missing is skipped gracefully
+#   - Case-insensitive branch resolution
+#   - Read-only: files are byte-identical before/after the call
+#   - The exact returned-dict shape
+#   - A pin against THIS branch's own real .trinity/local.json and
+#     .trinity/observations.json -- not just synthetic fixtures (per
+#     @daemon's own lesson: a synthetic fixture carried a field their real
+#     files did not, and the gap was the actual bug)
 
-Covers:
-  - Unknown branch returns success=False with an error message
-  - A known branch with no violations and no rollover due (default shape)
-  - A known branch where entry-count DOES trigger rollover (True branch)
-  - A known branch with planted entry-size violations
-  - A memory_type whose .trinity file is missing is skipped gracefully
-  - Case-insensitive branch resolution
-  - Read-only: files are byte-identical before/after the call
-  - The exact returned-dict shape
-  - A pin against THIS branch's own real .trinity/local.json and
-    .trinity/observations.json -- not just synthetic fixtures (per
-    @daemon's own lesson: a synthetic fixture carried a field their real
-    files did not, and the gap was the actual bug)
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — entry cap rules in handlers/json/lint_handler.py; tests/test_lint.py
+# seedgo: no-test-needed(covered_elsewhere) — detector.read_scope(), the name resolver; tests/test_residency_scope.py
 
-import importlib
 import json
-import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.memory.apps.handlers.json import entry_limits as _entry_limits
+from aipass.memory.apps.handlers.json import lint_handler as _lint_handler
+from aipass.memory.apps.handlers.monitor import detector as _detector
+from aipass.memory.apps.modules import health as _health
+
 
 # ---------------------------------------------------------------------------
-# Infrastructure mocking.
+# Infrastructure: the real chain, patched at the edge.
 #
-# conftest.py's autouse _mock_infrastructure fixture replaces the whole
-# "aipass.memory.apps.handlers.json" package with a bare MagicMock (only
-# .json_handler set). That is enough for governance/lint tests, but health.py
-# does `from aipass.memory.apps.handlers.json.lint_handler import run_lint`
-# (an absolute dotted import) -- Python's import machinery needs the parent
-# package to have a real __path__ to locate that submodule, and a MagicMock
-# has none (dunder attributes are not auto-vivified), so it fails with
-# "'...json' is not a package". detector.py/entry_limits.py also read
-# config_loader.section()/.load(), and an unconfigured MagicMock there makes
-# `cfg.get(...)` / int comparisons blow up.
-#
-# So: force the WHOLE chain (json package + json_handler + config_loader +
-# entry_limits + lint_handler + detector + health) to import for real --
-# real packages have real __path__, so plain dotted imports work -- and then
-# monkeypatch only the two behaviors that matter: config_loader returns
-# controlled dicts (deterministic, no coupling to live memory.config.json),
-# and json_handler.log_operation is stubbed so tests never write real
-# operational log files.
+# The whole health -> detector / lint_handler -> entry_limits / config_loader
+# / json_handler chain is imported for real at the top of this file (real
+# packages have a real __path__, so the dotted imports resolve), and then only
+# the two behaviors that matter are monkeypatched, on the very objects that
+# chain bound: config_loader returns controlled dicts (deterministic, no
+# coupling to live memory.config.json), and json_handler.log_operation is
+# stubbed so tests never write real operational log files.
 # ---------------------------------------------------------------------------
+
+_CHAIN = (_health, _detector, _lint_handler, _entry_limits)
 
 
 @pytest.fixture(autouse=True)
 def _mock_health_infrastructure(monkeypatch):
-    """Force a real, fresh import of the health -> detector / lint_handler ->
-    entry_limits / config_loader / json_handler chain, then patch
-    config_loader to controlled dicts and json_handler.log_operation to a
-    no-op (prax stays mocked by conftest's own autouse fixture)."""
-
-    for name in (
-        "aipass.memory.apps.handlers.json",
-        "aipass.memory.apps.handlers.json.json_handler",
-        "aipass.memory.apps.handlers.json.config_loader",
-        "aipass.memory.apps.handlers.json.entry_limits",
-        "aipass.memory.apps.handlers.json.lint_handler",
-        "aipass.memory.apps.handlers.monitor",
-        "aipass.memory.apps.handlers.monitor.detector",
-        "aipass.memory.apps.modules.health",
-    ):
-        monkeypatch.delitem(sys.modules, name, raising=False)
-
-    json_handler = importlib.import_module("aipass.memory.apps.handlers.json.json_handler")
-    config_loader = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
+    """Patch config_loader to controlled dicts and json_handler.log_operation
+    to a no-op on every module of the real health chain."""
 
     # Never let a test write a real entry into memory_json/*.json.
-    monkeypatch.setattr(json_handler, "log_operation", MagicMock(return_value=True))
+    for json_service in {id(mod.json_handler): mod.json_handler for mod in _CHAIN}.values():
+        monkeypatch.setattr(json_service, "log_operation", MagicMock(return_value=True))
 
     # Default: a "config gap" for rollover (empty defaults/per_branch) so
     # check_single_file deterministically reports should_rollover=False,
@@ -94,29 +75,30 @@ def _mock_health_infrastructure(monkeypatch):
     # reports zero violations -- independent of live memory.config.json.
     # Individual tests override via monkeypatch when they need a specific
     # scenario (rollover due / planted violation).
-    monkeypatch.setattr(
-        config_loader,
-        "section",
-        lambda name: {"defaults": {}, "per_branch": {}} if name == "rollover" else {},
-    )
-    monkeypatch.setattr(
-        config_loader,
-        "load",
-        lambda: {"entry_limits": {"enabled": True, "enforce": False, "entry_types": {}, "per_branch": {}}},
-    )
+    for config_loader in {id(mod.config_loader): mod.config_loader for mod in (_detector, _entry_limits)}.values():
+        monkeypatch.setattr(
+            config_loader,
+            "section",
+            lambda name: {"defaults": {}, "per_branch": {}} if name == "rollover" else {},
+        )
+        monkeypatch.setattr(
+            config_loader,
+            "load",
+            lambda: {"entry_limits": {"enabled": True, "enforce": False, "entry_types": {}, "per_branch": {}}},
+        )
 
 
 def _get_health():
-    """Import and return the health module (fresh, per the fixture above)."""
-    return importlib.import_module("aipass.memory.apps.modules.health")
+    """The health module, imported once at the top of this file."""
+    return _health
 
 
 def _get_detector():
-    return importlib.import_module("aipass.memory.apps.handlers.monitor.detector")
+    return _detector
 
 
 def _get_lint_handler():
-    return importlib.import_module("aipass.memory.apps.handlers.json.lint_handler")
+    return _lint_handler
 
 
 # ---------------------------------------------------------------------------
@@ -160,19 +142,49 @@ class TestUnknownBranch:
         health = _get_health()
         branch = _make_branch(tmp_path)
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("nosuchbranch")
 
         assert result == {"success": False, "error": "Unknown branch: nosuchbranch"}
 
+    def test_an_unreadable_registry_is_answered_never_raised(self, tmp_path: Path):
+        """@daemon calls this outside any try, from a function promising never to raise (DPLAN-0354 leg 3b)."""
+        health = _get_health()
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        refusal = _detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
+
+        with patch.object(health, "read_scope", side_effect=refusal):
+            result = health.get_branch_health("anything")
+
+        assert result["success"] is False
+        assert str(registry) in result["error"]
+
     def test_empty_registry_is_unknown(self, tmp_path: Path):
         health = _get_health()
 
-        with patch.object(health, "_read_registry", return_value=[]):
+        with patch.object(health, "read_scope", return_value=[]):
             result = health.get_branch_health("anything")
 
         assert result["success"] is False
         assert "anything" in result["error"]
+
+    def test_a_declared_external_branch_is_not_unknown(self, tmp_path: Path):
+        """Health reads, so it resolves names through the scope holding the external tier.
+
+        The write fence of 2026-09-18 was right and stays; it also left this
+        lane resolving through the WRITE scope, so ``health @vera`` answered
+        "Unknown branch" for a read that was never fenced. ``read_scope`` is
+        the binding under test: reach back for ``_read_registry`` and this
+        patch raises AttributeError instead of passing quietly.
+        """
+        health = _get_health()
+        external = _make_branch(tmp_path, name="vera")
+
+        with patch.object(health, "read_scope", return_value=[external]):
+            result = health.get_branch_health("vera")
+
+        assert result["success"] is True, result.get("error")
+        assert result["branch"] == "vera"
 
 
 # ===========================================================================
@@ -185,7 +197,7 @@ class TestKnownBranchNoViolations:
         health = _get_health()
         branch = _make_branch(tmp_path, name="clean_branch")
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("clean_branch")
 
         assert result["success"] is True
@@ -203,7 +215,7 @@ class TestKnownBranchNoViolations:
         health = _get_health()
         branch = _make_branch(tmp_path, name="clean_branch")
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("CLEAN_BRANCH")
 
         assert result["success"] is True
@@ -241,7 +253,7 @@ class TestKnownBranchRolloverDue:
         )
 
         branch = {"name": "full_branch", "path": str(branch_dir)}
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("full_branch")
 
         assert result["success"] is True
@@ -264,7 +276,7 @@ class TestMissingMemoryFile:
         health = _get_health()
         branch = _make_branch(tmp_path, name="partial_branch", with_observations=False)
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("partial_branch")
 
         assert result["success"] is True
@@ -309,7 +321,7 @@ class TestEntrySizeViolations:
         }
 
         branch = {"name": "loud_branch", "path": str(branch_dir)}
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             with patch.object(lint_handler, "load_entry_limits", return_value=limits):
                 result = health.get_branch_health("loud_branch")
 
@@ -336,7 +348,7 @@ class TestReadOnly:
         local_before = local_path.read_text(encoding="utf-8")
         obs_before = obs_path.read_text(encoding="utf-8")
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             health.get_branch_health("untouched_branch")
 
         assert local_path.read_text(encoding="utf-8") == local_before, "local.json was modified!"
@@ -355,7 +367,7 @@ class TestPublicSurface:
 
     def test_unknown_branch_return_shape(self, tmp_path: Path):
         health = _get_health()
-        with patch.object(health, "_read_registry", return_value=[]):
+        with patch.object(health, "read_scope", return_value=[]):
             result = health.get_branch_health("ghost")
         assert set(result.keys()) == {"success", "error"}
 
@@ -363,7 +375,7 @@ class TestPublicSurface:
         health = _get_health()
         branch = _make_branch(tmp_path, name="shape_branch")
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("shape_branch")
 
         assert set(result.keys()) == {"success", "branch", "entry_count", "entry_size"}
@@ -408,7 +420,7 @@ class TestRealTrinityFiles:
         local_before = local_file.read_text(encoding="utf-8")
         obs_before = obs_file.read_text(encoding="utf-8")
 
-        with patch.object(health, "_read_registry", return_value=[{"name": "memory", "path": str(self.BRANCH_ROOT)}]):
+        with patch.object(health, "read_scope", return_value=[{"name": "memory", "path": str(self.BRANCH_ROOT)}]):
             result = health.get_branch_health("memory")
 
         # Read-only: real files must be byte-identical after the call.
@@ -447,7 +459,6 @@ class TestTheUnknownSubcommandRefusalReachesTheExitCode:
     """
 
     def test_an_unknown_subcommand_exits_two(self, capsys):
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
 
         health = _get_health()
         reset_command_state()
@@ -458,7 +469,6 @@ class TestTheUnknownSubcommandRefusalReachesTheExitCode:
 
     def test_the_bare_verb_still_exits_zero(self, capsys):
         """The other half: introspection is not a refusal and must stay 0."""
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
 
         health = _get_health()
         reset_command_state()

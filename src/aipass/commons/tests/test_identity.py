@@ -3,50 +3,22 @@
 # Description: Unit tests for identity module and identity_ops handler
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-08-31
+# Modified: 2026-09-28
 # =============================================
 
-"""
-Unit tests for the commons identity module and identity_ops handler.
+"""Tests for apps/modules/commons_identity.py and apps/handlers/identity/identity_ops.py."""
 
-Tests extract_mentions (pure regex), find_branch_root (filesystem walk),
-resolve_display_name, and DB-backed mention validation.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that commons_identity.py and identity_ops.py parse and import
 
-import logging
 import sqlite3
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-logger = logging.getLogger(__name__)
-
-_mock_logger = MagicMock()
-_mock_logger_module = MagicMock()
-_mock_logger_module.system_logger = _mock_logger
-
-try:
-    from aipass.prax.apps.modules.logger import system_logger  # noqa: F401
-except ImportError:
-    logger.warning("[test_identity] prax unavailable — injecting mock logger")
-    sys.modules.setdefault("aipass.prax", MagicMock())
-    sys.modules.setdefault("aipass.prax.apps", MagicMock())
-    sys.modules.setdefault("aipass.prax.apps.modules", MagicMock())
-    sys.modules.setdefault("aipass.prax.apps.modules.logger", _mock_logger_module)
-
-try:
-    from aipass.cli.apps.modules import console  # noqa: F401
-except ImportError:
-    logger.warning("[test_identity] cli unavailable — injecting mock console")
-    _mock_cli = MagicMock()
-    sys.modules.setdefault("aipass.cli", _mock_cli)
-    sys.modules.setdefault("aipass.cli.apps", MagicMock())
-    sys.modules.setdefault("aipass.cli.apps.modules", MagicMock())
-
-from aipass.commons.apps.modules import commons_identity as _id_mod  # noqa: E402
-from aipass.commons.apps.handlers.identity import identity_ops as _ops  # noqa: E402
+from aipass.commons.apps.modules import commons_identity as _id_mod
+from aipass.commons.apps.handlers.identity import identity_ops as _ops
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +155,23 @@ def test_extract_mentions_with_underscores(initialized_db: sqlite3.Connection):
 
     result = _id_mod.extract_mentions("Asking @ai_mail for analysis")
     assert result == ["ai_mail"]
+
+
+def test_extract_mentions_answers_none_when_the_lookup_fails():
+    """A failed agents lookup answers None, never the [] of "nobody was mentioned".
+
+    Before: the except returned [], so post_ops/comment_ops reported a post that
+    named @drone as mentioning no one and the mention was lost in silence.
+    Mutant: identity_ops `return None` -> `return []` in the except turns this red.
+    """
+    with patch(
+        "aipass.commons.apps.handlers.database.db.get_db",
+        side_effect=sqlite3.OperationalError("database is locked"),
+    ) as failing_get_db:
+        result = _id_mod.extract_mentions("Hey @drone check this out")
+
+    failing_get_db.assert_called_once_with()
+    assert result is None
 
 
 # ===========================================================================
@@ -405,6 +394,7 @@ def test_get_caller_branch_prefers_cwd_over_env(
 
     assert result is not None
     assert result["name"] == "flow"
+    mock_register.assert_called_once()
 
 
 @patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
@@ -549,60 +539,107 @@ def test_get_caller_branch_end_to_end_for_external_citizen(
 # ---------------------------------------------------------------------------
 
 
-def test_find_caller_registries_skips_the_aipass_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """The AIPass registry is consulted first, never again during the walk."""
-    _write_registry(tmp_path / "AIPASS_REGISTRY.json", [])
-    _write_registry(tmp_path / "VERA-STUDIO_REGISTRY.json", [])
+def test_find_caller_registries_skips_the_aipass_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path
+):
+    """
+    The AIPass registry is consulted first, never again during the walk.
+
+    Through get_branch_info_by_name: an AIPASS_REGISTRY.json met on the walk
+    up from the caller's cwd is not the caller's project registry, so a name
+    only it holds never resolves.
+    Mutant killed: dropping `and path.name != "AIPASS_REGISTRY.json"` from
+    _find_caller_registries (GHOST resolves from the walked AIPass registry).
+    """
+    _write_registry(tmp_path / "AIPASS_REGISTRY.json", [{"name": "GHOST", "path": "ghost", "email": "@ghost"}])
+    _write_registry(tmp_path / "VERA-STUDIO_REGISTRY.json", [{"name": "VERA", "path": "vera", "email": "@vera"}])
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
 
-    found = _ops._find_caller_registries()
+    assert _id_mod.get_branch_info_by_name("ghost") is None
+    result = _id_mod.get_branch_info_by_name("vera")
+    assert result is not None
+    assert result["email"] == "@vera"
 
-    assert [p.name for p in found] == ["VERA-STUDIO_REGISTRY.json"]
 
+def test_find_caller_registries_sorted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
+    """
+    Multiple registries in one directory resolve in deterministic order.
 
-def test_find_caller_registries_sorted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Multiple registries in one directory resolve in deterministic order."""
-    _write_registry(tmp_path / "ZEBRA_REGISTRY.json", [])
-    _write_registry(tmp_path / "ALPHA_REGISTRY.json", [])
+    Both registries hold a VERA; the alphabetically first registry answers,
+    whatever order the filesystem lists them in.
+    Mutant killed: `return matches` -> `return matches[::-1]` in
+    _find_caller_registries (ZEBRA's VERA answers).
+    """
+    _write_registry(tmp_path / "ZEBRA_REGISTRY.json", [{"name": "VERA", "path": "vera", "email": "@zebra-vera"}])
+    _write_registry(tmp_path / "ALPHA_REGISTRY.json", [{"name": "VERA", "path": "vera", "email": "@alpha-vera"}])
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
 
-    found = _ops._find_caller_registries()
+    result = _id_mod.get_branch_info_by_name("vera")
 
-    assert [p.name for p in found] == ["ALPHA_REGISTRY.json", "ZEBRA_REGISTRY.json"]
+    assert result is not None
+    assert result["email"] == "@alpha-vera"
 
 
-def test_find_caller_registries_without_env(monkeypatch: pytest.MonkeyPatch):
-    """No AIPASS_CALLER_CWD means no walk — nothing to search from."""
+def test_find_caller_registries_without_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
+    """No AIPASS_CALLER_CWD means no walk: a project registry at the process cwd is never searched."""
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project)
     monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
-    assert _ops._find_caller_registries() == []
+    monkeypatch.chdir(branch_dir)
+
+    assert _id_mod.get_branch_info_by_name("vera") is None
 
 
-def test_branches_from_registry_dict_shape(tmp_path: Path):
+def test_branches_from_registry_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """
+    A registry path that doesn't exist yields no branches.
+
+    Through get_branch_info_by_name: the AIPass registry pointed at a missing
+    file, no caller walk — the lookup answers None, it does not raise.
+    Mutant killed: the missing-file `return []` in _branches_from_registry
+    -> `raise FileNotFoundError(registry_path)`.
+    """
+    monkeypatch.setattr(_REGISTRY_ATTR, tmp_path / "nope.json")
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+
+    assert _id_mod.get_branch_info_by_name("vera") is None
+
+
+def test_branches_from_registry_dict_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
     """Dict-keyed branches are flattened to a list, like the list shape."""
     import json as json_mod
 
-    path = tmp_path / "X_REGISTRY.json"
-    path.write_text(
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = project / "src" / "vera"
+    (branch_dir / ".trinity").mkdir(parents=True)
+    (branch_dir / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    (project / "VERA-STUDIO_REGISTRY.json").write_text(
         json_mod.dumps({"branches": {"vera": {"name": "VERA", "path": "src/vera"}}}),
         encoding="utf-8",
     )
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    branches = _ops._branches_from_registry(path)
+    result = _id_mod.get_branch_info_from_registry(branch_dir)
 
-    assert [b["name"] for b in branches] == ["VERA"]
+    assert result is not None
+    assert result["name"] == "VERA"
 
 
-def test_branches_from_registry_malformed_json(tmp_path: Path):
+def test_branches_from_registry_malformed_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
     """A corrupt registry is reported and skipped, never raised."""
-    path = tmp_path / "X_REGISTRY.json"
-    path.write_text("{not json", encoding="utf-8")
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = project / "src" / "vera"
+    (branch_dir / ".trinity").mkdir(parents=True)
+    (branch_dir / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    (project / "VERA-STUDIO_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    assert _ops._branches_from_registry(path) == []
+    result = _id_mod.get_branch_info_from_registry(branch_dir)
 
-
-def test_branches_from_registry_missing_file(tmp_path: Path):
-    """A registry path that doesn't exist yields no branches."""
-    assert _ops._branches_from_registry(tmp_path / "nope.json") == []
+    assert result is None
 
 
 # ===========================================================================
@@ -622,28 +659,34 @@ def test_branches_from_registry_missing_file(tmp_path: Path):
 
 
 @pytest.fixture
-def case_insensitive_glob(monkeypatch: pytest.MonkeyPatch):
+def case_insensitive_glob(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path, list[Path]]]:
     """
-    Emulate a case-insensitive filesystem for Path.glob.
+    Emulate a case-insensitive filesystem for the registry listing.
 
     Yields the union of the pattern's matches and the case-folded
     pattern's matches — which is what Windows hands back for a single
-    call. Wraps the real Path.glob rather than re-implementing listing,
-    so production's own call site is what gets widened.
+    call. Replaces identity_ops.list_registry_candidates (the seam whose
+    body is production's one glob) rather than Path.glob, so only the
+    registry listing is widened, never every glob in the process.
+
+    Returns the recorder: one (directory, listing) pair per call production
+    made to the seam, so a test can prove production went through it.
     """
-    real_glob = Path.glob
+    pattern = "*_REGISTRY.json"
+    calls: list[tuple[Path, list[Path]]] = []
 
-    def widened(self, pattern, *args, **kwargs):
+    def widened(directory: Path):
         seen = {}
-        for found in real_glob(self, pattern, *args, **kwargs):
+        for found in directory.glob(pattern):
             seen[str(found)] = found
-        folded = pattern.lower()
-        if folded != pattern:
-            for found in real_glob(self, folded, *args, **kwargs):
-                seen[str(found)] = found
-        return iter(sorted(seen.values()))
+        for found in directory.glob(pattern.lower()):
+            seen[str(found)] = found
+        listing = sorted(seen.values())
+        calls.append((directory, listing))
+        return iter(listing)
 
-    monkeypatch.setattr(Path, "glob", widened)
+    monkeypatch.setattr(_ops, "list_registry_candidates", widened)
+    return calls
 
 
 def _plant_case_folded_decoy(project: Path, branch_dir: Path) -> Path:
@@ -690,19 +733,26 @@ def test_case_folded_registry_cannot_answer_identity(
 
 
 def test_case_folded_registry_excluded_from_caller_registries(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case_insensitive_glob
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path, case_insensitive_glob
 ):
-    """The decoy is filtered at the source, so no later matcher can reach it."""
+    """
+    The decoy is filtered at the source, so no later matcher can reach it.
+
+    Through get_branch_info_by_name: the decoy's only citizen, GHOST, never
+    resolves by name, while the real project registry still answers VERA.
+    Mutant killed: `if path.name.endswith("_REGISTRY.json")` ->
+    `if path.name.lower().endswith("_registry.json")` in _find_caller_registries.
+    """
     project = tmp_path / "Vera-Studio"
     project.mkdir()
     branch_dir = _make_external_project(project)
-    decoy = _plant_case_folded_decoy(project, branch_dir)
+    _plant_case_folded_decoy(project, branch_dir)
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    found = _ops._find_caller_registries()
-
-    assert decoy not in found, "case-folded registry survived the suffix filter"
-    assert [p.name for p in found] == ["VERA-STUDIO_REGISTRY.json"]
+    assert _id_mod.get_branch_info_by_name("ghost") is None, "case-folded registry survived the suffix filter"
+    result = _id_mod.get_branch_info_by_name("vera")
+    assert result is not None
+    assert result["name"] == "VERA"
 
 
 # The pattern production actually globs, and a probe file whose suffix is the
@@ -737,27 +787,49 @@ def _host_folds_glob_case(tmp_path: Path) -> bool:
         probe.unlink()
 
 
-def test_the_widening_instrument_actually_widens(tmp_path: Path, case_insensitive_glob):
+def test_the_widening_instrument_actually_widens(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    aipass_registry: Path,
+    case_insensitive_glob: list[tuple[Path, list[Path]]],
+):
     """
-    POSITIVE CONTROL — the instrument, exercised through production's own call.
+    POSITIVE CONTROL — the instrument is what production lists registries through.
 
-    This makes the exact call ``_find_caller_registries`` makes rather than
-    re-stating its logic. If this fails, the pins above prove nothing and are
-    green for the wrong reason.
+    get_branch_info_by_name on the planted project must reach the stand-in and
+    be handed the decoy; if production globs on its own, the pins above prove
+    nothing and are green for the wrong reason (commons' decision, DPLAN-0354 leg 4).
 
-    On a folding host this control is satisfied by the filesystem itself
-    rather than by the instrument — which is not a defect but is worth
-    knowing. The negative control below names which world the run is in.
+    On a folding host the decoy is listed by the filesystem itself as well —
+    not a defect, but worth knowing. The negative control below names which
+    world the run is in.
     """
     project = tmp_path / "Vera-Studio"
     project.mkdir()
     branch_dir = _make_external_project(project)
     decoy = _plant_case_folded_decoy(project, branch_dir)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    listed = list(project.glob("*_REGISTRY.json"))
+    result = _id_mod.get_branch_info_by_name("vera")
 
-    assert decoy in listed, "instrument did not widen — the case-insensitive emulation is broken"
-    assert project / "VERA-STUDIO_REGISTRY.json" in listed
+    listings = dict(case_insensitive_glob)
+    listed = listings.get(project.resolve(), [])
+    assert decoy.resolve() in listed, "production did not list registries through the widened stand-in"
+    assert (project / "VERA-STUDIO_REGISTRY.json").resolve() in listed
+    assert result is not None
+    assert result["name"] == "VERA"
+
+
+def test_list_registry_candidates_lists_one_level_of_registry_files_only(tmp_path: Path):
+    """The seam by name, no fixture (commons' decision, DPLAN-0354 leg 4b, door A); its proof is its two mutants."""
+    (tmp_path / "ALPHA_REGISTRY.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "notes.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested" / "BETA_REGISTRY.json").write_text("{}", encoding="utf-8")
+
+    listed = list(_ops.list_registry_candidates(tmp_path))
+
+    assert listed == [tmp_path / "ALPHA_REGISTRY.json"]
 
 
 def test_raw_glob_matches_what_the_host_filesystem_actually_does(tmp_path: Path):
@@ -858,3 +930,32 @@ def test_external_registries_with_lowercase_stems_still_resolve(
 
     assert result is not None, "a lowercase-stem registry was wrongly filtered out"
     assert result["email"] == "@app"
+
+
+def test_get_caller_branch_raises_a_named_failure_when_the_lookup_breaks():
+    """A broken lookup raises CallerLookupFailed; None stays "no branch detected".
+
+    Before (DPLAN-0354 leg 3): the except logged and returned None, the same answer
+    as "not run from a branch", so ~30 handlers told the user the wrong thing.
+    Mutant: identity_ops `raise CallerLookupFailed(...) from e` -> `return None` turns this red.
+    """
+    with patch.object(_ops, "find_branch_root", side_effect=OSError("registry unreadable")) as lookup:
+        with pytest.raises(_ops.CallerLookupFailed, match="Caller lookup failed: registry unreadable"):
+            _ops.get_caller_branch()
+
+    lookup.assert_called_once()
+
+
+def test_whoami_refuses_naming_a_failed_caller_lookup(capsys: pytest.CaptureFixture[str]):
+    """whoami names a broken lookup instead of "run from a branch directory"."""
+    # whoami's one database route is identity_ops' lazy import of db.get_db; guarded there.
+    with (
+        patch.object(_ops, "find_branch_root", side_effect=OSError("registry unreadable")),
+        patch("aipass.commons.apps.handlers.database.db.get_db") as db,
+    ):
+        assert _id_mod.handle_command("whoami", []) is True
+
+    db.assert_not_called()
+    err = " ".join(capsys.readouterr().err.split())
+    assert "Caller lookup failed: registry unreadable" in err
+    assert "Run from a branch directory" not in err

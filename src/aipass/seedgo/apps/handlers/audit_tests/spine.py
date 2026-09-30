@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spine.py
 # Description: audit-tests core spine - the universal group list
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -30,11 +30,14 @@ requirement has to land before the capability or it never lands at all:
     No mutant record may exist without a kill-cause split. See KILL_CAUSE_CONTRACT.
   * `scoped_survival` measures module-granularity ORACLE SURVIVAL and is never
     to be read as pseudo-testedness. See SURVIVAL_NAMING_CONTRACT.
+  * `width_coupling` reports a DIVERGENCE COUNT off a two-point sample and is
+    never to be read as width-independence. See WIDTH_COUPLING_CONTRACT.
 """
 
 from typing import Dict, List
 
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.tests_pytest_standards import envdiff
 
 # =============================================================================
 # THE SPINE
@@ -80,12 +83,18 @@ SPINE_RATIONALE: Dict[str, str] = {
 # REV 4 CONTRACTS - binding on groups that do not exist yet
 # =============================================================================
 
-#: Groups bound by the kill_cause contract. Every one of them is currently
-#: `not_applicable: "not built"`; the contract exists so that the day any of
-#: them runs, it cannot ship without the split.
+#: Groups bound by the kill_cause contract - every group that EXECUTES A
+#: MUTANT, and nothing else. `pseudo_tested` stopped being hypothetical on
+#: 2026-09-19 when its opt-in seam landed, and it shipped carrying the split
+#: on every record exactly as this contract required while it was still
+#: unbuilt, which is the whole argument for writing requirements before
+#: capabilities. `width_coupling` landed the same day and is deliberately
+#: ABSENT: it runs no mutant, so there is no kill here to split.
 KILL_CAUSE_BOUND: tuple = (
     "oracle_execution",
+    "pseudo_tested",
     "scoped_survival",
+    "statement_deletion",
     "targeted_mutation",
 )
 
@@ -115,11 +124,65 @@ SURVIVAL_NAMING_CONTRACT = (
     "rule, never as a redefinition of this one."
 )
 
+PSEUDO_TESTED_SCOPE_CONTRACT = (
+    "pseudo_tested is the per-function probe contract 2 promised as a NEW group, "
+    "and it reports GUTTING SURVIVORS, which is a SUPERSET of pseudo-tested "
+    "functions. Descartes (Vera-Perez et al. EMSE 2018) calls a method "
+    "pseudo-tested only when it is COVERED and the mutant survives; this probe "
+    "measures no coverage, so a function no test ever executes also survives and "
+    "is ordinary dead-to-the-suite code rather than this group's news. Measured on "
+    "the banked canary fixture: 3 survivors, of which 1 was covered and genuinely "
+    "pseudo-tested and 2 were never executed at all. Until a coverage pass feeds "
+    "this group, every survivor list is published with that split unknown, and the "
+    "group may not be read as a pseudo-tested RATE."
+)
+
+#: The contract binding `width_coupling`, and the reason it is NOT in
+#: KILL_CAUSE_BOUND: that tuple binds groups that EXECUTE MUTANTS, and this
+#: group executes none. It runs one unmutated suite twice and subtracts the
+#: verdicts, so there is no kill, no exception class behind one, and nothing
+#: for a kill_cause split to describe. Adding it there would have made the
+#: contract list look thorough while binding a group to a requirement it
+#: cannot meet - which is how a contract stops meaning anything.
+#:
+#: THE LIMITS ARE NOT RESTATED HERE, THEY ARE THE ENGINE'S OWN. `envdiff.py`
+#: publishes `WIDTH_AXIS_LIMITS` with every result, so a second prose statement
+#: of the same caveats in this file would be one edit away from disagreeing
+#: with the one the artifact actually carries. The contract states what the
+#: count IS and then binds the published list verbatim; a limit added to the
+#: axis is a limit added to this contract, with nobody needing to remember.
+WIDTH_COUPLING_CONTRACT = (
+    "width_coupling publishes a DIVERGENCE COUNT: the number of nodeids whose pass/fail "
+    "verdict changes between two runs of the same unmutated suite that differ only in "
+    "COLUMNS. It executes no mutant, so kill_cause does not bind it and no mutant record "
+    "may appear under it. The count is evidence of coupling where it is non-zero and it "
+    "is NEVER evidence of width-independence where it is zero - a zero is what a "
+    "two-point sample of one axis, measured once, looks like when it found nothing at "
+    "those two points. Every reading of this group is bound by the axis's own published "
+    "limits, which travel in the group document as `limits`: " + " ".join(envdiff.WIDTH_AXIS_LIMITS)
+)
+
+#: What a statement-deletion survivor does and does not mean. It deletes ONE
+#: simple statement, never a compound header, so a dead BRANCH is out of its
+#: reach by construction - and its declared arid list removes the statements
+#: whose deletion cannot change behaviour without claiming the rest are all
+#: observable.
+STATEMENT_DELETION_SCOPE_CONTRACT = (
+    "A survivor here is one statement whose deletion no covering test noticed. It is not a claim "
+    "about the function around it, and it is not a claim about any branch: this operator deletes "
+    "simple statements only, so branch deletion is out of reach by construction. Arid statements "
+    "(docstrings, pass, bare ellipsis, a trailing `return None`) are declared and excluded up front "
+    "with the reason each cannot change behaviour, and their counts travel in the document."
+)
+
 #: Contract text keyed by the group it binds, for stamping into the artifact.
 GROUP_CONTRACTS: Dict[str, str] = {
     "oracle_execution": KILL_CAUSE_CONTRACT,
+    "pseudo_tested": KILL_CAUSE_CONTRACT + " " + PSEUDO_TESTED_SCOPE_CONTRACT,
     "scoped_survival": KILL_CAUSE_CONTRACT + " " + SURVIVAL_NAMING_CONTRACT,
+    "statement_deletion": KILL_CAUSE_CONTRACT + " " + STATEMENT_DELETION_SCOPE_CONTRACT,
     "targeted_mutation": KILL_CAUSE_CONTRACT,
+    envdiff.GROUP: WIDTH_COUPLING_CONTRACT,
 }
 
 

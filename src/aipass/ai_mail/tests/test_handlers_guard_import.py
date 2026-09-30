@@ -1,31 +1,34 @@
 # =================== AIPass ====================
 # Name: test_handlers_guard_import.py
 # Description: The branch-access guard must import without a readable cwd
+# Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-29
 # =============================================
 
-"""The import-time branch guard must not need a filesystem to run.
+"""Tests for apps/handlers/__init__.py -- the import-time branch guard must not need a filesystem."""
 
-THE DEFECT (@spawn's find, 2026-08-31, 16 branches carried it). ``_find_real_caller``
-opened with ``inspect.stack()``, which builds a FrameInfo per frame and reaches
-``getsourcefile() -> getmodule() -> os.path.realpath()``. On Windows
-``ntpath.realpath`` calls ``os.getcwd()`` unconditionally in its opening lines —
-before it checks whether the path is even absolute — at a call site inside
-``getmodule`` that is not wrapped in a try. So importing ANY handler in this
-package needed a readable cwd on Windows, and a disconnected share killed the
-import of a package whose only job at that moment was to check a name.
+# THE DEFECT (@spawn's find, 2026-08-31, 16 branches carried it). ``_find_real_caller``
+# opened with ``inspect.stack()``, which builds a FrameInfo per frame and reaches
+# ``getsourcefile() -> getmodule() -> os.path.realpath()``. On Windows
+# ``ntpath.realpath`` calls ``os.getcwd()`` unconditionally in its opening lines —
+# before it checks whether the path is even absolute — at a call site inside
+# ``getmodule`` that is not wrapped in a try. So importing ANY handler in this
+# package needed a readable cwd on Windows, and a disconnected share killed the
+# import of a package whose only job at that moment was to check a name.
+#
+# WHY IT HID ON LINUX, and why these pins deny what they deny. ``posixpath.realpath``
+# does not call ``getcwd`` for an absolute path, so the POSIX equivalent raises
+# earlier inside ``getabsfile()`` where ``inspect`` catches it. Denying
+# ``os.getcwd`` on Linux therefore proves nothing here — measured, both ways, before
+# these pins were written. The instrument denies ``os.path.realpath``: the call the
+# defect actually makes.
+#
+# Everything runs in a SUBPROCESS because the thing under test happens at import
+# time, and a package already in ``sys.modules`` cannot be imported again.
 
-WHY IT HID ON LINUX, and why these pins deny what they deny. ``posixpath.realpath``
-does not call ``getcwd`` for an absolute path, so the POSIX equivalent raises
-earlier inside ``getabsfile()`` where ``inspect`` catches it. Denying
-``os.getcwd`` on Linux therefore proves nothing here — measured, both ways, before
-these pins were written. The instrument denies ``os.path.realpath``: the call the
-defect actually makes.
-
-Everything runs in a SUBPROCESS because the thing under test happens at import
-time, and a package already in ``sys.modules`` cannot be imported again.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — _guard_branch_access()'s Example and guide lines, prose; the refusal is pinned
 
 import ast
 import subprocess
@@ -34,6 +37,9 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
+import aipass.ai_mail.apps.handlers as handlers_mod
+from aipass.ai_mail.apps.handlers import MY_BRANCH, _extract_branch_name
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -54,6 +60,7 @@ def _run(*parts: str) -> subprocess.CompletedProcess:
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
 
@@ -193,16 +200,32 @@ class TestThePolicyDidNotMoveWithTheMechanism:
     guard's own helpers directly rather than through an import, so they measure
     the decision instead of the plumbing."""
 
-    def test_an_external_caller_is_still_classified_as_external(self):
-        from aipass.ai_mail.apps.handlers import _extract_branch_name
+    def test_an_external_caller_is_still_classified_as_external(self, tmp_path):
+        assert _extract_branch_name(str(tmp_path / "src" / "aipass" / "devpulse" / "apps" / "thing.py")) == "devpulse"
+        assert _extract_branch_name(str(tmp_path / "src" / "aipass" / "ai_mail" / "apps" / "thing.py")) == "ai_mail"
 
-        assert _extract_branch_name("/home/x/src/aipass/devpulse/apps/thing.py") == "devpulse"
-        assert _extract_branch_name("/home/x/src/aipass/ai_mail/apps/thing.py") == "ai_mail"
+    def test_an_unrecognisable_path_is_unknown_not_a_branch(self, tmp_path):
+        assert _extract_branch_name(str(tmp_path / "nowhere" / "thing.py")) == "unknown"
 
-    def test_an_unrecognisable_path_is_unknown_not_a_branch(self):
-        from aipass.ai_mail.apps.handlers import _extract_branch_name
+    def test_an_external_caller_is_refused_with_the_banner_naming_it(self, tmp_path, monkeypatch):
+        """The refusal names the caller's branch, file and import, and the way through (leg 3: was owed).
 
-        assert _extract_branch_name("/tmp/nowhere/thing.py") == "unknown"
+        The caller is handed in through the guard's own frame walk, so nothing is
+        imported across branches. Its proof is its mutant: the Blocked line dropped.
+        """
+        caller = str(tmp_path / "src" / "aipass" / "devpulse" / "apps" / "thing.py")
+        blocked = "from aipass.ai_mail.apps.handlers.email import send"
+        monkeypatch.setattr(handlers_mod, "_find_real_caller", lambda: (caller, blocked))
+
+        with pytest.raises(ImportError) as refused:
+            handlers_mod._guard_branch_access()
+
+        lines = [line.strip() for line in str(refused.value).splitlines()]
+        assert "ACCESS DENIED: Cross-branch handler import blocked" in lines
+        assert "Caller branch: devpulse" in lines
+        assert "Caller file:   thing.py" in lines
+        assert f"Blocked:       {blocked}" in lines
+        assert f"from {MY_BRANCH}.apps.modules.<module> import <function>" in lines
 
     @pytest.mark.parametrize(
         "caller,allowed",
@@ -217,8 +240,6 @@ class TestThePolicyDidNotMoveWithTheMechanism:
         """The rule the guard applies: is ``/ai_mail/`` in the caller path, with
         backslashes normalised first. Windows spellings included because the OS
         that found the import defect is the one that spells paths the other way."""
-        from aipass.ai_mail.apps.handlers import MY_BRANCH
-
         assert (f"/{MY_BRANCH}/" in caller.replace("\\", "/")) is allowed
 
 

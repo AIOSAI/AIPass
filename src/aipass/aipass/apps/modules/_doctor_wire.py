@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-05-08
-# Modified: 2026-09-15
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -30,7 +30,7 @@ from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.handlers.provider_wire import (  # noqa: F401
+from aipass.aipass.apps.handlers.provider_wire import (
     HOOK_DESCRIPTIONS,
     ENV_DESCRIPTIONS,
     SETTINGS_DESCRIPTIONS,
@@ -50,7 +50,7 @@ from aipass.aipass.apps.handlers.ui.progress import GLYPH_PASS, GLYPH_WARN
 # STALE DENY RULE MIGRATION (implementation in handler; re-exported here)
 # =============================================================================
 
-from aipass.aipass.apps.handlers.provider_reconcile import reconcile_stale_deny  # noqa: E402, F401
+from aipass.aipass.apps.handlers.provider_reconcile import reconcile_stale_deny  # noqa: F401
 
 
 # =============================================================================
@@ -90,7 +90,9 @@ def _settings_cure(gap: SettingsGap) -> str:
     return f"Run: {WIRE_COMMAND}"
 
 
-def check_settings_scalars(manifest: dict) -> "tuple[List[SettingsCheckResult], List[str]]":
+def check_settings_scalars(
+    manifest: dict, settings_path: "Path | None" = None
+) -> "tuple[List[SettingsCheckResult], List[str]]":
     """One diff row per manifest settings key: what it wants, what the provider file has.
 
     Reads the PERSONAL settings file — for a scalar like includeGitInstructions that is
@@ -98,12 +100,18 @@ def check_settings_scalars(manifest: dict) -> "tuple[List[SettingsCheckResult], 
     (DPLAN-0347). Returns the rows plus the keys the wire verb would actually set: a key
     the user set to a different value is not one of them, so doctor does not offer to
     wire over a human decision.
+
+    *settings_path* is ``~/.claude/settings.json`` when None, resolved at call time.
+    doctor.check_provider_manifest hands on its own settings_path seam (None in the
+    product), so a test that hands a tmp settings file is never read against the live
+    one (aipass, fleet green leg 6: the seam is for the tests).
     """
     wanted = manifest_settings(manifest)
     if not wanted:
         return [], []
 
-    settings_path = Path.home() / ".claude" / "settings.json"
+    if settings_path is None:
+        settings_path = Path.home() / ".claude" / "settings.json"
     read = json_handler.read_json(settings_path) if settings_path.exists() else {}
     if not isinstance(read, dict):
         logger.warning("[doctor] provider settings unreadable for the settings scalars: %s", settings_path)

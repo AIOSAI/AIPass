@@ -1,43 +1,48 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins every aipass module against an unreadable working directory
-# Version: 1.1.0
+# Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-28
 # =============================================
 
-"""No module in this branch may read the working directory to import.
+"""Tests that apps/aipass.py and every module beneath it import without reading a dead working directory."""
 
-THE MECHANISM (measured on the Windows CI gate 2026-08-31, @memory's finding)
-----------------------------------------------------------------------------
-``ntpath.realpath`` computes ``os.getcwd()`` UNCONDITIONALLY — on its first
-lines, before it checks whether the path is even absolute — and
-``Path.resolve()`` routes through it.  So on Windows every
-``Path(__file__).resolve()`` reached while a module is being imported is an
-import-time working-directory read, and a process whose cwd was deleted (or
-sits on a disconnected share) cannot import the module at all.
+# No module in this branch may read the working directory to import.
+#
+# THE MECHANISM (measured on the Windows CI gate 2026-08-31, @memory's finding)
+# ----------------------------------------------------------------------------
+# ``ntpath.realpath`` computes ``os.getcwd()`` UNCONDITIONALLY — on its first
+# lines, before it checks whether the path is even absolute — and
+# ``Path.resolve()`` routes through it.  So on Windows every
+# ``Path(__file__).resolve()`` reached while a module is being imported is an
+# import-time working-directory read, and a process whose cwd was deleted (or
+# sits on a disconnected share) cannot import the module at all.
+#
+# ``posixpath.realpath`` skips ``getcwd`` for an absolute path, which is why this
+# was invisible on Linux for as long as it existed.  These pins inject the
+# Windows behaviour as a CONDITION rather than a platform, so they run red on
+# this host: ``os.path.realpath`` is wrapped to read ``os.getcwd()`` first, then
+# ``os.getcwd`` is denied.
+#
+# THE DISCRIMINATOR IS *REACHED AT IMPORT*, NOT *WRITTEN AT MODULE SCOPE*
+# -----------------------------------------------------------------------
+# A ``resolve()`` inside a function still counts when import-time code calls that
+# function — including a default argument evaluated during import.  A grep for
+# module-level assignments would miss those, so the pin imports every module in
+# the tree and lets the interpreter decide what is reached.
+#
+# WHY A CHILD PROCESS
+# -------------------
+# The injection has to land before any ``aipass`` module is imported, or a module
+# that already cached ``os.path.realpath`` would be measured against the real
+# one.  Other branches' import-time code is held CONSTANT by preloading it in the
+# healthy world first: their dead-cwd cure is their own build, and this file
+# measures aipass's sites only.
 
-``posixpath.realpath`` skips ``getcwd`` for an absolute path, which is why this
-was invisible on Linux for as long as it existed.  These pins inject the
-Windows behaviour as a CONDITION rather than a platform, so they run red on
-this host: ``os.path.realpath`` is wrapped to read ``os.getcwd()`` first, then
-``os.getcwd`` is denied.
-
-THE DISCRIMINATOR IS *REACHED AT IMPORT*, NOT *WRITTEN AT MODULE SCOPE*
------------------------------------------------------------------------
-A ``resolve()`` inside a function still counts when import-time code calls that
-function — including a default argument evaluated during import.  A grep for
-module-level assignments would miss those, so the pin imports every module in
-the tree and lets the interpreter decide what is reached.
-
-WHY A CHILD PROCESS
--------------------
-The injection has to land before any ``aipass`` module is imported, or a module
-that already cached ``os.path.realpath`` would be measured against the real
-one.  Other branches' import-time code is held CONSTANT by preloading it in the
-healthy world first: their dead-cwd cure is their own build, and this file
-measures aipass's sites only.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — each module's own logic; see tests/test_read.py
+# seedgo: no-test-needed(stdlib) — os.path.realpath's real Windows codepath; emulated, not run on Windows
 
 from __future__ import annotations
 
@@ -65,18 +70,22 @@ _FOREIGN = [
     "aipass.trigger.apps.modules.core",
 ]
 
-_SKIP_PARTS = {".archive", ".backup", "__pycache__", "tests", "logs"}
+#: dropbox and .archive are sandboxes nothing looks into (the owner's ruling of
+#: 09-27, 20:42).  docs.local is untracked scratch, never shipped — aipass's
+#: decision, fleet green leg 3.
+_SKIP_PARTS = {"dropbox", ".archive", ".backup", "__pycache__", "docs.local", "tests", "logs"}
 
 
-def _branch_modules() -> list[str]:
+def _branch_modules(root: Path = BRANCH_ROOT) -> list[str]:
     """Every importable ``aipass.aipass.*`` module name, found on disk.
 
     Named by walking files rather than by ``pkgutil``, because ``pkgutil``
-    imports as it walks — the very thing under test.
+    imports as it walks — the very thing under test.  *root* is the live tree
+    by default; the walk's skip pin hands it a tmp_path tree instead.
     """
     names: list[str] = []
-    for py in sorted(BRANCH_ROOT.rglob("*.py")):
-        parts = py.relative_to(BRANCH_ROOT).parts
+    for py in sorted(root.rglob("*.py")):
+        parts = py.relative_to(root).parts
         if any(part in _SKIP_PARTS for part in parts):
             continue
         stem = parts[:-1] if parts[-1] == "__init__.py" else (*parts[:-1], parts[-1][:-3])
@@ -137,6 +146,7 @@ def _run(source: str) -> str:
         [sys.executable, "-c", source],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=180,
     )
     return result.stdout + result.stderr
@@ -166,6 +176,18 @@ class TestEveryModuleImportsWithoutTheWorkingDirectory:
         assert len(modules) > 40, f"module walk named only {len(modules)} — it is blind, not clean"
         assert "aipass.aipass.apps.handlers" in modules
         assert not any(".tests" in name or ".archive" in name for name in modules)
+
+    def test_the_walk_never_enters_a_sandbox_or_scratch(self, tmp_path: Path) -> None:
+        """A planted module in each skipped directory is never named; the live one beside them is.
+
+        Red before the cure: docs.local/ held devpulse's fleet tools and the sweep
+        tried to import them as ``aipass.aipass.docs.local...``.
+        """
+        for skipped in ("dropbox", ".archive", "__pycache__", "docs.local"):
+            (tmp_path / skipped).mkdir()
+            (tmp_path / skipped / "planted.py").write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / "live.py").write_text("x = 1\n", encoding="utf-8")
+        assert _branch_modules(tmp_path) == ["aipass.aipass.live"]
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +265,10 @@ class TestTheImportGuardWalksFramesWithoutTheFilesystem:
 GUARD = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 
 #: Directories the ban does not police: retired code and the pin's own fixtures.
-_BAN_SKIP = {".archive", ".backup", "__pycache__", "tests", "logs"}
+#: dropbox and .archive are sandboxes nothing looks into (the owner's ruling of
+#: 09-27, 20:42).  docs.local is untracked scratch, never shipped — aipass's
+#: decision, fleet green leg 3.
+_BAN_SKIP = {"dropbox", ".archive", ".backup", "__pycache__", "docs.local", "tests", "logs"}
 
 
 def _inspect_stack_calls(source: str) -> list[int]:
@@ -268,21 +293,18 @@ def _inspect_stack_calls(source: str) -> list[int]:
     return sorted(lines)
 
 
-def _banned_sites() -> tuple[list[str], int]:
-    """Every ``inspect.stack()`` call under the branch, and the files parsed."""
+def _banned_sites(root: Path = BRANCH_ROOT) -> tuple[list[str], int]:
+    """Every ``inspect.stack()`` call under *root* (the live branch by default), and the files parsed."""
     offenders: list[str] = []
     scanned = 0
-    for py in sorted(BRANCH_ROOT.rglob("*.py")):
-        parts = py.relative_to(BRANCH_ROOT).parts
+    for py in sorted(root.rglob("*.py")):
+        parts = py.relative_to(root).parts
         if any(part in _BAN_SKIP for part in parts):
             continue
-        try:
-            source = py.read_text(encoding="utf-8")
-            lines = _inspect_stack_calls(source)
-        except (SyntaxError, UnicodeDecodeError):
-            continue
+        # A live file that will not parse raises here: skipping it could hide a call.
+        lines = _inspect_stack_calls(py.read_text(encoding="utf-8"))
         scanned += 1
-        offenders.extend(f"{py.relative_to(BRANCH_ROOT).as_posix()}:{line}" for line in lines)
+        offenders.extend(f"{py.relative_to(root).as_posix()}:{line}" for line in lines)
     return offenders, scanned
 
 
@@ -313,6 +335,15 @@ class TestNoInspectStackSurvives:
         """A walk that visits nothing reports clean. Refuse to call that a pass."""
         _, scanned = _banned_sites()
         assert scanned > 40, f"ban only parsed {scanned} modules -- it is blind, not clean"
+
+    def test_the_ban_never_enters_a_sandbox_or_scratch(self, tmp_path: Path) -> None:
+        """A call planted in each skipped directory goes unread; the live one beside them is convicted."""
+        planted = "import inspect\nx = inspect.stack()\n"
+        for skipped in ("dropbox", ".archive", "__pycache__", "docs.local"):
+            (tmp_path / skipped).mkdir()
+            (tmp_path / skipped / "planted.py").write_text(planted, encoding="utf-8")
+        (tmp_path / "live.py").write_text(planted, encoding="utf-8")
+        assert _banned_sites(tmp_path) == (["live.py:2"], 1)
 
     def test_a_planted_call_is_convicted_at_its_line(self) -> None:
         """Positive control through the REAL matcher, not a re-implementation."""

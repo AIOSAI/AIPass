@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commit_handler.py
 # Description: Commit handler with scoped staging
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-05-12
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """Commit handler with scoped staging."""
@@ -184,7 +184,6 @@ def stage_branch_dir(branch_dir: Path, repo_root: Path | None = None) -> dict:
 
 def commit_changes(
     message: str,
-    branch_dir: Path | None = None,
     all_files: bool = False,
     files: list[str] | None = None,
     repo_root: Path | None = None,

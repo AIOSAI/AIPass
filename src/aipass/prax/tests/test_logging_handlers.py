@@ -1,31 +1,68 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-08-04
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for prax logging handler modules.
+"""Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
 
-Covers: direct.py (doRollover), introspection.py (get_calling_module_path),
-log_watchdog.py (get_oversized_files, truncate_log_file),
-monitoring.py (run_monitoring_loop), operations.py (create_config_file),
-override.py (enhanced_getLogger, install_logger_override, restore_original_logger),
-setup.py (setup_system_logger, doRollover for _WindowsSafeRotatingHandler),
-terminal/filtering.py (load_filtered_modules, should_display_terminal),
-terminal/formatting.py (format_terminal_message, create_terminal_handler).
+# Tests for prax logging handler modules.
+#
+# Covers: direct.py (direct_log, doRollover), introspection.py (get_calling_module_path),
+# log_watchdog.py (get_oversized_files, truncate_log_file),
+# monitoring.py (run_monitoring_loop), operations.py (create_config_file),
+# override.py (enhanced_getLogger, install_logger_override, restore_original_logger),
+# setup.py (setup_system_logger, doRollover for _WindowsSafeRotatingHandler),
+# terminal/filtering.py (load_filtered_modules, should_display_terminal),
+# terminal/formatting.py (format_terminal_message, create_terminal_handler).
+#
+# All imports happen inside test functions because the autouse mock_prax_infrastructure
+# fixture must inject sys.modules mocks before any prax module is loaded.
 
-All imports happen inside test functions because the autouse mock_prax_infrastructure
-fixture must inject sys.modules mocks before any prax module is loaded.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — log_watchdog's sweep_stale_logs(), covered by tests/test_sweep.py
+# seedgo: no-test-needed(through_the_command) — setup_individual_logger(), covered by tests/test_logging.py
+# seedgo: no-test-needed(through_the_command) — append_jsonl() in jsonl_writer.py, covered by tests/test_jsonl_writer.py
 
-import importlib  # noqa: F401 — used inside test functions for dynamic module loading
+import importlib  # used inside test functions for dynamic module loading
 import json
 import logging
 import sys
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
+
+from aipass.prax.apps.handlers.logging import direct
+
+# =============================================
+# direct.py -- direct_log
+# =============================================
+
+
+class TestDirectLog:
+    """direct_log() on the real body, into a logger whose files live under tmp_path."""
+
+    def test_direct_log_writes_the_line(self, monkeypatch, tmp_path):
+        """direct_log writes the message into the caller's system and local logs, both under tmp_path.
+
+        Mutant: dropping the log_fn(message) call reddens this; so does handing it the level.
+        """
+        logs, cache, message = tmp_path / "logs", {}, "direct_log reached its file"
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(logs))
+        monkeypatch.setattr(direct, "_direct_loggers", cache)
+        try:
+            direct.direct_log("warning", message)
+        finally:
+            for built in cache.values():
+                for handler in list(built.handlers):
+                    handler.close()
+                    built.removeHandler(handler)
+
+        written = sorted(logs.rglob("*.log"))
+        assert len(written) == 2
+        for log_file in written:
+            assert message in log_file.read_text(encoding="utf-8")
 
 
 # =============================================
@@ -62,13 +99,11 @@ class TestDirectRotatingFileHandlerDoRollover:
         ):
             _direct_mod_name = "aipass.prax.apps.handlers.logging.direct"
             sys.modules.pop(_direct_mod_name, None)
-            direct_mod = importlib.import_module(_direct_mod_name)  # noqa: F841
+            direct_mod = importlib.import_module(_direct_mod_name)
 
             log_file = tmp_path / "test.log"
             log_file.write_text("line1\nline2\n", encoding="utf-8")
-            handler = direct_mod.RotatingFileHandler(  # noqa: F821
-                str(log_file), maxBytes=10, backupCount=1
-            )
+            handler = direct_mod.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
             record = logging.LogRecord(
                 name="test",
                 level=logging.INFO,
@@ -112,13 +147,11 @@ class TestDirectRotatingFileHandlerDoRollover:
         ):
             _direct_mod_name = "aipass.prax.apps.handlers.logging.direct"
             sys.modules.pop(_direct_mod_name, None)
-            direct_mod = importlib.import_module(_direct_mod_name)  # noqa: F841
+            direct_mod = importlib.import_module(_direct_mod_name)
 
             log_file = tmp_path / "test_os.log"
             log_file.write_text("data\n", encoding="utf-8")
-            handler = direct_mod.RotatingFileHandler(  # noqa: F821
-                str(log_file), maxBytes=10, backupCount=1
-            )
+            handler = direct_mod.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
 
             with (
                 patch(
@@ -1439,3 +1472,53 @@ class TestCreateTerminalHandler:
         fmt = self._import_formatting(tmp_path)
         handler = fmt.create_terminal_handler()
         assert handler.stream is sys.stdout
+
+
+# =============================================
+# lifecycle.py -- run_initialize / run_shutdown
+# =============================================
+
+
+class TestLifecycleRecordsWhoAskedForIt:
+    """The lifecycle doors take the caller's module name — and must use it.
+
+    seedgo's accepted_and_never_used_parameter rule found both doors accepting
+    module_name and reading neither, with a docstring promising it was 'for log
+    prefixes'. The operation record is where it belongs: initialising the fleet's
+    logging is a system-wide act, and the record of it should say who asked.
+    """
+
+    def _lifecycle(self, monkeypatch):
+        """Import the real lifecycle handler with every step stubbed out."""
+        import aipass.prax.apps.handlers.logging.lifecycle as lifecycle
+
+        for name in (
+            "create_config_file",
+            "save_module_registry",
+            "install_logger_override",
+            "start_file_watcher",
+            "stop_file_watcher",
+            "restore_original_logger",
+        ):
+            monkeypatch.setattr(lifecycle, name, lambda *a, **kw: None)
+        monkeypatch.setattr(lifecycle, "discover_python_modules", lambda *a, **kw: {})
+        monkeypatch.setattr(lifecycle, "setup_system_logger", lambda *a, **kw: MagicMock())
+        monkeypatch.setattr(lifecycle, "json_handler", MagicMock())
+
+        recorded = []
+        monkeypatch.setattr(lifecycle, "log_operation", lambda msg, data: recorded.append((msg, data)))
+        return lifecycle, recorded
+
+    def test_initialize_records_the_module_that_asked(self, monkeypatch):
+        lifecycle, recorded = self._lifecycle(monkeypatch)
+
+        lifecycle.run_initialize("some_caller")
+
+        assert [data.get("initiated_by") for _, data in recorded] == ["some_caller"]
+
+    def test_shutdown_records_the_module_that_asked(self, monkeypatch):
+        lifecycle, recorded = self._lifecycle(monkeypatch)
+
+        lifecycle.run_shutdown("some_caller")
+
+        assert [data.get("initiated_by") for _, data in recorded] == ["some_caller"]

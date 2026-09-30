@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: tests/test_integration.py
 # Description: Integration tests for CLI main() flow
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-29
-# Modified: 2026-03-30
+# Modified: 2026-09-27
 # =============================================
 
-"""Integration tests for CLI main() entry point."""
+"""Tests for apps/cli.py main() and the package's cli_entry — the routed flow end to end."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(help_flag_safety) — that each module's handle_command calls wants_help before acting
 
 from unittest.mock import patch
 
@@ -106,7 +109,6 @@ class TestMainFlow:
             patch.object(display, "err_console", err_cons),
             patch.object(display, "_TRIGGER", None),
             patch.object(display, "_TRIGGER_LOADED", True),
-            patch("aipass.cli.apps.handlers.json.json_handler.log_operation"),
             patch("sys.argv", ["cli", "display", "demo"]),
         ):
             result = main()

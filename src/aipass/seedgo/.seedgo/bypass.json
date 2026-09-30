@@ -6,8 +6,114 @@
   },
   "bypass": [
     {
-      "file": "_content.py",
-      "reason": "Content files contain Rich markup strings with code examples (print(), python3, imports, logger calls, etc.). These are documentation, not executable code. All code-quality checkers produce false positives on these files."
+      "file": "apps/handlers/aipass_standards/cli_content.py",
+      "standard": "cli",
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example ('from aipass.cli... import console' as the import to use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/encapsulation_content.py",
+      "standard": "cli",
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the cli import a module should use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/imports_content.py",
+      "standard": "cli",
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (cli imports in the import-order example). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/modules_content.py",
+      "standard": "cli",
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the cli import a module should use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/output_routing_content.py",
+      "standard": "cli",
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the cli helpers output should route through). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/stderr_routing_content.py",
+      "standard": "cli",
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the err_console import to use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/architecture_content.py",
+      "standard": "help_text",
+      "lines": [
+        80,
+        89
+      ],
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example ('$ python3 flow.py' as the anti-pattern). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/help_text_content.py",
+      "standard": "help_text",
+      "lines": [
+        28,
+        36,
+        37,
+        42,
+        50,
+        51,
+        52
+      ],
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (python3 commands as the anti-pattern the standard flags). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/shebang_content.py",
+      "standard": "help_text",
+      "lines": [
+        31,
+        39
+      ],
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (python3 shebang/run lines). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/encapsulation_content.py",
+      "standard": "architecture",
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (a modules import as the allowed pattern (line 42)). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: this checker passes no line= to is_bypassed."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/handlers_content.py",
+      "standard": "architecture",
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (a parent-module import as the example (line 51)). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: this checker passes no line= to is_bypassed."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/commented_logger_content.py",
+      "standard": "commented_logger",
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (commented-out logger calls as the anti-pattern). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: this checker passes no line= to is_bypassed."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/cli_ux_content.py",
+      "standard": "debug_print",
+      "lines": [
+        86
+      ],
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (a bare print() as the anti-pattern). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/hardcoded_path_content.py",
+      "standard": "hardcoded_path",
+      "lines": [
+        50,
+        53,
+        65
+      ],
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (home paths as the anti-pattern). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/stderr_routing_content.py",
+      "standard": "stderr_routing",
+      "lines": [
+        28,
+        45,
+        54
+      ],
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (Console(stderr=True) as the anti-pattern). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/todo_content.py",
+      "standard": "todo",
+      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (TODO/FIXME/HACK/XXX markers as the anti-pattern). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: this checker passes no line= to is_bypassed."
     },
     {
       "file": "apps/handlers/aipass_standards/stderr_routing_check.py",
@@ -37,7 +143,7 @@
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "cli",
-      "reason": "Display handler is an exception to the handler-no-console rule — its entire purpose is Rich console formatting. Known debt tracked in DPLAN-0047."
+      "reason": "Display handler is an exception to the handler-no-console rule \u2014 its entire purpose is Rich console formatting. Known debt tracked in DPLAN-0047."
     },
     {
       "file": "apps/handlers/diagnostics/diagnostics_check.py",
@@ -57,42 +163,42 @@
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/bypass/bypass_handler.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/diagnostics/diagnostics_check.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/readme/readme_generator.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/readme/readme_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/aipass_proof/triplet.py",
       "standard": "deep_nesting",
-      "reason": "scan() depth 6 — state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
+      "reason": "scan() depth 6 \u2014 state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
     },
     {
       "file": "apps/handlers/aipass_standards/introspection_check.py",
       "standard": "deep_nesting",
-      "reason": "3 functions (_find_name_main_block depth 5, _is_no_args_check depth 7, check_content_references depth 5) — deep AST traversal with isinstance chains inherent to pattern detection"
+      "reason": "3 functions (_find_name_main_block depth 5, _is_no_args_check depth 7, check_content_references depth 5) \u2014 deep AST traversal with isinstance chains inherent to pattern detection"
     },
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "deep_nesting",
-      "reason": "print_branch_summary() depth 6 — full rewrite planned in DPLAN-0047, refactoring now would be throwaway work"
+      "reason": "print_branch_summary() depth 6 \u2014 full rewrite planned in DPLAN-0047, refactoring now would be throwaway work"
     },
     {
       "file": "_content.py",
@@ -111,16 +217,45 @@
     },
     {
       "file": "tests/test_checkers_batch1.py",
-      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and contains intentional bad-pattern strings as test input data. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
+      "standard": "commented_logger",
+      "reason": "Test input, not dead code: the commented_logger cases write '# logger.info(...)' strings into tmp_path files as checker input (L252-256, L269). File-wide because commented_logger_check passes no line= to is_bypassed. Replaces the no-standard rule removed 2026-09-25 (survey row #12)."
     },
     {
-      "file": "tests/test_checkers_batch3.py",
-      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and contains intentional bad-pattern strings as test input data. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
+      "file": "tests/test_checkers_batch10.py",
+      "standard": "hardcoded_path",
+      "lines": [
+        92,
+        100,
+        116,
+        124,
+        132,
+        139,
+        146,
+        160,
+        168,
+        175,
+        203,
+        212,
+        222,
+        233,
+        249,
+        257,
+        285,
+        292,
+        299,
+        801,
+        803,
+        894,
+        918,
+        919,
+        920
+      ],
+      "reason": "Test input, not paths the tests use: the hardcoded_path and literal-path cases hold home-path strings (/home/patrick/, /Users/carol/, C:\\Users\\...) as checker input. Line-level; replaces the no-standard rule removed 2026-09-25 (survey row #12)."
     },
     {
       "file": "apps/handlers/aipass_standards/skip_dirs.py",
       "standard": "json_structure",
-      "reason": "Pure constants module — defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
+      "reason": "Pure constants module \u2014 defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
     },
     {
       "file": "tests/test_windows_compat.py",
@@ -135,7 +270,7 @@
     {
       "file": "apps/handlers/aipass_standards/exclusive_create_race.py",
       "standard": "json_structure",
-      "reason": "Pure AST detector — takes a parsed tree and returns (line, text) pairs: no I/O, no operation to log. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch. Same shape as skip_dirs.py above."
+      "reason": "Pure AST detector \u2014 takes a parsed tree and returns (line, text) pairs: no I/O, no operation to log. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch. Same shape as skip_dirs.py above."
     },
     {
       "file": "apps/handlers/aipass_standards/mock_repr_path.py",
@@ -145,31 +280,27 @@
     {
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
-      "reason": "Pure predicate — wants_help() answers a question about a list of strings and returns a bool: no state, no I/O, no operation to log. Measured 2026-08-13: checklist reports 'Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler (+1 more)', i.e. the standard wants an import AND a log_operation() call. This predicate runs before EVERY seedgo command, so satisfying it would write 'a help flag was looked for' on every invocation and bury the operation log the standard exists to serve. Same shape as skip_dirs.py above."
-    },
-    {
-      "file": "tests/test_checkers_batch10.py",
-      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and contains intentional hardcoded-path strings as test input data. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
+      "reason": "Pure predicate \u2014 wants_help() answers a question about a list of strings and returns a bool: no state, no I/O, no operation to log. Measured 2026-08-13: checklist reports 'Missing json_handler import \u2014 add: from aipass.<branch>.apps.handlers.json import json_handler (+1 more)', i.e. the standard wants an import AND a log_operation() call. This predicate runs before EVERY seedgo command, so satisfying it would write 'a help flag was looked for' on every invocation and bury the operation log the standard exists to serve. Same shape as skip_dirs.py above."
     },
     {
       "file": "handlers/aipass_proof/",
       "standard": "dead_code",
-      "reason": "Proof handlers are discovered via iterdir() + importlib in seedgo_proof.py — dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead — it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
+      "reason": "Proof handlers are discovered via iterdir() + importlib in seedgo_proof.py \u2014 dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead \u2014 it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "log_visibility",
-      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** — granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import — so this exemption cannot widen without a machine refusing the pack. prax's logger is an aipass import; the payload uses stdlib logging. This standard is NAMED in the grant's recorded terms."
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. prax's logger is an aipass import; the payload uses stdlib logging. This standard is NAMED in the grant's recorded terms."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "json_structure",
-      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** — granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import — so this exemption cannot widen without a machine refusing the pack. json_handler is an aipass import. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design §7 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger — a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. json_handler is an aipass import. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design \u00a77 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger \u2014 a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "unused_function",
-      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** — granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import — so this exemption cannot widen without a machine refusing the pack. every function flagged is a pytest hook called BY NAME by pytest inside the copy, so no aipass call site can exist by construction. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design §7 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger — a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. every function flagged is a pytest hook called BY NAME by pytest inside the copy, so no aipass call site can exist by construction. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design \u00a77 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger \u2014 a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/",
@@ -243,6 +374,26 @@
         "measure_corpus"
       ],
       "reason": "CALLED IN PRODUCTION THROUGH A MANIFEST STRING, which no static reader can follow. context_standards/pack.json declares \"measured_by\": \"startup_budget_check:measure_corpus\"; audit/discovery.measure_pack_corpus() resolves that string and calls it on every branch, which is why `drone @seedgo audit context` prints '6 startup files measured' instead of the engine's apps/**/*.py count. The checker strips string literals from its corpus by design (a name that only appears inside a quote is not a call), so the one real call site is invisible to it. Name-scoped, not file-wide: every other function in this checker is still measured."
+    },
+    {
+      "file": "tests/test_audit_tests_lane.py",
+      "standard": "hardcoded_path",
+      "reason": "The POSIX home literals are INPUT to plugin.classify(), whose job is to judge a path SHAPE. The literal is the fixture; this file never opens it. Replacing it with pathlib would delete the test."
+    },
+    {
+      "file": "tests/test_audit_tests_lane.py",
+      "standard": "windows_compat",
+      "reason": "The /tmp literals are INPUT to plugin.classify_sqlite(), which parses sqlite connection strings. The string shape is the subject under test, never a location this file touches."
+    },
+    {
+      "file": "tests/test_audit_tests_static.py",
+      "standard": "windows_compat",
+      "reason": "The /tmp literals are FIELD VALUES inside a hand-built artifact dict fed to the law checkers. Nothing opens them; they stand in for paths a run would have recorded, and the laws judge the document's shape, not the filesystem."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/gutting.py",
+      "standard": "unused_function",
+      "reason": "TRUE FINDING, RECORDED NOT DENIED. discover_functions(), run_campaign() and summarize() are the pseudo_tested engine's public surface and nothing calls them, because the group is declared not_applicable: the adapter's nominate(spec) seam carries no options channel to opt a campaign in per run, and the campaign costs one suite execution per function (projected 35.6h on seedgo, 58.8h ceiling) so it may not run by default. The engine is built and proven on .seedgo/fixtures/canary_6500dce9. Tracked as seedgo todo 120; the bypass goes when the run loop lands, and until then the audit is right and this entry is the record of why."
     }
   ],
   "notes": {

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_level_check.py
 # Description: Log Level Hygiene Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -28,6 +28,8 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Audit scope: all Python files
+# APPLIES_TO: level choice is a product decision.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 
@@ -84,7 +86,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not has_logger:
         return {
             "passed": True,
-            "checks": [{"name": "Log level check", "passed": True, "message": "No logger calls found (skipped)"}],
+            "checks": [
+                {
+                    "name": "Log level check",
+                    "passed": True,
+                    "message": "No logger calls found (skipped)",
+                    "declined": True,
+                }
+            ],
             "score": 100,
             "standard": "LOG_LEVEL",
         }

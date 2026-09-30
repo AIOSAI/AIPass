@@ -1,35 +1,38 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Case-insensitive filesystem pins for *_REGISTRY.json discovery
-# Version: 1.1.0
+# Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-28
 # =============================================
 
-"""Every ``*_REGISTRY.json`` walk in this tree must be case-SENSITIVE.
+"""Tests for shared/registry_discovery.py and its case-insensitive-filesystem pins."""
+# Every ``*_REGISTRY.json`` walk in this tree must be case-SENSITIVE.
+#
+# ``Path.glob`` asks the FILESYSTEM to match.  On Windows -- and on macOS by
+# default -- that match is case-insensitive, so ``*_REGISTRY.json`` also matches
+# ``*_registry.json``.  The bait ships in every branch: ``flow_json/*_registry.json``
+# plan counters and a ``.spawn/.template_registry.json`` (pathlib's ``*`` matches
+# dotfiles, unlike the ``glob`` module).  Measured on CI: ``find_registry()``
+# returned ``drone_command_registry.json`` as the fleet trust-anchor candidate.
+#
+# A registry is a TRUST ANCHOR -- it decides which installation a caller belongs
+# to, what project name lands on an identity, and where the delete lane thinks
+# root is.  A plan counter answering that is not a near miss; it is a different
+# question.
+#
+# These pins run RED ON LINUX by emulating the widened match, so no Windows box
+# is needed to keep them honest.
+#
+# 1.1.0 -- the CONTROL was the thing that assumed a host.  It asserted the raw
+# glob returns nothing, which is false on NTFS, so it failed on the Windows leg
+# of ebb8075d: broken on the exact platform the defect lives on.  The host is
+# PROBED now and both outcomes are pinned (see host_folds_case).  A
+# ``skipif`` was refused for the same reason -- it would retire the control where
+# it matters most.
 
-``Path.glob`` asks the FILESYSTEM to match.  On Windows -- and on macOS by
-default -- that match is case-insensitive, so ``*_REGISTRY.json`` also matches
-``*_registry.json``.  The bait ships in every branch: ``flow_json/*_registry.json``
-plan counters and a ``.spawn/.template_registry.json`` (pathlib's ``*`` matches
-dotfiles, unlike the ``glob`` module).  Measured on CI: ``find_registry()``
-returned ``drone_command_registry.json`` as the fleet trust-anchor candidate.
-
-A registry is a TRUST ANCHOR -- it decides which installation a caller belongs
-to, what project name lands on an identity, and where the delete lane thinks
-root is.  A plan counter answering that is not a near miss; it is a different
-question.
-
-These pins run RED ON LINUX by emulating the widened match, so no Windows box
-is needed to keep them honest.
-
-1.1.0 -- the CONTROL was the thing that assumed a host.  It asserted the raw
-glob returns nothing, which is false on NTFS, so it failed on the Windows leg
-of ebb8075d: broken on the exact platform the defect lives on.  The host is
-PROBED now and both outcomes are pinned (see :func:`host_folds_case`).  A
-``skipif`` was refused for the same reason -- it would retire the control where
-it matters most.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the registry-discovery module and the modules it imports parse and import
 
 from __future__ import annotations
 
@@ -63,11 +66,9 @@ def case_insensitive_fs(monkeypatch: pytest.MonkeyPatch):
 
     def widened(self: Path, pattern: str, *args, **kwargs):
         rx = re.compile(fnmatch.translate(pattern), re.IGNORECASE)
-        try:
-            entries = list(real_iterdir(self))
-        except (OSError, ValueError):
-            return iter(())
-        return iter(sorted(p for p in entries if rx.match(p.name)))
+        if not self.is_dir():
+            return iter(())  # the real glob of a missing directory is empty too
+        return iter(sorted(p for p in real_iterdir(self) if rx.match(p.name)))
 
     monkeypatch.setattr(Path, "glob", widened)
     return widened
@@ -154,7 +155,7 @@ class TestTheEmulationIsNotBlind:
         else:
             assert found == set(), f"host does NOT fold case, so the raw glob must reach nothing -- got {found}"
 
-    def test_with_emulation_the_lowercase_decoy_IS_matched(self, tmp_path: Path, case_insensitive_fs) -> None:
+    def test_with_emulation_the_lowercase_decoy_is_matched(self, tmp_path: Path, case_insensitive_fs) -> None:
         """If this goes green-by-accident the whole file proves nothing."""
         root, _ = _project(tmp_path)
         names = {p.name for p in (root / "sub").glob("*_REGISTRY.json")}
@@ -254,14 +255,15 @@ def _private_registry_globs(root: Path) -> tuple[list[str], int]:
     scanned = 0
     for py in sorted(root.rglob("*.py")):
         rel = py.relative_to(root).as_posix()
-        if rel.startswith((".backup/", ".archive/")):
+        # dropbox and .archive are sandboxes nothing looks into (the owner's ruling
+        # of 09-27, 20:42).  docs.local is untracked scratch, never shipped --
+        # aipass's decision, fleet green leg 3.
+        if {"dropbox", ".archive", ".backup", "__pycache__", "docs.local"} & set(py.relative_to(root).parts):
             continue
         if rel in {"tests/test_registry_case_sweep.py", "shared/registry_discovery.py"}:
             continue  # the pin itself, and the one sanctioned implementation
-        try:
-            tree = ast.parse(py.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
+        # A live file that will not parse raises here: skipping it could hide a glob.
+        tree = ast.parse(py.read_text(encoding="utf-8"))
         scanned += 1
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
@@ -313,6 +315,15 @@ class TestNoPrivateRegistryGlobSurvives:
         offenders, scanned = _private_registry_globs(tmp_path)
         assert offenders == ["guilty.py:2"]
         assert scanned == 2
+
+    def test_the_walk_never_enters_a_sandbox_or_scratch(self, tmp_path: Path) -> None:
+        """A glob planted in each skipped directory goes unread; the live one beside them is convicted."""
+        planted = 'from pathlib import Path\nx = Path(".").glob("*_REGISTRY.json")\n'
+        for skipped in ("dropbox", ".archive", "__pycache__", "docs.local"):
+            (tmp_path / skipped).mkdir()
+            (tmp_path / skipped / "planted.py").write_text(planted, encoding="utf-8")
+        (tmp_path / "live.py").write_text(planted, encoding="utf-8")
+        assert _private_registry_globs(tmp_path) == (["live.py:2"], 1)
 
     def test_the_walk_also_catches_rglob(self, tmp_path: Path) -> None:
         """``rglob`` is the same defect one keystroke away."""

@@ -1,14 +1,23 @@
 # =================== META ====================
 # Name: test_check_fix_identity.py
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-07-11
-# Modified: 2026-07-11
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for check_owner_identity and fix_owner_identity (sync-registry --check/--fix)."""
+"""Tests for apps/handlers/sync_registry_ops.py and apps/modules/sync_registry.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — docstrings on check_owner_identity, fix_owner_identity and pick_owner_branch
+# seedgo: no-test-needed(constant) — the flag-name strings ("no_owner", "multi_owner", etc.) sync_registry_ops emits
 
 import json
+
+from aipass.spawn.apps.handlers.registry import ensure_project_has_owner, pick_owner_branch
+from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity, fix_owner_identity
+from aipass.spawn.apps.handlers.adoption_ops import adopt_existing
+from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
 
 def _write_registry(tmp_path, metadata=None, branches=None):
@@ -67,7 +76,6 @@ class TestCheckOwnerIdentity:
     """Tests for check_owner_identity — 7 flags."""
 
     def test_clean_registry(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity
 
         _make_branch(tmp_path, "alpha", "src/alpha", passport_rid="proj-id")
         reg = _write_registry(
@@ -83,7 +91,6 @@ class TestCheckOwnerIdentity:
         assert result["owner_uid"] == "unique-alpha"
 
     def test_pinned_schema_no_owner(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity
 
         reg = _write_registry(
             tmp_path,
@@ -96,7 +103,6 @@ class TestCheckOwnerIdentity:
         assert result["owner_uid"] == ""
 
     def test_no_owner_flag(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity
 
         reg = _write_registry(
             tmp_path,
@@ -109,7 +115,6 @@ class TestCheckOwnerIdentity:
         assert "no_owner" in flags
 
     def test_multi_owner_flag(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity
 
         _make_branch(tmp_path, "alpha", "src/alpha")
         _make_branch(tmp_path, "beta", "src/beta")
@@ -127,7 +132,6 @@ class TestCheckOwnerIdentity:
         assert "multi_owner" in flags
 
     def test_owner_missing_branch_flag(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity
 
         reg = _write_registry(
             tmp_path,
@@ -140,7 +144,6 @@ class TestCheckOwnerIdentity:
         assert "owner_missing_branch" in flags
 
     def test_metadata_id_missing_flag(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity
 
         reg = _write_registry(
             tmp_path,
@@ -153,7 +156,6 @@ class TestCheckOwnerIdentity:
         assert "metadata_id_missing" in flags
 
     def test_passport_mismatch_flag(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity
 
         _make_branch(tmp_path, "alpha", "src/alpha", passport_rid="old-project-id")
         reg = _write_registry(
@@ -167,7 +169,6 @@ class TestCheckOwnerIdentity:
         assert "passport_mismatch" in flags
 
     def test_entry_rid_stale_missing(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity
 
         reg = _write_registry(
             tmp_path,
@@ -180,7 +181,6 @@ class TestCheckOwnerIdentity:
         assert "entry_rid_stale" in flags
 
     def test_entry_rid_stale_equals_metadata_id(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity
 
         project_id = "proj-id-shared"
         reg = _write_registry(
@@ -194,7 +194,6 @@ class TestCheckOwnerIdentity:
         assert "entry_rid_stale" in flags
 
     def test_entry_rid_stale_duplicate(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity
 
         dup_id = "duplicate-id"
         reg = _write_registry(
@@ -220,20 +219,26 @@ class TestFixOwnerIdentity:
     """Tests for fix_owner_identity — reconcile."""
 
     def test_noop_when_clean(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
+        """A clean project is not written at all: the registry and passport keep bytes and mtime.
 
-        _make_branch(tmp_path, "alpha", "src/alpha", passport_rid="proj-id")
+        test_refuses_to_alter_correct_seat reads the answer; this reads the disk.
+        """
+
+        branch = _make_branch(tmp_path, "alpha", "src/alpha", passport_rid="proj-id")
         reg = _write_registry(
             tmp_path,
             metadata={"version": "1.0.0", "last_updated": "2026-07-11", "id": "proj-id"},
             branches=[_entry("alpha", "src/alpha", owner=True, registry_id="unique-alpha")],
         )
+        watched = [reg, branch / ".trinity" / "passport.json"]
+        before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in watched]
 
         result = fix_owner_identity(registry_path=reg)
+
         assert result["actions"] == []
+        assert [(p.read_bytes(), p.stat().st_mtime_ns) for p in watched] == before
 
     def test_seats_missing_owner(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         reg = _write_registry(
             tmp_path,
@@ -254,7 +259,6 @@ class TestFixOwnerIdentity:
         assert alpha.get("owner") is True
 
     def test_resolves_multi_owner(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         reg = _write_registry(
             tmp_path,
@@ -274,7 +278,6 @@ class TestFixOwnerIdentity:
         assert owners[0]["name"] == "alpha"
 
     def test_mints_metadata_id_when_no_passport_consensus(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         reg = _write_registry(
             tmp_path,
@@ -290,7 +293,6 @@ class TestFixOwnerIdentity:
         assert len(data["metadata"]["id"]) == 36
 
     def test_majority_restores_metadata_id_from_passports(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         majority_id = "7087bb93-aaaa-bbbb-cccc-dddddddddddd"
         outlier_id = "deadbeef-0000-1111-2222-333333333333"
@@ -316,7 +318,6 @@ class TestFixOwnerIdentity:
         assert data["metadata"]["id"] == majority_id
 
     def test_majority_restore_aligns_outlier_passport(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         majority_id = "7087bb93-aaaa-bbbb-cccc-dddddddddddd"
         outlier_id = "deadbeef-0000-1111-2222-333333333333"
@@ -345,7 +346,6 @@ class TestFixOwnerIdentity:
         assert outlier_passport["citizenship"]["registry_id"] == majority_id
 
     def test_mints_metadata_id_when_passports_disagree(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         _make_branch(tmp_path, "alpha", "src/alpha", passport_rid="id-aaa")
         _make_branch(tmp_path, "beta", "src/beta", passport_rid="id-bbb")
@@ -368,7 +368,6 @@ class TestFixOwnerIdentity:
         assert len(data["metadata"]["id"]) == 36
 
     def test_mints_per_citizen_uids_for_stale_duplicates(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         shared_id = "stale-project-id"
         reg = _write_registry(
@@ -394,7 +393,6 @@ class TestFixOwnerIdentity:
         assert data["metadata"]["id"] == "proj-id", "the project credential is not a per-citizen uid"
 
     def test_aligns_passports_to_metadata_id(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         _make_branch(tmp_path, "alpha", "src/alpha", passport_rid="old-id")
         reg = _write_registry(
@@ -411,7 +409,6 @@ class TestFixOwnerIdentity:
         assert passport["citizenship"]["registry_id"] == "new-proj-id"
 
     def test_dry_run_does_not_write(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         reg = _write_registry(
             tmp_path,
@@ -426,7 +423,6 @@ class TestFixOwnerIdentity:
         assert reg.read_text(encoding="utf-8") == original
 
     def test_idempotent(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         _make_branch(tmp_path, "alpha", "src/alpha", passport_rid="proj-id")
         reg = _write_registry(
@@ -445,7 +441,6 @@ class TestFixOwnerIdentity:
         assert result2["actions"] == []
 
     def test_refuses_to_alter_correct_seat(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         _make_branch(tmp_path, "alpha", "src/alpha", passport_rid="proj-id")
         reg = _write_registry(
@@ -469,7 +464,6 @@ class TestLegacyCitizenClassMigration:
     """
 
     def test_migrates_every_retired_name_to_its_live_replacement(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         _make_branch(tmp_path, "vera", "src/vera", citizen_class="builder", passport_rid="proj-id")
         _make_branch(tmp_path, "writer", "src/writer", citizen_class="aipass_framework", passport_rid="proj-id")
@@ -514,7 +508,6 @@ class TestLegacyCitizenClassMigration:
         it takes the same backup under the same trinity-legal suffix — whichever
         path touches a passport first owns the true original.
         """
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         _make_branch(tmp_path, "alpha", "src/alpha", citizen_class="aipass_framework", passport_rid="proj-id")
         reg = _write_registry(
@@ -530,7 +523,6 @@ class TestLegacyCitizenClassMigration:
         assert json.loads(backup.read_text(encoding="utf-8"))["identity"]["citizen_class"] == "aipass_framework"
 
     def test_migration_idempotent(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         _make_branch(tmp_path, "alpha", "src/alpha", citizen_class="builder", passport_rid="proj-id")
         reg = _write_registry(
@@ -544,7 +536,6 @@ class TestLegacyCitizenClassMigration:
         assert not any("Migrate" in a for a in result2["actions"])
 
     def test_migration_dry_run_no_write(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         _make_branch(tmp_path, "alpha", "src/alpha", citizen_class="builder", passport_rid="proj-id")
         reg = _write_registry(
@@ -561,12 +552,14 @@ class TestLegacyCitizenClassMigration:
 
 
 class TestAdoptCallsEnsureOwner:
-    """Test that _adopt_existing calls ensure_project_has_owner."""
+    """Test that adopt_existing calls ensure_project_has_owner."""
 
     def test_adopt_seats_owner(self, tmp_path):
-        from unittest.mock import patch
+        """Adoption seats an owner and repairs the passport's registry_id against the found registry.
 
-        from aipass.spawn.apps.modules.core import _adopt_existing
+        Mutant: adopt_existing drops its fix_passport_registry_id call -> red.
+        """
+        from unittest.mock import patch
 
         branch_dir = tmp_path / "my_agent"
         trinity = branch_dir / ".trinity"
@@ -581,11 +574,17 @@ class TestAdoptCallsEnsureOwner:
         # The adoption lane lives in handlers/adoption_ops (split out of core when
         # core crossed the 600-line standard); core re-exports it, but patches
         # must target the module where the names are actually looked up.
-        with patch("aipass.spawn.apps.handlers.adoption_ops.find_registry", return_value=reg):
-            with patch("aipass.spawn.apps.handlers.adoption_ops.ensure_project_has_owner") as mock_owner:
-                with patch("aipass.spawn.apps.handlers.adoption_ops.fix_passport_registry_id"):
-                    _adopt_existing(branch_dir, "", None, None)
-                    mock_owner.assert_called_once_with(reg)
+        # update_ops.find_registry is the template update's by-name lookup; it walks
+        # from the CWD, so it is pointed at the tmp_path registry too.
+        with (
+            patch("aipass.spawn.apps.handlers.adoption_ops.find_registry", return_value=reg),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=reg),
+            patch("aipass.spawn.apps.handlers.adoption_ops.ensure_project_has_owner") as mock_owner,
+            patch("aipass.spawn.apps.handlers.adoption_ops.fix_passport_registry_id") as mock_fix_rid,
+        ):
+            adopt_existing(branch_dir, "", None, None)
+        mock_owner.assert_called_once_with(reg)
+        mock_fix_rid.assert_called_once_with(branch_dir, reg)
 
 
 class TestFixDryRunFullyReadOnly:
@@ -594,8 +593,6 @@ class TestFixDryRunFullyReadOnly:
     def test_fix_dry_run_writes_nothing_with_stale_entries(self, tmp_path):
         """Regression: dry-run must not apply old-sync repairs (prune stale, add unreg)."""
         from unittest.mock import patch
-
-        from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
         _make_branch(tmp_path, "real", "src/real", passport_rid="proj-id")
         reg = _write_registry(
@@ -622,8 +619,6 @@ class TestUnifiedOwnerHeuristic:
 
     def test_both_paths_pick_same_owner(self, tmp_path):
         """When first-created and passport-owner differ, both paths must agree."""
-        from aipass.spawn.apps.handlers.registry import ensure_project_has_owner, pick_owner_branch
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         _make_branch(tmp_path, "older", "src/older", citizen_class="specialist")
         _make_branch(tmp_path, "newer", "src/newer", citizen_class="manager")

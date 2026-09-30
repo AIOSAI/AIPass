@@ -3,20 +3,22 @@
 # Description: Error Resilience Tests (from seedgo template)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-03-27
+# Modified: 2026-09-28
 # =============================================
 
-"""
-Error Resilience Tests for API branch.
+"""Tests for apps/handlers/json/json_handler.py under missing, corrupt and empty files."""
 
-Covers 4 tests:
-  - missing_file, corrupt_json, empty_file, nonexistent_dir
-"""
+# Error Resilience Tests for API branch.
+#
+# Covers 4 tests:
+#   - missing_file, corrupt_json, empty_file, nonexistent_dir
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — the prax json service that json_handler delegates to; @prax's tests
+# seedgo: no-test-needed(ruff) — that apps/handlers/json/json_handler.py parses and imports
 
 import importlib
 import json
-import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -24,17 +26,12 @@ import pytest
 
 BRANCH_MODULE = "api"
 
-_handler_pkg = f"aipass.{BRANCH_MODULE}.apps.handlers"
-_json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
+_JSON_MOD_PATH = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
-if _handler_pkg not in sys.modules:
-    _stub = types.ModuleType(_handler_pkg)
-    _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-    _stub.__path__ = [str(_handlers_dir)]
-    sys.modules[_handler_pkg] = _stub
-
-_mod = importlib.import_module(_json_mod_path)
-json_handler = _mod
+# No sys.modules stub here: a file under api/ passes the handlers package's
+# branch guard, and conftest has already settled the package before collection.
+_mod = importlib.import_module(_JSON_MOD_PATH)
+JSON_HANDLER = _mod
 
 
 #: Isolation goes through the fleet seam, not a module attribute.
@@ -76,13 +73,14 @@ def test_missing_file(tmp_path: Path) -> None:
     target = json_dir / "ghost_config.json"
     assert not target.exists()
 
-    try:
-        result = json_handler.load_json("ghost", "config")
-    except FileNotFoundError:
-        return
+    # api, fleet green leg 3: no FileNotFoundError escape hatch - load_json
+    # creates the missing document, so the test pins that and nothing else.
+    result = JSON_HANDLER.load_json("ghost", "config")
 
-    assert result is not None
     assert isinstance(result, dict)
+    assert result["module_name"] == "ghost"
+    assert target.exists()
+    assert json.loads(target.read_text(encoding="utf-8")) == result
 
 
 def test_corrupt_json(tmp_path: Path) -> None:
@@ -92,7 +90,7 @@ def test_corrupt_json(tmp_path: Path) -> None:
     target = json_dir / "corrupt_data.json"
     target.write_bytes(b"\x00\x01NOT-JSON{{{broken")
 
-    result = json_handler.ensure_json_exists("corrupt", "data")
+    result = JSON_HANDLER.ensure_json_exists("corrupt", "data")
     assert result is True
 
     raw = target.read_text(encoding="utf-8")
@@ -109,7 +107,7 @@ def test_empty_file(tmp_path: Path) -> None:
     target = json_dir / "empty_log.json"
     target.write_text("", encoding="utf-8")
 
-    result = json_handler.ensure_json_exists("empty", "log")
+    result = JSON_HANDLER.ensure_json_exists("empty", "log")
     assert result is True
 
     raw = target.read_text(encoding="utf-8")
@@ -132,9 +130,9 @@ def test_nonexistent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     json_dir = _json_dir_as_path(tmp_path)
     assert not json_dir.exists()
 
-    try:
-        result = json_handler.ensure_json_exists("nodir", "config")
-        assert json_dir.exists()
-        assert result is True
-    except (FileNotFoundError, OSError):
-        pass
+    # api, fleet green leg 3: no OSError escape hatch - the handler builds the
+    # whole chain, so a raise here is a failure, not a pass.
+    result = JSON_HANDLER.ensure_json_exists("nodir", "config")
+    assert result is True
+    assert json_dir.exists()
+    assert (json_dir / "nodir_config.json").exists()

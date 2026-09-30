@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: profile_ops.py
 # Description: Profile Operations Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -26,7 +26,7 @@ from aipass.commons.apps.handlers.profiles.profile_queries import (
     get_all_agents_brief,
     format_time_ago,
 )
-from aipass.commons.apps.modules.commons_identity import get_caller_branch
+from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 from aipass.commons.apps.handlers.json import json_handler
 
 
@@ -60,7 +60,10 @@ def show_profile(args: List[str]) -> dict:
     if args:
         target_branch = args[0].lower()
     else:
-        caller = get_caller_branch()
+        try:
+            caller = get_caller_branch()
+        except CallerLookupFailed as exc:
+            return {"success": False, "error": str(exc)}
         if not caller:
             return {"success": False, "error": "Could not detect calling branch. Run from a branch directory."}
         target_branch = caller["name"]
@@ -96,7 +99,10 @@ def _handle_profile_set(args: List[str]) -> dict:
     if field not in valid_fields:
         return {"success": False, "error": f"Unknown field '{field}'. Must be one of: {', '.join(valid_fields)}"}
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch. Run from a branch directory."}
 
@@ -118,14 +124,11 @@ def _handle_profile_set(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def list_members(args: List[str]) -> dict:
+def list_members() -> dict:
     """
     List all agents with brief profile info.
 
     Usage: commons who
-
-    Args:
-        args: Command arguments (currently unused)
 
     Returns:
         Dict with success and agents list

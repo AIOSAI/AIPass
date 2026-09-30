@@ -1,9 +1,16 @@
-# META
-# module: devpulse.feedback
-# description: Tests for feedback inbox operations
-# END META
+# =================== AIPass ====================
+# Name: test_feedback_inbox.py
+# Description: Tests for feedback inbox — list, view, clear, summary
+# Version: 1.0.0
+# Created: 2026-04-14
+# Modified: 2026-09-27
+# =============================================
 
-"""Tests for feedback inbox — list, view, clear, summary."""
+"""Tests for apps/handlers/feedback/inbox.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that inbox.py and storage.py parse and import
+# seedgo: no-test-needed(constant) — the Rich column styles list_messages() gives its Table
 
 from unittest.mock import patch
 

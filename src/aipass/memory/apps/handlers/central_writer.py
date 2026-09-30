@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: central_writer.py
 # Description: Central File Writer Handler
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2025-11-27
-# Modified: 2026-03-06
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -71,34 +71,29 @@ def count_chroma_vectors() -> int:
         Total number of vectors stored (estimated from SQLite)
 
     Raises:
-        Exception if database access fails
+        sqlite3.Error if the store exists and cannot be counted. It used to
+        answer 0, the count of an empty store, and update_central published
+        that as a success (DPLAN-0354 leg 3); update_central now fails instead.
     """
+    if not CHROMA_DB_PATH.exists():
+        return 0
+
+    # Read ChromaDB SQLite database directly to avoid dependency issues
+    import sqlite3
+
+    db_file = CHROMA_DB_PATH / "chroma.sqlite3"
+    if not db_file.exists():
+        return 0
+
+    conn = sqlite3.connect(str(db_file))
     try:
-        if not CHROMA_DB_PATH.exists():
-            return 0
-
-        # Read ChromaDB SQLite database directly to avoid dependency issues
-        import sqlite3
-
-        db_file = CHROMA_DB_PATH / "chroma.sqlite3"
-        if not db_file.exists():
-            return 0
-
-        conn = sqlite3.connect(str(db_file))
-        cursor = conn.cursor()
-
         # Query embeddings table for total count
         # ChromaDB stores embeddings in the 'embeddings' table
+        cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM embeddings")
-        total = cursor.fetchone()[0]
-
+        return cursor.fetchone()[0]
+    finally:
         conn.close()
-
-        return total
-
-    except Exception as e:
-        logger.warning(f"[central_writer] Failed to count chroma vectors: {e}")
-        return 0
 
 
 def count_archive_files() -> int:

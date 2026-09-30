@@ -1,18 +1,28 @@
-"""The terminal moment's ORDERING, which is the whole of FPLAN-0452 P0's second fix.
+# =================== AIPass ====================
+# Name: test_dispatch_completion_ordering.py
+# Description: The terminal moment's ordering, FPLAN-0452 P0's second fix
+# Version: 1.0.0
+# Created: 2026-08-22
+# Modified: 2026-09-27
+# =============================================
 
-These assert positions in source rather than behaviour, deliberately. The defect
-was never that a function did the wrong thing — every function here worked. The
-defect was the ORDER they ran in, and an ordering is not observable from any
-single call. ``main()`` is a 200-line process-lifetime function ending in
-``sys.exit``; invoking it to observe the order would mean mocking the spawn, the
-retry loop, the bounce and the wake-back, and the mocks would then be what the
-test actually pinned.
+"""Tests for apps/handlers/dispatch/dispatch_monitor.py -- the terminal moment's ordering."""
 
-Every anchor below uses ``.index()``, which RAISES when the anchor is gone. A
-rename must break these loudly rather than let them pass on an empty search —
-that is the canary lesson from 6be0da57, where a test asserting exit code 2 was
-green from the repo root for two months without ever reaching its module.
-"""
+# The whole of FPLAN-0452 P0's second fix. These assert positions in source rather
+# than behaviour, deliberately. The defect was never that a function did the wrong
+# thing — every function here worked. The defect was the ORDER they ran in, and an
+# ordering is not observable from any single call. ``main()`` is a 200-line
+# process-lifetime function ending in ``sys.exit``; invoking it to observe the
+# order would mean mocking the spawn, the retry loop, the bounce and the
+# wake-back, and the mocks would then be what the test actually pinned.
+#
+# Every anchor below uses ``.index()``, which RAISES when the anchor is gone. A
+# rename must break these loudly rather than let them pass on an empty search —
+# that is the canary lesson from 6be0da57, where a test asserting exit code 2 was
+# green from the repo root for two months without ever reaching its module.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — STARTUP_TIMEOUT and HARD_TIMEOUT's numeric values
 
 from pathlib import Path
 

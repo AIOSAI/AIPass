@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: comment_ops.py
 # Description: Comment and voting operations handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -20,7 +20,7 @@ from typing import List, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
-from aipass.commons.apps.modules.commons_identity import get_caller_branch, extract_mentions
+from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch, extract_mentions
 from aipass.commons.apps.handlers.json import json_handler
 from aipass.commons.apps.handlers.search.search_queries import sync_comment_to_fts
 from aipass.commons.apps.handlers.profiles.profile_queries import increment_comment_count
@@ -85,7 +85,10 @@ def add_comment(args: List[str]) -> dict:
     content = filtered_args[1]
 
     # --- Get caller identity ---
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,
@@ -156,6 +159,12 @@ def add_comment(args: List[str]) -> dict:
 
         # --- Extract and store mentions ---
         mentions = extract_mentions(content)
+        mentions_error = ""
+        if mentions is None:
+            # The comment is committed: still a success, the lost mentions named.
+            mentions_error = "mentions not delivered: the agents lookup failed"
+            logger.warning(f"[comment_ops] Comment #{comment_id}: {mentions_error}")
+            mentions = []
 
         for mentioned in mentions:
             try:
@@ -192,6 +201,7 @@ def add_comment(args: List[str]) -> dict:
             "post_id": post_id,
             "author": author,
             "mentions": mentions,
+            "mentions_error": mentions_error,
             "parent_id": parent_id,
             "post_title": post_title,
         }
@@ -266,7 +276,10 @@ def vote_on_content(args: List[str]) -> dict:
     direction_value = 1 if direction_str == "up" else -1
 
     # --- Get caller identity ---
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,

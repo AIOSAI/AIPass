@@ -3,20 +3,14 @@
 # Description: Cross-platform durability pins for config.py's write + lock helpers
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-29
 # =============================================
 
-"""Durability pins for atomic_write_json and json_file_lock.
+"""Tests for apps/config.py's durability helpers: atomic_write_json, json_file_lock and the retry reads."""
 
-Windows CI ran this tree to completion for the first time on 2026-08-18 and
-found what a POSIX-only green run cannot: `json_file_lock` yielded WITHOUT a
-lock on win32, so the read-modify-write serialisation proven here every day
-did not exist there at all. Reported by devpulse (70a10016) with the measured
-shape — increment_counter reached 26 of 100 on Windows.
-
-These pins exercise the win32 branch FROM LINUX by injecting a fake msvcrt, so
-the platform this branch cannot run on is still covered by construction.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — _acquire_lock_win32 against a real Windows host; driven here by injection
+# seedgo: no-test-needed(covered_elsewhere) — medic state's read-modify-writes over json_file_lock, test_medic_state.py
 
 import json
 import os
@@ -48,12 +42,9 @@ class _FakeMsvcrt:
 
 
 @pytest.fixture
-def win32(monkeypatch):
-    """Make config believe it is running on Windows, with a fake msvcrt."""
-    fake = _FakeMsvcrt()
-    monkeypatch.setattr(config.sys, "platform", "win32")
-    monkeypatch.setitem(sys.modules, "msvcrt", fake)
-    return fake
+def win32():
+    """A fake msvcrt, handed to the lock through its seam with platform "win32"."""
+    return _FakeMsvcrt()
 
 
 class TestWindowsLockIsRealNotSkipped:
@@ -64,36 +55,37 @@ class TestWindowsLockIsRealNotSkipped:
 
     def test_win32_acquires_and_releases_a_real_lock(self, win32, tmp_path):
         """The win32 path calls the OS primitive, both ways."""
-        with config.json_file_lock(tmp_path / "doc.json"):
+        with config.json_file_lock(tmp_path / "doc.json", platform="win32", msvcrt_module=win32):
             assert (win32.LK_NBLCK, 1) in win32.calls, "no lock taken on win32"
         assert win32.calls[-1] == (win32.LK_UNLCK, 1), "lock never released"
 
-    def test_win32_retries_a_contended_lock_then_succeeds(self, monkeypatch, tmp_path):
+    def test_win32_retries_a_contended_lock_then_succeeds(self, tmp_path):
         """A lock held by someone else is waited for, not walked past."""
         fake = _FakeMsvcrt(fail_times=3)
-        monkeypatch.setattr(config.sys, "platform", "win32")
-        monkeypatch.setitem(sys.modules, "msvcrt", fake)
         sleeps: list = []
-        monkeypatch.setattr(config.time, "sleep", lambda s: sleeps.append(s))
 
-        with config.json_file_lock(tmp_path / "doc.json"):
+        with config.json_file_lock(tmp_path / "doc.json", platform="win32", msvcrt_module=fake, sleep_fn=sleeps.append):
             pass
 
         assert sleeps == [config._LOCK_BACKOFF_SECONDS] * 3
         assert fake.calls.count((fake.LK_NBLCK, 1)) == 4
 
-    def test_win32_refuses_rather_than_running_unlocked(self, monkeypatch, tmp_path):
-        """Exhausting the retries RAISES. Silent data loss is the one forbidden outcome."""
+    def test_win32_refuses_rather_than_running_unlocked(self, tmp_path):
+        """Exhausting the retries RAISES after a bounded wait. Silent data loss is the one forbidden outcome.
+
+        Mutant run: the win32 backoff sleep deleted reddens this.
+        """
         fake = _FakeMsvcrt(fail_times=config._LOCK_ATTEMPTS + 5)
-        monkeypatch.setattr(config.sys, "platform", "win32")
-        monkeypatch.setitem(sys.modules, "msvcrt", fake)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
+        sleeps: list = []
 
         entered = False
         with pytest.raises(OSError):
-            with config.json_file_lock(tmp_path / "doc.json"):
+            with config.json_file_lock(
+                tmp_path / "doc.json", platform="win32", msvcrt_module=fake, sleep_fn=sleeps.append
+            ):
                 entered = True
         assert entered is False, "body ran without the lock"
+        assert sleeps == [config._LOCK_BACKOFF_SECONDS] * (config._LOCK_ATTEMPTS - 1)
 
     def test_no_platform_yields_without_locking(self):
         """No branch of the lock may reach `yield` without taking a lock.
@@ -114,7 +106,7 @@ class TestReplaceSurvivesWindowsSharingViolations:
     """
 
     def test_success_after_transient_permission_errors(self, monkeypatch, tmp_path):
-        """A replace blocked twice still lands."""
+        """A replace blocked twice still lands, waiting once per refusal (mutant: a wait after success)."""
         attempts = {"n": 0}
 
         def flaky(src, dst):
@@ -122,11 +114,11 @@ class TestReplaceSurvivesWindowsSharingViolations:
             if attempts["n"] < 3:
                 raise PermissionError("sharing violation")
 
-        monkeypatch.setattr(config.os, "replace", flaky)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
+        sleeps: list = []
 
-        config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"))
+        config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"), replace_fn=flaky, sleep_fn=sleeps.append)
         assert attempts["n"] == 3
+        assert sleeps == [config._REPLACE_BACKOFF_SECONDS] * 2
 
     def test_exhaustion_raises_at_exactly_the_declared_attempts(self, monkeypatch, tmp_path):
         """Bounded, and the bound is the declared constant."""
@@ -136,11 +128,10 @@ class TestReplaceSurvivesWindowsSharingViolations:
             attempts["n"] += 1
             raise PermissionError("sharing violation")
 
-        monkeypatch.setattr(config.os, "replace", always_blocked)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
-
         with pytest.raises(PermissionError):
-            config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"))
+            config.replace_with_retry(
+                str(tmp_path / "a"), str(tmp_path / "b"), replace_fn=always_blocked, sleep_fn=lambda s: None
+            )
         assert attempts["n"] == config._REPLACE_ATTEMPTS
 
     def test_foreign_oserror_propagates_on_the_first_attempt(self, monkeypatch, tmp_path):
@@ -151,10 +142,8 @@ class TestReplaceSurvivesWindowsSharingViolations:
             attempts["n"] += 1
             raise OSError(18, "Invalid cross-device link")
 
-        monkeypatch.setattr(config.os, "replace", wrong_disk)
-
         with pytest.raises(OSError):
-            config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"))
+            config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"), replace_fn=wrong_disk)
         assert attempts["n"] == 1
 
     def test_the_backoff_is_a_wait_not_a_busy_spin(self, monkeypatch, tmp_path):
@@ -163,12 +152,16 @@ class TestReplaceSurvivesWindowsSharingViolations:
         Counting the sleeps pins the wait without asserting on wall-clock time,
         so it cannot flake on a loaded runner.
         """
-        monkeypatch.setattr(config.os, "replace", lambda s, d: (_ for _ in ()).throw(PermissionError()))
+
+        def refused(src, dst):
+            raise PermissionError()
+
         sleeps: list = []
-        monkeypatch.setattr(config.time, "sleep", lambda s: sleeps.append(s))
 
         with pytest.raises(PermissionError):
-            config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"))
+            config.replace_with_retry(
+                str(tmp_path / "a"), str(tmp_path / "b"), replace_fn=refused, sleep_fn=sleeps.append
+            )
 
         assert sleeps == [config._REPLACE_BACKOFF_SECONDS] * (config._REPLACE_ATTEMPTS - 1)
 
@@ -214,9 +207,7 @@ class TestReadTextWithRetry:
     def test_a_refusal_that_clears_is_waited_out(self, monkeypatch, tmp_path):
         """Three sharing violations, then the real contents."""
         path, state, read_text = self._flaky(tmp_path, 3)
-        monkeypatch.setattr(Path, "read_text", read_text)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
-        assert config.read_text_with_retry(path) == "payload"
+        assert config.read_text_with_retry(path, read_fn=read_text, sleep_fn=lambda s: None) == "payload"
         assert state["seen"] == 3
 
     def test_it_actually_waits_between_attempts(self, monkeypatch, tmp_path):
@@ -225,10 +216,8 @@ class TestReadTextWithRetry:
         no wall clock, so a loaded runner cannot flake this.
         """
         path, _state, read_text = self._flaky(tmp_path, 3)
-        monkeypatch.setattr(Path, "read_text", read_text)
         sleeps: list = []
-        monkeypatch.setattr(config.time, "sleep", sleeps.append)
-        config.read_text_with_retry(path)
+        config.read_text_with_retry(path, read_fn=read_text, sleep_fn=sleeps.append)
         assert sleeps == [config._REPLACE_BACKOFF_SECONDS] * 3
 
     def test_a_refusal_that_never_clears_raises(self, monkeypatch, tmp_path):
@@ -236,10 +225,8 @@ class TestReadTextWithRetry:
         this function must never have — that is the defect it was written for.
         """
         path, state, read_text = self._flaky(tmp_path, 10_000)
-        monkeypatch.setattr(Path, "read_text", read_text)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
         with pytest.raises(PermissionError):
-            config.read_text_with_retry(path)
+            config.read_text_with_retry(path, read_fn=read_text, sleep_fn=lambda s: None)
         assert state["seen"] == config._REPLACE_ATTEMPTS
 
     def test_a_foreign_oserror_propagates_on_the_first_attempt(self, monkeypatch, tmp_path):
@@ -251,9 +238,8 @@ class TestReadTextWithRetry:
             seen.append(1)
             raise FileNotFoundError(2, "No such file")
 
-        monkeypatch.setattr(Path, "read_text", read_text)
         with pytest.raises(FileNotFoundError):
-            config.read_text_with_retry(path)
+            config.read_text_with_retry(path, read_fn=read_text)
         assert len(seen) == 1, "retried something that was never going to clear"
 
 
@@ -296,30 +282,30 @@ class TestWindowsLockIsPositionAware:
     writes to it, position drift would silently un-serialise every caller.
     """
 
-    def test_a_sidecar_that_grew_still_collides(self, monkeypatch, tmp_path):
+    def test_a_sidecar_that_grew_still_collides(self, tmp_path):
         """The drift case, constructed: the file grows between the two opens.
 
         Handle A opens an empty sidecar and sits at byte 0. The sidecar then
         grows, so handle B opens at byte 64. Without the seek they lock
         different bytes and BOTH proceed — a lock that never collides. The
         seek is the only thing making them meet.
+        Mutant for the wait assert: the win32 backoff sleep deleted.
         """
         fake = _PositionalFakeMsvcrt()
-        monkeypatch.setattr(config.sys, "platform", "win32")
-        monkeypatch.setitem(sys.modules, "msvcrt", fake)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
+        sleeps: list = []
         doc = tmp_path / "doc.json"
         lock_path = doc.with_suffix(".lock")
         lock_path.write_text("", encoding="utf-8")
 
-        with config.json_file_lock(doc):
+        with config.json_file_lock(doc, platform="win32", msvcrt_module=fake, sleep_fn=sleeps.append):
             lock_path.write_text("x" * 64, encoding="utf-8")
             with pytest.raises(OSError):
-                with config.json_file_lock(doc):
+                with config.json_file_lock(doc, platform="win32", msvcrt_module=fake, sleep_fn=sleeps.append):
                     pass
 
         assert fake.grants[0] == (0, 1), f"outer lock landed at {fake.grants[0]}, not byte 0"
         assert len(fake.grants) == 1, "a second lock was granted while the first was held"
+        assert len(sleeps) == config._LOCK_ATTEMPTS - 1, "the inner lock did not wait out its bound before refusing"
 
     def test_the_model_can_see_position_drift(self, monkeypatch, tmp_path):
         """Vacuity floor: prove the model WOULD grant two unsought locks.
@@ -361,6 +347,23 @@ class TestAtomicCreateJsonNeverOverwrites:
 
         assert config.atomic_create_json(path, {"a": 1}) is False
         assert json.loads(path.read_text(encoding="utf-8")) == {"written": "by someone else"}
+
+    def test_a_filesystem_without_hard_links_refuses_rather_than_overwrites(self, tmp_path):
+        """No link support is a refusal, never the replacing write the create exists to avoid.
+
+        Red first 2026-09-29 (leg 5): the create fell back to replace_with_retry,
+        returned True, and the other writer's document was gone.
+        """
+        path = tmp_path / "taken.json"
+        path.write_text(json.dumps({"written": "by someone else"}), encoding="utf-8")
+
+        def no_links(source: str, destination: str) -> None:
+            raise OSError("no hard links on this filesystem")
+
+        with pytest.raises(OSError, match="no hard links"):
+            config.atomic_create_json(path, {"a": 1}, link_fn=no_links)
+        assert json.loads(path.read_text(encoding="utf-8")) == {"written": "by someone else"}
+        assert list(tmp_path.glob("*.tmp")) == []
 
     def test_it_leaves_no_staged_file_behind_either_way(self, tmp_path):
         """Both paths clean up their temp file — a create that loses the race

@@ -1,29 +1,35 @@
 # =================== AIPass ====================
 # Name: test_config_loader.py
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-06-13
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
-"""
-Tests for the config_loader handler (Phase 1 of FPLAN-0271).
+"""Tests for apps/handlers/json/config_loader.py and the budget arithmetic it seeds."""
 
-Doctrine (the owner, S193): the JSON file is the runtime authority; code
-carries DEFAULT_CONFIG so that file can be regenerated when lost.
+# Tests for the config_loader handler (Phase 1 of FPLAN-0271).
+#
+# Doctrine (the owner, S193): the JSON file is the runtime authority; code
+# carries DEFAULT_CONFIG so that file can be regenerated when lost.
+#
+# Covers:
+#   1. Missing file      -- REGENERATES the full file from defaults, logs, returns defaults.
+#   2. Unreadable file   -- left exactly as-is on disk; ERROR logged, defaults served in memory.
+#   4. Partial config                 -- deep_merge fills missing defaults, preserves file values.
+#   5. Full config                    -- passthrough of file values.
+#   6. section()                      -- returns named section or empty dict for unknown.
+#   7. deep_merge()                   -- nested merge, non-mutation, override precedence.
+#   8. todos count (DPLAN-0345)      -- count only, display-only, carried into per_branch.
+#   9. File budgets (FPLAN-0593)     -- worst-case entry/file arithmetic, the per-type
+#                                       per-file keep-count ceiling and its co-tenants,
+#                                       the clamp on load, and that no shipped default clamps.
 
-Covers:
-  1. Missing file      -- REGENERATES the full file from defaults, logs, returns defaults.
-  2. Unreadable file   -- left exactly as-is on disk; ERROR logged, defaults served in memory.
-  4. Partial config                 -- deep_merge fills missing defaults, preserves file values.
-  5. Full config                    -- passthrough of file values.
-  6. section()                      -- returns named section or empty dict for unknown.
-  7. deep_merge()                   -- nested merge, non-mutation, override precedence.
-  8. todos count (DPLAN-0345)      -- count only, display-only, carried into per_branch.
-  9. File budgets (FPLAN-0593)     -- worst-case entry/file arithmetic, the per-type
-                                      per-file keep-count ceiling and its co-tenants,
-                                      the clamp on load, and that no shipped default clamps.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — set_branch_limit and set_default_limit, in tests/test_entry_limits.py
+# seedgo: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch fleet push, in tests/test_config_verbs.py
+# seedgo: no-test-needed(covered_elsewhere) — get_count_ceilings and get_effective_limits, in tests/test_config_verbs.py
+# seedgo: no-test-needed(shared) — the json_handler.log_operation audit entries load() writes; the json handler's lane
 
 import copy
 import importlib
@@ -32,6 +38,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from aipass.memory.apps.handlers.json import budget
 
 
 # ---------------------------------------------------------------------------
@@ -186,14 +194,22 @@ class TestMissingFile:
         missing_path = tmp_path / "nope" / "memory.config.json"
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
-        monkeypatch.setattr(mod, "_write_config_file", lambda config: False)
+        attempts = []
+
+        def _refuse_write(config):
+            attempts.append(config)
+            return False
+
+        monkeypatch.setattr(mod, "_write_config_file", _refuse_write)
 
         result = mod.load()
 
+        assert attempts == [mod.DEFAULT_CONFIG], "the regeneration never tried to write the defaults"
         assert result == mod.DEFAULT_CONFIG
         mod.logger.error.assert_not_called()  # _write_config_file owns that log
 
     def test_logs_absence(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: the "No config at" message reworded in load() — killed."""
         missing_path = tmp_path / "nope" / "memory.config.json"
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
@@ -201,7 +217,7 @@ class TestMissingFile:
         mock_logger = mod.logger
         mod.load()
 
-        mock_logger.info.assert_called()
+        mock_logger.info.assert_any_call(f"[config_loader] No config at {missing_path}, regenerating from defaults")
 
 
 # ===========================================================================
@@ -316,6 +332,7 @@ class TestMalformedJson:
         assert mod.load()["entry_limits"]["enforce"] is False
 
     def test_logs_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: the "Malformed JSON in" message reworded in load() — killed."""
         config_dir = tmp_path / "custom_config"
         config_dir.mkdir(parents=True, exist_ok=True)
         bad_config = config_dir / "memory.config.json"
@@ -327,7 +344,8 @@ class TestMalformedJson:
         mock_logger = mod.logger
         mod.load()
 
-        mock_logger.error.assert_called()
+        mock_logger.error.assert_called_once()
+        assert mock_logger.error.call_args[0][0].startswith(f"[config_loader] Malformed JSON in {bad_config}: ")
 
 
 # ===========================================================================
@@ -379,8 +397,10 @@ class TestUnreadableFile:
         mock_logger = mod.logger
         mod.load()
 
-        mock_logger.error.assert_called()
-        assert "UnicodeDecodeError" in mock_logger.error.call_args[0][0]
+        # Mutant: the exception type dropped from the "Cannot read" message in load() — killed.
+        mock_logger.error.assert_called_once()
+        expected = f"[config_loader] Cannot read {bad_config}: UnicodeDecodeError: "
+        assert mock_logger.error.call_args[0][0].startswith(expected)
 
     def test_unopenable_file_returns_defaults_instead_of_raising(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -422,6 +442,29 @@ class TestUnreadableFile:
         assert result["success"] is False
         assert "unreadable" in result["error"]
         assert bad_config.read_bytes() == original
+
+    def test_push_names_an_unreadable_registry_rather_than_an_empty_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A broken registry is reported as broken, and the config is not written.
+
+        Until leg 3 of DPLAN-0354 materialize_per_branch() answered {} here, the
+        answer of a registry with no active branch, so the push said "No
+        branches found in registry" over a file it could not read.
+        """
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text("NOT JSON {{{", encoding="utf-8")
+        mod = _get_module()
+        config = _write_config(tmp_path, copy.deepcopy(mod.DEFAULT_CONFIG))
+        original = config.read_bytes()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", config)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+
+        result = mod.push_defaults_to_per_branch()
+
+        assert result["success"] is False
+        assert str(registry) in result["error"]
+        assert config.read_bytes() == original
 
 
 # ===========================================================================
@@ -549,13 +592,14 @@ class TestSection:
     """
 
     def test_returns_known_section(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: section() adding a key to what it returns — killed."""
         mod = _get_module()
         config_path = _write_config(tmp_path, copy.deepcopy(mod.DEFAULT_CONFIG))
         monkeypatch.setattr(mod, "_CONFIG_PATH", config_path)
 
         result = mod.section("memory_pool")
 
-        assert isinstance(result, dict)
+        assert result == mod.DEFAULT_CONFIG["memory_pool"]
         assert "enabled" in result
 
     def test_returns_entry_limits_section(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -830,8 +874,8 @@ class TestTodosCountMaterializes:
 
 
 def _budget_module():
-    """Import and return the pure budget-arithmetic module."""
-    return importlib.import_module("aipass.memory.apps.handlers.json.budget")
+    """Return the pure budget-arithmetic module."""
+    return budget
 
 
 def _entry_limits(mod) -> dict:

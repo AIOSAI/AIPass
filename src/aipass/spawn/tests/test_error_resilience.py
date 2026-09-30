@@ -1,25 +1,24 @@
 # =================== AIPass ====================
 # Name: test_error_resilience.py
 # Description: Error resilience tests for spawn json_handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-28
-# Modified: 2026-03-28
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Error Resilience Tests for spawn json_handler.
+"""Tests for apps/handlers/json/json_handler.py's read_json and write_json error handling."""
 
-Covers 4 tests:
-  - test_missing_file: FileNotFoundError handled, returns None gracefully
-  - test_corrupt_json: JSONDecodeError handled, returns None gracefully
-  - test_empty_file: empty_content handled gracefully without crash
-  - test_nonexistent_dir: missing directory created automatically by write_json
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in apps/handlers/json/ parses and imports
+# seedgo: no-test-needed(covered_elsewhere) — the happy path, in test_json_handler.py
+# seedgo: no-test-needed(covered_elsewhere) — write_json's OSError-false branch, in test_json_handler.py
 
 import json
 from pathlib import Path
 
 from aipass.spawn.apps.handlers.json.json_handler import read_json, write_json
+
+# Covers: a missing file, corrupt JSON, an empty file, and write_json auto-creating a missing parent dir.
 
 
 # ============================================================================

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scaffold_manifest.py
 # Description: Scaffold manifest + the conffile rule that decides what an update may overwrite
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-09-09
-# Modified: 2026-09-09
+# Modified: 2026-09-29
 # =============================================
 
 """Scaffold manifest — which AIPass version wrote which file, and its hash.
@@ -66,6 +66,16 @@ RETIRED_HOOK_HANDLERS: tuple = ("auto_watchdog",)
 #: it -- it exists so a project can say "this file is mine now" up front,
 #: rather than discovering after the fact that an update wanted it.
 IGNORE_NAME: str = ".updateignore"
+
+
+class UpdateIgnoreUnreadable(Exception):
+    """The project's ``.updateignore`` is there but cannot be read.
+
+    Not the same answer as no file: an owner who wrote one has claimed files, and
+    an update that reads the claim as empty would overwrite them. The update
+    refuses and doctor says so in one row (fleet green leg 5, aipass's decision).
+    """
+
 
 #: Plan verdicts. A file carries exactly one.
 ACTION_CREATE: str = "create"
@@ -219,11 +229,10 @@ def write_manifest(target: Path, files: dict, version: str | None = None) -> Pat
 # =============================================================================
 
 
-def decide(rel: str, current: str | None, template: str | None, recorded: str | None) -> tuple:
+def decide(current: str | None, template: str | None, recorded: str | None) -> tuple:
     """Decide what an update may do to one managed file.
 
     Args:
-        rel: Path relative to the project root, for the reason string.
         current: sha256 of the file on disk, or None when absent.
         template: sha256 of the content the template would write, or None when
             the template is unavailable (no AIPASS_HOME, missing source file).
@@ -261,6 +270,11 @@ def read_ignore(target: Path) -> list:
     ``#`` comments, blank lines ignored. Negation (``!``) is deliberately not in
     v1 -- an ignore file whose meaning depends on line order is a support
     burden, and nobody has asked for it yet.
+
+    Raises:
+        UpdateIgnoreUnreadable: the file is there but cannot be read or decoded.
+            Callers: bootstrap.update_project (the update refuses before any
+            write) and doctor's Scaffold group (one row says so).
     """
     path = Path(target) / IGNORE_NAME
     try:
@@ -268,8 +282,8 @@ def read_ignore(target: Path) -> list:
     except FileNotFoundError:
         return []
     except (OSError, UnicodeDecodeError) as exc:
-        logger.info("[scaffold] %s unreadable, ignoring: %s", path, exc)
-        return []
+        logger.warning("[scaffold] %s is there but cannot be read: %s", path, exc)
+        raise UpdateIgnoreUnreadable(f"{path} is there but cannot be read ({exc}); fix or remove it") from exc
     patterns = []
     for line in raw.splitlines():
         stripped = line.strip()

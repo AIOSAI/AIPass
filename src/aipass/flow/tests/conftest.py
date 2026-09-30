@@ -1,3 +1,11 @@
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset
+# Version: 1.1.0
+# Created: 2026-03-05
+# Modified: 2026-09-28
+# =============================================
+
 """Shared pytest fixtures for flow tests"""
 
 import os
@@ -12,7 +20,7 @@ import pytest
 import json
 import shutil
 from pathlib import Path
-from typing import Generator
+from typing import Callable, Generator
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -23,6 +31,7 @@ import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.flow.apps.handlers.json.json_handler  # noqa: F401
 from aipass.flow.apps.handlers.json import json_handler as json_handler_module
 import aipass.cli.apps.modules  # noqa: F401
+from aipass.cli.apps.modules import display
 
 # Pre-import every module that calls find_repo_root() at MODULE level, for a
 # different reason: to move an IMPORT-TIME diagnostic out of every test window.
@@ -50,6 +59,83 @@ import aipass.flow.apps.handlers.plan.close_helpers  # noqa: F401
 import aipass.flow.apps.handlers.plan.restore_ops  # noqa: F401
 import aipass.flow.apps.modules.aggregate_central  # noqa: F401
 import aipass.flow.apps.modules.registry_monitor  # noqa: F401
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+class HeaderBusRecorder:
+    """Stands in for the trigger module display.header() fires through.
+
+    Records every fire as ``(event, kwargs)`` and delivers nothing.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    def fire(self, event: str, **kwargs) -> None:
+        """Record one event instead of firing it on the live bus."""
+        self.calls.append((event, kwargs))
+
+
+@pytest.fixture(autouse=True)
+def header_bus(monkeypatch) -> HeaderBusRecorder:
+    """Keep display.header() off the live trigger bus in every flow test.
+
+    header() lazy-loads aipass.trigger's real module into display._TRIGGER and
+    fires ``cli_header_displayed`` on it — a live event, with a live handler
+    registered in trigger. flow's decision (leg 3, 2026-09-28): one autouse
+    fixture here rather than a patch in each test, because every help path
+    prints a header and a test that forgets the patch fires a real event.
+    _TRIGGER_LOADED is set True so header() never re-imports the real module.
+    No cli file is edited. A test about the title asserts it on the recorder.
+
+    Returns:
+        The recorder; ``.calls`` holds each header fire.
+    """
+    recorder = HeaderBusRecorder()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return recorder
+
+
+@pytest.fixture
+def platform_create_answer() -> Callable[[Path], OSError | None]:
+    """Ask the platform what an exclusive create of a path answers, before the product does.
+
+    Which error a file system raises for a bad lock path is the platform's
+    choice: a 257-byte name is ENAMETOOLONG on Linux and macOS and another error
+    on Windows. A test whose subject is that error makes the same call with its
+    own hands and asserts the product reports what the platform raised (flow's
+    decision, leg 3b), rather than naming an error number of its own.
+
+    Returns:
+        A function: path -> the OSError the create raised, or None when the
+        create succeeded (the file it made is removed again).
+    """
+
+    def ask(path: Path) -> OSError | None:
+        try:
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except OSError as exc:
+            return exc
+        os.close(fd)
+        path.unlink()
+        return None
+
+    return ask
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 def pytest_configure(config):
@@ -173,25 +259,6 @@ def mock_json_handler(request):
         yield mock_log_op
 
 
-@pytest.fixture(autouse=True)
-def mock_console():
-    """Mock CLI console to prevent real console output."""
-    with (
-        patch("aipass.cli.apps.modules.console") as console_mock,
-        patch("aipass.cli.apps.modules.error") as error_mock,
-        patch("aipass.cli.apps.modules.warning") as warning_mock,
-        patch("aipass.cli.apps.modules.success") as success_mock,
-        patch("aipass.cli.apps.modules.header") as header_mock,
-    ):
-        yield {
-            "console": console_mock,
-            "error": error_mock,
-            "warning": warning_mock,
-            "success": success_mock,
-            "header": header_mock,
-        }
-
-
 @pytest.fixture
 def sample_test_data() -> dict:
     """Reusable sample data shaped like a valid 'data' JSON document.
@@ -254,20 +321,6 @@ def mock_registry(tmp_path):
         },
     }
     registry_file = tmp_path / "fplan_registry.json"
-    registry_file.write_text(json.dumps(registry, indent=2), encoding="utf-8")
-    return registry_file, registry
-
-
-@pytest.fixture
-def mock_template_registry(tmp_path):
-    """Create a mock template registry."""
-    registry = {
-        "types": {
-            "flow_plans": {"prefix": "FPLAN", "shorthand": "fplan", "created": "2026-03-07"},
-            "dev_plans": {"prefix": "DPLAN", "shorthand": "dplan", "created": "2026-03-07"},
-        }
-    }
-    registry_file = tmp_path / "template_registry.json"
     registry_file.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_file, registry
 

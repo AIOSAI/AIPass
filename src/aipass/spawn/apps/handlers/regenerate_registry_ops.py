@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: regenerate_registry_ops.py
 # Description: Regenerate .template_registry.json for spawn template directories
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-25
-# Modified: 2026-03-25
+# Modified: 2026-09-27
 # =============================================
 
 """Regenerate template registry — walk template directory, hash files, build registry.
@@ -37,6 +37,19 @@ _SKIP_SPAWN_FILES = {".template_registry.json", ".branch_meta.json"}
 
 # Placeholder patterns to detect in filenames
 _BRANCH_PLACEHOLDERS = ("{{BRANCH}}", "{{BRANCHNAME}}")
+
+
+def _registry_date() -> str:
+    """Today's date as the registry stamps it (YYYY-MM-DD) — the clock seam.
+
+    The body is exactly the call it replaced. It exists for the tests, and says
+    so: it closes the midnight window of the last_updated date tests (they
+    compared this clock against their own date.today(), so a run that crossed
+    midnight read two days), and it lets tests/test_regenerate_registry_ops.py
+    stop patching the stdlib datetime process-wide. Spawn's decision,
+    DPLAN-0354 leg 3.
+    """
+    return datetime.now().strftime("%Y-%m-%d")
 
 
 # =============================================================================
@@ -89,7 +102,7 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     if unchanged and existing_metadata.get("last_updated"):
         last_updated = existing_metadata["last_updated"]
     else:
-        last_updated = datetime.now().strftime("%Y-%m-%d")
+        last_updated = _registry_date()
 
     registry = {
         "metadata": {

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_ops.py
 # Description: Process lock file operations handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-22
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -36,6 +36,18 @@ from aipass.flow.apps.handlers.json import json_handler
 # sit out a long budget before reporting a real permissions problem.
 _CREATE_RETRIES = 5
 _CREATE_BACKOFF_BASE = 0.05
+# A lock with no pid in it is a writer between its exclusive create and its pid
+# write (microseconds) or a writer that died there. Past this age it is the latter.
+_UNREADABLE_LOCK_GRACE = 10.0
+
+
+def _sleep(seconds: float) -> None:
+    """time.sleep(seconds), the create backoff's wait.
+
+    The reason is the tests alone: they patch this name so the backoff neither
+    waits nor replaces time.sleep for the whole process.
+    """
+    time.sleep(seconds)
 
 
 def _pid_alive_windows(pid: int) -> bool:
@@ -115,20 +127,58 @@ def try_create_lock(lock_file: Path) -> bool:
             denial = exc
             logger.info("Lock file create denied (delete-pending?), retry %d: %s: %s", attempt + 1, lock_file, exc)
         delay = _CREATE_BACKOFF_BASE * (2**attempt)
-        time.sleep(delay)
+        _sleep(delay)
         waited += delay
     raise PermissionError(
         f"Lock {lock_file} still denied after {_CREATE_RETRIES} attempts ({waited:.2f}s waited)"
     ) from denial
 
 
-def is_lock_stale(lock_file: Path) -> bool:
-    """Check if existing lock file belongs to a dead process."""
+def _pidless_lock_is_stale(lock_file: Path) -> bool:
+    """Age a lock that holds no pid: held inside _UNREADABLE_LOCK_GRACE, stale past it.
+
+    Raises:
+        OSError: The stat fails for any reason but the lock being gone.
+    """
     try:
-        pid = int(lock_file.read_text(encoding="utf-8").strip())
-    except (ValueError, OSError):
-        logger.info("Stale lock found (unreadable), taking over: %s", lock_file)
+        age = time.time() - lock_file.stat().st_mtime
+    except FileNotFoundError:
+        logger.info("Lock released before it could be aged, taking over: %s", lock_file)
         return True
+    if age < _UNREADABLE_LOCK_GRACE:
+        logger.info("Lock without a pid is %.1fs old, treating as held: %s", age, lock_file)
+        return False
+    logger.info("Stale lock found (no pid for %.1fs), taking over: %s", age, lock_file)
+    return True
+
+
+def is_lock_stale(lock_file: Path) -> bool:
+    """Check if existing lock file belongs to a dead process.
+
+    A lock gone before it is read was released: stale, take over. A lock
+    without a pid (empty, or not an integer) is held while younger than
+    _UNREADABLE_LOCK_GRACE: try_create_lock creates the file before it writes
+    the pid, and a reader in that gap must not unlink a live holder's lock.
+    Older than the grace, its writer died mid-create: stale.
+
+    Raises:
+        OSError: The lock exists but cannot be read or stat'ed (not
+            FileNotFoundError). That is no proof the holder is dead, so it is
+            not reported as stale (flow's decision, leg 3).
+    """
+    try:
+        text = lock_file.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        logger.info("Lock released before it could be read, taking over: %s", lock_file)
+        return True
+    pid: int | None
+    try:
+        pid = int(text)
+    except ValueError as exc:
+        logger.info("Lock holds no pid, ageing it: %s: %s", lock_file, exc)
+        pid = None
+    if pid is None:
+        return _pidless_lock_is_stale(lock_file)
     if _pid_alive(pid):
         logger.info("Another instance running (PID %d), lock valid: %s", pid, lock_file)
         return False
@@ -140,11 +190,15 @@ def acquire_lock(lock_file: Path) -> bool:
     """Try to acquire lock file. Returns True if acquired.
 
     Uses atomic O_CREAT | O_EXCL to avoid TOCTOU race. False means another
-    live process holds the lock.
+    live process holds the lock (or a lock without a pid, inside its grace).
 
     Raises:
         PermissionError: From try_create_lock, when the create is still denied
             after its retry budget. Not contention, so never reported as False.
+        OSError: From is_lock_stale, when the lock exists but cannot be read;
+            or from removing a stale lock, when the unlink is refused. Neither
+            is a live holder, so neither is reported as False (flow's decision,
+            leg 3).
     """
     if try_create_lock(lock_file):
         json_handler.log_operation("lock_acquired", {"lock_file": str(lock_file)})
@@ -153,11 +207,8 @@ def acquire_lock(lock_file: Path) -> bool:
     if not is_lock_stale(lock_file):
         return False
 
-    try:
-        lock_file.unlink()
-    except OSError as exc:
-        logger.warning("Failed to remove stale lock %s: %s", lock_file, exc)
-        return False
+    # Gone already (released between the read and here) is fine; refused is raised.
+    lock_file.unlink(missing_ok=True)
 
     if not try_create_lock(lock_file):
         logger.info("Another process grabbed lock during retry: %s", lock_file)

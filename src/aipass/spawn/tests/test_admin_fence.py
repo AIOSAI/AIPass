@@ -1,30 +1,49 @@
 # =================== AIPass ====================
 # Name: test_admin_fence.py
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for the admin privilege fence (FPLAN-0401 Phase 2, DPLAN-0288).
+"""Tests for apps/handlers/registry.py and apps/handlers/class_registry.py, the two halves of the admin fence."""
 
-Two halves:
-
-  Part A — ``ensure_admin()`` / ``drone @spawn grant-admin`` write
-           ``"admin": true`` onto the devpulse entry of the root registry.
-           The branch name is a constant, not a caller choice: every other
-           name is refused by name, and the flag alone grants nothing (the
-           lane needs all five contract legs).
-
-  Part B — "admin" is never a citizen class and never a template. create,
-           update and sync each refuse it loudly and permanently.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every handler and module this file imports parses and imports
+# seedgo: no-test-needed(documentation) — docstrings on ensure_admin and handle_grant_admin
+# seedgo: no-test-needed(documentation) — docstrings on the class_registry refusal helpers
 
 import json
 from unittest.mock import patch
 
 import pytest
 
+from aipass.spawn.apps.handlers.class_registry import (
+    CITIZEN_CLASSES,
+    IDENTITY_CITIZEN_CLASSES,
+    get_available_classes,
+    get_template_dir,
+    refuse_forbidden_class,
+    resolve_template_class,
+    validate_class,
+)
+from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, ensure_admin
+from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
+from aipass.spawn.apps.modules.core import spawn_agent
+from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
+from aipass.spawn.apps.modules.update import handle_update
+from aipass.spawn.apps.spawn import handle_create, main
+
+# Admin privilege fence (FPLAN-0401 Phase 2, DPLAN-0288). Two halves:
+#
+#   Part A -- ensure_admin() / drone @spawn grant-admin write "admin": true onto
+#             the devpulse entry of the root registry. The branch name is a
+#             constant, not a caller choice: every other name is refused by
+#             name, and the flag alone grants nothing (the lane needs all five
+#             contract legs).
+#
+#   Part B -- "admin" is never a citizen class and never a template. create,
+#             update and sync each refuse it loudly and permanently.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,7 +108,6 @@ class TestEnsureAdmin:
 
     def test_grants_admin_on_devpulse_entry(self, tmp_path):
         """devpulse entry gains admin:true, persisted to disk."""
-        from aipass.spawn.apps.handlers.registry import ensure_admin
 
         registry = _write_registry(tmp_path, [_entry("DEVPULSE", owner=True), _entry("SPAWN")])
 
@@ -101,7 +119,6 @@ class TestEnsureAdmin:
 
     def test_is_idempotent(self, tmp_path):
         """Second call reports already-granted instead of rewriting."""
-        from aipass.spawn.apps.handlers.registry import ensure_admin
 
         registry = _write_registry(tmp_path, [_entry("DEVPULSE", owner=True)])
         ensure_admin(registry)
@@ -115,7 +132,6 @@ class TestEnsureAdmin:
     @pytest.mark.parametrize("name", ["spawn", "SPAWN", "baud", "drone", "devpulse_evil", ""])
     def test_refuses_every_non_devpulse_name(self, tmp_path, name):
         """The name is a constant — no other branch can ever be granted admin."""
-        from aipass.spawn.apps.handlers.registry import ensure_admin
 
         registry = _write_registry(tmp_path, [_entry("DEVPULSE", owner=True), _entry("SPAWN")])
 
@@ -128,7 +144,6 @@ class TestEnsureAdmin:
 
     def test_accepts_uppercase_devpulse(self, tmp_path):
         """Registry names are uppercase — the fence normalizes, it doesn't trip."""
-        from aipass.spawn.apps.handlers.registry import ensure_admin
 
         registry = _write_registry(tmp_path, [_entry("DEVPULSE", owner=True)])
 
@@ -138,7 +153,6 @@ class TestEnsureAdmin:
 
     def test_refuses_when_no_devpulse_entry(self, tmp_path):
         """No devpulse seat in this registry — fail closed, write nothing."""
-        from aipass.spawn.apps.handlers.registry import ensure_admin
 
         registry = _write_registry(tmp_path, [_entry("BAUD", owner=True)])
         before = registry.read_text(encoding="utf-8")
@@ -151,7 +165,6 @@ class TestEnsureAdmin:
 
     def test_preserves_existing_entry_keys(self, tmp_path):
         """admin is a sibling boolean — owner and the rest survive untouched."""
-        from aipass.spawn.apps.handlers.registry import ensure_admin
 
         registry = _write_registry(tmp_path, [_entry("DEVPULSE", owner=True, custom_key="keep-me")])
 
@@ -164,7 +177,6 @@ class TestEnsureAdmin:
 
     def test_admin_branch_constant_is_devpulse(self):
         """The one seat, pinned as a constant."""
-        from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH
 
         assert ADMIN_BRANCH == "devpulse"
 
@@ -174,7 +186,6 @@ class TestGrantAdminCli:
 
     def test_grants_via_cli(self, tmp_path):
         """--registry points at the root registry; exit 0 and flag written."""
-        from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 
         registry = _write_registry(tmp_path, [_entry("DEVPULSE", owner=True)])
 
@@ -185,7 +196,6 @@ class TestGrantAdminCli:
 
     def test_idempotent_via_cli(self, tmp_path):
         """Re-running the ceremony is safe and still exits 0."""
-        from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 
         registry = _write_registry(tmp_path, [_entry("DEVPULSE", owner=True)])
         handle_grant_admin(["--registry", str(registry)])
@@ -194,7 +204,6 @@ class TestGrantAdminCli:
 
     def test_refuses_branch_argument(self, tmp_path):
         """No target argument exists — admin is devpulse-only by construction."""
-        from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 
         registry = _write_registry(tmp_path, [_entry("DEVPULSE", owner=True), _entry("SPAWN")])
 
@@ -208,23 +217,23 @@ class TestGrantAdminCli:
 
     def test_exits_nonzero_when_registry_has_no_devpulse(self, tmp_path):
         """Refusals are loud — the ceremony reports failure."""
-        from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 
         registry = _write_registry(tmp_path, [_entry("BAUD", owner=True)])
 
         assert handle_grant_admin(["--registry", str(registry)]) == 1
 
     def test_entry_point_routes_grant_admin(self):
-        """main() routes the command to the module."""
-        from aipass.spawn.apps.spawn import main
+        """main() routes the command to the module.
 
-        with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
-            mock_sys.argv = ["spawn", "grant-admin", "--help"]
+        Mutant: main hands grant-admin [] instead of its remaining args -> red.
+        """
+
+        with patch("sys.argv", ["spawn", "grant-admin", "--help"]):
             with patch("aipass.spawn.apps.modules.grant_admin.handle_grant_admin", return_value=0) as mock_handler:
                 result = main()
 
         assert result == 0
-        mock_handler.assert_called_once()
+        mock_handler.assert_called_once_with(["--help"])
 
 
 # ---------------------------------------------------------------------------
@@ -237,12 +246,6 @@ class TestAdminClassRefusal:
 
     def test_admin_is_not_template_selectable(self):
         """Pin: admin is absent from every class list, forever."""
-        from aipass.spawn.apps.handlers.class_registry import (
-            CITIZEN_CLASSES,
-            IDENTITY_CITIZEN_CLASSES,
-            get_available_classes,
-            validate_class,
-        )
 
         assert validate_class("admin") is False
         assert "admin" not in CITIZEN_CLASSES
@@ -251,7 +254,6 @@ class TestAdminClassRefusal:
 
     def test_refuse_forbidden_class_names_admin(self):
         """The refusal helper answers for admin and stays silent for real classes."""
-        from aipass.spawn.apps.handlers.class_registry import refuse_forbidden_class
 
         refusal = refuse_forbidden_class("admin")
         assert refusal
@@ -267,7 +269,6 @@ class TestAdminClassRefusal:
 
     def test_get_template_dir_refuses_admin(self):
         """No template lookup ever resolves admin."""
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir
 
         with pytest.raises(ValueError) as exc:
             get_template_dir("admin")
@@ -276,32 +277,34 @@ class TestAdminClassRefusal:
 
     def test_resolve_template_class_refuses_admin_passport(self):
         """A passport claiming admin is refused, not resolved to a template."""
-        from aipass.spawn.apps.handlers.class_registry import resolve_template_class
 
         with pytest.raises(ValueError) as exc:
             resolve_template_class({"citizen_class": "admin", "role": "orchestration_hub"})
 
         assert "devpulse" in str(exc.value).lower()
 
-    def test_spawn_agent_refuses_admin_class(self, tmp_path):
-        """The Python API refuses the class and creates nothing."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
+    def test_spawn_agent_refuses_admin_class(self, tmp_path, _isolate_spawn_json):
+        """The Python API refuses the class, creates nothing, and logs the refusal.
+
+        Mutant: the mint_refused log_operation in core removed -> red.
+        """
 
         target = tmp_path / "would_be_admin"
 
-        result = _spawn_agent(str(target), citizen_class="admin")
+        result = spawn_agent(str(target), citizen_class="admin")
 
         assert result["success"] is False
         assert "devpulse" in result["error"].lower()
         assert not target.exists()
+        logged = [p.read_text(encoding="utf-8") for p in _isolate_spawn_json.rglob("*") if p.is_file()]
+        assert any('"mint_refused"' in text and '"admin"' in text for text in logged), logged
 
     def test_spawn_agent_refuses_admin_template_dir(self, tmp_path):
         """--template admin can't sneak past as a raw directory value."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         target = tmp_path / "would_be_admin"
 
-        result = _spawn_agent(str(target), template_dir="admin")
+        result = spawn_agent(str(target), template_dir="admin")
 
         assert result["success"] is False
         assert "devpulse" in result["error"].lower()
@@ -309,7 +312,6 @@ class TestAdminClassRefusal:
 
     def test_handle_create_refuses_admin_as_class_argument(self, tmp_path):
         """`spawn create admin <path>` is a named refusal, not a parse error."""
-        from aipass.spawn.apps.spawn import handle_create
 
         target = tmp_path / "new_agent"
 
@@ -322,7 +324,6 @@ class TestAdminClassRefusal:
 
     def test_handle_create_refuses_admin_template_flag(self, tmp_path):
         """`--template admin` is refused by name before any filesystem work."""
-        from aipass.spawn.apps.spawn import handle_create
 
         target = tmp_path / "new_agent"
 
@@ -335,7 +336,6 @@ class TestAdminClassRefusal:
 
     def test_handle_update_refuses_admin_class(self):
         """`update admin --all` never reaches the update engine."""
-        from aipass.spawn.apps.modules.update import handle_update
 
         with patch("aipass.spawn.apps.modules.update.update_all") as mock_all:
             with patch("aipass.spawn.apps.modules.update.error") as mock_error:
@@ -347,7 +347,6 @@ class TestAdminClassRefusal:
 
     def test_sync_template_class_refuses_admin(self):
         """The sync rebuild path refuses admin instead of silently scaffolding."""
-        from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
 
         with pytest.raises(ValueError) as exc:
             resolve_sync_template_class("admin", "SOMEBRANCH")
@@ -366,7 +365,6 @@ class TestAdminClassRefusal:
         is fail-loud, so the guess is gone and the refusal must name the branch
         and the class it could not resolve — that is what the caller skips on.
         """
-        from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
 
         with pytest.raises(ValueError) as exc:
             resolve_sync_template_class("legacy_builder", "SOMEBRANCH")
@@ -378,7 +376,6 @@ class TestAdminClassRefusal:
 
     def test_sync_template_class_refuses_retired_names_by_name(self):
         """A retired class is refused with the rename notice, never remapped."""
-        from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
 
         for retired, replacement in (("aipass_framework", "specialist"), ("project_agent", "manager")):
             with pytest.raises(ValueError) as exc:
@@ -391,7 +388,6 @@ class TestAdminClassRefusal:
 
     def test_sync_template_class_resolves_both_live_classes(self):
         """The fence must not have taken the real classes down with the fallback."""
-        from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
 
         for live in ("manager", "specialist"):
             assert resolve_sync_template_class(live, "SOMEBRANCH").name == "citizen"

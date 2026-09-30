@@ -1,59 +1,43 @@
 # =================== AIPass ====================
 # Name: test_cli_ux.py
 # Description: Tests for cli_ux_check.py
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-07-17
-# Modified: 2026-07-17
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for cli_ux_check — CLI UX house pattern detection."""
+"""Tests for apps/handlers/aipass_standards/cli_ux_check.py — CLI UX house pattern detection."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that cli_ux_check.py parses and imports
 
 from pathlib import Path
 
 import pytest
 from unittest.mock import MagicMock
 
+from aipass.seedgo.apps.handlers.aipass_standards import cli_ux_check
+from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
+
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    import sys
+    """Mock heavy infrastructure the checker reads, at the seam it reads it from.
 
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    bypass_pkg = MagicMock()
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as real_is_bypassed
-
-    bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = real_is_bypassed
-    bypass_pkg.utils = bypass_utils
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.ignore_handler", bypass_ignore)
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.utils", bypass_utils)
-
-    for mod_name in ["aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check"]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+    ``is_bypassed`` stays real: it is a pure function of the ``bypass_rules``
+    argument each call passes explicitly, and with no rules it returns before
+    touching a filesystem. ``ignore_handler`` is not imported by cli_ux_check
+    at all, so there is no seam of its to patch.
+    """
+    monkeypatch.setattr(cli_ux_check, "logger", MagicMock())
+    monkeypatch.setattr(cli_ux_check, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
 
 
 def _entry_file(tmp_path, source):
     apps_dir = tmp_path / "apps"
     apps_dir.mkdir()
     f = apps_dir / "branch.py"
-    f.write_text(source)
+    f.write_text(source, encoding="utf-8")
     return str(f)
 
 
@@ -66,9 +50,7 @@ def test_init_file_skipped(tmp_path):
     apps_dir = tmp_path / "apps"
     apps_dir.mkdir()
     f = apps_dir / "__init__.py"
-    f.write_text("# init\n")
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
+    f.write_text("# init\n", encoding="utf-8")
     result = check_module(str(f))
     assert result["passed"] is True
     assert result["score"] == 100
@@ -78,34 +60,26 @@ def test_non_entry_point_skipped(tmp_path):
     handler_dir = tmp_path / "apps" / "handlers"
     handler_dir.mkdir(parents=True)
     f = handler_dir / "helper.py"
-    f.write_text("def main(): pass\n")
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
+    f.write_text("def main(): pass\n", encoding="utf-8")
     result = check_module(str(f))
     assert result["passed"] is True
     assert result["score"] == 100
 
 
-def test_missing_file():
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
-    result = check_module("/nonexistent/apps/branch.py")
+def test_missing_file(tmp_path):
+    result = check_module(str(tmp_path / "apps" / "branch.py"))
     assert result["passed"] is False
     assert result["score"] == 0
 
 
 def test_empty_file(tmp_path):
     path = _entry_file(tmp_path, "")
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     assert result["passed"] is True
 
 
 def test_syntax_error(tmp_path):
     path = _entry_file(tmp_path, "def broken(:\n")
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     assert result["passed"] is False
 
@@ -135,8 +109,6 @@ def main():
 
 def test_good_entry_passes_all(tmp_path):
     path = _entry_file(tmp_path, GOOD_ENTRY)
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     assert result["passed"] is True
     assert result["score"] == 100
@@ -165,8 +137,6 @@ def main():
 
 def test_bad_entry_fails_two_tier(tmp_path):
     path = _entry_file(tmp_path, BAD_ENTRY)
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     assert result["passed"] is False
     checks = {c["name"]: c["passed"] for c in result["checks"]}
@@ -193,8 +163,6 @@ def print_help():
 
 def test_bare_print_fails_rich_console(tmp_path):
     path = _entry_file(tmp_path, BARE_PRINT_ENTRY)
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["two_tier_help"] is True
@@ -221,8 +189,6 @@ def print_help():
 
 def test_missing_title_markup(tmp_path):
     path = _entry_file(tmp_path, NO_TITLE_ENTRY)
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["title_markup"] is False
@@ -249,8 +215,6 @@ def print_help():
 
 def test_missing_purpose_line(tmp_path):
     path = _entry_file(tmp_path, NO_PURPOSE_ENTRY)
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["title_markup"] is True
@@ -277,8 +241,6 @@ def print_help():
 
 def test_missing_help_pointer(tmp_path):
     path = _entry_file(tmp_path, NO_POINTER_ENTRY)
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["help_pointer"] is False
@@ -306,8 +268,6 @@ def print_help():
 
 def test_missing_usage_section(tmp_path):
     path = _entry_file(tmp_path, NO_USAGE_ENTRY)
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["usage_section"] is False
@@ -334,8 +294,6 @@ def print_help():
 
 def test_missing_examples_section(tmp_path):
     path = _entry_file(tmp_path, NO_EXAMPLES_ENTRY)
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["examples_section"] is False
@@ -352,10 +310,10 @@ def test_internal_modules_detected(tmp_path):
     apps_dir.mkdir()
     modules_dir = apps_dir / "modules"
     modules_dir.mkdir()
-    (modules_dir / "doctor_wire.py").write_text("def handle_command(): pass\n")
-    (modules_dir / "doctor_fix.py").write_text("def handle_command(): pass\n")
-    (modules_dir / "good_module.py").write_text("def handle_command(): pass\n")
-    (modules_dir / "__init__.py").write_text("")
+    (modules_dir / "doctor_wire.py").write_text("def handle_command(): pass\n", encoding="utf-8")
+    (modules_dir / "doctor_fix.py").write_text("def handle_command(): pass\n", encoding="utf-8")
+    (modules_dir / "good_module.py").write_text("def handle_command(): pass\n", encoding="utf-8")
+    (modules_dir / "__init__.py").write_text("", encoding="utf-8")
 
     source = """
 from aipass.cli import console
@@ -370,9 +328,7 @@ def print_help():
     console.print("[yellow]Examples:[/yellow]")
 """
     f = apps_dir / "branch.py"
-    f.write_text(source)
-
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
+    f.write_text(source, encoding="utf-8")
 
     result = check_module(str(f))
     checks = {c["name"]: c for c in result["checks"]}
@@ -386,8 +342,8 @@ def test_underscore_prefixed_internal_ok(tmp_path):
     apps_dir.mkdir()
     modules_dir = apps_dir / "modules"
     modules_dir.mkdir()
-    (modules_dir / "_doctor_wire.py").write_text("def handle_command(): pass\n")
-    (modules_dir / "__init__.py").write_text("")
+    (modules_dir / "_doctor_wire.py").write_text("def handle_command(): pass\n", encoding="utf-8")
+    (modules_dir / "__init__.py").write_text("", encoding="utf-8")
 
     source = """
 from aipass.cli import console
@@ -402,9 +358,7 @@ def print_help():
     console.print("[yellow]Examples:[/yellow]")
 """
     f = apps_dir / "branch.py"
-    f.write_text(source)
-
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
+    f.write_text(source, encoding="utf-8")
 
     result = check_module(str(f))
     checks = {c["name"]: c["passed"] for c in result["checks"]}
@@ -418,8 +372,6 @@ def print_help():
 
 def test_bypass_passes(tmp_path):
     path = _entry_file(tmp_path, "def main(): print('hello')\n")
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     bypass = [{"standard": "cli_ux", "file": Path(path).as_posix()}]
     result = check_module(path, bypass_rules=bypass)
     assert result["passed"] is True
@@ -442,8 +394,6 @@ def print_help():
     console.print("commands go here")
 """
     path = _entry_file(tmp_path, source)
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     assert 0 < result["score"] < 100
     assert result["passed"] is False
@@ -470,8 +420,6 @@ def print_help():
     console.print("[yellow]Examples:[/yellow]")
 """
     path = _entry_file(tmp_path, source)
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     result = check_module(path)
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["title_markup"] is True
@@ -483,8 +431,6 @@ def print_help():
 
 
 def test_seedgo_entry_passes():
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
-
     _root = Path(__file__).resolve().parents[1]
     path = str(_root / "apps" / "seedgo.py")
     result = check_module(path)
@@ -518,9 +464,7 @@ def main():
     pass
 """
     entry = apps_dir / "backup.py"
-    entry.write_text(source)
-
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_ux_check import check_module
+    entry.write_text(source, encoding="utf-8")
 
     result = check_module(str(entry))
     assert result["passed"] is True

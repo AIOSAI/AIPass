@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_ops.py
 # Description: README Update Operations Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -67,17 +67,17 @@ def resolve_branch(branch_arg: str) -> Optional[Dict]:
 
     Returns:
         Branch dict from registry, or None if not found
+
+    Raises:
+        OSError, ValueError: the registry exists and cannot be read. An
+            unreadable registry answered None, the answer for an unknown
+            branch (seedgo, fleet green leg 5); resolve_targets names it.
     """
     registry_path = _find_registry()
     if not registry_path.exists():
         return None
 
-    try:
-        content = registry_path.read_text(encoding="utf-8")
-        registry = json.loads(content)
-    except (json.JSONDecodeError, OSError):
-        logger.info("Cannot read registry for branch resolution: %s", registry_path)
-        return None
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
 
     # Strip @ prefix and normalize
     name = branch_arg.lstrip("@").upper()
@@ -99,19 +99,19 @@ def get_all_branches() -> List[Dict]:
     Get all branches from the registry.
 
     Returns:
-        List of branch dicts, or empty list on failure
+        List of branch dicts, or an empty list when there is no registry
+
+    Raises:
+        OSError, ValueError: the registry exists and cannot be read. It
+            answered an empty list, the answer for an empty registry (seedgo,
+            fleet green leg 5); resolve_targets names it.
     """
     registry_path = _find_registry()
     if not registry_path.exists():
         return []
 
-    try:
-        content = registry_path.read_text(encoding="utf-8")
-        registry = json.loads(content)
-        return registry.get("branches", [])
-    except (json.JSONDecodeError, OSError):
-        logger.info("Cannot read registry for branch listing: %s", registry_path)
-        return []
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    return registry.get("branches", [])
 
 
 # =============================================================================
@@ -124,21 +124,22 @@ def load_generator():
     Load readme_generator module via importlib to avoid cross-branch import issues.
 
     Returns:
-        The readme_generator module, or None on failure
+        The readme_generator module, or None when the file is not there
+
+    Raises:
+        Whatever loading the file raises (a SyntaxError, an ImportError, an
+        OSError). It answered None with the reason at info level only, so the
+        user read "Failed to load" and nothing more (seedgo, fleet green leg 5).
     """
     if not GENERATOR_PATH.exists():
         return None
 
-    try:
-        spec = importlib.util.spec_from_file_location("readme_generator", str(GENERATOR_PATH))
-        if spec is None or spec.loader is None:
-            return None
-        generator = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(generator)
-        return generator
-    except Exception:
-        logger.info("Failed to load readme generator module")
-        return None
+    spec = importlib.util.spec_from_file_location("readme_generator", str(GENERATOR_PATH))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"no loader for {GENERATOR_PATH}")
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    return generator
 
 
 # =============================================================================
@@ -158,7 +159,9 @@ def resolve_targets(args: List[str]) -> tuple:
     Returns:
         Tuple of (branches_list, error_message).
         On success: (list_of_dicts, None)
-        On failure: ([], error_string)
+        On failure: ([], error_string): "no_args", "no_branches",
+        "not_found:<target>", or "unreadable_registry:<reason>" when the
+        registry exists and cannot be read.
     """
     if not args:
         return [], "no_args"
@@ -166,15 +169,15 @@ def resolve_targets(args: List[str]) -> tuple:
     target = args[0]
     json_handler.log_operation("readme_ops_executed", {"target": target})
 
-    # Handle @all
-    if target.lstrip("@").lower() == "all":
-        branches = get_all_branches()
-        if not branches:
-            return [], "no_branches"
-        return branches, None
+    try:
+        if target.lstrip("@").lower() == "all":
+            branches = get_all_branches()
+            return (branches, None) if branches else ([], "no_branches")
+        branch = resolve_branch(target)
+    except (OSError, ValueError) as exc:
+        logger.error("Registry unreadable for readme targets: %s", exc)
+        return [], f"unreadable_registry:{exc}"
 
-    # Handle specific branch
-    branch = resolve_branch(target)
     if not branch:
         return [], f"not_found:{target}"
 

@@ -1,8 +1,9 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_dead_cwd_imports.py - Dead-cwd import pins
-# Date: 2026-08-31
+# =================== AIPass ====================
+# Name: test_dead_cwd_imports.py
+# Description: Dead-cwd import pins
 # Version: 1.0.0
+# Created: 2026-08-31
+# Modified: 2026-09-27
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -13,37 +14,10 @@
 #   - Measures by RUNNING in a child process, never by grepping spellings
 # =============================================
 
-"""
-Every skills module must import when the working directory is unreadable.
+"""Tests that every skills module, and the guard in apps/handlers/__init__.py, survive a dead cwd."""
 
-THE DEFECT. ``ntpath.realpath`` calls ``os.getcwd()`` on its first lines
-UNCONDITIONALLY - before it checks whether the path is even relative.
-``posixpath.realpath`` reads the cwd only for relative paths, which is why this
-was invisible on Linux for as long as it existed. ``Path.resolve()`` routes
-through realpath, so on Windows every ``Path(__file__).resolve()`` REACHED AT
-IMPORT is an import-time crash for a process whose directory was deleted or
-whose network share dropped. Not "degrades" - cannot import.
-
-WHY TWO WORLDS. They convict different constructions and neither is sufficient:
-
-  World A - take the Windows reading of realpath (call getcwd first), then deny
-            getcwd. Convicts a raw ``Path.resolve()`` reached at import.
-            It CANNOT convict ``inspect.stack()``: denying getcwd kills
-            abspath, so ``getmodule`` dies inside ``getabsfile`` where inspect
-            already catches it, and stack() completes green for the wrong
-            reason.
-  World B - deny ``os.path.realpath`` outright and leave abspath working.
-            Convicts ``inspect.stack()`` through getmodule's UNGUARDED
-            ``os.path.realpath`` at inspect.py:1009.
-
-WHY SUBPROCESSES. The defect is import-time. A module already in
-``sys.modules`` cannot demonstrate it, and the denial has to be installed
-before the first import rather than around it.
-
-WHY A ``-c`` STRING AND NOT STDIN. A probe piped through stdin gets cached by
-linecache under the ``<stdin>`` key, and the probe then lies green. The child
-rides a string-pseudo frame instead.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — posixpath and ntpath realpath() themselves; only whether a world reaches them
 
 import ast
 import os
@@ -166,6 +140,21 @@ print("OK %s" % TARGET)
 """
 
 
+# WHY TWO WORLDS. They convict different constructions and neither is sufficient:
+#
+#   World A - take the Windows reading of realpath (call getcwd first), then deny
+#             getcwd. Convicts a raw ``Path.resolve()`` reached at import.
+#             It CANNOT convict ``inspect.stack()``: denying getcwd kills
+#             abspath, so ``getmodule`` dies inside ``getabsfile`` where inspect
+#             already catches it, and stack() completes green for the wrong
+#             reason.
+#   World B - deny ``os.path.realpath`` outright and leave abspath working.
+#             Convicts ``inspect.stack()`` through getmodule's UNGUARDED
+#             ``os.path.realpath`` at inspect.py:1009.
+#
+# WHY SUBPROCESSES. The defect is import-time. A module already in
+# ``sys.modules`` cannot demonstrate it, and the denial has to be installed
+# before the first import rather than around it.
 def _run_probe(mode: str, target: str, inject: bool = True):
     """Import one module in a child process under a denial world.
 
@@ -185,6 +174,9 @@ def _run_probe(mode: str, target: str, inject: bool = True):
     # its resolve. Inheriting it here made reverting that site survive every
     # pin — a measurement that quietly stopped reaching the code it measures.
     env.pop("AIPASS_TEST_LOG_DIR", None)
+    # A -c STRING AND NOT STDIN. A probe piped through stdin gets cached by
+    # linecache under the <stdin> key, and the probe then lies green. The child
+    # rides a string-pseudo frame instead.
     return subprocess.run(
         [
             sys.executable,
@@ -196,6 +188,7 @@ def _run_probe(mode: str, target: str, inject: bool = True):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=120,
@@ -239,11 +232,19 @@ def test_healthy_world_imports_everything():
     """
     failures = [(m, _run_probe("healthy", m)) for m in SKILLS_MODULES]
     red = [(m, r.stdout.strip() or r.stderr.strip()[-300:]) for m, r in failures if r.returncode != 0]
-    assert not red, f"modules failed to import in a HEALTHY world: {red}"
+    assert red == [], f"modules failed to import in a HEALTHY world: {red}"
 
 
 # ---------------------------------------------------------------------------
 # The measurement
+#
+# THE DEFECT. ntpath.realpath calls os.getcwd() on its first lines
+# UNCONDITIONALLY - before it checks whether the path is even relative.
+# posixpath.realpath reads the cwd only for relative paths, which is why this
+# was invisible on Linux for as long as it existed. Path.resolve() routes
+# through realpath, so on Windows every Path(__file__).resolve() REACHED AT
+# IMPORT is an import-time crash for a process whose directory was deleted or
+# whose network share dropped. Not "degrades" - cannot import.
 # ---------------------------------------------------------------------------
 
 
@@ -255,7 +256,7 @@ def test_every_module_imports_with_a_dead_cwd(mode):
         result = _run_probe(mode, module)
         if result.returncode != 0:
             red.append(result.stdout.strip() or result.stderr.strip()[-300:])
-    assert not red, (
+    assert red == [], (
         f"world {mode}: {len(red)} of {len(SKILLS_MODULES)} skills modules "
         f"cannot be imported with an unreadable cwd:\n" + "\n".join(red)
     )
@@ -302,7 +303,7 @@ def test_guard_contains_no_inspect_stack_call():
     names inspect.stack while explaining the defect.
     """
     lines = _inspect_stack_calls(GUARD_FILE.read_text(encoding="utf-8"))
-    assert not lines, (
+    assert lines == [], (
         f"inspect.stack() called in {GUARD_FILE} at line(s) {lines}; it needs a "
         f"readable cwd before any of the guard's own code runs (getmodule -> "
         f"os.path.realpath, inspect.py:1009, outside any try)"
@@ -418,6 +419,7 @@ def test_caller_module_name_survives_and_still_answers(tmp_path):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=60,
@@ -482,6 +484,7 @@ def _run_runtime_probe():
         [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", _RUNTIME_PROBE],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=60,
@@ -599,6 +602,7 @@ def test_caller_is_none_branch_returns_without_a_readable_cwd():
         [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", _NONE_BRANCH_PROBE],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=60,
@@ -675,6 +679,7 @@ def test_absent_telethon_is_not_announced_on_every_import():
         [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", _IMPORT_WARNING_PROBE],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=60,
@@ -831,6 +836,7 @@ def _run_emulation(shape: str, world: str, call: str = "cwd", platform: str = "h
         [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", source],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=60,
@@ -842,21 +848,13 @@ def _run_emulation(shape: str, world: str, call: str = "cwd", platform: str = "h
 class TestTheAccessorTrapIsReproducibleLocally:
     """Pin the 3.10 discrimination on whatever interpreter is running."""
 
-    def test_a_bare_module_patch_does_not_reach_a_captured_accessor(self):
-        """This is the defect: rebinding a name nothing reads again.
-
-        The accessor took its copy of os.getcwd at class creation, so the
-        world reports no denial at all - and every pin underneath it would be
-        vacuously green.
-        """
-        assert _run_emulation(ACCESSOR_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=NO_RAISE"
-
     def test_the_shipped_world_does_reach_a_captured_accessor(self):
         """The cure, measured against the same emulation.
 
         Same shape, same call, different world text - and this one arms. That
-        difference IS the fix; without it this pin and the one above would
-        agree and neither would mean anything.
+        difference IS the fix; without it this pin and the bare-patch pin in
+        test_the_emulation_itself_captures_eagerly would agree and neither
+        would mean anything.
         """
         assert _run_emulation(ACCESSOR_SHAPE, WORLD_A) == "VERDICT=RAISED"
 
@@ -880,6 +878,9 @@ class TestTheAccessorTrapIsReproducibleLocally:
         instrument would quietly stop measuring the thing it exists for.
         """
         assert _run_emulation(_LAZY_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=RAISED"
+        # This is the defect: rebinding a name nothing reads again. The accessor
+        # took its copy of os.getcwd at class creation, so the world reports no
+        # denial at all - and every pin underneath it would be vacuously green.
         assert _run_emulation(ACCESSOR_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=NO_RAISE"
 
     def test_the_runtime_world_also_reaches_a_captured_accessor(self):
@@ -941,7 +942,7 @@ class TestTheAccessorTrapIsReproducibleLocally:
             }
             if len(set(verdicts.values())) != 1:
                 moved.append((call, verdicts))
-        assert not moved, f"verdicts moved with the platform: {moved}"
+        assert moved == [], f"verdicts moved with the platform: {moved}"
 
 
 class TestTheArmingProbeIsDialectDependent:
@@ -989,6 +990,7 @@ class TestTheArmingProbeIsDialectDependent:
             [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", source],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
             cwd=str(SRC_ROOT),
             timeout=60,
@@ -1054,6 +1056,7 @@ class TestTheArmingProbeIsDialectDependent:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
             cwd=str(SRC_ROOT),
             timeout=60,
@@ -1075,7 +1078,7 @@ class TestTheAccessorTrapResolveRoute:
     nothing about the other.
     """
 
-    def test_world_a_reaches_the_captured_accessor_on_the_RESOLVE_route(self):
+    def test_world_a_reaches_the_captured_accessor_on_the_resolve_route(self):
         """WORLD_A patches two accessor attributes; this measures the second.
 
         ``Path.cwd()`` and ``Path.resolve()`` go through DIFFERENT captured

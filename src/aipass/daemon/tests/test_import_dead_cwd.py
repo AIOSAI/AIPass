@@ -3,90 +3,14 @@
 # Description: Pins daemon imports against a dead working directory
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-28
 # =============================================
 
-"""Every daemon module must import without a readable working directory.
+"""Tests for apps/handlers/module_root.py — every daemon module imports without a readable working directory."""
 
-THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding):
-ntpath.realpath calls the working-directory reader UNCONDITIONALLY - not only
-for relative paths, the way posixpath does - and Path.resolve() routes through
-it. So on Windows every module-level Path(__file__).resolve() is an import-time
-working-directory read, and a process whose cwd was deleted cannot import the
-module at all. inspect.stack() carries the same defect one layer down:
-getmodule()'s os.path.realpath sits outside every try in that function.
-
-THE MASK, and why the count in this docstring is worth keeping. Before the cure
-all 35 importable daemon modules died, and they all died at the SAME line - the
-handlers guard's inspect.stack(). Curing the guard alone took it to 25 dead, and
-those 25 all died at the SECOND mask, json_handler's _DAEMON_ROOT. A count taken
-before the top mask is cured measures the mask, not the tree: measure, cure,
-RE-measure. Final state 36/36 importing in both worlds.
-
-TWO WORLDS, AND THEY ARE NOT REDUNDANT - measured here, not assumed:
-  A - ntpath emulation: os.path.realpath is wrapped to read the working
-      directory first, then that reader is denied.
-  B - os.path.realpath denied outright while the working directory still
-      reads.
-
-WORLD A'S STACK OUTCOME IS PLATFORM-DEPENDENT, and the qualifier took two
-corrections to get right. The deciding variable is ABSPATH:
-
-  POSIX - posixpath.abspath calls os.getcwd() for its normalisation, so denying
-      getcwd kills abspath too. inspect.getmodule then dies on the way IN, at
-      getabsfile, and that call sits inside getmodule's own
-      `except (TypeError, FileNotFoundError): return None`. getmodule returns
-      None, inspect.stack() COMPLETES. World A cannot convict the stack half here.
-  WINDOWS - ntpath.abspath rides Win32 _getfullpathname and never touches
-      getcwd, so it SURVIVES the denial. getmodule proceeds past getabsfile and
-      reaches the `os.path.realpath(f)` line further down - the one outside
-      every try - and inspect.stack() DIES.
-
-The history is worth keeping because the rule came out of it. Round 4 measured
-the POSIX half here and wrote it as "world A cannot convict stack" - unqualified.
-@cli measured the opposite in a variant that patched abspath functional, and
-@devpulse reconciled the two: same world name, different instruments. That
-produced the tightening "world A AS CONSTRUCTED HERE". Then round 4 shipped and
-the real Windows runner redded this very pin with its own assertion text
-(windows-setup, run 33431848734) - because there was one more dimension the
-sentence still did not carry. The rule now reads: AS CONSTRUCTED HERE, ON THIS
-PLATFORM. A measurement is of an instrument AND a platform, and naming only the
-instrument is how a true sentence travels somewhere it is false.
-
-The pin did exactly what it was built to do - it went red the moment the
-measured behaviour stopped matching, on the platform that could show it. It is
-now a TABLE rather than a single expectation; see STACK_IN_WORLD_A.
-Measured 2026-08-31: denying os.getcwd also kills os.path.abspath, so
-inspect.getmodule dies on its way IN, at getabsfile - and that call sits inside
-`except (TypeError, FileNotFoundError): return None`. getmodule returns None,
-inspect.stack() completes, and a guard still calling it would pass world A for
-the wrong reason. World B leaves the working directory readable, so getabsfile
-succeeds and execution reaches the `os.path.realpath(f)` line further down
-getmodule - the one outside every try. That is the only world of the two that
-kills inspect.stack(), and it is why the fleet recipe names both.
-
-The asymmetry is asserted per world below rather than papered over, and
-test_world_a_cannot_convict_inspect_stack pins it so nobody collapses the two
-worlds into one and quietly loses the stack half of the cure.
-
-Both injections happen in a CHILD process before any aipass import, so no module
-has cached the real functions, and the child rides a <string> frame (python -c).
-<string> is load-bearing and NOT interchangeable with <stdin>: linecache caches
-<stdin> content, so a <stdin> probe can resolve names the real defect cannot and
-report green on unfixed code (@hooks' finding).
-
-STACK_DIES / PROBE_ARMED runs before any assertion. The probe earns its keep
-because a denial can be BLIND rather than vacuous and the two are
-indistinguishable from outside: on <=3.10 pathlib captured os.path.realpath at
-import time (_NormalAccessor, 3.10 pathlib.py:358), so rebinding
-os.path.realpath never reached Path.resolve() there - the world reported itself
-harmless while convicting nothing. Measured 2026-09-03 in python:3.10-slim:
-VACUOUS on the rebind alone, ARMED once the accessor is rebound too;
-3.11/3.12/3.13 carry no accessor and arm on the rebind (@spawn's find,
-FPLAN-0461 family). Both worlds now rebind the accessor where it exists, so
-every interpreter this fleet runs on convicts and PROBE_VACUOUS is a failure
-everywhere rather than an excused outcome.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — ntpath/posixpath.realpath's cwd reads; measured in the child worlds, not re-tested
+# seedgo: no-test-needed(ruff) — that each swept file parses; the sweeps ast.parse every one and would raise first
 
 import ast
 import os
@@ -95,6 +19,98 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from aipass.daemon.apps.handlers import module_root
+from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.module_root import module_file
+
+# No sweep in this file walks into a dropbox or an .archive: the owner of the project
+# ruled on 2026-09-27 at 20:42 that a dropbox is a sandbox like .archive, which nothing
+# looks into and no process runs out of (a paraphrase). __pycache__ holds no source.
+# Three names written here, not seedgo's list: seedgo's handlers refuse a caller from
+# another branch, and that list also names docs, tools, logs, reports and backups.
+SWEEP_SKIP_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+# Every daemon module must import without a readable working directory.
+#
+# THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding):
+# ntpath.realpath calls the working-directory reader UNCONDITIONALLY - not only
+# for relative paths, the way posixpath does - and Path.resolve() routes through
+# it. So on Windows every module-level Path(__file__).resolve() is an import-time
+# working-directory read, and a process whose cwd was deleted cannot import the
+# module at all. inspect.stack() carries the same defect one layer down:
+# getmodule()'s os.path.realpath sits outside every try in that function.
+#
+# THE MASK, and why the count in this docstring is worth keeping. Before the cure
+# all 35 importable daemon modules died, and they all died at the SAME line - the
+# handlers guard's inspect.stack(). Curing the guard alone took it to 25 dead, and
+# those 25 all died at the SECOND mask, json_handler's _DAEMON_ROOT. A count taken
+# before the top mask is cured measures the mask, not the tree: measure, cure,
+# RE-measure. Final state 36/36 importing in both worlds.
+#
+# TWO WORLDS, AND THEY ARE NOT REDUNDANT - measured here, not assumed:
+#   A - ntpath emulation: os.path.realpath is wrapped to read the working
+#       directory first, then that reader is denied.
+#   B - os.path.realpath denied outright while the working directory still
+#       reads.
+#
+# WORLD A'S STACK OUTCOME IS PLATFORM-DEPENDENT, and the qualifier took two
+# corrections to get right. The deciding variable is ABSPATH:
+#
+#   POSIX - posixpath.abspath calls os.getcwd() for its normalisation, so denying
+#       getcwd kills abspath too. inspect.getmodule then dies on the way IN, at
+#       getabsfile, and that call sits inside getmodule's own
+#       `except (TypeError, FileNotFoundError): return None`. getmodule returns
+#       None, inspect.stack() COMPLETES. World A cannot convict the stack half here.
+#   WINDOWS - ntpath.abspath rides Win32 _getfullpathname and never touches
+#       getcwd, so it SURVIVES the denial. getmodule proceeds past getabsfile and
+#       reaches the `os.path.realpath(f)` line further down - the one outside
+#       every try - and inspect.stack() DIES.
+#
+# The history is worth keeping because the rule came out of it. Round 4 measured
+# the POSIX half here and wrote it as "world A cannot convict stack" - unqualified.
+# @cli measured the opposite in a variant that patched abspath functional, and
+# @devpulse reconciled the two: same world name, different instruments. That
+# produced the tightening "world A AS CONSTRUCTED HERE". Then round 4 shipped and
+# the real Windows runner redded this very pin with its own assertion text
+# (windows-setup, run 33431848734) - because there was one more dimension the
+# sentence still did not carry. The rule now reads: AS CONSTRUCTED HERE, ON THIS
+# PLATFORM. A measurement is of an instrument AND a platform, and naming only the
+# instrument is how a true sentence travels somewhere it is false.
+#
+# The pin did exactly what it was built to do - it went red the moment the
+# measured behaviour stopped matching, on the platform that could show it. It is
+# now a TABLE rather than a single expectation; see STACK_IN_WORLD_A.
+# Measured 2026-08-31: denying os.getcwd also kills os.path.abspath, so
+# inspect.getmodule dies on its way IN, at getabsfile - and that call sits inside
+# `except (TypeError, FileNotFoundError): return None`. getmodule returns None,
+# inspect.stack() completes, and a guard still calling it would pass world A for
+# the wrong reason. World B leaves the working directory readable, so getabsfile
+# succeeds and execution reaches the `os.path.realpath(f)` line further down
+# getmodule - the one outside every try. That is the only world of the two that
+# kills inspect.stack(), and it is why the fleet recipe names both.
+#
+# The asymmetry is asserted per world below rather than papered over, and
+# test_world_a_cannot_convict_inspect_stack pins it so nobody collapses the two
+# worlds into one and quietly loses the stack half of the cure.
+#
+# Both injections happen in a CHILD process before any aipass import, so no module
+# has cached the real functions, and the child rides a <string> frame (python -c).
+# <string> is load-bearing and NOT interchangeable with <stdin>: linecache caches
+# <stdin> content, so a <stdin> probe can resolve names the real defect cannot and
+# report green on unfixed code (@hooks' finding).
+#
+# STACK_DIES / PROBE_ARMED runs before any assertion. The probe earns its keep
+# because a denial can be BLIND rather than vacuous and the two are
+# indistinguishable from outside: on <=3.10 pathlib captured os.path.realpath at
+# import time (_NormalAccessor, 3.10 pathlib.py:358), so rebinding
+# os.path.realpath never reached Path.resolve() there - the world reported itself
+# harmless while convicting nothing. Measured 2026-09-03 in python:3.10-slim:
+# VACUOUS on the rebind alone, ARMED once the accessor is rebound too;
+# 3.11/3.12/3.13 carry no accessor and arm on the rebind (@spawn's find,
+# FPLAN-0461 family). Both worlds now rebind the accessor where it exists, so
+# every interpreter this fleet runs on convicts and PROBE_VACUOUS is a failure
+# everywhere rather than an excused outcome.
 
 # Other branches' import-time code is held CONSTANT: preloaded in the healthy
 # world, before any denial. Their dead-cwd cure is their own build (fleet
@@ -263,10 +279,14 @@ SWEPT_ROOTS = (APPS, _BRANCH / "tools")
 
 
 def _sweepable(root: Path):
-    """Python files under *root*, or nothing if the root is not on this machine."""
+    """Python files under *root*, or nothing if the root is not on this machine.
+
+    A file under any directory SWEEP_SKIP_DIRS names is left out, judged BELOW the
+    root, so a branch that lives under a directory named dropbox is still read.
+    """
     if not root.is_dir():
         return []
-    return [f for f in sorted(root.rglob("*.py")) if ".archive" not in f.parts]
+    return [f for f in sorted(root.rglob("*.py")) if not SWEEP_SKIP_DIRS.intersection(f.relative_to(root).parts[:-1])]
 
 
 def _run_world(denial: str) -> subprocess.CompletedProcess:
@@ -276,6 +296,8 @@ def _run_world(denial: str) -> subprocess.CompletedProcess:
         [sys.executable, "-c", source],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
 
@@ -368,29 +390,21 @@ def test_world_a_stack_outcome_matches_the_platform_table():
     assertion until it cannot fail. Which entry is measured live and which is
     derived from CI is recorded on STACK_IN_WORLD_A itself.
     """
-    expected = STACK_IN_WORLD_A.get(os.name)
-    if expected is None:
-        pytest.skip(f"no measured world-A stack outcome for os.name={os.name!r} - add one rather than guessing")
+    # A table with a hole would read green by skipping, so the hole is a failure
+    # here (moved in from the retired table-only test, 2026-09-27). AIPass CI
+    # runs Linux, macOS (both os.name == 'posix') and Windows ('nt').
+    assert set(STACK_IN_WORLD_A) == {"posix", "nt"}, STACK_IN_WORLD_A
+    assert set(STACK_IN_WORLD_A.values()) <= {"STACK_LIVES", "STACK_DIES"}, STACK_IN_WORLD_A
+    assert os.name in STACK_IN_WORLD_A, (
+        f"this machine is os.name={os.name!r} and the table has no entry - the pin is skipping rather than measuring"
+    )
+    expected = STACK_IN_WORLD_A[os.name]
 
     # The comparison itself lives in _assert_world, which asserts the exact
     # token in BOTH directions. A second copy here was removed rather than kept:
     # a mutant proved it unkillable, and an assertion no mutant can kill is
     # decoration that makes the file look better covered than it is.
     _assert_world(_run_world(WORLD_A), "A", expect_stack=expected)
-
-
-def test_the_platform_table_covers_the_platforms_this_fleet_runs_on():
-    """A table with a hole reads green by skipping - so the hole is a test.
-
-    AIPass CI runs Linux, macOS (both os.name == 'posix') and Windows
-    ('nt'). If either key disappears, the skip above would quietly retire the
-    pin on the platform whose CI failure created the table in the first place.
-    """
-    assert set(STACK_IN_WORLD_A) == {"posix", "nt"}, STACK_IN_WORLD_A
-    assert set(STACK_IN_WORLD_A.values()) <= {"STACK_LIVES", "STACK_DIES"}, STACK_IN_WORLD_A
-    assert os.name in STACK_IN_WORLD_A, (
-        f"this machine is os.name={os.name!r} and the table has no entry - the pin is skipping rather than measuring"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +552,23 @@ class TestNoModuleLevelResolveSurvives:
 
         assert _sweepable(tools), "tools/ is present but the sweep reads no Python from it"
 
+    def test_the_sweep_never_enters_a_dropbox_or_an_archive(self, tmp_path):
+        """The owner's ruling of 2026-09-27 20:42, paraphrased: nothing looks into a dropbox, a sandbox like .archive.
+
+        The skip is judged below the swept root, and the root here stands inside a
+        directory named dropbox: a skip judged on the whole path would read nothing.
+        Red first: _sweepable skipping .archive alone (dropbox/stray.py swept, the code before leg 3).
+        HELD for mutants (the runner cannot serve a test module): the skip judged on the whole
+        path is reasoned, not run; this pin stands on red first alone.
+        """
+        tools = tmp_path / "dropbox" / "tools"
+        for folder in ("handlers", "dropbox", ".archive", "handlers/dropbox"):
+            (tools / folder).mkdir(parents=True)
+        for rel in ("handlers/kept.py", "dropbox/stray.py", ".archive/old.py", "handlers/dropbox/stray.py"):
+            (tools / rel).write_text("", encoding="utf-8")
+
+        assert [f.relative_to(tools).as_posix() for f in _sweepable(tools)] == ["handlers/kept.py"]
+
     def test_the_matcher_convicts_the_shape_that_was_cured(self):
         """Positive control - the exact pre-cure line, from json_handler.py:35."""
         assert _module_level_resolves(
@@ -564,8 +595,6 @@ class TestNoModuleLevelResolveSurvives:
 class TestModuleFileResolvesWhenItCan:
     def test_a_healthy_world_gets_a_resolved_path(self, tmp_path):
         """The symlink is the point: resolving is why the call exists."""
-        from aipass.daemon.apps.handlers.module_root import module_file
-
         real = tmp_path / "real"
         real.mkdir()
         target = real / "mod.py"
@@ -576,69 +605,66 @@ class TestModuleFileResolvesWhenItCan:
         assert module_file(str(link)) == target.resolve()
 
     def test_the_fallback_is_reached_only_on_oserror(self, tmp_path, monkeypatch):
-        """And when reached, it still names the right file - absolutely."""
-        from aipass.daemon.apps.handlers import module_root
+        """And when reached, it still names the right file - absolutely, spelled through the symlink.
 
-        target = tmp_path / "mod.py"
+        Through a symlink so the two answers differ: a resolved path would name
+        the real file, the fallback names the link. Mutant killed: module_file
+        reaching pathlib.Path directly instead of its own binding (the denial
+        never bites, and the resolved target comes back).
+        """
+        real = tmp_path / "real"
+        real.mkdir()
+        target = real / "mod.py"
         target.write_text("", encoding="utf-8")
+        link = tmp_path / "link.py"
+        link.symlink_to(target)
 
-        def denied(self, *args, **kwargs):
-            raise OSError(2, "no working directory")
+        monkeypatch.setattr(module_root, "Path", _UnresolvablePath)
 
-        monkeypatch.setattr(Path, "resolve", denied)
+        result = module_root.module_file(str(link))
 
-        result = module_root.module_file(str(target))
-
-        assert result == target
+        assert result == link, f"the fallback resolved anyway: {result}"
         assert result.is_absolute(), "the fallback returned a path that names nowhere in particular"
 
     def test_the_fallback_never_raises_when_the_diagnostic_lane_is_down(self, tmp_path, monkeypatch):
         """The world that denies the filesystem can deny the logger too.
+
+        Mutant killed: module_file reaching pathlib.Path directly (no fallback, no logger call).
 
         This pin found a real defect: the first cut called logger.debug from
         module_file() itself, outside every try, so a failing logger turned the
         survivable import into a crash - inside the guard written to prevent
         exactly that crash.
         """
-        from aipass.daemon.apps.handlers import module_root
-
         target = tmp_path / "mod.py"
         target.write_text("", encoding="utf-8")
 
-        def denied(self, *args, **kwargs):
-            raise OSError(2, "no working directory")
-
         raising = _RaisingLogger()
-        monkeypatch.setattr(Path, "resolve", denied)
+        monkeypatch.setattr(module_root, "Path", _UnresolvablePath)
         monkeypatch.setattr(module_root, "logger", raising)
 
         # Control: the stand-in really does raise, so a green below is not green
         # because the injection did nothing.
         with pytest.raises(RuntimeError):
             module_root.logger.debug("probe")
+        control_calls = len(raising.calls)
 
         result = module_root.module_file(str(target))
 
         assert result == target
-        assert raising.calls, "the diagnostic lane was never reached - the pin proved nothing"
+        # Counted past the control's own call, which would otherwise satisfy this alone.
+        assert len(raising.calls) > control_calls, "the diagnostic lane was never reached - the pin proved nothing"
 
     def test_the_fallback_never_raises_when_the_audit_write_fails(self, tmp_path, monkeypatch):
         """json_handler unavailable is the other half of the same bare world."""
-        from aipass.daemon.apps.handlers import module_root
-
         target = tmp_path / "mod.py"
         target.write_text("", encoding="utf-8")
-
-        def denied(self, *args, **kwargs):
-            raise OSError(2, "no working directory")
 
         def exploding_import(*args, **kwargs):
             raise RuntimeError("the audit lane is down too")
 
-        monkeypatch.setattr(Path, "resolve", denied)
+        monkeypatch.setattr(module_root, "Path", _UnresolvablePath)
         monkeypatch.setattr(module_root, "__import__", exploding_import, raising=False)
-
-        from aipass.daemon.apps.handlers.json import json_handler
 
         def exploding_log(*args, **kwargs):
             raise RuntimeError("the audit lane is down too")
@@ -649,6 +675,17 @@ class TestModuleFileResolvesWhenItCan:
             json_handler.log_operation("probe", {})
 
         assert module_root.module_file(str(target)) == target
+
+
+class _UnresolvablePath(type(Path())):
+    """A path whose resolve() fails the way a dead working directory makes it fail.
+
+    Bound as module_root's own Path, so only module_file() meets it: pathlib.Path
+    itself is left alone for every other module in the process.
+    """
+
+    def resolve(self, strict=False):
+        raise OSError(2, "no working directory")
 
 
 class _RaisingLogger:

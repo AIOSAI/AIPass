@@ -1,22 +1,24 @@
 # =================== AIPass ====================
 # Name: test_admin_lane.py
 # Description: Tests for admin-grant verification + dispatch wiring (FPLAN-0401 Phase 4)
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for the admin dispatch lane's decision half.
+"""Tests for apps/handlers/users/verified_caller.py and the dispatch admin-wiring it feeds."""
 
-Split by responsibility:
-  - what the flag ROUTES -> test_wake.py::TestAdminManagerLane
-  - what EARNS the flag  -> here (5-leg verification + dispatch.py wiring)
+# Split by responsibility:
+#   - what the flag ROUTES -> test_wake.py::TestAdminManagerLane
+#   - what EARNS the flag  -> here (5-leg verification + dispatch.py wiring)
+#
+# The signing key lives outside every repo at ~/.aipass/admin_grant.key and does
+# not exist until the owner's ceremony. Nothing here creates it: every test that
+# needs a passing signature builds a throwaway key under tmp_path and hands its
+# path in explicitly.
 
-The signing key lives outside every repo at ~/.aipass/admin_grant.key and does
-not exist until the owner's ceremony. Nothing here creates it: every test that
-needs a passing signature builds a throwaway key under tmp_path and hands its
-path in explicitly.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — is_verified_admin_caller(), never called here: tests/test_cross_project_bridge.py
 
 import json
 from contextlib import ExitStack
@@ -26,19 +28,33 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.ai_mail.apps.handlers.users.verified_caller import verify_admin_caller
+from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
+from aipass.devpulse.apps.handlers.owner.admin_grant import compute_signature
 
 MOD = "aipass.ai_mail.apps.modules.dispatch"
 _H_WAKE = "aipass.ai_mail.apps.handlers.dispatch.wake"
 _H_SEND = "aipass.ai_mail.apps.handlers.email.send"
 _H_VERIFIED = "aipass.ai_mail.apps.handlers.users.verified_caller"
 
-_REAL_KEY = Path.home() / ".aipass" / "admin_grant.key"
-# Stat only, never content — captured at import, before any test body runs, so
-# the guard below can prove this suite did not write the real ceremony key.
-_REAL_KEY_AT_IMPORT = (_REAL_KEY.stat().st_mtime_ns, _REAL_KEY.stat().st_size) if _REAL_KEY.exists() else None
 _REFERENCE = "aipass.devpulse.apps.handlers.owner.admin_grant"
 
 _KEY_HEX = "a" * 64  # 32 bytes, fixture only — never written outside tmp_path
+
+
+def _key_stat(key_path: Path):
+    """(mtime_ns, size) of the key file, or None when absent. Stat only, never content."""
+    return (key_path.stat().st_mtime_ns, key_path.stat().st_size) if key_path.exists() else None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def real_key_stat_before():
+    """The real admin grant key's stat, taken before this file's first test and never at import.
+
+    The path is built here, not at module scope, so a home that cannot be read fails
+    one fixture, not the collection of the whole file. The key file is never opened.
+    """
+    key_path = Path.home() / ".aipass" / "admin_grant.key"
+    return key_path, _key_stat(key_path)
 
 
 @pytest.fixture(autouse=True)
@@ -55,8 +71,6 @@ def ceremony(tmp_path):
     Returns the paths so a test can break exactly one leg and assert that
     leg's named refusal.
     """
-    from aipass.devpulse.apps.handlers.owner.admin_grant import compute_signature
-
     branch = tmp_path / "src" / "aipass" / "devpulse"
     (branch / "artifacts").mkdir(parents=True)
 
@@ -144,8 +158,6 @@ class TestVerifyAdminCaller:
 
     def test_admin_privilege_absent_is_refused(self, ceremony, monkeypatch):
         """Leg 3: a correctly signed cert that grants nothing grants nothing."""
-        from aipass.devpulse.apps.handlers.owner.admin_grant import compute_signature
-
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
         cert = {"owner": "devpulse", "type": "birth_certificate", "privileges": {"admin": False}}
         cert["signature"] = {"algo": "hmac-sha256", "value": compute_signature(cert, bytes.fromhex(_KEY_HEX))}
@@ -184,16 +196,17 @@ class TestVerifyAdminCaller:
         assert ok is False
         assert "lane dark" in reason.lower()
 
-    def test_real_key_path_is_not_touched_by_this_suite(self):
+    def test_real_key_path_is_not_touched_by_this_suite(self, real_key_stat_before):
         """Guard: this suite must never create OR modify the ceremony key.
 
         Originally this asserted the key did not exist — true until the owner's
         ceremony, and false the moment it happened. The durable form compares
-        the key's stat against the value captured at import: fixtures stay
-        under tmp_path either way, and the guard survives the ceremony.
+        the key's stat against the value the session fixture took before this
+        file's first test: fixtures stay under tmp_path, and the guard survives
+        the ceremony. No value of the key or its stat appears in the message.
         """
-        now = (_REAL_KEY.stat().st_mtime_ns, _REAL_KEY.stat().st_size) if _REAL_KEY.exists() else None
-        assert now == _REAL_KEY_AT_IMPORT, (
+        key_path, before = real_key_stat_before
+        assert _key_stat(key_path) == before, (
             "a test created or modified the real signing key — fixtures must stay under tmp_path"
         )
 
@@ -239,8 +252,7 @@ class TestDispatchSendAdminWiring:
 
     @pytest.fixture(autouse=True)
     def _quiet(self, monkeypatch):
-        """Silence module output; tests that read it install their own console."""
-        monkeypatch.setattr(f"{MOD}.console", MagicMock())
+        """Replace error(); the real console prints to stdout, where capsys reads it."""
         monkeypatch.setattr(f"{MOD}.error", lambda msg: None)
 
     def test_verified_admin_threads_admin_true(self, monkeypatch):
@@ -253,8 +265,6 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": MagicMock(return_value=(True, "admin grant verified")),
             }
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert len(calls) == 1
@@ -265,8 +275,6 @@ class TestDispatchSendAdminWiring:
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
         calls: list = []
         with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=_wake_spy(calls))}):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert len(calls) == 1
@@ -276,8 +284,6 @@ class TestDispatchSendAdminWiring:
         """Unverifiable callers get the closed lane, no exception."""
         calls: list = []
         with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=_wake_spy(calls))}):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert calls[0]["admin"] is False
@@ -293,19 +299,13 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": verifier,
             }
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         verifier.assert_not_called()
 
-    def test_lane_dark_reason_is_reported_to_the_holder(self, monkeypatch):
-        """Pre-ceremony devpulse must SEE why the lane did not open."""
+    def test_lane_dark_reason_is_reported_to_the_holder(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
+        """Pre-ceremony devpulse must SEE why the lane did not open, read from stdout."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
-        printed: list[str] = []
-        console = MagicMock()
-        console.print = lambda msg="", **kw: printed.append(str(msg))
-        monkeypatch.setattr(f"{MOD}.console", console)
 
         calls: list = []
         with _send_patches(
@@ -316,12 +316,11 @@ class TestDispatchSendAdminWiring:
                 ),
             }
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert calls[0]["admin"] is False
-        assert any("lane dark" in line.lower() for line in printed), printed
+        out = " ".join(capsys.readouterr().out.split())
+        assert "lane dark until ceremony" in out, out
 
     def test_dispatch_survives_a_verifier_that_raises(self, monkeypatch):
         """A privilege path that explodes must not take the mail down with it."""
@@ -338,8 +337,6 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": MagicMock(side_effect=_boom),
             }
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert result is True
@@ -360,8 +357,6 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": MagicMock(return_value=(False, "lane dark")),
             }
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert calls[0]["admin"] is False

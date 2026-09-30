@@ -1,52 +1,94 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_commons.py - The Commons Integration Tests
-# Date: 2026-03-07
+# =================== AIPass ====================
+# Name: test_commons.py
+# Description: Integration tests for The Commons social network (posts, comments, votes, rooms, feeds)
 # Version: 1.0.0
-# Category: commons/tests
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-03-07): Ported from dev system for AIPass public framework
-#
-# CODE STANDARDS:
-#   - unittest style with setUp/tearDown per class
-#   - Each test class creates its own temp database for isolation
-#   - Imports from aipass.commons.apps.handlers.* (no sys.path manipulation)
+# Created: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
-"""
-Integration Tests for The Commons Social Network
+"""Tests for apps/handlers/database/db.py and the handlers it drives (notifications, profiles, welcome, search)."""
 
-Tests the complete lifecycle of posts, comments, votes, rooms, and feeds.
-Uses a temporary SQLite database for each test class to ensure isolation.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the handlers this file drives parse and import
+# seedgo: no-test-needed(duplicate) — get_reactions_detailed and get_reaction_summary; test_curation.py pins them
+# seedgo: no-test-needed(duplicate) — search_all; test_search.py and test_space_catchup.py pin it
+# seedgo: no-test-needed(duplicate) — get_db and DB_PATH resolution; test_lifecycle.py pins db.py's live-path side
+# seedgo: no-test-needed(duplicate) — the commands' printed output; test_search.py, test_curation_explore_welcome_ops.py
 
 import shutil
 import sqlite3
-import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 from aipass.commons.apps.handlers.database.db import init_db, close_db
+from aipass.commons.apps.handlers.notifications.preferences import (
+    get_preference,
+    set_preference,
+    get_all_preferences,
+    should_notify,
+    get_watchers,
+)
+from aipass.commons.apps.handlers.profiles.profile_queries import (
+    get_profile,
+    update_bio,
+    update_status,
+    update_role,
+    get_activity_stats,
+    increment_post_count,
+    increment_comment_count,
+)
+from aipass.commons.apps.handlers.welcome.welcome_handler import (
+    create_welcome_post,
+    has_been_welcomed,
+    get_onboarding_nudge,
+    welcome_new_branches,
+)
+from aipass.commons.apps.handlers.search.search_queries import (
+    search_posts,
+    search_comments,
+    search_all,
+    sync_post_to_fts,
+    sync_comment_to_fts,
+)
+from aipass.commons.apps.handlers.search.log_export import export_room_log
+from aipass.commons.apps.handlers.curation.reaction_queries import (
+    add_reaction,
+    remove_reaction,
+    get_reactions,
+    get_reactions_detailed,
+    get_reaction_summary,
+)
+from aipass.commons.apps.handlers.curation.pin_queries import (
+    pin_post,
+    unpin_post,
+    get_pinned_posts,
+    is_pinned,
+)
 
-_TEMPLATE_DB = None
+
+@pytest.fixture(autouse=True)
+def _tmp_db_paths(request, tmp_path, _template_db_path):
+    """Stash tmp_path and the session template db onto unittest.TestCase instances.
+
+    commons' decision, DPLAN-0354 leg 3: the classes below are xunit-style
+    (setup_method(self, _method)), which cannot take fixture arguments
+    directly. pytest still resolves autouse fixtures before setup_method
+    runs (confirmed against this pytest's own ordering), so setup_method
+    reads self._tmp_path / self._template_db_path instead of building its
+    own file under /tmp with tempfile.NamedTemporaryFile. request.instance
+    is None for the plain (non-class) test functions below, which build
+    their own tmp_path-backed db via init_db and don't need this.
+    """
+    if request.instance is not None:
+        request.instance._tmp_path = tmp_path
+        request.instance._template_db_path = _template_db_path
 
 
-def _get_template_db():
-    global _TEMPLATE_DB
-    if _TEMPLATE_DB is None:
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        path = Path(tmp.name)
-        tmp.close()
-        conn = init_db(path)
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        close_db(conn)
-        _TEMPLATE_DB = path
-    return _TEMPLATE_DB
-
-
-def _fast_db(db_path):
-    shutil.copy2(str(_get_template_db()), str(db_path))
+def _fast_db(db_path: Path, template_path: Path) -> sqlite3.Connection:
+    """Copy the session template db to db_path and open a fast connection."""
+    shutil.copy2(str(template_path), str(db_path))
     conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -55,650 +97,16 @@ def _fast_db(db_path):
     return conn
 
 
-class TestPostLifecycle(unittest.TestCase):
-    """Test creating, reading, and deleting posts."""
-
-    def setUp(self):
-        """Create a fresh test database."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
-
-        self.conn.execute(
-            "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)", ("TEST_AGENT", "Test Agent")
-        )
-        self.conn.commit()
-
-    def tearDown(self):
-        """Clean up test database."""
-        self.conn.close()
-        if self.db_path.exists():
-            self.db_path.unlink()
-
-    def test_create_post(self):
-        """Test creating a basic post."""
-        self.conn.execute(
-            "INSERT INTO posts (room_name, author, title, content, post_type) VALUES (?, ?, ?, ?, ?)",
-            ("general", "TEST_AGENT", "Test Post", "Test content", "discussion"),
-        )
-        self.conn.commit()
-
-        post = self.conn.execute("SELECT * FROM posts WHERE author = ?", ("TEST_AGENT",)).fetchone()
-
-        self.assertIsNotNone(post)
-        self.assertEqual(post["title"], "Test Post")
-        self.assertEqual(post["content"], "Test content")
-        self.assertEqual(post["room_name"], "general")
-        self.assertEqual(post["vote_score"], 0)
-        self.assertEqual(post["comment_count"], 0)
-
-    def test_post_appears_in_feed(self):
-        """Test that a created post appears in the feed."""
-        posts = [
-            ("general", "Post 1", "Content 1", "2026-02-06T10:00:00Z"),
-            ("general", "Post 2", "Content 2", "2026-02-06T10:01:00Z"),
-            ("watercooler", "Post 3", "Content 3", "2026-02-06T10:02:00Z"),
-        ]
-
-        for room, title, content, timestamp in posts:
-            self.conn.execute(
-                "INSERT INTO posts (room_name, author, title, content, created_at) VALUES (?, ?, ?, ?, ?)",
-                (room, "TEST_AGENT", title, content, timestamp),
-            )
-        self.conn.commit()
-
-        all_posts = self.conn.execute("SELECT * FROM posts ORDER BY created_at DESC").fetchall()
-
-        self.assertEqual(len(all_posts), 3)
-
-        general_posts = self.conn.execute(
-            "SELECT * FROM posts WHERE room_name = ? ORDER BY created_at DESC", ("general",)
-        ).fetchall()
-
-        self.assertEqual(len(general_posts), 2)
-        self.assertEqual(general_posts[0]["title"], "Post 2")
-        self.assertEqual(general_posts[1]["title"], "Post 1")
-
-    def test_delete_post(self):
-        """Test deleting a post."""
-        self.conn.execute(
-            "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
-            ("general", "TEST_AGENT", "To Delete", "Will be deleted"),
-        )
-        self.conn.commit()
-
-        post_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-        post = self.conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
-        self.assertIsNotNone(post)
-
-        self.conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
-        self.conn.commit()
-
-        post = self.conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
-        self.assertIsNone(post)
-
-    def test_post_types(self):
-        """Test different post types."""
-        post_types = ["discussion", "review", "question", "announcement"]
-
-        for ptype in post_types:
-            self.conn.execute(
-                "INSERT INTO posts (room_name, author, title, content, post_type) VALUES (?, ?, ?, ?, ?)",
-                ("general", "TEST_AGENT", f"{ptype} post", "content", ptype),
-            )
-        self.conn.commit()
-
-        for ptype in post_types:
-            post = self.conn.execute("SELECT * FROM posts WHERE post_type = ?", (ptype,)).fetchone()
-            self.assertIsNotNone(post)
-            self.assertEqual(post["post_type"], ptype)
-
-
-class TestCommentSystem(unittest.TestCase):
-    """Test comment creation, nesting, and thread display."""
-
-    def setUp(self):
-        """Create a fresh test database."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
-
-        for agent in ["TEST_AGENT_1", "TEST_AGENT_2"]:
-            self.conn.execute(
-                "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)",
-                (agent, agent.replace("_", " ").title()),
-            )
-
-        self.conn.execute(
-            "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
-            ("general", "TEST_AGENT_1", "Test Post", "Content"),
-        )
-        self.conn.commit()
-        self.post_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-    def tearDown(self):
-        """Clean up test database."""
-        self.conn.close()
-        if self.db_path.exists():
-            self.db_path.unlink()
-
-    def test_create_comment(self):
-        """Test creating a comment on a post."""
-        self.conn.execute(
-            "INSERT INTO comments (post_id, author, content) VALUES (?, ?, ?)",
-            (self.post_id, "TEST_AGENT_2", "Great post!"),
-        )
-        self.conn.commit()
-
-        comment = self.conn.execute("SELECT * FROM comments WHERE post_id = ?", (self.post_id,)).fetchone()
-
-        self.assertIsNotNone(comment)
-        self.assertEqual(comment["content"], "Great post!")
-        self.assertEqual(comment["author"], "TEST_AGENT_2")
-        self.assertIsNone(comment["parent_id"])
-
-    def test_nested_comment(self):
-        """Test creating a nested reply to a comment."""
-        self.conn.execute(
-            "INSERT INTO comments (post_id, author, content) VALUES (?, ?, ?)",
-            (self.post_id, "TEST_AGENT_1", "Parent comment"),
-        )
-        self.conn.commit()
-        parent_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-        self.conn.execute(
-            "INSERT INTO comments (post_id, parent_id, author, content) VALUES (?, ?, ?, ?)",
-            (self.post_id, parent_id, "TEST_AGENT_2", "Reply to parent"),
-        )
-        self.conn.commit()
-
-        child = self.conn.execute("SELECT * FROM comments WHERE parent_id = ?", (parent_id,)).fetchone()
-
-        self.assertIsNotNone(child)
-        self.assertEqual(child["parent_id"], parent_id)
-        self.assertEqual(child["content"], "Reply to parent")
-
-    def test_comment_count_update(self):
-        """Test that comment_count is updated on posts."""
-        post = self.conn.execute("SELECT comment_count FROM posts WHERE id = ?", (self.post_id,)).fetchone()
-        self.assertEqual(post["comment_count"], 0)
-
-        for i in range(3):
-            self.conn.execute(
-                "INSERT INTO comments (post_id, author, content) VALUES (?, ?, ?)",
-                (self.post_id, "TEST_AGENT_1", f"Comment {i + 1}"),
-            )
-            self.conn.execute("UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?", (self.post_id,))
-        self.conn.commit()
-
-        post = self.conn.execute("SELECT comment_count FROM posts WHERE id = ?", (self.post_id,)).fetchone()
-        self.assertEqual(post["comment_count"], 3)
-
-    def test_view_thread(self):
-        """Test retrieving all comments for a post."""
-        comments_data = [
-            (None, "Comment 1"),
-            (None, "Comment 2"),
-        ]
-
-        for parent_id, content in comments_data:
-            self.conn.execute(
-                "INSERT INTO comments (post_id, parent_id, author, content) VALUES (?, ?, ?, ?)",
-                (self.post_id, parent_id, "TEST_AGENT_1", content),
-            )
-        self.conn.commit()
-
-        first_comment = self.conn.execute(
-            "SELECT id FROM comments WHERE content = ? AND post_id = ?", ("Comment 1", self.post_id)
-        ).fetchone()
-
-        self.conn.execute(
-            "INSERT INTO comments (post_id, parent_id, author, content) VALUES (?, ?, ?, ?)",
-            (self.post_id, first_comment["id"], "TEST_AGENT_2", "Nested reply"),
-        )
-        self.conn.commit()
-
-        comments = self.conn.execute(
-            "SELECT * FROM comments WHERE post_id = ? ORDER BY created_at ASC", (self.post_id,)
-        ).fetchall()
-
-        self.assertEqual(len(comments), 3)
-
-        nested = [c for c in comments if c["parent_id"] is not None]
-        self.assertEqual(len(nested), 1)
-        self.assertEqual(nested[0]["parent_id"], first_comment["id"])
-
-
-class TestVoteSystem(unittest.TestCase):
-    """Test voting on posts and comments."""
-
-    def setUp(self):
-        """Create a fresh test database."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
-
-        for agent in ["VOTER_1", "VOTER_2", "AUTHOR"]:
-            self.conn.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)", (agent, agent))
-
-        self.conn.execute(
-            "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
-            ("general", "AUTHOR", "Test Post", "Content"),
-        )
-        self.conn.commit()
-        self.post_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-        self.conn.execute(
-            "INSERT INTO comments (post_id, author, content) VALUES (?, ?, ?)", (self.post_id, "AUTHOR", "Test comment")
-        )
-        self.conn.commit()
-        self.comment_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-    def tearDown(self):
-        """Clean up test database."""
-        self.conn.close()
-        if self.db_path.exists():
-            self.db_path.unlink()
-
-    def test_upvote_post(self):
-        """Test upvoting a post."""
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_1", self.post_id, "post", 1),
-        )
-        self.conn.commit()
-
-        score = self.conn.execute(
-            "SELECT COALESCE(SUM(direction), 0) FROM votes WHERE target_id = ? AND target_type = ?",
-            (self.post_id, "post"),
-        ).fetchone()[0]
-
-        self.assertEqual(score, 1)
-
-    def test_downvote_post(self):
-        """Test downvoting a post."""
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_1", self.post_id, "post", -1),
-        )
-        self.conn.commit()
-
-        score = self.conn.execute(
-            "SELECT COALESCE(SUM(direction), 0) FROM votes WHERE target_id = ? AND target_type = ?",
-            (self.post_id, "post"),
-        ).fetchone()[0]
-
-        self.assertEqual(score, -1)
-
-    def test_vote_toggle(self):
-        """Test that voting twice with the same direction is prevented by UNIQUE constraint."""
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_1", self.post_id, "post", 1),
-        )
-        self.conn.commit()
-
-        self.conn.execute(
-            "INSERT OR REPLACE INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_1", self.post_id, "post", 1),
-        )
-        self.conn.commit()
-
-        votes = self.conn.execute(
-            "SELECT COUNT(*) FROM votes WHERE agent_name = ? AND target_id = ? AND target_type = ?",
-            ("VOTER_1", self.post_id, "post"),
-        ).fetchone()[0]
-
-        self.assertEqual(votes, 1)
-
-    def test_change_vote_direction(self):
-        """Test changing vote from up to down."""
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_1", self.post_id, "post", 1),
-        )
-        self.conn.commit()
-
-        self.conn.execute(
-            "INSERT OR REPLACE INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_1", self.post_id, "post", -1),
-        )
-        self.conn.commit()
-
-        vote = self.conn.execute(
-            "SELECT direction FROM votes WHERE agent_name = ? AND target_id = ? AND target_type = ?",
-            ("VOTER_1", self.post_id, "post"),
-        ).fetchone()
-
-        self.assertEqual(vote["direction"], -1)
-
-    def test_multiple_voters(self):
-        """Test multiple users voting on same post."""
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_1", self.post_id, "post", 1),
-        )
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_2", self.post_id, "post", 1),
-        )
-        self.conn.commit()
-
-        score = self.conn.execute(
-            "SELECT COALESCE(SUM(direction), 0) FROM votes WHERE target_id = ? AND target_type = ?",
-            (self.post_id, "post"),
-        ).fetchone()[0]
-
-        self.assertEqual(score, 2)
-
-    def test_vote_on_comment(self):
-        """Test voting on a comment."""
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_1", self.comment_id, "comment", 1),
-        )
-        self.conn.commit()
-
-        score = self.conn.execute(
-            "SELECT COALESCE(SUM(direction), 0) FROM votes WHERE target_id = ? AND target_type = ?",
-            (self.comment_id, "comment"),
-        ).fetchone()[0]
-
-        self.assertEqual(score, 1)
-
-    def test_mixed_votes_score(self):
-        """Test that upvotes and downvotes correctly calculate net score."""
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_1", self.post_id, "post", 1),
-        )
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("VOTER_2", self.post_id, "post", 1),
-        )
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("AUTHOR", self.post_id, "post", -1),
-        )
-        self.conn.commit()
-
-        score = self.conn.execute(
-            "SELECT COALESCE(SUM(direction), 0) FROM votes WHERE target_id = ? AND target_type = ?",
-            (self.post_id, "post"),
-        ).fetchone()[0]
-
-        self.assertEqual(score, 1)
-
-
-class TestFeedSorting(unittest.TestCase):
-    """Test feed sorting algorithms (hot, new, top)."""
-
-    def setUp(self):
-        """Create a fresh test database with posts."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
-
-        self.conn.execute(
-            "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)", ("TEST_AGENT", "Test Agent")
-        )
-        self.conn.commit()
-
-        posts = [
-            ("Post 1", 5, "2026-02-01T10:00:00Z"),
-            ("Post 2", 10, "2026-02-03T10:00:00Z"),
-            ("Post 3", 3, "2026-02-05T10:00:00Z"),
-            ("Post 4", -1, "2026-02-02T10:00:00Z"),
-            ("Post 5", 7, "2026-02-04T10:00:00Z"),
-        ]
-
-        for title, score, timestamp in posts:
-            self.conn.execute(
-                "INSERT INTO posts (room_name, author, title, content, vote_score, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                ("general", "TEST_AGENT", title, "content", score, timestamp),
-            )
-        self.conn.commit()
-
-    def tearDown(self):
-        """Clean up test database."""
-        self.conn.close()
-        if self.db_path.exists():
-            self.db_path.unlink()
-
-    def test_sort_new(self):
-        """Test sorting by newest first."""
-        posts = self.conn.execute("SELECT title FROM posts ORDER BY created_at DESC").fetchall()
-
-        titles = [p["title"] for p in posts]
-        self.assertEqual(titles, ["Post 3", "Post 5", "Post 2", "Post 4", "Post 1"])
-
-    def test_sort_top(self):
-        """Test sorting by highest vote score."""
-        posts = self.conn.execute("SELECT title FROM posts ORDER BY vote_score DESC").fetchall()
-
-        titles = [p["title"] for p in posts]
-        self.assertEqual(titles, ["Post 2", "Post 5", "Post 1", "Post 3", "Post 4"])
-
-    def test_sort_hot(self):
-        """Test hot sorting (score + recency)."""
-        posts = self.conn.execute("SELECT title FROM posts ORDER BY vote_score DESC, created_at DESC").fetchall()
-
-        titles = [p["title"] for p in posts]
-        self.assertEqual(titles[0], "Post 2")
-        self.assertEqual(titles[1], "Post 5")
-
-
-class TestRoomManagement(unittest.TestCase):
-    """Test room creation, listing, joining, and filtering."""
-
-    def setUp(self):
-        """Create a fresh test database."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
-
-        self.conn.execute(
-            "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)", ("TEST_AGENT", "Test Agent")
-        )
-        self.conn.commit()
-
-    def tearDown(self):
-        """Clean up test database."""
-        self.conn.close()
-        if self.db_path.exists():
-            self.db_path.unlink()
-
-    def test_default_rooms_exist(self):
-        """Test that default rooms are created."""
-        rooms = self.conn.execute("SELECT name FROM rooms").fetchall()
-        room_names = [r["name"] for r in rooms]
-
-        self.assertIn("general", room_names)
-        self.assertIn("watercooler", room_names)
-
-    def test_create_room(self):
-        """Test creating a new room."""
-        self.conn.execute(
-            "INSERT INTO rooms (name, display_name, description, created_by) VALUES (?, ?, ?, ?)",
-            ("test-lab", "Test Lab", "Talk about code", "TEST_AGENT"),
-        )
-        self.conn.commit()
-
-        room = self.conn.execute("SELECT * FROM rooms WHERE name = ?", ("test-lab",)).fetchone()
-
-        self.assertIsNotNone(room)
-        self.assertEqual(room["display_name"], "Test Lab")
-        self.assertEqual(room["description"], "Talk about code")
-        self.assertEqual(room["created_by"], "TEST_AGENT")
-
-    def test_list_rooms(self):
-        """Test listing all rooms."""
-        self.conn.execute(
-            "INSERT INTO rooms (name, display_name, description, created_by) VALUES (?, ?, ?, ?)",
-            ("test-ideas", "Test Ideas", "Share ideas", "TEST_AGENT"),
-        )
-        self.conn.commit()
-
-        rooms = self.conn.execute("SELECT name FROM rooms ORDER BY name").fetchall()
-        room_names = [r["name"] for r in rooms]
-
-        self.assertGreaterEqual(len(room_names), 3)
-
-    def test_join_room(self):
-        """Test subscribing to a room."""
-        self.conn.execute("INSERT INTO subscriptions (agent_name, room_name) VALUES (?, ?)", ("TEST_AGENT", "general"))
-        self.conn.commit()
-
-        sub = self.conn.execute(
-            "SELECT * FROM subscriptions WHERE agent_name = ? AND room_name = ?", ("TEST_AGENT", "general")
-        ).fetchone()
-
-        self.assertIsNotNone(sub)
-
-    def test_filter_feed_by_room(self):
-        """Test filtering posts by room."""
-        self.conn.execute(
-            "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
-            ("general", "TEST_AGENT", "General Post", "content"),
-        )
-        self.conn.execute(
-            "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
-            ("watercooler", "TEST_AGENT", "Watercooler Post", "content"),
-        )
-        self.conn.commit()
-
-        general_posts = self.conn.execute("SELECT * FROM posts WHERE room_name = ?", ("general",)).fetchall()
-
-        self.assertEqual(len(general_posts), 1)
-        self.assertEqual(general_posts[0]["title"], "General Post")
-
-        wc_posts = self.conn.execute("SELECT * FROM posts WHERE room_name = ?", ("watercooler",)).fetchall()
-
-        self.assertEqual(len(wc_posts), 1)
-        self.assertEqual(wc_posts[0]["title"], "Watercooler Post")
-
-
-class TestDatabaseIntegrity(unittest.TestCase):
-    """Test foreign keys, constraints, and indexes."""
-
-    def setUp(self):
-        """Create a fresh test database."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
-
-        self.conn.execute(
-            "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)", ("TEST_AGENT", "Test Agent")
-        )
-        self.conn.commit()
-
-    def tearDown(self):
-        """Clean up test database."""
-        self.conn.close()
-        if self.db_path.exists():
-            self.db_path.unlink()
-
-    def test_foreign_key_post_to_room(self):
-        """Test that posts require valid rooms."""
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
-                ("nonexistent", "TEST_AGENT", "Test", "content"),
-            )
-            self.conn.commit()
-
-    def test_foreign_key_comment_to_post(self):
-        """Test that comments require valid posts."""
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "INSERT INTO comments (post_id, author, content) VALUES (?, ?, ?)",
-                (99999, "TEST_AGENT", "Test comment"),
-            )
-            self.conn.commit()
-
-    def test_vote_direction_constraint(self):
-        """Test that votes must be 1 or -1."""
-        self.conn.execute(
-            "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
-            ("general", "TEST_AGENT", "Test", "content"),
-        )
-        self.conn.commit()
-        post_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-                ("TEST_AGENT", post_id, "post", 5),
-            )
-            self.conn.commit()
-
-    def test_post_type_constraint(self):
-        """Test that post_type is constrained."""
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "INSERT INTO posts (room_name, author, title, content, post_type) VALUES (?, ?, ?, ?, ?)",
-                ("general", "TEST_AGENT", "Test", "content", "invalid_type"),
-            )
-            self.conn.commit()
-
-    def test_unique_vote_constraint(self):
-        """Test that agents can only vote once per target."""
-        self.conn.execute(
-            "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
-            ("general", "TEST_AGENT", "Test", "content"),
-        )
-        self.conn.commit()
-        post_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-        self.conn.execute(
-            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-            ("TEST_AGENT", post_id, "post", 1),
-        )
-        self.conn.commit()
-
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
-                ("TEST_AGENT", post_id, "post", -1),
-            )
-            self.conn.commit()
-
-    def test_indexes_exist(self):
-        """Test that expected indexes are created."""
-        indexes = self.conn.execute("SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL").fetchall()
-
-        index_names = [i["name"] for i in indexes]
-
-        self.assertIn("idx_posts_room", index_names)
-        self.assertIn("idx_posts_author", index_names)
-        self.assertIn("idx_comments_post", index_names)
-        self.assertIn("idx_votes_target", index_names)
-
-
 class TestNotificationPreferences(unittest.TestCase):
     """Test notification preference CRUD and should_notify logic."""
 
-    def setUp(self):
-        """Create a fresh test database with agents."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
+    _tmp_path: Path
+    _template_db_path: Path
 
-        self.conn = _fast_db(self.db_path)
+    def setup_method(self, _method):
+        """Create a fresh test database with agents."""
+        self.db_path = self._tmp_path / "notification.db"
+        self.conn = _fast_db(self.db_path, self._template_db_path)
 
         for agent in ["AGENT_A", "AGENT_B", "AGENT_C"]:
             self.conn.execute(
@@ -707,21 +115,13 @@ class TestNotificationPreferences(unittest.TestCase):
             )
         self.conn.commit()
 
-        from aipass.commons.apps.handlers.notifications.preferences import (
-            get_preference,
-            set_preference,
-            get_all_preferences,
-            should_notify,
-            get_watchers,
-        )
-
         self.get_preference = get_preference
         self.set_preference = set_preference
         self.get_all_preferences = get_all_preferences
         self.should_notify = should_notify
         self.get_watchers = get_watchers
 
-    def tearDown(self):
+    def teardown_method(self, _method):
         """Clean up test database."""
         self.conn.close()
         if self.db_path.exists():
@@ -841,13 +241,13 @@ class TestNotificationPreferences(unittest.TestCase):
 class TestSocialProfiles(unittest.TestCase):
     """Test social profile columns, updates, and activity counters."""
 
-    def setUp(self):
-        """Create a fresh test database with agents."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
+    _tmp_path: Path
+    _template_db_path: Path
 
-        self.conn = _fast_db(self.db_path)
+    def setup_method(self, _method):
+        """Create a fresh test database with agents."""
+        self.db_path = self._tmp_path / "profiles.db"
+        self.conn = _fast_db(self.db_path, self._template_db_path)
 
         for agent in ["PROFILE_A", "PROFILE_B"]:
             self.conn.execute(
@@ -855,16 +255,6 @@ class TestSocialProfiles(unittest.TestCase):
                 (agent, agent.replace("_", " ").title()),
             )
         self.conn.commit()
-
-        from aipass.commons.apps.handlers.profiles.profile_queries import (
-            get_profile,
-            update_bio,
-            update_status,
-            update_role,
-            get_activity_stats,
-            increment_post_count,
-            increment_comment_count,
-        )
 
         self.get_profile = get_profile
         self.update_bio = update_bio
@@ -874,7 +264,7 @@ class TestSocialProfiles(unittest.TestCase):
         self.increment_post_count = increment_post_count
         self.increment_comment_count = increment_comment_count
 
-    def tearDown(self):
+    def teardown_method(self, _method):
         """Clean up test database."""
         self.conn.close()
         if self.db_path.exists():
@@ -894,56 +284,71 @@ class TestSocialProfiles(unittest.TestCase):
         self.assertEqual(row["comment_count"], 0)
 
     def test_update_bio(self):
-        """Test updating an agent's bio."""
+        """Test updating an agent's bio.
+
+        Mutant: update_bio writes (bio.upper(), branch_name) - the stored bio no longer equals the one given.
+        """
         result = self.update_bio(self.conn, "PROFILE_A", "I enforce code quality standards")
         self.assertTrue(result)
 
         profile = self.get_profile(self.conn, "PROFILE_A")
         assert profile is not None
-        self.assertEqual(profile["bio"], "I enforce code quality standards")
+        assert profile["bio"] == "I enforce code quality standards"
 
     def test_update_status(self):
-        """Test updating an agent's status."""
+        """Test updating an agent's status.
+
+        Mutant: update_status writes (status.upper(), branch_name) - the stored status no longer equals the one given.
+        """
         result = self.update_status(self.conn, "PROFILE_A", "Auditing branches")
         self.assertTrue(result)
 
         profile = self.get_profile(self.conn, "PROFILE_A")
         assert profile is not None
-        self.assertEqual(profile["status"], "Auditing branches")
+        assert profile["status"] == "Auditing branches"
 
     def test_update_role(self):
-        """Test updating an agent's role."""
+        """Test updating an agent's role.
+
+        Mutant: update_role writes (role.upper(), branch_name) - the stored role no longer equals the one given.
+        """
         result = self.update_role(self.conn, "PROFILE_A", "Standards Authority")
         self.assertTrue(result)
 
         profile = self.get_profile(self.conn, "PROFILE_A")
         assert profile is not None
-        self.assertEqual(profile["role"], "Standards Authority")
+        assert profile["role"] == "Standards Authority"
 
     def test_increment_post_count(self):
-        """Test incrementing post_count."""
+        """Test incrementing post_count.
+
+        Mutant: SET post_count = 1 instead of post_count + 1 - the second increment stays at 1.
+        """
         self.increment_post_count(self.conn, "PROFILE_A")
         self.conn.commit()
 
         stats = self.get_activity_stats(self.conn, "PROFILE_A")
         assert stats is not None
-        self.assertEqual(stats["post_count"], 1)
+        assert stats["post_count"] == 1
 
         self.increment_post_count(self.conn, "PROFILE_A")
         self.conn.commit()
 
         stats = self.get_activity_stats(self.conn, "PROFILE_A")
         assert stats is not None
-        self.assertEqual(stats["post_count"], 2)
+        assert stats["post_count"] == 2
 
     def test_increment_comment_count(self):
-        """Test incrementing comment_count."""
+        """Test incrementing comment_count.
+
+        Mutant: SET comment_count = 1 instead of comment_count + 1 - four increments stay at 1.
+        """
         self.increment_comment_count(self.conn, "PROFILE_A")
         self.conn.commit()
 
         stats = self.get_activity_stats(self.conn, "PROFILE_A")
         assert stats is not None
-        self.assertEqual(stats["comment_count"], 1)
+        assert stats["comment_count"] == 1
 
         for _ in range(3):
             self.increment_comment_count(self.conn, "PROFILE_A")
@@ -951,10 +356,13 @@ class TestSocialProfiles(unittest.TestCase):
 
         stats = self.get_activity_stats(self.conn, "PROFILE_A")
         assert stats is not None
-        self.assertEqual(stats["comment_count"], 4)
+        assert stats["comment_count"] == 4
 
     def test_get_profile_returns_all_fields(self):
-        """Test that get_profile returns all expected profile fields."""
+        """Test that get_profile returns all expected profile fields.
+
+        Mutant: get_profile's SELECT drops the role column - the key set no longer matches.
+        """
         self.update_bio(self.conn, "PROFILE_B", "Test bio")
         self.update_status(self.conn, "PROFILE_B", "Testing")
         self.update_role(self.conn, "PROFILE_B", "Tester")
@@ -976,8 +384,7 @@ class TestSocialProfiles(unittest.TestCase):
             "post_count",
             "comment_count",
         ]
-        for key in expected_keys:
-            self.assertIn(key, profile, f"Missing key: {key}")
+        assert sorted(profile) == sorted(expected_keys)
 
         self.assertEqual(profile["branch_name"], "PROFILE_B")
         self.assertEqual(profile["bio"], "Test bio")
@@ -991,13 +398,13 @@ class TestSocialProfiles(unittest.TestCase):
 class TestWelcomeOnboarding(unittest.TestCase):
     """Test welcome posts, duplicate prevention, and onboarding nudges."""
 
-    def setUp(self):
-        """Create a fresh test database with agents."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
+    _tmp_path: Path
+    _template_db_path: Path
 
-        self.conn = _fast_db(self.db_path)
+    def setup_method(self, _method):
+        """Create a fresh test database with agents."""
+        self.db_path = self._tmp_path / "welcome.db"
+        self.conn = _fast_db(self.db_path, self._template_db_path)
 
         for agent in ["WELCOME_A", "WELCOME_B", "WELCOME_C"]:
             self.conn.execute(
@@ -1006,19 +413,12 @@ class TestWelcomeOnboarding(unittest.TestCase):
             )
         self.conn.commit()
 
-        from aipass.commons.apps.handlers.welcome.welcome_handler import (
-            create_welcome_post,
-            has_been_welcomed,
-            get_onboarding_nudge,
-            welcome_new_branches,
-        )
-
         self.create_welcome_post = create_welcome_post
         self.has_been_welcomed = has_been_welcomed
         self.get_onboarding_nudge = get_onboarding_nudge
         self.welcome_new_branches = welcome_new_branches
 
-    def tearDown(self):
+    def teardown_method(self, _method):
         """Clean up test database."""
         self.conn.close()
         if self.db_path.exists():
@@ -1071,12 +471,15 @@ class TestWelcomeOnboarding(unittest.TestCase):
         self.assertEqual(count, 1)
 
     def test_onboarding_nudge_new_user(self):
-        """Test that a branch with no posts and no comments gets a nudge."""
+        """Test that a branch with no posts and no comments gets a nudge.
+
+        Mutant: the new-user message reads "You have not posted yet" - the nudge no longer opens as pinned.
+        """
         nudge = self.get_onboarding_nudge(self.conn, "WELCOME_A")
 
         self.assertIsNotNone(nudge)
         assert nudge is not None
-        self.assertIn("haven't posted yet", nudge)
+        assert nudge.startswith("You haven't posted yet!")
         self.assertIn("commons post", nudge)
 
     def test_onboarding_nudge_active_user(self):
@@ -1088,7 +491,10 @@ class TestWelcomeOnboarding(unittest.TestCase):
         self.assertIsNone(nudge)
 
     def test_onboarding_nudge_commenter_only(self):
-        """Test that a branch with comments but no posts gets a specific nudge."""
+        """Test that a branch with comments but no posts gets a specific nudge.
+
+        Mutant: the new-user branch tests comment_count >= 0 - a commenter gets the new-user nudge instead.
+        """
         self.conn.execute("UPDATE agents SET comment_count = 5, post_count = 0 WHERE branch_name = ?", ("WELCOME_C",))
         self.conn.commit()
 
@@ -1096,7 +502,7 @@ class TestWelcomeOnboarding(unittest.TestCase):
 
         self.assertIsNotNone(nudge)
         assert nudge is not None
-        self.assertIn("commenting but never posted", nudge)
+        assert nudge.startswith("You've been commenting but never posted!")
 
     def test_welcome_new_branches(self):
         """Test that welcome_new_branches scans and welcomes all unwelcomed branches."""
@@ -1117,13 +523,13 @@ class TestWelcomeOnboarding(unittest.TestCase):
 class TestSearchAndLogs(unittest.TestCase):
     """Test FTS5 search and log export."""
 
-    def setUp(self):
-        """Create a fresh test database with agents and sample data."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
+    _tmp_path: Path
+    _template_db_path: Path
 
-        self.conn = _fast_db(self.db_path)
+    def setup_method(self, _method):
+        """Create a fresh test database with agents and sample data."""
+        self.db_path = self._tmp_path / "search.db"
+        self.conn = _fast_db(self.db_path, self._template_db_path)
 
         for agent in ["SEARCH_A", "SEARCH_B", "SEARCH_C"]:
             self.conn.execute(
@@ -1132,15 +538,6 @@ class TestSearchAndLogs(unittest.TestCase):
             )
         self.conn.commit()
 
-        from aipass.commons.apps.handlers.search.search_queries import (
-            search_posts,
-            search_comments,
-            search_all,
-            sync_post_to_fts,
-            sync_comment_to_fts,
-        )
-        from aipass.commons.apps.handlers.search.log_export import export_room_log
-
         self.search_posts = search_posts
         self.search_comments = search_comments
         self.search_all = search_all
@@ -1148,7 +545,7 @@ class TestSearchAndLogs(unittest.TestCase):
         self.sync_comment_to_fts = sync_comment_to_fts
         self.export_room_log = export_room_log
 
-    def tearDown(self):
+    def teardown_method(self, _method):
         """Clean up test database."""
         self.conn.close()
         if self.db_path.exists():
@@ -1239,7 +636,10 @@ class TestSearchAndLogs(unittest.TestCase):
         self.assertEqual(results[0]["author"], "SEARCH_B")
 
     def test_sync_post_to_fts(self):
-        """Test that syncing a post to FTS makes it searchable."""
+        """Test that syncing a post to FTS makes it searchable.
+
+        Mutant: sync_post_to_fts indexes rowid post_id + 1 - the search no longer finds this post.
+        """
         cursor = self.conn.execute(
             "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
             ("general", "SEARCH_A", "Unsynced Post", "This is not yet indexed"),
@@ -1255,8 +655,7 @@ class TestSearchAndLogs(unittest.TestCase):
         self.conn.commit()
 
         results = self.search_posts(self.conn, "unsynced")
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["id"], post_id)
+        assert [r["id"] for r in results] == [post_id]
 
     def test_log_export_format(self):
         """Test that log export produces correctly formatted plaintext."""
@@ -1284,13 +683,13 @@ class TestSearchAndLogs(unittest.TestCase):
 class TestReactionsAndPins(unittest.TestCase):
     """Test reactions, pins, and trending detection."""
 
-    def setUp(self):
-        """Create a fresh test database with agents, posts, and comments."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
+    _tmp_path: Path
+    _template_db_path: Path
 
-        self.conn = _fast_db(self.db_path)
+    def setup_method(self, _method):
+        """Create a fresh test database with agents, posts, and comments."""
+        self.db_path = self._tmp_path / "reactions.db"
+        self.conn = _fast_db(self.db_path, self._template_db_path)
 
         for agent in ["REACT_A", "REACT_B", "REACT_C", "AUTHOR_X"]:
             self.conn.execute(
@@ -1312,20 +711,6 @@ class TestReactionsAndPins(unittest.TestCase):
         self.conn.commit()
         self.comment_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-        from aipass.commons.apps.handlers.curation.reaction_queries import (
-            add_reaction,
-            remove_reaction,
-            get_reactions,
-            get_reactions_detailed,
-            get_reaction_summary,
-        )
-        from aipass.commons.apps.handlers.curation.pin_queries import (
-            pin_post,
-            unpin_post,
-            get_pinned_posts,
-            is_pinned,
-        )
-
         self.add_reaction = add_reaction
         self.remove_reaction = remove_reaction
         self.get_reactions = get_reactions
@@ -1336,7 +721,7 @@ class TestReactionsAndPins(unittest.TestCase):
         self.get_pinned_posts = get_pinned_posts
         self.is_pinned = is_pinned
 
-    def tearDown(self):
+    def teardown_method(self, _method):
         """Clean up test database."""
         self.conn.close()
         if self.db_path.exists():
@@ -1475,5 +860,105 @@ class TestReactionsAndPins(unittest.TestCase):
         self.assertEqual(row["pinned"], 0)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+# ===========================================================================
+# schema.sql as init_db applies it — constraints, indexes, seeded rooms
+# ===========================================================================
+# Each test opens its own database through init_db, so the subject is this
+# branch's schema.sql, not SQLite. Dropping the named clause from schema.sql
+# is the bug that reddens each one.
+
+
+def test_schema_seeds_the_default_rooms(tmp_path: Path) -> None:
+    """init_db seeds general and watercooler; drop either seed row and this reddens."""
+    conn = init_db(tmp_path / "commons.db")
+    room_names = {r["name"] for r in conn.execute("SELECT name FROM rooms").fetchall()}
+    close_db(conn)
+    assert {"general", "watercooler"} <= room_names
+
+
+def test_schema_refuses_a_post_to_an_unknown_room(tmp_path: Path) -> None:
+    """posts.room_name REFERENCES rooms(name); drop the foreign key and the insert succeeds."""
+    conn = init_db(tmp_path / "commons.db")
+    conn.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('TEST_AGENT', 'Test Agent')")
+    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+        conn.execute(
+            "INSERT INTO posts (room_name, author, title, content) VALUES ('nonexistent', 'TEST_AGENT', 'T', 'c')"
+        )
+    close_db(conn)
+
+
+def test_schema_refuses_a_comment_on_an_unknown_post(tmp_path: Path) -> None:
+    """comments.post_id REFERENCES posts(id); drop the foreign key and the insert succeeds."""
+    conn = init_db(tmp_path / "commons.db")
+    conn.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('TEST_AGENT', 'Test Agent')")
+    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+        conn.execute("INSERT INTO comments (post_id, author, content) VALUES (99999, 'TEST_AGENT', 'c')")
+    close_db(conn)
+
+
+def test_schema_refuses_a_vote_direction_other_than_one_or_minus_one(tmp_path: Path) -> None:
+    """votes.direction CHECK (direction IN (1, -1)); drop the CHECK and a 5 is stored."""
+    conn = init_db(tmp_path / "commons.db")
+    conn.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('TEST_AGENT', 'Test Agent')")
+    post_id = conn.execute(
+        "INSERT INTO posts (room_name, author, title, content) VALUES ('general', 'TEST_AGENT', 'T', 'c')"
+    ).lastrowid
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+        conn.execute(
+            "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES ('TEST_AGENT', ?, 'post', 5)",
+            (post_id,),
+        )
+    close_db(conn)
+
+
+def test_schema_refuses_an_unknown_post_type(tmp_path: Path) -> None:
+    """posts.post_type CHECK lists four types; drop the CHECK and 'invalid_type' is stored."""
+    conn = init_db(tmp_path / "commons.db")
+    conn.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('TEST_AGENT', 'Test Agent')")
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+        conn.execute(
+            "INSERT INTO posts (room_name, author, title, content, post_type)"
+            " VALUES ('general', 'TEST_AGENT', 'T', 'c', 'invalid_type')"
+        )
+    close_db(conn)
+
+
+def test_schema_refuses_a_second_vote_by_one_agent_on_one_target(tmp_path: Path) -> None:
+    """votes UNIQUE (agent_name, target_id, target_type); drop it and a second vote is stored."""
+    conn = init_db(tmp_path / "commons.db")
+    conn.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('TEST_AGENT', 'Test Agent')")
+    post_id = conn.execute(
+        "INSERT INTO posts (room_name, author, title, content) VALUES ('general', 'TEST_AGENT', 'T', 'c')"
+    ).lastrowid
+    vote = "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES ('TEST_AGENT', ?, 'post', ?)"
+    conn.execute(vote, (post_id, 1))
+    with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
+        conn.execute(vote, (post_id, -1))
+    close_db(conn)
+
+
+def test_schema_creates_the_lookup_indexes(tmp_path: Path) -> None:
+    """schema.sql creates four lookup indexes; drop any CREATE INDEX and this reddens."""
+    conn = init_db(tmp_path / "commons.db")
+    rows = conn.execute("SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL").fetchall()
+    close_db(conn)
+    assert {"idx_posts_room", "idx_posts_author", "idx_comments_post", "idx_votes_target"} <= {r["name"] for r in rows}
+
+
+def test_schema_stores_each_of_the_four_post_types(tmp_path: Path) -> None:
+    """posts.post_type CHECK accepts discussion, review, question, announcement; drop one and its insert is refused.
+
+    Mutant: init_db applies schema.sql with 'review' dropped from the CHECK - the review insert raises IntegrityError.
+    """
+    conn = init_db(tmp_path / "commons.db")
+    conn.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('TEST_AGENT', 'Test Agent')")
+    four = ["discussion", "review", "question", "announcement"]
+    for post_type in four:
+        conn.execute(
+            "INSERT INTO posts (room_name, author, title, content, post_type)"
+            " VALUES ('general', 'TEST_AGENT', ?, 'c', ?)",
+            (post_type, post_type),
+        )
+    stored = [r["post_type"] for r in conn.execute("SELECT post_type FROM posts ORDER BY id").fetchall()]
+    close_db(conn)
+    assert stored == four

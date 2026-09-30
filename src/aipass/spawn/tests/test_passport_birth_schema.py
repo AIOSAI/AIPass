@@ -1,33 +1,16 @@
 # =================== META ====================
 # Name: test_passport_birth_schema.py
 # Description: The passport 2.0 contract AT BIRTH — block order, key order, new fields
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-27
 # =============================================
 
-"""What a freshly minted passport must look like — DPLAN-0319 (Passport 2.0).
+"""Tests for apps/modules/core.py — the passport 2.0 contract at birth."""
 
-ORDER IS CONTRACT AND NOTHING PINNED IT
----------------------------------------
-R1 is a ruling about LAYOUT: document_metadata → branch_info → citizenship →
-identity, with ``principles`` moved inside identity. A passport is a document a
-human reads and a dozen branches parse; the order it is written in is the order
-it is read in, and `spawn update` explicitly refuses to reorder an existing one
-(update_ops:363) — so the only moment the order is decided is BIRTH. If it can
-only be set once, it needs a test that says what it is.
-
-``tests/test_passport_migration.py`` pins order for MIGRATED passports. This
-file pins it for MINTED ones. The two are deliberately independent: they share
-no helpers, and the expectation here is written out literally rather than
-derived from the template file, so a template edit that silently reshuffles keys
-fails here instead of being copied into the assertion.
-
-The mint is driven end-to-end through ``_spawn_agent`` rather than read off the
-template, because the render, the ``--traits`` post-render write and the JSON
-round-trip through json_handler all sit between the template and the file a
-citizen is actually born with — and any one of them could reorder it.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that core.py, placeholders.py, and class_registry.py parse and import cleanly
+# seedgo: no-test-needed(documentation) — that the public functions in those modules carry docstrings
 
 import json
 from pathlib import Path
@@ -36,7 +19,31 @@ from unittest.mock import patch
 import pytest
 
 import aipass.spawn.apps.handlers.placeholders as placeholders
-from aipass.spawn.apps.modules.core import _spawn_agent
+from aipass.spawn.apps.handlers.class_registry import get_template_dir
+from aipass.spawn.apps.modules.core import spawn_agent
+
+# Context kept from the file's original docstring — what a freshly minted
+# passport must look like (DPLAN-0319, Passport 2.0):
+#
+# ORDER IS CONTRACT AND NOTHING PINNED IT
+# ---------------------------------------
+# R1 is a ruling about LAYOUT: document_metadata → branch_info → citizenship →
+# identity, with ``principles`` moved inside identity. A passport is a document a
+# human reads and a dozen branches parse; the order it is written in is the order
+# it is read in, and `spawn update` explicitly refuses to reorder an existing one
+# (update_ops:363) — so the only moment the order is decided is BIRTH. If it can
+# only be set once, it needs a test that says what it is.
+#
+# ``tests/test_passport_migration.py`` pins order for MIGRATED passports. This
+# file pins it for MINTED ones. The two are deliberately independent: they share
+# no helpers, and the expectation here is written out literally rather than
+# derived from the template file, so a template edit that silently reshuffles keys
+# fails here instead of being copied into the assertion.
+#
+# The mint is driven end-to-end through ``spawn_agent`` rather than read off the
+# template, because the render, the ``--traits`` post-render write and the JSON
+# round-trip through json_handler all sit between the template and the file a
+# citizen is actually born with — and any one of them could reorder it.
 
 # The 2.0 layout, spelled out. Block order first (R1), then the key order within
 # each block, exactly as devpulse's gold reference declares it.
@@ -98,7 +105,7 @@ def _fresh_registry(path: Path) -> Path:
 def _mint(tmp_path: Path, name: str = "newborn", **kwargs) -> dict:
     """Mint one citizen into tmp_path and return its passport, keys in file order."""
     registry = _fresh_registry(tmp_path / "TEST_REGISTRY.json")
-    result = _spawn_agent(str(tmp_path / name), registry_path=str(registry), **kwargs)
+    result = spawn_agent(str(tmp_path / name), registry_path=str(registry), **kwargs)
     assert result["success"] is True, result.get("error")
     return json.loads((tmp_path / name / ".trinity" / "passport.json").read_text(encoding="utf-8"))
 
@@ -162,8 +169,6 @@ class TestNewbornPassportOrder:
 
     def test_the_shipped_template_declares_the_same_order(self, tmp_path):
         """Mint and template must agree — if they ever diverge, say which one moved."""
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir
-
         template = json.loads((get_template_dir() / ".trinity" / "passport.json").read_text(encoding="utf-8"))
 
         assert list(template.keys()) == EXPECTED_BLOCK_ORDER

@@ -3,7 +3,7 @@
 # Description: Feed display and query operations
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -27,8 +27,13 @@ from aipass.commons.apps.handlers.json import json_handler
 # =============================================================================
 
 
-def format_time_ago(timestamp: str) -> str:
-    """Convert ISO timestamp to human-readable relative time."""
+def format_time_ago(timestamp: str | None) -> str:
+    """Convert ISO timestamp to human-readable relative time.
+
+    timestamp is Optional: the falsy check below has always treated None the
+    same as "" (commons' decision, DPLAN-0354 leg 3, item 7 — the signature
+    was the lie, not the behaviour; no caller's runtime meaning changes).
+    """
     if not timestamp:
         return "never"
     try:

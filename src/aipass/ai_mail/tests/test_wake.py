@@ -1,12 +1,17 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-04-26
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for wake handler -- branch resolution, lock checking, PID checks, helpers."""
+"""Tests for apps/handlers/dispatch/wake.py and wake_dashboard.py."""
+
+# branch resolution, lock checking, PID checks, helpers.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — DEFAULT_PROMPT's exact literal text
 
 import json
 import os
@@ -16,9 +21,12 @@ import threading
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path as _Path
+from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
+import aipass.prax.apps.modules.dashboard as prax_dashboard_mod
+from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
     _read_json,
     _check_lock,
@@ -356,7 +364,7 @@ def test_get_pid_cwd_unsupported_platform(monkeypatch):
 def test_is_zombie_linux_not_zombie(monkeypatch, tmp_path):
     """Non-zombie process returns False."""
     status_file = tmp_path / "status"
-    status_file.write_text("Name:\tclaude\nState:\tS (sleeping)\nPid:\t42\n")
+    status_file.write_text("Name:\tclaude\nState:\tS (sleeping)\nPid:\t42\n", encoding="utf-8")
     monkeypatch.setattr(
         "builtins.open",
         _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
@@ -367,7 +375,7 @@ def test_is_zombie_linux_not_zombie(monkeypatch, tmp_path):
 def test_is_zombie_linux_zombie(monkeypatch, tmp_path):
     """Zombie process returns True."""
     status_file = tmp_path / "status"
-    status_file.write_text("Name:\tclaude\nState:\tZ (zombie)\nPid:\t42\n")
+    status_file.write_text("Name:\tclaude\nState:\tZ (zombie)\nPid:\t42\n", encoding="utf-8")
     monkeypatch.setattr(
         "builtins.open",
         _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
@@ -404,10 +412,12 @@ def test_check_lock_alive_pid(tmp_path, monkeypatch):
     lock_file = lock_dir / ".dispatch.lock"
     lock_data = {"pid": 1234, "timestamp": "2026-03-29T10:00:00"}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
-    monkeypatch.setattr(wake_mod, "_check_pid_alive", lambda pid: True)
+    alive = MagicMock(return_value=True)
+    monkeypatch.setattr(wake_mod, "_check_pid_alive", alive)
     result = _check_lock(tmp_path)
     assert result is not None
     assert result["pid"] == 1234
+    alive.assert_called_once_with(1234)
 
 
 def test_check_lock_dead_pid_removes_lock(tmp_path, monkeypatch):
@@ -417,10 +427,12 @@ def test_check_lock_dead_pid_removes_lock(tmp_path, monkeypatch):
     lock_file = lock_dir / ".dispatch.lock"
     lock_data = {"pid": 99999, "timestamp": "2026-03-29T10:00:00"}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
-    monkeypatch.setattr(wake_mod, "_check_pid_alive", lambda pid: False)
+    alive = MagicMock(return_value=False)
+    monkeypatch.setattr(wake_mod, "_check_pid_alive", alive)
     result = _check_lock(tmp_path)
     assert result is None
     assert not lock_file.exists()
+    alive.assert_called_once_with(99999)
 
 
 def test_check_lock_stale_old_timestamp(tmp_path, monkeypatch):
@@ -822,7 +834,7 @@ class TestWakeBranchSpawnEnv:
 
         wake_mod.wake_branch("@testbranch", fresh=True)
 
-        assert captured_envs, "Popen was not called"
+        assert len(captured_envs) == 1, "Popen must be called exactly once"
         env = captured_envs[0]
         assert local_bin in env.get("PATH", ""), f"~/.local/bin not in spawn_env PATH: {env.get('PATH', '')}"
 
@@ -910,7 +922,7 @@ class TestLoadConfig:
 class TestIsBranchOccupied:
     """Tests for _is_branch_occupied() — checks for interactive Claude sessions."""
 
-    def test_no_claude_processes(self, monkeypatch):
+    def test_no_claude_processes(self, tmp_path, monkeypatch):
         """pgrep returns non-zero (no claude processes) -> not occupied."""
 
         class FakeResult:
@@ -918,7 +930,7 @@ class TestIsBranchOccupied:
             stdout = ""
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-        assert _is_branch_occupied(_Path("/some/branch")) is False
+        assert _is_branch_occupied(tmp_path) is False
 
     def test_claude_in_different_dir(self, tmp_path, monkeypatch):
         """Claude running in a different directory -> not occupied."""
@@ -961,14 +973,14 @@ class TestIsBranchOccupied:
         monkeypatch.setattr(wake_mod, "_read_session_type", lambda pid_str: "daemon")
         assert _is_branch_occupied(tmp_path) is False
 
-    def test_pgrep_subprocess_failure_returns_false(self, monkeypatch):
+    def test_pgrep_subprocess_failure_returns_false(self, tmp_path, monkeypatch):
         """subprocess failure returns False."""
 
         def _fail(*a, **kw):
             raise subprocess.SubprocessError("pgrep failed")
 
         monkeypatch.setattr(subprocess, "run", _fail)
-        assert _is_branch_occupied(_Path("/some/branch")) is False
+        assert _is_branch_occupied(tmp_path) is False
 
     def test_readlink_oserror_continues(self, tmp_path, monkeypatch):
         """OSError on readlink is caught, continues to next PID."""
@@ -1363,6 +1375,44 @@ class TestWakeBranch:
         p_idx = claude_part.index("-p")
         prompt = claude_part[p_idx + 1]
         assert "synchronously" in prompt.lower()
+
+    def test_prompt_puts_the_spec_before_the_build(self, tmp_path, monkeypatch):
+        """Prompt sends the builder to the standards and the test template first, the checklist last.
+
+        Measured on 66 worker transcripts: 61 ran the checklist after writing,
+        0 read the standards page before (DPLAN-0354). The spec line comes
+        ahead of every other instruction so it is read first.
+        """
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+
+        captured_cmds: list = []
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _FakeProc()
+
+        monkeypatch.setattr("subprocess.Popen", fake_popen)
+        notified: list = []
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.notify.send_notification",
+            lambda *a, **kw: notified.append(kw.get("kind")),
+            raising=False,
+        )
+        status, ok = wake_branch("@testbranch")
+        assert ok is True
+        assert notified == ["wake"]  # the real feed was never written
+        cmd = captured_cmds[0]
+        sep_idx = cmd.index("--")
+        claude_part = cmd[sep_idx + 1 :]
+        p_idx = claude_part.index("-p")
+        prompt = claude_part[p_idx + 1]
+        spec_at = prompt.find("Before you build:")
+        assert spec_at != -1
+        assert "src/aipass/seedgo/docs/aipass_standards.md" in prompt
+        assert "src/aipass/seedgo/templates/test_template_v1.md" in prompt
+        assert spec_at < prompt.find("IMPORTANT: run any sub-agents")
+        assert prompt.find("checklist last") > spec_at
 
     # --- spawn errors ---
 
@@ -1833,8 +1883,6 @@ class TestWakeBackOptOut:
 
     def test_a_declined_wake_back_is_written_on_the_register_row(self, tmp_path, monkeypatch):
         """A reader of the register can tell a declined wake-back from a lost one."""
-        from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
-
         _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
         _patch_wake_deps(monkeypatch)
         _record_spawn_routes(monkeypatch)
@@ -2084,17 +2132,14 @@ class TestWakeModelPolicy:
         assert "fable" in decision.refusal.lower(), decision.refusal
         assert "2026-09-08" in decision.refusal, decision.refusal
 
-    def test_a_refused_request_never_stalls_the_wake(self, granted):
-        """Refusing the WAKE would punish the target for its schedule's model
-        field. The wake happens; the model does not."""
-        granted(["@devpulse"])
-
-        assert wake_mod.resolve_wake_model("@vera", "fable").model == DEFAULT_MODEL
-
     def test_manager_class_no_longer_buys_fable(self, granted):
         """The superseded rule, pinned as superseded. This is the exact call the
         08-30 version answered with "fable" for any manager; @vera is
-        manager-class and holds no grant, so it is opus now."""
+        manager-class and holds no grant, so it is opus now.
+
+        The refused "fable" request still resolves to a model: refusing the WAKE
+        would punish the target for its schedule's model field. The wake
+        happens; the model does not."""
         granted(["@devpulse"])
 
         assert wake_mod.resolve_wake_model("@vera", None).model == DEFAULT_MODEL
@@ -2382,8 +2427,6 @@ class TestDaemonSessionMarking:
         _patch_wake_deps(monkeypatch)
         _record_spawn_routes(monkeypatch)
 
-        from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
-
         opened = []
         monkeypatch.setattr(register_mod, "open_dispatch", lambda **kw: opened.append(kw) or "id", raising=True)
 
@@ -2619,7 +2662,7 @@ class TestRecipientDashboardRefresh:
         """Patch the prax entry point where the wake imports it from — the
         MODULE door (apps/modules/dashboard.py), which is prax's published
         surface and the only one another branch may read."""
-        import aipass.prax.apps.modules.dashboard as prax_refresh
+        prax_refresh = prax_dashboard_mod
 
         if fake is not None:
             monkeypatch.setattr(prax_refresh, "refresh_single_dashboard", fake)

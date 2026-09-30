@@ -3,26 +3,23 @@
 # Description: Tests for push_branch_dashboard handler — branch dashboard push
 # Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for push_branch_dashboard handler — branch dashboard push."""
+"""Tests for apps/handlers/dashboard/push_branch_dashboard.py and aipass.prax's dashboard module."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from aipass.flow.apps.handlers.dashboard import push_branch_dashboard
+from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, SUBJECT_CAP
+
 _MOD = "aipass.flow.apps.handlers.dashboard.push_branch_dashboard"
-
-
-# ─── Import helpers ───────────────────────────────────────
-
-
-def _import_mod():
-    import aipass.flow.apps.handlers.dashboard.push_branch_dashboard as mod
-
-    return mod
 
 
 # ═══════════════════════════════════════════════════════════
@@ -35,7 +32,7 @@ class TestWriteDashboardSection:
 
     def test_creates_dashboard_when_not_exists(self, tmp_path):
         """Creates DASHBOARD.local.json when it does not exist."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         section_data = {"managed_by": "flow", "active_plans": 0}
         with patch.object(mod, "DASHBOARD_TEMPLATE_FILE", tmp_path / "nonexistent_template.json"):
             result = mod._write_dashboard_section(tmp_path, "flow", section_data)
@@ -48,7 +45,7 @@ class TestWriteDashboardSection:
 
     def test_updates_existing_dashboard(self, tmp_path):
         """Updates an existing DASHBOARD.local.json with new section data."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         existing = {
             "branch": "TEST",
             "last_updated": "",
@@ -70,7 +67,7 @@ class TestWriteDashboardSection:
 
     def test_corrupt_json_creates_fresh(self, tmp_path):
         """Corrupt JSON in dashboard file triggers creation of fresh dashboard."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         dashboard_path = tmp_path / "DASHBOARD.local.json"
         dashboard_path.write_text("{not valid json!!!", encoding="utf-8")
 
@@ -85,7 +82,7 @@ class TestWriteDashboardSection:
 
     def test_empty_file_creates_fresh(self, tmp_path):
         """Empty dashboard file triggers creation of fresh dashboard."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         dashboard_path = tmp_path / "DASHBOARD.local.json"
         dashboard_path.write_text("", encoding="utf-8")
 
@@ -99,7 +96,7 @@ class TestWriteDashboardSection:
 
     def test_recalculates_quick_status(self, tmp_path):
         """Dashboard quick_status is recalculated after section write."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         existing = {
             "branch": "TEST",
             "last_updated": "",
@@ -122,7 +119,7 @@ class TestWriteDashboardSection:
 
     def test_preserves_foreign_quick_status_keys(self, tmp_path):
         """A quick_status key written by another service survives our push."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         existing = {
             "branch": "TEST",
             "last_updated": "",
@@ -154,7 +151,7 @@ class TestWriteDashboardSection:
 
     def test_returns_false_on_exception(self, tmp_path):
         """Returns False when an exception occurs during write."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         section_data = {"managed_by": "flow"}
         # Patch Path to simulate write failure
         with patch.object(mod, "_create_fresh_dashboard", side_effect=RuntimeError("boom")):
@@ -163,7 +160,7 @@ class TestWriteDashboardSection:
 
     def test_adds_last_updated_to_section(self, tmp_path):
         """Section data gets a last_updated timestamp injected."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         dashboard_path = tmp_path / "DASHBOARD.local.json"
         dashboard_path.write_text(json.dumps({"sections": {}}), encoding="utf-8")
 
@@ -185,7 +182,7 @@ class TestCreateFreshDashboard:
 
     def test_uses_template_when_exists(self, tmp_path):
         """Loads from DASHBOARD_TEMPLATE_FILE when it exists."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         template = {
             "branch": "{{BRANCHNAME}}",
             "sections": {},
@@ -205,7 +202,7 @@ class TestCreateFreshDashboard:
 
     def test_fallback_when_no_template(self, tmp_path):
         """Falls back to hardcoded defaults when template file does not exist."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         branch_path = tmp_path / "test_branch"
         branch_path.mkdir()
 
@@ -222,7 +219,7 @@ class TestCreateFreshDashboard:
 
     def test_fallback_on_corrupt_template(self, tmp_path):
         """Falls back to defaults when template file contains invalid JSON."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         template_file = tmp_path / "DASHBOARD.template.json"
         template_file.write_text("not json at all", encoding="utf-8")
 
@@ -246,7 +243,7 @@ class TestCalculateQuickStatus:
 
     def test_all_clear_when_nothing(self):
         """Returns 'All clear' summary when all counts are zero."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {
             "ai_mail": {"new": 0, "opened": 0},
             "flow": {"active_plans": 0},
@@ -259,7 +256,7 @@ class TestCalculateQuickStatus:
 
     def test_action_required_with_new_mail(self):
         """Sets action_required True when there is new mail."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {
             "ai_mail": {"new": 5, "opened": 1},
             "flow": {"active_plans": 0},
@@ -272,7 +269,7 @@ class TestCalculateQuickStatus:
 
     def test_active_plans_as_list(self):
         """A stale list-shaped section still counts — pre-ruling dashboards on disk."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {
             "ai_mail": {"new": 0},
             "flow": {"active_plans": ["plan1", "plan2", "plan3"]},
@@ -285,7 +282,7 @@ class TestCalculateQuickStatus:
 
     def test_active_plans_as_int(self):
         """Handles active_plans as an integer directly — the ruling shape."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {
             "ai_mail": {"new": 0},
             "flow": {"active_plans": 2},
@@ -300,7 +297,7 @@ class TestCalculateQuickStatus:
         It used to read active_count, which only flow writes: after a prax
         refresh built the section, the glance would have counted 0 plans.
         """
-        mod = _import_mod()
+        mod = push_branch_dashboard
         prax_shaped = {
             "ai_mail": {"new": 0},
             # exactly what prax's refresh writes — no active_count, no total_plans
@@ -313,7 +310,7 @@ class TestCalculateQuickStatus:
 
     def test_mentions_trigger_action_required(self):
         """Commons mentions trigger action_required."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {
             "ai_mail": {"new": 0},
             "flow": {"active_plans": 0},
@@ -325,7 +322,7 @@ class TestCalculateQuickStatus:
 
     def test_empty_sections(self):
         """Handles completely empty sections dict."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._calculate_quick_status({})
         assert result["action_required"] is False
         assert result["summary"] == "All clear"
@@ -335,7 +332,7 @@ class TestCalculateQuickStatus:
 
     def test_uses_unread_fallback(self):
         """Falls back to 'unread' key when 'new' is missing from ai_mail."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {
             "ai_mail": {"unread": 7},
             "flow": {"active_plans": 0},
@@ -356,7 +353,7 @@ class TestCalculateQuickStatusMerge:
 
     def test_unknown_keys_survive_verbatim(self):
         """Keys we know nothing about are carried through untouched."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {"ai_mail": {"new": 0}, "flow": {"active_plans": 0}}
         existing = {"todo_count": 9, "custom_flag": "keep-me", "nested": {"a": 1}}
 
@@ -368,7 +365,7 @@ class TestCalculateQuickStatusMerge:
 
     def test_foreign_counter_keeps_action_required(self):
         """A foreign *_count still pending means the branch still needs action."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {"ai_mail": {"new": 0}, "flow": {"active_plans": 0}}
 
         result = mod._calculate_quick_status(sections, {"todo_count": 9})
@@ -378,7 +375,7 @@ class TestCalculateQuickStatusMerge:
 
     def test_foreign_counter_at_zero_stays_all_clear(self):
         """A zeroed foreign counter is preserved but raises no flag."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {"ai_mail": {"new": 0}, "flow": {"active_plans": 0}}
 
         result = mod._calculate_quick_status(sections, {"todo_count": 0})
@@ -389,7 +386,7 @@ class TestCalculateQuickStatusMerge:
 
     def test_foreign_non_counter_is_preserved_but_not_interpreted(self):
         """Only *_count keys are read as counters; other keys are data we pass on."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {"ai_mail": {"new": 0}, "flow": {"active_plans": 0}}
 
         result = mod._calculate_quick_status(sections, {"last_refresh_ms": 1500})
@@ -400,7 +397,7 @@ class TestCalculateQuickStatusMerge:
 
     def test_non_numeric_foreign_counter_does_not_raise(self):
         """A *_count key holding junk is preserved, never compared numerically."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {"ai_mail": {"new": 0}, "flow": {"active_plans": 0}}
 
         result = mod._calculate_quick_status(sections, {"todo_count": None, "err_count": "n/a"})
@@ -411,7 +408,7 @@ class TestCalculateQuickStatusMerge:
 
     def test_our_own_keys_win_over_stale_values(self):
         """Keys we own are recomputed, never inherited from the previous write."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {"ai_mail": {"new": 1}, "flow": {"active_plans": 2}, "commons_activity": {"mentions": 0}}
         existing = {"active_plans": 99, "commons_mentions": 99, "summary": "stale"}
 
@@ -423,7 +420,7 @@ class TestCalculateQuickStatusMerge:
 
     def test_mail_counts_already_set_are_not_downgraded(self):
         """@prax reads inbox.json first-hand; our stale section view must not overwrite it."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         # Section says nothing is open; the live inbox (via @prax) says one is.
         sections = {"ai_mail": {"new": 0, "opened": 0}, "flow": {"active_plans": 0}}
         existing = {"new_mail": 0, "opened_mail": 1}
@@ -435,7 +432,7 @@ class TestCalculateQuickStatusMerge:
 
     def test_mail_counts_seeded_when_absent(self):
         """On a dashboard with no mail counts yet, we seed them from the ai_mail section."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {"ai_mail": {"new": 3, "opened": 2}, "flow": {"active_plans": 0}}
 
         result = mod._calculate_quick_status(sections, {"todo_count": 1})
@@ -446,7 +443,7 @@ class TestCalculateQuickStatusMerge:
 
     def test_summary_lists_our_parts_then_foreign(self):
         """Foreign counters are appended after the parts we compute."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {"ai_mail": {"new": 1}, "flow": {"active_plans": 2}, "commons_activity": {"mentions": 3}}
 
         result = mod._calculate_quick_status(sections, {"todo_count": 4})
@@ -455,14 +452,14 @@ class TestCalculateQuickStatusMerge:
 
     def test_no_existing_block_behaves_as_before(self):
         """Omitting the existing block keeps the original single-writer behaviour."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {"ai_mail": {"new": 0}, "flow": {"active_plans": 0}}
 
         assert mod._calculate_quick_status(sections) == mod._calculate_quick_status(sections, {})
 
     def test_non_dict_existing_is_ignored(self):
         """A corrupt (non-dict) quick_status block does not break the write."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         sections = {"ai_mail": {"new": 0}, "flow": {"active_plans": 0}}
 
         result = mod._calculate_quick_status(sections, "not-a-dict")
@@ -481,7 +478,7 @@ class TestGetAllRegistryFiles:
 
     def test_reads_template_registry(self, tmp_path):
         """Reads per-type registry filenames from template_registry.json."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         template_reg = {
             "types": {
                 "flow_plans": {"prefix": "FPLAN"},
@@ -500,14 +497,14 @@ class TestGetAllRegistryFiles:
 
     def test_falls_back_on_missing_template_registry(self, tmp_path):
         """Falls back to REGISTRY_FILE.name when template_registry.json is missing."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         with patch.object(mod, "FLOW_JSON_DIR", tmp_path):
             result = mod._get_all_registry_files()
         assert result == [mod.REGISTRY_FILE.name]
 
     def test_deduplicates_prefixes(self, tmp_path):
         """Does not duplicate registry filenames for repeated prefixes."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         template_reg = {
             "types": {
                 "flow_plans": {"prefix": "FPLAN"},
@@ -533,7 +530,7 @@ class TestLoadRegistry:
 
     def test_merges_multiple_registries(self, tmp_path):
         """Merges plans from multiple registry files using composite keys."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         fplan_reg = {"plans": {"1": {"subject": "fplan one", "file_path": "/p/FPLAN-0001_test.md"}}, "next_number": 5}
         dplan_reg = {"plans": {"2": {"subject": "dplan one", "file_path": "/p/DPLAN-0002_test.md"}}, "next_number": 10}
         (tmp_path / "fplan_registry.json").write_text(json.dumps(fplan_reg), encoding="utf-8")
@@ -551,7 +548,7 @@ class TestLoadRegistry:
 
     def test_handles_missing_registry(self, tmp_path):
         """Gracefully handles a missing registry file."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         with (
             patch.object(mod, "FLOW_JSON_DIR", tmp_path),
             patch.object(mod, "_get_all_registry_files", return_value=["nonexistent_registry.json"]),
@@ -562,7 +559,7 @@ class TestLoadRegistry:
 
     def test_keeps_highest_next_number(self, tmp_path):
         """Keeps the highest next_number across registries."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         reg_a = {"plans": {}, "next_number": 3}
         reg_b = {"plans": {}, "next_number": 50}
         reg_c = {"plans": {}, "next_number": 20}
@@ -583,7 +580,7 @@ class TestLoadRegistry:
 
     def test_handles_corrupt_registry_gracefully(self, tmp_path):
         """Skips a corrupt registry file and continues with others."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         (tmp_path / "bad_registry.json").write_text("not json!", encoding="utf-8")
         good_reg = {"plans": {"1": {"subject": "good", "file_path": "/p/GOOD-0001_test.md"}}, "next_number": 5}
         (tmp_path / "good_registry.json").write_text(json.dumps(good_reg), encoding="utf-8")
@@ -612,7 +609,7 @@ class TestFilterBranchPlans:
 
     def test_filters_active_plans_for_branch(self, tmp_path):
         """Returns active plans matching the branch path."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         registry = {
             "plans": {
                 "FPLAN-0001": {
@@ -640,7 +637,7 @@ class TestFilterBranchPlans:
 
     def test_no_plans_for_branch(self, tmp_path):
         """Returns empty lists when no plans match the branch."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         other_path = tmp_path / "other_branch"
         other_path.mkdir()
         registry = {
@@ -661,7 +658,7 @@ class TestFilterBranchPlans:
 
     def test_recently_closed_within_7_days(self, tmp_path):
         """Includes closed plans within the 7-day window."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         recent_ts = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
         registry = {
             "plans": {
@@ -682,7 +679,7 @@ class TestFilterBranchPlans:
 
     def test_excludes_old_closed_plans(self, tmp_path):
         """Excludes closed plans older than 7 days."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         registry = {
             "plans": {
@@ -702,7 +699,7 @@ class TestFilterBranchPlans:
 
     def test_recently_closed_capped_at_5(self, tmp_path):
         """Recently closed list is limited to 5 entries."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         plans = {}
         for i in range(1, 9):
             ts = (datetime.now(timezone.utc) - timedelta(hours=i)).isoformat()
@@ -721,7 +718,7 @@ class TestFilterBranchPlans:
 
     def test_unparseable_closed_timestamp_included_anyway(self, tmp_path):
         """Plans with unparseable closed timestamps are included anyway."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         registry = {
             "plans": {
                 "FPLAN-0001": {
@@ -740,7 +737,7 @@ class TestFilterBranchPlans:
 
     def test_sorts_active_newest_first(self, tmp_path):
         """Active plans are sorted by created date, newest first."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         registry = {
             "plans": {
                 "FPLAN-0001": {
@@ -773,7 +770,7 @@ class TestFilterBranchPlans:
 
     def test_extracts_plan_prefix_from_filepath(self, tmp_path):
         """Uses composite key as plan ID directly."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         registry = {
             "plans": {
                 "DPLAN-0042": {
@@ -799,7 +796,7 @@ class TestBuildSectionData:
 
     def test_builds_correct_structure(self):
         """Returns section dict with all expected keys."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         active = [{"id": "FPLAN-0001", "subject": "Test"}]
         closed = [{"id": "FPLAN-0002", "subject": "Done"}]
         result = mod._build_section_data(active, closed, 10)
@@ -811,7 +808,7 @@ class TestBuildSectionData:
 
     def test_empty_lists(self):
         """Handles empty active and closed lists."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._build_section_data([], [], 0)
         assert result["active_plans"] == 0
         assert result["recently_closed"] == []
@@ -837,21 +834,25 @@ class TestBuildSectionDataOpenRecent:
 
     def test_entry_shape_is_plan_id_subject_created(self):
         """Each entry carries plan_id/subject/created — and nothing else."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._build_section_data(self._active(1), [], 1)
 
         assert result["open_recent"] == [{"plan_id": "FPLAN-0001", "subject": "Plan 1", "created": "2026-08-01 09:00"}]
 
-    def test_capped_at_five(self):
-        """22 open plans publish 5 entries — the bounded-context guarantee."""
-        mod = _import_mod()
+    def test_capped_at_five_and_nothing_dropped_below_the_cap(self):
+        """22 open plans publish 5 entries — the bounded-context guarantee.
+        Under the cap the window is every open plan, none dropped.
+        Mutant: newest_first[:OPEN_RECENT_LIMIT] -> newest_first[1:OPEN_RECENT_LIMIT + 1] reddens this."""
+        mod = push_branch_dashboard
         result = mod._build_section_data(self._active(22), [], 22)
+        below = mod._build_section_data(self._active(3), [], 3)
 
         assert len(result["open_recent"]) == 5
+        assert [e["plan_id"] for e in below["open_recent"]] == ["FPLAN-0003", "FPLAN-0002", "FPLAN-0001"]
 
     def test_newest_first_by_created(self):
         """The 5 published are the NEWEST by created date, newest first."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._build_section_data(self._active(22), [], 22)
 
         assert [e["plan_id"] for e in result["open_recent"]] == [
@@ -864,7 +865,7 @@ class TestBuildSectionDataOpenRecent:
 
     def test_sorts_unordered_input_itself(self):
         """The window sorts its own input — it does not inherit caller order."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         scrambled = list(reversed(self._active(7)[:3])) + self._active(7)[3:]
         result = mod._build_section_data(scrambled, [], 7)
 
@@ -872,7 +873,7 @@ class TestBuildSectionDataOpenRecent:
 
     def test_count_still_reports_the_whole_world(self):
         """active_plans stays the FULL total — the window must not read as everything."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._build_section_data(self._active(22), [], 22)
 
         assert result["active_plans"] == 22
@@ -880,7 +881,7 @@ class TestBuildSectionDataOpenRecent:
 
     def test_missing_created_sorts_last_without_raising(self):
         """A plan with no created date still renders, sorted to the back."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         active = self._active(2) + [{"id": "FPLAN-0099", "subject": "Undated"}]
         result = mod._build_section_data(active, [], 3)
 
@@ -889,7 +890,7 @@ class TestBuildSectionDataOpenRecent:
 
     def test_section_carries_no_unbounded_plan_list(self):
         """RULING 2026-08-16: the full open-plan list leaves the section entirely."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._build_section_data(self._active(22), [], 22)
 
         # No value anywhere in the section may be a list of 22 plan rows.
@@ -898,7 +899,7 @@ class TestBuildSectionDataOpenRecent:
 
     def test_active_plans_is_the_count_not_the_list(self):
         """active_plans is an int total — the shape @prax already writes."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._build_section_data(self._active(22), [], 22)
 
         assert result["active_plans"] == 22
@@ -906,14 +907,14 @@ class TestBuildSectionDataOpenRecent:
 
     def test_active_count_is_collapsed_away(self):
         """Collapsed to one name: active_count no longer ships."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._build_section_data(self._active(22), [], 22)
 
         assert "active_count" not in result
 
     def test_full_section_key_set_is_exactly_the_contract(self):
         """The published contract, pinned whole — new keys are a deliberate act."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._build_section_data(self._active(3), [], 3)
 
         assert set(result) == {
@@ -926,7 +927,7 @@ class TestBuildSectionDataOpenRecent:
 
     def test_closed_and_total_survive_the_shape_change(self):
         """The ruling touched the open side only — closed/total are unchanged."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         active = self._active(9)
         closed = [{"id": "FPLAN-0100", "subject": "Done", "closed": "2026-08-15 10:00"}]
         result = mod._build_section_data(active, closed, 30)
@@ -944,15 +945,21 @@ class TestBuildSectionDataOpenRecent:
 class TestPushFlowToBranchDashboard:
     """Tests for push_flow_to_branch_dashboard."""
 
-    def test_returns_false_if_no_dashboard_exists(self, tmp_path):
-        """Returns False when DASHBOARD.local.json does not exist."""
-        mod = _import_mod()
+    def test_returns_none_if_no_dashboard_exists(self, tmp_path):
+        """Returns None when DASHBOARD.local.json does not exist.
+
+        None, not False: False is kept for a push that failed, so a caller can
+        tell 'no branch here' from 'the push broke' (flow's decision, leg 3).
+        Mutant: return None -> return False reddens this.
+        """
+        mod = push_branch_dashboard
         result = mod.push_flow_to_branch_dashboard(tmp_path)
-        assert result is False
+        assert result is None
+        assert not (tmp_path / "DASHBOARD.local.json").exists()
 
     def test_success_calls_log_operation(self, tmp_path, mock_json_handler):
         """Logs via json_handler on successful push."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         dashboard_path = tmp_path / "DASHBOARD.local.json"
         dashboard_path.write_text(json.dumps({"sections": {}}), encoding="utf-8")
 
@@ -968,7 +975,7 @@ class TestPushFlowToBranchDashboard:
 
     def test_orchestrates_full_pipeline(self, tmp_path, mock_json_handler):
         """Main handler calls load, filter, build, write in sequence."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         dashboard_path = tmp_path / "DASHBOARD.local.json"
         dashboard_path.write_text(json.dumps({"sections": {}}), encoding="utf-8")
 
@@ -995,7 +1002,7 @@ class TestPushFlowToBranchDashboard:
 
     def test_push_preserves_another_services_todo_count(self, tmp_path, mock_json_handler):
         """End-to-end: closing a plan must not wipe @prax's todo_count off the card."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         dashboard_path = tmp_path / "DASHBOARD.local.json"
         dashboard_path.write_text(
             json.dumps(
@@ -1039,7 +1046,7 @@ class TestPushFlowToBranchDashboard:
 
     def test_returns_false_on_exception(self, tmp_path):
         """Returns False when an exception occurs in the main handler."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         dashboard_path = tmp_path / "DASHBOARD.local.json"
         dashboard_path.write_text(json.dumps({"sections": {}}), encoding="utf-8")
 
@@ -1050,7 +1057,7 @@ class TestPushFlowToBranchDashboard:
 
     def test_returns_false_when_write_section_fails(self, tmp_path):
         """Returns False when _write_dashboard_section fails."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         dashboard_path = tmp_path / "DASHBOARD.local.json"
         dashboard_path.write_text(json.dumps({"sections": {}}), encoding="utf-8")
 
@@ -1101,7 +1108,7 @@ class TestPushFlowToAllBranchDashboards:
         return {"plans": plans, "next_number": len(plans) + 1}
 
     def test_sweeps_every_branch_in_the_registry(self, tmp_path, mock_json_handler):
-        mod = _import_mod()
+        mod = push_branch_dashboard
         a, b, c = (self._branch(tmp_path, n) for n in ("a", "b", "c"))
 
         with patch.object(mod, "_load_registry", return_value=self._registry(a, b, c)):
@@ -1115,7 +1122,7 @@ class TestPushFlowToAllBranchDashboards:
 
     def test_heals_a_card_left_on_the_old_contract(self, tmp_path, mock_json_handler):
         """A pre-2.0.0 card carrying the list shape is rewritten to the int."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         stale = self._branch(tmp_path, "stale")
         (stale / "DASHBOARD.local.json").write_text(
             json.dumps(
@@ -1142,7 +1149,7 @@ class TestPushFlowToAllBranchDashboards:
 
     def test_skips_locations_with_no_dashboard(self, tmp_path, mock_json_handler):
         """Never conjure a dashboard for a path that is not a real branch."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         real = self._branch(tmp_path, "real")
         ghost = tmp_path / "ghost"
         ghost.mkdir()
@@ -1156,7 +1163,7 @@ class TestPushFlowToAllBranchDashboards:
 
     def test_one_bad_branch_does_not_abort_the_sweep(self, tmp_path, mock_json_handler):
         """A single failure must not cost every other card its heal."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         a, b = self._branch(tmp_path, "a"), self._branch(tmp_path, "b")
         real_push = mod.push_flow_to_branch_dashboard
 
@@ -1175,9 +1182,28 @@ class TestPushFlowToAllBranchDashboards:
         assert result["failed"] == 1
         assert "flow" in json.loads((b / "DASHBOARD.local.json").read_text(encoding="utf-8"))["sections"]
 
+    def test_a_dashboard_gone_mid_sweep_is_skipped_not_failed(self, tmp_path, mock_json_handler):
+        """The push's None (no dashboard) counts as skipped; only its False counts as failed.
+
+        Mutant: "skipped" if pushed is None -> "failed" if pushed is None reddens this.
+        """
+        mod = push_branch_dashboard
+        a, b = self._branch(tmp_path, "a"), self._branch(tmp_path, "b")
+
+        def answer(path):
+            return None if Path(path).name == "a" else False
+
+        with (
+            patch.object(mod, "_load_registry", return_value=self._registry(a, b)),
+            patch.object(mod, "push_flow_to_branch_dashboard", side_effect=answer),
+        ):
+            result = mod.push_flow_to_all_branch_dashboards()
+
+        assert result == {"pushed": 0, "skipped": 1, "failed": 1}
+
     def test_duplicate_locations_are_pushed_once(self, tmp_path, mock_json_handler):
         """Many plans in one branch is one push, not one per plan."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         a = self._branch(tmp_path, "a")
         registry = self._registry(a, a, a)
 
@@ -1191,7 +1217,7 @@ class TestPushFlowToAllBranchDashboards:
         assert result["pushed"] == 1
 
     def test_plans_with_no_location_are_ignored(self, tmp_path, mock_json_handler):
-        mod = _import_mod()
+        mod = push_branch_dashboard
         a = self._branch(tmp_path, "a")
         registry = self._registry(a)
         registry["plans"]["FPLAN-9999"] = {"subject": "homeless", "status": "open", "location": ""}
@@ -1217,9 +1243,7 @@ class TestSubjectCap:
     """
 
     def test_open_recent_subject_is_cut_to_the_shared_cap(self):
-        from aipass.prax.apps.modules.dashboard import SUBJECT_CAP
-
-        mod = _import_mod()
+        mod = push_branch_dashboard
         long_subject = "x" * (SUBJECT_CAP + 80)
         result = mod._build_section_data([{"id": "FPLAN-0001", "subject": long_subject}], [], 1)
 
@@ -1228,9 +1252,7 @@ class TestSubjectCap:
         assert published.endswith("...")
 
     def test_recently_closed_subject_is_cut_to_the_shared_cap(self):
-        from aipass.prax.apps.modules.dashboard import SUBJECT_CAP
-
-        mod = _import_mod()
+        mod = push_branch_dashboard
         long_subject = "y" * (SUBJECT_CAP + 80)
         result = mod._build_section_data([], [{"id": "FPLAN-0002", "subject": long_subject}], 1)
 
@@ -1240,9 +1262,7 @@ class TestSubjectCap:
 
     def test_subject_exactly_at_the_cap_is_published_whole(self):
         """The boundary belongs to the subject — 120 chars is not truncated."""
-        from aipass.prax.apps.modules.dashboard import SUBJECT_CAP
-
-        mod = _import_mod()
+        mod = push_branch_dashboard
         exact = "z" * SUBJECT_CAP
         result = mod._build_section_data([{"id": "FPLAN-0001", "subject": exact}], [{"id": "F", "subject": exact}], 1)
 
@@ -1251,7 +1271,7 @@ class TestSubjectCap:
 
     def test_cut_never_refuses_the_row(self):
         """Truncate, never refuse: an essay subject still leaves a visible plan."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._build_section_data([{"id": "FPLAN-0001", "subject": "q" * 400}], [], 1)
 
         assert len(result["open_recent"]) == 1
@@ -1259,14 +1279,14 @@ class TestSubjectCap:
 
     def test_body_under_a_subject_never_reaches_the_glance(self):
         """cap_subject takes the first line only."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         result = mod._build_section_data([{"id": "FPLAN-0001", "subject": "The subject\nthe body\nmore body"}], [], 1)
 
         assert result["open_recent"][0]["subject"] == "The subject"
 
     def test_closed_entry_keeps_its_other_fields(self):
         """Capping the subject must not drop the id or the closed timestamp."""
-        mod = _import_mod()
+        mod = push_branch_dashboard
         closed = {"id": "FPLAN-0002", "subject": "s" * 300, "closed": "2026-09-15T10:00:00+00:00"}
         result = mod._build_section_data([], [closed], 1)
 
@@ -1284,12 +1304,12 @@ class TestDashboardCharBudget:
     """
 
     def test_warns_once_when_over_budget(self, tmp_path):
-        from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET
-
-        mod = _import_mod()
+        mod = push_branch_dashboard
         branch = tmp_path / "bloated"
         branch.mkdir()
-        (branch / "DASHBOARD.local.json").write_text(json.dumps({"branch": "BLOATED", "sections": {}}))
+        (branch / "DASHBOARD.local.json").write_text(
+            json.dumps({"branch": "BLOATED", "sections": {}}), encoding="utf-8"
+        )
 
         fat = {"managed_by": "flow", "active_plans": 0, "filler": "f" * (DASHBOARD_CHAR_BUDGET + 500)}
         with patch(f"{_MOD}.logger") as mock_logger:
@@ -1303,26 +1323,24 @@ class TestDashboardCharBudget:
 
     def test_over_budget_still_writes_the_file(self, tmp_path):
         """Warn, never refuse: the dashboard must not go stale."""
-        from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET
-
-        mod = _import_mod()
+        mod = push_branch_dashboard
         branch = tmp_path / "bloated"
         branch.mkdir()
         path = branch / "DASHBOARD.local.json"
-        path.write_text(json.dumps({"branch": "BLOATED", "sections": {}}))
+        path.write_text(json.dumps({"branch": "BLOATED", "sections": {}}), encoding="utf-8")
 
         fat = {"managed_by": "flow", "active_plans": 0, "filler": "f" * (DASHBOARD_CHAR_BUDGET + 500)}
         with patch(f"{_MOD}.logger"):
             mod._write_dashboard_section(branch, "flow", fat)
 
-        written = json.loads(path.read_text())
+        written = json.loads(path.read_text(encoding="utf-8"))
         assert len(written["sections"]["flow"]["filler"]) == DASHBOARD_CHAR_BUDGET + 500
 
     def test_no_warning_under_budget(self, tmp_path):
-        mod = _import_mod()
+        mod = push_branch_dashboard
         branch = tmp_path / "lean"
         branch.mkdir()
-        (branch / "DASHBOARD.local.json").write_text(json.dumps({"branch": "LEAN", "sections": {}}))
+        (branch / "DASHBOARD.local.json").write_text(json.dumps({"branch": "LEAN", "sections": {}}), encoding="utf-8")
 
         with patch(f"{_MOD}.logger") as mock_logger:
             assert mod._write_dashboard_section(branch, "flow", {"managed_by": "flow", "active_plans": 0}) is True
@@ -1336,18 +1354,16 @@ class TestDashboardCharBudget:
         A section just under the budget still pushes the whole file over once
         the surrounding JSON is counted — that is the number the branch pays.
         """
-        from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET
-
-        mod = _import_mod()
+        mod = push_branch_dashboard
         branch = tmp_path / "edge"
         branch.mkdir()
         path = branch / "DASHBOARD.local.json"
-        path.write_text(json.dumps({"branch": "EDGE", "sections": {}}))
+        path.write_text(json.dumps({"branch": "EDGE", "sections": {}}), encoding="utf-8")
 
         section = {"managed_by": "flow", "active_plans": 0, "filler": "f" * (DASHBOARD_CHAR_BUDGET - 200)}
         with patch(f"{_MOD}.logger") as mock_logger:
             mod._write_dashboard_section(branch, "flow", section)
 
-        rendered_size = len(path.read_text())
+        rendered_size = len(path.read_text(encoding="utf-8"))
         over = [c for c in mock_logger.warning.call_args_list if "over the" in str(c)]
         assert bool(over) is (rendered_size > DASHBOARD_CHAR_BUDGET)

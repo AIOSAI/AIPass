@@ -3,18 +3,23 @@
 # Description: Tests for the log watcher service entry point
 # Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-09-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for log_watcher_service — the persistent service entry point."""
+"""Tests for apps/log_watcher_service.py — the persistent service entry point."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — the reload decision behind reload_sentinel.start, in test_reload_sentinel.py
+# seedgo: no-test-needed(covered_elsewhere) — the branch watcher start_branch_watcher drives, in test_log_watcher.py
 
 import signal
-import sys
 import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
+import aipass.trigger.apps.log_watcher_service as log_watcher_service
 
 
 # ---------------------------------------------------------------------------
@@ -24,58 +29,35 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock heavy watcher module imports before log_watcher_service loads."""
+    """Patch every door main() opens onto the live watchers and the catch-up.
 
-    # Mock branch_log_events module
-    mock_branch = MagicMock()
-    mock_branch.start = MagicMock(return_value=True)
-    mock_branch.stop = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.modules.branch_log_events",
-        mock_branch,
-    )
-
-    # Mock log_events module
-    mock_system = MagicMock()
-    mock_system.start = MagicMock(return_value=True)
-    mock_system.stop = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.modules.log_events",
-        mock_system,
-    )
+    The service binds its five collaborators by name at import, so they are
+    replaced on the service module itself. monkeypatch records the real
+    binding first, which also undoes the tests below that assign
+    ``mod.start_branch_watcher = MagicMock(...)`` directly on the shared module.
+    """
+    # The real watchers arm watchdog observers over the LIVE log tree.
+    monkeypatch.setattr(log_watcher_service, "start_branch_watcher", MagicMock(return_value=True))
+    monkeypatch.setattr(log_watcher_service, "stop_branch_watcher", MagicMock())
+    monkeypatch.setattr(log_watcher_service, "start_system_watcher", MagicMock(return_value=True))
+    monkeypatch.setattr(log_watcher_service, "stop_system_watcher", MagicMock())
 
     # Stub the catch-up. main() now calls it for real (DPLAN-0339 step 2), and
     # the real one walks the LIVE system_logs and fires error_detected for
     # anything it finds — every main() test below would scan the tree and
     # dispatch other branches' errors through medic. The tests that care about
-    # the call assert on this mock.
-    #
-    # Stubbed at the MEDIC MODULE, which is where the service binds it from:
-    # log_watcher_service is an entry point, so it reaches the handler through
-    # a module (seedgo encapsulation rule 3), not directly.
-    mock_medic = MagicMock()
-    mock_medic.run_error_catchup = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.modules.medic",
-        mock_medic,
-    )
+    # the call assert on this mock; trigger.fire is only handed to it, never
+    # called.
+    monkeypatch.setattr(log_watcher_service, "run_error_catchup", MagicMock())
 
-    # Force re-import so mocks take effect
-    monkeypatch.delitem(
-        sys.modules,
-        "aipass.trigger.apps.log_watcher_service",
-        raising=False,
-    )
+    # The shell may be systemd-supervised: main() starts reload_sentinel,
+    # whose evaluate() only acts under INVOCATION_ID.
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
 
 
 def _import_module():
-    """Import log_watcher_service fresh (after mocks are in place)."""
-    import aipass.trigger.apps.log_watcher_service as mod
-
-    return mod
+    """Hand each test the service module, its doors already patched."""
+    return log_watcher_service
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +173,7 @@ class TestMain:
         assert exc_info.value.code == 1
 
     def test_calls_stop_on_shutdown(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """After stop_event is set, both stop functions are called."""
+        """After stop_event is set, both stop functions are called (mutant: the two stops swapped)."""
         mod = _import_module()
 
         pre_set = threading.Event()
@@ -201,21 +183,16 @@ class TestMain:
         mod.start_branch_watcher = MagicMock(return_value=True)
         mod.start_system_watcher = MagicMock(return_value=True)
 
-        mock_stop_branch = MagicMock()
-        mock_stop_system = MagicMock()
-        mod.stop_branch_watcher = mock_stop_branch
-        mod.stop_system_watcher = mock_stop_system
-
-        # Suppress print output
-        monkeypatch.setattr("builtins.print", lambda *a, **kw: None)
+        stopped: list[str] = []
+        mod.stop_branch_watcher = MagicMock(side_effect=lambda: stopped.append("branch"))
+        mod.stop_system_watcher = MagicMock(side_effect=lambda: stopped.append("system"))
 
         mod.main()
 
-        mock_stop_branch.assert_called_once()
-        mock_stop_system.assert_called_once()
+        assert stopped == ["branch", "system"]
 
     def test_signal_handler_sets_stop_event(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The shutdown closure sets the stop_event when invoked."""
+        """The shutdown closure sets the stop_event when invoked (mutant: shutdown() no longer sets the event)."""
         mod = _import_module()
 
         # Use a real Event but do NOT pre-set it; we will trigger it via
@@ -223,74 +200,51 @@ class TestMain:
         real_event = threading.Event()
         monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: real_event))
 
-        # Capture the signal handler that main() registers (no-op stub
-        # avoids calling real signal.signal which fails in threads).
-        installed_handlers: dict[int, object] = {}
+        # main() runs on this thread and installs the real handlers. The
+        # sentinel start is the product's own hook between installing them and
+        # wait(): the handler main() installed is invoked there, so wait()
+        # returns only if that handler set the event (else --timeout fails it).
+        def deliver_sigterm(_stop: object):
+            """Deliver SIGTERM through the handler main() installed."""
+            handler = signal.getsignal(signal.SIGTERM)
+            assert callable(handler), f"main() installed no SIGTERM handler: {handler!r}"
+            handler(signal.SIGTERM, None)
+            return lambda: False
 
-        def capture_signal(signum: int, handler: object) -> object:
-            """Record installed signal handler for later inspection."""
-            installed_handlers[signum] = handler
-            return signal.SIG_DFL
-
-        monkeypatch.setattr(signal, "signal", capture_signal)
-
+        monkeypatch.setattr(mod.reload_sentinel, "start", deliver_sigterm)
         mod.start_branch_watcher = MagicMock(return_value=True)
         mod.start_system_watcher = MagicMock(return_value=True)
 
-        # Suppress print output
-        monkeypatch.setattr("builtins.print", lambda *a, **kw: None)
+        saved = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
+        try:
+            mod.main()
+        finally:
+            for sig, previous in saved.items():
+                signal.signal(sig, previous)
 
-        # main() is called on the main thread; capture_signal is a no-op so
-        # signal registration is safe.  The pre-set Event makes wait() return
-        # immediately, but we need it NOT set yet so we can trigger via handler.
-        # Instead, run main() in a background thread.
-        t = threading.Thread(target=mod.main, daemon=True)
-        t.start()
-
-        # Poll-wait for main() to register the SIGTERM handler instead of a
-        # fixed sleep, which can flake under load (deadline avoids a hang).
-        import time
-
-        deadline = time.monotonic() + 2.0
-        while signal.SIGTERM not in installed_handlers and time.monotonic() < deadline:
-            time.sleep(0.01)
-
-        # Invoke the captured SIGTERM handler
-        assert signal.SIGTERM in installed_handlers
-        handler = installed_handlers[signal.SIGTERM]
-        handler(signal.SIGTERM, None)  # type: ignore[operator]
-
-        # The event should now be set, unblocking main()
         assert real_event.is_set()
-        t.join(timeout=2)
-        assert not t.is_alive()
 
     def test_registers_both_signal_handlers(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """main() registers handlers for both SIGTERM and SIGINT."""
+        """main() registers handlers for both SIGTERM and SIGINT (mutant: the SIGINT registration dropped)."""
         mod = _import_module()
 
         pre_set = threading.Event()
         pre_set.set()
         monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
 
-        installed_signals: list[int] = []
-        original_signal = signal.signal
-
-        def capture_signal(signum: int, handler: object) -> object:
-            """Record which signal numbers are registered."""
-            installed_signals.append(signum)
-            return original_signal(signum, signal.SIG_DFL)
-
-        monkeypatch.setattr(signal, "signal", capture_signal)
-
         mod.start_branch_watcher = MagicMock(return_value=True)
         mod.start_system_watcher = MagicMock(return_value=True)
-        monkeypatch.setattr("builtins.print", lambda *a, **kw: None)
 
-        mod.main()
+        saved = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
+        try:
+            mod.main()
+            installed = {sig: signal.getsignal(sig) for sig in saved}
+        finally:
+            for sig, previous in saved.items():
+                signal.signal(sig, previous)
 
-        assert signal.SIGTERM in installed_signals
-        assert signal.SIGINT in installed_signals
+        assert getattr(installed[signal.SIGTERM], "__name__", None) == "shutdown"
+        assert getattr(installed[signal.SIGINT], "__name__", None) == "shutdown"
 
     def test_both_fail_is_reported_at_error_level(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When both watchers fail, the reason is reported at ERROR level.
@@ -345,7 +299,6 @@ class TestReloadExit:
 
         mod.start_branch_watcher = MagicMock(return_value=True)
         mod.start_system_watcher = MagicMock(return_value=True)
-        monkeypatch.setattr("builtins.print", lambda *a, **kw: None)
 
         with pytest.raises(SystemExit) as exit_info:
             mod.main()
@@ -384,7 +337,6 @@ class TestReloadExit:
         mod.start_system_watcher = MagicMock(return_value=True)
         mod.stop_branch_watcher = MagicMock()
         mod.stop_system_watcher = MagicMock()
-        monkeypatch.setattr("builtins.print", lambda *a, **kw: None)
 
         with pytest.raises(SystemExit):
             mod.main()
@@ -413,25 +365,27 @@ class TestStartupCatchup:
         monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
         mod.start_branch_watcher = MagicMock(return_value=True)
         mod.start_system_watcher = MagicMock(return_value=True)
-        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: None)
-        monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: None)
         mod.main()
 
     def test_main_runs_the_catchup(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Recovery no longer depends on anything firing the startup event."""
+        """Recovery no longer depends on anything firing the startup event (mutant: catch-up handed None)."""
         mod = _import_module()
+        catchup = MagicMock()
+        monkeypatch.setattr(mod, "run_error_catchup", catchup)
 
         self._run(mod, monkeypatch)
 
-        mod.run_error_catchup.assert_called_once()
+        catchup.assert_called_once_with(mod.trigger.fire)
 
     def test_catchup_gets_a_fire_event_so_errors_reach_medic(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Scanning without dispatching would recover errors into silence."""
         mod = _import_module()
+        catchup = MagicMock()
+        monkeypatch.setattr(mod, "run_error_catchup", catchup)
 
         self._run(mod, monkeypatch)
 
-        assert mod.run_error_catchup.call_args[0][0] == mod.trigger.fire
+        assert catchup.call_args[0][0] == mod.trigger.fire
 
     def test_catchup_runs_after_the_watchers_are_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Order is deliberate: overlap is safe, a gap is not.
@@ -449,8 +403,6 @@ class TestStartupCatchup:
         mod.start_branch_watcher = MagicMock(side_effect=lambda: order.append("branch") or True)
         mod.start_system_watcher = MagicMock(side_effect=lambda: order.append("system") or True)
         mod.run_error_catchup = MagicMock(side_effect=lambda *a: order.append("catchup"))
-        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: None)
-        monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: None)
 
         mod.main()
 
@@ -474,7 +426,6 @@ class TestStartupCatchup:
         mock_stop_branch = MagicMock()
         mod.stop_branch_watcher = mock_stop_branch
         errors: list[str] = []
-        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: None)
         monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: errors.append(str(a)))
 
         mod.main()
@@ -485,6 +436,8 @@ class TestStartupCatchup:
     def test_no_catchup_when_both_watchers_fail(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Nothing will be watching, so there is no window to recover into."""
         mod = _import_module()
+        catchup = MagicMock()
+        monkeypatch.setattr(mod, "run_error_catchup", catchup)
 
         pre_set = threading.Event()
         pre_set.set()
@@ -495,4 +448,4 @@ class TestStartupCatchup:
         with pytest.raises(SystemExit):
             mod.main()
 
-        mod.run_error_catchup.assert_not_called()
+        catchup.assert_not_called()

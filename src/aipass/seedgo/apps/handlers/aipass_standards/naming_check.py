@@ -21,6 +21,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: snake_case and column-0 constants are the house style everywhere.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 # A bare dotted name and nothing else — `_h.save_json`, `mod.InvalidDocument`.

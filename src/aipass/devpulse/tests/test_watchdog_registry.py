@@ -3,22 +3,33 @@
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
 # Version: 1.2.0
 # Created: 2026-04-14
-# Modified: 2026-09-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for watchdog registry — register/deregister/list/kill (Phase 4)."""
+"""Tests for apps/handlers/watchdog/registry.py and the handlers that register through it."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/watchdog/registry.py parses and imports
+# seedgo: no-test-needed(documentation) — that register, deregister, list_active and kill_watch carry docstrings
 
 import json
 import os
 import subprocess
 import sys
+import threading
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from aipass.devpulse.apps.handlers.watchdog import agent as agent_handler
+from aipass.devpulse.apps.handlers.watchdog import registry as reg
 from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
+from aipass.devpulse.apps.handlers.watchdog import schedule as schedule_handler
+from aipass.devpulse.apps.handlers.watchdog import timer as tmr
+from aipass.devpulse.apps.handlers.watchdog import timer as watch_timer
 
 
 @pytest.fixture
@@ -116,7 +127,6 @@ def test_list_active_empty(store_path):
 def test_list_active_returns_all_with_elapsed(store_path):
     watch_registry.register("agent", {"agent_id": "@drone"}, storage_path=store_path)
     watch_registry.register("timer", {"duration": "5m"}, storage_path=store_path)
-    time.sleep(0.05)
 
     active = watch_registry.list_active(storage_path=store_path, prune_stale=False)
     assert len(active) == 2
@@ -450,8 +460,6 @@ def test_full_cycle_integration(store_path):
 
 def test_agent_handler_registers_and_deregisters(store_path, monkeypatch):
     """watch_agent registers on entry and deregisters in finally (even on early return)."""
-    from aipass.devpulse.apps.handlers.watchdog import agent as agent_handler
-
     # Force the handler's default storage path to our tmp file so register
     # lands in the right place.
     monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
@@ -467,22 +475,20 @@ def test_agent_handler_registers_and_deregisters(store_path, monkeypatch):
 
 
 def test_timer_wake_in_registers_and_deregisters(store_path, monkeypatch):
-    """wake_in with a short duration registers then deregisters."""
-    from aipass.devpulse.apps.handlers.watchdog import timer as timer_handler
-
+    """wake_in with a short duration registers then deregisters; mutant 'register skipped' reddens it."""
     monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
 
-    # Take a peek mid-flight by patching time.sleep to snapshot the registry.
+    # Poll the store on disk from here while the timer waits in its own thread.
+    outcome: dict = {}
+    waker = threading.Thread(target=lambda: outcome.update(result=watch_timer.wake_in("1s")))
     snapshots: list[list] = []
-    real_sleep = time.sleep
-
-    def spy_sleep(duration):
-        """Capture the registry state while the timer is mid-wait."""
+    waker.start()
+    deadline = time.monotonic() + 30
+    while waker.is_alive() and time.monotonic() < deadline:
         snapshots.append(watch_registry.list_active(storage_path=store_path, prune_stale=False))
-        real_sleep(duration)
-
-    with patch("aipass.devpulse.apps.handlers.watchdog.timer.time.sleep", spy_sleep):
-        result = timer_handler.wake_in("1s")
+        waker.join(timeout=0.01)
+    waker.join(timeout=30)
+    result = outcome["result"]
 
     assert result["state"] == "woke"
     assert "handle" in result
@@ -498,13 +504,9 @@ def test_timer_wake_in_registers_and_deregisters(store_path, monkeypatch):
 
 def test_schedule_wake_at_registers_and_deregisters(store_path, monkeypatch):
     """wake_at with a tiny relative delay registers then deregisters."""
-    from aipass.devpulse.apps.handlers.watchdog import schedule as schedule_handler
-
     monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
 
     # Fast-forward clock so wake_at returns immediately without real waiting.
-    from datetime import datetime, timedelta
-
     start = datetime(2026, 4, 14, 12, 0, 0)
     calls = {"n": 0}
 
@@ -526,8 +528,6 @@ def test_schedule_wake_at_registers_and_deregisters(store_path, monkeypatch):
 
 def test_handler_deregisters_on_exception(store_path, monkeypatch):
     """If a handler raises mid-wait, the finally block must still deregister."""
-    from aipass.devpulse.apps.handlers.watchdog import timer as timer_handler
-
     monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
 
     # Make time.sleep raise after the register call.
@@ -537,7 +537,7 @@ def test_handler_deregisters_on_exception(store_path, monkeypatch):
 
     with patch("aipass.devpulse.apps.handlers.watchdog.timer.time.sleep", exploding_sleep):
         with pytest.raises(RuntimeError, match="boom"):
-            timer_handler.wake_in("5s")
+            watch_timer.wake_in("5s")
 
     # Even though wake_in raised, the finally block must have deregistered.
     assert watch_registry.list_active(storage_path=store_path, prune_stale=False) == []
@@ -547,6 +547,20 @@ def test_handler_deregisters_on_exception(store_path, monkeypatch):
 # default storage path — where the store lands when nobody passes one
 
 
+def test_a_call_that_names_no_store_writes_the_sealed_tmp_store(tmp_path):
+    """conftest's sealed_watchdog_store: a test's default store is its own tmp_path, never the seat's."""
+    handle = watch_registry.register("agent", {"agent_id": "@seal-probe"})
+    started = watch_timer.timer_start("seal-probe")
+
+    sealed = tmp_path / "_sealed_watchdog"
+    watches = json.loads((sealed / "watchdog_active.json").read_text(encoding="utf-8"))["watches"]
+    timers = json.loads((sealed / "watchdog_timers.json").read_text(encoding="utf-8"))["active"]
+    assert [watch["handle"] for watch in watches] == [handle]
+    assert list(timers) == ["seal-probe"]
+    assert timers["seal-probe"]["started_at"] == started["started_at"]
+
+
+@pytest.mark.live_default_store
 class TestTheDefaultStoreNeverLandsAtTheCallersFeet:
     """The 2026-08-31 CI red: on a fresh checkout (no AIPASS_REGISTRY.json
     anywhere — the marker is machine-local runtime state, exactly like the
@@ -565,9 +579,6 @@ class TestTheDefaultStoreNeverLandsAtTheCallersFeet:
         Red against the old code: the walk fails (no marker above tmp_path,
         no parent named devpulse) and the fallback answers tmp_path/.watchdog.
         """
-        from aipass.devpulse.apps.handlers.watchdog import registry as reg
-        from aipass.devpulse.apps.handlers.watchdog import timer as tmr
-
         monkeypatch.chdir(tmp_path)
         for mod in (reg, tmr):
             default = mod._default_storage_path()
@@ -577,9 +588,6 @@ class TestTheDefaultStoreNeverLandsAtTheCallersFeet:
 
     def test_the_default_path_lives_inside_the_package(self, tmp_path, monkeypatch):
         """The store resolves next to the code that owns it, from anywhere."""
-        from aipass.devpulse.apps.handlers.watchdog import registry as reg
-        from aipass.devpulse.apps.handlers.watchdog import timer as tmr
-
         monkeypatch.chdir(tmp_path)
         package_root = Path(reg.__file__).resolve().parents[3]
         assert package_root.name == "devpulse", (

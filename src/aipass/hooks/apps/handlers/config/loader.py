@@ -22,6 +22,16 @@ AIPASS_HOME = os.environ.get("AIPASS_HOME", "")
 _GUARD_DIR = Path(tempfile.gettempdir())
 
 
+def _search_bounds() -> tuple[Path, Path]:
+    """Where the walk for .aipass/hooks.json starts (the working directory) and stops (home).
+
+    A seam: the tests are the reason it exists. They replace this function by name
+    in place of patching Path.cwd and Path.home, which replaces them process-wide.
+    It changes no verdict. The decision is hooks', leg 4.
+    """
+    return Path.cwd(), Path.home()
+
+
 def find_project_config() -> dict | None:
     """Walk up from CWD looking for .aipass/hooks.json, with trust verification."""
     from aipass.hooks.apps.handlers.config.trust_registry import (
@@ -30,8 +40,7 @@ def find_project_config() -> dict | None:
         is_trusted,
     )
 
-    search = Path.cwd()
-    home = Path.home()
+    search, home = _search_bounds()
     while search != home and search.parent != search:
         config_file = search / ".aipass" / "hooks.json"
         if config_file.exists():
@@ -78,8 +87,7 @@ def config_unavailable_reason() -> str:
         is_unenrolled,
     )
 
-    search = Path.cwd()
-    home = Path.home()
+    search, home = _search_bounds()
     while search != home and search.parent != search:
         config_file = search / ".aipass" / "hooks.json"
         if config_file.exists():
@@ -118,8 +126,7 @@ def trust_break_banner() -> str | None:
     """
     from aipass.hooks.apps.handlers.config.trust_registry import is_hash_mismatch
 
-    search = Path.cwd()
-    home = Path.home()
+    search, home = _search_bounds()
     while search != home and search.parent != search:
         config_file = search / ".aipass" / "hooks.json"
         if config_file.exists():
@@ -172,8 +179,7 @@ def never_enrolled_banner(session_id: str = "") -> str | None:
     """
     from aipass.hooks.apps.handlers.config.trust_registry import is_unenrolled
 
-    search = Path.cwd()
-    home = Path.home()
+    search, home = _search_bounds()
     while search != home and search.parent != search:
         config_file = search / ".aipass" / "hooks.json"
         if config_file.exists():

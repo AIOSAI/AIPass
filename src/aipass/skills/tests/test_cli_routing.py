@@ -1,118 +1,157 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_cli_routing.py - Unit tests for skills.py CLI routing
-# Date: 2026-03-10
+# =================== AIPass ====================
+# Name: test_cli_routing.py
+# Description: Unit tests for skills.py CLI routing
 # Version: 1.1.0
+# Created: 2026-03-10
+# Modified: 2026-09-27
 # Category: skills/tests
 # =============================================
 
-"""Tests for the skills entry point CLI routing."""
+"""Tests for apps/skills.py — the entry point's routing, help, introspection and exit codes."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/skills.py parses and carries no unused import
+# seedgo: no-test-needed(constant) — the wording of print_help's rows beyond the doors pinned below
 
 import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
-skills_root = Path(__file__).resolve().parent.parent.parent
-if str(skills_root) not in sys.path:
-    sys.path.insert(0, str(skills_root))
-
-from aipass.skills.apps.skills import handle_command, _parse_extra_args  # noqa: E402
+from aipass.skills.apps import skills as entry
+from aipass.skills.apps.modules import runner
+from aipass.skills.apps.skills import handle_command, print_help, print_introspection
 
 
-class TestParseExtraArgs:
-    def test_key_value_pairs(self):
-        result = _parse_extra_args(["host=localhost", "port=8080"])
+class TestRunExtraArgs:
+    """`run <skill> <action> k=v ...` hands the runner a parsed args dict."""
+
+    def _run_with(self, monkeypatch, extra):
+        # A recorder stands in for the runner at the edge: the route is the unit.
+        seen = {}
+
+        def recorder(name, action=None, args=None):
+            seen.update(name=name, action=action, args=args)
+            return {"success": True, "output": "", "error": None}
+
+        monkeypatch.setattr(runner, "run_skill", recorder)
+        assert handle_command("run", ["some_skill", "act", *extra]) is True
+        assert (seen["name"], seen["action"]) == ("some_skill", "act")
+        return seen["args"]
+
+    def test_key_value_pairs(self, monkeypatch):
+        result = self._run_with(monkeypatch, ["host=localhost", "port=8080"])
         assert result == {"host": "localhost", "port": "8080"}
 
-    def test_positional_args(self):
-        result = _parse_extra_args(["foo", "bar"])
+    def test_positional_args(self, monkeypatch):
+        # Mutant killed: positional_idx never incremented (arg1 overwrites arg0).
+        result = self._run_with(monkeypatch, ["foo", "bar"])
         assert result == {"arg0": "foo", "arg1": "bar"}
 
-    def test_mixed_args(self):
-        result = _parse_extra_args(["foo", "key=val", "bar"])
+    def test_mixed_args(self, monkeypatch):
+        result = self._run_with(monkeypatch, ["foo", "key=val", "bar"])
         assert result == {"arg0": "foo", "key": "val", "arg1": "bar"}
 
-    def test_empty_args(self):
-        result = _parse_extra_args([])
+    def test_empty_args(self, monkeypatch):
+        result = self._run_with(monkeypatch, [])
         assert result == {}
 
-    def test_value_with_equals_sign(self):
-        """key=value where value itself contains '='."""
-        result = _parse_extra_args(["query=a=b"])
+    def test_value_with_equals_sign(self, monkeypatch):
+        """key=value where value itself contains '=' (mutant killed: split("=") unbounded)."""
+        result = self._run_with(monkeypatch, ["query=a=b"])
         assert result == {"query": "a=b"}
 
 
 class TestHandleCommand:
-    def test_none_command_shows_introspection(self):
+    def test_none_command_shows_introspection(self, capsys):
+        # Mutant killed: None routed to print_help() instead of print_introspection().
         result = handle_command(None)
         assert result is True
+        out = capsys.readouterr().out
+        assert "skills Entry Point" in out
+        assert "Usage:" not in out
 
-    def test_help_command(self):
+    def test_help_command(self, capsys):
+        # Mutant killed: the help branch calls print_introspection() instead of print_help().
         result = handle_command("--help")
         assert result is True
+        assert "drone @skills <command> [args]" in capsys.readouterr().out
 
-    def test_help_alias(self):
+    def test_help_alias(self, capsys):
         result = handle_command("help")
         assert result is True
+        assert "drone @skills <command> [args]" in capsys.readouterr().out
 
-    def test_h_flag(self):
+    def test_h_flag(self, capsys):
         result = handle_command("-h")
         assert result is True
+        assert "drone @skills <command> [args]" in capsys.readouterr().out
 
     def test_version_command(self, capsys):
         result = handle_command("--version")
         assert result is True
         # One version string: the printed line is the module's own constant,
         # never a literal that drifts from the file header.
-        from aipass.skills.apps import skills as entry
-
         assert capsys.readouterr().out.strip() == f"SKILLS v{entry.VERSION}"
 
-    def test_version_short_flag(self):
+    def test_version_short_flag(self, capsys):
+        # Mutant killed: -V split off to print a bare VERSION.
         result = handle_command("-V")
         assert result is True
+        assert capsys.readouterr().out.strip() == f"SKILLS v{entry.VERSION}"
 
     def test_unknown_command_returns_false(self):
         result = handle_command("bogus_command_xyz")
         assert result is False
 
-    def test_list_command(self):
+    def test_list_command(self, capsys):
+        # Mutant killed: `if not skills` inverted, so list prints "No skills found." and returns True.
         result = handle_command("list")
         assert result is True
+        out = capsys.readouterr().out
+        assert "skill(s):" in out
+        assert "github" in out
 
     def test_info_missing_args_returns_false(self):
         result = handle_command("info")
         assert result is False
 
-    def test_info_with_valid_skill(self):
+    def test_info_with_valid_skill(self, capsys):
+        # Mutant killed: the info branch returns True without calling _cmd_info.
         result = handle_command("info", ["github"])
         assert result is True
+        assert "Skill: github" in capsys.readouterr().out
 
     def test_run_missing_args_returns_false(self):
         result = handle_command("run")
         assert result is False
 
-    def test_run_with_valid_skill(self):
+    def test_run_with_valid_skill(self, capsys):
+        # Mutant killed: the run branch returns True without calling _cmd_run.
         result = handle_command("run", ["system_status", "disk"])
         assert result is True
+        assert "Disk Usage (" in capsys.readouterr().out
 
     def test_validate_missing_args_returns_false(self):
         result = handle_command("validate")
         assert result is False
 
-    def test_validate_with_valid_skill(self):
+    def test_validate_with_valid_skill(self, capsys):
+        # Mutant killed: the validate branch returns True without calling _cmd_validate.
         result = handle_command("validate", ["github"])
         assert result is True
+        assert "Skill 'github' - all requirements met." in capsys.readouterr().out
 
     def test_create_missing_args_returns_false(self):
         result = handle_command("create")
         assert result is False
 
-    def test_create_help_flag_returns_true(self):
+    def test_create_help_flag_returns_true(self, capsys):
         """create --help shows help instead of treating --help as a skill name."""
+        # Mutant killed: the create help guard prints print_help() instead of the create page.
         result = handle_command("create", ["--help"])
         assert result is True
+        assert "Skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
 
     def test_create_help_flag_shows_usage(self, capsys):
         """create --help prints usage text."""
@@ -121,15 +160,17 @@ class TestHandleCommand:
         assert "Usage" in captured.out
         assert "create" in captured.out.lower()
 
-    def test_create_h_flag_returns_true(self):
+    def test_create_h_flag_returns_true(self, capsys):
         """create -h shows help."""
         result = handle_command("create", ["-h"])
         assert result is True
+        assert "Skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
 
-    def test_create_help_word_returns_true(self):
+    def test_create_help_word_returns_true(self, capsys):
         """create help shows help."""
         result = handle_command("create", ["help"])
         assert result is True
+        assert "Skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
 
 
 # ===================================================================
@@ -139,11 +180,6 @@ class TestHandleCommand:
 
 class TestNoArgs:
     """Test no_args behavior -- None command triggers introspection."""
-
-    def test_no_args_returns_true(self):
-        """no_args: handle_command(None) returns True."""
-        result = handle_command(None)
-        assert result is True
 
     def test_no_args_triggers_introspection(self, capsys):
         """no_args_triggers: calling with None produces introspection output."""
@@ -160,8 +196,6 @@ class TestPrintHelp:
 
     def test_print_help_produces_output(self, capsys):
         """print_help: calling --help produces help text."""
-        from aipass.skills.apps.skills import print_help
-
         print_help()
         captured = capsys.readouterr()
         # Both halves of the old `or` were about the same output, so it could
@@ -187,24 +221,39 @@ class TestPrintIntrospection:
 
     def test_print_introspection_produces_output(self, capsys):
         """print_introspection: shows module info."""
-        from aipass.skills.apps.skills import print_introspection
-
         print_introspection()
         captured = capsys.readouterr()
         assert "skills Entry Point" in captured.out
         assert "Run 'drone @skills --help' for usage information" in captured.out
 
-    def test_print_introspection_lists_modules(self, capsys):
-        """print_introspection: lists connected modules."""
-        from aipass.skills.apps.skills import print_introspection
-
+    def test_print_introspection_lists_every_module_on_disk(self, capsys):
+        """print_introspection: lists each apps/modules/*.py with its header Description."""
+        modules_dir = Path(__file__).resolve().parent.parent / "apps" / "modules"
         print_introspection()
         captured = capsys.readouterr()
         assert "modules/" in captured.out
-        # Every module the introspection claims to connect, named. A module
-        # dropped from the listing fails here instead of passing on "modules/".
-        for module in ("discovery.py", "loader.py", "runner.py", "creator.py", "validator.py", "switch.py"):
-            assert module in captured.out, f"introspection does not list {module}"
+        on_disk = sorted(p for p in modules_dir.glob("*.py") if p.name != "__init__.py")
+        assert len(on_disk) > 0, "no modules found on disk - the oracle would be vacuous"
+        for path in on_disk:
+            description = next(
+                line.split(":", 1)[1].strip()
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.startswith("# Description:")
+            )
+            assert f"{path.name} ({description})" in captured.out, f"introspection does not list {path.name}"
+        assert "__init__.py" not in captured.out
+
+    def test_print_introspection_derives_from_the_directory(self, tmp_path, capsys):
+        """print_introspection: the listing follows the directory, not a hand-kept list."""
+        (tmp_path / "__init__.py").write_text("", encoding="utf-8")
+        (tmp_path / "widget.py").write_text("# Description: Spin widgets\n", encoding="utf-8")
+        (tmp_path / "bare.py").write_text('"""No header here."""\n', encoding="utf-8")
+        print_introspection(modules_dir=tmp_path)
+        captured = capsys.readouterr()
+        assert "widget.py (Spin widgets)" in captured.out
+        assert "- bare.py\n" in captured.out
+        assert "__init__.py" not in captured.out
+        assert "discovery.py" not in captured.out
 
 
 class TestOutputCapture:
@@ -223,10 +272,8 @@ class TestOutputCapture:
         # The banner is built from skills.VERSION; the old `or` passed on either
         # half of it, so a half-broken version line read green. Pinned to the
         # constant, which is also this file's header version.
-        from aipass.skills.apps import skills as entry
-
         assert captured.out.strip() == f"SKILLS v{entry.VERSION}"
-        assert entry.VERSION == "1.1.0"
+        assert entry.VERSION == "1.1.1"
 
     def test_output_capture_unknown_command(self, capsys):
         """output_capture: unknown command names itself and points at help."""
@@ -252,8 +299,15 @@ class TestExitCodes:
             [sys.executable, str(entry), *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=120,
         )
+
+    def test_bare_invocation_exits_zero_with_introspection(self):
+        """Bare `drone @skills` is the live self-map (mutant killed: __main__ routes no args to --help)."""
+        result = self._run()
+        assert result.returncode == 0
+        assert "skills Entry Point" in result.stdout
 
     def test_success_exits_zero(self):
         assert self._run("list").returncode == 0

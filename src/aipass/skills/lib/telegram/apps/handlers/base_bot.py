@@ -75,7 +75,7 @@ from urllib.request import Request, urlopen
 from aipass.prax import logger
 
 # JSON handler (seedgo standard)
-from aipass.skills.apps.handlers.json import json_handler  # noqa: F401
+from aipass.skills.apps.handlers.json import json_handler
 
 # =============================================
 # SIBLING IMPORTS

@@ -1,23 +1,26 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_lint.py
-# Date: 2026-06-13
-# Version: 1.0.0
-# Category: memory/tests
+# =================== AIPass ====================
+# Name: test_lint.py
+# Description: check_entry validator, the read-only lint handler and the lint module (FPLAN-0270 phase 2)
+# Version: 1.0.1
+# Created: 2026-06-13
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for Phase 2 of FPLAN-0270: check_entry validator + lint handler.
+"""Tests for apps/handlers/json/entry_limits.py check_entry, apps/handlers/json/lint_handler.py and apps/modules/lint.py."""
 
-Covers:
-  - check_entry boundary checks (at-cap, cap+1, larger over)
-  - Character-not-byte counting (em-dash, tree glyphs)
-  - Unknown entry_type handling
-  - Dict container measurement (plain string + dict-with-field)
-  - List container measurement + missing-field refusal
-  - Lint handler finds violations with correct counts
-  - Lint handler is read-only (files unchanged after scan)
-"""
+# Tests for Phase 2 of FPLAN-0270: check_entry validator + lint handler.
+#
+# Covers:
+#   - check_entry boundary checks (at-cap, cap+1, larger over)
+#   - Character-not-byte counting (em-dash, tree glyphs)
+#   - Unknown entry_type handling
+#   - Dict container measurement (plain string + dict-with-field)
+#   - List container measurement + missing-field refusal
+#   - Lint handler finds violations with correct counts
+#   - Lint handler is read-only (files unchanged after scan)
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — the wording of lint's print_help() and print_introspection() panels
 
 import importlib
 import json
@@ -28,6 +31,8 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +452,7 @@ class TestUnknownBranchIsAnError:
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "error") as errored:
                 with patch.object(lint, "run_lint") as scanned:
                     lint._execute_lint(branch_filter="nosuchbrnach")
@@ -460,7 +465,7 @@ class TestUnknownBranchIsAnError:
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "error"):
                 with patch.object(lint, "success") as succeeded:
                     lint._execute_lint(branch_filter="nosuchbrnach")
@@ -468,38 +473,67 @@ class TestUnknownBranchIsAnError:
         succeeded.assert_not_called()
 
     def test_known_branch_still_scans(self) -> None:
-        """The guard must not block a real branch."""
+        """The guard must not block a real branch.
+
+        Mutant: _execute_lint hands run_lint branch_filter=None — killed.
+        """
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
                 with patch.object(lint, "_display_results"):
                     lint._execute_lint(branch_filter="memory")
 
-        scanned.assert_called_once()
+        scanned.assert_called_once_with(registry, branch_filter="memory")
 
     def test_known_branch_match_is_case_insensitive(self) -> None:
-        """run_lint matches case-insensitively, so the guard must too."""
+        """run_lint matches case-insensitively, so the guard must too.
+
+        Mutant: _execute_lint hands run_lint branch_filter=None — killed.
+        """
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
                 with patch.object(lint, "_display_results"):
                     lint._execute_lint(branch_filter="MEMORY")
 
-        scanned.assert_called_once()
+        scanned.assert_called_once_with(registry, branch_filter="MEMORY")
 
     def test_no_filter_scans_everything(self) -> None:
+        """Mutant: _execute_lint hands run_lint an empty branch list — killed."""
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
                 with patch.object(lint, "_display_results"):
                     lint._execute_lint(branch_filter=None)
 
+        scanned.assert_called_once_with(registry, branch_filter=None)
+
+    def test_a_declared_external_branch_is_not_refused(self) -> None:
+        """The read lane resolves names through the scope that holds the external tier.
+
+        From the write fence of 2026-09-18 until this pin, ``lint @vera``
+        answered "Unknown branch": the lane resolved through the WRITE scope,
+        which stops at the repo edge, so a declared external citizen could not
+        be named even for a read. Patching ``read_scope`` is the binding under
+        test — if the lane ever reaches back for ``_read_registry`` this call
+        raises AttributeError rather than passing quietly.
+        """
+        lint = self._lint_module()
+        external = [{"name": "vera", "path": str(Path(tempfile.gettempdir()) / "vera")}]
+
+        with patch.object(lint, "read_scope", return_value=external):
+            with patch.object(lint, "error") as errored:
+                with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
+                    with patch.object(lint, "_display_results"):
+                        lint._execute_lint(branch_filter="vera")
+
+        errored.assert_not_called()
         scanned.assert_called_once()
 
 
@@ -550,13 +584,11 @@ class TestTheEmptyRegistryRefusalReachesTheExitCode:
         return importlib.import_module("aipass.memory.apps.modules.lint")
 
     def test_an_empty_registry_exits_two(self, capsys):
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-
         lint = self._lint_module()
         reset_command_state()
-        # The name the module actually binds: _read_registry is imported from
+        # The name the module actually binds: read_scope is imported from
         # the monitor detector into lint's own namespace, so patch it there.
-        with patch.object(lint, "_read_registry", return_value=[]):
+        with patch.object(lint, "read_scope", return_value=[]):
             assert lint.handle_command("lint", ["run"]) is True
         assert resolve_exit(True) == 2, "lint found no branches but would exit 0"
         captured = capsys.readouterr()
@@ -1061,22 +1093,23 @@ class TestFieldsModeDisplay:
         assert "No .trinity fields to measure" in captured.out + captured.err
 
     def test_the_fields_mode_reaches_the_display(self) -> None:
+        """Mutant: _execute_lint_fields drops the branch filter on its way to the display — killed."""
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "run_lint_fields", return_value={"success": True}) as scanned:
                 with patch.object(lint, "_display_field_results") as displayed:
                     lint._execute_lint_fields(branch_filter="memory")
 
-        scanned.assert_called_once()
-        displayed.assert_called_once()
+        scanned.assert_called_once_with(registry, branch_filter="memory")
+        displayed.assert_called_once_with({"success": True}, "memory")
 
     def test_an_unknown_branch_is_refused_in_fields_mode_too(self) -> None:
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "error") as errored:
                 with patch.object(lint, "run_lint_fields") as scanned:
                     lint._execute_lint_fields(branch_filter="nosuchbrnach")

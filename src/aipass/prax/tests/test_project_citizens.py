@@ -1,34 +1,44 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_project_citizens.py
 # Description: projects/* citizens resolve by registry and passport, not path shape
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""Regression cover for Mission Control's third path shape (DPLAN night item 9).
+"""Tests for apps/handlers/monitoring/branch_detector.py."""
 
-prax learned two shapes: ``src/aipass/*`` branches from AIPASS_REGISTRY.json,
-and external Vera-class projects under ``~/Projects/``. In-repo citizens at
-``projects/<proj>/src/<mod>/<name>`` were never learned, so the owner's live
-``monitor run baud`` answered "BAUD is not a known branch — nothing will be
-shown."
+# Regression cover for Mission Control's third path shape (DPLAN night item 9).
+#
+# prax learned two shapes: ``src/aipass/*`` branches from AIPASS_REGISTRY.json,
+# and external Vera-class projects under ``~/Projects/``. In-repo citizens at
+# ``projects/<proj>/src/<mod>/<name>`` were never learned, so the owner's live
+# ``monitor run baud`` answered "BAUD is not a known branch — nothing will be
+# shown."
+#
+# Two defects, one cause. Scoping could not resolve the name, and path detection
+# fell through to Strategy 6, which splits a path into segments and matches each
+# against known branch names — the segment ``AIPass`` matches the ``aipass``
+# branch, so every BAUD file was labelled **AIPASS**. Misattribution is worse than
+# UNKNOWN: the events show up on the wrong screen and are filtered off the right
+# one.
+#
+# Same family as the watchdog fix (c247fce8, sweep ``projects/*/*_REGISTRY.json``
+# after the main registry) and the statusline fix (walk up to the nearest
+# ``.trinity/passport.json`` instead of matching path patterns).
+#
+# Each test builds a real temporary repo, so nothing here depends on the live
+# tree's current citizen list.
 
-Two defects, one cause. Scoping could not resolve the name, and path detection
-fell through to Strategy 6, which splits a path into segments and matches each
-against known branch names — the segment ``AIPass`` matches the ``aipass``
-branch, so every BAUD file was labelled **AIPASS**. Misattribution is worse than
-UNKNOWN: the events show up on the wrong screen and are filtered off the right
-one.
-
-Same family as the watchdog fix (c247fce8, sweep ``projects/*/*_REGISTRY.json``
-after the main registry) and the statusline fix (walk up to the nearest
-``.trinity/passport.json`` instead of matching path patterns).
-
-Each test builds a real temporary repo, so nothing here depends on the live
-tree's current citizen list.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — detect_from_log, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — detect_from_module, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — get_stats, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — reload_registry, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — get_detector, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — detect_branch_from_log, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(json_structure) — __init__'s log_operation("branch_detected") record, covered by that row
 
 import importlib
 import json

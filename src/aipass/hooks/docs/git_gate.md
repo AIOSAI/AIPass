@@ -34,6 +34,16 @@ gate scans the raw command as before — a gate that cannot parse must not turn 
 One refusal is all-or-nothing per command: `_all_git_reads()` requires *every* git invocation in the
 command to be an allowed verb, so `git status && git tag` is refused whole.
 
+**One program, many spellings (1.3.0, 2026-09-19).** The regexes are CANDIDATE finders now, matching
+`git` with any dotted tail and any casing; `_invocations()` turns a candidate into a verdict by asking
+`bash_writes.verb_name()` whether that spelling really names git. Measured before the cure, of
+`git.exe`, `GIT`, `Git`, `git.cmd`, `/usr/bin/git.exe` and `gh.exe`, **every one was allowed** and only
+the bare lowercase spelling was refused — on Windows all of them run the program, so the one mechanical
+layer holding git writes behind drone was a rename away from being off (reported 09-16, cured on the
+owner's go under devpulse DPLAN-0352). The executable-extension list lives once, in `bash_writes`, so a
+file merely NAMED for a program (`git.py`) is still nobody's invocation and stays quiet. Read verbs are
+spelling-blind in the same way: `GIT status` is allowed, like `git status`.
+
 **What it protects:** Edits to `.claude/settings.json`, `.claude/hooks/`, and `.git/hooks/` — the enforcement layer itself.
 The path is matched with `\` read as `/` and case-insensitively (1.2.0). Before that, a Windows backslash
 path never matched and the edit was allowed.

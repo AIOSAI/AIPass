@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Event handler registry for startup registration
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2025-12-04
-# Modified: 2026-08-10
+# Modified: 2026-09-29
 # =============================================
 
 """Event Handler Registry - Setup all event handlers on startup"""
@@ -22,7 +22,6 @@ def setup_handlers():
     """Register all event handlers on startup"""
     from aipass.trigger.apps.modules.core import trigger
     from .startup import handle_startup
-    from .cli import handle_cli_header_displayed
     from .error_detected import handle_error_detected, set_send_email_callback
     from .runaway_handler import handle_runaway_log_detected, set_send_email_callback as set_runaway_email_callback
     from aipass.trigger.apps.handlers.escalation import set_send_email_callback as set_escalation_email_callback
@@ -85,7 +84,11 @@ def setup_handlers():
     from .memory_pool import handle_memory_pool_auto_processed
 
     trigger.on("startup", handle_startup)
-    trigger.on("cli_header_displayed", handle_cli_header_displayed)
+    # cli_header_displayed is NOT wired. Its handler was retired 2026-09-29 in
+    # fleet green leg 4 — see .archive/cli.py: it wrote a 'cli_event' line with
+    # no title to the live operation log for every header in every process,
+    # and nothing read it. cli fires the event from display.py and needs
+    # nothing back, so the event stays in the vocabulary and runs no handler.
     # plan_file_created / _deleted / _moved are NOT wired. The handler was
     # retired 2026-08-31 as measured inert — see .archive/plan_file.py for the
     # evidence (its regex matched 1 of 366 real plan filenames). @flow fires

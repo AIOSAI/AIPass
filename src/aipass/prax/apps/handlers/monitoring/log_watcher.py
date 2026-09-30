@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Log File Monitor
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2025-11-23
-# Modified: 2026-08-08
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -51,35 +51,11 @@ from aipass.prax.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
 
-# Trigger integration - graceful fallback if trigger not available
-try:
-    from aipass.trigger.apps.modules.core import trigger
-
-    HAS_TRIGGER = True
-except ImportError as e:
-    logger.info("[log_watcher] trigger module not available: %s", e)
-    trigger = None  # type: ignore[assignment]
-    HAS_TRIGGER = False
-
-
-def _generate_error_hash(module_name: str, message: str) -> str:
-    """
-    Generate a hash for error deduplication.
-
-    Same module + message = same hash, allowing trigger rules to
-    deduplicate repeated errors.
-
-    Args:
-        module_name: Name of the module that generated the error
-        message: The error message content
-
-    Returns:
-        8-character hash string for deduplication
-    """
-    import hashlib
-
-    content = f"{module_name}:{message}"
-    return hashlib.md5(content.encode()).hexdigest()[:8]
+# No trigger fire here. Until 2026-09-27 every ERROR line this watcher saw fired
+# error_detected with keys trigger's handler does not read (log_file, module_name,
+# no count or fingerprint), so it never dispatched and only muddied trigger's
+# escalation counts. @trigger's own log watcher reads the same logs and fires the
+# full payload; this one feeds Mission Control and nothing else.
 
 
 # Global observer instance
@@ -110,7 +86,7 @@ class LogFileWatcher(FileSystemEventHandler):
         # Track command per branch to avoid duplicate command separators
         self.last_command_per_branch: Dict[str, str] = {}
 
-    def _process_log_line(self, branch: str, line: str, file_path: str) -> None:
+    def _process_log_line(self, branch: str, line: str) -> None:
         """Process a single log line: detect hooks, commands, or emit as log event."""
         if not line.strip():
             return
@@ -124,7 +100,7 @@ class LogFileWatcher(FileSystemEventHandler):
             return
         if self._should_display_log(line):
             level = self._detect_log_level(line)
-            self._emit_log_event(branch, line, level, file_path)
+            self._emit_log_event(branch, line, level)
 
     def _read_new_content(self, file_path: str) -> Optional[str]:
         """Read new content from a log file since last position.
@@ -167,7 +143,7 @@ class LogFileWatcher(FileSystemEventHandler):
 
             branch = detect_branch_from_log(file_path)
             for line in new_content.strip().split("\n"):
-                self._process_log_line(branch, line, file_path)
+                self._process_log_line(branch, line)
 
         except Exception as e:
             logger.info(f"Error reading log file {file_path}: {e}")
@@ -387,7 +363,8 @@ class LogFileWatcher(FileSystemEventHandler):
         target_match = re.search(r"@(\w+)", cmd)
         if target_match:
             return target_match.group(1).upper()
-        path_match = re.search(r"/aipass/(\w+)", cmd)
+        norm = cmd.replace("\\", "/")
+        path_match = re.search(r"/aipass/(\w+)", norm)
         if path_match:
             return path_match.group(1).upper()
         return None
@@ -460,41 +437,18 @@ class LogFileWatcher(FileSystemEventHandler):
         # Fallback: return as-is if can't parse
         return log_line.strip()
 
-    def _emit_log_event(self, branch: str, log_line: str, level: str, log_file_path: Optional[str] = None) -> None:
+    def _emit_log_event(self, branch: str, log_line: str, level: str) -> None:
         """
         Create and emit log event to monitoring queue.
-
-        Also fires trigger event for ERROR level logs to enable
-        automated error response workflows.
 
         Args:
             branch: Branch name detected from log file
             log_line: Raw log line content
             level: Log level (error, warning, info, debug)
-            log_file_path: Path to the log file (for trigger events)
         """
         # Parse to extract clean message (remove embedded prefix)
         clean_message = self._parse_log_message(log_line)
         current_time = datetime.now()
-
-        # Fire trigger event for ERROR level logs
-        if HAS_TRIGGER and trigger is not None and level == "error":
-            # Extract module name from log line if possible
-            module_name = "unknown"
-            if " | " in log_line:
-                parts = log_line.split(" | ")
-                if len(parts) >= 2:
-                    module_name = parts[1].strip()
-
-            trigger.fire(
-                "error_detected",
-                branch=branch,
-                message=clean_message,
-                error_hash=_generate_error_hash(module_name, clean_message),
-                timestamp=current_time.isoformat(),
-                log_file=log_file_path or "unknown",
-                module_name=module_name,
-            )
 
         # Create monitoring event
         log_event = MonitoringEvent(

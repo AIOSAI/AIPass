@@ -18,4 +18,4 @@ Usage:
     from aipass.cli.apps import handlers
 """
 
-from . import handlers  # noqa: F401
+from . import handlers

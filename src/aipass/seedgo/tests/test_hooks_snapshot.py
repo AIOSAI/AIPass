@@ -1,18 +1,20 @@
-"""Hook Configuration Snapshot Tests.
-
-Compares current settings.json hook configurations against known-good baselines.
-Detects: hooks added/removed, command strings changed, matchers changed, events changed.
-
-Baselines in tests/fixtures/*_hooks_snapshot.json.
-
 # =================== META ====================
 # Name: test_hooks_snapshot.py
 # Description: Snapshot tests for hook configurations across provider, project, and branch levels
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-05-07
-# Modified: 2026-05-07
+# Modified: 2026-09-27
 # =============================================
-"""
+
+"""Tests for the hook wiring .claude/provider_manifest.json gives hooks/apps/handlers/bridges/claude.py."""
+
+# Hook Configuration Snapshot Tests.
+# Compares current settings.json hook configurations against known-good baselines.
+# Detects: hooks added/removed, command strings changed, matchers changed, events changed.
+# Baselines in tests/fixtures/*_hooks_snapshot.json.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(generated) — what the claude bridge does when a hook fires; @hooks tests/test_engine.py covers it
 
 import json
 import re
@@ -98,12 +100,14 @@ def _extract_hook_matchers(hooks_config: dict) -> dict[str, list[str]]:
 # -- Provider hooks snapshot ---------------------------------------------------
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32" or not (Path.home() / ".claude" / "settings.json").exists(),
-    reason="No provider settings.json (CI environment) or Windows CI",
-)
 class TestProviderHooksSnapshot:
     """Compare ~/.claude/settings.json hooks against known-good baseline."""
+
+    @pytest.fixture(autouse=True)
+    def _provider_settings_present(self):
+        """Skip where there is no provider settings.json (CI environment) or on Windows CI."""
+        if sys.platform == "win32" or not (Path.home() / ".claude" / "settings.json").exists():
+            pytest.skip("No provider settings.json (CI environment) or Windows CI")
 
     @pytest.fixture()
     def baseline(self):
@@ -150,7 +154,7 @@ class TestProviderHooksSnapshot:
         for cmds in _extract_hook_commands(current).values():
             current_cmds.update(cmds)
         added = current_cmds - baseline_cmds
-        assert not added, f"Hooks added since snapshot: {added}"
+        assert added == set(), f"Hooks added since snapshot: {added}"
 
     def test_no_hooks_removed(self, baseline, current):
         """Detect any hooks removed since the snapshot was taken."""
@@ -161,7 +165,7 @@ class TestProviderHooksSnapshot:
         for cmds in _extract_hook_commands(current).values():
             current_cmds.update(cmds)
         removed = baseline_cmds - current_cmds
-        assert not removed, f"Hooks removed since snapshot: {removed}"
+        assert removed == set(), f"Hooks removed since snapshot: {removed}"
 
 
 # -- Project hooks snapshot ----------------------------------------------------
@@ -226,7 +230,7 @@ class TestDoubleFire:
             for jc in sorted(c for c in project_cmds if script_name(c) == script)
             if pc != jc
         ]
-        assert not double_fire, (
+        assert double_fire == [], (
             f"Double-fire risk: {double_fire} — same script with different command strings at "
             f"provider vs project. "
             f"Claude Code deduplicates by exact string — different strings = fires twice."
@@ -238,7 +242,7 @@ class TestDoubleFire:
         provider_only_events = {"PreToolUse", "PostToolUse"}
 
         leaked = provider_only_events & set(branch_baseline)
-        assert not leaked, f"Branch baseline has {sorted(leaked)} hooks — these only fire from provider settings"
+        assert leaked == set(), f"Branch baseline has {sorted(leaked)} hooks — these only fire from provider settings"
 
 
 # -- Branch hooks snapshot -----------------------------------------------------
@@ -300,7 +304,9 @@ class TestTheSnapshotTracksTheManifest:
     def test_the_manifest_is_readable_and_not_empty(self):
         """Guard the oracle itself: an empty manifest would make the next test vacuous."""
         manifest = self._manifest_commands()
-        assert manifest, "provider_manifest.json declares no claude hooks — the comparison below would prove nothing"
+        assert manifest != {}, (
+            "provider_manifest.json declares no claude hooks — the comparison below would prove nothing"
+        )
         assert sum(len(c) for c in manifest.values()) > 1
 
     def test_fixture_matches_the_manifest(self):

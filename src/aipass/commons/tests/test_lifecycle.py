@@ -1,42 +1,32 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_lifecycle.py - The Commons Lifecycle Integration Tests
-# Date: 2026-03-07
+# =================== AIPass ====================
+# Name: test_lifecycle.py
+# Description: The Commons lifecycle integration tests — full social platform flow
 # Version: 1.0.0
-# Category: commons/tests
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-03-07): Created for FPLAN-0411 Phase 7
-#
-# CODE STANDARDS:
-#   - Pytest style with conftest fixtures
-#   - Full lifecycle flow: init → create → interact → cleanup
-#   - Tests handler functions directly (not modules)
+# Created: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
-"""
-The Commons - Lifecycle Integration Tests
+"""Tests for apps/handlers/database/db.py and the full posts/comments/votes lifecycle it drives."""
 
-Exercises the full social platform flow: database init, room creation,
-posting, commenting, voting, feed retrieval, search, thread view,
-and cascade deletion.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that db.py parses and imports
 
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from aipass.commons.apps.handlers.database import db as db_module
 from aipass.commons.apps.handlers.database.db import init_db, close_db
+from aipass.commons.apps.handlers.search.search_queries import (
+    search_posts,
+    sync_post_to_fts,
+)
 
 
 @pytest.fixture
-def db():
-    """Provide a fresh initialized database for each test."""
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-    db_path = Path(tmp.name)
-    tmp.close()
+def db(tmp_path: Path):
+    """Provide a fresh initialized database for each test, inside pytest's tmp_path."""
+    db_path = tmp_path / "lifecycle.db"
 
     conn = init_db(db_path)
 
@@ -183,11 +173,6 @@ class TestFullLifecycle:
 
     def test_search_content(self, db):
         """Search for content via FTS5."""
-        from aipass.commons.apps.handlers.search.search_queries import (
-            search_posts,
-            sync_post_to_fts,
-        )
-
         db.execute(
             "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
             ("general", "ALICE", "Architecture Review", "Let's review the handler pattern"),
@@ -252,12 +237,14 @@ class TestFullLifecycle:
         db.commit()
 
         # Verify everything exists
-        assert db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone() is not None
-        assert db.execute("SELECT * FROM comments WHERE post_id = ?", (post_id,)).fetchone() is not None
-        assert (
-            db.execute("SELECT * FROM votes WHERE target_id = ? AND target_type = 'post'", (post_id,)).fetchone()
-            is not None
-        )
+        setup_post = db.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
+        setup_comment = db.execute("SELECT * FROM comments WHERE post_id = ?", (post_id,)).fetchone()
+        setup_vote = db.execute(
+            "SELECT * FROM votes WHERE target_id = ? AND target_type = 'post'", (post_id,)
+        ).fetchone()
+        assert setup_post["title"] == "To Be Deleted"
+        assert setup_comment["content"] == "Comment on doomed post"
+        assert setup_vote["agent_name"] == "CHARLIE"
 
         # Delete the post
         db.execute("DELETE FROM comments WHERE post_id = ?", (post_id,))
@@ -318,7 +305,7 @@ class TestFullLifecycle:
 # Branch-root resolution — .trinity/ or .aipass/ marker walk (P1, @devpulse)
 #
 # .trinity/ is gitignored, so a fresh clone has no branch-root marker,
-# _find_branch_root() returns None, and _get_db_path() used to silently fall
+# find_branch_root() returns None, and resolve_db_path() used to silently fall
 # through to ~/.aipass/commons.db — a wrong-path SUCCESS. Fix: accept the
 # git-tracked .aipass/ as a co-marker, and fail loudly (CommonsRootNotFound)
 # instead of falling back to the home directory.
@@ -329,12 +316,15 @@ class TestBranchRootResolution:
     """Covers the fresh-clone marker walk and the fail-honestly behaviour."""
 
     def test_resolves_with_aipass_marker_only(self, tmp_path):
-        """Fresh clone: only .aipass/ present (no .trinity/) must still resolve."""
+        """Fresh clone: only .aipass/ present (no .trinity/) must still resolve.
+
+        Mutant killed: the walk checks .trinity/ alone.
+        """
         (tmp_path / ".aipass").mkdir()
         start = tmp_path / "apps" / "handlers" / "database"
         start.mkdir(parents=True)
 
-        result = db_module._find_branch_root(start)
+        result = db_module.find_branch_root(start)
         assert result == tmp_path.resolve()
 
     def test_resolves_with_trinity_marker_only(self, tmp_path):
@@ -343,7 +333,7 @@ class TestBranchRootResolution:
         start = tmp_path / "apps" / "handlers" / "database"
         start.mkdir(parents=True)
 
-        result = db_module._find_branch_root(start)
+        result = db_module.find_branch_root(start)
         assert result == tmp_path.resolve()
 
     def test_no_marker_in_ancestry_returns_none(self, tmp_path):
@@ -351,15 +341,22 @@ class TestBranchRootResolution:
         start = tmp_path / "deep" / "nested" / "dir"
         start.mkdir(parents=True)
 
-        result = db_module._find_branch_root(start)
+        result = db_module.find_branch_root(start)
         assert result is None
 
     def test_get_db_path_none_without_markers_or_env(self, monkeypatch):
-        """No resolvable root and AIPASS_ROOT unset -> _get_db_path() is None."""
-        monkeypatch.delenv("AIPASS_ROOT", raising=False)
-        monkeypatch.setattr(db_module, "_find_branch_root", lambda start_path=None: None)
+        """No resolvable root and AIPASS_ROOT unset -> resolve_db_path() is None.
 
-        assert db_module._get_db_path() is None
+        Mutant killed: the home-directory fallback restored (~/.aipass/commons.db).
+        """
+
+        def _no_root(start_path=None):
+            return None
+
+        monkeypatch.delenv("AIPASS_ROOT", raising=False)
+        monkeypatch.setattr(db_module, "find_branch_root", _no_root)
+
+        assert db_module.resolve_db_path() is None
 
     def test_get_db_raises_commons_root_not_found(self, monkeypatch):
         """get_db() fails honestly (no home-directory fallback) when the root

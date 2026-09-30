@@ -3,7 +3,7 @@
 # Description: Error reporting handler for registry and source fix email
 # Version: 1.0.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -18,6 +18,8 @@ Purpose:
     layer to satisfy thin-module standard.
 """
 
+from typing import Optional
+
 from aipass.prax import logger
 
 # logger imported from aipass.prax
@@ -28,7 +30,7 @@ from aipass.trigger.apps.handlers.error_registry import (
 from aipass.trigger.apps.handlers.json import json_handler
 
 
-def send_source_fix_email(entry: dict) -> bool:
+def send_source_fix_email(entry: dict) -> Optional[bool]:
     """Send recommendation email to source branch about fixing log level.
 
     When an error is suppressed, the source branch gets notified that
@@ -39,14 +41,17 @@ def send_source_fix_email(entry: dict) -> bool:
         entry: Error registry entry dict
 
     Returns:
-        True if email sent successfully
+        True if the email was sent. False if there was nothing to send: the
+        entry names no branch (empty or 'unknown' component). None if the
+        send failed — ai_mail could not be imported, refused delivery, or
+        raised — so the caller can say the mail was lost rather than skipped.
     """
     try:
         from aipass.ai_mail.apps.modules.email_send import deliver_email_to_branch
     # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
     except (ImportError, OSError):
         logger.info("[ERRORS] Could not import deliver_email_to_branch - ai_mail not available")
-        return False
+        return None
 
     try:
         component = entry.get("component", "").lower()
@@ -99,12 +104,14 @@ Reply to @trigger with your fix status."""
         }
         success, _ = deliver_email_to_branch(recipient, email_data)
 
-        if success:
-            logger.info(f"[ERRORS] Source fix email sent to {recipient} for {fingerprint}")
-        return success
+        if not success:
+            # One failure path: a refusal is reported exactly as a raise is.
+            raise RuntimeError(f"ai_mail refused delivery to {recipient} for {fingerprint}")
+        logger.info(f"[ERRORS] Source fix email sent to {recipient} for {fingerprint}")
+        return True
     except Exception as exc:
         logger.info(f"[ERRORS] Failed to send source fix email: {exc}")
-        return False
+        return None
 
 
 def report_error(

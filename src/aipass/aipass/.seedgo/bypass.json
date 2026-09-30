@@ -11,6 +11,11 @@
       "reason": "wants_help() is a pure predicate - no I/O, no JSON, no logging - called on EVERY command dispatch before any action runs. Importing json_handler would add a write path and a failure surface to the one function whose whole job is to stop a help probe becoming a write. Measured: the file performs zero JSON operations, so json_handler would be imported solely to satisfy the checker. Fleet-settled shape (DPLAN-0291 help_flag_safety round)."
     },
     {
+      "file": "apps/handlers/cross_os/doctor_rows.py",
+      "standard": "json_structure",
+      "reason": "Builds the rows of `aipass doctor --cross-os` from answers other handlers give and returns them; it opens no file and writes no JSON. The run is logged once where the command runs (doctor.handle_command, doctor_cross_os), gap_registry logs its own read, and preflight logs the e2e run (its three light probes log only a failure to run). Importing json_handler here would be for the checker alone. Split out of doctor.py 2026-09-29 (fleet green leg 5, aipass's decision); kept here, not moved into preflight.py, in leg 6 (aipass's decision): preflight runs probes and prints nothing, the rows need the gap registry and the screen glyphs, and there the checker would pass only on preflight's unrelated e2e log call. Devpulse's exception, compass 495."
+    },
+    {
       "file": "apps/modules/init_flow.py",
       "standard": "modules",
       "reason": "12-stage init flow requires this many lines; splitting would scatter cohesive stage logic across multiple files and break the resumable-progress contract. Re-measured 2026-09-07 (FPLAN-0492 wave 6) after the hand-rolled json writer was replaced by the fleet service: the file is still 1210 lines and the rule is LIVE IN BOTH LANES without this row (audit Modules 95%, checklist modules FAIL). The writer was never what this row was carrying."

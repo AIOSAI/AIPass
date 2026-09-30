@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Branch Discovery Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-21
 # =============================================
 
 """
@@ -241,12 +241,13 @@ def non_scoring_packs(handlers_dir: Path) -> Dict[str, str]:
 # =============================================================================
 
 #: What the banner says a pack measured when its manifest declares nothing.
-#: These are the aipass pack's own terms: it walks apps/**/*.py one file at a
-#: time and never enters tests/. It is the default because every pack was that
-#: pack before a second one existed.
+#: These are the aipass pack's own terms: it walks one file at a time, and
+#: since 2026-09-21 (owner ruling 21:20) that walk covers apps/**/*.py plus
+#: tests/ test_*.py and conftest.py. It is the default because every pack was
+#: that pack before a second one existed.
 DEFAULT_PACK_CORPUS: Dict[str, str] = {
-    "noun": "production files",
-    "detail": "apps/ only, tests/ not in the corpus",
+    "noun": "files",
+    "detail": "apps/ plus tests/ test_*.py and conftest.py",
 }
 
 

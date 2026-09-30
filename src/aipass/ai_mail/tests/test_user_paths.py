@@ -1,33 +1,35 @@
 # =================== AIPass ====================
 # Name: test_user_paths.py
 # Description: Tests for absolute mailbox_path resolution in user functions
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-09-29
 # =============================================
 
-"""
-Tests for mailbox_path Absolute Resolution
+"""Tests for apps/handlers/users/user.py and apps/handlers/paths.py's find_repo_root()."""
 
-Bug: get_user_by_email() and get_all_users() returned relative paths like
-"src/aipass/ai_mail/.ai_mail.local" instead of absolute paths.
-get_current_user() was already correct (resolved against _repo_root).
+# Bug: get_user_by_email() and get_all_users() returned relative paths like
+# "src/aipass/ai_mail/.ai_mail.local" instead of absolute paths.
+# get_current_user() was already correct (resolved against _repo_root).
+#
+# Fix: Both functions now resolve relative registry paths against _repo_root
+# (the parent of BRANCH_REGISTRY_PATH), matching get_current_user()'s pattern.
+#
+# These tests verify:
+# 1. get_user_by_email() returns an absolute mailbox_path
+# 2. get_all_users() returns absolute mailbox_path for every entry
+# 3. Paths are never doubled (no src/aipass/.../src/aipass/...)
+# 4. Absolute paths in the registry are preserved as-is
 
-Fix: Both functions now resolve relative registry paths against _repo_root
-(the parent of BRANCH_REGISTRY_PATH), matching get_current_user()'s pattern.
-
-These tests verify:
-1. get_user_by_email() returns an absolute mailbox_path
-2. get_all_users() returns absolute mailbox_path for every entry
-3. Paths are never doubled (no src/aipass/.../src/aipass/...)
-4. Absolute paths in the registry are preserved as-is
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — get_user_by_email()/get_all_users()'s broad except Exception on a malformed registry
 
 import json
 import pytest
 from pathlib import Path
 from unittest.mock import patch
 
+from aipass.ai_mail.apps.handlers import paths
 from aipass.ai_mail.apps.handlers.users.user import get_all_users, get_current_user, get_user_by_email
 
 
@@ -159,7 +161,7 @@ class TestGetUserByEmailPaths:
         registry_path, _ = relative_path_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             result = get_user_by_email("@trigger")
-            assert result is not None
+            assert result is not None and result["email_address"] == "@trigger"
             # Normalize to forward slashes for consistent counting on all platforms
             path = result["mailbox_path"].replace("\\", "/")
             # Count occurrences of the relative segment
@@ -352,8 +354,6 @@ class TestRepoRootFallbackIsLoud:
         """
         import logging
 
-        from aipass.ai_mail.apps.handlers import paths
-
         monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
         monkeypatch.setattr(paths, "__file__", str(tmp_path / "nowhere" / "paths.py"))
         monkeypatch.chdir(tmp_path)
@@ -369,8 +369,6 @@ class TestRepoRootFallbackIsLoud:
 
     def test_it_still_returns_rather_than_raising(self, monkeypatch, tmp_path):
         """Refusing would make every CI run an import-time failure by construction."""
-        from aipass.ai_mail.apps.handlers import paths
-
         monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
         monkeypatch.setattr(paths, "__file__", str(tmp_path / "nowhere" / "paths.py"))
         monkeypatch.chdir(tmp_path)
@@ -401,8 +399,6 @@ class TestTheFreshCheckoutFindsTheRightRoot:
         unrelated cwd, and every path built from it (feed, register, reports)
         lands in a directory that has nothing to do with the checkout.
         """
-        from aipass.ai_mail.apps.handlers import paths
-
         checkout = tmp_path / "fresh-checkout"
         (checkout / "src" / "aipass" / "ai_mail" / "apps" / "handlers").mkdir(parents=True)
         (checkout / "pyproject.toml").write_text("[project]\nname = 'aipass'\n", encoding="utf-8")
@@ -425,8 +421,6 @@ class TestTheFreshCheckoutFindsTheRightRoot:
         Both markers present, at DIFFERENT levels, so the assertion can only
         pass for one of them.
         """
-        from aipass.ai_mail.apps.handlers import paths
-
         outer = tmp_path / "outer"
         inner = outer / "inner"
         inner.mkdir(parents=True)
@@ -440,8 +434,6 @@ class TestTheFreshCheckoutFindsTheRightRoot:
     def test_neither_marker_anywhere_still_falls_back_loudly(self, monkeypatch, tmp_path, caplog):
         """The last resort survives — it is just no longer the fresh-checkout path."""
         import logging
-
-        from aipass.ai_mail.apps.handlers import paths
 
         monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
         monkeypatch.setattr(paths, "__file__", str(tmp_path / "bare" / "paths.py"))

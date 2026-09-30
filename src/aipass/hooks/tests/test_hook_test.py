@@ -1,4 +1,19 @@
-"""Tests for the portable hook test runner (modules/hook_test.py)."""
+# =================== AIPass ====================
+# Name: test_hook_test.py
+# Version: 1.0.1
+# Description: Tests for the portable hook test runner
+# Branch: hooks
+# Layer: tests
+# Created: 2026-07-10
+# Modified: 2026-09-28
+# =============================================
+
+"""Tests for apps/modules/hook_test.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — MOCK_EVENTS' sample payloads and HELP_COMMANDS' display strings
+# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing where the synthetic file lands
+# seedgo: no-test-needed(ruff) — that modules/hook_test.py parses and imports the engine it drives
 
 import json
 import os
@@ -99,7 +114,7 @@ class TestPrintResults:
     def test_error_result_prints(self):
         with patch.object(hook_test.CONSOLE, "print") as mock_print:
             hook_test.print_results({"error": "No config found"})
-        mock_print.assert_called_once()
+        mock_print.assert_called_once_with("[red]No config found[/red]")
 
     def test_normal_results_print_summary(self):
         results = {
@@ -130,12 +145,14 @@ class TestHandleCommand:
     def test_runs_test_with_run_arg(self):
         with (
             patch.object(hook_test, "run_test", return_value={}) as mock_run,
-            patch.object(hook_test, "print_results"),
-            patch.object(hook_test.CONSOLE, "print"),
+            patch.object(hook_test, "print_results") as mock_results,
+            patch.object(hook_test.CONSOLE, "print") as mock_print,
         ):
             result = hook_test.handle_command("test", ["run"])
         assert result is True
-        mock_run.assert_called_once()
+        mock_run.assert_called_once_with(verbose=False)
+        mock_results.assert_called_once_with({}, verbose=False)
+        mock_print.assert_any_call("[bold cyan]HOOKS Test Runner[/bold cyan]")
 
 
 class TestProbeIsolation:
@@ -203,14 +220,15 @@ class TestProbeIsolation:
         branch = tmp_path / "hooks"
         (branch / ".trinity").mkdir(parents=True)
         monkeypatch.chdir(branch)
-        monkeypatch.setenv("AIPASS_HOME", "/sentinel/home")
+        sentinel_home = str(tmp_path / "sentinel" / "home")
+        monkeypatch.setenv("AIPASS_HOME", sentinel_home)
         monkeypatch.delenv(hook_test.PROBE_ENV_VAR, raising=False)
 
         with patch(f"{_MOD}.find_project_config", return_value=self._prep_config()):
             hook_test.run_test()
 
         assert Path.cwd() == branch
-        assert os.environ["AIPASS_HOME"] == "/sentinel/home"
+        assert os.environ["AIPASS_HOME"] == sentinel_home
         assert hook_test.PROBE_ENV_VAR not in os.environ
 
     def test_workspace_is_removed(self, tmp_path, monkeypatch):

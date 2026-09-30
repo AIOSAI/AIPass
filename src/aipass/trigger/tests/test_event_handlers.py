@@ -3,13 +3,15 @@
 # Description: Tests for simple event handler functions and the warning escalation lane
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-08-08
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for cli, memory_template_updated, and warning_logged event handlers."""
+"""Tests for apps/handlers/events/memory_template_updated.py and warning_logged.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the lane internals in apps/handlers/escalation.py; the escalation tests cover them
 
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List
@@ -17,104 +19,22 @@ from unittest.mock import MagicMock
 
 import pytest
 from aipass.trigger.apps.config import trail_logger
+from aipass.trigger.apps.handlers import escalation
+from aipass.trigger.apps.handlers.events import memory_template_updated, warning_logged
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Mock heavy infrastructure imports for all six handler modules."""
-    from aipass.trigger.apps.config import atomic_write_json, migrate_json_file
+def json_log(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """The json_handler each of the two handler modules logs through, as a recorder.
 
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = tmp_path
-    mock_config.AIPASS_PKG_ROOT = tmp_path / "aipass"
-    mock_config.atomic_write_json = atomic_write_json
-    mock_config.TRIGGER_JSON_DIR = tmp_path / "trigger_json"
-    mock_config.migrate_json_file = migrate_json_file
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
-
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.handlers.json.json_handler",
-        mock_json_handler,
-    )
-
-    for mod_name in (
-        "aipass.trigger.apps.handlers.events.cli",
-        "aipass.trigger.apps.handlers.events.memory_template_updated",
-        "aipass.trigger.apps.handlers.events.warning_logged",
-    ):
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
-
-
-def _import_cli():
-    """Import cli handler module fresh after mocking."""
-    import aipass.trigger.apps.handlers.events.cli as m
-
-    return m
-
-
-def _import_memory_template_updated():
-    """Import memory_template_updated handler module fresh after mocking."""
-    import aipass.trigger.apps.handlers.events.memory_template_updated as m
-
-    return m
-
-
-def _import_warning_logged():
-    """Import warning_logged handler module fresh after mocking."""
-    import aipass.trigger.apps.handlers.events.warning_logged as m
-
-    return m
-
-
-# ---------------------------------------------------------------------------
-# cli.py -- handle_cli_header_displayed
-# ---------------------------------------------------------------------------
-
-
-class TestHandleCliHeaderDisplayed:
-    """Tests for handle_cli_header_displayed from cli.py."""
-
-    def test_calls_log_operation(self) -> None:
-        """Logs cli_event via json_handler."""
-        mod = _import_cli()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
-
-        mod.handle_cli_header_displayed()
-
-        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
-            "cli_event", {"success": True}
-        )
-
-    def test_arbitrary_kwargs_are_absorbed_and_never_reach_the_log(self) -> None:
-        """Extra event data is swallowed by **kwargs — the payload is unchanged.
-
-        Not crashing was all this checked, and not crashing is what a handler
-        that quietly forwarded its kwargs into the log payload also does. The
-        bus hands every handler whatever the firer passed; the contract is that
-        this one logs its own fixed payload regardless.
-        """
-        mod = _import_cli()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        mod.handle_cli_header_displayed(foo="bar", baz=42)
-
-        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
-            "cli_event", {"success": True}
-        )
-
-    def test_returns_none(self) -> None:
-        """Handler returns None (handlers must not return values)."""
-        mod = _import_cli()
-        result = mod.handle_cli_header_displayed()
-        assert result is None
+    Replaced where each handler module holds the name, so no handler call in
+    this file reaches trigger's operation log.
+    """
+    log = MagicMock()
+    log.log_operation = MagicMock(return_value=True)
+    for handler_module in (memory_template_updated, warning_logged):
+        monkeypatch.setattr(handler_module, "json_handler", log)
+    return log
 
 
 # ---------------------------------------------------------------------------
@@ -125,20 +45,17 @@ class TestHandleCliHeaderDisplayed:
 class TestHandleMemoryTemplateUpdated:
     """Tests for handle_memory_template_updated from memory_template_updated.py."""
 
-    def test_calls_log_operation(self) -> None:
+    def test_calls_log_operation(self, json_log: MagicMock) -> None:
         """Logs memory_template_event via json_handler."""
-        mod = _import_memory_template_updated()
-        from aipass.trigger.apps.handlers.json import json_handler
+        mod = memory_template_updated
 
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_log.log_operation.reset_mock()
 
         mod.handle_memory_template_updated()
 
-        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
-            "memory_template_event", {"success": True}
-        )
+        json_log.log_operation.assert_called_once_with("memory_template_event", {"success": True})
 
-    def test_documented_event_data_is_absorbed_and_never_reaches_the_log(self) -> None:
+    def test_documented_event_data_is_absorbed_and_never_reaches_the_log(self, json_log: MagicMock) -> None:
         """template_name and updated_by are documented, accepted, and discarded.
 
         The module docstring names both as expected event data, so "does not
@@ -147,18 +64,15 @@ class TestHandleMemoryTemplateUpdated:
         payload is fixed; the event data is context for a push this handler
         does not perform.
         """
-        mod = _import_memory_template_updated()
-        from aipass.trigger.apps.handlers.json import json_handler
+        mod = memory_template_updated
 
         mod.handle_memory_template_updated(template_name="local", updated_by="drone")
 
-        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
-            "memory_template_event", {"success": True}
-        )
+        json_log.log_operation.assert_called_once_with("memory_template_event", {"success": True})
 
     def test_returns_none(self) -> None:
         """Handler returns None."""
-        mod = _import_memory_template_updated()
+        mod = memory_template_updated
         result = mod.handle_memory_template_updated()
         assert result is None
 
@@ -171,18 +85,15 @@ class TestHandleMemoryTemplateUpdated:
 class TestHandleWarningLogged:
     """Tests for handle_warning_logged from warning_logged.py."""
 
-    def test_calls_log_operation(self) -> None:
+    def test_calls_log_operation(self, json_log: MagicMock) -> None:
         """Logs warning_logged_event via json_handler."""
-        mod = _import_warning_logged()
-        from aipass.trigger.apps.handlers.json import json_handler
+        mod = warning_logged
 
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_log.log_operation.reset_mock()
 
         mod.handle_warning_logged()
 
-        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
-            "warning_logged_event", {"success": True}
-        )
+        json_log.log_operation.assert_called_once_with("warning_logged_event", {"success": True})
 
     def test_the_three_discarded_params_are_really_discarded(self, lane) -> None:
         """error_hash, timestamp and level are accepted and then dropped.
@@ -193,7 +104,7 @@ class TestHandleWarningLogged:
         as well if any of the three travelled into the row, which is the only
         way this could go wrong.
         """
-        mod = _import_warning_logged()
+        mod = warning_logged
 
         mod.handle_warning_logged(
             branch="flow",
@@ -212,7 +123,7 @@ class TestHandleWarningLogged:
         assert "w1-should-not-travel" not in serialised
         assert "2026-04-25T12:00:00" not in serialised
 
-    def test_all_none_records_nothing_and_still_logs(self, lane) -> None:
+    def test_all_none_records_nothing_and_still_logs(self, lane, json_log: MagicMock) -> None:
         """No branch and no message is not a warning — nothing recorded, still logged.
 
         A malformed event must not mint a signature keyed on nothing, which
@@ -228,8 +139,7 @@ class TestHandleWarningLogged:
         this unit actually pins is the pair — nothing recorded, and the log
         call still made outside the guard.
         """
-        mod = _import_warning_logged()
-        from aipass.trigger.apps.handlers.json import json_handler
+        mod = warning_logged
 
         mod.handle_warning_logged(
             branch=None,
@@ -242,11 +152,9 @@ class TestHandleWarningLogged:
         )
 
         assert lane.mod.get_signatures() == []
-        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
-            "warning_logged_event", {"success": True}
-        )
+        json_log.log_operation.assert_called_once_with("warning_logged_event", {"success": True})
 
-    def test_an_undocumented_kwarg_reaches_neither_the_lane_nor_the_log(self, lane) -> None:
+    def test_an_undocumented_kwarg_reaches_neither_the_lane_nor_the_log(self, lane, json_log: MagicMock) -> None:
         """**kwargs absorbs what the contract does not name, and it stops there.
 
         Firers add event data faster than handlers learn about it, so the
@@ -254,8 +162,7 @@ class TestHandleWarningLogged:
         letting it leak into a signature, where it would split one repeating
         warning into many and defeat the digest.
         """
-        mod = _import_warning_logged()
-        from aipass.trigger.apps.handlers.json import json_handler
+        mod = warning_logged
 
         mod.handle_warning_logged(
             branch="flow",
@@ -267,13 +174,11 @@ class TestHandleWarningLogged:
         rows = lane.mod.get_signatures()
         assert len(rows) == 1
         assert "unexpected-and-unnamed" not in json.dumps(rows[0])
-        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
-            "warning_logged_event", {"success": True}
-        )
+        json_log.log_operation.assert_called_once_with("warning_logged_event", {"success": True})
 
     def test_returns_none(self) -> None:
         """Handler returns None."""
-        mod = _import_warning_logged()
+        mod = warning_logged
         result = mod.handle_warning_logged()
         assert result is None
 
@@ -291,8 +196,6 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     the config and the digest callback are pinned here — the operator's config
     never decides a test outcome, and no digest can leave the process.
     """
-    from aipass.trigger.apps.handlers import escalation
-
     config: Dict[str, Any] = {
         "enabled": True,
         "digest_recipient": "@digest-inbox",
@@ -327,7 +230,7 @@ class TestWarningLoggedFeedsEscalation:
 
     def test_warning_is_counted(self, lane) -> None:
         """One warning lands in the lane as a WARNING signature."""
-        mod = _import_warning_logged()
+        mod = warning_logged
 
         mod.handle_warning_logged(branch="flow", message="queue depth 91%", module_name="watcher")
 
@@ -339,7 +242,7 @@ class TestWarningLoggedFeedsEscalation:
 
     def test_module_name_defaults_to_unknown(self, lane) -> None:
         """A warning with no module still counts, under a named placeholder."""
-        mod = _import_warning_logged()
+        mod = warning_logged
 
         mod.handle_warning_logged(branch="flow", message="queue depth 91%")
 
@@ -347,23 +250,23 @@ class TestWarningLoggedFeedsEscalation:
 
     def test_context_travels_into_the_lane(self, lane) -> None:
         """Log path and raw line are what make the eventual digest actionable."""
-        mod = _import_warning_logged()
+        mod = warning_logged
 
         mod.handle_warning_logged(
             branch="flow",
             message="queue depth 91%",
             module_name="watcher",
-            log_file="/logs/flow.log",
+            log_file=str(Path("logs") / "flow.log"),
             raw_line="2026-08-08 | watcher | WARNING | queue depth 91%",
         )
 
         row = lane.mod.get_signatures()[0]
-        assert row["log_file"] == "/logs/flow.log"
+        assert row["log_file"] == str(Path("logs") / "flow.log")
         assert row["samples"] == ["2026-08-08 | watcher | WARNING | queue depth 91%"]
 
     def test_repeats_with_variable_paths_share_one_signature(self, lane) -> None:
         """The same warning about different files is one repeating warning."""
-        mod = _import_warning_logged()
+        mod = warning_logged
 
         mod.handle_warning_logged(branch="flow", message="cannot read /home/a/x.json", module_name="watcher")
         mod.handle_warning_logged(branch="flow", message="cannot read /srv/b/y.json", module_name="watcher")
@@ -374,7 +277,7 @@ class TestWarningLoggedFeedsEscalation:
 
     def test_different_branches_do_not_pool(self, lane) -> None:
         """Two branches warning identically are two separate signatures."""
-        mod = _import_warning_logged()
+        mod = warning_logged
 
         mod.handle_warning_logged(branch="flow", message="queue depth 91%", module_name="watcher")
         mod.handle_warning_logged(branch="memory", message="queue depth 91%", module_name="watcher")
@@ -383,7 +286,7 @@ class TestWarningLoggedFeedsEscalation:
 
     def test_repeat_crosses_the_threshold_and_emails_once(self, lane) -> None:
         """The point of the lane: repetition reaches a human, exactly once."""
-        mod = _import_warning_logged()
+        mod = warning_logged
 
         for _ in range(2):
             mod.handle_warning_logged(branch="flow", message="queue depth 91%", module_name="watcher")
@@ -395,7 +298,7 @@ class TestWarningLoggedFeedsEscalation:
 
     def test_missing_branch_records_nothing(self, lane) -> None:
         """A warning with nothing to attribute it to is not countable."""
-        mod = _import_warning_logged()
+        mod = warning_logged
 
         mod.handle_warning_logged(branch=None, message="queue depth 91%", module_name="watcher")
 
@@ -403,23 +306,20 @@ class TestWarningLoggedFeedsEscalation:
 
     def test_missing_message_records_nothing(self, lane) -> None:
         """There is no signature without a message."""
-        mod = _import_warning_logged()
+        mod = warning_logged
 
         mod.handle_warning_logged(branch="flow", message=None, module_name="watcher")
 
         assert lane.mod.get_signatures() == []
 
-    def test_event_is_still_logged_when_the_lane_is_off(self, lane) -> None:
+    def test_event_is_still_logged_when_the_lane_is_off(self, lane, json_log: MagicMock) -> None:
         """Switching the lane off must not change the handler's own contract."""
-        mod = _import_warning_logged()
-        from aipass.trigger.apps.handlers.json import json_handler
+        mod = warning_logged
 
         lane.config["enabled"] = False
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_log.log_operation.reset_mock()
 
         mod.handle_warning_logged(branch="flow", message="queue depth 91%", module_name="watcher")
 
         assert lane.mod.get_signatures() == []
-        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
-            "warning_logged_event", {"success": True}
-        )
+        json_log.log_operation.assert_called_once_with("warning_logged_event", {"success": True})

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-06-15
-# Modified: 2026-09-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -76,7 +76,11 @@ def get_job_state(runstate: dict, owner: str, job_id: str) -> dict:
 
 
 def _already_ran_today(last_run: Optional[str], now: datetime) -> bool:
-    """Check if a daily job already ran today."""
+    """Check if a daily job already ran today.
+
+    An unreadable last_run answers not-yet-run: the fire writes a fresh stamp,
+    so one bad row costs one early fire, never a stuck job or a failed tick.
+    """
     if not last_run:
         return False
     try:
@@ -88,7 +92,11 @@ def _already_ran_today(last_run: Optional[str], now: datetime) -> bool:
 
 
 def _already_ran_this_hour(last_run: Optional[str], now: datetime) -> bool:
-    """Check if an hourly job already ran this hour."""
+    """Check if an hourly job already ran this hour.
+
+    An unreadable last_run answers not-yet-run: the fire writes a fresh stamp,
+    so one bad row costs one early fire, never a stuck job or a failed tick.
+    """
     if not last_run:
         return False
     try:
@@ -137,7 +145,12 @@ def _is_daily_due(schedule: dict, last_run: Optional[str], now: datetime) -> boo
 
 
 def _is_hourly_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
-    """Check if an hourly job is due (within +/-15 min window)."""
+    """Check if an hourly job is due (within +/-15 min window).
+
+    An unreadable ``time`` answers not due, as _target_minutes does for daily:
+    no fire rewrites the owner's schedule, so firing would guess a minute every
+    hour forever, while refusing costs this one job and never the tick.
+    """
     target_m_str = schedule.get("time", "0")
     try:
         target_m = int(target_m_str)
@@ -152,8 +165,16 @@ def _is_hourly_due(schedule: dict, last_run: Optional[str], now: datetime) -> bo
 
 
 def _is_interval_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
-    """Check if an interval job is due (elapsed >= interval_minutes since last_run)."""
+    """Check if an interval job is due (elapsed >= interval_minutes since last_run).
+
+    An interval that is not a positive number answers not due: no fire can repair
+    the owner's schedule, so due would fire the job on every tick. An unreadable
+    last_run answers due: the fire writes a fresh stamp, so one bad row costs one fire.
+    """
     interval = schedule.get("interval_minutes", 60)
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
+        logger.warning("[runstate] Interval job not due: interval_minutes %r is not a positive number", interval)
+        return False
     if not last_run:
         return True
     try:
@@ -166,7 +187,12 @@ def _is_interval_due(schedule: dict, last_run: Optional[str], now: datetime) -> 
 
 
 def _is_once_due(schedule: dict, completed: Optional[str], now: datetime) -> bool:
-    """Check if a one-shot job is due (due_date <= today, not completed)."""
+    """Check if a one-shot job is due (due_date <= today, not completed).
+
+    An unreadable due_date answers not due: a one-shot fired on a date nobody
+    can read may land before the owner meant it and cannot be taken back, so it
+    waits for the owner to fix the date while the tick goes on for every other job.
+    """
     if completed:
         return False
     due_date = schedule.get("due_date")
@@ -279,6 +305,10 @@ def _hourly_window_closed_unrun(schedule: dict, last_run: Optional[str], now: da
     same reason: a window whose tail crosses the hour boundary (minute > 44)
     never closes inside its own hour, so there is no instant at which the miss
     is certain.
+
+    An unreadable ``time`` answers False, the same as _is_hourly_due: a schedule
+    with no readable window cannot have missed one, so it writes no MISSED line
+    and fires no catch-up, and the rest of the tick is untouched.
     """
     raw = schedule.get("time", "0")
     try:
@@ -382,6 +412,13 @@ def _slot_anchor(slot: str, interval: int, now: datetime) -> Optional[datetime]:
     in the past keeps its PHASE without making the job instantly overdue: the
     anchor names the rhythm, not a one-off date. A slot still in the future is
     seeded one interval BEHIND itself, so the first fire lands exactly on it.
+
+    None on an unreadable slot: the caller warns and the job fires on this tick,
+    and that fire writes the last_run that gives it a rhythm, so one bad slot
+    costs one off-slot fire. None on an interval that is not a positive number
+    (text, null, zero, negative): the caller warns and the job never fires,
+    because _is_interval_due refuses the same interval; one bad job costs that
+    one job, never the tick.
     """
     try:
         anchor = datetime.fromisoformat(slot)
@@ -389,7 +426,7 @@ def _slot_anchor(slot: str, interval: int, now: datetime) -> Optional[datetime]:
         logger.warning("[runstate] Unreadable slot %r: %s", slot, e)
         return None
 
-    if interval <= 0:
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
         logger.warning("[runstate] Slot %r with non-positive interval %r, not seeding", slot, interval)
         return None
 
@@ -423,7 +460,8 @@ def seed_interval_slot(runstate: dict, job: dict, now: Optional[datetime] = None
 
     Returns the seeded ISO timestamp, or None when the job declares no readable
     slot - in which case today's behaviour stands and the job fires on the next
-    tick. Callers warn on None; the decision to fire immediately is not silent.
+    tick - or no positive interval_minutes, which never fires. Callers warn on
+    None; the decision to fire immediately is not silent.
     """
     schedule = job.get("schedule", {})
     slot = schedule.get(SLOT_FIELD)
@@ -495,20 +533,33 @@ def _due_from(state: dict) -> Optional[str]:
 
 
 def _in_failure_backoff(state: dict, now: datetime) -> bool:
-    """True while a recent failure should hold off the next attempt."""
+    """True while a recent failure should hold off the next attempt.
+
+    An unreadable last_failure_at answers no hold: a hold that cannot be measured
+    could never expire and would stall the job for good, while releasing it costs
+    at most one early retry, whose own failure writes a fresh stamp.
+
+    An unreadable last_success_at cancels nothing: both stamps are parsed, never
+    compared as text, because any string sorting after "2026-..." would read as
+    a later success and lift the hold on a job that is still failing.
+    """
     failed_at = state.get("last_failure_at")
     if not failed_at:
-        return False
-    # A later success clears the hold - the old last_failure_at stays in the
-    # record as history and must not keep braking a job that recovered.
-    success = state.get("last_success_at")
-    if success and success >= failed_at:
         return False
     try:
         failed_dt = datetime.fromisoformat(failed_at)
     except (ValueError, TypeError) as e:
         logger.info("[runstate] Failure backoff parse failed for %r: %s", failed_at, e)
         return False
+    # A later success clears the hold - the old last_failure_at stays in the
+    # record as history and must not keep braking a job that recovered.
+    success = state.get("last_success_at")
+    if success:
+        try:
+            if datetime.fromisoformat(success) >= failed_dt:
+                return False
+        except (ValueError, TypeError) as e:
+            logger.warning("[runstate] Unreadable last_success_at %r does not lift the failure backoff: %s", success, e)
     return (now - failed_dt) < timedelta(minutes=_FAILURE_BACKOFF_MINUTES)
 
 
@@ -520,21 +571,35 @@ def _in_blocked_hold(state: dict, now: datetime) -> bool:
     at all - the target was busy, paused, or already held the lock. The job's
     period is untouched either way, but the block is both cheaper to retry (no
     agent spawns) and likelier to clear on its own, so it holds for less time.
+
+    An unreadable last_blocked_at answers no hold: a hold that cannot be measured
+    could never expire and would stall the job for good, while releasing it costs
+    at most one early attempt, whose own block writes a fresh stamp.
+
+    An unreadable last_success_at or last_failure_at lifts nothing: the stamps are
+    parsed, never compared as text, because any string sorting after "2026-..."
+    would read as a later event and end a hold that is still due (DPLAN-0354 leg 4).
     """
     blocked_at = state.get("last_blocked_at")
     if not blocked_at:
         return False
-    # Anything that happened AFTER the block ends the hold: a success means the
-    # target freed up, and a failure hands the job to the longer failure
-    # backoff. The old last_blocked_at stays in the record as history.
-    for later in (state.get("last_success_at"), state.get("last_failure_at")):
-        if later and later >= blocked_at:
-            return False
     try:
         blocked_dt = datetime.fromisoformat(blocked_at)
     except (ValueError, TypeError) as e:
         logger.info("[runstate] Blocked hold parse failed for %r: %s", blocked_at, e)
         return False
+    # Anything that happened AFTER the block ends the hold: a success means the
+    # target freed up, and a failure hands the job to the longer failure
+    # backoff. The old last_blocked_at stays in the record as history.
+    for key in ("last_success_at", "last_failure_at"):
+        later = state.get(key)
+        if not later:
+            continue
+        try:
+            if datetime.fromisoformat(later) >= blocked_dt:
+                return False
+        except (ValueError, TypeError) as e:
+            logger.warning("[runstate] Unreadable %s %r does not lift the blocked hold: %s", key, later, e)
     return (now - blocked_dt) < timedelta(minutes=_BLOCKED_RETRY_MINUTES)
 
 
@@ -640,6 +705,10 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
 
     Returns:
         ISO timestamp of the next run, or None if the schedule cannot be parsed.
+        Every unreadable field answers None, the same "no instant to advertise"
+        as an unknown type: next_run is only displayed (queue, SEED log, wake
+        header) and is_job_due never reads it, so a bad field blanks one cell
+        and never moves a fire or fails the tick.
     """
     sched_type = schedule.get("type", "")
 
@@ -677,6 +746,11 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
 
     if sched_type == "interval":
         interval = schedule.get("interval_minutes", 60)
+        # The same refusal as _is_interval_due: an interval that is not a positive
+        # number is never due, so there is no next run to advertise.
+        if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
+            logger.info("[runstate] calc_next_run: interval_minutes %r is not a positive number", interval)
+            return None
         try:
             last_dt = datetime.fromisoformat(last_run_ts)
             return (last_dt + timedelta(minutes=interval)).isoformat()

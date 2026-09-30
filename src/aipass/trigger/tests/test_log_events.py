@@ -1,16 +1,24 @@
-"""Tests for the log_events module (apps/modules/log_events.py)."""
-
 # =================== META ====================
 # Name: test_log_events.py
 # Description: Unit tests for log_events module
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
 
-import sys
+"""Tests for the log_events module (apps/modules/log_events.py)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the watcher in apps/handlers/log_watcher.py that it drives; its own tests cover it
+
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
+
+from aipass.cli.apps.modules import display
+from aipass.trigger.apps.modules import log_events
+
+# The mocks the autouse fixture set on the real module, read by the helpers below.
+_MOCKS: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -19,102 +27,51 @@ from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports before log_events module loads."""
+def _mock_infrastructure(monkeypatch, tmp_path):
+    """Patch every name log_events reaches outside with, on the real module.
 
+    The logger is patched because this module's log is read by the live branch
+    watcher; the watcher functions are patched so no test starts a real
+    filesystem observer.
+    """
+    mod = log_events
     mock_logger = MagicMock()
-
-    # -- prax logger --------------------------------------------------------
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.system_logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
+    monkeypatch.setattr(mod, "logger", mock_logger)
 
     # -- trigger json handler -----------------------------------------------
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
+    monkeypatch.setattr(mod, "json_handler", mock_json_handler)
 
     # -- watchers.log_watcher handler ---------------------------------------
     mock_log_watcher = MagicMock()
     mock_log_watcher.start_log_watcher = MagicMock(return_value=MagicMock())
     mock_log_watcher.stop_log_watcher = MagicMock()
     mock_log_watcher.is_log_watcher_active = MagicMock(return_value=False)
-    mock_log_watcher.SYSTEM_LOGS_DIR = "/fake/system_logs"
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.watchers", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.watchers.log_watcher", mock_log_watcher)
+    for name in ("start_log_watcher", "stop_log_watcher", "is_log_watcher_active"):
+        monkeypatch.setattr(mod, name, getattr(mock_log_watcher, name))
+    log_dir = tmp_path / "system_logs"
+    monkeypatch.setattr(mod, "SYSTEM_LOGS_DIR", log_dir)
 
-    # -- trigger config -----------------------------------------------------
-    from aipass.trigger.apps.config import atomic_write_json
-
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = "/fake/trigger"
-    mock_config.AIPASS_PKG_ROOT = "/fake/aipass"
-    mock_config.atomic_write_json = atomic_write_json
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
-
-    # -- CLI console --------------------------------------------------------
-    mock_console = MagicMock()
-    cli_modules = MagicMock()
-    cli_modules.console = mock_console
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-
-    cli_display = MagicMock()
-    cli_display.console = mock_console
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules.display", cli_display)
-
-    # -- rich (for print_help Panel) ----------------------------------------
-    monkeypatch.setitem(sys.modules, "rich", MagicMock())
-    monkeypatch.setitem(sys.modules, "rich.panel", MagicMock())
-    monkeypatch.setitem(sys.modules, "rich.console", MagicMock())
-
-    # -- Force re-import so mocks take effect -------------------------------
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.modules.log_events", raising=False)
+    # The CLI console and rich are real: output is read with capsys, and a
+    # refusal through error() is read from cli's own failure flag.
+    _MOCKS.clear()
+    _MOCKS.update(watcher=mock_log_watcher, json_handler=mock_json_handler, logger=mock_logger, log_dir=log_dir)
 
 
 def _import_module():
-    """Import log_events module fresh (after mocks are in place)."""
-    import aipass.trigger.apps.modules.log_events as mod
-
-    return mod
+    """Return the real log_events module the fixture patched."""
+    return log_events
 
 
 def _get_log_watcher():
-    """Return the mocked watchers.log_watcher handler from sys.modules."""
-    return sys.modules["aipass.trigger.apps.handlers.watchers.log_watcher"]
-
-
-def _get_console():
-    """Return the mocked console from sys.modules."""
-    return sys.modules["aipass.cli.apps.modules"].console
+    """Return the mock whose attributes stand in for the watcher functions."""
+    return _MOCKS["watcher"]
 
 
 def _get_json_handler():
-    """Return the mocked json_handler from sys.modules."""
-    return sys.modules["aipass.trigger.apps.handlers.json.json_handler"]
-
-
-def _get_print_str_args(console):
-    """Extract all string positional arguments passed to console.print().
-
-    Returns a flat list of strings -- only positional args that are actual
-    str instances (ignoring MagicMock objects like Panel).
-    """
-    result = []
-    for call in console.print.call_args_list:
-        for arg in call.args:
-            if isinstance(arg, str):
-                result.append(arg)
-    return result
+    """Return the mocked json_handler."""
+    return _MOCKS["json_handler"]
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +105,7 @@ def test_stop_calls_stop_log_watcher():
     mod = _import_module()
     mod.stop()
     watcher = _get_log_watcher()
-    watcher.stop_log_watcher.assert_called_once()
+    assert watcher.stop_log_watcher.call_args_list == [call()]
 
 
 # ---------------------------------------------------------------------------
@@ -157,12 +114,14 @@ def test_stop_calls_stop_log_watcher():
 
 
 def test_status_returns_dict_with_correct_shape():
-    """status() returns dict with 'active' and 'log_dir' keys."""
+    """status() returns dict with 'active' and 'log_dir' keys.
+
+    Mutant run: status() reporting active as a constant False reddens this.
+    """
     mod = _import_module()
+    _get_log_watcher().is_log_watcher_active.return_value = True
     result = mod.status()
-    assert isinstance(result, dict)
-    assert "active" in result
-    assert "log_dir" in result
+    assert result == {"active": True, "log_dir": str(mod.SYSTEM_LOGS_DIR)}
 
 
 def test_status_active_reflects_handler():
@@ -178,7 +137,7 @@ def test_status_log_dir_is_string():
     """status() 'log_dir' is a string representation of SYSTEM_LOGS_DIR."""
     mod = _import_module()
     result = mod.status()
-    assert result["log_dir"] == "/fake/system_logs"
+    assert result["log_dir"] == str(_MOCKS["log_dir"])
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +154,7 @@ def test_handle_command_start_success():
     watcher.start_log_watcher.assert_called_once()
 
 
-def test_handle_command_start_not_started_refuses_through_the_error_channel():
+def test_handle_command_start_not_started_refuses_through_the_error_channel(capsys):
     """handle_command('start', []) refuses through error(), never warning().
 
     Rewritten TWICE, and the middle version is the lesson. On 2026-08-14 this
@@ -206,21 +165,20 @@ def test_handle_command_start_not_started_refuses_through_the_error_channel():
     test was not silent about the defect, it was agreeing with it. The cure is
     to rewrite the assertion, not to add a second one beside it.
 
-    aipass.cli.apps.modules is a MagicMock under this file's fixture, so capsys
-    sees nothing. The mock's own call args are the honest oracle.
+    Read on the real channels since 2026-09-27: error() writes stderr and
+    marks the command failed; warning() would write stderr and leave it unset.
+    Mutant run: the refusal sent through warning() instead of error() reddens this.
     """
     mod = _import_module()
     watcher = _get_log_watcher()
     watcher.start_log_watcher.return_value = None
     result = mod.handle_command("start", [])
     assert result is True
-    cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.error.assert_called_once()
-    cli_modules.warning.assert_not_called()
-    message = str(cli_modules.error.call_args[0][0])
-    assert "one owner" in message, f"the refusal must name the reason, got: {message}"
-    printed = " ".join(str(c) for c in _get_console().print.call_args_list) + str(cli_modules.error.call_args)
-    assert "branch_log_events" in printed
+    captured = capsys.readouterr()
+    assert display.command_failed() is True
+    assert "⚠" not in captured.err
+    assert "one owner" in captured.err, f"the refusal must name the reason, got: {captured.err}"
+    assert "branch_log_events" in captured.out + captured.err
 
 
 def test_handle_command_stop():
@@ -232,14 +190,12 @@ def test_handle_command_stop():
     watcher.stop_log_watcher.assert_called_once()
 
 
-def test_handle_command_status():
+def test_handle_command_status(capsys):
     """handle_command('status', []) displays status and returns True."""
     mod = _import_module()
     result = mod.handle_command("status", [])
     assert result is True
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    output = "\n".join(printed)
+    output = capsys.readouterr().out
     assert "Active:" in output
     assert "Log dir:" in output
 
@@ -330,13 +286,11 @@ def test_handle_command_subcommand_help_flag():
 # ---------------------------------------------------------------------------
 
 
-def test_print_introspection_outputs_module_name():
+def test_print_introspection_outputs_module_name(capsys):
     """print_introspection prints module name and handler info."""
     mod = _import_module()
     mod.print_introspection()
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    output = "\n".join(printed)
+    output = capsys.readouterr().out
     assert "log_events Module" in output
     assert "Connected Handlers:" in output
     assert "log_watcher.py" in output
@@ -347,13 +301,11 @@ def test_print_introspection_outputs_module_name():
 # ---------------------------------------------------------------------------
 
 
-def test_print_help_outputs_commands():
+def test_print_help_outputs_commands(capsys):
     """print_help prints command reference."""
     mod = _import_module()
     mod.print_help()
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    output = "\n".join(printed)
+    output = capsys.readouterr().out
     assert "start" in output
     assert "stop" in output
     assert "status" in output
@@ -405,7 +357,7 @@ def test_help_flag_survives_module_name_routing(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_start_command_names_the_owner_and_says_it_is_a_ruling_not_a_failure():
+def test_start_command_names_the_owner_and_says_it_is_a_ruling_not_a_failure(capsys):
     """`log_events start` declining is a ruling, and it still exits non-zero.
 
     start_log_watcher() always returns None because branch_log_events owns
@@ -414,7 +366,8 @@ def test_start_command_names_the_owner_and_says_it_is_a_ruling_not_a_failure():
     watcher ("Failed to start" sends the reader hunting a bug that is a
     decision), AND the refusal must travel on the channel that reaches the
     shell. Rewritten 2026-09-08 — the old version asserted the wording while
-    the exit code said the watcher was running.
+    the exit code said the watcher was running. Mutant run: the refusal sent
+    through warning() instead of error() reddens this.
     """
     mod = _import_module()
     watcher = _get_log_watcher()
@@ -423,10 +376,10 @@ def test_start_command_names_the_owner_and_says_it_is_a_ruling_not_a_failure():
     result = mod.handle_command("start", [])
 
     assert result is True
-    cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.warning.assert_not_called()
-    message = str(cli_modules.error.call_args[0][0])
-    printed = str(cli_modules.error.call_args) + " ".join(str(c) for c in _get_console().print.call_args_list)
+    captured = capsys.readouterr()
+    assert display.command_failed() is True
+    message = captured.err
+    printed = captured.out + captured.err
     assert "branch_log_events" in printed, f"Expected the owner named, got: {printed[:300]}"
     assert "Failed to start" not in printed, "Declining by ruling must not read as a failure"
     assert "not failed" in message, f"the refusal must say which it is, got: {message}"
@@ -446,6 +399,6 @@ def test_declining_to_start_is_not_logged_as_an_error():
 
     mod.start()
 
-    logger = sys.modules["aipass.prax.apps.modules.logger"].system_logger
+    logger = _MOCKS["logger"]
     logger.error.assert_not_called()
     assert logger.info.called

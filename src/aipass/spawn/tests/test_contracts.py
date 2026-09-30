@@ -1,18 +1,27 @@
 # =================== AIPass ====================
 # Name: test_contracts.py
 # Description: Tests for return types, exceptions, data structures, and init
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-27
-# Modified: 2026-03-27
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for type contracts, exception handling, data structures, and init provisioning."""
+"""Tests for apps/modules/core.py's mint contract and apps/handlers/json/json_handler.py's return/exception types."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/modules/regenerate_registry.py and apps/spawn.py parse and import
+# seedgo: no-test-needed(documentation) — docstrings on handle_command, spawn_agent, and read_json
 
 import json
 from pathlib import Path
 from unittest.mock import patch
 
+from aipass.spawn.apps.handlers.class_registry import get_template_dir
+from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
 from aipass.spawn.apps.handlers.json.json_handler import read_json
+from aipass.spawn.apps.modules.core import spawn_agent
+from aipass.spawn.apps.modules.regenerate_registry import handle_command
+from aipass.spawn.apps.spawn import handle_create, main
 
 
 class TestReturnTypeContracts:
@@ -24,21 +33,27 @@ class TestReturnTypeContracts:
         Measured 2026-09-08: True. The bool is the ROUTED / NOT-ROUTED answer the
         caller switches on, so a handler that started returning False for its own
         verb would have passed the old isinstance pin unnoticed.
-        """
-        from aipass.spawn.apps.modules.regenerate_registry import handle_command
 
-        with patch("aipass.spawn.apps.modules.regenerate_registry.print_introspection"):
+        Mutant: no-args arm's print_introspection() -> pass -> red.
+        """
+
+        with patch("aipass.spawn.apps.modules.regenerate_registry.print_introspection") as mock_intro:
             result = handle_command("regenerate-registry", [])
+        mock_intro.assert_called_once_with()
         assert isinstance(result, bool)
         assert result is True, result
         assert handle_command("not-a-spawn-verb", []) is False
 
     def test_load_correct_type(self, tmp_path):
-        """read_json returns dict for valid file, None for invalid."""
+        """read_json returns dict for valid file, None for invalid.
+
+        Mutant: json_service.read_json returns {**json.load(handle), "mutant": 1} -> red.
+        """
         f = tmp_path / "test.json"
         f.write_text(json.dumps({"key": "val"}), encoding="utf-8")
         result = read_json(f)
         assert isinstance(result, dict)
+        assert result == {"key": "val"}, result
 
         bad = tmp_path / "bad.json"
         bad.write_text("not json", encoding="utf-8")
@@ -56,34 +71,38 @@ class TestExceptionContracts:
     real unwritable target in tests/test_json_handler.py.
     """
 
-    def test_invalid_mode_raises(self):
-        """Unknown command in main() returns error code, not exception."""
-        from aipass.spawn.apps.spawn import main
+    def test_invalid_mode_raises(self, monkeypatch):
+        """Unknown command in main() returns error code, not exception.
 
-        with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
-            mock_sys.argv = ["spawn", "totally_invalid_mode"]
-            with patch("aipass.spawn.apps.spawn.error"):
-                result = main()
+        main() takes no argv, so the string form of the sys.argv patch stands in.
+
+        Mutant: error(f"Unknown command: {command}", ...) -> error(f"Unknown: {command}", ...) -> red.
+        """
+
+        monkeypatch.setattr("sys.argv", ["spawn", "totally_invalid_mode"])
+        with patch("aipass.spawn.apps.spawn.error") as mock_error:
+            result = main()
         assert result == 1
+        mock_error.assert_called_once()
+        assert mock_error.call_args.args[0] == "Unknown command: totally_invalid_mode"
 
 
 class TestDataStructureContracts:
     """Verify data structures have required keys."""
 
-    def test_config_keys(self):
-        """spawn_agent result dict contains all required keys."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-        import tempfile
+    def test_config_keys(self, tmp_path):
+        """spawn_agent result dict contains all required keys.
 
-        with tempfile.TemporaryDirectory() as td:
-            target = Path(td) / "contract_test"
-            result = _spawn_agent(str(target))
+        Minted into tmp_path against a tmp_path registry — never the live one.
+        """
+        target = tmp_path / "contract_test"
+        result = spawn_agent(str(target), registry_path=tmp_path / "AIPASS_REGISTRY.json")
         assert "success" in result
         assert "branch_name" in result
         assert "path" in result
         assert "files_copied" in result
 
-    def test_returns_dict(self):
+    def test_returns_dict(self, tmp_path):
         """The VALUES a successful mint reports, beside the key contract above.
 
         ``test_config_keys`` pins which keys are present; this pins what they say.
@@ -96,15 +115,10 @@ class TestDataStructureContracts:
         rule. It is measured here instead, the same way copy_template counts:
         every file under the template directory whose relative path does not
         touch a name in SKIP_NAMES. And ``path`` is resolved on both sides —
-        _spawn_agent resolves the target it is given, so an unresolved
+        spawn_agent resolves the target it is given, so an unresolved
         ``target`` built from an 8.3 short temp-dir name (Windows) would never
         compare equal to the resolved path it actually returns.
         """
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir
-        from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
-        from aipass.spawn.apps.modules.core import _spawn_agent
-        import tempfile
-
         template = get_template_dir()
         expected_files_copied = sum(
             1
@@ -112,15 +126,23 @@ class TestDataStructureContracts:
             if p.is_file() and not any(part in SKIP_NAMES for part in p.relative_to(template).parts)
         )
 
-        with tempfile.TemporaryDirectory() as td:
-            target = (Path(td) / "init_test").resolve()
-            result = _spawn_agent(str(target))
-            assert isinstance(result, dict)
-            assert result["success"] is True, result.get("error")
-            assert result["branch_name"] == "INIT_TEST", result["branch_name"]
-            assert Path(result["path"]) == target, result["path"]
-            assert result["files_copied"] == expected_files_copied, result["files_copied"]
-            assert result["validation_issues"] == [], result["validation_issues"]
+        target = (tmp_path / "init_test").resolve()
+        result = spawn_agent(str(target), registry_path=tmp_path.resolve() / "AIPASS_REGISTRY.json")
+        assert isinstance(result, dict)
+        assert result["success"] is True, result.get("error")
+        assert result["branch_name"] == "INIT_TEST", result["branch_name"]
+        assert Path(result["path"]) == target, result["path"]
+        assert result["files_copied"] == expected_files_copied, result["files_copied"]
+        assert result["validation_issues"] == [], result["validation_issues"]
+        # The newborn still gets its dropbox and .archive, each with the shipped
+        # README, placeholders filled: the walks that skip them after the mint
+        # must not reach the copy.
+        for sandbox in ("dropbox", ".archive"):
+            assert (target / sandbox / "README.md").is_file(), sandbox
+            shipped = (template / sandbox / "README.md").read_text(encoding="utf-8").splitlines()
+            minted = (target / sandbox / "README.md").read_text(encoding="utf-8").splitlines()
+            assert minted[0] == shipped[0]
+            assert len(minted) == len(shipped)
 
 
 class TestInfrastructureMocking:
@@ -133,28 +155,18 @@ class TestInfrastructureMocking:
         module_key = "aipass.spawn.apps.handlers.json.json_handler"
         assert module_key in sys.modules
 
-    def test_reimport_after_mock(self):
-        """Verify module reimport works after mocking."""
-        from aipass.spawn.apps.handlers.json.json_handler import read_json as fn1
-
-        # Re-import to verify clean state
-        import importlib
-        import aipass.spawn.apps.handlers.json.json_handler as mod
-
-        importlib.reload(mod)
-        from aipass.spawn.apps.handlers.json.json_handler import read_json as fn2
-
-        assert callable(fn1)
-        assert callable(fn2)
-
 
 class TestSuccessFailurePaths:
     """Verify success and failure code paths."""
 
     def test_no_args_triggers_help(self):
-        """create with no args returns error code 1."""
-        from aipass.spawn.apps.spawn import handle_create
+        """create with no args returns error code 1.
 
-        with patch("aipass.spawn.apps.spawn.error"):
+        Mutant: error("target path required", ...) -> error("path required", ...) -> red.
+        """
+
+        with patch("aipass.spawn.apps.spawn.error") as mock_error:
             result = handle_create([])
         assert result == 1
+        mock_error.assert_called_once()
+        assert mock_error.call_args.args[0] == "target path required"

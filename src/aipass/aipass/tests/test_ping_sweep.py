@@ -1,15 +1,19 @@
 # =================== AIPass ====================
 # Name: test_ping_sweep.py
 # Description: Tests for aipass ping_sweep handler Phase 3
-# Version: 1.0.0
+# Version: 1.1.2
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for ping_sweep handler — Phase 3 (FPLAN-0188)."""
+"""Tests for apps/handlers/ping_sweep/__init__.py — Phase 3 (FPLAN-0188)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — _discover_branches and _aipass_inbox_path; every test mocks both
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
@@ -17,11 +21,41 @@ from aipass.aipass.apps.handlers.ping_sweep import (
     BRANCHES,
     TEST_TOKEN,
     TIMEOUT_PER_BRANCH,
-    _send_test_email,
-    _wait_for_ack,
     sweep_all_branches,
     sweep_summary,
 )
+
+_PS = "aipass.aipass.apps.handlers.ping_sweep"
+
+
+def _sweep_one(branch: str, inbox: Path, timeout: int, run: MagicMock) -> tuple[dict, MagicMock]:
+    """Sweep exactly one branch through sweep_all_branches with every live edge sealed.
+
+    The mail send is `subprocess.run(["drone", "@ai_mail", "email", ...])` inside ping_sweep:
+    `run` replaces it (the process edge), so no real mail leaves. The inbox is `inbox` under
+    tmp_path and the audit log is an autospec json_handler. Returns (results, run).
+    """
+    with (
+        patch(f"{_PS}._discover_branches", return_value=[branch]),
+        patch(f"{_PS}._aipass_inbox_path", return_value=inbox),
+        patch(f"{_PS}.subprocess.run", run),
+        patch(f"{_PS}.json_handler", autospec=True),
+    ):
+        results = sweep_all_branches(timeout=timeout)
+    return results, run
+
+
+def _run_rc(returncode: int) -> MagicMock:
+    """A stand-in for subprocess.run whose drone send exits with returncode."""
+    return MagicMock(return_value=MagicMock(returncode=returncode, stderr="error msg" if returncode else ""))
+
+
+def _ack_inbox(tmp_path: Path, sender: str, status: str) -> Path:
+    """Write an inbox.json under tmp_path holding one ack message from sender with status."""
+    inbox = tmp_path / "inbox.json"
+    msg = {"from": f"@{sender}", "subject": "ack", "message": "ack", "status": status}
+    inbox.write_text(json.dumps({"messages": [msg]}), encoding="utf-8")
+    return inbox
 
 
 # =============================================================================
@@ -55,43 +89,43 @@ class TestConstants:
 
 
 class TestSendTestEmail:
-    def test_success_returns_true(self) -> None:
-        """Returns True when drone exits with returncode 0."""
-        mock_result = MagicMock(returncode=0, stderr="")
-        with patch("aipass.aipass.apps.handlers.ping_sweep.subprocess.run", return_value=mock_result):
-            assert _send_test_email("seedgo", "ping body") is True
+    """The mail send, reached through sweep_all_branches with subprocess.run replaced."""
 
-    def test_nonzero_returncode_returns_false(self) -> None:
-        """Returns False when drone exits with non-zero returncode."""
-        mock_result = MagicMock(returncode=1, stderr="error msg")
-        with patch("aipass.aipass.apps.handlers.ping_sweep.subprocess.run", return_value=mock_result):
-            assert _send_test_email("seedgo", "ping body") is False
+    def test_success_returns_true(self, tmp_path) -> None:
+        """A send drone accepts (rc 0) is not an error: the sweep goes on to wait for the ack.
 
-    def test_drone_not_found_returns_false(self) -> None:
-        """Returns False when drone binary is not on PATH."""
-        with patch(
-            "aipass.aipass.apps.handlers.ping_sweep.subprocess.run",
-            side_effect=FileNotFoundError("drone not found"),
-        ):
-            assert _send_test_email("prax", "ping body") is False
+        Mutant: `if result.returncode != 0:` -> `if result.returncode == 0:` -> red.
+        """
+        results, _run = _sweep_one("seedgo", tmp_path / "inbox.json", 0, _run_rc(0))
+        assert results == {"seedgo": "timeout"}
 
-    def test_timeout_returns_false(self) -> None:
-        """Returns False when subprocess times out."""
-        with patch(
-            "aipass.aipass.apps.handlers.ping_sweep.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="drone", timeout=15),
-        ):
-            assert _send_test_email("flow", "ping body") is False
+    def test_nonzero_returncode_returns_false(self, tmp_path) -> None:
+        """A send drone refuses (non-zero rc) marks the branch 'error'."""
+        results, _run = _sweep_one("seedgo", tmp_path / "inbox.json", 0, _run_rc(1))
+        assert results == {"seedgo": "error"}
 
-    def test_calls_drone_with_correct_args(self) -> None:
-        """Subprocess is called with the expected drone command."""
-        mock_result = MagicMock(returncode=0, stderr="")
-        with patch("aipass.aipass.apps.handlers.ping_sweep.subprocess.run", return_value=mock_result) as mock_run:
-            _send_test_email("drone", "test body")
-        args = mock_run.call_args[0][0]
-        assert args[0] == "drone"
-        assert "@ai_mail" in args
-        assert "@drone" in args
+    def test_drone_not_found_returns_false(self, tmp_path) -> None:
+        """drone missing from PATH marks the branch 'error', not a traceback."""
+        run = MagicMock(side_effect=FileNotFoundError("drone not found"))
+        results, _run = _sweep_one("prax", tmp_path / "inbox.json", 0, run)
+        assert results == {"prax": "error"}
+
+    def test_timeout_returns_false(self, tmp_path) -> None:
+        """A send that times out marks the branch 'error', not a traceback."""
+        run = MagicMock(side_effect=subprocess.TimeoutExpired(cmd="drone", timeout=15))
+        results, _run = _sweep_one("flow", tmp_path / "inbox.json", 0, run)
+        assert results == {"flow": "error"}
+
+    def test_calls_drone_with_correct_args(self, tmp_path) -> None:
+        """The one send is drone @ai_mail email @<branch> with the ping body carrying TEST_TOKEN.
+
+        Mutant: `f"@{branch}"` -> `f"{branch}"` in the send command -> red.
+        """
+        _results, run = _sweep_one("drone", tmp_path / "inbox.json", 0, _run_rc(0))
+        run.assert_called_once()
+        args = run.call_args[0][0]
+        assert args[:5] == ["drone", "@ai_mail", "email", "@drone", "AIPASS PING"]
+        assert TEST_TOKEN in args[5]
 
 
 # =============================================================================
@@ -100,92 +134,45 @@ class TestSendTestEmail:
 
 
 class TestWaitForAck:
-    def _make_inbox(self, messages: list) -> dict:
-        return {"messages": messages}
+    """The ack poll, reached through sweep_all_branches after a send drone accepts.
+
+    time.sleep is not patched: timeout=1 enters the poll once and sleeps the product's real
+    2 s, so each test that reads the inbox costs 2 s. A poll-interval seam on _wait_for_ack
+    would exist for these tests alone; aipass's decision, fleet green leg 3: pay the 2 s.
+    """
 
     def test_returns_timeout_when_no_inbox(self, tmp_path) -> None:
         """Returns 'timeout' when inbox file does not exist."""
-        missing = tmp_path / "nonexistent.json"
-        with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=missing):
-            with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
-                # Short real timeout — watchdog thread shares time.time, so mocking it is fragile
-                result = _wait_for_ack("seedgo", timeout=0)
-        assert result == "timeout"
+        results, _run = _sweep_one("seedgo", tmp_path / "nonexistent.json", 1, _run_rc(0))
+        assert results == {"seedgo": "timeout"}
 
     def test_returns_ack_when_matching_message(self, tmp_path) -> None:
-        """Returns 'ack' when inbox has a matching new ack from branch."""
-        inbox = tmp_path / "inbox.json"
-        inbox.write_text(
-            json.dumps(
-                {
-                    "messages": [
-                        {
-                            "from": "@seedgo",
-                            "subject": "ack",
-                            "message": "ack",
-                            "status": "new",
-                        }
-                    ]
-                }
-            )
-        )
-        with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
-            with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
-                result = _wait_for_ack("seedgo", timeout=5)
-        assert result == "ack"
+        """Returns 'ack' when inbox has a matching new ack from branch.
+
+        Mutant: `return "ack"` -> `return "timeout"` in the poll -> red.
+        """
+        results, _run = _sweep_one("seedgo", _ack_inbox(tmp_path, "seedgo", "new"), 1, _run_rc(0))
+        assert results == {"seedgo": "ack"}
 
     def test_ignores_message_from_other_branch(self, tmp_path) -> None:
-        """Does not match ack from a different branch."""
-        inbox = tmp_path / "inbox.json"
-        inbox.write_text(
-            json.dumps(
-                {
-                    "messages": [
-                        {
-                            "from": "@prax",
-                            "subject": "ack",
-                            "message": "ack",
-                            "status": "new",
-                        }
-                    ]
-                }
-            )
-        )
-        with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
-            with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
-                result = _wait_for_ack("seedgo", timeout=0)
-        assert result == "timeout"
+        """Does not match ack from a different branch.
+
+        Mutant: `msg_from == branch and` dropped from the match -> red.
+        """
+        results, _run = _sweep_one("seedgo", _ack_inbox(tmp_path, "prax", "new"), 1, _run_rc(0))
+        assert results == {"seedgo": "timeout"}
 
     def test_ignores_non_new_message(self, tmp_path) -> None:
         """Does not match already-read messages."""
-        inbox = tmp_path / "inbox.json"
-        inbox.write_text(
-            json.dumps(
-                {
-                    "messages": [
-                        {
-                            "from": "@seedgo",
-                            "subject": "ack",
-                            "message": "ack",
-                            "status": "read",
-                        }
-                    ]
-                }
-            )
-        )
-        with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
-            with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
-                result = _wait_for_ack("seedgo", timeout=0)
-        assert result == "timeout"
+        results, _run = _sweep_one("seedgo", _ack_inbox(tmp_path, "seedgo", "read"), 1, _run_rc(0))
+        assert results == {"seedgo": "timeout"}
 
     def test_handles_corrupt_inbox(self, tmp_path) -> None:
         """Gracefully handles corrupt inbox.json (returns 'timeout')."""
         inbox = tmp_path / "inbox.json"
-        inbox.write_text("NOT JSON")
-        with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
-            with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
-                result = _wait_for_ack("seedgo", timeout=0)
-        assert result == "timeout"
+        inbox.write_text("NOT JSON", encoding="utf-8")
+        results, _run = _sweep_one("seedgo", inbox, 1, _run_rc(0))
+        assert results == {"seedgo": "timeout"}
 
 
 # =============================================================================

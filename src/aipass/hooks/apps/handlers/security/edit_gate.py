@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.16.0
+# Version: 1.16.1
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -60,6 +60,9 @@ _TODO_BACKLOG = ".backup/todo/{branch}/backlog.json"
 # gate refused it, the command failed) must not grow it.
 _TRIPWIRE_DIR = Path(tempfile.gettempdir())
 _TRIPWIRE_PENDING_MAX = 8
+# A refusal reason runs to a screen; the log line is the diagnostic, not the copy.
+# The head names the rule and the target, and prax rotates at 50KB.
+_REFUSAL_LOG_CHARS = 500
 # The sanctioned writers of memory files from a shell: drone verbs, not raw writes.
 _MEMORY_VERB_TARGETS = frozenset({"@memory", "@spawn"})
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
@@ -80,13 +83,44 @@ def _entry_number(entry: dict) -> int | None:
     return None
 
 
+def _import_module(name: str) -> Any:
+    """Import a module this gate reads at call time.
+
+    A seam: the tests are the reason it exists. They replace this function by name
+    in place of patching importlib.import_module, which replaces it process-wide.
+    It changes no verdict. The decision is hooks', leg 4.
+    """
+    load = importlib.import_module
+    return load(name)
+
+
 def _ownership() -> Any:
     """modules/write_ownership, reached at call time: a handler never imports a module at import time."""
-    return importlib.import_module("aipass.hooks.apps.modules.write_ownership")
+    return _import_module("aipass.hooks.apps.modules.write_ownership")
 
 
 def _refuse(reason: str) -> dict:
+    """Build the one refusal shape every gate in this file returns — and write the line that says why.
+
+    engine.jsonl records exit 2 and a stdout length, never the reason, and two
+    generations hold well under an hour of fleet traffic: a live block on
+    2026-09-22 04:37:29 left no line in edit_gate.log at all, so by morning
+    nothing on disk could say what had been refused or to whom. The cap refusal
+    was the widest case — _evaluate_limits logged each violation in WARN mode
+    and nothing in the mode that actually blocks.
+
+    Paths carrying detail the reason does not spell (the shell verb, a violation
+    count) log that line first and then call here; two lines is the intended
+    shape there, not a duplicate.
+    """
+    logger.warning("[HOOKS] edit_gate: refused — %s", _one_line(reason))
     return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
+
+
+def _one_line(reason: str, cap: int = _REFUSAL_LOG_CHARS) -> str:
+    """Flatten a refusal to one bounded log line: the head is what names the rule and the target."""
+    flat = " | ".join(part.strip() for part in reason.splitlines() if part.strip())
+    return flat if len(flat) <= cap else f"{flat[:cap]}… (+{len(flat) - cap} chars, full text in the refusal)"
 
 
 def _is_admin_seat(cwd: str) -> bool:
@@ -105,7 +139,7 @@ def _is_admin_seat(cwd: str) -> bool:
         True when the grant verifies, False on every doubt.
     """
     try:
-        admin = importlib.import_module("aipass.hooks.apps.modules.admin_seat")
+        admin = _import_module("aipass.hooks.apps.modules.admin_seat")
     except Exception as exc:
         # The delegation must not become a way IN. Reaching the rail through a
         # second module adds a second import that can fail, and an exemption
@@ -161,11 +195,7 @@ def _cross_project_block(caller_root: Path, target_root: Path, target: Path, how
         "file-layer twin of the mail fence that refuses cross-project sends.\n"
         'To reach that project: drone @devpulse feedback send "Subject" "Body"'
     )
-    return {
-        "stdout": json.dumps({"decision": "block", "reason": reason}),
-        "exit_code": 2,
-        "sound": "edit gate",
-    }
+    return _refuse(reason)
 
 
 def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
@@ -178,7 +208,7 @@ def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
     if not command:
         return []
     try:
-        bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
+        bw = _import_module("aipass.hooks.apps.modules.bash_writes")
         return bw.write_targets(command, cwd)
     except Exception as exc:
         logger.warning("[HOOKS] edit_gate: bash write-target scan failed (allowing): %s", exc)
@@ -274,7 +304,7 @@ def _check_bash_memory_write(targets: list[tuple[Path, str]]) -> dict | None:
             "Only reading it? An interpreter that names a memory path is refused whether it reads or writes, "
             "because this gate cannot tell which. Read the file with the Read tool, cat or jq."
         )
-        return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
+        return _refuse(reason)
     return None
 
 
@@ -285,9 +315,9 @@ def _memory_service_reachable() -> bool:
     `aipass init` projects, which have no @memory (docs/edit_gate.md).
     """
     try:
-        importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        _import_module("aipass.memory.apps.handlers.json.entry_limits")
         return True
-    except Exception as exc:  # noqa: BLE001 - any import failure means "not reachable here"
+    except Exception as exc:  # any import failure means "not reachable here"
         logger.info("[HOOKS] edit_gate: @memory is not reachable from this project (%s)", exc)
         return False
 
@@ -668,11 +698,7 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
             "  (Caps are measured on Edit/Write; a write to a memory file made through Bash is refused. "
             "Cure drift already on disk with drone @memory lint.)"
         )
-        return {
-            "stdout": json.dumps({"decision": "block", "reason": "\n".join(lines)}),
-            "exit_code": 2,
-            "sound": "edit gate",
-        }
+        return _refuse("\n".join(lines))
     for v, text in zip(over, texts, strict=True):
         _log_violation(v, text)
     return None
@@ -719,11 +745,7 @@ def _evaluate_file_budget(file_name: str, after_text: str, limits: dict, el: Any
         "Caps live in @memory's memory.config.json (file_budgets); @spawn owns the schema."
     )
     logger.warning("[HOOKS] edit_gate: %s refused — %d file-budget violation(s)", file_name, len(violations))
-    return {
-        "stdout": json.dumps({"decision": "block", "reason": "\n".join(lines)}),
-        "exit_code": 2,
-        "sound": "edit gate",
-    }
+    return _refuse("\n".join(lines))
 
 
 def _todos_count_advisory(after: dict, branch: str) -> str:
@@ -750,7 +772,7 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
         todos = after.get("todos")
         if not isinstance(todos, list):
             return ""
-        cl = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
+        cl = _import_module("aipass.memory.apps.handlers.json.config_loader")
         configured = cl.get_todos_count(branch)
         limit = configured if configured is not None else _TODOS_COUNT_FALLBACK
         count = len(todos)
@@ -767,7 +789,7 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
                 f"next rollover (PreCompact, or drone @memory rollover run --branch @{branch}) to "
                 f"{_TODO_BACKLOG.format(branch=branch)}; drone @memory todo backlog @{branch} reads it."
             )
-        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+        cadence = _import_module("aipass.hooks.apps.modules.cadence")
         if not cadence.should_fire_advisory("todos_count"):
             # debug, not info: the condition is unchanged and already recorded
             # by the emission that did fire. Volume is the defect here.
@@ -870,7 +892,7 @@ def _check_session_counts(branch: str, file_stem: str, entries: list, section_cf
 def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
     """Warn (never block) when rolling sections exceed their configured entry-count cap."""
     try:
-        cl = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
+        cl = _import_module("aipass.memory.apps.handlers.json.config_loader")
         roll = cl.section("rollover")
         branch_cfg = roll.get("per_branch", {}).get(branch) or roll.get("defaults", {})
         file_cfg = branch_cfg.get(file_stem, {})
@@ -934,11 +956,7 @@ def _check_newest_first(before: dict, after: dict) -> dict | None:
                 "next rollover archives the tail as 'oldest' and would silently drop a misplaced write. "
                 "Insert new entries at index 0 only, leaving the rest of the array untouched."
             )
-            return {
-                "stdout": json.dumps({"decision": "block", "reason": reason}),
-                "exit_code": 2,
-                "sound": "edit gate",
-            }
+            return _refuse(reason)
 
         new_numbers = [_entry_number(e) for e in new_entries if isinstance(e, dict)]
 
@@ -965,11 +983,7 @@ def _check_newest_first(before: dict, after: dict) -> dict | None:
                 )
             else:
                 continue
-            return {
-                "stdout": json.dumps({"decision": "block", "reason": reason}),
-                "exit_code": 2,
-                "sound": "edit gate",
-            }
+            return _refuse(reason)
     return None
 
 
@@ -986,7 +1000,7 @@ def _unparseable_refusal(fp: Path, exc: ValueError) -> dict:
         "not parse is broken for every reader until the next edit lands — @memory, this gate, the tripwire "
         "and the startup read all see a corrupt seat. Make the edit so the whole file still parses, then retry."
     )
-    return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
+    return _refuse(reason)
 
 
 def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: str) -> dict | None:
@@ -1027,7 +1041,7 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         if block:
             return block
 
-        el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        el = _import_module("aipass.memory.apps.handlers.json.entry_limits")
         limits = el.load_entry_limits(branch)
         if limits.get("enabled"):
             block = _evaluate_limits(before, after, limits, el)
@@ -1130,7 +1144,7 @@ def _read_pending(path: Path) -> dict:
 
 def _runs_memory_verb(command: str, cwd: str) -> bool:
     """True when some segment of *command* is a drone @memory or @spawn verb, the sanctioned writers."""
-    bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
+    bw = _import_module("aipass.hooks.apps.modules.bash_writes")
     for segment, _hits in bw.write_targets_by_segment(command, cwd):
         words = list(segment)
         while words and _ENV_ASSIGNMENT.match(words[0]):
@@ -1150,7 +1164,7 @@ def _measure_memory_file(path: Path) -> list[str]:
     if not path.is_file():
         return [f"  {path.name} no longer exists."]
     if path.name in _FILE_BUDGET_FILES:
-        el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        el = _import_module("aipass.memory.apps.handlers.json.entry_limits")
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
@@ -1164,7 +1178,7 @@ def _measure_memory_file(path: Path) -> list[str]:
         return [f"  {path.name} no longer parses as JSON: {exc}"]
     if not isinstance(doc, dict):
         return [f"  {path.name} is no longer a JSON object."]
-    el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+    el = _import_module("aipass.memory.apps.handlers.json.entry_limits")
     limits = el.load_entry_limits(path.parent.parent.name)
     if not limits.get("enabled"):
         return []
@@ -1215,7 +1229,7 @@ def handle(hook_data: dict) -> dict:
         fp = Path(file_path)
         if fp.name == "inbox.json" and ".ai_mail.local" in fp.parts:
             reason = 'Direct writes to inbox.json are blocked.\nUse: drone @ai_mail email @<branch> "Subject" "Body"'
-            return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
+            return _refuse(reason)
 
         cwd = hook_data.get("cwd", "") or os.getcwd()
 
@@ -1237,11 +1251,7 @@ def handle(hook_data: dict) -> dict:
                     f"Dispatched agent confined to own branch: '{cwd_branch}' "
                     f"cannot write to '{target_branch}' in daemon mode."
                 )
-                return {
-                    "stdout": json.dumps({"decision": "block", "reason": reason}),
-                    "exit_code": 2,
-                    "sound": "edit gate",
-                }
+                return _refuse(reason)
             repo_root = None
             for parent in Path(cwd).parents:
                 if (parent / ".git").exists():
@@ -1252,11 +1262,7 @@ def handle(hook_data: dict) -> dict:
                 resolved = str(fp.resolve()) if not fp.is_absolute() else str(fp)
                 if not resolved.startswith(allowed_prefix):
                     reason = f"Dispatched agent restricted to {allowed_prefix}. Cannot write to: {file_path}"
-                    return {
-                        "stdout": json.dumps({"decision": "block", "reason": reason}),
-                        "exit_code": 2,
-                        "sound": "edit gate",
-                    }
+                    return _refuse(reason)
 
         target_branch = _get_branch(str(fp.resolve()) if not fp.is_absolute() else str(fp), package)
 
@@ -1274,8 +1280,10 @@ def handle(hook_data: dict) -> dict:
         if not file_path.endswith(".py"):
             return {"stdout": "", "exit_code": 0}
 
-        ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
-        state = ds.load()
+        # Each seat reads its own diagnostics state alone (devpulse's decision A, leg 4).
+        ds = _import_module("aipass.hooks.apps.modules.diagnostics_state")
+        seat = ds.seat_key(hook_data)
+        state = ds.load_seat(seat) or {}
 
         errored_file = state.get("file", "")
         errors = state.get("errors", [])
@@ -1306,7 +1314,7 @@ def handle(hook_data: dict) -> dict:
         fresh = ds.revalidate(errored)
         if fresh is not None:
             if not fresh:
-                ds.clear()
+                ds.clear_seat(seat)
                 return {"stdout": "", "exit_code": 0}
             errors = fresh
 
@@ -1323,11 +1331,7 @@ def handle(hook_data: dict) -> dict:
 
         error_summary = "\n".join(f"  L{e['line']}: {e['message']}" for e in errors[:5])
         reason = f"Fix {len(errors)} error(s) in {Path(errored_file).name} before editing other files:\n{error_summary}"
-        return {
-            "stdout": json.dumps({"decision": "block", "reason": reason}),
-            "exit_code": 2,
-            "sound": "edit gate",
-        }
+        return _refuse(reason)
 
     except Exception as exc:
         logger.warning("[HOOKS] edit_gate: unexpected error, every fence dark for this call (allowing): %s", exc)

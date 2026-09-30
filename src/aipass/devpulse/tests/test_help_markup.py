@@ -1,50 +1,32 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_help_markup.py
 # Description: Canary tests that literal [placeholders] survive Rich rendering
 # Version: 1.0.0
 # Created: 2026-08-11
-# Modified: 2026-08-11
+# Modified: 2026-09-27
 # =============================================
 
-"""Rendered-output canaries for square-bracket placeholders (devpulse).
+"""Tests for the rendered [placeholders] of apps/devpulse.py, apps/modules/watchdog.py and its presenter."""
 
-Rich treats ``[word]`` as a style tag, so an UNESCAPED literal placeholder is
-consumed silently: ``drone @devpulse <command> [args...]`` rendered as
-``drone @devpulse <command>`` with no error and no visible gap (found live in
-the night-shift sweep @prax requested after fixing the same class on their
-surfaces, cc862706). Every test here renders through a REAL Rich console and
-asserts the bracketed text is still in the output — a mocked console records
-the call but never renders, so it cannot catch this class.
-
-Covers:
-- devpulse.print_help() — the ``[args...]`` usage placeholder
-- watchdog HELP_TEXT / schedule + timer help — ``[command]``, ``[--timeout ...]``
-- watchdog presenter.format_status_line / print_kill_result — the ``[handle]`` prefix
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — the Rich colour tags around HELP_TEXT's placeholders
 
 import io
 
-import pytest
 from rich.console import Console
+
+from aipass.devpulse.apps import devpulse as entry
+from aipass.devpulse.apps.handlers.watchdog import presenter
+from aipass.devpulse.apps.modules import watchdog
+
+# Rich treats [word] as a style tag, so an unescaped placeholder is consumed silently;
+# the product's own console renders to the channel capsys reads, a mock never renders.
 
 
 def _real_console(width: int = 200) -> tuple[Console, io.StringIO]:
     """A real rendering console writing to a buffer."""
     buffer = io.StringIO()
     return Console(file=buffer, width=width, no_color=True, highlight=False, markup=True), buffer
-
-
-def _render_module_call(module, call) -> str:
-    """Run ``call(module)`` with the module's console swapped for a real one."""
-    console, buffer = _real_console()
-    original = getattr(module, "console")
-    setattr(module, "console", console)
-    try:
-        call(module)
-    finally:
-        setattr(module, "console", original)
-    return buffer.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -55,32 +37,34 @@ def _render_module_call(module, call) -> str:
 class TestHelpPlaceholders:
     """Placeholders in help output must reach the terminal."""
 
-    def test_devpulse_help_keeps_args_placeholder(self):
+    def test_devpulse_help_keeps_args_placeholder(self, capsys):
         """print_help shows [args...], not a truncated usage line."""
-        from aipass.devpulse.apps import devpulse as entry
-
-        output = _render_module_call(entry, lambda m: m.print_help())
-        assert "[args...]" in output
+        entry.print_help()
+        assert "[args...]" in capsys.readouterr().out
 
     def test_watchdog_help_keeps_placeholders(self):
         """watchdog --help keeps [--timeout SECONDS] and the optional [command]."""
-        from aipass.devpulse.apps.modules import watchdog
-
         console, buffer = _real_console()
         console.print(watchdog.HELP_TEXT)
         output = buffer.getvalue()
         assert "[--timeout SECONDS]" in output
         assert "[command]" in output
 
-    def test_watchdog_timer_and_schedule_help_survive(self):
+    def test_watchdog_timer_and_schedule_help_survive(self, capsys, monkeypatch):
         """The timer/schedule sub-help texts render without losing bracketed text."""
-        from aipass.devpulse.apps.modules import watchdog
+        # The bare verbs print their sub-help after the owner gate; the gate is not the subject.
+        gate_calls: list[str] = []
 
-        for text in (watchdog._TIMER_HELP_TEXT, watchdog._SCHEDULE_HELP_TEXT):
-            console, buffer = _real_console()
-            console.print(text)
+        def _owner_seat() -> bool:
+            gate_calls.append("consulted")
+            return True
+
+        monkeypatch.setattr(watchdog, "_guard_caller", _owner_seat)
+        for verb in ("timer", "schedule"):
+            assert watchdog.handle_command("watchdog", [verb]) is True
             # every non-style bracket group in the source must survive rendering
-            assert "watchdog" in buffer.getvalue()
+            assert "watchdog" in capsys.readouterr().out
+        assert gate_calls == ["consulted", "consulted"]
 
 
 # ---------------------------------------------------------------------------
@@ -101,22 +85,15 @@ class TestStatusHandleTag:
 
     def test_status_line_keeps_handle(self):
         """format_status_line's [handle] renders literally."""
-        from aipass.devpulse.apps.handlers.watchdog import presenter
-
         line = presenter.format_status_line(self.WATCH, lambda s: f"{s}s")
         console, buffer = _real_console()
         console.print(line)
         assert "[wd-1234]" in buffer.getvalue()
 
-    def test_kill_result_keeps_handle(self):
+    def test_kill_result_keeps_handle(self, capsys):
         """print_kill_result's [handle] renders literally."""
-        from aipass.devpulse.apps.handlers.watchdog import presenter
-
-        output = _render_module_call(
-            presenter,
-            lambda m: m.print_kill_result({"handle": "wd-9", "killed": True, "was_alive": True, "reason": "test"}),
-        )
-        assert "[wd-9]" in output
+        presenter.print_kill_result({"handle": "wd-9", "killed": True, "was_alive": True, "reason": "test"})
+        assert "[wd-9]" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +114,3 @@ def test_dash_leading_tags_are_not_at_risk():
     console, buffer = _real_console()
     console.print("  watchdog agent <branch> [--timeout SECONDS]")
     assert "[--timeout SECONDS]" in buffer.getvalue()
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])

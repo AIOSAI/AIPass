@@ -36,7 +36,7 @@ if _HANDLERS_DIR not in sys.path:
 if _APPS_DIR not in sys.path:
     sys.path.insert(0, _APPS_DIR)
 
-from handlers import executor, parser  # noqa: E402
+from handlers import executor, parser
 
 
 AIPASS_ROOT = os.environ.get("AIPASS_ROOT", os.path.expanduser("~"))

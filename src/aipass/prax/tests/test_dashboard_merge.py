@@ -1,30 +1,45 @@
 # =================== AIPass ====================
 # Name: test_dashboard_merge.py
 # Description: quick_status has many writers — none may delete another's key
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-27
 # =============================================
 
-"""Regression cover for the 2026-08-12 quick_status clobber (@flow, DPLAN-0290 item 4).
+"""Tests for apps/handlers/dashboard/status.py, refresh.py, operations.py, template_pusher.py and template_differ.py."""
 
-DASHBOARD.local.json's quick_status block has several writers. Each one used to
-build a fresh dict and assign it over the whole block, so every writer silently
-deleted the keys it did not know about. The owner saw the symptom on his devpulse
-card: 0 todos while local.json held 9. @flow fixed their push and found the
-mirror here — prax refresh drops their ``commons_mentions`` on every run.
+# Regression cover for the 2026-08-12 quick_status clobber (@flow, DPLAN-0290 item 4).
+#
+# DASHBOARD.local.json's quick_status block has several writers. Each one used to
+# build a fresh dict and assign it over the whole block, so every writer silently
+# deleted the keys it did not know about. The owner saw the symptom on his devpulse
+# card: 0 todos while local.json held 9. @flow fixed their push and found the
+# mirror here — prax refresh drops their ``commons_mentions`` on every run.
+#
+# The invariant both sides now hold: **no writer deletes a key it did not write.**
+#
+# Second defect, same file: the calculator existed in THREE near-identical copies
+# (status.py, refresh.py, operations.py) and only one had grown a guard for a
+# list-shaped ``active_plans``. flow's section writes a list, so the two unguarded
+# copies raise TypeError on it. The copies are the reason one guard was missing,
+# so the drift is pinned shut here too.
+#
+# Modules are imported inside each test — conftest.py installs autouse sys.modules
+# mocks that must be in place first.
 
-The invariant both sides now hold: **no writer deletes a key it did not write.**
-
-Second defect, same file: the calculator existed in THREE near-identical copies
-(status.py, refresh.py, operations.py) and only one had grown a guard for a
-list-shaped ``active_plans``. flow's section writes a list, so the two unguarded
-copies raise TypeError on it. The copies are the reason one guard was missing,
-so the drift is pinned shut here too.
-
-Modules are imported inside each test — conftest.py installs autouse sys.modules
-mocks that must be in place first.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — load_dashboard and save_dashboard, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — create_fresh_dashboard, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — get_branch_paths, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — resolve_branch_path, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — diff_dashboard_template, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — push_dashboard_template, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — get_template_status, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — _extract_flow_section, covered by tests/test_flow_section_contract.py
+# seedgo: no-test-needed(through_the_command) — plugin refresh(), covered by tests/test_devpulse_dashboard_plugin.py
+# seedgo: no-test-needed(dead_code) — _extract_ai_mail_section's block, which refresh pops before save and nothing reads
+# seedgo: no-test-needed(json_structure) — the log_operation records of the refresh, push and diff, covered by that row
 
 import importlib
 import json
@@ -276,6 +291,27 @@ class TestPushTemplateIsNotAWreckingBall:
         pusher._apply_structural_updates(data, {}, [], None)
         assert data["quick_status"]["todo_count"] == 0
         assert data["quick_status"]["new_mail"] == 0
+
+    def test_a_template_section_the_constant_never_heard_of_is_advised(self, tmp_path):
+        """The adviser's third copy of the policy.
+
+        _diff_branch accepted the loaded template and compared against
+        module-level REQUIRED_SECTIONS instead (seedgo's
+        accepted_and_never_used_parameter rule, 2026-09-24). That copy happens to
+        agree with templates/DASHBOARD.template.json today, so the drift would be
+        silent both ways: a section added to the template would never be advised,
+        and the advice would keep naming one the template had dropped.
+        """
+        differ = _load("aipass.prax.apps.handlers.dashboard.template_differ")
+        branch = _seed_branch(tmp_path, {"new_mail": 0})
+
+        result = differ._diff_branch(
+            "SOMEBRANCH",
+            branch,
+            {"sections": {"a_brand_new_section": {}}, "quick_status": {"new_mail": 0}},
+        )
+
+        assert "a_brand_new_section section" in result["additions"]
 
     def test_canary_deprecation_list_still_deletes(self):
         """Proof the first assertion can fail: the removal loop is real."""

@@ -3,13 +3,28 @@
 # Description: Unit tests for trigger event bus core module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-29
 # =============================================
 
-"""Unit tests for aipass.trigger.apps.modules.core — Trigger event bus."""
+"""Tests for apps/modules/core.py, the Trigger event bus."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — handlers wired by registry.setup_handlers; each has its own test file
+
+import sys
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
+
+from aipass.trigger.apps.config import trail_logger
+from aipass.trigger.apps.handlers.events import error_detected, registry, runaway_handler
+from aipass.trigger.apps.modules import core
+
+# A second import site for the same class, read by the module-identity test at the foot of the file.
+from aipass.trigger.apps.modules.core import Trigger as ReimportedTrigger
+
+# The real wiring pass, held before the autouse fixture replaces it at its home.
+wire_the_real_handlers = registry.setup_handlers
 
 
 # ---------------------------------------------------------------------------
@@ -18,72 +33,39 @@ from unittest.mock import MagicMock
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure so the module loads in isolation."""
-    import sys
+def _off_the_live_bus(monkeypatch):
+    """Keep the real core module off every live edge it touches.
 
-    mock_logger = MagicMock()
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-
-    # Prax logger (imported at module level as `logger`)
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.system_logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
-
-    # json_handler used by handle_command
-    json_mod = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.handlers.json",
-        MagicMock(json_handler=json_mod),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.handlers.json.json_handler",
-        json_mod,
-    )
-
-    # Registry setup_handlers (called by _ensure_initialized)
-    registry_mod = MagicMock()
-    registry_mod.setup_handlers = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.handlers.events",
-        MagicMock(registry=registry_mod),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.handlers.events.registry",
-        registry_mod,
-    )
-
-    # Force re-import so the module picks up mocks
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.modules.core", raising=False)
+    setup_handlers is the wiring pass that would register the live handlers
+    (trigger_json writes, real mail); core reads it from the registry module at
+    call time, so it is replaced at that home. core's logger and json_handler
+    are replaced where core holds them.
+    """
+    assert sys.modules[registry.__name__] is registry, "registry is not the module core will import"
+    monkeypatch.setattr(registry, "setup_handlers", MagicMock())
+    monkeypatch.setattr(core, "logger", MagicMock())
+    monkeypatch.setattr(core, "json_handler", MagicMock())
 
 
 @pytest.fixture()
-def trigger_cls():
-    """Import and return a clean Trigger class after mocking.
+def trigger_cls(monkeypatch):
+    """Return the real Trigger class with its class-level state reset.
 
     Resets all class-level state so tests are fully isolated.
     """
-    from aipass.trigger.apps.modules.core import Trigger
+    Trigger = core.Trigger
 
     # Reset mutable class state between tests
-    Trigger._handlers = {}
-    Trigger._history = []
-    Trigger._initialized = False
-    Trigger._firing = False
-    Trigger._deferred_queue = []
-    Trigger._draining_deferred = False
-    Trigger._log_watcher_started = False
-    Trigger._handler_failures = {}
-    Trigger._disabled_handlers = set()
-    Trigger._alias_warned = set()
+    monkeypatch.setattr(Trigger, "_handlers", {})
+    monkeypatch.setattr(Trigger, "_history", [])
+    monkeypatch.setattr(Trigger, "_initialized", False)
+    monkeypatch.setattr(Trigger, "_firing", False)
+    monkeypatch.setattr(Trigger, "_deferred_queue", [])
+    monkeypatch.setattr(Trigger, "_draining_deferred", False)
+    monkeypatch.setattr(Trigger, "_log_watcher_started", False)
+    monkeypatch.setattr(Trigger, "_handler_failures", {})
+    monkeypatch.setattr(Trigger, "_disabled_handlers", set())
+    monkeypatch.setattr(Trigger, "_alias_warned", set())
     return Trigger
 
 
@@ -119,13 +101,16 @@ def test_on_multiple_events(trigger_cls):
 
 
 def test_fire_calls_registered_handler(trigger_cls):
-    """fire() invokes every handler registered for that event."""
+    """fire() invokes every handler registered for that event.
+
+    Mutant run: fire() dropping its fire_event callback reddens this.
+    """
     handler = MagicMock()
     trigger_cls.on("deploy", handler)
 
     trigger_cls.fire("deploy")
 
-    handler.assert_called_once()
+    assert handler.call_args_list == [call(fire_event=trigger_cls.fire)]
 
 
 def test_fire_no_handlers_does_not_error(trigger_cls):
@@ -169,7 +154,10 @@ def test_fire_injects_fire_event_callback(trigger_cls):
 
 
 def test_fire_multiple_handlers_same_event(trigger_cls):
-    """fire() calls every handler registered for the same event."""
+    """fire() calls every handler registered for the same event.
+
+    Mutant run: fire() dropping its fire_event callback reddens this.
+    """
     h1 = MagicMock()
     h2 = MagicMock()
     h3 = MagicMock()
@@ -180,9 +168,8 @@ def test_fire_multiple_handlers_same_event(trigger_cls):
 
     trigger_cls.fire("build")
 
-    h1.assert_called_once()
-    h2.assert_called_once()
-    h3.assert_called_once()
+    for handler in (h1, h2, h3):
+        assert handler.call_args_list == [call(fire_event=trigger_cls.fire)]
 
 
 def test_fire_handler_exception_does_not_block_others(trigger_cls):
@@ -372,6 +359,28 @@ def test_a_second_wiring_pass_does_not_double_fire(trigger_cls):
     trigger_cls.fire("error_detected")
 
     assert calls == ["a", "b"]
+
+
+def test_a_header_event_reaches_no_handler_on_the_real_wiring(trigger_cls, monkeypatch, tmp_path, mock_infrastructure):
+    """cli's header fire runs nothing in trigger and writes no operation line.
+
+    The real setup_handlers wires the bus (an isolated Trigger state). It also
+    hands the live mail adapter to two handler modules; those names are set
+    through monkeypatch first, so teardown takes the adapter back out.
+    Red first 2026-09-29: the retired handler ran and logged 'cli_event'.
+    """
+    for handler_module in (core, error_detected, runaway_handler):
+        assert sys.modules[handler_module.__name__] is handler_module, "not the module setup_handlers imports"
+    monkeypatch.setattr(error_detected, "_send_email", None)
+    monkeypatch.setattr(runaway_handler, "_send_email", None)
+    monkeypatch.setattr(registry, "logger", trail_logger(tmp_path / "registry_handler.jsonl"))
+    wire_the_real_handlers()
+
+    result = trigger_cls.fire("cli_header_displayed", title="probe")
+
+    assert result["handlers"] == 0
+    logged = [p.read_text(encoding="utf-8") for p in mock_infrastructure.rglob("*") if p.is_file()]
+    assert not any("cli_event" in text for text in logged)
 
 
 def test_distinct_handlers_still_both_register(trigger_cls):
@@ -670,8 +679,22 @@ def test_different_branches_have_independent_failure_counts(trigger_cls):
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _coerce_value (CLI `fire key=value` typing)
+# Tests -- CLI `fire key=value` typing
 # ---------------------------------------------------------------------------
+
+
+def _fire_value(trigger_cls, monkeypatch, token):
+    """Fire `probe value=<token>` through the command; return what the handler received.
+
+    Registration is marked done so no handler but the probe is ever wired.
+    """
+    monkeypatch.setattr(trigger_cls, "_initialized", True)
+    probe = MagicMock()
+    trigger_cls.on("typing_probe", probe)
+    core = sys.modules[trigger_cls.__module__]
+    assert core.handle_command("fire", ["typing_probe", f"value={token}"]) is True
+    assert probe.call_count == 1
+    return probe.call_args.kwargs["value"]
 
 
 @pytest.mark.parametrize(
@@ -687,7 +710,7 @@ def test_different_branches_have_independent_failure_counts(trigger_cls):
         "1e3",  # float() reshapes to 1000.0
     ],
 )
-def test_coerce_value_never_mangles_a_token_it_cannot_round_trip(token):
+def test_fire_never_mangles_a_token_it_cannot_round_trip(trigger_cls, monkeypatch, token):
     """A value is only typed when the numeric form is byte-identical.
 
     Identity tokens travelling through `fire key=value` are strings that may
@@ -695,10 +718,10 @@ def test_coerce_value_never_mangles_a_token_it_cannot_round_trip(token):
     time, and handle_error_detected annotates fingerprint/error_hash/
     registry_id as str. Coercing "00123456" to int 123456 both breaks the type
     contract and silently deletes a character from the user's token.
+    Reached through `fire key=value`. Mutant run: dropping the round-trip guard
+    in _coerce_value (plain int()/float()) reddens this.
     """
-    from aipass.trigger.apps.modules.core import _coerce_value
-
-    result = _coerce_value(token)
+    result = _fire_value(trigger_cls, monkeypatch, token)
     if result != token:
         assert str(result) == token, f"{token!r} was mangled into {result!r}"
     assert result == token
@@ -709,27 +732,27 @@ def test_coerce_value_never_mangles_a_token_it_cannot_round_trip(token):
     ("token", "expected"),
     [("2", 2), ("0", 0), ("-7", -7), ("1.5", 1.5), ("-0.25", -0.25)],
 )
-def test_coerce_value_still_types_lossless_numbers(token, expected):
-    """The guard must not over-correct: count=2 has to arrive as an int."""
-    from aipass.trigger.apps.modules.core import _coerce_value
+def test_fire_still_types_lossless_numbers(trigger_cls, monkeypatch, token, expected):
+    """The guard must not over-correct: count=2 has to arrive as an int.
 
-    result = _coerce_value(token)
+    Mutant run: _coerce_value returning every value as a string reddens this.
+    """
+    result = _fire_value(trigger_cls, monkeypatch, token)
     assert result == expected
     assert isinstance(result, type(expected))
 
 
-def test_coerce_value_leaves_plain_strings_alone():
-    """Non-numeric values are untouched, as before."""
-    from aipass.trigger.apps.modules.core import _coerce_value
+def test_fire_leaves_plain_strings_alone(trigger_cls, monkeypatch):
+    """Non-numeric values are untouched, as before.
 
-    assert _coerce_value("api") == "api"
-    assert _coerce_value("a1b2c3d4") == "a1b2c3d4"
+    Mutant run: _coerce_value upper-casing a string it cannot type reddens this.
+    """
+    tokens = ["api", "a1b2c3d4"]
+    assert [_fire_value(trigger_cls, monkeypatch, token) for token in tokens] == tokens
 
 
 def test_fire_cli_delivers_all_digit_identity_token_unmangled(trigger_cls):
     """`fire ... fingerprint=00123456` must reach the handler as that string."""
-    from aipass.trigger.apps.modules import core
-
     received = {}
 
     def capture(**kwargs):
@@ -754,8 +777,6 @@ def test_help_flag_after_the_event_name_does_not_fire(trigger_cls, monkeypatch):
     discarded and the event fired. Trigger.fire is the dispatch target and is
     mocked here: the assertion is that it is never reached.
     """
-    from aipass.trigger.apps.modules import core
-
     fired = MagicMock()
     monkeypatch.setattr(core.Trigger, "fire", fired)
     printed = MagicMock()
@@ -770,8 +791,6 @@ def test_help_flag_after_the_event_name_does_not_fire(trigger_cls, monkeypatch):
 
 def test_short_help_flag_after_key_values_does_not_fire(trigger_cls, monkeypatch):
     """`-h` behind a full key=value payload still explains rather than fires."""
-    from aipass.trigger.apps.modules import core
-
     fired = MagicMock()
     monkeypatch.setattr(core.Trigger, "fire", fired)
     printed = MagicMock()
@@ -790,8 +809,6 @@ def test_bare_word_help_as_a_payload_value_still_fires(trigger_cls, monkeypatch)
     This is why only the dashed forms scan the whole sequence: an event
     payload may legitimately carry the word.
     """
-    from aipass.trigger.apps.modules import core
-
     fired = MagicMock(return_value={"event": "e", "handlers": 1, "ran": 1, "failed": 0})
     monkeypatch.setattr(core.Trigger, "fire", fired)
     printed = MagicMock()
@@ -806,8 +823,6 @@ def test_bare_word_help_as_a_payload_value_still_fires(trigger_cls, monkeypatch)
 
 def test_module_route_help_flag_after_subcommand_does_not_fire(trigger_cls, monkeypatch):
     """`core fire <event> --help` — the flag survives module-name routing."""
-    from aipass.trigger.apps.modules import core
-
     fired = MagicMock()
     monkeypatch.setattr(core.Trigger, "fire", fired)
     printed = MagicMock()
@@ -826,78 +841,119 @@ def test_module_route_help_flag_after_subcommand_does_not_fire(trigger_cls, monk
 
 
 class TestDeprecatedEventAliases:
-    """A renamed event keeps working for one release and says it is retired."""
+    """A renamed event keeps working for one release and says it is retired.
 
-    def test_old_name_reaches_a_handler_on_the_new_name(self, trigger_cls):
-        """The whole point: `file_deleted` is delivered to `profile_write_failed`.
+    The table is empty since 2026-09-28, so the mechanism tests stand on an
+    entry each test sets itself, under names no product fires.
+    """
 
-        Without this, renaming the event silently stops delivery for the three
-        fire sites in @aipass and @daemon that still use the old name.
+    OLD = "probe_old_event"
+    NEW = "probe_new_event"
+
+    @pytest.fixture()
+    def aliased(self, trigger_cls, monkeypatch):
+        """The bus with one test-owned rename entry, OLD -> NEW."""
+        core = sys.modules[trigger_cls.__module__]
+        monkeypatch.setitem(core.DEPRECATED_EVENT_ALIASES, self.OLD, self.NEW)
+        return trigger_cls
+
+    def test_old_name_reaches_a_handler_on_the_new_name(self, aliased):
+        """The whole point: the old name is delivered to the new one.
+
+        Without this, renaming an event silently stops delivery for every
+        fire site still using the old name.
+        Mutant 2026-09-28: _canonical answering its argument reddens this.
         """
         handler = MagicMock()
-        trigger_cls.on("profile_write_failed", handler)
+        aliased.on(self.NEW, handler)
 
-        summary = trigger_cls.fire("file_deleted", path="/store.json")
+        summary = aliased.fire(self.OLD, path="store.json")
 
         handler.assert_called_once()
         assert summary["handlers"] == 1
         assert summary["ran"] == 1
 
-    def test_summary_names_the_event_that_actually_ran(self, trigger_cls):
+    def test_summary_names_the_event_that_actually_ran(self, aliased):
         """A caller reading the summary back must not be sent hunting.
 
-        Reporting `file_deleted` would name an event with no handlers under it.
+        Reporting the old name would name an event with no handlers under it.
         """
-        trigger_cls.on("profile_write_failed", MagicMock())
+        aliased.on(self.NEW, MagicMock())
 
-        summary = trigger_cls.fire("file_deleted", path="/store.json")
+        summary = aliased.fire(self.OLD, path="store.json")
 
-        assert summary["event"] == "profile_write_failed"
+        assert summary["event"] == self.NEW
 
-    def test_a_handler_registered_on_the_old_name_still_hears_the_new_one(self, trigger_cls):
-        """The alias resolves on registration too, not only on fire."""
+    def test_a_handler_registered_on_the_old_name_still_hears_the_new_one(self, aliased):
+        """The alias resolves on registration too, not only on fire.
+
+        Mutant run: fire() dropping its fire_event callback reddens this.
+        """
         handler = MagicMock()
-        trigger_cls.on("file_deleted", handler)
+        aliased.on(self.OLD, handler)
 
-        trigger_cls.fire("profile_write_failed", path="/store.json")
+        aliased.fire(self.NEW, path="store.json")
 
-        handler.assert_called_once()
+        assert handler.call_args_list == [call(path="store.json", fire_event=aliased.fire)]
 
-    def test_off_under_the_old_name_actually_unregisters(self, trigger_cls):
+    def test_off_under_the_old_name_actually_unregisters(self, aliased):
         """on(old) + off(old) must cancel out.
 
         Resolving only in on() would register on the new name and remove
         nothing, leaving a handler no caller can detach.
         """
         handler = MagicMock()
-        trigger_cls.on("file_deleted", handler)
-        trigger_cls.off("file_deleted", handler)
+        aliased.on(self.OLD, handler)
+        aliased.off(self.OLD, handler)
 
-        summary = trigger_cls.fire("profile_write_failed")
+        summary = aliased.fire(self.NEW)
 
         assert summary["handlers"] == 0
         handler.assert_not_called()
 
-    def test_the_deprecation_is_logged_once_per_process(self, trigger_cls, monkeypatch):
+    def test_the_deprecation_is_logged_once_per_process(self, aliased, monkeypatch):
         """Silent forwarding is how a rename never finishes — say it, but once.
 
-        Once per name, not once per fire: this event fires on a write-failure
-        path that can repeat, and a warning per occurrence would be its own
-        noise source in a branch that watches logs for errors.
+        Once per name, not once per fire: a renamed event can fire on a path
+        that repeats, and a warning per occurrence would be its own noise
+        source in a branch that watches logs for errors.
         """
-        from aipass.trigger.apps.modules import core
-
+        core = sys.modules[aliased.__module__]
         warned = MagicMock()
         monkeypatch.setattr(core.logger, "warning", warned)
 
-        core.Trigger.fire("file_deleted")
-        core.Trigger.fire("file_deleted")
-        core.Trigger.fire("file_deleted")
+        aliased.fire(self.OLD)
+        aliased.fire(self.OLD)
+        aliased.fire(self.OLD)
 
         assert warned.call_count == 1
         message = str(warned.call_args)
-        assert "file_deleted" in message
-        assert "profile_write_failed" in message
+        assert self.OLD in message
+        assert self.NEW in message
+
+    def test_file_deleted_is_a_real_deletion_again(self, trigger_cls, monkeypatch):
+        """The retired entry: `file_deleted` reaches its own name and nothing else.
+
+        The alias `file_deleted -> profile_write_failed` lived through v2.8.7 to
+        v2.8.11 and was retired 2026-09-28 (compass 485): the two fires left
+        under the old name, aipass install.py and daemon timer_install.py, are
+        real unlinks, and delivering them as a failed profile write was a lie.
+        Red first on the tree that still held the entry.
+        Mutant 2026-09-28: the entry put back in the table reddens this.
+        """
+        warned = MagicMock()
+        monkeypatch.setattr(core.logger, "warning", warned)
+        deleted = MagicMock()
+        write_failed = MagicMock()
+        trigger_cls.on("file_deleted", deleted)
+        trigger_cls.on("profile_write_failed", write_failed)
+
+        summary = trigger_cls.fire("file_deleted", path="unit.service")
+
+        assert summary["event"] == "file_deleted"
+        assert deleted.call_args_list == [call(path="unit.service", fire_event=trigger_cls.fire)]
+        write_failed.assert_not_called()
+        warned.assert_not_called()
 
     def test_an_unaliased_event_passes_straight_through(self, trigger_cls):
         """The table is a rename list, not a whitelist — everything else is untouched."""
@@ -955,10 +1011,11 @@ def test_a_handler_registered_here_is_visible_through_a_fresh_import(trigger_cls
     This is the failure a fork would actually cause — worth pinning directly,
     because an identity assertion alone tells you nothing about what breaks.
     """
-    from aipass.trigger.apps.modules.core import Trigger as reimported
+    reimported = ReimportedTrigger
 
     handler = MagicMock()
     trigger_cls.on("identity_probe", handler)
 
-    assert "identity_probe" in reimported._handlers
-    assert handler in reimported._handlers["identity_probe"]
+    reimported.fire("identity_probe")
+
+    assert handler.call_args_list == [call(fire_event=reimported.fire)]

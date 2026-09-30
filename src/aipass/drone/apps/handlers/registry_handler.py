@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.2.1
+# Version: 1.2.4
 # Created: 2026-03-09
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -286,6 +286,17 @@ def reset_registry_path() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _read_registry_json(registry_path: Path) -> Any:
+    """Open and parse one registry file; every error is the caller's to name.
+
+    The product has no reason of its own for this name; _load_registry_data
+    could open inline. The reason is the test: a read the OS refuses is
+    supplied here, not by replacing builtins.open for the whole process.
+    """
+    with open(registry_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
     """Read, parse, and normalize a registry file.
 
@@ -304,8 +315,7 @@ def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
         )
 
     try:
-        with open(registry_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = _read_registry_json(registry_path)
     except PermissionError as e:
         raise RegistryPermissionError(f"Permission denied reading registry: {e}")
     except json.JSONDecodeError as e:
@@ -376,8 +386,28 @@ def load_registry() -> Dict[str, Any]:
     return data
 
 
-def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]:
+def _fleet_gateway() -> Any:
+    """@memory's fleet gateway module, imported at CALL time and never at module level.
+
+    A failure anywhere in @memory's import chain must cost the external tier,
+    not every import of drone (see external_branches, which calls this inside
+    its guard). That call-time import is the product reason; it could sit
+    inline in the guard. Its own name is for the test: a module that will not
+    import is supplied here, not by replacing the interpreter's __import__ for
+    the whole process.
+    """
+    from aipass.memory.apps.modules import fleet
+
+    return fleet
+
+
+def external_branches(repo_root: Optional[Path] = None) -> Optional[List[Dict[str, Any]]]:
     """Citizens in declared roots, in DECLARATION ORDER, as registry entries.
+
+    Returns None when the tier is LOST (no project root to scope it, or the
+    gateway raised), and [] when the tier answered and declares nobody. None is
+    never a success answer, so a caller can tell the two apart; the lookups
+    below read it through _external_branches, where a lost tier is no externals.
 
     Consumes @memory's public gateway and never reads AIPASS_ROOTS.json — the
     file has exactly one reader and it is theirs. A second reader here would be
@@ -390,7 +420,7 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
     different rule would mean ``@wren`` resolving by one law and ``@memory`` by
     another.
 
-    Returns [] and says so LOUDLY when the gateway fails. An empty declared-roots
+    Returns None and says so LOUDLY when the gateway fails. An empty declared-roots
     file is a legal state and silent; another branch's module raising is not.
     """
     # Scoped to the project being resolved AGAINST, not to this checkout.
@@ -408,7 +438,7 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
             repo_root = get_registry_path().parent
         except Exception as exc:
             logger.warning("External tier: cannot locate a project root to scope declared roots: %s", exc)
-            return []
+            return None
 
     # Imported HERE, not at module level, and the import sits INSIDE the guard.
     # A module-level import made every failure in @memory's import chain a
@@ -425,16 +455,14 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
     # suite patches with patch.object(fleet, ...) — a call-time import is not a
     # fresh one.
     try:
-        from aipass.memory.apps.modules import fleet
-
-        records = fleet.external_branches(repo_root, name_from="registry")
+        records = _fleet_gateway().external_branches(repo_root, name_from="registry")
     except Exception as exc:
         logger.error(
             "External tier unavailable — @memory's fleet gateway raised: %s. "
             "Local and AIPASS_HOME resolution continue; declared-root citizens do not resolve.",
             exc,
         )
-        return []
+        return None
 
     entries: List[Dict[str, Any]] = []
     for record in records:
@@ -455,6 +483,16 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
             }
         )
     return entries
+
+
+def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """The lookups' view of the tier: a lost tier is no externals, never a crash.
+
+    external_branches has already logged the loss at ERROR; local and
+    AIPASS_HOME resolution go on without the declared roots.
+    """
+    tier = external_branches(repo_root)
+    return [] if tier is None else tier
 
 
 def _external_registry_path(entry: Dict[str, Any]) -> Optional[Path]:

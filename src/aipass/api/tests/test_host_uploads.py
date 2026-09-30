@@ -3,36 +3,41 @@
 # Description: Tests for the host API photo lane — bytes onto disk, named by the server
 # Version: 1.0.0
 # Created: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the Photo Lane
+"""Tests for apps/handlers/host/uploads.py and its POST /v1/files/upload route."""
 
-DPLAN-0300 Round 20. `POST /v1/files/upload` writes one image to disk and
-returns its absolute path — and that path is the entire product of the route,
-because the phone types it into the open attach socket and @baud's
-`deliverPaths` does the rest.
+# Tests for the Photo Lane
+#
+# DPLAN-0300 Round 20. `POST /v1/files/upload` writes one image to disk and
+# returns its absolute path — and that path is the entire product of the route,
+# because the phone types it into the open attach socket and @baud's
+# `deliverPaths` does the rest.
+#
+# THE THING THIS LANE COULD GET WRONG IS NOT "does the file arrive":
+#
+#   1. **Letting the caller name the file.** An upload's filename is
+#      attacker-controlled and there is no sanitiser worth trusting against every
+#      form of `../`. So the name is not cleaned — it is never read. These tests
+#      send hostile filenames and assert the bytes land under a generated name
+#      anyway, and that nothing appears outside the upload directory.
+#
+#   2. **Believing the Content-Type.** A header costs nothing to write. The magic
+#      bytes decide both acceptance and extension, so a `.png` on disk can never
+#      hold something that is not a PNG.
+#
+#   3. **Truncating instead of refusing.** A truncated image is not a smaller
+#      image, it is a corrupt one wearing a success response.
+#
+# Real files in a real tmp directory throughout. The interesting failures here are
+# filesystem-shaped — a partial file left behind, a mode set after creation, a
+# collision inside one second — and a mocked filesystem invents its way past all
+# three.
 
-THE THING THIS LANE COULD GET WRONG IS NOT "does the file arrive":
-
-  1. **Letting the caller name the file.** An upload's filename is
-     attacker-controlled and there is no sanitiser worth trusting against every
-     form of `../`. So the name is not cleaned — it is never read. These tests
-     send hostile filenames and assert the bytes land under a generated name
-     anyway, and that nothing appears outside the upload directory.
-
-  2. **Believing the Content-Type.** A header costs nothing to write. The magic
-     bytes decide both acceptance and extension, so a `.png` on disk can never
-     hold something that is not a PNG.
-
-  3. **Truncating instead of refusing.** A truncated image is not a smaller
-     image, it is a corrupt one wearing a success response.
-
-Real files in a real tmp directory throughout. The interesting failures here are
-filesystem-shaped — a partial file left behind, a mode set after creation, a
-collision inside one second — and a mocked filesystem invents its way past all
-three.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — handlers/host/attach.py, where the path goes; tests/test_host_attach.py
+# seedgo: no-test-needed(covered_elsewhere) — token issue and check in host_tokens; tests/test_host_token_store.py
 
 import os
 import stat
@@ -462,7 +467,7 @@ class TestWhereImagesLand:
         with patch.dict(os.environ, {"XDG_PICTURES_DIR": str(tmp_path / "Bilder")}, clear=False):
             assert host_uploads.upload_root() == tmp_path / "Bilder" / "BAUD"
 
-    def test_a_relocated_pictures_directory_is_honoured(self, tmp_path: Path) -> None:
+    def test_a_relocated_pictures_directory_is_honoured(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """
         Read from the XDG config the way Tauri's picture_dir() does, so a
         machine with a relocated or non-English Pictures folder does not end up
@@ -472,22 +477,24 @@ class TestWhereImagesLand:
         config.mkdir()
         (config / "user-dirs.dirs").write_text('XDG_PICTURES_DIR="$HOME/Billeder"\n', encoding="utf-8")
 
-        env = {"HOME": str(tmp_path)}
-        with patch.dict(os.environ, env, clear=False):
-            os.environ.pop("XDG_PICTURES_DIR", None)
-            with patch.object(Path, "home", lambda: tmp_path):
-                assert host_uploads.upload_root() == tmp_path / "Billeder" / "BAUD"
+        # A home of our own, the way the host names one: HOME on POSIX,
+        # USERPROFILE on Windows. Nothing in pathlib is replaced.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
 
-    def test_the_fallback_needs_no_platform_branch(self, tmp_path: Path) -> None:
+        assert host_uploads.upload_root() == tmp_path / "Billeder" / "BAUD"
+
+    def test_the_fallback_needs_no_platform_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """
         ~/Pictures is also the right answer on Windows and macOS, which is why
         there is no platform check here to get wrong.
         """
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("XDG_PICTURES_DIR", None)
-            with patch.object(Path, "home", lambda: tmp_path):
-                with patch.object(host_uploads, "_pictures_from_user_dirs", lambda: None):
-                    assert host_uploads.upload_root() == tmp_path / "Pictures" / "BAUD"
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
+
+        assert host_uploads.upload_root() == tmp_path / "Pictures" / "BAUD"
 
     def test_reading_the_root_creates_nothing(self, tmp_path: Path) -> None:
         """
@@ -499,14 +506,23 @@ class TestWhereImagesLand:
 
         assert not root.exists()
 
-    def test_an_unreadable_xdg_config_falls_back_rather_than_raising(self, tmp_path: Path) -> None:
+    def test_an_unreadable_xdg_config_falls_back_rather_than_raising(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """
         Most machines have no such file. That is the normal case, not an error,
         and an upload lane that refused to work without one would be broken on
         every fresh install.
         """
-        with patch.object(Path, "home", lambda: tmp_path / "nowhere"):
-            assert host_uploads._pictures_from_user_dirs() is None
+        config = tmp_path / ".config"
+        config.mkdir()
+        # Not text at all: the read fails on every host the same way.
+        (config / "user-dirs.dirs").write_bytes(b"\xff\xfe\xfa not utf-8")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
+
+        assert host_uploads.upload_root() == tmp_path / "Pictures" / "BAUD"
 
 
 # ==============================================

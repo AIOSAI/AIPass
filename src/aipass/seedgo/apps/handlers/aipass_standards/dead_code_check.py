@@ -27,6 +27,8 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
 
+# APPLIES_TO: pytest calls test functions by discovery, so every one would read unreferenced.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "branch_level"
 
 # Directories to skip when collecting source files

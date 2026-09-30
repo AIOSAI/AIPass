@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Entry point CLI for drone @daemon
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -30,7 +30,7 @@ if sys.platform == "win32":
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # Console
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import (
     UnknownArgument,
@@ -82,6 +82,12 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
     Returns:
         True if command was handled, False otherwise
+
+    Exits:
+        An exception raised by a module stops routing: no later module is asked,
+        error() names the verb ("<command> failed: <exception>"), and the process
+        exits 1 (sys.exit). An UnknownArgument refusal names the verb and the
+        token and exits 1 the same way.
     """
     for module in modules:
         try:
@@ -94,8 +100,13 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
         except UnknownArgument as refusal:
             error(f"{refusal.verb}: unknown argument '{refusal.token}'", refusal.usage or None)
             sys.exit(1)
+        # Every module refuses a verb it does not own before doing any work, so an
+        # exception here comes from the module that owns the verb: name it and stop.
+        # Moving on to the next module reported the verb as "Unknown command".
         except Exception as e:
-            logger.error(f"[DAEMON] Module {module.__name__} error: {e}")
+            logger.error(f"[DAEMON] Module {module.__name__} error: {e}", exc_info=True)
+            error(f"{command} failed: {e}")
+            sys.exit(1)
 
     return False
 
@@ -213,7 +224,16 @@ def print_help(modules: List[Any]):
 
 
 def main():
-    """Main entry point - routes commands or shows help"""
+    """Main entry point - routes commands or shows help.
+
+    The exit seam: the failed flag error() sets is reset on entry, so a run never
+    inherits an earlier command's verdict, and a routed command answers
+    resolve_exit(handled): 0 clean, 2 routed but a failure went through error(),
+    1 not routed. The systemd tick's red exit for a failed job is run's own
+    sys.exit(1), and a tick calls no error() on a job failure, so this seam does
+    not turn an ordinary failed job into a failing unit.
+    """
+    reset_command_state()
 
     # Get available modules
     modules = get_modules()
@@ -254,14 +274,14 @@ def main():
     json_handler.log_operation("daemon_command", {"command": command})
 
     # Route to modules
-    if route_command(command, remaining_args, modules):
+    handled = route_command(command, remaining_args, modules)
+    if handled:
         logger.info("[DAEMON] Command routed successfully: %s", command)
-        return 0
     else:
         console.print()
         error(f"Unknown command: {command}", suggestion="Run 'drone @daemon --help' for available commands")
         console.print()
-        return 1
+    return resolve_exit(handled)
 
 
 if __name__ == "__main__":

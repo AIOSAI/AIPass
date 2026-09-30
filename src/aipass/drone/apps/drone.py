@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.2.2
+# Version: 1.2.5
 # Created: 2026-03-05
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -261,13 +261,30 @@ def _handle_systems() -> int:
             console.print("[dim]Only local registry found. To access AIPass core branches:[/dim]")
             console.print("[dim]  export AIPASS_HOME=/path/to/AIPass[/dim]")
 
+    # A lost routing_config.json empties the external modules; the list above is
+    # partial, so say so where the caller is. Exit stays 0, as for scan.
+    from aipass.drone.apps.modules.module_registry import external_modules_error
+
+    error = external_modules_error()
+    if error:
+        err_console.print(f"drone: external modules could not load: {error}", markup=False)
+
     return 0
+
+
+def _module_unavailable(name: str, why: str) -> int:
+    """Name a registered module that cannot run, on stderr; the exit code is 1."""
+    err_console.print(f"drone: module @{name} is registered but not available: {why}")
+    return 1
 
 
 def _handle_module(name: str, args: List[str]) -> int:
     """Handle routing to an internal module."""
     if not args:
         intro_text = get_module_introspective(name)
+        if intro_text is None:
+            # None is the handler's "the adapter could not load"; "" is a quiet module.
+            return _module_unavailable(name, "it could not load (see drone log)")
         if intro_text:
             # Text.from_ansi handles both pre-formatted ANSI (external modules)
             # and plain text (internal modules) correctly
@@ -278,6 +295,8 @@ def _handle_module(name: str, args: List[str]) -> int:
 
     if args == ["--help"]:
         help_text = get_module_help(name)
+        if help_text is None:
+            return _module_unavailable(name, "it could not load (see drone log)")
         if help_text:
             console.print(Text.from_ansi(help_text), end="")
         else:
@@ -291,8 +310,7 @@ def _handle_module(name: str, args: List[str]) -> int:
         result = route_module_command(name, command, cmd_args)
     except (ImportError, AttributeError) as exc:
         logger.error("Module @%s not available: %s", name, exc)
-        err_console.print(f"drone: module @{name} is registered but not available: {exc}")
-        return 1
+        return _module_unavailable(name, str(exc))
 
     if result.get("stdout"):
         sys.stdout.write(result["stdout"])
@@ -379,7 +397,14 @@ def _handle_custom_command(args: list[str]) -> int:
     """
     from aipass.drone.apps.modules.commands import match
 
-    matched = match(args)
+    # A command registry that cannot load (its heal failed) is a failure to
+    # name, never "no match" and never a traceback for whoever typed the word.
+    try:
+        matched = match(args)
+    except Exception as exc:
+        logger.error("[drone] command registry could not load: %s", exc)
+        err_console.print(f"drone: command registry could not load: {exc}")
+        return 1
     if matched is None:
         return -1  # Signal: not a custom command
 

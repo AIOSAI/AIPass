@@ -149,6 +149,7 @@ def scan_plan_files_impl(
             logger.warning(f"[{MODULE_NAME}] Error during scan: {error}")
 
     # Use os.walk() with error handling
+    found: List[Tuple[Tuple[str, str], Path]] = []
     for root, dirs, files in os.walk(str(ecosystem_root), topdown=True, onerror=handle_walk_error):
         # Skip ignored directories (modify dirs in-place to prevent descent).
         # Exact-name match — substring match ("dev" in "devpulse", "sys" in "system_logs")
@@ -159,22 +160,31 @@ def scan_plan_files_impl(
         for filename in files:
             match = PLAN_PATTERN.match(filename)
             if match:
-                file_path = Path(root) / filename
                 # Keyed by (prefix, number), never the bare number. Every type
                 # numbers from 0001, so APLAN-0007 and FPLAN-0007 are two
                 # different plans -- a number-only key called them one plan
                 # filed twice and sent the loser to be renamed on disk.
                 # heal_registry._build_plan_file_index keys the same way.
-                plan_key = (match.group(1), match.group(2))
+                found.append(((match.group(1), match.group(2)), Path(root) / filename))
 
-                # Duplicate detection -- same TYPE and same number
-                if plan_key in plan_files:
-                    if plan_key not in duplicates:
-                        duplicates[plan_key] = [plan_files[plan_key]]
-                    duplicates[plan_key].append(file_path)
-                    logger.warning(f"[{MODULE_NAME}] Duplicate plan {filename} found: {file_path}")
-                else:
-                    plan_files[plan_key] = file_path
+    # Sort by path before deciding anything. os.walk yields directories and
+    # their files in OS order, so "keep the first occurrence" used to hand the
+    # number to whichever file the filesystem happened to name first -- the same
+    # tree renamed a different file on a different run, and a live plan could be
+    # the one renamed. heal_registry._build_plan_file_index sorts for the same
+    # reason. This does not decide the RIGHT keeper (the registry is not
+    # consulted here, and it holds one type only), just the same one every run.
+    found.sort(key=lambda entry: str(entry[1]))
+
+    for plan_key, file_path in found:
+        # Duplicate detection -- same TYPE and same number
+        if plan_key in plan_files:
+            if plan_key not in duplicates:
+                duplicates[plan_key] = [plan_files[plan_key]]
+            duplicates[plan_key].append(file_path)
+            logger.warning(f"[{MODULE_NAME}] Duplicate plan {file_path.name} found: {file_path}")
+        else:
+            plan_files[plan_key] = file_path
 
     # Auto-renumber duplicates (keep first, renumber rest)
     renumbered: List[Dict[str, str]] = []

@@ -1,9 +1,15 @@
-"""Tests for plan handler functions in aipass.flow.apps.handlers.plan.*
+# =================== AIPass ====================
+# Name: test_plan_handlers.py
+# Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
+# Version: 1.0.0
+# Created: 2026-04-05
+# Modified: 2026-09-28
+# =============================================
 
-Covers: slugify_subject, create_plan_impl, create_plan_file,
-        build_plan_registry_entry, calculate_relative_location,
-        resolve_plan_location, auto_close_orphaned_plans, get_closed_plans.
-"""
+"""Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import os
 import tempfile
@@ -11,12 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-#: The platform's temp directory, never a POSIX literal. These paths are only
-#: ever handed to MagicMocks - nothing here touches the disk - but a hardcoded
-#: /tmp still reads as a POSIX-only test to anyone porting the suite, and
-#: seedgo's windows_compat rule says so out loud.
-_TMP = Path(tempfile.gettempdir())
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Module imports
@@ -28,6 +29,12 @@ from aipass.flow.apps.handlers.plan.calculate_relative_path import calculate_rel
 from aipass.flow.apps.handlers.plan.resolve_location import resolve_plan_location
 from aipass.flow.apps.handlers.plan.auto_cleanup import auto_close_orphaned_plans
 from aipass.flow.apps.handlers.plan.get_closed_plans import get_closed_plans
+
+#: The platform's temp directory, never a POSIX literal. These paths are only
+#: ever handed to MagicMocks - nothing here touches the disk - but a hardcoded
+#: /tmp still reads as a POSIX-only test to anyone porting the suite, and
+#: seedgo's windows_compat rule says so out loud.
+_TMP = Path(tempfile.gettempdir())
 
 # The json_handler module object used to be bound here, deliberately, so that a
 # neighbour evicting it from sys.modules could not make a string-path patch land
@@ -270,7 +277,7 @@ class TestResolvePlanLocation:
             "aipass.flow.apps.handlers.plan.resolve_location._get_caller_cwd",
             return_value=tmp_path,
         ):
-            success, _, error = resolve_plan_location("/no/such/place", tmp_path)
+            success, _, error = resolve_plan_location(str(tmp_path / "no" / "such" / "place"), tmp_path)
 
         assert success is False
         assert "does not exist" in error
@@ -468,16 +475,18 @@ class TestGetClosedPlans:
         empty list passed it having checked nothing at all - the exact defect the
         unit exists to catch. mock_registry holds three plans of which exactly
         one is closed, so the floor is a measured 1, not a truthiness check.
+        Mutant: append((plan_num, ...)) -> append((str(len(closed_plans)), ...)) reddens this.
         """
         _, registry = mock_registry
         with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
             result = get_closed_plans()
 
         assert len(result) == 1
-        for plan_num, plan_info in result:
-            assert isinstance(plan_num, str)
-            assert isinstance(plan_info, dict)
-            assert "subject" in plan_info
+        # The pair is the closed row's registry KEY and ITS info, not just any str/dict.
+        plan_num, plan_info = result[0]
+        assert plan_num == "2"
+        assert plan_info["subject"] == "Closed plan"
+        assert plan_info["closed_reason"] == "completed"
 
 
 # =========================================================================
@@ -510,6 +519,12 @@ class TestGetClosedPlans:
 class TestCreatePlanImpl:
     """Tests for create_plan_impl()."""
 
+    @pytest.fixture(autouse=True)
+    def bus(self):
+        """Stand in for the trigger bus where it lives, so no real plan_created is fired."""
+        with patch("aipass.trigger.apps.modules.core.trigger") as fake:
+            yield fake
+
     def _make_deps(self, **overrides) -> dict:
         """Build a complete set of MagicMock dependencies for create_plan_impl."""
         registry = {"next_number": 1, "plans": {}}
@@ -533,8 +548,8 @@ class TestCreatePlanImpl:
         return deps
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_successful_creation(self, mock_log, mock_jh):
+    def test_successful_creation(self, mock_jh, bus):
+        """Mutant: plan_number=NEXT_NUM -> plan_number=NEXT_NUM + 1 reddens this."""
         deps = self._make_deps()
         success, plan_num, loc, tmpl, err, msgs = create_plan_impl(
             location=str(_TMP / "plans"),
@@ -549,10 +564,10 @@ class TestCreatePlanImpl:
         assert err == ""
         deps["create_plan_file"].assert_called_once()
         deps["save_registry"].assert_called()
+        bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="Widget feature")
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_missing_dependency_returns_failure(self, mock_log, mock_jh):
+    def test_missing_dependency_returns_failure(self, mock_jh):
         deps = self._make_deps()
         deps["get_template"] = None  # Missing dep
 
@@ -563,22 +578,20 @@ class TestCreatePlanImpl:
         assert "get_template" in err
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_location_resolution_failure(self, mock_log, mock_jh):
+    def test_location_resolution_failure(self, mock_jh, tmp_path):
         deps = self._make_deps(
             resolve_plan_location=MagicMock(
                 return_value=(False, _TMP, "Dir not found"),
             ),
         )
 
-        success, _, _, _, err, _ = create_plan_impl(location="/bad/path", subject="test", **deps)
+        success, _, _, _, err, _ = create_plan_impl(location=str(tmp_path / "bad" / "path"), subject="test", **deps)
 
         assert success is False
         assert err == "Dir not found"
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_file_creation_failure(self, mock_log, mock_jh):
+    def test_file_creation_failure(self, mock_jh):
         deps = self._make_deps(
             create_plan_file=MagicMock(return_value=(False, "File exists")),
         )
@@ -589,8 +602,8 @@ class TestCreatePlanImpl:
         assert err == "File exists"
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_auto_cleanup_runs_and_saves(self, mock_log, mock_jh):
+    def test_auto_cleanup_runs_and_saves(self, mock_jh, bus):
+        """Mutant: plan_number=NEXT_NUM -> plan_number=1 reddens this."""
         registry = {"next_number": 5, "plans": {}}
         cleaned_registry = {"next_number": 5, "plans": {}}
         deps = self._make_deps(
@@ -609,11 +622,14 @@ class TestCreatePlanImpl:
         dim_msgs = [m for m in msgs if m.get("type") == "dim" and "AUTO-CLEANUP" in m.get("text", "")]
         assert len(dim_msgs) == 1
         assert "2" in dim_msgs[0]["text"]
+        bus.fire.assert_called_once_with("plan_created", plan_number=5, location="plans", subject="test")
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_plan_type_config_used(self, mock_log, mock_jh):
-        """Plan type config controls prefix, digits, slug length."""
+    def test_plan_type_config_used(self, mock_jh, bus):
+        """Plan type config controls prefix, digits, slug length.
+
+        Mutant: subject=subject -> subject=subject[:20] reddens this.
+        """
         deps = self._make_deps()
         config = {
             "prefix": "DPLAN",
@@ -632,10 +648,12 @@ class TestCreatePlanImpl:
         call_args = deps["create_plan_file"].call_args
         plan_file_path: Path = call_args[0][0]
         assert plan_file_path.name.startswith("DPLAN-001")
+        bus.fire.assert_called_once_with(
+            "plan_created", plan_number=1, location="plans", subject="Testing custom config"
+        )
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_template_exception_returns_failure(self, mock_log, mock_jh):
+    def test_template_exception_returns_failure(self, mock_jh):
         deps = self._make_deps(
             get_template=MagicMock(side_effect=ValueError("bad template")),
         )
@@ -646,8 +664,8 @@ class TestCreatePlanImpl:
         assert "Failed to load template" in err
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_dashboard_failure_does_not_block_success(self, mock_log, mock_jh):
+    def test_dashboard_failure_does_not_block_success(self, mock_jh, bus):
+        """Mutant: location=RELATIVE_LOCATION -> location=str(target_dir) reddens this."""
         deps = self._make_deps(
             update_dashboard_local=MagicMock(return_value=False),
             push_to_plans_central=MagicMock(return_value=False),
@@ -658,10 +676,58 @@ class TestCreatePlanImpl:
 
         assert success is True
         assert err == ""
+        bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="test")
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_empty_subject_produces_filename_without_slug(self, mock_log, mock_jh):
+    def test_a_failed_branch_push_is_not_reported_as_no_dashboard(self, mock_jh, bus):
+        """The push's False (it broke) warns; only its None (no dashboard) says no branch tracks the plan.
+
+        Mutant: if branch_dashboard_success is None: -> if not branch_dashboard_success: reddens this.
+        """
+        deps = self._make_deps(push_flow_to_branch_dashboard=MagicMock(return_value=False))
+
+        success, _, _, _, _, msgs = create_plan_impl(subject="test", **deps)
+
+        assert success is True
+        texts = [m["text"] for m in msgs if m.get("type") in ("dim", "warning")]
+        assert not any("No branch dashboard" in t for t in texts)
+        assert any("Failed to push flow section to branch dashboard" in t for t in texts)
+
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
+    def test_no_branch_dashboard_is_said_as_such(self, mock_jh, bus):
+        """The push's None: no dashboard there, so no branch is tracking the plan.
+
+        A guard: the product before leg 3 said the same for its False, so this
+        does not tell old from new; its proof is its mutant.
+        Mutant: `if branch_dashboard_success is None:` -> `if branch_dashboard_success is False:` reddens this.
+        """
+        deps = self._make_deps(push_flow_to_branch_dashboard=MagicMock(return_value=None))
+
+        success, _, _, _, _, msgs = create_plan_impl(subject="test", **deps)
+
+        assert success is True
+        dims = [m["text"] for m in msgs if m.get("type") == "dim"]
+        assert any("No branch dashboard" in t and "no branch is tracking this plan" in t for t in dims)
+
+    @pytest.mark.parametrize("answer, failed", [(None, False), (False, True)])
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
+    def test_no_local_dashboard_is_not_logged_as_a_failure(self, mock_jh, answer, failed, bus, mock_logger):
+        """update_dashboard_local's None means flow has no dashboard, not a failure; its False warns.
+
+        Mutant: `if dashboard_success is False:` -> `if not dashboard_success:` reddens the None case.
+        """
+        deps = self._make_deps(update_dashboard_local=MagicMock(return_value=answer))
+
+        success, _, _, _, _, _ = create_plan_impl(subject="test", **deps)
+
+        assert success is True
+        deps["update_dashboard_local"].assert_called_once_with()
+        warned = [str(c.args[0]) for c in mock_logger.warning.call_args_list]
+        assert any("Failed to update DASHBOARD.local.json" in w for w in warned) is failed
+
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
+    def test_empty_subject_produces_filename_without_slug(self, mock_jh, bus):
+        """Mutant: subject=subject) -> subject=subject or "untitled") reddens this."""
         deps = self._make_deps()
 
         success, _, _, _, _, _ = create_plan_impl(subject="", **deps)
@@ -674,11 +740,14 @@ class TestCreatePlanImpl:
         assert name.startswith("FPLAN-0001_")
         # Should not have double underscores from empty slug
         assert "__" not in name
+        bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="")
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_registry_save_failure_warns_but_returns_success(self, mock_log, mock_jh):
-        """Plan is created even if registry save fails (file already on disk)."""
+    def test_registry_save_failure_warns_but_returns_success(self, mock_jh, bus):
+        """Plan is created even if registry save fails (file already on disk).
+
+        Mutant: trigger.fire("plan_created" -> trigger.fire("plan_saved" reddens this.
+        """
         save_mock = MagicMock(side_effect=[True, False])  # First for auto-close, second for plan
         deps = self._make_deps(
             auto_close_orphaned_plans=MagicMock(
@@ -692,3 +761,4 @@ class TestCreatePlanImpl:
         assert success is True
         warning_msgs = [m for m in msgs if m.get("type") == "warning"]
         assert len(warning_msgs) >= 1
+        bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="test")

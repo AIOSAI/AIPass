@@ -1,4 +1,19 @@
-"""Tests for wire_verify module — provider ↔ project hook wiring checker."""
+# =================== AIPass ====================
+# Name: test_wire_verify.py
+# Version: 1.0.1
+# Description: Tests for wire_verify module — provider ↔ project hook wiring checker
+# Branch: hooks
+# Created: 2026-07-09
+# Modified: 2026-09-28
+# =============================================
+
+"""Tests for apps/modules/wire_verify.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that wire_verify.py parses and imports, ruff and collection cover it
+# seedgo: no-test-needed(documentation) — verify_wiring()'s and handle_command()'s docstrings, the documentation checker
+# seedgo: no-test-needed(constant) — HELP_COMMANDS' entries and _META_KEYS' members, fixed literals
+# seedgo: no-test-needed(stdlib) — json.loads' parsing of the settings file, the stdlib's own
 
 import json
 from unittest.mock import patch
@@ -212,7 +227,7 @@ class TestCheckEventWiring:
 class TestVerifyWiring:
     def test_all_good(self, tmp_path):
         settings = tmp_path / "settings.json"
-        settings.write_text(json.dumps({"hooks": GOOD_PROVIDER}))
+        settings.write_text(json.dumps({"hooks": GOOD_PROVIDER}), encoding="utf-8")
         result = wire_verify.verify_wiring(provider_path=settings, project_config=GOOD_PROJECT)
         assert result["ok"] is True
         assert result["errors"] == []
@@ -220,7 +235,7 @@ class TestVerifyWiring:
     def test_empty_provider_array(self, tmp_path):
         provider = {**GOOD_PROVIDER, "SessionStart": []}
         settings = tmp_path / "settings.json"
-        settings.write_text(json.dumps({"hooks": provider}))
+        settings.write_text(json.dumps({"hooks": provider}), encoding="utf-8")
         project = {
             **GOOD_PROJECT,
             "SessionStart": {
@@ -241,7 +256,7 @@ class TestVerifyWiring:
 
     def test_no_project_config(self, tmp_path):
         settings = tmp_path / "settings.json"
-        settings.write_text(json.dumps({"hooks": GOOD_PROVIDER}))
+        settings.write_text(json.dumps({"hooks": GOOD_PROVIDER}), encoding="utf-8")
         with patch.object(wire_verify, "find_project_config", return_value=None):
             result = wire_verify.verify_wiring(provider_path=settings)
         assert result["ok"] is False
@@ -254,7 +269,7 @@ class TestVerifyWiring:
             ],
         }
         settings = tmp_path / "settings.json"
-        settings.write_text(json.dumps({"hooks": provider}))
+        settings.write_text(json.dumps({"hooks": provider}), encoding="utf-8")
         project = {
             "hooks_enabled": True,
             "UserPromptSubmit": {
@@ -268,7 +283,7 @@ class TestVerifyWiring:
 
     def test_provider_wired_false_now_errors(self, tmp_path):
         settings = tmp_path / "settings.json"
-        settings.write_text(json.dumps({"hooks": GOOD_PROVIDER}))
+        settings.write_text(json.dumps({"hooks": GOOD_PROVIDER}), encoding="utf-8")
         project = {
             **GOOD_PROJECT,
             "UserPromptSubmit": {
@@ -289,7 +304,7 @@ class TestVerifyWiring:
             ],
         }
         settings = tmp_path / "settings.json"
-        settings.write_text(json.dumps({"hooks": provider}))
+        settings.write_text(json.dumps({"hooks": provider}), encoding="utf-8")
         project = {
             **GOOD_PROJECT,
             "PreCompact": {
@@ -303,13 +318,13 @@ class TestVerifyWiring:
     def test_provider_only_event_info(self, tmp_path):
         provider = {**GOOD_PROVIDER, "CustomEvent": [_provider_entry("CustomEvent")]}
         settings = tmp_path / "settings.json"
-        settings.write_text(json.dumps({"hooks": provider}))
+        settings.write_text(json.dumps({"hooks": provider}), encoding="utf-8")
         result = wire_verify.verify_wiring(provider_path=settings, project_config=GOOD_PROJECT)
         assert any("provider-only" in i for i in result["info"])
 
     def test_meta_keys_ignored(self, tmp_path):
         settings = tmp_path / "settings.json"
-        settings.write_text(json.dumps({"hooks": GOOD_PROVIDER}))
+        settings.write_text(json.dumps({"hooks": GOOD_PROVIDER}), encoding="utf-8")
         project = {**GOOD_PROJECT, "_comment": "test", "hooks_enabled": True}
         result = wire_verify.verify_wiring(provider_path=settings, project_config=project)
         assert result["ok"] is True
@@ -318,7 +333,7 @@ class TestVerifyWiring:
 class TestReadProviderHooks:
     def test_reads_file(self, tmp_path):
         settings = tmp_path / "settings.json"
-        settings.write_text(json.dumps({"hooks": {"Stop": []}}))
+        settings.write_text(json.dumps({"hooks": {"Stop": []}}), encoding="utf-8")
         result = wire_verify._read_provider_hooks(settings)
         assert "Stop" in result
 
@@ -328,7 +343,7 @@ class TestReadProviderHooks:
 
     def test_malformed_json_returns_empty(self, tmp_path):
         settings = tmp_path / "settings.json"
-        settings.write_text("not json{{{")
+        settings.write_text("not json{{{", encoding="utf-8")
         result = wire_verify._read_provider_hooks(settings)
         assert result == {}
 
@@ -337,16 +352,26 @@ class TestHandleCommand:
     def test_returns_false_for_non_verify(self):
         assert wire_verify.handle_command("status", []) is False
 
-    def test_routes_verify(self):
+    def test_routes_verify(self, capsys):
         mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
-        with patch.object(wire_verify, "verify_wiring", return_value=mock_result):
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
+        mock_verify.assert_called_once_with()
+        err = capsys.readouterr().err
+        assert "Wire check passed" in err
+        assert "0 errors, 0 warnings" in err
 
-    def test_help_flag(self):
-        assert wire_verify.handle_command("verify", ["--help"]) is True
+    def test_help_flag(self, capsys):
+        with patch.object(wire_verify, "verify_wiring") as mock_verify:
+            assert wire_verify.handle_command("verify", ["--help"]) is True
+        mock_verify.assert_not_called()
+        assert "Exits non-zero on any ERROR finding." in capsys.readouterr().err
 
-    def test_help_word(self):
-        assert wire_verify.handle_command("verify", ["help"]) is True
+    def test_help_word(self, capsys):
+        with patch.object(wire_verify, "verify_wiring") as mock_verify:
+            assert wire_verify.handle_command("verify", ["help"]) is True
+        mock_verify.assert_not_called()
+        assert "Exits non-zero on any ERROR finding." in capsys.readouterr().err
 
     def test_error_findings_exit_non_zero(self):
         """Its own --help promises 'Exits non-zero on any ERROR finding' — keep that promise.
@@ -363,38 +388,44 @@ class TestHandleCommand:
                 wire_verify.handle_command("verify", [])
         assert exc.value.code != 0
 
-    def test_clean_run_does_not_exit(self):
+    def test_clean_run_does_not_exit(self, capsys):
         """The passing path must stay a normal return — only ERROR findings exit."""
         mock_result = {"ok": True, "errors": [], "warnings": ["cosmetic"], "info": []}
-        with patch.object(wire_verify, "verify_wiring", return_value=mock_result):
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
+        mock_verify.assert_called_once_with()
+        err = capsys.readouterr().err
+        assert "Wire check passed" in err
+        assert "cosmetic" in err
+        assert "0 errors, 1 warnings" in err
 
 
 class TestRenderResults:
-    def test_renders_pass(self):
-        from io import StringIO
+    def test_renders_pass(self, capsys):
+        """A pass prints the check glyph and the word passed on the real console (stderr).
 
-        from rich.console import Console
+        The product paints the headline green on a pass and red on a failure; plain
+        text loses that colour, so the glyph that differs (✓ against ✗) is pinned.
+        Proof the pin bites: a mutant that swaps the pass line's ✓ for ✗.
+        """
+        wire_verify._render_results({"ok": True, "errors": [], "warnings": [], "info": ["x"]})
+        err = capsys.readouterr().err
+        assert "✓ Wire check passed" in err
+        assert "✗" not in err
+        assert "OK     x" in err
 
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False)
-        with patch.object(wire_verify, "CONSOLE", test_console):
-            wire_verify._render_results({"ok": True, "errors": [], "warnings": [], "info": ["x"]})
-        output = buf.getvalue()
-        assert "passed" in output
+    def test_renders_fail(self, capsys):
+        """A failure prints the cross glyph, FAILED, and the error under the ERROR word.
 
-    def test_renders_fail(self):
-        from io import StringIO
-
-        from rich.console import Console
-
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False)
-        with patch.object(wire_verify, "CONSOLE", test_console):
-            wire_verify._render_results({"ok": False, "errors": ["bad"], "warnings": [], "info": []})
-        output = buf.getvalue()
-        assert "FAILED" in output
-        assert "bad" in output
+        Plain text loses the red of the headline and of the ERROR tag; the cross
+        glyph (✗ against ✓) and the word ERROR are what still tell it from a pass.
+        Proof the pin bites: a mutant that swaps the fail line's ✗ for ✓.
+        """
+        wire_verify._render_results({"ok": False, "errors": ["bad"], "warnings": [], "info": []})
+        err = capsys.readouterr().err
+        assert "✗ Wire check FAILED" in err
+        assert "✓" not in err
+        assert "ERROR  bad" in err
 
 
 class TestPrintIntrospection:

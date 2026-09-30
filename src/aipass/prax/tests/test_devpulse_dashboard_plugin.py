@@ -1,12 +1,19 @@
 # =================== AIPass ====================
 # Name: test_devpulse_dashboard_plugin.py
 # Description: Tests for devpulse dashboard plugin
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-05-16
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for devpulse dashboard plugin (git, session, dispatch sections + refresh)."""
+"""Tests for apps/plugins/devpulse_dashboard/git_section.py, dispatch_section.py and refresh.py."""
+
+# Tests for devpulse dashboard plugin (git, session, dispatch sections + refresh).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — the builders' write_section, covered by tests/test_operations.py
+# seedgo: no-test-needed(ruff) — that __init__.py's __all__ re-export of refresh names a real import (F822)
+# seedgo: no-test-needed(log_level) — the lines each builder logs on a failure, covered by that row
 
 import json
 from unittest.mock import patch, MagicMock
@@ -42,7 +49,8 @@ def branch_path(tmp_path):
                 "quick_status": {"action_required": False},
                 "sections": {},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     return tmp_path
 
@@ -60,7 +68,7 @@ def branch_with_trinity(branch_path):
             "recently_completed": [],
         },
     }
-    (trinity / "local.json").write_text(json.dumps(local_data))
+    (trinity / "local.json").write_text(json.dumps(local_data), encoding="utf-8")
     return branch_path
 
 
@@ -84,7 +92,7 @@ class TestGitSection:
         assert result is True
 
         # Verify dashboard was written
-        dash = json.loads((branch_with_git / "DASHBOARD.local.json").read_text())
+        dash = json.loads((branch_with_git / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         git = dash["sections"]["git"]
         assert git["managed_by"] == "devpulse"
         assert git["branch"] == "dev"
@@ -109,7 +117,7 @@ class TestGitSection:
         mock_run.side_effect = _responses
         assert git_section.build_git_section(branch_with_git) is True
 
-        dash = json.loads((branch_with_git / "DASHBOARD.local.json").read_text())
+        dash = json.loads((branch_with_git / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         msg = dash["sections"]["git"]["last_commit_msg"]
         assert git_section.SUBJECT_CAP - 4 < len(msg) <= git_section.SUBJECT_CAP
         assert msg.startswith("fix(memory): why")
@@ -167,7 +175,7 @@ class TestDispatchSection:
         result = build_dispatch_section(branch_path)
         assert result is True
 
-        dash = json.loads((branch_path / "DASHBOARD.local.json").read_text())
+        dash = json.loads((branch_path / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         dispatch = dash["sections"]["dispatch"]
         assert dispatch["managed_by"] == "devpulse"
         assert dispatch["agents_active"] == []
@@ -182,12 +190,12 @@ class TestDispatchSection:
         prax_mail = parent / "prax" / ".ai_mail.local"
         prax_mail.mkdir(parents=True, exist_ok=True)
         lock_data = {"pid": 12345, "subject": "Build dashboard view", "started": "2026-05-16T14:00:00"}
-        (prax_mail / ".dispatch.lock").write_text(json.dumps(lock_data))
+        (prax_mail / ".dispatch.lock").write_text(json.dumps(lock_data), encoding="utf-8")
 
         result = build_dispatch_section(branch_path)
         assert result is True
 
-        dash = json.loads((branch_path / "DASHBOARD.local.json").read_text())
+        dash = json.loads((branch_path / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         dispatch = dash["sections"]["dispatch"]
         assert "prax" in dispatch["agents_active"]
         assert dispatch["agents_active_count"] == 1
@@ -200,12 +208,12 @@ class TestDispatchSection:
         parent = branch_path.parent
         seedgo_mail = parent / "seedgo" / ".ai_mail.local"
         seedgo_mail.mkdir(parents=True, exist_ok=True)
-        (seedgo_mail / ".dispatch.lock").write_text("broken json{{{")
+        (seedgo_mail / ".dispatch.lock").write_text("broken json{{{", encoding="utf-8")
 
         result = build_dispatch_section(branch_path)
         assert result is True
 
-        dash = json.loads((branch_path / "DASHBOARD.local.json").read_text())
+        dash = json.loads((branch_path / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         dispatch = dash["sections"]["dispatch"]
         assert "seedgo" in dispatch["agents_active"]
         assert dispatch["details"]["seedgo"]["subject"] == "unknown"

@@ -1,32 +1,36 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
-# Version: 1.2.0
-# Created: 2026-09-15
-# Modified: 2026-09-18
+# Version: 1.2.2
+# Created: 2026-08-31
+# Modified: 2026-09-28
 # =============================================
 
-"""Pins for ``handlers/repo_root.py`` — one repo-root answer, never the cwd.
+"""Tests for apps/handlers/repo_root.py."""
 
-WHY A WHOLE MODULE FOR ONE FUNCTION
------------------------------------
-@drone reported the ``Path.cwd()`` fallback in ``registry_scope`` and it was
-cured the same hour. CI went red again within that hour on ``detector.py``:
-byte-identical function, one file over, one of TEN copies. The subprocess pin
-written for the first fix is what caught it — but only because CI runs a bare
-checkout where the fallback is actually reached. On a developer machine the
-walk finds the live registry and the defect is invisible.
+# Pins for ``handlers/repo_root.py`` — one repo-root answer, never the cwd.
+#
+# WHY A WHOLE MODULE FOR ONE FUNCTION
+# -----------------------------------
+# @drone reported the ``Path.cwd()`` fallback in ``registry_scope`` and it was
+# cured the same hour. CI went red again within that hour on ``detector.py``:
+# byte-identical function, one file over, one of TEN copies. The subprocess pin
+# written for the first fix is what caught it — but only because CI runs a bare
+# checkout where the fallback is actually reached. On a developer machine the
+# walk finds the live registry and the defect is invisible.
+#
+# So the pins here come in two species, deliberately:
+#
+#   * BEHAVIOURAL — what the function does when the fallback IS taken. These run
+#     everywhere, because they hand the walk a directory with no registry above
+#     it rather than waiting for the machine to be bare.
+#   * STRUCTURAL — that no lane keeps a private copy of the answer. This is the
+#     pin that would have caught ``detector.py`` before CI did, and it is the
+#     only one that makes a third round impossible. A test that can only fail in
+#     an environment we do not run locally is not a guard, it is a report.
 
-So the pins here come in two species, deliberately:
-
-  * BEHAVIOURAL — what the function does when the fallback IS taken. These run
-    everywhere, because they hand the walk a directory with no registry above
-    it rather than waiting for the machine to be bare.
-  * STRUCTURAL — that no lane keeps a private copy of the answer. This is the
-    pin that would have caught ``detector.py`` before CI did, and it is the
-    only one that makes a third round impossible. A test that can only fail in
-    an environment we do not run locally is not a guard, it is a report.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — module_file() on Windows, where resolve() reads the cwd; the sweep pins its callers
 
 import importlib
 import inspect
@@ -38,7 +42,9 @@ from pathlib import Path
 
 import pytest
 
+import aipass.memory.tests.test_residency_scope as residency
 from aipass.memory.apps.handlers import repo_root as rr
+from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.tests.dead_cwd import (
     ACCESSOR_SHAPE,
     DEAD_CWD_WORLD,
@@ -49,13 +55,32 @@ from aipass.memory.tests.dead_cwd import (
     WINDOWS_REALPATH_WORLD,
 )
 
+# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
+# whole path: a checkout that lives under a directory named dropbox must not hide itself.
+# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
+# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+_SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+
+def _walk(root: Path, pattern: str = "*.py") -> list[Path]:
+    """Every file under *root* matching *pattern*, outside the skipped directories."""
+    return sorted(path for path in root.rglob(pattern) if not _SKIPPED_DIRS.intersection(path.relative_to(root).parts))
+
+
+def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path: Path) -> None:
+    """Red first against a bare rglob. The root stands inside a directory named dropbox; live/ is the control."""
+    root = tmp_path / "dropbox" / "checkout"
+    for name in (*sorted(_SKIPPED_DIRS), "live"):
+        (root / name).mkdir(parents=True)
+        (root / name / "test_x.py").write_text("", encoding="utf-8")
+    assert _walk(root) == [root / "live" / "test_x.py"]
+
+
 # Every .py in the branch's own source, minus archives (kept deliberately as
 # written) and caches. The sweep must read the tree, not a list someone
 # maintains by hand — a hand-maintained list is how the tenth copy hid.
 _APPS = Path(rr.__file__).resolve().parent.parent
-_SOURCES = sorted(
-    path for path in _APPS.rglob("*.py") if ".archive" not in path.parts and "__pycache__" not in path.parts
-)
+_SOURCES = _walk(_APPS)
 
 # The one other species of cwd read in this tree, and it is not this defect:
 # "where was the caller standing" is a QUESTION ABOUT THE CALLER, and cwd is
@@ -249,7 +274,7 @@ class TestNoLaneKeepsAPrivateCopyOfTheAnswer:
         env = {**os.environ, "AIPASS_CALLER_CWD": str(elsewhere)}
 
         result = subprocess.run(
-            [sys.executable, "-c", probe], capture_output=True, text=True, cwd=str(elsewhere), env=env
+            [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", cwd=str(elsewhere), env=env
         )
 
         assert result.returncode == 0, result.stderr
@@ -407,7 +432,7 @@ class TestEveryImportTimeLaneSurvivesADeadWorkingDirectory:
     @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
     def test_importing_survives(self, module, world):
         probe = f"import os, sys\nsys.path.insert(0, {_src_root()!r})\n{world}import {module}\nprint('OK')\n"
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, (
             f"{module} could not be imported in a dead cwd. "
             + (
@@ -450,7 +475,7 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
             f"import {module}\n"
             "print('OK')\n"
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, (
             f"{module} could not be imported in a dead cwd with prax held constant — "
             f"this one IS memory's:\n{result.stderr}"
@@ -490,7 +515,7 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
             f"import {module} as target\n"
             "print('OK')\n"
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, (
             f"{module} took the fallback and died — this is the CI defect reproduced locally:\n{result.stderr}"
         )
@@ -517,13 +542,17 @@ class TestTheDeadCwdProbeIsAHonestInstrument:
 
     def test_denying_getcwd_makes_reading_the_cwd_raise(self):
         """The portable construction. Runs on Windows, where the other cannot."""
-        result = subprocess.run([sys.executable, "-c", _DENY_CWD + self._CHECK], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-c", _DENY_CWD + self._CHECK], capture_output=True, text=True, encoding="utf-8"
+        )
         assert "RAISED" in result.stdout, f"{result.stdout}{result.stderr}"
 
     @_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD
     def test_deleting_the_cwd_makes_reading_the_cwd_raise(self):
         """The real world, where the platform allows it to be built."""
-        result = subprocess.run([sys.executable, "-c", _DELETE_CWD + self._CHECK], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-c", _DELETE_CWD + self._CHECK], capture_output=True, text=True, encoding="utf-8"
+        )
         assert "RAISED" in result.stdout, f"{result.stdout}{result.stderr}"
 
 
@@ -562,6 +591,7 @@ class TestBothConstructionsAgree:
             [sys.executable, "-c", world + TestBothConstructionsAgree._ASK],
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
 
     @_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD
@@ -664,9 +694,8 @@ class TestTheFilterHasOneImplementationForFourWalks:
     """
 
     def test_registry_scope_delegates_rather_than_carrying_a_twin(self):
-        from aipass.memory.apps.handlers.monitor import registry_scope
-
-        source = inspect.getsource(registry_scope._exactly_named)
+        # The module's text, sliced to the helper: the claim is about its source, not a call into it.
+        source = inspect.getsource(registry_scope).split("def _exactly_named(", 1)[1].split("\ndef ", 1)[0]
 
         assert "repo_root.exactly_named" in source, "the ten-copy lesson, one package over"
         assert "endswith" not in source.split('"""')[-1], "a second implementation is a second answer"
@@ -742,7 +771,10 @@ class TestTheDeniedWorldSurvivesEveryWayPathlibCallsIt:
     def test_the_denial_answers_when_pathlib_calls_it_as_a_bound_method(self):
         """Red on this laptop with the old ``lambda:`` spelling. That is the point."""
         result = subprocess.run(
-            [sys.executable, "-c", _DENY_CWD + ACCESSOR_SHAPE + self._ASK], capture_output=True, text=True
+            [sys.executable, "-c", _DENY_CWD + ACCESSOR_SHAPE + self._ASK],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
 
         assert "RAISED" in result.stdout, f"{result.stdout}{result.stderr}"
@@ -774,7 +806,10 @@ class TestTheDeniedWorldSurvivesEveryWayPathlibCallsIt:
         )
 
         result = subprocess.run(
-            [sys.executable, "-c", pre_captured + _DENY_CWD + self._ASK], capture_output=True, text=True
+            [sys.executable, "-c", pre_captured + _DENY_CWD + self._ASK],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
 
         assert "RAISED" in result.stdout, f"the world never reached the accessor: {result.stdout}{result.stderr}"
@@ -786,8 +821,6 @@ class TestTheDeniedWorldSurvivesEveryWayPathlibCallsIt:
         happened to run first. A world with two implementations is two worlds,
         and the cheapest place to notice that is here.
         """
-        import aipass.memory.tests.test_residency_scope as residency
-
         assert residency.DEAD_CWD_WORLD is DEAD_CWD_WORLD
         # Assembled rather than written out: a literal needle in the assertion
         # makes this file its own first offender, which the first run proved by
@@ -861,13 +894,15 @@ class TestResolvingOwnFileIsACwdReadOnWindows:
             "except FileNotFoundError:\n"
             "    print('RAISED')\n"
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
 
         assert "RAISED" in result.stdout, f"{result.stdout}{result.stderr}"
 
     @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
     def test_this_branch_imports_where_resolving_a_path_reads_the_cwd(self, module):
-        result = subprocess.run([sys.executable, "-c", self._probe(module)], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-c", self._probe(module)], capture_output=True, text=True, encoding="utf-8"
+        )
 
         assert result.returncode == 0, (
             f"{module} died where Path.resolve() reads the cwd — this is the Windows CI red "
@@ -1045,7 +1080,7 @@ class TestTheStackReadIsReproducibleAfterAll:
             f"import sys\nsys.path.insert(0, {_src_root()!r})\n{self._WORLD}"
             "import aipass.memory.apps.handlers\nprint('OK')\n"
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, (
             "handlers/__init__.py could not be imported with os.path.realpath denied — "
             "this is the Windows CI crash, reproduced.\n" + result.stderr
@@ -1054,7 +1089,9 @@ class TestTheStackReadIsReproducibleAfterAll:
 
     def test_the_construct_the_guard_used_to_call_dies_in_that_same_world(self):
         """Positive control: the world is hostile, and hostile to THIS call."""
-        result = subprocess.run([sys.executable, "-c", self._WORLD + self._PROBE], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-c", self._WORLD + self._PROBE], capture_output=True, text=True, encoding="utf-8"
+        )
         assert result.returncode == 0, result.stderr
         assert "RAISED FileNotFoundError" in result.stdout, (
             "The realpath denial did not reach inspect.stack(), so the pin above is measuring nothing: " + result.stdout
@@ -1069,7 +1106,7 @@ class TestTheStackReadIsReproducibleAfterAll:
         """
         script = tmp_path / "from_a_real_file.py"
         script.write_text(self._WORLD + self._PROBE, encoding="utf-8")
-        result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, result.stderr
         assert result.stdout.startswith("SURVIVED"), (
             "A frame from a real file reached the unprotected realpath, which contradicts "
@@ -1112,7 +1149,7 @@ class TestTheDiagnosticBranchIsReachableAfterAll:
 
     def _child(self, body: str) -> subprocess.CompletedProcess:
         probe = f"import sys\nsys.path.insert(0, {_src_root()!r})\n{self._WORLD}{self._SETUP}{body}"
-        return subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+        return subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
 
     def test_the_denial_bites_in_this_child(self):
         """Arming probe 1: the world is hostile where the defect would live."""
@@ -1223,7 +1260,9 @@ class TestTheTwoWorldsMustNotBeStacked:
     }
 
     def _verdict(self, world: str) -> str:
-        result = subprocess.run([sys.executable, "-c", world + self._PROBE], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-c", world + self._PROBE], capture_output=True, text=True, encoding="utf-8"
+        )
         assert result.returncode == 0, result.stderr
         return result.stdout.strip()
 
@@ -1248,7 +1287,7 @@ class TestTheTwoWorldsMustNotBeStacked:
                 "    print('IT_READ_THE_CWD')\n"
             )
         )
-        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, result.stderr
         assert "ABSOLUTE_REALPATH_IGNORED_THE_CWD" in result.stdout, (
             "the posix half is not installed, so the rows below are measuring the host: " + result.stdout
@@ -1318,7 +1357,7 @@ class TestTheTwoWorldsMustNotBeStacked:
                 "    print('ABSPATH_DIED')\n"
             )
         )
-        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, result.stderr
         assert "ABSPATH_SURVIVED_THE_DENIAL" in result.stdout, (
             "the Win32 abspath half is not installed, so the nt rows below are measuring posix: " + result.stdout
@@ -1346,7 +1385,7 @@ class TestTheTwoWorldsMustNotBeStacked:
         concatenates both gets a world where the defect cannot fire.
         """
         offenders = []
-        for path in sorted(Path(__file__).parent.rglob("test_*.py")):
+        for path in _walk(Path(__file__).parent, "test_*.py"):
             if path.name == Path(__file__).name:
                 continue
             text = path.read_text(encoding="utf-8")
@@ -1458,7 +1497,7 @@ class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
     )
 
     def _verdict(self, world: str) -> str:
-        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, result.stderr
         return result.stdout.strip()
 
@@ -1516,7 +1555,7 @@ class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
         assert self._verdict(bare).startswith("NO_RAISE"), f"host={host}: the bare patch verdict is host-dependent"
         assert self._verdict(cured) == "RAISED", f"host={host}: the cured world's verdict is host-dependent"
 
-    def test_the_accessor_still_answers_CORRECTLY_when_the_cwd_is_fine(self):
+    def test_the_accessor_still_answers_correctly_when_the_cwd_is_fine(self):
         """A world that raises for the right reason can still return the wrong path.
 
         ``staticmethod`` is what stops this. Through an instance a plain

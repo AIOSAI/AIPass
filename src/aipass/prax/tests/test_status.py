@@ -1,18 +1,25 @@
 # =================== AIPass ====================
 # Name: test_status.py
 # Description: Unit tests for PRAX status module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for prax status module command routing, help text, and introspection.
+"""Tests for apps/modules/status.py and apps/handlers/status/sync.py."""
 
-All module imports happen inside test functions so that conftest's
-autouse mock_prax_infrastructure fixture injects sys.modules mocks first.
-"""
+# Tests for prax status module command routing, help text, and introspection.
+#
+# All module imports happen inside test functions so that conftest's
+# autouse mock_prax_infrastructure fixture injects sys.modules mocks first.
 
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(error_handling) — sync_status's error on an absent or unreadable registry, covered by that row
+# seedgo: no-test-needed(error_handling) — _handle_sync's error line when sync_status raises, covered by that row
+# seedgo: no-test-needed(json_structure) — sync_status's status_sync_declined log_operation record, covered by that row
+# seedgo: no-test-needed(log_level) — sync_status's info line counting what it scanned, covered by that row
+
+import json
 import sys
 from unittest.mock import MagicMock
 
@@ -208,3 +215,67 @@ def test_last_scan_survives_a_block_missing_its_counts(mock_prax_infrastructure,
     _ensure_sync_mock(monkeypatch)
 
     assert _format_last_scan()({"timestamp": "2026-09-12T07:57:47+00:00"}) == "2026-09-12T07:57:47+00:00 (+? / -?)"
+
+
+# =============================================
+# The decommissioned STATUS flow (@devpulse ruling 2026-09-15)
+# =============================================
+
+
+class TestSyncDoesNotResurrectTheRootFile:
+    """TDPLAN-0007 decommissioned the STATUS flow and the fleet deleted the file.
+
+    The trigger registration was unwired; the CLI subcommand was not, so
+    `status sync` still walked every branch and wrote STATUS.md back to the repo
+    root — the 2026-08-13 audit recreated it by running the command, and prax's
+    own docs carried it as an open defect. @devpulse ruled on 2026-09-15: stop.
+    The engine stays revivable (the scan, the registry read and the parse are
+    untouched); what it must not do is write.
+    """
+
+    def _sync_module(self, monkeypatch, repo_root):
+        import aipass.prax.apps.handlers.status.sync as sync
+
+        monkeypatch.setattr(sync, "_find_repo_root", lambda: repo_root)
+        monkeypatch.setattr(sync, "json_handler", MagicMock())
+        return sync
+
+    def _repo(self, tmp_path):
+        """A repo root with one registered branch carrying a STATUS.local.md."""
+        branch = tmp_path / "src" / "aipass" / "somebranch"
+        branch.mkdir(parents=True)
+        (branch / "STATUS.local.md").write_text(
+            "**State:** Operational\n**Last update:** 2026-09-24\n", encoding="utf-8"
+        )
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "somebranch", "email": "@somebranch", "path": "src/aipass/somebranch"}]}),
+            encoding="utf-8",
+        )
+        return tmp_path
+
+    def test_no_status_md_appears_at_the_repo_root(self, tmp_path, monkeypatch):
+        repo_root = self._repo(tmp_path)
+        sync = self._sync_module(monkeypatch, repo_root)
+
+        sync.sync_status()
+
+        assert not (repo_root / "STATUS.md").exists(), (
+            "status sync resurrected the file the fleet deleted on purpose (TDPLAN-0007)"
+        )
+
+    def test_the_command_says_it_declined_rather_than_reporting_a_write(self, tmp_path, monkeypatch):
+        """Fail honestly: a caller must not read this as a successful sync."""
+        sync = self._sync_module(monkeypatch, self._repo(tmp_path))
+
+        result = sync.sync_status()
+
+        assert result["status"] == "declined"
+        assert "DASHBOARD.local.json" in result.get("reason", "")
+
+    def test_the_scan_still_runs_so_the_engine_stays_revivable(self, tmp_path, monkeypatch):
+        """Declining to write is not the same as deleting the engine."""
+        sync = self._sync_module(monkeypatch, self._repo(tmp_path))
+
+        result = sync.sync_status()
+
+        assert result["branches_synced"] == ["@somebranch"]

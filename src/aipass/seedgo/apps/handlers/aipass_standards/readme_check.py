@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_check.py
 # Description: README Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-05
-# Modified: 2026-09-19
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -46,6 +46,8 @@ from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_D
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 
 # Audit scope: entry points only (apps/{name}.py)
+# APPLIES_TO: README.md through the entry point.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
 
 
@@ -338,10 +340,13 @@ def check_directory_tree(lines: List[str], branch_root: Path, file_path: str, by
 
     # Check which mentioned directories exist somewhere under branch root
     missing_dirs = []
+    # Recorded, not skipped: a directory "not found" under a subtree the walk
+    # could not list is unverified, and the message has to say which subtree.
+    unreadable: List[OSError] = []
     for dir_name in mentioned_dirs:
         # Check if this directory exists anywhere in the branch
         found = False
-        for _, dirs, _ in os.walk(str(branch_root)):
+        for _, dirs, _ in os.walk(str(branch_root), onerror=unreadable.append):
             if dir_name in dirs:
                 found = True
                 break
@@ -357,10 +362,14 @@ def check_directory_tree(lines: List[str], branch_root: Path, file_path: str, by
             "message": f"All {len(mentioned_dirs)} directories in tree verified",
         }
 
+    message = f"Directories in tree not found on disk: {', '.join(sorted(missing_dirs))}"
+    if unreadable:
+        unread = sorted({str(error.filename) for error in unreadable})
+        message += f"; not verified, {len(unread)} subtree(s) could not be read: {', '.join(unread)}"
     return {
         "name": "Directory tree accuracy",
         "passed": False,
-        "message": f"Directories in tree not found on disk: {', '.join(sorted(missing_dirs))}",
+        "message": message,
     }
 
 

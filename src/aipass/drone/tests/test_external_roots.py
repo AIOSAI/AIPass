@@ -1,24 +1,15 @@
 # =================== AIPass ====================
 # Name: test_external_roots.py
 # Description: Declared roots are the third resolution source
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-08-30
+# Modified: 2026-09-28
 # =============================================
 
-"""Citizens in declared roots resolve, and never at a local citizen's expense.
+"""Tests for apps/handlers/registry_handler.py's declared-roots tier: externals resolve, never over a local."""
 
-FPLAN-0460 phase 3. @memory owns AIPASS_ROOTS.json and is its ONLY reader; this
-branch consumes the records their gateway returns and decides precedence.
-
-Two rulings from @devpulse are pinned here rather than described:
-
-  DECLARATION IS THE CREDENTIAL — an external registry can never satisfy the
-  metadata.id check, because the ids differ by construction. The gate asks an
-  intra-installation question and a cross-repo answer is not available to it.
-
-  PRECEDENCE — AIPass local always wins; declaration order breaks ties among
-  externals; collisions are logged on both sides rather than resolved quietly.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 import json
 import tempfile
@@ -30,6 +21,23 @@ import pytest
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.modules import fleet
 from aipass.drone.apps.handlers import registry_handler
+from aipass.drone.apps.handlers.registry_handler import reset_registry_path, set_registry_path
+from aipass.drone.apps.modules.resolver import BranchNotFoundError, resolve_branch
+
+
+# Citizens in declared roots resolve, and never at a local citizen's expense.
+#
+# FPLAN-0460 phase 3. @memory owns AIPASS_ROOTS.json and is its ONLY reader; this
+# branch consumes the records their gateway returns and decides precedence.
+#
+# Two rulings from @devpulse are pinned here rather than described:
+#
+#   DECLARATION IS THE CREDENTIAL — an external registry can never satisfy the
+#   metadata.id check, because the ids differ by construction. The gate asks an
+#   intra-installation question and a cross-repo answer is not available to it.
+#
+#   PRECEDENCE — AIPass local always wins; declaration order breaks ties among
+#   externals; collisions are logged on both sides rather than resolved quietly.
 
 
 # ---------------------------------------------------------------------------
@@ -45,10 +53,11 @@ def _make_root(base: Path, repo: str, branches: list[tuple[str, str]]) -> Path:
     for name, rel in branches:
         branch = root / rel
         (branch / ".trinity").mkdir(parents=True)
-        (branch / ".trinity" / "passport.json").write_text("{}")
+        (branch / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
         rows.append({"name": name, "path": rel, "email": f"@{name.lower()}", "status": "active"})
     (root / f"{repo.upper()}_REGISTRY.json").write_text(
-        json.dumps({"metadata": {"id": f"{repo}-id"}, "branches": rows})
+        json.dumps({"metadata": {"id": f"{repo}-id"}, "branches": rows}),
+        encoding="utf-8",
     )
     return root
 
@@ -79,7 +88,9 @@ def local_world(tmp_path, monkeypatch):
     for name in ("drone", "memory"):
         trinity = world / "src" / name / ".trinity"
         trinity.mkdir(parents=True)
-        (trinity / "passport.json").write_text(json.dumps({"citizenship": {"registry_id": registry_id}}))
+        (trinity / "passport.json").write_text(
+            json.dumps({"citizenship": {"registry_id": registry_id}}), encoding="utf-8"
+        )
     (world / "AIPASS_REGISTRY.json").write_text(
         json.dumps(
             {
@@ -89,7 +100,8 @@ def local_world(tmp_path, monkeypatch):
                     {"name": "memory", "path": "src/memory", "email": "@memory", "status": "active"},
                 ],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     monkeypatch.delenv("AIPASS_HOME", raising=False)
     monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
@@ -104,7 +116,9 @@ def standin(tmp_path):
     """An AIPass home with declared roots, read by @memory's REAL reader."""
     home = tmp_path / "AIPassHome"
     home.mkdir()
-    (home / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {"id": "home-id"}, "branches": []}))
+    (home / "AIPASS_REGISTRY.json").write_text(
+        json.dumps({"metadata": {"id": "home-id"}, "branches": []}), encoding="utf-8"
+    )
     _make_root(tmp_path, "alpha", [("ALPHA_AGENT", "src/alpha/worker")])
     _make_root(tmp_path, "beta", [("BETA_AGENT", "src/beta/helper")])
     (home / "AIPASS_ROOTS.json").write_text(
@@ -116,7 +130,8 @@ def standin(tmp_path):
                     {"path": "../beta", "label": "beta", "status": "active"},
                 ],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     return home
 
@@ -148,7 +163,7 @@ class TestTheStandInWorldIsSealed:
             assert registry_handler.get_branch_by_name("trigger") is None
 
 
-class TestNothingMovesUntilPatrickBlesses:
+class TestNothingMovesUntilTheOwnerBlesses:
     """The tier is driven by the declared file and by nothing else.
 
     This class first pinned "declared_roots() is empty on this machine", which
@@ -159,9 +174,13 @@ class TestNothingMovesUntilPatrickBlesses:
     resolves exactly as it did before the tier existed.
     """
 
-    def test_a_project_with_no_declared_roots_sees_no_externals(self, tmp_path):
-        """The empty state is legal and silent — not an error, not a fallback."""
-        assert registry_handler._external_branches(repo_root=tmp_path) == []
+    def test_a_project_with_no_declared_roots_sees_no_externals(self, local_world):
+        """The empty state is legal and silent — not an error, not a fallback (mutant killed: a fallback citizen)."""
+        with patch.object(registry_handler, "logger") as log:
+            names = {b["name"] for b in registry_handler.get_all_branches()}
+
+        assert names == {"drone", "memory"}
+        assert log.error.call_args_list == []
 
     def test_no_external_source_is_consulted_when_nothing_is_declared(self, local_world):
         with patch.object(fleet, "external_branches", return_value=[]) as gateway:
@@ -283,13 +302,14 @@ class TestPrecedence:
         assert "impostor" not in branch["path"], branch["path"]
 
     def test_declaration_order_breaks_ties_among_externals(self, local_world):
+        """Mutant killed: the external tier walked in reverse declaration order."""
         first = _external("shared", "alpha")
         second = _external("shared", "beta")
         with patch.object(fleet, "external_branches", return_value=[first, second]):
             branch = registry_handler.get_branch_by_name("shared")
 
-        assert branch is not None, "a tie among externals resolved to nothing"
-        assert "alpha" in branch["path"], "the earlier declared root must win"
+        assert branch is not None, "a declared citizen did not resolve at all"
+        assert Path(branch["path"]) == Path(first["path"]), "the earlier declared root must win"
 
     def test_a_local_external_collision_is_logged_on_both_sides(self, local_world):
         with patch.object(fleet, "external_branches", return_value=[_external("memory", "impostor")]):
@@ -318,6 +338,39 @@ class TestGatewayFailureIsContained:
 
         assert log.error.called, "losing the external tier must never pass in silence"
 
+    def test_a_lost_tier_answers_none_and_an_empty_fleet_answers_empty(self, local_world):
+        """A lost tier and a fleet with no externals are two answers, not one.
+
+        Both used to answer []: a caller could not tell "the gateway failed"
+        from "nothing is declared". Mutant killed (runner): the gateway
+        failure's None put back to [].
+        """
+        with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
+            lost = registry_handler.external_branches()
+        with patch.object(fleet, "external_branches", return_value=[]):
+            empty = registry_handler.external_branches()
+
+        assert lost is None, "a lost external tier must not read as an empty one"
+        assert empty == []
+
+    def test_a_tier_with_no_project_root_answers_none(self, local_world):
+        """No project root to scope the declared roots is a lost tier, not an empty one.
+
+        Mutant killed (runner): the no-root None put back to [].
+        """
+        with patch.object(registry_handler, "get_registry_path", side_effect=RuntimeError("no registry")):
+            assert registry_handler.external_branches() is None
+
+    def test_a_lost_tier_still_refuses_an_unknown_name_through_resolve_branch(self, local_world):
+        """resolve_branch's lookup reads the lost tier as no externals, never as a crash.
+
+        Mutant killed (runner): _external_branches handing the lost tier's
+        None straight to get_branch_with_registry's loop.
+        """
+        with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
+            with pytest.raises(BranchNotFoundError, match="not found in registry"):
+                resolve_branch("@nosuchbranch")
+
 
 # ---------------------------------------------------------------------------
 # The gateway's shape is another branch's contract — it can move
@@ -342,23 +395,29 @@ class TestMalformedRecordsAreSkippedNotTrusted:
         ],
         ids=["no-name", "no-path", "no-registry", "empty-name"],
     )
-    def test_a_record_missing_a_required_key_is_dropped(self, broken):
+    def test_a_record_missing_a_required_key_is_dropped(self, broken, local_world):
+        """Mutant killed: the required-key check removed."""
         with patch.object(fleet, "external_branches", return_value=[broken]):
-            assert registry_handler._external_branches() == []
+            names = {b["name"] for b in registry_handler.get_all_branches()}
 
-    def test_the_dropped_record_is_named(self):
+        assert names == {"drone", "memory"}
+
+    def test_the_dropped_record_is_named(self, local_world):
+        """Mutant killed: the malformed-record warning removed."""
         with patch.object(fleet, "external_branches", return_value=[{"name": "a"}]):
             with patch.object(registry_handler, "logger") as log:
-                registry_handler._external_branches()
+                registry_handler.get_all_branches()
 
-        assert log.warning.called, "a record dropped without a line is a citizen that vanished"
+        named = [c.args[1] for c in log.warning.call_args_list if len(c.args) > 1]
+        assert {"name": "a"} in named, "a record dropped without a line is a citizen that vanished"
 
-    def test_a_good_record_beside_a_broken_one_still_resolves(self):
+    def test_a_good_record_beside_a_broken_one_still_resolves(self, local_world):
+        """Mutant killed: a malformed record ending the walk instead of being skipped."""
         good = _external("keeper", "alpha")
         with patch.object(fleet, "external_branches", return_value=[{"name": "a"}, good]):
-            entries = registry_handler._external_branches()
+            names = {b["name"] for b in registry_handler.get_all_branches()}
 
-        assert [e["name"] for e in entries] == ["keeper"]
+        assert names == {"drone", "memory", "keeper"}
 
 
 # ---------------------------------------------------------------------------
@@ -377,8 +436,6 @@ class TestResolutionEndToEnd:
         which is only true because get_branch_with_registry hands back the
         sealed registry the entry was read from.
         """
-        from aipass.drone.apps.modules.resolver import resolve_branch
-
         with patch.object(
             fleet,
             "external_branches",
@@ -392,8 +449,6 @@ class TestResolutionEndToEnd:
         assert Path(resolved).parts[-4:] == ("alpha", "src", "alpha", "worker"), resolved
 
     def test_an_undeclared_repo_is_still_refused(self, standin):
-        from aipass.drone.apps.modules.resolver import BranchNotFoundError, resolve_branch
-
         with patch.object(
             fleet,
             "external_branches",
@@ -420,11 +475,6 @@ class TestTheTierIsScopedToTheProjectBeingResolved:
         Pointed at a stand-in home, enumeration returns that home's two declared
         citizens and none of this machine's — the leak, stated as an assertion.
         """
-        from aipass.drone.apps.handlers.registry_handler import (
-            reset_registry_path,
-            set_registry_path,
-        )
-
         monkeypatch.delenv("AIPASS_HOME", raising=False)  # the SECOND source, isolated the way the suite already does
         registry = standin / "AIPASS_REGISTRY.json"
         registry.write_text(
@@ -433,7 +483,8 @@ class TestTheTierIsScopedToTheProjectBeingResolved:
                     "metadata": {"id": "7087bb93-570f-4b9a-b035-4fd7f570200e"},
                     "branches": [],
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         try:
             set_registry_path(registry)
@@ -443,10 +494,25 @@ class TestTheTierIsScopedToTheProjectBeingResolved:
 
         assert names == {"alpha_agent", "beta_agent"}  # enumeration lowercases names
 
-    def test_the_scope_follows_the_registry_not_the_checkout(self, standin, tmp_path):
-        """A project WITH declared roots sees its own, not ours."""
-        assert registry_handler._external_branches(repo_root=standin)
-        assert registry_handler._external_branches(repo_root=tmp_path / "nowhere") == []
+    def test_the_scope_follows_the_registry_not_the_checkout(self, standin, tmp_path, monkeypatch):
+        """A project WITH declared roots sees its own; mutant killed: roots read one level above the registry."""
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        # No metadata id: the credential gate passes on "nothing to compare", not on this machine's passport.
+        (standin / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        nowhere = tmp_path / "nowhere"
+        nowhere.mkdir()
+        (nowhere / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        try:
+            set_registry_path(standin / "AIPASS_REGISTRY.json")
+            declared = {b["name"] for b in registry_handler.get_all_branches()}
+            set_registry_path(nowhere / "AIPASS_REGISTRY.json")
+            undeclared = {b["name"] for b in registry_handler.get_all_branches()}
+        finally:
+            reset_registry_path()
+
+        assert declared == {"alpha_agent", "beta_agent"}
+        assert undeclared == set()
 
 
 class TestTheHomeFallbackDoesNotSwallowTheThirdSource:
@@ -466,7 +532,7 @@ class TestTheHomeFallbackDoesNotSwallowTheThirdSource:
     def test_a_home_registry_miss_still_reaches_a_declared_root(self, tmp_path, monkeypatch):
         home = tmp_path / "elsewhere"
         home.mkdir()
-        (home / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}))
+        (home / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
         monkeypatch.setenv("AIPASS_HOME", str(home))
 
         with patch.object(fleet, "external_branches", return_value=[_external("shared", "alpha")]):
@@ -476,19 +542,22 @@ class TestTheHomeFallbackDoesNotSwallowTheThirdSource:
         assert branch["name"] == "shared"
 
     def test_a_home_registry_hit_still_wins_over_an_external(self, tmp_path, monkeypatch):
-        """Falling through on a miss must not turn into skipping the home tier."""
+        """Falling through on a miss must not skip the home tier; mutant killed: externals consulted first."""
         home = tmp_path / "elsewhere"
         home.mkdir()
         (home / "AIPASS_REGISTRY.json").write_text(
-            json.dumps({"branches": [{"name": "shared", "path": "src/home/shared", "email": "@shared"}]})
+            json.dumps({"branches": [{"name": "shared", "path": "src/home/shared", "email": "@shared"}]}),
+            encoding="utf-8",
         )
         monkeypatch.setenv("AIPASS_HOME", str(home))
 
         with patch.object(fleet, "external_branches", return_value=[_external("shared", "alpha")]):
             branch = registry_handler.get_branch_by_name("shared")
 
-        assert branch is not None, "the AIPass home citizen did not resolve"
-        assert "home" in str(branch["path"]), "AIPass home outranks a declared root"
+        assert branch is not None, "no source answered for a name two sources declare"
+        assert Path(branch["path"]) == (home / "src" / "home" / "shared").resolve(), (
+            "AIPass home outranks a declared root"
+        )
 
 
 class TestTheStandInMatchesTheRealReader:
@@ -553,25 +622,25 @@ class TestTheGatewaysImportCannotTakeDroneDown:
             print("imported", registry_handler.__name__.rsplit(".", 1)[-1])
             """
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
 
         assert result.returncode == 0, result.stderr
         assert "imported registry_handler" in result.stdout
 
-    def test_a_gateway_that_will_not_import_is_contained_and_loud(self, tmp_path):
-        """The tier is lost, resolution is not, and the loss is on the record."""
-        import builtins
+    def test_a_gateway_that_will_not_import_is_contained_and_loud(self, local_world):
+        """The tier is lost, resolution is not; mutant killed: the lost-tier error line removed.
 
-        real_import = builtins.__import__
+        The refusal is supplied at registry_handler's one import door for the
+        gateway, not by replacing ``builtins.__import__`` for the whole process.
+        Mutant killed (runner): the gateway imported inline, past the door.
+        """
 
-        def refuse_memory(name, *args, **kwargs):
-            if name.startswith("aipass.memory"):
-                raise ImportError("simulated bare-world crash inside @memory")
-            return real_import(name, *args, **kwargs)
+        def refuse_memory():
+            raise ImportError("simulated bare-world crash inside @memory")
 
-        with patch.object(builtins, "__import__", refuse_memory):
+        with patch.object(registry_handler, "_fleet_gateway", refuse_memory):
             with patch.object(registry_handler, "logger") as log:
-                entries = registry_handler._external_branches(repo_root=tmp_path)
+                names = {b["name"] for b in registry_handler.get_all_branches()}
 
-        assert entries == []
-        assert log.error.called, "losing the tier at import must never pass in silence"
+        assert names == {"drone", "memory"}
+        assert "External tier unavailable" in log.error.call_args[0][0], "losing the tier must never pass in silence"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: post_ops.py
 # Description: Post operations handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -20,7 +20,7 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
-from aipass.commons.apps.modules.commons_identity import get_caller_branch, extract_mentions
+from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch, extract_mentions
 from aipass.commons.apps.handlers.json import json_handler
 from aipass.commons.apps.handlers.search.search_queries import sync_post_to_fts
 from aipass.commons.apps.handlers.profiles.profile_queries import increment_post_count
@@ -82,7 +82,10 @@ def create_post(args: List[str]) -> dict:
         }
 
     # --- Get caller identity ---
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,
@@ -113,6 +116,12 @@ def create_post(args: List[str]) -> dict:
         # --- Extract and store mentions ---
         full_text = f"{title} {content}"
         mentions = extract_mentions(full_text)
+        mentions_error = ""
+        if mentions is None:
+            # The post is committed: still a success, the lost mentions named.
+            mentions_error = "mentions not delivered: the agents lookup failed"
+            logger.warning(f"[post_ops] Post #{post_id}: {mentions_error}")
+            mentions = []
 
         for mentioned in mentions:
             try:
@@ -151,6 +160,7 @@ def create_post(args: List[str]) -> dict:
             "author": author,
             "post_type": post_type,
             "mentions": mentions,
+            "mentions_error": mentions_error,
         }
 
     except Exception as e:
@@ -254,7 +264,10 @@ def delete_post(args: List[str]) -> dict:
         return {"success": False, "error": "Invalid post_id - must be an integer"}
 
     # --- Get caller identity ---
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,

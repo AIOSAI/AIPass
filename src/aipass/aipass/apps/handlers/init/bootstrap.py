@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.0.0
+# Version: 2.0.2
 # Created: 2026-03-14
-# Modified: 2026-04-22
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -41,11 +41,11 @@ from pathlib import Path
 from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.project_home import (
-    _claude_local_settings,
+    claude_local_settings,
     _claude_settings,
     _detect_aipass_home,
     _enroll_project,
-    _merge_local_settings,
+    merge_local_settings,
     is_projects_child,
     is_throwaway_path,
 )
@@ -378,7 +378,7 @@ def init_project(
     if aipass_home and not is_throwaway_path(aipass_home):
         local_settings_path = claude_dir / "settings.local.json"
         if not local_settings_path.exists():
-            sm.write_text_lf(local_settings_path, _claude_local_settings(aipass_home, nested=is_projects_child(target)))
+            sm.write_text_lf(local_settings_path, claude_local_settings(aipass_home, nested=is_projects_child(target)))
             created.append(str(local_settings_path))
 
     # 9c. .claude/commands/prep.md — /prep session wrap-up slash command
@@ -602,7 +602,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     for rel, dest, template_text in managed:
         current_hash = sm.hash_file(dest)
         template_hash = sm.sha256_text(template_text) if template_text is not None else None
-        action, reason = sm.decide(rel, current_hash, template_hash, recorded.get(rel))
+        action, reason = sm.decide(current_hash, template_hash, recorded.get(rel))
         record(rel, dest, action, reason, template_text)
 
     # --- Seeds: created once, never rewritten. They exist to be filled in. ---
@@ -649,7 +649,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     # fence. Retrofit-safe: merges into existing content, never clobbers.
     if aipass_home and not is_throwaway_path(aipass_home):
         local_path = claude_dir / "settings.local.json"
-        generated = json.loads(_claude_local_settings(aipass_home, nested=is_projects_child(target)))
+        generated = json.loads(claude_local_settings(aipass_home, nested=is_projects_child(target)))
         existing_local_text = _read_text(local_path)
         if existing_local_text is None:
             content = json.dumps(generated, indent=2, ensure_ascii=False) + "\n"
@@ -660,7 +660,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             except json.JSONDecodeError as exc:
                 logger.info("settings.local.json parse failed, rebuilding: %s", exc)
                 existing = {}
-            merged = _merge_local_settings(existing, generated)
+            merged = merge_local_settings(existing, generated)
             merged_content = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
             if existing != merged:
                 record(

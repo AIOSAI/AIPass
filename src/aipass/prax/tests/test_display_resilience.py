@@ -1,32 +1,42 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_display_resilience.py
 # Description: The display consumer must survive an unrenderable event
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Regression cover for the 2026-08-11 Mission Control consumer death.
+"""Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""
 
-A tailed log line containing ``[/usr/bin]`` reached ``print_event``, which
-interpolated it raw into a Rich markup string. Rich read it as a closing tag,
-raised ``MarkupError``, and the exception escaped ``_display_worker`` — killing
-the only consumer of the display queue for the life of the process. The queue
-then sat permanently full, ``event_queue`` warned every 30s for ~20 hours, and
-the Telegram relay (fed from the same code path) went silent.
+# Regression cover for the 2026-08-11 Mission Control consumer death.
+#
+# A tailed log line containing ``[/usr/bin]`` reached ``print_event``, which
+# interpolated it raw into a Rich markup string. Rich read it as a closing tag,
+# raised ``MarkupError``, and the exception escaped ``_display_worker`` — killing
+# the only consumer of the display queue for the life of the process. The queue
+# then sat permanently full, ``event_queue`` warned every 30s for ~20 hours, and
+# the Telegram relay (fed from the same code path) went silent.
+#
+# Two independent defects, covered separately here:
+#
+# 1. Event text is UNTRUSTED markup. Log lines carry ``[/usr/bin]`` (raises) and
+#    ``[event_queue]`` (silently eaten). Every dynamic value must be escaped.
+# 2. One unrenderable event must not kill the consumer. Even with (1) fixed, the
+#    loop has to survive whatever the next producer sends.
+#
+# Rendering goes through a REAL Rich console — the shared conftest installs a
+# MagicMock console that records the call but never renders, so it cannot fail
+# on either defect.
 
-Two independent defects, covered separately here:
-
-1. Event text is UNTRUSTED markup. Log lines carry ``[/usr/bin]`` (raises) and
-   ``[event_queue]`` (silently eaten). Every dynamic value must be escaped.
-2. One unrenderable event must not kill the consumer. Even with (1) fixed, the
-   loop has to survive whatever the next producer sends.
-
-Rendering goes through a REAL Rich console — the shared conftest installs a
-MagicMock console that records the call but never renders, so it cannot fail
-on either defect.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — handle_command and _run_monitor, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — _start_threads, _stop_threads, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — _get_watch_directories, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — the observer fallback, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — monitor.py's print_help(), covered by tests/test_help_markup.py
+# seedgo: no-test-needed(through_the_command) — print_status's formatting, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — the rate worker's scan_rates(), covered by tests/test_rate_tracker.py
+# seedgo: no-test-needed(constant) — COLORS, SYMBOLS and LEVEL_COLORS, the style tables print_event reads
 
 import importlib
 import io
@@ -101,6 +111,18 @@ class TestEventTextIsUntrustedMarkup:
         """print_hook_event takes the same untrusted text."""
         output = _render(lambda m: m.print_hook_event("HOOKS", CRASHING_MESSAGE, "fired"))
         assert "[/usr/bin]" in output
+
+    def test_hook_event_says_which_branch_fired(self):
+        """The branch the hook fired in must reach the screen.
+
+        print_hook_event accepted branch and never printed it (seedgo's
+        accepted_and_never_used_parameter rule, 2026-09-24), so every hook line
+        in Mission Control read the same whether it came from hooks, drone or an
+        external project — the one column that tells them apart was dropped.
+        """
+        output = _render(lambda m: m.print_hook_event("SEEDGO", "cadence:fired loader=global", "fired"))
+        assert "SEEDGO" in output
+        assert "cadence:fired loader=global" in output
 
     def test_command_separator_is_escaped(self):
         """A command string can carry brackets too."""

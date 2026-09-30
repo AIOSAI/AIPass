@@ -1,31 +1,38 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/test_auto_process_background.py
-# Date: 2026-08-13
-# Version: 1.1.0
+# Description: Tests for auto_process background spawn, single-flight lock and run_once
+# Version: 1.1.1
+# Created: 2026-08-14
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""
-Tests for moving auto_process off the prompt lane (DPLAN-0295 item 1).
+"""Tests for apps/handlers/intake/auto_process.py."""
 
-auto_process ran SYNCHRONOUSLY on the first UserPromptSubmit of every session —
-measured 78.5s to 120.5s with a backlog, and the cause of the 30s-timeout losses
-The owner hit live. Its stdout is always empty, so by the owner's test (compass #272)
-it never belonged on the prompt lane at all.
+# Tests for moving auto_process off the prompt lane (DPLAN-0295 item 1).
+#
+# auto_process ran SYNCHRONOUSLY on the first UserPromptSubmit of every session —
+# measured 78.5s to 120.5s with a backlog, and the cause of the 30s-timeout losses
+# The owner hit live. Its stdout is always empty, so by the owner's test (compass #272)
+# it never belonged on the prompt lane at all.
+#
+# Covers:
+#   - spawn_background() returns immediately and does NOT do the work inline
+#   - a spawn failure is reported, never raised into the hook and never silent
+#   - single-flight: a fresh lock skips the spawn with a stated reason
+#   - a stale lock is reclaimed rather than deadlocking the lane forever
+#   - run_once() (the child) acquires, works, and always releases — even on error
+#   - the child is detached, so it outlives the session that kicked it
+#   - run_once() announces memory_pool_auto_processed on BOTH outcomes (1.1.0)
 
-Covers:
-  - spawn_background() returns immediately and does NOT do the work inline
-  - a spawn failure is reported, never raised into the hook and never silent
-  - single-flight: a fresh lock skips the spawn with a stated reason
-  - a stale lock is reclaimed rather than deadlocking the lane forever
-  - run_once() (the child) acquires, works, and always releases — even on error
-  - the child is detached, so it outlives the session that kicked it
-  - run_once() announces memory_pool_auto_processed on BOTH outcomes (1.1.0)
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — run_pool_processing and auto_process() work, in tests/test_auto_process.py
+# seedgo: no-test-needed(external) — what the detached child writes to _CHILD_LOG; that is the child's own run
+# seedgo: no-test-needed(external) — the win32 branch of spawn_background(); only a Windows run takes it
 
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -38,8 +45,9 @@ from aipass.memory.apps.handlers.intake import auto_process as ap
 
 @pytest.fixture(autouse=True)
 def isolated_lock(tmp_path, monkeypatch):
-    """Point the lock at tmp_path — never touch the real one during tests."""
+    """Point the lock and the child log at tmp_path — never touch the real ones during tests."""
     monkeypatch.setattr(ap, "_LOCK_PATH", tmp_path / "auto-process.lock")
+    monkeypatch.setattr(ap, "_CHILD_LOG", tmp_path / "auto-process.log")
     yield tmp_path / "auto-process.lock"
 
 
@@ -84,16 +92,21 @@ class TestSpawnBackground:
         else:
             assert kwargs.get("start_new_session") is True
 
-    def test_child_never_inherits_the_hook_pipes(self):
-        """Inherited pipes can block the hook when the buffer fills."""
+    def test_child_never_inherits_the_hook_pipes(self, isolated_lock):
+        """Inherited pipes can block the hook when the buffer fills.
+
+        Each stream is pinned to what it is handed, not merely to "something":
+        stdin to DEVNULL, stderr folded into stdout, stdout to the child log file.
+        Mutant: ``"stdin": subprocess.DEVNULL`` -> ``subprocess.PIPE`` — killed.
+        """
         with patch("subprocess.Popen") as popen:
             popen.return_value = MagicMock(pid=1)
             ap.spawn_background()
 
         kwargs = popen.call_args.kwargs
-        assert kwargs.get("stdout") is not None
-        assert kwargs.get("stderr") is not None
-        assert kwargs.get("stdin") is not None
+        assert kwargs["stdin"] == subprocess.DEVNULL
+        assert kwargs["stderr"] == subprocess.STDOUT
+        assert kwargs["stdout"].name == str(isolated_lock.parent / "auto-process.log")
 
     def test_spawn_failure_is_reported_not_raised(self):
         """Fail to errors: the hook gets a result, never an exception."""
@@ -133,7 +146,7 @@ class TestSingleFlight:
 
     def test_stale_lock_does_not_wedge_the_lane_forever(self, isolated_lock):
         """A crashed child leaves a lock behind; it must not block for good."""
-        old = time.time() - (ap._LOCK_STALE_SECONDS + 60)
+        old = time.time() - 30 * 24 * 3600  # a month old: stale under any threshold the lane could carry
         isolated_lock.write_text(json.dumps({"pid": 999, "started": old}), encoding="utf-8")
 
         with patch("subprocess.Popen") as popen:
@@ -322,7 +335,10 @@ class TestScriptContract:
         assert '__name__ == "__main__"' in source
 
     def test_handler_has_no_relative_imports(self):
-        """A relative import here is invisible until the child runs (the `watch` defect)."""
+        """A relative import here is invisible until the child runs (the `watch` defect).
+
+        Mutant: a ``from . import nothing`` line added to ``spawn_background``'s docstring — killed.
+        """
         source = Path(ap.__file__).read_text(encoding="utf-8")
         offenders = [ln for ln in source.splitlines() if ln.strip().startswith("from .")]
-        assert not offenders, f"relative imports in a script-executed handler: {offenders}"
+        assert offenders == [], f"relative imports in a script-executed handler: {offenders}"

@@ -1,8 +1,9 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/conftest.py
-# Date: 2026-03-24
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
 # Version: 1.1.0
+# Created: 2026-03-07
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
@@ -36,6 +37,7 @@ from aipass.prax import json_handler as _prax_json_service
 # The write fence, captured once at collection so its logger is the real one and
 # no test's sys.modules stand-in can shadow it (see the fixture below).
 from aipass.memory.apps.handlers import write_fence as _write_fence
+from aipass.cli.apps.modules import display
 
 # The branch shim's own file, so the service can resolve memory's json directory
 # the way the shim does, without importing (and caching) the memory json package
@@ -177,83 +179,6 @@ def sample_test_data() -> dict:
             "version": "1.0.0",
         },
     }
-
-
-@pytest.fixture
-def sample_memory_data() -> dict:
-    """Provides sample memory file data (v2 schema)."""
-    return {
-        "document_metadata": {
-            "document_type": "session_history",
-            "document_name": "TEST.LOCAL",
-            "version": "2.0.0",
-            "schema_version": "2.0.0",
-            "created": "2026-01-01",
-            "last_updated": "2026-01-01",
-            "managed_by": "TEST",
-            "tags": ["test"],
-            "limits": {"max_sessions": 20, "max_key_learnings": 25},
-            "status": {"health": "healthy", "current_lines": 50},
-        },
-        "key_learnings": {"test_learning": "This is a test."},
-        "sessions": [{"session_number": 1, "date": "2026-01-01", "summary": "Test session", "status": "completed"}],
-    }
-
-
-@pytest.fixture
-def sample_registry_data() -> dict:
-    """Provides sample AIPASS_REGISTRY.json data."""
-    return {
-        "branches": [
-            {
-                "name": "TEST_BRANCH",
-                "path": "src/aipass/test_branch",
-                "module": "aipass.test_branch",
-                "email": "@test_branch",
-                "status": "active",
-            },
-            {
-                "name": "MEMORY",
-                "path": "src/aipass/memory",
-                "module": "aipass.memory",
-                "email": "@memory",
-                "status": "active",
-            },
-        ]
-    }
-
-
-@pytest.fixture
-def temp_branch(tmp_path, sample_memory_data):
-    """Create a minimal branch structure with .trinity/ files."""
-    branch_dir = tmp_path / "src" / "aipass" / "test_branch"
-    trinity = branch_dir / ".trinity"
-    trinity.mkdir(parents=True)
-    (trinity / "local.json").write_text(json.dumps(sample_memory_data, indent=2), encoding="utf-8")
-    (trinity / "passport.json").write_text(
-        json.dumps(
-            {
-                "branch_info": {"branch_name": "test_branch", "path": "src/aipass/test_branch"},
-                "identity": {"role": "test", "purpose": "testing"},
-                "citizenship": {"registered": True},
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    (trinity / "observations.json").write_text(
-        json.dumps({"document_metadata": {"document_type": "collaboration_patterns"}, "observations": []}, indent=2),
-        encoding="utf-8",
-    )
-    return branch_dir
-
-
-@pytest.fixture
-def temp_registry(tmp_path, sample_registry_data):
-    """Create a temporary AIPASS_REGISTRY.json."""
-    registry_path = tmp_path / "AIPASS_REGISTRY.json"
-    registry_path.write_text(json.dumps(sample_registry_data, indent=2), encoding="utf-8")
-    return registry_path
 
 
 @pytest.fixture
@@ -520,3 +445,18 @@ def case_insensitive_exists(monkeypatch):
 
     monkeypatch.setattr(Path, "exists", folded)
     return folded
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()

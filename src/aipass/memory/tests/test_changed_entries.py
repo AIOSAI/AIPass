@@ -1,22 +1,26 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_changed_entries.py
-# Date: 2026-06-13
-# Version: 1.0.0
-# Category: memory/tests
+# =================== AIPass ====================
+# Name: test_changed_entries.py
+# Description: changed_entries diff helper and the write_memory_file entry-limits wiring (FPLAN-0270 phase 3)
+# Version: 1.0.1
+# Created: 2026-06-13
+# Modified: 2026-09-28
 # =============================================
 
-"""
-Tests for Phase 3 of FPLAN-0270: changed_entries diff helper and
-write_memory_file entry-limits wiring.
+"""Tests for apps/handlers/json/entry_limits.py changed_entries and its write_memory_file wiring in memory_files.py."""
 
-Covers:
-  - changed_entries: new over-limit, changed over-limit, unchanged legacy
-    fat entries (rollover-safe), shrinking, dict/list containers, empty before.
-  - write_memory_file wiring: warn mode writes through + logs, enforce mode
-    rejects new fat entries, enforce mode allows unchanged legacy fat entries,
-    non-trinity files unaffected, passport.json unaffected.
-"""
+# Tests for Phase 3 of FPLAN-0270: changed_entries diff helper and
+# write_memory_file entry-limits wiring.
+#
+# Covers:
+#   - changed_entries: new over-limit, changed over-limit, unchanged legacy
+#     fat entries (rollover-safe), shrinking, dict/list containers, empty before.
+#   - write_memory_file wiring: warn mode writes through + logs, enforce mode
+#     rejects new fat entries, enforce mode allows unchanged legacy fat entries,
+#     non-trinity files unaffected, passport.json unaffected.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — write_memory_file_simple(), read_memory_file_data(): test_memory_files.py
+# seedgo: no-test-needed(covered_elsewhere) — load_entry_limits() config merge, fed in here: tests/test_entry_limits.py
 
 import importlib
 import json
@@ -25,6 +29,28 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from aipass.memory.apps.handlers import repo_root
+
+# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
+# whole path: a checkout that lives under a directory named dropbox must not hide itself.
+# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
+# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+_SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+
+def _walk(root: Path, pattern: str = "*.py") -> list[Path]:
+    """Every file under *root* matching *pattern*, outside the skipped directories."""
+    return sorted(path for path in root.rglob(pattern) if not _SKIPPED_DIRS.intersection(path.relative_to(root).parts))
+
+
+def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path: Path) -> None:
+    """Red first against a bare rglob. The root stands inside a directory named dropbox; live/ is the control."""
+    root = tmp_path / "dropbox" / "checkout"
+    for name in (*sorted(_SKIPPED_DIRS), "live"):
+        (root / name).mkdir(parents=True)
+        (root / name / "test_x.py").write_text("", encoding="utf-8")
+    assert _walk(root) == [root / "live" / "test_x.py"]
 
 
 # ---------------------------------------------------------------------------
@@ -811,8 +837,6 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
     @staticmethod
     def _hooks_root():
         """@hooks' source tree, or None when this checkout does not carry it."""
-        from aipass.memory.apps.handlers import repo_root
-
         candidate = repo_root.SOURCE_ROOT / "src" / "aipass" / "hooks" / "apps"
         return candidate if candidate.is_dir() else None
 
@@ -822,9 +846,7 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
             pytest.skip("@hooks is not installed in this checkout — nothing to measure")
 
         callers = [
-            path.relative_to(root)
-            for path in root.rglob("*.py")
-            if ".archive" not in path.parts and "changed_entries(" in path.read_text(encoding="utf-8")
+            path.relative_to(root) for path in _walk(root) if "changed_entries(" in path.read_text(encoding="utf-8")
         ]
         assert callers, (
             "no file in @hooks calls changed_entries() any more — the unused_function bypass in "
@@ -835,7 +857,6 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
     def test_the_bypass_rule_is_narrowed_to_that_one_function(self) -> None:
         """A file-wide exemption would hide the NEXT orphan in the same file."""
         import json as _json
-        from aipass.memory.apps.handlers import repo_root
 
         rules = _json.loads(
             (repo_root.SOURCE_ROOT / "src" / "aipass" / "memory" / ".seedgo" / "bypass.json").read_text(
@@ -959,8 +980,9 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
             memory_files.logger, "warning", lambda message, *a, **k: records.append(str(message)), raising=False
         )
 
-        memory_files._validate_entry_limits(target, {"key_learnings": {"b": "x" * 190}})
+        result = memory_files.write_memory_file(target, {"key_learnings": {"b": "x" * 190}})
 
+        assert result["success"] is True, result
         assert any("NEAR" in line and "190/200" in line and "10 chars of headroom" in line for line in records), records
         assert logging  # the import is the point: nothing here reconfigures logging
 
@@ -1121,11 +1143,23 @@ class TestTheClosedFieldShape:
         assert (hits[0]["length"], hits[0]["cap"]) == (30, 20)
 
     def test_the_six_published_keys_stay_ints_on_every_new_reason(self):
-        """@hooks formats length/cap/over_by with %d — a None there crashes the renderer."""
-        for entry in (self._entry(mood="x"), self._entry(status="x" * 50), self._entry(tags=["a"] * 9)):
-            for hit in self._authored([], [entry]):
-                for key in ("length", "cap", "over_by"):
-                    assert isinstance(hit[key], int), f"{hit['reason']}.{key} is {hit[key]!r}"
+        """@hooks formats length/cap/over_by with %d — a None there crashes the renderer.
+
+        Mutant: check_fields hands unknown_field a cap of 1 instead of 0 (still an int) — killed.
+        """
+        published = [
+            (hit["reason"], hit["length"], hit["cap"], hit["over_by"])
+            for entry in (self._entry(mood="x"), self._entry(status="x" * 50), self._entry(tags=["a"] * 9))
+            for hit in self._authored([], [entry])
+        ]
+        for reason, *numbers in published:
+            for value in numbers:
+                assert isinstance(value, int), f"{reason} published {value!r}"
+        assert published == [
+            ("unknown_field", 1, 0, 0),
+            ("field_over_cap", 50, 40, 10),
+            ("field_over_cap", 9, 3, 6),
+        ]
 
     # -- reused reasons, not new ones ----------------------------------------
 

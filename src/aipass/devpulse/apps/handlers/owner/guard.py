@@ -116,7 +116,7 @@ def owner_address(start_path: Path | None = None) -> str | None:
 
     try:
         entry = get_owner(start_path=start_path) if start_path is not None else get_owner()
-    except Exception as exc:  # noqa: BLE001 - a registry read can fail any number of ways
+    except Exception as exc:  # a registry read can fail any number of ways
         logger.info("[owner_guard] owner lookup failed: %s", exc)
         return None
 

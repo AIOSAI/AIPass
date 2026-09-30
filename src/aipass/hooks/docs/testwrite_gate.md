@@ -50,6 +50,22 @@ in `modules/admin_seat.py` that `edit_gate` uses — so cleanup work with the ow
 policy file. A crash inside the gate allows rather than walls: fail-closed covers a policy that could
 not be *read*, not a defect that is ours.
 
+**Naming a path is not writing it (1.2.0, 2026-09-19).** `bash_writes` reports every path an
+interpreter is handed, which is the right breadth for `edit_gate`'s fence and the wrong breadth for
+this gate's narrower question. Three seats were refused for commands that created nothing — @seedgo
+for a one-liner that PRINTED a test path while measuring the fleet, @canary for a path literal in a
+heredoc, this branch for both (devpulse DPLAN-0352). The reader now looks at the interpreter's OWN
+text for a write verb, **in the grammar that text is written in** — `>` is a redirection in a shell
+and a comparison in python — and appends `NO_WRITE_VERB` to the reason when it finds none. This gate
+reads that marker and stands down; `edit_gate` ignores it and keeps the full breadth, because a path
+an interpreter holds still cannot be told from one it writes.
+
+The evidence is never claimed about text nobody read. An interpreter handed a **script file** keeps
+the broad reading — the program is on disk, not in the command — and so does `awk`, whose program
+arrives as a bare operand rather than behind `-c`/`-e` or a heredoc. Shelling out (`os.system`,
+`subprocess`) counts as a write shape for the same reason: the verb is then inside a string this
+parser does not read as code.
+
 **What it deliberately does NOT catch** — published as data in `testwrite_targets.NOT_CAUGHT` and
 printed by `drone @hooks testwrite`, so this list and the code cannot drift apart:
 
@@ -58,6 +74,8 @@ printed by `drone @hooks testwrite`, so this list and the code cannot drift apar
 - a new test appended *into* an existing test file — the deliberate cost of letting agents fix reds
 - a test tree under a different directory name (`specs/`, `testing/`, `t/`)
 - everything `bash_writes.NOT_CAUGHT` already lists, on the scripted lane
+- a write made through a shape the write-verb vocabulary has no pattern for — the path is still
+  reported, but without that evidence this gate stands down on it
 - a file created by a process the command merely starts (a scaffolder, a generator)
 - deletion or renaming of the policy file itself — this gate does not guard its own switch
 
@@ -72,6 +90,38 @@ template entry against silent drift. Stamping a default policy is @aipass's call
 (`\w+_REGISTRY\.json$`) with no project-awareness, and its refusal hardcodes "use `drone @spawn`" —
 correct inside AIPass, wrong advice for an unrelated project that happens to own its own
 `FOO_REGISTRY.json`. That needs its own measurement, not a ride-along.
+
+## The template pointer — one line, PostToolUse (1.3.0, 2026-09-21)
+
+@seedgo houses the fleet's test template (`src/aipass/seedgo/templates/`) and distributes it as a page
+in each branch's own `tests/TEST_TEMPLATE.md`, beside a receipt `tests/.template_version.json`. Their
+contract, this branch's hook (DPLAN-0354, devpulse c3ab29d2): on a PostToolUse touching `tests/**`,
+inject exactly one line — `Test template v1: <branch>/tests/TEST_TEMPLATE.md - then drone @seedgo
+checklist <file>`, both paths rendered project-relative.
+
+`template_pointer()` shares this file with the gate rather than growing a second reader: the gate's own
+`_targets()` already answers both lanes — a tool payload's `file_path` and a Bash command's write
+targets through `bash_writes` — and `testwrite_targets.in_test_tree()` is the one reading of the
+`tests/` shape, extracted from `is_test_file()` so both callers ask it the same way. The contract is
+`tests/**`, wider than the gate's own question: a `fixtures/corpus.json` under a test tree gets the
+line, a collectable file outside one does not. A nested test tree is pointed at its OWN page — the
+page sits beside the suite it describes.
+
+**The page is the whole question, read per call.** No manifest of seedgo's is consulted and nothing is
+cached: a branch with no page is unstamped, and the line is SUPPRESSED rather than pointing at a file
+that is not there. The receipt only spells the version (`v<major>`, defaulting to `v1` when it is
+missing or unreadable), so a stamp that half-landed costs one word and never the pointer. Paths are
+rendered project-relative and POSIX-spelled, which keeps a machine's home directory out of the line;
+outside a project the absolute path is the only true answer and is used as is.
+
+It reaches the model as PostToolUse `additionalContext` — plain stdout would only reach the transcript
+— and `config/output_merge.py` folds it in beside `auto_fix`'s diagnostics when both fire on one
+event. A defect in the pointer costs the line and nothing else: it runs after the write, so it is a
+courtesy, never a wall.
+
+**Wiring:** it needs its own PostToolUse entry in the project's `.aipass/hooks.json`, a project-level
+file and therefore @devpulse's to apply (owner's ruling, 2026-09-18). Until that entry lands the
+handler is built, tested and dark.
 
 ---
 

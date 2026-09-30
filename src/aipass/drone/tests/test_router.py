@@ -1,10 +1,20 @@
-"""Tests for command routing — router module and router_handler."""
+# =================== AIPass ====================
+# Name: test_router.py
+# Description: Command routing - router module and router_handler
+# Version: 1.0.2
+# Created: 2026-03-14
+# Modified: 2026-09-28
+# =============================================
+
+"""Tests for apps/modules/router.py and apps/handlers/router_handler.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — subprocess spawning itself; tests/test_executor.py drives the executor
 
 import json
-import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -21,6 +31,7 @@ from aipass.drone.apps.handlers.router_handler import (
     resolve_caller_identity,
 )
 from aipass.drone.apps.modules.router import handle_command, route_command, route_all
+from aipass.drone.apps.plugins.devpulse_ops.auth import verify_git_access
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +47,7 @@ class TestFindEntryPoint:
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir()
         entry_file = apps_dir / "mybranch.py"
-        entry_file.write_text("# entry point stub")
+        entry_file.write_text("# entry point stub", encoding="utf-8")
 
         result = find_entry_point(str(temp_test_dir), "mybranch")
 
@@ -53,7 +64,7 @@ class TestFindEntryPoint:
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir()
         entry_file = apps_dir / "test_branch.py"
-        entry_file.write_text("")
+        entry_file.write_text("", encoding="utf-8")
 
         result = find_entry_point(str(temp_test_dir), "test_branch")
 
@@ -75,7 +86,7 @@ class TestExecuteBranchCommand:
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir()
         entry = apps_dir / "fakebranch.py"
-        entry.write_text("# stub")
+        entry.write_text("# stub", encoding="utf-8")
         return temp_test_dir
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
@@ -428,15 +439,19 @@ class TestRouteAll:
     @patch("aipass.drone.apps.modules.router.route_command")
     @patch("aipass.drone.apps.modules.router.list_branches")
     def test_captures_failure_per_branch(self, mock_list, mock_route):
-        """When a branch raises, route_all records exit_code=-1 for it."""
+        """A raising branch records exit_code=-1; each branch gets its args once (mutant: args=[] dropped)."""
         mock_list.return_value = ["@ok_branch", "@bad_branch"]
         mock_route.side_effect = [
             CommandResult(stdout="ok", stderr="", exit_code=0, branch="ok_branch", command="cmd"),
             RuntimeError("boom"),
         ]
 
-        results = route_all("cmd")
+        results = route_all("cmd", ["--flag"])
 
+        assert mock_route.call_args_list == [
+            call("@ok_branch", "cmd", args=["--flag"], timeout=None),
+            call("@bad_branch", "cmd", args=["--flag"], timeout=None),
+        ]
         assert results["ok_branch"].exit_code == 0
         assert results["bad_branch"].exit_code == -1
         assert "boom" in results["bad_branch"].stderr
@@ -455,7 +470,7 @@ class TestDetectCallerBranchName:
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"branch_info": {"branch_name": "alpha"}}))
+        passport.write_text(json.dumps({"branch_info": {"branch_name": "alpha"}}), encoding="utf-8")
 
         result = detect_caller_signal(temp_test_dir).name
         assert result == "alpha"
@@ -465,7 +480,7 @@ class TestDetectCallerBranchName:
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"identity": {"name": "beta"}}))
+        passport.write_text(json.dumps({"identity": {"name": "beta"}}), encoding="utf-8")
 
         result = detect_caller_signal(temp_test_dir).name
         assert result == "beta"
@@ -481,7 +496,8 @@ class TestDetectCallerBranchName:
                     "branch_info": {"branch_name": "v1name"},
                     "identity": {"name": "v2name"},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         result = detect_caller_signal(temp_test_dir).name
@@ -497,7 +513,7 @@ class TestDetectCallerBranchName:
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text("{{{not valid json!!!")
+        passport.write_text("{{{not valid json!!!", encoding="utf-8")
 
         result = detect_caller_signal(temp_test_dir).name
         assert result is None
@@ -507,7 +523,7 @@ class TestDetectCallerBranchName:
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"branch_info": {"branch_name": "found_it"}}))
+        passport.write_text(json.dumps({"branch_info": {"branch_name": "found_it"}}), encoding="utf-8")
 
         sub = temp_test_dir / "deep" / "nested" / "dir"
         sub.mkdir(parents=True)
@@ -526,13 +542,15 @@ class TestDetectCallerFallsBackToRegistry:
 
     @staticmethod
     def _write_registry(root: Path, name: str) -> None:
-        (root / "PROJ_REGISTRY.json").write_text(json.dumps({"metadata": {"name": name}, "branches": []}))
+        (root / "PROJ_REGISTRY.json").write_text(
+            json.dumps({"metadata": {"name": name}, "branches": []}), encoding="utf-8"
+        )
 
     def test_corrupt_passport_falls_back_to_registry(self, temp_test_dir: Path):
         """Invalid JSON in the passport still resolves the project from the registry."""
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
-        (trinity / "passport.json").write_text("{{{not valid json!!!")
+        (trinity / "passport.json").write_text("{{{not valid json!!!", encoding="utf-8")
         self._write_registry(temp_test_dir, "Vera Studio")
 
         assert detect_caller_signal(temp_test_dir).name == "vera-studio"
@@ -541,7 +559,7 @@ class TestDetectCallerFallsBackToRegistry:
         """A passport that parses but names no branch is unusable, not authoritative."""
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
-        (trinity / "passport.json").write_text(json.dumps({"branch_info": {}}))
+        (trinity / "passport.json").write_text(json.dumps({"branch_info": {}}), encoding="utf-8")
         self._write_registry(temp_test_dir, "Vera Studio")
 
         assert detect_caller_signal(temp_test_dir).name == "vera-studio"
@@ -553,12 +571,14 @@ class TestDetectCallerFallsBackToRegistry:
         """
         parent_trinity = temp_test_dir / ".trinity"
         parent_trinity.mkdir()
-        (parent_trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "parent_branch"}}))
+        (parent_trinity / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": "parent_branch"}}), encoding="utf-8"
+        )
 
         child = temp_test_dir / "child"
         child_trinity = child / ".trinity"
         child_trinity.mkdir(parents=True)
-        (child_trinity / "passport.json").write_text("{{{broken")
+        (child_trinity / "passport.json").write_text("{{{broken", encoding="utf-8")
 
         assert detect_caller_signal(child).name != "parent_branch"
 
@@ -587,7 +607,7 @@ class TestDetectCallerFallsBackToRegistry:
         """The happy path must not warn — noise in the logs @trigger watches."""
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
-        (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "alpha"}}))
+        (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "alpha"}}), encoding="utf-8")
 
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
             assert detect_caller_signal(temp_test_dir).name == "alpha"
@@ -617,14 +637,15 @@ class TestNamelessRegistryFallback:
     ):
         """The filename is the one thing every registry provably has."""
         (temp_test_dir / filename).write_text(
-            json.dumps({"metadata": {"version": "1.0.0", "total_branches": 17, "id": "abc"}, "branches": []})
+            json.dumps({"metadata": {"version": "1.0.0", "total_branches": 17, "id": "abc"}, "branches": []}),
+            encoding="utf-8",
         )
         assert detect_caller_signal(temp_test_dir).name == expected
 
     def test_declared_name_beats_the_filename(self, temp_test_dir: Path):
         """An explicit declaration outranks inference — filename is the fallback, not the rule."""
         (temp_test_dir / "PROJ_REGISTRY.json").write_text(
-            json.dumps({"metadata": {"name": "Vera Studio"}, "branches": []})
+            json.dumps({"metadata": {"name": "Vera Studio"}, "branches": []}), encoding="utf-8"
         )
         assert detect_caller_signal(temp_test_dir).name == "vera-studio"
 
@@ -636,8 +657,10 @@ class TestNamelessRegistryFallback:
         """
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
-        (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "drone"}}))
-        (temp_test_dir / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": []}))
+        (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "drone"}}), encoding="utf-8")
+        (temp_test_dir / "AIPASS_REGISTRY.json").write_text(
+            json.dumps({"metadata": {}, "branches": []}), encoding="utf-8"
+        )
 
         assert detect_caller_signal(temp_test_dir).name == "drone"
 
@@ -648,7 +671,7 @@ class TestNamelessRegistryFallback:
         the log showed 'no passport or registry found' while the registry was
         sitting in the very directory named by the message.
         """
-        (temp_test_dir / "PROJ_REGISTRY.json").write_text("{{{not json")
+        (temp_test_dir / "PROJ_REGISTRY.json").write_text("{{{not json", encoding="utf-8")
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
             detect_caller_signal(temp_test_dir).name
         assert mock_logger.warning.called
@@ -663,7 +686,7 @@ class TestNamelessRegistryFallback:
         it is the whole point — a registry turned down in silence is exactly the
         failure being fixed here.
         """
-        (temp_test_dir / "_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": []}))
+        (temp_test_dir / "_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": []}), encoding="utf-8")
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
             assert detect_caller_signal(temp_test_dir).name is None
         assert any("no usable project name" in str(c) for c in mock_logger.warning.call_args_list)
@@ -675,9 +698,9 @@ class TestNamelessRegistryFallback:
         a caller name. Owner-tier reads passports directly and must stay unmoved
         by that — otherwise this convenience would be an escalation path.
         """
-        from aipass.drone.apps.plugins.devpulse_ops.auth import verify_git_access
-
-        (temp_test_dir / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {"id": "x"}, "branches": []}))
+        (temp_test_dir / "AIPASS_REGISTRY.json").write_text(
+            json.dumps({"metadata": {"id": "x"}, "branches": []}), encoding="utf-8"
+        )
         assert detect_caller_signal(temp_test_dir).name == "aipass"
 
         monkeypatch.chdir(temp_test_dir)
@@ -694,7 +717,7 @@ def _plant_passport(directory: Path, branch_name: str) -> Path:
     """Create directory/.trinity/passport.json naming branch_name."""
     trinity = directory / ".trinity"
     trinity.mkdir(parents=True, exist_ok=True)
-    (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": branch_name}}))
+    (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": branch_name}}), encoding="utf-8")
     return directory
 
 
@@ -779,7 +802,9 @@ class TestIdentityMessageSeverity:
     def _plant_registry(self, directory: Path, filename: str = "AIPASS_REGISTRY.json") -> Path:
         """Write a registry with no declared name — AIPass's own shape."""
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / filename).write_text(json.dumps({"metadata": {"version": "1.0"}, "branches": []}))
+        (directory / filename).write_text(
+            json.dumps({"metadata": {"version": "1.0"}, "branches": []}), encoding="utf-8"
+        )
         return directory
 
     def test_project_root_caller_does_not_warn(self, temp_test_dir: Path, monkeypatch):
@@ -816,16 +841,17 @@ class TestIdentityMessageSeverity:
         assert "passport" not in said.lower().split("no passport")[0]
         assert "prax" in said and "aipass" in said
 
-    def test_real_passport_conflict_still_warns(self, temp_test_dir: Path, monkeypatch):
-        """S102's shape stays loud — two citizens claiming one process."""
+    def test_real_passport_conflict_still_warns_and_assigned_wins(self, temp_test_dir: Path, monkeypatch):
+        """S102 stays loud, names the passport, and the assigned name wins (mutant: passport wins)."""
         home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
 
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
-            resolve_caller_identity(home)
+            result = resolve_caller_identity(home)
 
         warnings = " ".join(str(c) for c in mock_logger.warning.call_args_list)
-        assert "commons" in warnings and "AIPASS" in warnings
+        assert "commons" in warnings and "AIPASS" in warnings and "passport" in warnings
+        assert result == "commons"
 
     def test_detection_failure_does_not_warn(self, temp_test_dir: Path, monkeypatch):
         """The owner running a monitor from ~ is a normal operator action."""
@@ -881,7 +907,7 @@ class TestIdentityMessageSeverity:
 
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
             resolve_caller_identity(home)
-            router_handler._LOGGED_IDENTITY_SIGNATURES.clear()  # a fresh process starts empty
+            monkeypatch.setattr(router_handler, "_LOGGED_IDENTITY_SIGNATURES", set())  # a fresh process starts empty
             resolve_caller_identity(home)
 
         assert len(mock_logger.warning.call_args_list) == 2
@@ -909,15 +935,13 @@ class TestIdentityMessageSeverity:
         """End to end: the env var the child receives is what ai_mail stamps."""
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir()
-        (apps_dir / "testbranch.py").write_text("# stub")
+        (apps_dir / "testbranch.py").write_text("# stub", encoding="utf-8")
         home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
         mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
 
-        with patch("aipass.drone.apps.handlers.router_handler.Path") as mock_path_cls:
-            mock_path_cls.cwd.return_value = home
-            mock_path_cls.side_effect = Path
-            execute_branch_command(branch_path=str(temp_test_dir), branch_name="testbranch", command="status")
+        monkeypatch.chdir(home)
+        execute_branch_command(branch_path=str(temp_test_dir), branch_name="testbranch", command="status")
 
         assert mock_exec.call_args.kwargs["env"]["AIPASS_CALLER_BRANCH"] == "commons"
 
@@ -966,7 +990,7 @@ class TestCallerBranchEnvVar:
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir()
         entry = apps_dir / "testbranch.py"
-        entry.write_text("# stub")
+        entry.write_text("# stub", encoding="utf-8")
 
         # Set up passport in cwd
         cwd_dir = temp_test_dir / "caller_cwd"
@@ -974,32 +998,27 @@ class TestCallerBranchEnvVar:
         trinity = cwd_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"branch_info": {"branch_name": "caller_branch"}}))
+        passport.write_text(json.dumps({"branch_info": {"branch_name": "caller_branch"}}), encoding="utf-8")
 
         mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
 
-        with patch("aipass.drone.apps.handlers.router_handler.Path") as mock_path_cls:
-            # Make Path.cwd() return our fake cwd
-            mock_path_cls.cwd.return_value = cwd_dir
-            # But keep Path(branch_path) / ... working for find_entry_point
-            mock_path_cls.side_effect = Path
-
-            execute_branch_command(
-                branch_path=str(temp_test_dir),
-                branch_name="testbranch",
-                command="status",
-            )
+        monkeypatch.chdir(cwd_dir)
+        execute_branch_command(
+            branch_path=str(temp_test_dir),
+            branch_name="testbranch",
+            command="status",
+        )
 
         env = mock_exec.call_args.kwargs["env"]
         assert env["AIPASS_CALLER_BRANCH"] == "caller_branch"
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
-    def test_no_caller_branch_without_passport(self, mock_exec, temp_test_dir: Path):
+    def test_no_caller_branch_without_passport(self, mock_exec, temp_test_dir: Path, monkeypatch):
         """AIPASS_CALLER_BRANCH is absent when no passport.json and no env var."""
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir()
         entry = apps_dir / "testbranch.py"
-        entry.write_text("# stub")
+        entry.write_text("# stub", encoding="utf-8")
 
         # Use a cwd with no passport
         cwd_dir = temp_test_dir / "empty_cwd"
@@ -1007,18 +1026,13 @@ class TestCallerBranchEnvVar:
 
         mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
 
-        with patch("aipass.drone.apps.handlers.router_handler.Path") as mock_path_cls:
-            mock_path_cls.cwd.return_value = cwd_dir
-            mock_path_cls.side_effect = Path
-
-            with patch.dict(os.environ, {}, clear=False):
-                # Remove AIPASS_BRANCH_NAME if present
-                os.environ.pop("AIPASS_BRANCH_NAME", None)
-                execute_branch_command(
-                    branch_path=str(temp_test_dir),
-                    branch_name="testbranch",
-                    command="status",
-                )
+        monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
+        monkeypatch.chdir(cwd_dir)
+        execute_branch_command(
+            branch_path=str(temp_test_dir),
+            branch_name="testbranch",
+            command="status",
+        )
 
         env = mock_exec.call_args.kwargs["env"]
         assert "AIPASS_CALLER_BRANCH" not in env

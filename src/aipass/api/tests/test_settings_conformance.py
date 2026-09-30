@@ -3,33 +3,38 @@
 # Description: The settings conformance corpus, python side — shared goldens both runtimes must satisfy
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-28
 # =============================================
 
-"""
-The python runner for the shared settings conformance corpus (FPLAN-0438 R3).
+"""Tests for apps/handlers/host/settings.py's read and write doors against the shared conformance corpus."""
 
-WHY THIS EXISTS. The settings lane is a faithful mirror of @baud's settings.rs,
-and a mirror drifts. @baud measured six real divergences between the two
-implementations in one night — not by reading each other's source, by running
-both — and every one of them was a place where two faces would have written the
-operator's own config differently while each believed it was correct.
+# The python runner for the shared settings conformance corpus (FPLAN-0438 R3).
+#
+# WHY THIS EXISTS. The settings lane is a faithful mirror of @baud's settings.rs,
+# and a mirror drifts. @baud measured six real divergences between the two
+# implementations in one night — not by reading each other's source, by running
+# both — and every one of them was a place where two faces would have written the
+# operator's own config differently while each believed it was correct.
+#
+# Prose cannot hold a mirror straight. Shared DATA can: one set of cases, in
+# plain JSON, that each runtime proves it satisfies in its own test suite. When
+# the two disagree from here on, a case goes red on one side and names the
+# disagreement, instead of an operator finding it.
+#
+# THE CASES ARE THE CONTRACT, not this file. This file only knows how to build a
+# starting state, call a door, and compare an answer. A rust runner walks the same
+# directory with serde and does the same three things — the JSON carries no python
+# in it anywhere, which is the whole point.
+#
+# See tests/conformance/settings/README.md for the case format.
 
-Prose cannot hold a mirror straight. Shared DATA can: one set of cases, in
-plain JSON, that each runtime proves it satisfies in its own test suite. When
-the two disagree from here on, a case goes red on one side and names the
-disagreement, instead of an operator finding it.
-
-THE CASES ARE THE CONTRACT, not this file. This file only knows how to build a
-starting state, call a door, and compare an answer. A rust runner walks the same
-directory with serde and does the same three things — the JSON carries no python
-in it anywhere, which is the whole point.
-
-See tests/conformance/settings/README.md for the case format.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — hooks_sound_get() and hooks_sound_set(), tests/test_host_settings.py
+# seedgo: no-test-needed(covered) — the rust side of the corpus, run by @baud's own suite against settings.rs
 
 import hashlib
 import json
+import logging
 import os
 import stat
 import tempfile
@@ -40,6 +45,10 @@ from typing import Any, Dict, List
 import pytest
 
 from aipass.api.apps.handlers.host import settings as host_settings
+
+# The capability probe records what the host answered, so a runner's verdicts
+# can be traced back to the world it measured.
+logger = logging.getLogger(__name__)
 
 CORPUS = Path(__file__).parent / "conformance" / "settings"
 MANIFEST = CORPUS / "manifest.json"
@@ -119,7 +128,8 @@ def platform_capabilities() -> frozenset:
             denied.chmod(0o000)
             try:
                 denied.read_bytes()
-            except OSError:
+            except OSError as e:
+                logger.debug("probe: a mode-000 file is unreadable here: %s", e)
                 found.add(UNREADABLE_FILES)
         finally:
             denied.chmod(0o600)
@@ -134,11 +144,12 @@ def platform_capabilities() -> frozenset:
         blocker.write_text("a file standing where a directory belongs", encoding="utf-8")
         try:
             (blocker / "child.json").read_bytes()
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             # The OS reports the broken tree as a missing file, so no rule that
             # reads missing-as-blank can tell the two apart.
-            pass
-        except OSError:
+            logger.debug("probe: a file-as-parent reads as missing here: %s", e)
+        except OSError as e:
+            logger.debug("probe: a file-as-parent is its own fault here: %s", e)
             found.add(PARENT_IS_A_FILE_IS_DISTINGUISHABLE)
 
     return frozenset(found)
@@ -209,7 +220,7 @@ class TestTheCorpusItself:
         # is asserted once, here, where the first of them runs (seedgo
         # unentered_assert, 2026-09-07). A corpus that failed to load and a
         # corpus where every case is correct look identical without it.
-        assert CASES, "the shared corpus is empty — nothing was checked against the doors"
+        assert 0 < len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — not every case was checked"
 
         for entry in CASES:
             assert RUNTIME in entry["runtimes"], entry["id"]
@@ -249,7 +260,7 @@ class TestTheCorpusItself:
         not survive. Without this, the fix for one case would leave the next
         one to be found by CI on a platform nobody runs locally.
         """
-        assert CASES, "the shared corpus is empty — no mode-carrying case could be found"
+        assert 0 < len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — a mode case could be missed"
 
         mode_carrying = 0
 
@@ -270,7 +281,7 @@ class TestTheCorpusItself:
         # `mode` is the expectation this guard exists for. A corpus that stopped
         # carrying it anywhere would leave the loop above entering nothing and
         # this test green — an absence wearing a pass's clothes.
-        assert mode_carrying, "no case expects a file mode, so this guard measured nothing"
+        assert mode_carrying >= 1, "no case expects a file mode, so this guard measured nothing"
 
     def test_a_case_that_cannot_be_built_here_is_skipped_and_never_passed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -331,14 +342,14 @@ class TestTheCorpusItself:
         Both directions are checked: what a case REQUIRES and what it declares
         an expectation for.
         """
-        assert CASES, "the shared corpus is empty — no capability name was checked"
+        assert 0 < len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — a capability went unchecked"
 
         for entry in CASES:
             platform = _platform_block(entry)
             named = set(platform.get("requires", [])) | set(platform.get("expect_without", {}))
 
             unknown = named - set(CAPABILITY_MEANINGS)
-            assert not unknown, f"{entry['id']} names capabilities nobody measures: {sorted(unknown)}"
+            assert unknown == set(), f"{entry['id']} names capabilities nobody measures: {sorted(unknown)}"
 
 
 def _build(root: Path, given: Dict[str, Any]) -> Path:

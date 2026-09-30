@@ -1,16 +1,23 @@
-"""Tests for seedgo_proof module."""
-
 # =================== META ====================
 # Name: test_seedgo_proof.py
 # Description: Unit tests for the seedgo_proof module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
+"""Tests for apps/modules/seedgo_proof.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(generated) — the Rich Table rows _display_proof_results draws; Rich lays them out
+# seedgo: no-test-needed(stdlib) — importlib.util.spec_from_file_location loading a handler by its path
+
+import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock
-from pathlib import Path
+
+from aipass.seedgo.apps.modules import seedgo_proof
 
 
 # ---------------------------------------------------------------------------
@@ -20,45 +27,31 @@ from pathlib import Path
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for seedgo_proof."""
-    import sys
-
-    mock_logger = MagicMock()
-    mock_console = MagicMock()
+    """Replace the header and error seams seedgo_proof reads; the console stays real, read through capsys."""
     mock_header = MagicMock()
     mock_error = MagicMock()
-    mock_warning = MagicMock()
-    mock_json_handler = MagicMock()
 
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
+    monkeypatch.setattr(seedgo_proof, "header", mock_header)
+    monkeypatch.setattr(seedgo_proof, "error", mock_error)
 
-    # -- cli ----------------------------------------------------------------
-    cli_mod = MagicMock()
-    cli_mod.console = mock_console
-    cli_mod.header = mock_header
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
 
-    cli_apps = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", cli_apps)
+def _handlers(tmp_path, monkeypatch, target: bool = True):
+    """A handlers/ tree the module discovers from: Path(__file__).parent.parent / "handlers"."""
+    handlers_dir = tmp_path / "handlers"
+    handlers_dir.mkdir()
+    if target:
+        (handlers_dir / "code_standards").mkdir()
+    fake_file = tmp_path / "modules" / "seedgo_proof.py"
+    fake_file.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(seedgo_proof, "__file__", str(fake_file))
+    return handlers_dir
 
-    cli_modules = MagicMock()
-    cli_modules.error = mock_error
-    cli_modules.warning = mock_warning
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
 
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # Force re-import
-    monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.seedgo_proof", raising=False)
+def _run_json(capsys, pack: str = "code") -> dict:
+    """`proof <pack> --json`, the command a user runs, parsed off stdout."""
+    capsys.readouterr()
+    assert seedgo_proof.handle_command("proof", [pack, "--json"]) is True
+    return json.loads(capsys.readouterr().out)
 
 
 # ---------------------------------------------------------------------------
@@ -68,57 +61,76 @@ def _mock_infrastructure(monkeypatch):
 
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
-
-    assert handle_command("wrong_command", []) is False
+    assert seedgo_proof.handle_command("wrong_command", []) is False
 
 
 def test_handle_command_accepts_proof_name():
-    """handle_command recognises 'proof' as its command."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
-
-    result = handle_command("proof", [])
-    assert result is True
+    """'proof' reaches this module's introspection, not just a True."""
+    with patch.object(seedgo_proof, "print_introspection") as shown:
+        assert seedgo_proof.handle_command("proof", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_accepts_seedgo_proof_name():
-    """handle_command recognises 'seedgo_proof' as its command."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
-
-    result = handle_command("seedgo_proof", [])
-    assert result is True
+    """'seedgo_proof' is the same door, not a near miss returning True."""
+    with patch.object(seedgo_proof, "print_introspection") as shown:
+        assert seedgo_proof.handle_command("seedgo_proof", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_help_flag():
-    """--help flag is handled without error."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
-
-    result = handle_command("proof", ["--help"])
-    assert result is True
+    """--help explains and runs no pack."""
+    with (
+        patch.object(seedgo_proof, "print_help") as helped,
+        patch.object(seedgo_proof, "_run_proof_pack") as ran,
+    ):
+        assert seedgo_proof.handle_command("proof", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert ran.call_args_list == []
 
 
 def test_handle_command_h_flag():
-    """-h flag is handled without error."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
+    """A help flag AFTER a pack name describes the run instead of performing it.
 
-    result = handle_command("proof", ["-h"])
-    assert result is True
+    The cured defect this pins, stated in handle_command itself: `proof aipass
+    --help` used to run the pack. Running it and describing it both return
+    True, so only the effect separates them — and one of the two is slow.
+    """
+    with (
+        patch.object(seedgo_proof, "print_help") as helped,
+        patch.object(seedgo_proof, "_run_proof_pack") as ran,
+    ):
+        assert seedgo_proof.handle_command("proof", ["aipass", "-h"]) is True
+    helped.assert_called_once_with()
+    assert ran.call_args_list == []
 
 
 def test_handle_command_help_word():
-    """'help' word is handled without error."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
-
-    result = handle_command("proof", ["help"])
-    assert result is True
+    """The bare word 'help' reaches the same door as the flags."""
+    with (
+        patch.object(seedgo_proof, "print_help") as helped,
+        patch.object(seedgo_proof, "_run_proof_pack") as ran,
+    ):
+        assert seedgo_proof.handle_command("proof", ["help"]) is True
+    helped.assert_called_once_with()
+    assert ran.call_args_list == []
 
 
 def test_handle_command_unknown_pack():
-    """Unknown pack name returns True (error displayed to user)."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
+    """An unknown pack is named back with the available ones, and nothing runs.
 
-    result = handle_command("proof", ["nonexistent_pack_xyz"])
-    assert result is True
+    Was `assert result is True` under a docstring promising an error was
+    displayed — and this module returns True on every path, so the test
+    passed with _validate_pack's whole error arm deleted.
+    """
+    with patch.object(seedgo_proof, "_run_proof_pack") as ran:
+        assert seedgo_proof.handle_command("proof", ["nonexistent_pack_xyz"]) is True
+
+    assert ran.call_args_list == []
+    reported = seedgo_proof.error.call_args_list  # type: ignore[attr-defined]
+    assert len(reported) == 1
+    assert reported[0].args[0] == "Unknown proof pack: 'nonexistent_pack_xyz'"
+    assert "Available packs:" in reported[0].kwargs["suggestion"]
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +138,7 @@ def test_handle_command_unknown_pack():
 # ---------------------------------------------------------------------------
 
 
-def test_print_introspection_runs():
+def test_print_introspection_runs(capsys):
     """print_introspection headers SEEDGO PROOF and lists the proof packs.
 
     "console.print OR header was called" is not an oracle — it holds for a
@@ -134,37 +146,28 @@ def test_print_introspection_runs():
     here while nothing was measured. Both strings were read off a real run
     (2026-09-07): the header is unconditional, and the pack heading is the line
     that only appears when discovery actually found something to list.
+    Mutant: the pack heading's markup unclosed in apps/modules/seedgo_proof.py — killed.
     """
-    import sys
-    from aipass.seedgo.apps.modules.seedgo_proof import print_introspection
-
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    mock_cli.header.reset_mock()
-    result = print_introspection()
-    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
-    headers = [call.args[0] for call in mock_cli.header.call_args_list if call.args]
+    seedgo_proof.header.reset_mock()
+    result = seedgo_proof.print_introspection()
+    printed = capsys.readouterr().out
+    headers = [call.args[0] for call in seedgo_proof.header.call_args_list if call.args]
     assert result is None
     assert headers == ["SEEDGO PROOF"], f"introspection headed itself {headers!r}"
     assert "Available Proof Packs:" in printed, f"introspection never listed the packs: {printed!r}"
 
 
-def test_print_help_runs():
+def test_print_help_runs(capsys):
     """print_help prints its banner and the handler interface it demands.
 
     Same reason as the introspection test above. The second string is the one
     piece of help a handler author cannot work without — the signature every
     proof handler must define — so an edit that drops the interface section
     turns this red instead of passing on "something was printed".
+    Mutant: the signature line's markup unclosed in apps/modules/seedgo_proof.py — killed.
     """
-    import sys
-    from aipass.seedgo.apps.modules.seedgo_proof import print_help
-
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    mock_cli.header.reset_mock()
-    result = print_help()
-    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
+    result = seedgo_proof.print_help()
+    printed = capsys.readouterr().out
     assert result is None
     assert "Seedgo Proof Module" in printed, f"help never named the module: {printed!r}"
     assert "scan(pack_dir: Path) -> dict" in printed, f"help never showed the handler signature: {printed!r}"
@@ -175,11 +178,10 @@ def test_print_help_runs():
 # ---------------------------------------------------------------------------
 
 
-def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch):
-    """_discover_proof_packs discovers *_proof dirs containing handler .py files."""
+def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch, capsys):
+    """Mutant: a *_proof dir with no handler listed anyway in apps/modules/seedgo_proof.py — killed."""
     # Build: tmp_path/handlers/ with pack subdirectories
-    handlers_dir = tmp_path / "handlers"
-    handlers_dir.mkdir()
+    handlers_dir = _handlers(tmp_path, monkeypatch)
 
     valid_pack = handlers_dir / "code_proof"
     valid_pack.mkdir()
@@ -191,60 +193,55 @@ def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch):
     not_a_pack = handlers_dir / "random_dir"
     not_a_pack.mkdir()  # not *_proof -- should be skipped
 
-    import aipass.seedgo.apps.modules.seedgo_proof as sp_mod
-
-    # Patch __file__ so Path(__file__).parent.parent / "handlers" -> handlers_dir
-    fake_file = tmp_path / "modules" / "seedgo_proof.py"
-    fake_file.parent.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(sp_mod, "__file__", str(fake_file))
-
-    packs = sp_mod._discover_proof_packs()
-    assert isinstance(packs, dict)
-    assert "code" in packs, "Should discover 'code' from code_proof/"
-    assert packs["code"] == valid_pack
-    assert "empty" not in packs, "Should skip dirs without handler .py files"
-    assert "random_dir" not in packs, "Should skip non-*_proof dirs"
+    # Reached through `proof` with no pack: the introspection lists what discovery found.
+    assert seedgo_proof.handle_command("proof", []) is True
+    out = capsys.readouterr().out
+    assert "code  (1 proof, target found)" in out, "Should discover 'code' from code_proof/"
+    assert "empty" not in out, "Should skip dirs without handler .py files"
+    assert "random_dir" not in out, "Should skip non-*_proof dirs"
 
 
-def test_discover_proof_handlers_empty_dir(tmp_path):
-    """_discover_proof_handlers returns empty list for empty directory."""
-    from aipass.seedgo.apps.modules.seedgo_proof import _discover_proof_handlers
+def test_discover_proof_handlers_empty_dir(tmp_path, monkeypatch, capsys):
+    """Mutant: an empty pack dir answered with a handler in apps/modules/seedgo_proof.py — killed."""
+    (_handlers(tmp_path, monkeypatch) / "code_proof").mkdir()
 
-    result = _discover_proof_handlers(tmp_path)
-    assert result == []
-
-
-def test_discover_proof_handlers_skips_init(tmp_path):
-    """_discover_proof_handlers skips __init__.py and _prefixed files."""
-    from aipass.seedgo.apps.modules.seedgo_proof import _discover_proof_handlers
-
-    (tmp_path / "__init__.py").write_text("", encoding="utf-8")
-    (tmp_path / "_private.py").write_text("", encoding="utf-8")
-    (tmp_path / "valid_proof.py").write_text("", encoding="utf-8")
-    result = _discover_proof_handlers(tmp_path)
-    names = [p.name for p in result]
-    assert "__init__.py" not in names
-    assert "_private.py" not in names
-    assert "valid_proof.py" in names
+    # A *_proof dir whose handler list is empty is no pack at all.
+    assert seedgo_proof.handle_command("proof", []) is True
+    out = capsys.readouterr().out
+    assert "Available Proof Packs:" not in out
+    assert "Add handler .py files" in out
 
 
-def test_discover_proof_handlers_skips_content_files(tmp_path):
-    """_discover_proof_handlers skips *_content.py files."""
-    from aipass.seedgo.apps.modules.seedgo_proof import _discover_proof_handlers
+def test_discover_proof_handlers_skips_init(tmp_path, monkeypatch, capsys):
+    """__init__.py and _prefixed files are not proof handlers.
 
-    (tmp_path / "architecture_content.py").write_text("", encoding="utf-8")
-    (tmp_path / "real_proof.py").write_text("", encoding="utf-8")
-    result = _discover_proof_handlers(tmp_path)
-    names = [p.name for p in result]
-    assert "architecture_content.py" not in names
-    assert "real_proof.py" in names
+    Mutant: _prefixed files run as handlers in apps/modules/seedgo_proof.py — killed.
+    """
+    pack = _handlers(tmp_path, monkeypatch) / "code_proof"
+    pack.mkdir()
+    (pack / "__init__.py").write_text("", encoding="utf-8")
+    (pack / "_private.py").write_text("", encoding="utf-8")
+    (pack / "valid_proof.py").write_text("", encoding="utf-8")
+    names = list(_run_json(capsys)["results"])
+    assert "__init__" not in names
+    assert "_private" not in names
+    assert "valid_proof" in names
 
 
-def test_discover_proof_handlers_nonexistent_dir():
+def test_discover_proof_handlers_skips_content_files(tmp_path, monkeypatch, capsys):
+    """Mutant: *_content.py run as a handler in apps/modules/seedgo_proof.py — killed."""
+    pack = _handlers(tmp_path, monkeypatch) / "code_proof"
+    pack.mkdir()
+    (pack / "architecture_content.py").write_text("", encoding="utf-8")
+    (pack / "real_proof.py").write_text("", encoding="utf-8")
+    names = list(_run_json(capsys)["results"])
+    assert "architecture_content" not in names
+    assert "real_proof" in names
+
+
+def test_discover_proof_handlers_nonexistent_dir(tmp_path):
     """_discover_proof_handlers returns empty list for nonexistent directory."""
-    from aipass.seedgo.apps.modules.seedgo_proof import _discover_proof_handlers
-
-    result = _discover_proof_handlers(Path("/tmp/does_not_exist_xyz"))
+    result = seedgo_proof._discover_proof_handlers(tmp_path / "does_not_exist_xyz")
     assert result == []
 
 
@@ -253,38 +250,37 @@ def test_discover_proof_handlers_nonexistent_dir():
 # ---------------------------------------------------------------------------
 
 
-def test_run_proof_pack_missing_target():
-    """_run_proof_pack returns error when target standards pack is missing."""
-    from aipass.seedgo.apps.modules.seedgo_proof import _run_proof_pack
-
-    result = _run_proof_pack("nonexistent_xyz", Path("/tmp/does_not_exist"))
+def test_run_proof_pack_missing_target(tmp_path, monkeypatch, capsys):
+    """Mutant: a missing target certified in apps/modules/seedgo_proof.py — killed."""
+    pack = _handlers(tmp_path, monkeypatch, target=False) / "code_proof"
+    pack.mkdir()
+    (pack / "any_proof.py").write_text("", encoding="utf-8")
+    result = _run_json(capsys)
     assert result["certified"] is False
     assert "error" in result
 
 
-def test_load_and_run_proof_missing_scan(tmp_path):
-    """_load_and_run_proof returns error dict when handler has no scan() function."""
-    from aipass.seedgo.apps.modules.seedgo_proof import _load_and_run_proof
-
-    handler = tmp_path / "bad_proof.py"
-    handler.write_text("# no scan function\nx = 1\n", encoding="utf-8")
-    result = _load_and_run_proof(handler, tmp_path)
+def test_load_and_run_proof_missing_scan(tmp_path, monkeypatch, capsys):
+    """Mutant: a handler with no scan() not marked not_implemented in apps/modules/seedgo_proof.py — killed."""
+    pack = _handlers(tmp_path, monkeypatch) / "code_proof"
+    pack.mkdir()
+    (pack / "bad_proof.py").write_text("# no scan function\nx = 1\n", encoding="utf-8")
+    result = _run_json(capsys)["results"]["bad_proof"]
     assert result["passed"] is False
     assert result.get("not_implemented") is True
 
 
-def test_load_and_run_proof_working_scan(tmp_path):
-    """_load_and_run_proof correctly invokes scan() and returns its result."""
-    from aipass.seedgo.apps.modules.seedgo_proof import _load_and_run_proof
-
-    handler = tmp_path / "good_proof.py"
-    handler.write_text(
+def test_load_and_run_proof_working_scan(tmp_path, monkeypatch, capsys):
+    """Mutant: scan()'s own result replaced in apps/modules/seedgo_proof.py — killed."""
+    pack = _handlers(tmp_path, monkeypatch) / "code_proof"
+    pack.mkdir()
+    (pack / "good_proof.py").write_text(
         "from pathlib import Path\n"
         "def scan(pack_dir: Path) -> dict:\n"
         '    return {"passed": True, "issues": [], "summary": "All good"}\n',
         encoding="utf-8",
     )
-    result = _load_and_run_proof(handler, tmp_path)
+    result = _run_json(capsys)["results"]["good_proof"]
     assert result["passed"] is True
     assert result["summary"] == "All good"
 
@@ -294,13 +290,11 @@ def test_load_and_run_proof_working_scan(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_help_after_the_pack_name_does_not_run_the_pack(monkeypatch):
+def test_help_after_the_pack_name_does_not_run_the_pack(monkeypatch, tmp_path):
     """`drone @seedgo proof aipass --help` ran the whole proof pack instead of describing it."""
-    from aipass.seedgo.apps.modules import seedgo_proof
-
     run = MagicMock()
     monkeypatch.setattr(seedgo_proof, "_run_proof_pack", run)
-    monkeypatch.setattr(seedgo_proof, "_validate_pack", MagicMock(return_value=("aipass", Path("/nowhere"), False)))
+    monkeypatch.setattr(seedgo_proof, "_validate_pack", MagicMock(return_value=("aipass", tmp_path / "nowhere", False)))
     shown = MagicMock()
     monkeypatch.setattr(seedgo_proof, "print_help", shown)
 
@@ -309,10 +303,8 @@ def test_help_after_the_pack_name_does_not_run_the_pack(monkeypatch):
     assert shown.call_count == 1
 
 
-def test_proof_still_runs_without_a_help_flag(monkeypatch):
-    """The gate must not swallow the real command."""
-    from aipass.seedgo.apps.modules import seedgo_proof
-
+def test_proof_still_runs_without_a_help_flag(monkeypatch, tmp_path):
+    """The gate must not swallow the real command. Mutant: display dropped in apps/modules/seedgo_proof.py — killed."""
     run = MagicMock(
         return_value={
             "pack_name": "aipass",
@@ -325,18 +317,25 @@ def test_proof_still_runs_without_a_help_flag(monkeypatch):
         }
     )
     monkeypatch.setattr(seedgo_proof, "_run_proof_pack", run)
-    monkeypatch.setattr(seedgo_proof, "_validate_pack", MagicMock(return_value=("aipass", Path("/nowhere"), False)))
-    monkeypatch.setattr(seedgo_proof, "_display_proof_results", MagicMock())
-    monkeypatch.setattr(seedgo_proof, "print_help", MagicMock())
+    monkeypatch.setattr(seedgo_proof, "_validate_pack", MagicMock(return_value=("aipass", tmp_path / "nowhere", False)))
+    shown = MagicMock()
+    monkeypatch.setattr(seedgo_proof, "_display_proof_results", shown)
+    helped = MagicMock()
+    monkeypatch.setattr(seedgo_proof, "print_help", helped)
 
     assert seedgo_proof.handle_command("proof", ["aipass"]) is True
     assert run.call_count == 1
+    shown.assert_called_once_with("aipass", run.return_value)
+    helped.assert_not_called()
 
 
 def test_proof_does_not_answer_for_another_command(monkeypatch):
-    """Ownership first: a help flag never makes a module claim a command it does not own."""
-    from aipass.seedgo.apps.modules import seedgo_proof
+    """Ownership first: a help flag never makes a module claim a command it does not own.
 
-    monkeypatch.setattr(seedgo_proof, "print_help", MagicMock())
+    Mutant: help answered before ownership in apps/modules/seedgo_proof.py — killed.
+    """
+    helped = MagicMock()
+    monkeypatch.setattr(seedgo_proof, "print_help", helped)
 
     assert seedgo_proof.handle_command("checklist", ["--help"]) is False
+    helped.assert_not_called()

@@ -1,32 +1,34 @@
 # =================== AIPass ====================
 # Name: test_cross_scope_addressing.py
 # Description: Tests that an out-of-scope address is refused honestly, not reported as unknown
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for honest refusal of hosted-project addresses (found by @api, 2026-08-14).
+"""Tests for apps/handlers/email/delivery.py -- honest refusal of hosted-project addresses."""
 
-@api tried to mail ``@baud`` from ``src/aipass/api`` and got
-``Unknown branch email: @baud (available: 17 branches)``. That message is
-false: @baud is a registered citizen of the hosted project ``projects/baud``,
-reachable by @devpulse's admin lane. The refusal is *correct* — fleet-to-project
-initiation is walled by the owner's ruling, replies only (DPLAN-0288) — but the
-stated reason was not, so @api spent the next five minutes hunting an addressing
-bug that did not exist and left two stray ping mails in @baud's inbox.
+# Found by @api, 2026-08-14. @api tried to mail ``@baud`` from ``src/aipass/api`` and got
+# ``Unknown branch email: @baud (available: 17 branches)``. That message is
+# false: @baud is a registered citizen of the hosted project ``projects/baud``,
+# reachable by @devpulse's admin lane. The refusal is *correct* — fleet-to-project
+# initiation is walled by the owner's ruling, replies only (DPLAN-0288) — but the
+# stated reason was not, so @api spent the next five minutes hunting an addressing
+# bug that did not exist and left two stray ping mails in @baud's inbox.
+#
+# Mail has two walls in this direction and they disagreed about honesty. The
+# inner wall, ``_check_cross_project_boundary``, already names both projects and
+# says "cross-project mail refused". The outer wall, address resolution, said the
+# address does not exist. A caller who trips the outer wall never learns there
+# was a policy at all.
+#
+# These tests pin the contract: explain the wall, do not deny the address —
+# and, critically, explaining must not open it. The diagnostic reads the project
+# registries to describe the failure and must never add them to the resolution
+# map, or the refusal it is describing would stop happening.
 
-Mail has two walls in this direction and they disagreed about honesty. The
-inner wall, ``_check_cross_project_boundary``, already names both projects and
-says "cross-project mail refused". The outer wall, address resolution, said the
-address does not exist. A caller who trips the outer wall never learns there
-was a policy at all.
-
-These tests pin the contract: **explain the wall, do not deny the address** —
-and, critically, explaining must not open it. The diagnostic reads the project
-registries to describe the failure and must never add them to the resolution
-map, or the refusal it is describing would stop happening.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — _describe_unresolved_address(), private: its wording is pinned through the send here
 
 import json
 from contextlib import contextmanager
@@ -148,13 +150,15 @@ def test_explaining_the_wall_does_not_open_it(repo_root, hosted_baud, noop_inbox
 
 
 def test_a_genuinely_unknown_address_still_reports_unknown(repo_root, noop_inbox_lock):
-    """The honest message for a real typo is still 'unknown'."""
+    """The honest message for a real typo is still 'unknown', pinned whole (leg 3: was owed).
+
+    Its proof is its mutant: the fallback's count dropped from the wording.
+    """
     with patch.object(delivery_mod, "get_all_branches", return_value=[]):
         success, error = deliver_email_to_branch("@nosuchbranch", _email_data())
 
     assert success is False
-    assert "Unknown branch email" in error
-    assert "@nosuchbranch" in error
+    assert error == "Unknown branch email: @nosuchbranch (available: 0 branches)"
 
 
 def test_a_typo_is_not_mistaken_for_a_hosted_citizen(repo_root, hosted_baud, noop_inbox_lock):

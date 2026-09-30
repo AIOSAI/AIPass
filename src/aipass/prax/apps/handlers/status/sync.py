@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync.py
 # Description: Status sync handler — scans branches for STATUS.local.md
-# Version: 1.0.0
+# Version: 2.0.0
 # Created: 2026-03-10
-# Modified: 2026-03-10
+# Modified: 2026-09-24
 # =============================================
 
 """
@@ -11,8 +11,9 @@ Status Sync Handler
 
 Scans all registered branches for STATUS.local.md files,
 extracts state and last-update metadata, and builds an
-aggregated STATUS.md at the repo root with collapsible
-<details> sections per branch.
+aggregate with collapsible <details> sections per branch. Since the
+2026-09-15 ruling it builds that aggregate and declines to write it:
+the repo-root STATUS.md was decommissioned with the rest of the flow.
 
 Usage (internal):
     from aipass.prax.apps.handlers.status.sync import sync_status
@@ -52,10 +53,12 @@ def _extract_field(pattern: re.Pattern, text: str) -> str:
 
 def sync_status() -> Dict:
     """
-    Scan all branches for STATUS.local.md, build central STATUS.md.
+    Scan all branches for STATUS.local.md and build the aggregate — without
+    writing it. See the comment at the write site for why nothing is written.
 
     Returns:
-        Dict with keys: status, branches_synced, branches_missing, timestamp
+        Dict with keys: status ("declined" or "error"), reason, branches_synced,
+        branches_missing, timestamp
     """
     repo_root = _find_repo_root()
     registry_path = repo_root / "AIPASS_REGISTRY.json"
@@ -143,15 +146,27 @@ def sync_status() -> Dict:
         lines.append("</details>")
         lines.append("")
 
-    status_md = repo_root / "STATUS.md"
-    status_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # The aggregate is BUILT and not written. TDPLAN-0007 decommissioned the
+    # STATUS flow — every STATUS.local.md and the aggregated STATUS.md were
+    # deleted across the fleet — but only the trigger registration was unwired,
+    # so this command kept writing the root file back (the 2026-08-13 audit
+    # resurrected it by running it). @devpulse ruled on 2026-09-15: stop writing.
+    # The scan above is left whole because the engine is meant to stay revivable;
+    # the branch state it would have rendered lives in DASHBOARD.local.json now.
+    logger.info(
+        "status sync declined the write: %d branches scanned, %d missing, %d lines built and discarded",
+        len(synced),
+        len(missing),
+        len(lines),
+    )
 
-    logger.info("STATUS.md synced: %d branches, %d missing", len(synced), len(missing))
-
-    json_handler.log_operation("status_synced", {"branches_synced": len(synced), "branches_missing": len(missing)})
+    json_handler.log_operation(
+        "status_sync_declined", {"branches_synced": len(synced), "branches_missing": len(missing)}
+    )
 
     return {
-        "status": "ok",
+        "status": "declined",
+        "reason": "the STATUS flow was decommissioned (TDPLAN-0007) — branch state lives in DASHBOARD.local.json",
         "branches_synced": synced,
         "branches_missing": missing,
         "timestamp": now,

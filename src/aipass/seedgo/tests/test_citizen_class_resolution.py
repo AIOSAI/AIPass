@@ -1,12 +1,16 @@
-"""Pins for architecture_check resolving citizen_class through spawn's modules gateway."""
-
 # =================== META ====================
 # Name: test_citizen_class_resolution.py
 # Description: Template baseline resolves class via spawn's modules gateway, never a mirror or a path join
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/aipass_standards/architecture_check.py resolving citizen_class via spawn's gateway."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — the baseline's per-item dir and file rows; tests/test_coverage_arch_checklist.py
+# seedgo: no-test-needed(stdlib) — json.load() reading the passport file
 
 import ast
 import json
@@ -281,11 +285,16 @@ class TestGatewayIsTheOnlySource:
                 print("SILENT")
             """
         )
-        proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
         assert proc.stdout.strip() == "LOUD", f"stdout={proc.stdout!r} stderr={proc.stderr[-400:]!r}"
 
-    def test_resolution_matches_spawn_on_every_value_spawn_knows(self):
-        """End to end: the checker's answer IS spawn's answer, for every known value."""
+    def test_resolution_matches_spawn_on_every_value_spawn_knows(self, tmp_path, monkeypatch):
+        """End to end: the checker's answer IS spawn's answer, for every known value.
+
+        Mutant: refused class made citizen in apps/handlers/aipass_standards/architecture_check.py — killed.
+        """
         known = (
             sorted(class_registry.CITIZEN_CLASSES)
             + sorted(class_registry.LEGACY_CLASSES)
@@ -296,21 +305,37 @@ class TestGatewayIsTheOnlySource:
         # registries are populated rather than pinning what they hold. With them
         # empty the walk below would only exercise the two literals above.
         assert class_registry.CITIZEN_CLASSES, "spawn registers no citizen class - the walk proves nothing"
+        templates = _template(tmp_path, monkeypatch).parent
+        entry = _branch(tmp_path, "")
+        passport = entry.parent.parent / ".trinity" / "passport.json"
         for value in known:
-            resolved, refusal = architecture_check._resolve_template_dir(value)
             expected = spawn_gateway.get_template_dir(value).name if class_registry.validate_class(value) else None
-            assert resolved == expected, f"{value!r}: checker said {resolved!r}, spawn said {expected!r}"
-            assert bool(refusal) is (expected is None), f"{value!r}: refusal text and verdict disagree"
+            if expected:
+                (templates / expected / "apps").mkdir(parents=True, exist_ok=True)
+            passport.write_text(json.dumps({"identity": {"citizen_class": value}}), encoding="utf-8")
+            head = architecture_check.check_template_baseline(str(entry))[0]
+            # Reached through the command: a resolved class names spawn's directory in
+            # the scored summary, a refused one is a single failed row.
+            if expected is None:
+                assert head["passed"] is False, f"{value!r}: spawn refuses it, the checker passed it"
+                assert head["name"] == "Template baseline", f"{value!r}: refused yet scored as a class"
+            else:
+                assert head["name"] == f"Template baseline ({value})", f"{value!r}: spawn resolves it, checker refused"
+                assert f"spawn/templates/{expected}/" in head["message"], f"{value!r}: checker said {head!r}"
 
-    def test_the_three_lanes_stay_apart(self):
+    def test_the_three_lanes_stay_apart(self, tmp_path, monkeypatch):
         """Retired, forbidden and unregistered each get their own answer.
 
         Compared as a set of three distinct messages rather than three separate
         assertions: the failure being guarded is two lanes collapsing into one
-        sentence, which no single-lane assertion can see.
+        sentence, which no single-lane assertion can see. Read through the
+        scored row, whose message carries the refusal verbatim.
+        Mutant: spawn's refusal text dropped from the unresolved lane in
+        apps/handlers/aipass_standards/architecture_check.py — killed.
         """
+        _template(tmp_path, monkeypatch)
         messages = {
-            lane: architecture_check._resolve_template_dir(value)[1]
+            lane: architecture_check.check_template_baseline(str(_branch(tmp_path / lane, value)))[0]["message"]
             for lane, value in (("legacy", "aipass_framework"), ("forbidden", "admin"), ("unknown", "wizard"))
         }
         assert len(set(messages.values())) == 3

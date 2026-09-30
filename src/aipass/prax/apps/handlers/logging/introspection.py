@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection.py
 # Description: Stack Introspection
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-10
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -32,7 +32,8 @@ _PRAX_INTERNAL_MARKERS = (
 
 def _is_prax_internal(module_path: str) -> bool:
     """Check if a module path belongs to prax internals."""
-    return any(marker in module_path for marker in _PRAX_INTERNAL_MARKERS)
+    norm = module_path.replace("\\", "/")
+    return any(marker in norm for marker in _PRAX_INTERNAL_MARKERS)
 
 
 def _find_external_caller_path() -> Optional[str]:

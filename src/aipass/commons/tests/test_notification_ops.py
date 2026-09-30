@@ -1,8 +1,11 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_notification_ops.py - Notification Operations Tests
+# Description: Tests for apps/handlers/notifications/notification_ops.py
 # Date: 2026-04-03
 # Version: 1.0.0
+# Created: 2026-04-03
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,24 +17,22 @@
 #   - Mocks get_db, close_db, get_caller_branch, json_handler, and logger
 # =============================================
 
-"""
-Unit tests for notification_ops.py — the high-level notification operations layer.
+"""Tests for apps/handlers/notifications/notification_ops.py."""
 
-Covers:
-- set_watch: watch a room, post, or thread
-- set_mute: mute a room, post, or thread
-- set_track: track a room, post, or thread
-- _set_notification_level: shared arg parsing, validation, target existence checks
-- show_preferences: display all preferences for the calling agent
-
-NOTE: test_notifications.py already covers the lower-level preferences.py functions
-(set_preference, get_preference, get_all_preferences, should_notify, get_watchers).
-These tests focus on the operations layer: arg parsing, caller detection, DB lifecycle,
-target validation, and error paths.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/notifications/ parses and imports
+# seedgo: no-test-needed(duplicate) — the notification preference primitives; tests/test_notifications.py pins them
 
 import sqlite3
 from unittest.mock import patch, MagicMock
+
+from aipass.commons.apps.handlers.notifications.notification_ops import (
+    set_watch,
+    set_mute,
+    set_track,
+    show_preferences,
+)
+from aipass.commons.apps.handlers.notifications.preferences import set_preference
 
 
 # =============================================================================
@@ -101,15 +102,13 @@ def test_set_watch_room_success(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """set_watch should set notification level to 'watch' for a valid room."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
     # 'general' room is seeded by initialized_db
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     result = set_watch(["room", "general"])
 
@@ -136,15 +135,13 @@ def test_set_watch_post_success(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """set_watch should set notification level to 'watch' for a valid post."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
     _insert_post(conn, post_id=42)
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     result = set_watch(["post", "42"])
 
@@ -174,14 +171,12 @@ def test_set_mute_room_success(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """set_mute should set notification level to 'mute' for a valid room."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
 
     result = set_mute(["room", "general"])
 
@@ -212,15 +207,13 @@ def test_set_track_thread_success(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """set_track should set notification level to 'track' for a valid thread (post)."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
     _insert_post(conn, post_id=10)
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_track
 
     result = set_track(["thread", "10"])
 
@@ -237,8 +230,6 @@ def test_set_track_thread_success(
 
 def test_set_watch_too_few_args() -> None:
     """set_watch with fewer than 2 args should return usage error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["room"])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -246,8 +237,6 @@ def test_set_watch_too_few_args() -> None:
 
 def test_set_mute_no_args() -> None:
     """set_mute with no args should return usage error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
-
     result = set_mute([])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -255,8 +244,6 @@ def test_set_mute_no_args() -> None:
 
 def test_set_track_single_arg() -> None:
     """set_track with 1 arg should return usage error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_track
-
     result = set_track(["post"])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -270,8 +257,6 @@ def test_set_track_single_arg() -> None:
 @patch(_MOCK_CALLER, return_value={"name": "test-branch"})
 def test_set_watch_invalid_target_type(mock_caller: MagicMock) -> None:
     """Passing an unsupported target type should return an error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["channel", "general"])
     assert result["success"] is False
     assert "Invalid target type" in result["error"]
@@ -281,8 +266,6 @@ def test_set_watch_invalid_target_type(mock_caller: MagicMock) -> None:
 @patch(_MOCK_CALLER, return_value={"name": "test-branch"})
 def test_set_mute_invalid_target_type(mock_caller: MagicMock) -> None:
     """Passing 'user' as target type should fail validation."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
-
     result = set_mute(["user", "someone"])
     assert result["success"] is False
     assert "Invalid target type" in result["error"]
@@ -296,8 +279,6 @@ def test_set_mute_invalid_target_type(mock_caller: MagicMock) -> None:
 @patch(_MOCK_CALLER, return_value=None)
 def test_set_watch_no_caller(mock_caller: MagicMock) -> None:
     """When get_caller_branch returns None, operations should fail with caller error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["room", "general"])
     assert result["success"] is False
     assert "Could not detect calling branch" in result["error"]
@@ -306,8 +287,6 @@ def test_set_watch_no_caller(mock_caller: MagicMock) -> None:
 @patch(_MOCK_CALLER, return_value=None)
 def test_set_mute_no_caller(mock_caller: MagicMock) -> None:
     """set_mute should also fail when caller is undetectable."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
-
     result = set_mute(["room", "general"])
     assert result["success"] is False
     assert "Could not detect" in result["error"]
@@ -316,8 +295,6 @@ def test_set_mute_no_caller(mock_caller: MagicMock) -> None:
 @patch(_MOCK_CALLER, return_value=None)
 def test_set_track_no_caller(mock_caller: MagicMock) -> None:
     """set_track should also fail when caller is undetectable."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_track
-
     result = set_track(["post", "1"])
     assert result["success"] is False
     assert "Could not detect" in result["error"]
@@ -343,14 +320,12 @@ def test_set_watch_room_not_found(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Watching a nonexistent room should return room-not-found error."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     result = set_watch(["room", "nonexistent-room"])
     assert result["success"] is False
@@ -373,14 +348,12 @@ def test_set_mute_post_not_found(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Muting a nonexistent post should return post-not-found error."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
 
     result = set_mute(["post", "9999"])
     assert result["success"] is False
@@ -402,14 +375,12 @@ def test_set_track_thread_not_found(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Tracking a nonexistent thread should return not-found error."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_track
 
     result = set_track(["thread", "8888"])
     assert result["success"] is False
@@ -432,14 +403,12 @@ def test_set_watch_post_id_not_numeric(
     mock_caller: MagicMock,
     mock_json: MagicMock,
     mock_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Watching a post with a non-numeric ID should return an error."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     result = set_watch(["post", "abc"])
     assert result["success"] is False
@@ -457,14 +426,12 @@ def test_set_track_thread_id_not_numeric(
     mock_caller: MagicMock,
     mock_json: MagicMock,
     mock_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Tracking a thread with a non-numeric ID should return an error."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_track
 
     result = set_track(["thread", "not-a-number"])
     assert result["success"] is False
@@ -491,14 +458,12 @@ def test_set_watch_room_name_lowercased(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Room names should be lowercased before lookup and storage."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     # Pass mixed-case — 'General' should resolve to 'general'
     result = set_watch(["room", "General"])
@@ -526,14 +491,12 @@ def test_set_mute_target_type_case_insensitive(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Target type should be lowercased, so 'ROOM' works like 'room'."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
 
     result = set_mute(["ROOM", "general"])
     assert result["success"] is True
@@ -556,8 +519,6 @@ def test_set_watch_db_exception(
     mock_logger: MagicMock,
 ) -> None:
     """When get_db raises an exception, result should capture the error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["room", "general"])
     assert result["success"] is False
     assert "disk full" in result["error"]
@@ -583,16 +544,14 @@ def test_show_preferences_empty(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """show_preferences with no preferences set should return empty list."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
-    from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
-
-    result = show_preferences([])
+    result = show_preferences()
     assert result["success"] is True
     assert result["agent"] == "test-branch"
     assert result["preferences"] == []
@@ -614,20 +573,17 @@ def test_show_preferences_with_data(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """show_preferences should return all preferences for the agent."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.preferences import set_preference
-    from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
 
     set_preference(conn, "test-branch", "room", "general", "watch")
     set_preference(conn, "test-branch", "post", "5", "mute")
 
-    result = show_preferences([])
+    result = show_preferences()
     assert result["success"] is True
     assert result["agent"] == "test-branch"
     assert len(result["preferences"]) == 2
@@ -640,9 +596,7 @@ def test_show_preferences_with_data(
 @patch(_MOCK_CALLER, return_value=None)
 def test_show_preferences_no_caller(mock_caller: MagicMock) -> None:
     """show_preferences should fail when caller is not detected."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
-
-    result = show_preferences([])
+    result = show_preferences()
     assert result["success"] is False
     assert "Could not detect" in result["error"]
 
@@ -658,9 +612,7 @@ def test_show_preferences_db_exception(
     mock_logger: MagicMock,
 ) -> None:
     """show_preferences should handle DB exceptions gracefully."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
-
-    result = show_preferences([])
+    result = show_preferences()
     assert result["success"] is False
     assert "connection refused" in result["error"]
 
@@ -685,14 +637,12 @@ def test_set_watch_logs_operation(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Successful watch should call json_handler.log_operation with 'notification_set'."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     result = set_watch(["room", "general"])
     assert result["success"] is True
@@ -724,14 +674,12 @@ def test_set_watch_preference_fails(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """When set_preference returns False, the operation should report failure."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     result = set_watch(["room", "general"])
     assert result["success"] is False
@@ -758,14 +706,12 @@ def test_set_watch_extra_args_ignored(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Extra arguments beyond the first two should be ignored."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     result = set_watch(["room", "general", "extra", "stuff"])
     assert result["success"] is True
@@ -793,16 +739,52 @@ def test_set_mute_post_id_normalized(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Post ID should be normalized through int conversion (e.g. '042' -> '42')."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
     _insert_post(conn, post_id=42)
 
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
-
     result = set_mute(["post", "042"])
     assert result["success"] is True
     assert result["target_id"] == "42"
+
+
+def test_show_preferences_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    The lookup raises before any database is opened.
+    """
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.notifications.notification_ops.get_db") as db,
+    ):
+        result = show_preferences()
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_set_watch_refuses_naming_a_failed_caller_lookup():
+    # Route: set_watch -> _set_notification_level (the site set_mute and set_track share).
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.notifications.notification_ops.get_db") as db,
+    ):
+        result = set_watch(["room", "general"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: profile.py
 # Description: User profile read/write — aipass profile command
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-16
-# Modified: 2026-08-27
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -71,9 +71,9 @@ def _fire_profile_write_failed(path: str) -> None:
     The event fires on a FAILED WRITE, never on a deletion, and since 2026-09-07
     it is named for what it is. It was ``file_deleted`` when the writer was
     hand-rolled and the temp file this module unlinked was the only thing the
-    name could honestly describe; @trigger delivers that old name as a
-    deprecated alias for one release, so consumers keep working across the
-    rename.
+    name could honestly describe. @trigger carried the old name as an alias
+    for one release and has since retired it: only ``profile_write_failed``
+    is delivered today.
 
     ``path`` is the STORE the failed write targeted, not a temp file:
     json_handler owns its temp file and unlinks it internally, so this module

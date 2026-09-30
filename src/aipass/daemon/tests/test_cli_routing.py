@@ -1,35 +1,23 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for DAEMON
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-28
-# Modified: 2026-03-28
+# Modified: 2026-09-28
 # =============================================
 
-"""
-CLI Routing Tests for DAEMON branch.
+"""Tests for apps/daemon.py — the router: help, introspection, unknown commands, the argument gate."""
 
-Tests daemon.py routing: help flags, introspection, unknown commands,
-no-args behavior, and output capture.
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/daemon.py parses and imports
+# seedgo: no-test-needed(constant) — the version literal main() prints for --version
 
-Covers 9 tests:
-  - help_flag (--help)
-  - short_help (-h)
-  - help_word ("help")
-  - no_args (no arguments)
-  - unknown_command
-  - print_help
-  - print_introspection
-  - output_capture
-  - version_flag (bonus)
-"""
-
-import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
+from aipass.cli.apps.modules import error, mark_command_failed
 
 # ---------------------------------------------------------------------------
 # We import the daemon module and mock json_handler.log_operation to
@@ -53,35 +41,35 @@ def _mock_log_operation():
 
 def test_help_flag() -> None:
     """--help flag triggers help and returns exit code 0."""
-    with patch.object(sys, "argv", ["daemon", "--help"]):
+    with patch("sys.argv", ["daemon", "--help"]):
         result = _daemon_mod.main()
     assert result == 0, "daemon --help must return exit code 0"
 
 
 def test_short_help() -> None:
     """short_help: -h flag triggers help and returns exit code 0."""
-    with patch.object(sys, "argv", ["daemon", "-h"]):
+    with patch("sys.argv", ["daemon", "-h"]):
         result = _daemon_mod.main()
     assert result == 0, "daemon -h must return exit code 0"
 
 
 def test_help_word() -> None:
     """help_word: 'help' as command triggers help and returns exit code 0."""
-    with patch.object(sys, "argv", ["daemon", "help"]):
+    with patch("sys.argv", ["daemon", "help"]):
         result = _daemon_mod.main()
     assert result == 0, "daemon help must return exit code 0"
 
 
 def test_no_args() -> None:
     """no_args: running daemon with no arguments shows introspection and returns 0."""
-    with patch.object(sys, "argv", ["daemon"]):
+    with patch("sys.argv", ["daemon"]):
         result = _daemon_mod.main()
     assert result == 0, "daemon with no args must return exit code 0"
 
 
 def test_unknown_command() -> None:
     """unknown_command: unrecognized command returns exit code 1."""
-    with patch.object(sys, "argv", ["daemon", "nonexistent_command_xyz"]):
+    with patch("sys.argv", ["daemon", "nonexistent_command_xyz"]):
         result = _daemon_mod.main()
     assert result == 1, "Unknown command must return exit code 1"
 
@@ -106,7 +94,7 @@ def test_print_introspection(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_output_capture(capsys: pytest.CaptureFixture[str]) -> None:
     """output_capture: help flag produces captured output on stdout."""
-    with patch.object(sys, "argv", ["daemon", "--help"]):
+    with patch("sys.argv", ["daemon", "--help"]):
         _daemon_mod.main()
     captured = capsys.readouterr()
     assert len(captured.out) > 0, "Help output must be capturable on stdout"
@@ -121,9 +109,54 @@ def test_output_capture(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_version_flag() -> None:
     """--version flag returns exit code 0."""
-    with patch.object(sys, "argv", ["daemon", "--version"]):
+    with patch("sys.argv", ["daemon", "--version"]):
         result = _daemon_mod.main()
     assert result == 0, "daemon --version must return exit code 0"
+
+
+# ============================================================================
+# The exit seam — main() reads the failed flag error() sets (resolve_exit)
+# ============================================================================
+
+
+def _tick_that_reports(message: str | None):
+    """A stand-in for run._run_with_lock: says `message` through error() when given, and answers 0."""
+
+    def tick(dry_run: bool = False) -> int:
+        if message is not None:
+            error(message)
+        return 0
+
+    return tick
+
+
+def test_a_verb_that_reports_through_error_exits_2() -> None:
+    """A routed verb that called error() and returned exits 2, not 0.
+
+    `run` is driven with the tick itself patched out, so nothing is discovered,
+    locked or fired: the stand-in reports through error() and answers 0, the way
+    a verb reports a failure it handled. main() used to answer 0 for every routed
+    verb, so the refusal error() recorded reached no caller.
+    Mutant killed: main returning 0 for a routed verb instead of resolve_exit(handled).
+    """
+    with (
+        patch.object(_daemon_mod.run, "_run_with_lock", _tick_that_reports("run: the tick reported a failure")),
+        patch("sys.argv", ["daemon", "run"]),
+    ):
+        assert _daemon_mod.main() == 2
+
+
+def test_a_failed_flag_left_by_an_earlier_command_is_not_inherited() -> None:
+    """A clean verb exits 0 even when an earlier command in the process tripped the flag.
+
+    Mutant killed: main's reset_command_state() on entry dropped.
+    """
+    mark_command_failed()
+    with (
+        patch.object(_daemon_mod.run, "_run_with_lock", _tick_that_reports(None)),
+        patch("sys.argv", ["daemon", "run"]),
+    ):
+        assert _daemon_mod.main() == 0
 
 
 # ============================================================================
@@ -138,7 +171,7 @@ def test_version_flag() -> None:
 def test_help_after_flag_does_not_fire_scheduler() -> None:
     """'run --dry-run --help' prints help — it must not run a scheduler tick."""
     with patch.object(_daemon_mod.run, "_run_with_lock") as mock_tick:
-        with patch.object(sys, "argv", ["daemon", "run", "--dry-run", "--help"]):
+        with patch("sys.argv", ["daemon", "run", "--dry-run", "--help"]):
             result = _daemon_mod.main()
     mock_tick.assert_not_called()
     assert result == 0, "help must exit 0"
@@ -147,7 +180,7 @@ def test_help_after_flag_does_not_fire_scheduler() -> None:
 def test_help_after_value_does_not_sweep_inboxes() -> None:
     """'inbox-sweep --hours 48 --help' prints help — it must not wake branches."""
     with patch.object(_daemon_mod.inbox_sweep, "run_sweep") as mock_sweep:
-        with patch.object(sys, "argv", ["daemon", "inbox-sweep", "--hours", "48", "--help"]):
+        with patch("sys.argv", ["daemon", "inbox-sweep", "--hours", "48", "--help"]):
             result = _daemon_mod.main()
     mock_sweep.assert_not_called()
     assert result == 0, "help must exit 0"
@@ -156,7 +189,7 @@ def test_help_after_value_does_not_sweep_inboxes() -> None:
 def test_help_after_junk_arg_does_not_fire_scheduler() -> None:
     """A stray token before --help must not turn help into a live fire."""
     with patch.object(_daemon_mod.run, "_run_with_lock") as mock_tick:
-        with patch.object(sys, "argv", ["daemon", "run", "oops", "--help"]):
+        with patch("sys.argv", ["daemon", "run", "oops", "--help"]):
             result = _daemon_mod.main()
     mock_tick.assert_not_called()
     assert result == 0, "help must exit 0"
@@ -233,7 +266,7 @@ class TestUnknownArgumentIsRefused:
     @pytest.mark.parametrize("verb", GATED_VERBS)
     def test_a_stray_positional_is_refused(self, verb) -> None:
         with patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True):
-            with patch.object(sys, "argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
+            with patch("sys.argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
                 with pytest.raises(SystemExit) as exc:
                     _daemon_mod.main()
         assert exc.value.code == 1, f"{verb} accepted a stray positional"
@@ -245,7 +278,7 @@ class TestUnknownArgumentIsRefused:
             patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True),
             patch(f"{ROUTER}.error") as mock_err,
         ):
-            with patch.object(sys, "argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
+            with patch("sys.argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
                 with pytest.raises(SystemExit):
                     _daemon_mod.main()
         printed = str(mock_err.call_args)
@@ -255,7 +288,7 @@ class TestUnknownArgumentIsRefused:
     @pytest.mark.parametrize("verb", ["queue", "rotation", "activity-report", "inbox-sweep", "run"])
     def test_a_typo_in_a_real_flag_is_refused(self, verb) -> None:
         """The case that bites hardest: --jsonn is not --json, and used to be ignored."""
-        with patch.object(sys, "argv", ["daemon", verb, "--jsonn"]):
+        with patch("sys.argv", ["daemon", verb, "--jsonn"]):
             with pytest.raises(SystemExit) as exc:
                 _daemon_mod.main()
         assert exc.value.code == 1
@@ -264,7 +297,7 @@ class TestUnknownArgumentIsRefused:
     def test_the_real_flags_still_work(self, argv) -> None:
         with patch.object(_daemon_mod.run, "_run_with_lock", return_value=0):
             with patch.object(_daemon_mod.inbox_sweep, "run_sweep", return_value={}):
-                with patch.object(sys, "argv", ["daemon", *argv]):
+                with patch("sys.argv", ["daemon", *argv]):
                     result = _daemon_mod.main()
         assert result == 0, f"{argv} is a legitimate form and must not be refused"
 
@@ -274,11 +307,13 @@ class TestUnknownArgumentIsRefused:
         The mutation this guards: dropping the two-step skip in
         unknown_argument() refuses every value flag ever passed.
         """
-        with patch.object(sys, "argv", ["daemon", "activity", "--hours", "48"]):
+        with patch("sys.argv", ["daemon", "activity", "--hours", "48"]):
             assert _daemon_mod.main() == 0
 
     @pytest.mark.parametrize("verb", ["install-timer", "uninstall-timer"])
-    def test_the_timer_verbs_cannot_reach_live_systemd_without_the_gate(self, verb, _seal_timer_host_state) -> None:
+    def test_the_timer_verbs_cannot_reach_live_systemd_without_the_gate(
+        self, verb, _seal_timer_host_state, tmp_path
+    ) -> None:
         """The two rows that took the scheduler down on 2026-09-07, run in the world that did it.
 
         The gate is patched to a no-op here — the exact mutation world, and the
@@ -296,8 +331,22 @@ class TestUnknownArgumentIsRefused:
         units = ("daemon-tick.service", "daemon-tick.timer")
         before = sorted(name for name in units if (live_dir / name).exists())
 
-        with patch.object(_daemon_mod.timer_install, "gate", lambda *a, **k: None):
-            with patch.object(sys, "argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
+        # uninstall-timer unlinks only the units that stand in the unit dir, so the
+        # sealed dir is given both units first: the file operations below are then
+        # seen landing in the sealed dir, never in the live one.
+        sealed_dir = tmp_path / "_sealed_unit_dir"
+        if verb == "uninstall-timer":
+            sealed_dir.mkdir()
+            for name in units:
+                (sealed_dir / name).write_text("[Unit]\n", encoding="utf-8")
+
+        with (
+            patch.object(_daemon_mod.timer_install, "gate", lambda *a, **k: None),
+            # The uninstall fires file_deleted per removed unit; patched at the
+            # home of the trigger object _uninstall imports, so no fire reaches the bus.
+            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+        ):
+            with patch("sys.argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
                 result = _daemon_mod.main()
 
         assert result == 0, f"{verb} with the gate removed should run the verb, not refuse"
@@ -306,17 +355,21 @@ class TestUnknownArgumentIsRefused:
         )
 
         # Where the file operations actually landed. install-timer copies both
-        # units in, uninstall-timer unlinks whatever is there — against the
-        # SEALED directory. The seam is a module constant, so the same code
-        # would perform the same operations on whatever it points at; this is
-        # what makes the live-dir assertion below a consequence of the seal
-        # rather than a coincidence.
-        sealed_dir = _daemon_mod.timer_install._UNIT_DIR
-        assert sealed_dir != live_dir, "the seal is not in place — _UNIT_DIR is the live directory"
+        # units in, uninstall-timer unlinks them — against the SEALED directory,
+        # which conftest's _seal_timer_host_state points the unit-dir seam at
+        # under this test's own tmp_path. What happened THERE is what makes the
+        # live-dir assertion below a consequence of the seal rather than a
+        # coincidence.
         if verb == "install-timer":
             assert sorted(p.name for p in sealed_dir.iterdir()) == sorted(units), (
                 f"install-timer did not write the units into the sealed dir: {list(sealed_dir.iterdir())}"
             )
+            fire.assert_not_called()
+        else:
+            assert list(sealed_dir.iterdir()) == [], f"uninstall-timer left units: {list(sealed_dir.iterdir())}"
+            assert fire.call_args_list == [
+                call("file_deleted", path=str(sealed_dir / name), source="timer_install") for name in units
+            ]
 
         after = sorted(name for name in units if (live_dir / name).exists())
         assert after == before, f"{verb} changed the live unit files: {before} -> {after}"
@@ -328,5 +381,5 @@ class TestUnknownArgumentIsRefused:
         assert len(GATED_VERBS) == 12, f"the gate covers twelve verbs, this list names {len(GATED_VERBS)}"
         for verb in GATED_VERBS:
             with patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True):
-                with patch.object(sys, "argv", ["daemon", verb, "--help"]):
+                with patch("sys.argv", ["daemon", verb, "--help"]):
                     assert _daemon_mod.main() == 0, f"{verb} --help must exit 0"

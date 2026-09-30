@@ -1,17 +1,19 @@
 # =================== AIPass ====================
 # Name: test_session_pointer.py
 # Description: Tests for the durable per-branch session pointer
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-20
-# Modified: 2026-08-20
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for session_pointer -- encoding, round trip, atomicity, resume verdicts.
+"""Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
 
-Everything here runs against tmp_path. ``Path.home`` is monkeypatched wherever a
-test needs a transcript to exist, so no test can read or create anything under
-the real ``~/.claude`` or inside a live branch.
-"""
+# Everything here runs against tmp_path. ``Path.home`` is monkeypatched wherever a
+# test needs a transcript to exist, so no test can read or create anything under
+# the real ``~/.claude`` or inside a live branch.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — _BYTES_PER_MB, the internal MB conversion factor
 
 import json
 from pathlib import Path
@@ -20,6 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import aipass.ai_mail.apps.handlers.dispatch.session_pointer as mod
+import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as dispatch_monitor
 from aipass.ai_mail.apps.handlers.dispatch.session_pointer import (
     mint_session_id,
     pointer_path,
@@ -66,6 +69,7 @@ def fake_home(tmp_path, monkeypatch):
 def _make_transcript(branch_path: Path, session_id: str, size_bytes: int = 64) -> Path:
     """Create a fake transcript for `session_id` under the (faked) home."""
     target = transcript_file(branch_path, session_id)
+    assert target is not None, "fake_home names the home directory"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"x" * size_bytes)
     return target
@@ -92,7 +96,9 @@ def test_mint_session_id_is_unique():
 
 def test_transcript_dir_encodes_separators_underscores_and_dots(fake_home):
     """/ and _ and . all collapse to '-' -- the rule Claude itself uses."""
-    encoded = transcript_dir("/srv/branches/my_repo/src.pkg").name
+    result = transcript_dir("/srv/branches/my_repo/src.pkg")
+    assert result is not None
+    encoded = result.name
     assert encoded == "-srv-branches-my-repo-src-pkg"
     assert "_" not in encoded
     assert "." not in encoded
@@ -101,30 +107,47 @@ def test_transcript_dir_encodes_separators_underscores_and_dots(fake_home):
 
 def test_transcript_dir_encodes_windows_paths(fake_home):
     """Backslash and drive colon collapse too: C:\\repo\\AIPass -> C--repo-AIPass."""
-    assert transcript_dir("C:\\repo\\AIPass").name == "C--repo-AIPass"
+    result = transcript_dir("C:\\repo\\AIPass")
+    assert result is not None and result.name == "C--repo-AIPass"
 
 
-def test_transcript_dir_lives_under_claude_projects(fake_home):
-    result = transcript_dir("/some/branch")
-    assert result.parent == fake_home / ".claude" / "projects"
+def test_transcript_dir_lives_under_claude_projects(fake_home, tmp_path):
+    result = transcript_dir(str(tmp_path / "some" / "branch"))
+    assert result is not None and result.parent == fake_home / ".claude" / "projects"
 
 
-def test_transcript_dir_accepts_a_path_object(fake_home):
-    assert transcript_dir(Path("/some/branch")) == transcript_dir("/some/branch")
+def test_transcript_dir_accepts_a_path_object(fake_home, tmp_path):
+    sample = tmp_path / "some" / "branch"
+    assert transcript_dir(sample) == transcript_dir(str(sample))
 
 
-def test_transcript_file_appends_the_jsonl_name(fake_home):
-    result = transcript_file("/some/branch", "abc-123")
-    assert result.name == "abc-123.jsonl"
-    assert result.parent == transcript_dir("/some/branch")
+def test_transcript_file_appends_the_jsonl_name(fake_home, tmp_path):
+    sample = str(tmp_path / "some" / "branch")
+    result = transcript_file(sample, "abc-123")
+    assert result is not None and result.name == "abc-123.jsonl"
+    assert result.parent == transcript_dir(sample)
 
 
-def test_transcript_dir_matches_dispatch_monitors_encoding(fake_home):
-    """The two implementations must never disagree while both exist."""
-    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import _get_jsonl_projects_dir
+def test_dispatch_monitor_asks_transcript_dir_and_holds_no_copy(monkeypatch, tmp_path):
+    """dispatch_monitor's projects dir is whatever transcript_dir answers: one encoding, not two.
 
-    cwd = "/srv/branches/AIPass/src/aipass/ai_mail"
-    assert transcript_dir(cwd) == _get_jsonl_projects_dir(cwd)
+    The old shape compared transcript_dir with _get_jsonl_projects_dir, which is a
+    call to transcript_dir, so it compared a function with itself and could not
+    fail (devpulse's mutant dropping the underscore rule passed it). What is still
+    true, and worth pinning, is the delegation: a sentinel answered at
+    session_pointer's home must come back unchanged, which a local copy of the
+    encoding would not do.
+
+    Mutant: `return session_pointer.transcript_dir(cwd)` -> `return Path(cwd)` (a
+    local answer) is caught here.
+    """
+    sentinel = tmp_path / "sentinel-projects-dir"
+    asked = []
+    monkeypatch.setattr(mod, "transcript_dir", lambda cwd: asked.append(cwd) or sentinel)
+    cwd = str(tmp_path / "srv" / "branches" / "AIPass" / "src" / "aipass" / "ai_mail")
+
+    assert dispatch_monitor._get_jsonl_projects_dir(cwd) == sentinel
+    assert asked == [cwd]
 
 
 # --- pointer_path ----------------------------------------------------
@@ -162,7 +185,7 @@ def test_write_pointer_set_at_is_timezone_aware(branch):
 
     write_pointer(branch, "sess-1", "wake")
     data = read_pointer(branch)
-    assert data is not None
+    assert data is not None and data["session_id"] == "sess-1"
     stamp = datetime.fromisoformat(data["set_at"])
     assert stamp.tzinfo is not None
 
@@ -357,7 +380,7 @@ def test_resolve_returns_none_when_pointer_json_is_broken(branch, fake_home):
 
     session_id, reason = resolve_resume_target(branch)
     assert session_id is None
-    assert reason
+    assert reason == f"no usable pointer at {pointer_path(branch)} - falling back to -c"
 
 
 def test_resolve_reason_is_always_populated(branch, fake_home):
@@ -439,7 +462,9 @@ def test_resolve_never_raises_on_a_nonsense_argument():
     """The dispatch hot path survives a caller's mistake."""
     session_id, reason = resolve_resume_target(object())  # type: ignore[arg-type]
     assert session_id is None
-    assert reason
+    # The error type is the interpreter's to choose, so only the form is pinned.
+    assert reason.startswith("pointer unreadable (")
+    assert reason.endswith(" - falling back to -c")
 
 
 def test_resolve_survives_an_unstattable_transcript_dir(branch, fake_home, monkeypatch):
@@ -596,7 +621,9 @@ class TestAnUnnameableHomeDoesNotRaise:
         session_id, reason = resolve_resume_target(branch)
 
         assert session_id is None
-        assert reason, "every verdict lands in a log line, so none may be silent"
+        assert reason.startswith("cannot determine this machine's home directory"), (
+            "every verdict lands in a log line, so none may be silent"
+        )
 
     def test_the_reason_says_home_and_not_transcript_not_found(self, branch, fake_home, monkeypatch):
         """ "I cannot name home" and "there is no transcript" are different facts.
@@ -613,7 +640,7 @@ class TestAnUnnameableHomeDoesNotRaise:
 
         assert "home" in reason.lower(), f"the reason must name the actual failure. Got: {reason}"
 
-    def test_transcript_dir_reports_the_absence_rather_than_guessing(self, monkeypatch):
+    def test_transcript_dir_reports_the_absence_rather_than_guessing(self, monkeypatch, tmp_path):
         """No home means no answer — not a plausible path that cannot exist.
 
         Returning a sentinel would make "this machine cannot name its home"
@@ -622,5 +649,6 @@ class TestAnUnnameableHomeDoesNotRaise:
         """
         self._home_is_unnameable(monkeypatch)
 
-        assert transcript_dir("/anywhere") is None
-        assert transcript_file("/anywhere", "sess") is None
+        somewhere = str(tmp_path / "anywhere")
+        assert transcript_dir(somewhere) is None
+        assert transcript_file(somewhere, "sess") is None

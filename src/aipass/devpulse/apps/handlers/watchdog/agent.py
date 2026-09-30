@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-04-14
-# Modified: 2026-09-12
+# Modified: 2026-09-25
 # =============================================
 
 # Signal choice: ai_mail dispatch lock file polling.
@@ -315,21 +315,38 @@ class TranscriptScanner:
         self.newest: tuple[str, int, float] | None = None
         self.newest_toplevel: tuple[str, int, float] | None = None
         self._verdicts: dict[str, tuple[tuple[int, float], bool]] = {}
+        self.unreadable: dict[str, str] = {}
         self.refresh(now)
         self._stat_pass()  # seed sizes: watch start is the baseline, not "everything is new"
 
     def refresh(self, now: float) -> None:
         """Re-walk the tree for ``.jsonl`` files (``os.walk`` — pathlib.rglob
-        spent most of the old tick in ``relative_to``/path-object overhead)."""
+        spent most of the old tick in ``relative_to``/path-object overhead).
+
+        A directory the walk cannot list lands in ``unreadable`` (path -> error)
+        for the caller to read; ``os.walk`` would otherwise drop it in silence and
+        the stall verdict would be judged over a tree it never saw
+        (``os_walk_onerror``, 2026-09-25).
+        """
         paths: list[str] = []
-        try:
-            for root, _dirs, files in os.walk(self.projects_dir):
-                for name in files:
-                    if name.endswith(".jsonl"):
-                        paths.append(os.path.join(root, name))
-        except OSError as exc:
-            logger.info("[watchdog.agent] scanner walk failed for %s: %s", self.projects_dir, exc)
+        unreadable: dict[str, str] = {}
+
+        def _record(exc: OSError) -> None:
+            unreadable[exc.filename or self._top_dir] = exc.strerror or str(exc)
+
+        for root, _dirs, files in os.walk(self.projects_dir, onerror=_record):
+            for name in files:
+                if name.endswith(".jsonl"):
+                    paths.append(os.path.join(root, name))
+        if unreadable:
+            logger.warning(
+                "[watchdog.agent] scanner could not list %d dir(s) under %s: %s",
+                len(unreadable),
+                self.projects_dir,
+                "; ".join(f"{path}: {err}" for path, err in unreadable.items()),
+            )
         self._paths = paths
+        self.unreadable = unreadable
         self._last_refresh = now
 
     def _stat_pass(self) -> dict:

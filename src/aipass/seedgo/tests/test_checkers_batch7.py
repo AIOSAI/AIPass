@@ -1,20 +1,78 @@
-"""Tests for seedgo checker sub-functions -- batch 7 (encapsulation, imports, introspection, modules)."""
-
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for checker sub-functions in encapsulation, imports, introspection, modules
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-27
 # =============================================
 
-import ast
-from typing import List
+"""Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
 
-import pytest
+# Seedgo checker sub-functions, batch 7: encapsulation, imports, introspection and
+# modules, plus the cli, documentation, error_handling, handlers, json_structure,
+# silent_catch and unused_function rulings pinned beside them.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that each checker in handlers/aipass_standards/ parses and imports
+# seedgo: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
+
+import ast
+from typing import Any, List
 from unittest.mock import MagicMock
 
-from aipass.seedgo.apps.handlers.aipass_standards import documentation_check
+import pytest
+
+from aipass.seedgo.apps.handlers.aipass_standards import (
+    cli_check,
+    documentation_check,
+    encapsulation_check,
+    error_handling_check,
+    handlers_check,
+    imports_check,
+    json_structure_check,
+    silent_catch_check,
+    unused_function_check,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.cli_check import check_handler_separation
+from aipass.seedgo.apps.handlers.aipass_standards.cli_content import get_cli_standards
+from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import check_function_docstrings
+from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
+    check_cross_branch_imports,
+    check_cross_package_imports,
+    check_direct_handler_imports,
+    extract_branch_from_import,
+    extract_handler_package,
+    get_file_handler_package,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import check_auto_detection
+from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
+    check_handler_independence,
+    check_import_order,
+    check_no_aipass_root,
+    check_no_bare_imports,
+    check_no_sys_path,
+    check_prax_logger,
+    filter_docstrings,
+    find_import_section_end,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
+    check_content_references,
+    check_correct_dispatch,
+    check_execution_order,
+    check_introspection_rich_formatting,
+    check_module_handle_command_gate,
+    check_module_help_interception,
+    check_print_introspection_exists,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
+    check_file_size,
+    check_handle_command,
+    check_no_business_logic,
+    check_no_direct_file_ops,
+    check_thin_orchestration,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.silent_catch_content import get_silent_catch_standards
+from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
 
 
 def _lines(text: str) -> List[str]:
@@ -28,65 +86,18 @@ def _lines(text: str) -> List[str]:
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for standards checkers."""
-    import sys
+def _pin_bypass_log(monkeypatch):
+    """Point is_bypassed's json_handler at a mock for every test here.
 
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.json.json_handler",
-        json_mod,
-    )
-
-    # -- bypass handler -----------------------------------------------------
-    bypass_pkg = MagicMock()
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
-    bypass_pkg.ignore_handler = bypass_ignore
-    bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = MagicMock(return_value=False)
-    bypass_pkg.utils = bypass_utils
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        bypass_ignore,
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.utils",
-        bypass_utils,
-    )
-
-    # Force re-imports so checkers pick up fresh mocks
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.imports_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.introspection_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.modules_check",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
-
-    # Clear the handler guard cache between tests
-    enc_mod_name = "aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check"
-    enc_mod = sys.modules.get(enc_mod_name)
-    if enc_mod is not None and hasattr(enc_mod, "_handler_guard_cache"):
-        enc_mod._handler_guard_cache.clear()
+    The bypass tests call the real is_bypassed, which appends to the
+    repo-tracked seedgo_json/utils_log.json via the json_handler global in
+    its OWN module — xdist workers racing on that shared file corrupt it
+    (JSONDecodeError: Extra data). sys.modules patching never reaches a
+    function's globals, so the pin must land on the utils module object.
+    """
+    mock_handler = MagicMock()
+    mock_handler.log_operation = MagicMock(return_value=True)
+    monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
 
 
 # ===========================================================================
@@ -102,37 +113,21 @@ class TestExtractBranchFromImport:
 
     def test_branch_dot_apps_handlers(self):
         """Extract branch from 'from flow.apps.handlers...' pattern."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            extract_branch_from_import,
-        )
-
         result = extract_branch_from_import("from flow.apps.handlers.plan.validator import X")
         assert result == "flow"
 
     def test_aipass_dot_branch_pattern(self):
         """Extract branch from 'from aipass.api.apps.handlers...' pattern."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            extract_branch_from_import,
-        )
-
         result = extract_branch_from_import("from aipass.api.apps.handlers.openrouter import X")
         assert result == "api"
 
     def test_local_import_returns_none(self):
         """Local import without branch returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            extract_branch_from_import,
-        )
-
         result = extract_branch_from_import("from apps.handlers.json import X")
         assert result is None
 
     def test_import_statement_form(self):
         """Extract branch from 'import branch.apps.handlers...' pattern."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            extract_branch_from_import,
-        )
-
         result = extract_branch_from_import("import seedgo.apps.handlers.json")
         assert result == "seedgo"
 
@@ -145,37 +140,21 @@ class TestExtractHandlerPackage:
 
     def test_extracts_json(self):
         """Extract 'json' from handler import path."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            extract_handler_package,
-        )
-
         result = extract_handler_package("from apps.handlers.json.json_handler import X")
         assert result == "json"
 
     def test_extracts_dashboard(self):
         """Extract 'dashboard' from handler import path."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            extract_handler_package,
-        )
-
         result = extract_handler_package("from apps.handlers.dashboard.refresh import X")
         assert result == "dashboard"
 
     def test_cross_branch_handler(self):
         """Extract package from cross-branch handler import."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            extract_handler_package,
-        )
-
         result = extract_handler_package("from flow.apps.handlers.plan.validator import X")
         assert result == "plan"
 
     def test_no_handlers_returns_none(self):
         """Import without apps.handlers returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            extract_handler_package,
-        )
-
         result = extract_handler_package("from apps.modules.audit import run")
         assert result is None
 
@@ -186,22 +165,14 @@ class TestExtractHandlerPackage:
 class TestGetFileHandlerPackage:
     """Tests for get_file_handler_package."""
 
-    def test_handler_file_returns_package(self):
+    def test_handler_file_returns_package(self, tmp_path):
         """File in handlers/json/ returns 'json'."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            get_file_handler_package,
-        )
-
-        result = get_file_handler_package("/home/x/apps/handlers/json/json_handler.py")
+        result = get_file_handler_package((tmp_path / "apps" / "handlers" / "json" / "json_handler.py").as_posix())
         assert result == "json"
 
-    def test_non_handler_returns_none(self):
+    def test_non_handler_returns_none(self, tmp_path):
         """File in modules/ returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            get_file_handler_package,
-        )
-
-        result = get_file_handler_package("/home/x/apps/modules/something.py")
+        result = get_file_handler_package((tmp_path / "apps" / "modules" / "something.py").as_posix())
         assert result is None
 
 
@@ -213,11 +184,7 @@ class TestCheckHandlerGuard:
 
     def test_guard_present_passes(self, tmp_path, monkeypatch):
         """Branch with inspect.stack guard in handlers/__init__.py passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards import (
-            encapsulation_check,
-        )
-
-        encapsulation_check._handler_guard_cache.clear()
+        monkeypatch.setattr(encapsulation_check, "_handler_guard_cache", {})
 
         branch = tmp_path / "mybranch"
         handlers_dir = branch / "apps" / "handlers"
@@ -244,11 +211,7 @@ class TestCheckHandlerGuard:
 
     def test_guard_missing_fails(self, tmp_path, monkeypatch):
         """Branch without guard in handlers/__init__.py fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards import (
-            encapsulation_check,
-        )
-
-        encapsulation_check._handler_guard_cache.clear()
+        monkeypatch.setattr(encapsulation_check, "_handler_guard_cache", {})
 
         branch = tmp_path / "mybranch"
         handlers_dir = branch / "apps" / "handlers"
@@ -268,11 +231,7 @@ class TestCheckHandlerGuard:
 
     def test_no_handlers_dir_returns_none(self, tmp_path, monkeypatch):
         """Branch without handlers/ directory returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards import (
-            encapsulation_check,
-        )
-
-        encapsulation_check._handler_guard_cache.clear()
+        monkeypatch.setattr(encapsulation_check, "_handler_guard_cache", {})
 
         branch = tmp_path / "mybranch"
         branch.mkdir(parents=True)
@@ -293,45 +252,37 @@ class TestCheckHandlerGuard:
 class TestCheckCrossBranchImports:
     """Tests for check_cross_branch_imports."""
 
-    def test_no_cross_branch_passes(self):
+    def test_no_cross_branch_passes(self, tmp_path):
         """File with no cross-branch handler imports passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_cross_branch_imports,
-        )
-
         lines = _lines("from apps.handlers.json import json_handler\n")
-        result = check_cross_branch_imports(lines, "/seedgo/apps/modules/a.py", "seedgo")
+        result = check_cross_branch_imports(
+            lines, (tmp_path / "seedgo" / "apps" / "modules" / "a.py").as_posix(), "seedgo"
+        )
         assert result["passed"] is True
 
-    def test_cross_branch_import_fails(self):
+    def test_cross_branch_import_fails(self, tmp_path):
         """Importing another branch's handlers fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_cross_branch_imports,
-        )
-
         lines = _lines("from flow.apps.handlers.plan.validator import X\n")
-        result = check_cross_branch_imports(lines, "/seedgo/apps/modules/a.py", "seedgo")
+        result = check_cross_branch_imports(
+            lines, (tmp_path / "seedgo" / "apps" / "modules" / "a.py").as_posix(), "seedgo"
+        )
         assert result["passed"] is False
         assert "flow" in result["message"]
 
-    def test_same_branch_import_passes(self):
+    def test_same_branch_import_passes(self, tmp_path):
         """Importing own branch's handlers passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_cross_branch_imports,
-        )
-
         lines = _lines("from seedgo.apps.handlers.json import json_handler\n")
-        result = check_cross_branch_imports(lines, "/seedgo/apps/modules/a.py", "seedgo")
+        result = check_cross_branch_imports(
+            lines, (tmp_path / "seedgo" / "apps" / "modules" / "a.py").as_posix(), "seedgo"
+        )
         assert result["passed"] is True
 
-    def test_import_in_string_ignored(self):
+    def test_import_in_string_ignored(self, tmp_path):
         """Handler import inside a string literal is not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_cross_branch_imports,
-        )
-
         lines = _lines('"from flow.apps.handlers.plan import X"\n')
-        result = check_cross_branch_imports(lines, "/seedgo/apps/modules/a.py", "seedgo")
+        result = check_cross_branch_imports(
+            lines, (tmp_path / "seedgo" / "apps" / "modules" / "a.py").as_posix(), "seedgo"
+        )
         assert result["passed"] is True
 
 
@@ -341,53 +292,41 @@ class TestCheckCrossBranchImports:
 class TestCheckCrossPackageImports:
     """Tests for check_cross_package_imports."""
 
-    def test_same_package_passes(self):
+    def test_same_package_passes(self, tmp_path):
         """Importing from same handler package passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_cross_package_imports,
-        )
-
         lines = _lines("from apps.handlers.json.utils import helper\n")
-        result = check_cross_package_imports(lines, "/branch/apps/handlers/json/handler.py", "json")
+        result = check_cross_package_imports(
+            lines, (tmp_path / "branch" / "apps" / "handlers" / "json" / "handler.py").as_posix(), "json"
+        )
         assert result["passed"] is True
 
-    def test_cross_package_fails(self):
+    def test_cross_package_fails(self, tmp_path):
         """Importing from a different handler package fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_cross_package_imports,
-        )
-
         lines = _lines("from apps.handlers.error.error_handler import X\n")
         result = check_cross_package_imports(
             lines,
-            "/branch/apps/handlers/audit/checker.py",
+            (tmp_path / "branch" / "apps" / "handlers" / "audit" / "checker.py").as_posix(),
             "audit",
         )
         assert result["passed"] is False
         assert "error" in result["message"]
 
-    def test_allowed_json_handler_passes(self):
+    def test_allowed_json_handler_passes(self, tmp_path):
         """Importing json_handler (default allowed handler) passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_cross_package_imports,
-        )
-
         lines = _lines("from apps.handlers.json.json_handler import log_op\n")
         result = check_cross_package_imports(
             lines,
-            "/branch/apps/handlers/audit/checker.py",
+            (tmp_path / "branch" / "apps" / "handlers" / "audit" / "checker.py").as_posix(),
             "audit",
         )
         assert result["passed"] is True
 
-    def test_relative_import_passes(self):
+    def test_relative_import_passes(self, tmp_path):
         """Relative imports within same package pass."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_cross_package_imports,
-        )
-
         lines = _lines("from .utils import helper\n")
-        result = check_cross_package_imports(lines, "/branch/apps/handlers/json/handler.py", "json")
+        result = check_cross_package_imports(
+            lines, (tmp_path / "branch" / "apps" / "handlers" / "json" / "handler.py").as_posix(), "json"
+        )
         assert result["passed"] is True
 
 
@@ -397,35 +336,23 @@ class TestCheckCrossPackageImports:
 class TestCheckDirectHandlerImports:
     """Tests for check_direct_handler_imports."""
 
-    def test_no_handler_import_passes(self):
+    def test_no_handler_import_passes(self, tmp_path):
         """Entry point without handler imports passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_direct_handler_imports,
-        )
-
         lines = _lines("from apps.modules.audit import run_audit\n")
-        result = check_direct_handler_imports(lines, "/branch/apps/branch.py")
+        result = check_direct_handler_imports(lines, (tmp_path / "branch" / "apps" / "branch.py").as_posix())
         assert result["passed"] is True
 
-    def test_direct_handler_import_fails(self):
+    def test_direct_handler_import_fails(self, tmp_path):
         """Entry point importing handlers directly fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_direct_handler_imports,
-        )
-
         lines = _lines("from apps.handlers.openrouter.client import get_response\n")
-        result = check_direct_handler_imports(lines, "/branch/apps/branch.py")
+        result = check_direct_handler_imports(lines, (tmp_path / "branch" / "apps" / "branch.py").as_posix())
         assert result["passed"] is False
         assert "Handler imported directly" in result["message"]
 
-    def test_allowed_json_handler_passes(self):
+    def test_allowed_json_handler_passes(self, tmp_path):
         """Default handlers (json_handler) are allowed from entry points."""
-        from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
-            check_direct_handler_imports,
-        )
-
         lines = _lines("from apps.handlers.json.json_handler import log_op\n")
-        result = check_direct_handler_imports(lines, "/branch/apps/branch.py")
+        result = check_direct_handler_imports(lines, (tmp_path / "branch" / "apps" / "branch.py").as_posix())
         assert result["passed"] is True
 
 
@@ -442,10 +369,6 @@ class TestFilterDocstrings:
 
     def test_removes_multiline_docstring(self):
         """Multi-line docstring lines are removed."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            filter_docstrings,
-        )
-
         lines = _lines('"""\nThis is a docstring.\n"""\nimport os\n')
         result = filter_docstrings(lines)
         assert any("import os" in ln for ln in result)
@@ -453,10 +376,6 @@ class TestFilterDocstrings:
 
     def test_removes_single_line_docstring(self):
         """Single-line docstring is removed."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            filter_docstrings,
-        )
-
         lines = _lines('"""Module docstring."""\nimport os\n')
         result = filter_docstrings(lines)
         assert any("import os" in ln for ln in result)
@@ -464,10 +383,6 @@ class TestFilterDocstrings:
 
     def test_preserves_code(self):
         """Non-docstring lines are preserved."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            filter_docstrings,
-        )
-
         lines = _lines("import os\nimport sys\n")
         result = filter_docstrings(lines)
         assert len([ln for ln in result if ln.strip()]) == 2
@@ -481,30 +396,18 @@ class TestFindImportSectionEnd:
 
     def test_finds_def(self):
         """Stops at first def statement."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            find_import_section_end,
-        )
-
         lines = _lines("import os\nimport sys\n\ndef main():\n    pass\n")
         result = find_import_section_end(lines)
         assert result == 3  # index of 'def main():'
 
     def test_finds_class(self):
         """Stops at first class statement."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            find_import_section_end,
-        )
-
         lines = _lines("import os\n\nclass Foo:\n    pass\n")
         result = find_import_section_end(lines)
         assert result == 2  # index of 'class Foo:'
 
     def test_no_def_returns_length(self):
         """File with no def/class returns length of lines."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            find_import_section_end,
-        )
-
         lines = _lines("import os\nimport sys\nx = 42\n")
         result = find_import_section_end(lines)
         assert result == len(lines)
@@ -516,24 +419,16 @@ class TestFindImportSectionEnd:
 class TestCheckNoAipassRoot:
     """Tests for check_no_aipass_root."""
 
-    def test_clean_file_passes(self):
+    def test_clean_file_passes(self, tmp_path):
         """File without AIPASS_ROOT passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_no_aipass_root,
-        )
-
         lines = _lines("import os\nfrom aipass.prax import logger\n")
-        result = check_no_aipass_root(lines, "/test.py")
+        result = check_no_aipass_root(lines, (tmp_path / "test.py").as_posix())
         assert result["passed"] is True
 
-    def test_aipass_root_usage_fails(self):
+    def test_aipass_root_usage_fails(self, tmp_path):
         """File using AIPASS_ROOT fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_no_aipass_root,
-        )
-
         lines = _lines("root = AIPASS_ROOT / 'config'\n")
-        result = check_no_aipass_root(lines, "/test.py")
+        result = check_no_aipass_root(lines, (tmp_path / "test.py").as_posix())
         assert result["passed"] is False
         assert "AIPASS_ROOT" in result["message"]
 
@@ -544,35 +439,23 @@ class TestCheckNoAipassRoot:
 class TestCheckNoSysPath:
     """Tests for check_no_sys_path."""
 
-    def test_clean_file_passes(self):
+    def test_clean_file_passes(self, tmp_path):
         """File without sys.path hacking passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_no_sys_path,
-        )
-
         lines = _lines("import os\nimport sys\n")
-        result = check_no_sys_path(lines, "/test.py")
+        result = check_no_sys_path(lines, (tmp_path / "test.py").as_posix())
         assert result["passed"] is True
 
-    def test_sys_path_insert_fails(self):
+    def test_sys_path_insert_fails(self, tmp_path):
         """File with sys.path.insert fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_no_sys_path,
-        )
-
         lines = _lines("import sys\nsys.path.insert(0, '/my/path')\n")
-        result = check_no_sys_path(lines, "/test.py")
+        result = check_no_sys_path(lines, (tmp_path / "test.py").as_posix())
         assert result["passed"] is False
         assert "sys.path" in result["message"]
 
-    def test_sys_path_append_fails(self):
+    def test_sys_path_append_fails(self, tmp_path):
         """File with sys.path.append fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_no_sys_path,
-        )
-
         lines = _lines("import sys\nsys.path.append('/my/path')\n")
-        result = check_no_sys_path(lines, "/test.py")
+        result = check_no_sys_path(lines, (tmp_path / "test.py").as_posix())
         assert result["passed"] is False
 
 
@@ -582,25 +465,17 @@ class TestCheckNoSysPath:
 class TestCheckPraxLogger:
     """Tests for check_prax_logger."""
 
-    def test_prax_import_passes(self):
+    def test_prax_import_passes(self, tmp_path):
         """File with from aipass.prax import logger passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_prax_logger,
-        )
-
         lines = _lines("from aipass.prax import logger\n")
-        result = check_prax_logger(lines, "/test.py")
+        result = check_prax_logger(lines, (tmp_path / "test.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
-    def test_missing_prax_import_fails(self):
+    def test_missing_prax_import_fails(self, tmp_path):
         """File without prax logger import fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_prax_logger,
-        )
-
         lines = _lines("import os\nimport sys\n")
-        result = check_prax_logger(lines, "/test.py")
+        result = check_prax_logger(lines, (tmp_path / "test.py").as_posix())
         assert result is not None
         assert result["passed"] is False
         assert "Prax logger" in result["message"]
@@ -618,51 +493,49 @@ class TestCheckPraxLoggerAcceptsBothBindings:
     binding style the standard never asked for.
     """
 
-    def _check(self, source: str):
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_prax_logger,
-        )
+    def _check(self, source: str, tmp_path) -> dict:
+        result = check_prax_logger(_lines(source), (tmp_path / "test.py").as_posix())
+        assert result is not None
+        return result
 
-        return check_prax_logger(_lines(source), "/test.py")
+    def test_the_rebindable_module_form_passes(self, tmp_path):
+        assert self._check("from aipass import prax\n", tmp_path)["passed"] is True
 
-    def test_the_rebindable_module_form_passes(self):
-        assert self._check("from aipass import prax\n")["passed"] is True
+    def test_the_object_form_still_passes(self, tmp_path):
+        assert self._check("from aipass.prax import logger\n", tmp_path)["passed"] is True
 
-    def test_the_object_form_still_passes(self):
-        assert self._check("from aipass.prax import logger\n")["passed"] is True
+    def test_prax_inside_a_multi_name_import_counts(self, tmp_path):
+        assert self._check("from aipass import cli, prax\n", tmp_path)["passed"] is True
 
-    def test_prax_inside_a_multi_name_import_counts(self):
-        assert self._check("from aipass import cli, prax\n")["passed"] is True
+    def test_an_aliased_prax_still_counts(self, tmp_path):
+        assert self._check("from aipass import prax as p\n", tmp_path)["passed"] is True
 
-    def test_an_aliased_prax_still_counts(self):
-        assert self._check("from aipass import prax as p\n")["passed"] is True
-
-    def test_a_sibling_package_is_not_mistaken_for_prax(self):
+    def test_a_sibling_package_is_not_mistaken_for_prax(self, tmp_path):
         # `from aipass import cli` must NOT satisfy a prax-logging rule.
-        assert self._check("from aipass import cli\n")["passed"] is False
+        assert self._check("from aipass import cli\n", tmp_path)["passed"] is False
 
-    def test_a_name_that_merely_starts_with_prax_is_not_prax(self):
+    def test_a_name_that_merely_starts_with_prax_is_not_prax(self, tmp_path):
         # Substring matching would accept this; the check splits the import
         # list and compares whole names.
-        assert self._check("from aipass import praxis\n")["passed"] is False
+        assert self._check("from aipass import praxis\n", tmp_path)["passed"] is False
 
-    def test_prax_imported_from_somewhere_that_is_not_aipass_does_not_count(self):
+    def test_prax_imported_from_somewhere_that_is_not_aipass_does_not_count(self, tmp_path):
         # Found by mutation: deleting the "from aipass import " prefix guard
         # killed no test, so any package exporting a name `prax` would have
         # satisfied an AIPASS logging rule.
-        assert self._check("from thirdparty import prax\n")["passed"] is False
+        assert self._check("from thirdparty import prax\n", tmp_path)["passed"] is False
 
-    def test_a_commented_out_import_does_not_count(self):
-        assert self._check("# from aipass import prax\n")["passed"] is False
+    def test_a_commented_out_import_does_not_count(self, tmp_path):
+        assert self._check("# from aipass import prax\n", tmp_path)["passed"] is False
 
-    def test_a_commented_out_OBJECT_form_import_does_not_count_either(self):
+    def test_a_commented_out_object_form_import_does_not_count_either(self, tmp_path):
         # The module form is rejected by the source-package guard even without
         # the comment skip, so only the OBJECT form actually exercises it -
         # found by mutation, the comment-skip mutant survived until this test.
-        assert self._check("# from aipass.prax import logger\n")["passed"] is False
+        assert self._check("# from aipass.prax import logger\n", tmp_path)["passed"] is False
 
-    def test_the_failure_message_offers_BOTH_spellings(self):
-        message = self._check("import os\n")["message"]
+    def test_the_failure_message_offers_both_spellings(self, tmp_path):
+        message = self._check("import os\n", tmp_path)["message"]
         assert "from aipass.prax import logger" in message
         assert "from aipass import prax" in message
 
@@ -673,39 +546,33 @@ class TestCheckPraxLoggerAcceptsBothBindings:
 class TestImportsHandlerIndependence:
     """Tests for imports_check.check_handler_independence."""
 
-    def test_clean_handler_passes(self):
+    def test_clean_handler_passes(self, tmp_path):
         """Handler without parent module imports passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_handler_independence,
-        )
-
         lines = _lines("from aipass.prax import logger\n")
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/handler.py")
+        result = check_handler_independence(
+            lines, (tmp_path / "seedgo" / "apps" / "handlers" / "json" / "handler.py").as_posix()
+        )
         assert result is not None
         assert result["passed"] is True
 
-    def test_parent_module_import_fails(self):
+    def test_parent_module_import_fails(self, tmp_path):
         """Handler importing from parent branch modules fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_handler_independence,
-        )
-
         lines = _lines("from seedgo.apps.modules.audit import run\n")
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/handler.py")
+        result = check_handler_independence(
+            lines, (tmp_path / "seedgo" / "apps" / "handlers" / "json" / "handler.py").as_posix()
+        )
         assert result is not None
         assert result["passed"] is False
         assert "parent module" in result["message"]
 
-    def test_infrastructure_import_passes(self):
+    def test_infrastructure_import_passes(self, tmp_path):
         """Infrastructure imports (aipass.prax, aipass.cli) are allowed."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_handler_independence,
-        )
-
         lines = _lines(
             "from aipass.prax.apps.modules.logger import info\nfrom aipass.cli.apps.modules.display import header\n"
         )
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/handler.py")
+        result = check_handler_independence(
+            lines, (tmp_path / "seedgo" / "apps" / "handlers" / "json" / "handler.py").as_posix()
+        )
         assert result is not None
         assert result["passed"] is True
 
@@ -716,37 +583,25 @@ class TestImportsHandlerIndependence:
 class TestCheckImportOrder:
     """Tests for check_import_order."""
 
-    def test_correct_order_passes(self):
+    def test_correct_order_passes(self, tmp_path):
         """Stdlib before aipass imports passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_import_order,
-        )
-
         lines = _lines("import os\nimport sys\nfrom aipass.prax import logger\n")
-        result = check_import_order(lines, "/test.py")
+        result = check_import_order(lines, (tmp_path / "test.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
-    def test_wrong_order_fails(self):
+    def test_wrong_order_fails(self, tmp_path):
         """Aipass import before stdlib fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_import_order,
-        )
-
         lines = _lines("from aipass.prax import logger\nimport os\n")
-        result = check_import_order(lines, "/test.py")
+        result = check_import_order(lines, (tmp_path / "test.py").as_posix())
         assert result is not None
         assert result["passed"] is False
         assert "before stdlib" in result["message"]
 
-    def test_no_imports_returns_none(self):
+    def test_no_imports_returns_none(self, tmp_path):
         """File with no imports returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_import_order,
-        )
-
         lines = _lines("x = 42\n")
-        result = check_import_order(lines, "/test.py")
+        result = check_import_order(lines, (tmp_path / "test.py").as_posix())
         assert result is None
 
 
@@ -756,49 +611,33 @@ class TestCheckImportOrder:
 class TestCheckNoBareImports:
     """Tests for check_no_bare_imports."""
 
-    def test_proper_namespace_passes(self):
+    def test_proper_namespace_passes(self, tmp_path):
         """Import using aipass.* namespace passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_no_bare_imports,
-        )
-
         lines = _lines("from aipass.seedgo.apps.handlers.json import json_handler\n")
-        result = check_no_bare_imports(lines, "/test.py")
+        result = check_no_bare_imports(lines, (tmp_path / "test.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
-    def test_bare_handler_import_fails(self):
+    def test_bare_handler_import_fails(self, tmp_path):
         """Bare 'from handlers.X' import fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_no_bare_imports,
-        )
-
         lines = _lines("from handlers.json import json_handler\n")
-        result = check_no_bare_imports(lines, "/test.py")
+        result = check_no_bare_imports(lines, (tmp_path / "test.py").as_posix())
         assert result is not None
         assert result["passed"] is False
         assert "bare import" in result["message"]
 
-    def test_bare_module_import_fails(self):
+    def test_bare_module_import_fails(self, tmp_path):
         """Bare 'from drone.apps...' without aipass prefix fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_no_bare_imports,
-        )
-
         lines = _lines("from drone.apps.modules.commander import route\n")
-        result = check_no_bare_imports(lines, "/test.py")
+        result = check_no_bare_imports(lines, (tmp_path / "test.py").as_posix())
         assert result is not None
         assert result["passed"] is False
         assert "missing aipass." in result["message"]
 
-    def test_stdlib_import_passes(self):
+    def test_stdlib_import_passes(self, tmp_path):
         """Standard library imports pass."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_no_bare_imports,
-        )
-
         lines = _lines("import os\nfrom pathlib import Path\n")
-        result = check_no_bare_imports(lines, "/test.py")
+        result = check_no_bare_imports(lines, (tmp_path / "test.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
@@ -816,10 +655,6 @@ class TestCheckPrintIntrospectionExists:
 
     def test_function_present_passes(self):
         """File with def print_introspection passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_print_introspection_exists,
-        )
-
         content = "def print_introspection():\n    pass\n"
         tree = ast.parse(content)
         result = check_print_introspection_exists(tree, "test.py")
@@ -827,10 +662,6 @@ class TestCheckPrintIntrospectionExists:
 
     def test_function_missing_fails(self):
         """File without print_introspection fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_print_introspection_exists,
-        )
-
         content = "def main():\n    pass\n"
         tree = ast.parse(content)
         result = check_print_introspection_exists(tree, "test.py")
@@ -846,10 +677,6 @@ class TestCheckExecutionOrder:
 
     def test_correct_order_passes(self):
         """No-args check before --help check passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_execution_order,
-        )
-
         content = (
             "def main():\n"
             "    if not args:\n"
@@ -864,10 +691,6 @@ class TestCheckExecutionOrder:
 
     def test_wrong_order_fails(self):
         """--help check before no-args check fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_execution_order,
-        )
-
         content = (
             "def main():\n"
             "    if '--help' in args:\n"
@@ -882,10 +705,6 @@ class TestCheckExecutionOrder:
 
     def test_no_main_skips(self):
         """File without main() or __name__ block is skipped."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_execution_order,
-        )
-
         content = "def compute():\n    return 42\n"
         tree = ast.parse(content)
         result = check_execution_order(tree, content, "test.py")
@@ -902,10 +721,6 @@ class TestCheckModuleHandleCommandGate:
 
     def test_gate_present_passes(self):
         """handle_command with no-args gate calling print_introspection passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_handle_command_gate,
-        )
-
         content = (
             "def handle_command(command, args):\n"
             "    if not args:\n"
@@ -920,10 +735,6 @@ class TestCheckModuleHandleCommandGate:
 
     def test_gate_missing_fails(self):
         """handle_command without no-args gate fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_handle_command_gate,
-        )
-
         content = "def handle_command(command, args):\n    do_work(args)\n    return True\n"
         tree = ast.parse(content)
         result = check_module_handle_command_gate(tree, "test.py")
@@ -932,10 +743,6 @@ class TestCheckModuleHandleCommandGate:
 
     def test_no_handle_command_skips(self):
         """File without handle_command is skipped."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_handle_command_gate,
-        )
-
         content = "def compute():\n    return 42\n"
         tree = ast.parse(content)
         result = check_module_handle_command_gate(tree, "test.py")
@@ -952,10 +759,6 @@ class TestCheckCorrectDispatch:
 
     def test_correct_dispatch_passes(self):
         """No-args calls introspection and --help calls help passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_correct_dispatch,
-        )
-
         content = (
             "def main():\n"
             "    if not args:\n"
@@ -970,10 +773,6 @@ class TestCheckCorrectDispatch:
 
     def test_swapped_dispatch_fails(self):
         """No-args calling print_help instead of print_introspection fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_correct_dispatch,
-        )
-
         content = (
             "def main():\n"
             "    if not args:\n"
@@ -988,10 +787,6 @@ class TestCheckCorrectDispatch:
 
     def test_no_main_returns_none(self):
         """File without main function returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_correct_dispatch,
-        )
-
         content = "def compute():\n    return 42\n"
         tree = ast.parse(content)
         result = check_correct_dispatch(tree, "test.py")
@@ -1006,10 +801,6 @@ class TestCheckContentReferences:
 
     def test_correct_references_passes(self):
         """Introspection text without python3 references passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_content_references,
-        )
-
         content = "def print_introspection():\n    msg = 'Use: drone @mybranch command'\n    return msg\n"
         tree = ast.parse(content)
         result = check_content_references(tree, "test.py")
@@ -1018,10 +809,6 @@ class TestCheckContentReferences:
 
     def test_python3_reference_fails(self):
         """Introspection text referencing python3 fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_content_references,
-        )
-
         content = "def print_introspection():\n    msg = 'Run: python3 mybranch.py command'\n    return msg\n"
         tree = ast.parse(content)
         result = check_content_references(tree, "test.py")
@@ -1031,10 +818,6 @@ class TestCheckContentReferences:
 
     def test_no_relevant_funcs_returns_none(self):
         """File without print_introspection or print_help returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_content_references,
-        )
-
         content = "def compute():\n    return 42\n"
         tree = ast.parse(content)
         result = check_content_references(tree, "test.py")
@@ -1049,10 +832,6 @@ class TestCheckModuleHelpInterception:
 
     def test_help_intercepted_passes(self):
         """handle_command that intercepts --help passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_help_interception,
-        )
-
         content = (
             "def handle_command(command, args):\n"
             "    if '--help' in args:\n"
@@ -1067,10 +846,6 @@ class TestCheckModuleHelpInterception:
 
     def test_help_not_intercepted_fails(self):
         """handle_command without --help interception fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_help_interception,
-        )
-
         content = "def handle_command(command, args):\n    do_work(args)\n    return True\n"
         tree = ast.parse(content)
         result = check_module_help_interception(tree, "test.py")
@@ -1080,10 +855,6 @@ class TestCheckModuleHelpInterception:
 
     def test_no_handle_command_returns_none(self):
         """File without handle_command returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_help_interception,
-        )
-
         content = "def compute():\n    return 42\n"
         tree = ast.parse(content)
         result = check_module_help_interception(tree, "test.py")
@@ -1091,10 +862,6 @@ class TestCheckModuleHelpInterception:
 
     def test_imported_help_predicate_passes(self):
         """A delegated predicate imported from a handler counts as interception."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_help_interception,
-        )
-
         content = (
             "from aipass.memory.apps.handlers.cli.help_flags import wants_help\n"
             "\n"
@@ -1111,10 +878,6 @@ class TestCheckModuleHelpInterception:
 
     def test_locally_defined_help_predicate_passes(self):
         """A predicate defined in the same file counts as interception."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_help_interception,
-        )
-
         content = (
             "def _is_help_request(args):\n"
             "    return bool(args)\n"
@@ -1132,10 +895,6 @@ class TestCheckModuleHelpInterception:
 
     def test_non_help_predicate_call_fails(self):
         """An unrelated predicate call is not mistaken for a help guard."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_help_interception,
-        )
-
         content = (
             "def should_process(args):\n"
             "    return bool(args)\n"
@@ -1153,10 +912,6 @@ class TestCheckModuleHelpInterception:
 
     def test_helper_substring_name_does_not_pass(self):
         """'helper' merely contains 'help' -- it is not a help predicate."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_help_interception,
-        )
-
         content = (
             "def _has_credential_helper(args):\n"
             "    return bool(args)\n"
@@ -1174,10 +929,6 @@ class TestCheckModuleHelpInterception:
 
     def test_help_predicate_not_asked_about_args_does_not_pass(self):
         """A help-named predicate applied to something other than the args is no guard."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_help_interception,
-        )
-
         content = (
             "def _contains_help_string(node):\n"
             "    return bool(node)\n"
@@ -1196,10 +947,6 @@ class TestCheckModuleHelpInterception:
 
     def test_unresolved_help_predicate_does_not_pass(self):
         """A help-named attribute call on an unknown object does not count."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_module_help_interception,
-        )
-
         content = (
             "def handle_command(command, args):\n"
             "    if ctx.cli.wants_help(args):\n"
@@ -1222,10 +969,6 @@ class TestCheckIntrospectionRichFormatting:
 
     def test_styled_introspection_passes(self):
         """print_introspection with Rich markup tags passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_introspection_rich_formatting,
-        )
-
         content = (
             "def print_introspection():\n"
             "    console.print('[bold cyan]Flow[/bold cyan] - PLAN Management')\n"
@@ -1239,10 +982,6 @@ class TestCheckIntrospectionRichFormatting:
 
     def test_flat_introspection_fails(self):
         """print_introspection with only plain strings fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_introspection_rich_formatting,
-        )
-
         content = (
             "def print_introspection():\n"
             "    console.print('spawn Entry Point')\n"
@@ -1257,10 +996,6 @@ class TestCheckIntrospectionRichFormatting:
 
     def test_delegation_to_styled_helper_passes(self):
         """print_introspection delegating to a styled _helper passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_introspection_rich_formatting,
-        )
-
         content = (
             "def _show_branch_introspection():\n"
             "    console.print('[bold cyan]Branch[/bold cyan]')\n"
@@ -1277,10 +1012,6 @@ class TestCheckIntrospectionRichFormatting:
 
     def test_delegation_to_flat_helper_fails(self):
         """print_introspection delegating to a flat _helper fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_introspection_rich_formatting,
-        )
-
         content = (
             "def _show_info():\n"
             "    console.print('Plain text only')\n"
@@ -1297,10 +1028,6 @@ class TestCheckIntrospectionRichFormatting:
 
     def test_no_print_introspection_returns_none(self):
         """File without print_introspection returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_introspection_rich_formatting,
-        )
-
         content = "def compute():\n    return 42\n"
         tree = ast.parse(content)
         result = check_introspection_rich_formatting(tree, "test.py")
@@ -1308,10 +1035,6 @@ class TestCheckIntrospectionRichFormatting:
 
     def test_no_output_returns_none(self):
         """print_introspection that produces no output returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
-            check_introspection_rich_formatting,
-        )
-
         content = "def print_introspection():\n    return {'name': 'test'}\n"
         tree = ast.parse(content)
         result = check_introspection_rich_formatting(tree, "test.py")
@@ -1331,10 +1054,6 @@ class TestCheckHandleCommand:
 
     def test_correct_pattern_passes(self):
         """Module with handle_command(command, args) -> bool passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_handle_command,
-        )
-
         content = "def handle_command(command: str, args: list) -> bool:\n    return True\n"
         result = check_handle_command(content)
         assert result is not None
@@ -1342,10 +1061,6 @@ class TestCheckHandleCommand:
 
     def test_missing_handle_command_fails(self):
         """Module without handle_command fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_handle_command,
-        )
-
         content = "def do_work():\n    return True\n"
         result = check_handle_command(content)
         assert result is not None
@@ -1354,10 +1069,6 @@ class TestCheckHandleCommand:
 
     def test_missing_return_type_fails(self):
         """handle_command without -> bool annotation fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_handle_command,
-        )
-
         content = "def handle_command(command, args):\n    return True\n"
         result = check_handle_command(content)
         assert result is not None
@@ -1371,36 +1082,24 @@ class TestCheckHandleCommand:
 class TestModulesCheckFileSize:
     """Tests for modules_check.check_file_size."""
 
-    def test_simple_module_passes(self):
+    def test_simple_module_passes(self, tmp_path):
         """Under 150 lines is perfect."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_file_size,
-        )
-
         lines: list[str] = ["x"] * 100
-        result = check_file_size(lines, "/branch/apps/modules/audit.py")
+        result = check_file_size(lines, (tmp_path / "branch" / "apps" / "modules" / "audit.py").as_posix())
         assert result["passed"] is True
         assert "simple" in result["message"]
 
-    def test_standard_module_passes(self):
+    def test_standard_module_passes(self, tmp_path):
         """150-250 lines is standard."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_file_size,
-        )
-
         lines: list[str] = ["x"] * 200
-        result = check_file_size(lines, "/branch/apps/modules/audit.py")
+        result = check_file_size(lines, (tmp_path / "branch" / "apps" / "modules" / "audit.py").as_posix())
         assert result["passed"] is True
         assert "standard" in result["message"]
 
-    def test_oversized_module_fails(self):
+    def test_oversized_module_fails(self, tmp_path):
         """600+ lines fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_file_size,
-        )
-
         lines: list[str] = ["x"] * 650
-        result = check_file_size(lines, "/branch/apps/modules/audit.py")
+        result = check_file_size(lines, (tmp_path / "branch" / "apps" / "modules" / "audit.py").as_posix())
         assert result["passed"] is False
         assert "too large" in result["message"]
 
@@ -1413,10 +1112,6 @@ class TestCheckNoDirectFileOps:
 
     def test_clean_module_passes(self):
         """Module without direct file operations passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_no_direct_file_ops,
-        )
-
         content = "def do_work():\n    return handler.load_data()\n"
         lines = _lines(content)
         result = check_no_direct_file_ops(content, lines)
@@ -1425,10 +1120,6 @@ class TestCheckNoDirectFileOps:
 
     def test_open_call_fails(self):
         """Module with bare open() call fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_no_direct_file_ops,
-        )
-
         content = 'def do_work():\n    f = open("data.json")\n'
         lines = _lines(content)
         result = check_no_direct_file_ops(content, lines)
@@ -1438,10 +1129,6 @@ class TestCheckNoDirectFileOps:
 
     def test_json_dump_fails(self):
         """Module with json.dump() call fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_no_direct_file_ops,
-        )
-
         content = "def save():\n    json.dump(data, fp)\n"
         lines = _lines(content)
         result = check_no_direct_file_ops(content, lines)
@@ -1450,10 +1137,6 @@ class TestCheckNoDirectFileOps:
 
     def test_import_open_not_flagged(self):
         """Import lines containing 'open' are not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_no_direct_file_ops,
-        )
-
         content = "from pathlib import Path\nimport os\n"
         lines = _lines(content)
         result = check_no_direct_file_ops(content, lines)
@@ -1467,52 +1150,36 @@ class TestCheckNoDirectFileOps:
 class TestCheckNoBusinessLogic:
     """Tests for check_no_business_logic."""
 
-    def test_clean_module_passes(self):
+    def test_clean_module_passes(self, tmp_path):
         """Module without hardcoded data passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_no_business_logic,
-        )
-
         content = "CONSTANT = 42\ndef do_work():\n    return True\n"
         lines = _lines(content)
-        result = check_no_business_logic(content, lines, "/module.py")
+        result = check_no_business_logic(content, lines, (tmp_path / "module.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
-    def test_hardcoded_list_fails(self):
+    def test_hardcoded_list_fails(self, tmp_path):
         """Module-level hardcoded list fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_no_business_logic,
-        )
-
         content = 'allowed_types = ["alpha", "beta", "gamma"]\n'
         lines = _lines(content)
-        result = check_no_business_logic(content, lines, "/module.py")
+        result = check_no_business_logic(content, lines, (tmp_path / "module.py").as_posix())
         assert result is not None
         assert result["passed"] is False
         assert "hardcoded" in result["message"]
 
-    def test_all_caps_constant_passes(self):
+    def test_all_caps_constant_passes(self, tmp_path):
         """ALL_CAPS constant is not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_no_business_logic,
-        )
-
         content = 'ALLOWED = ["alpha", "beta", "gamma"]\n'
         lines = _lines(content)
-        result = check_no_business_logic(content, lines, "/module.py")
+        result = check_no_business_logic(content, lines, (tmp_path / "module.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
-    def test_empty_list_passes(self):
+    def test_empty_list_passes(self, tmp_path):
         """Empty list assignment is not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_no_business_logic,
-        )
-
         content = "results = []\n"
         lines = _lines(content)
-        result = check_no_business_logic(content, lines, "/module.py")
+        result = check_no_business_logic(content, lines, (tmp_path / "module.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
@@ -1523,12 +1190,8 @@ class TestCheckNoBusinessLogic:
 class TestCheckThinOrchestration:
     """Tests for check_thin_orchestration."""
 
-    def test_thin_module_passes(self):
+    def test_thin_module_passes(self, tmp_path):
         """Module with only standard functions passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_thin_orchestration,
-        )
-
         content = (
             "def handle_command(command, args):\n"
             "    return True\n"
@@ -1537,56 +1200,40 @@ class TestCheckThinOrchestration:
             "def print_introspection():\n"
             "    pass\n"
         )
-        result = check_thin_orchestration(content, "/module.py")
+        result = check_thin_orchestration(content, (tmp_path / "module.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
-    def test_implementation_function_fails(self):
+    def test_implementation_function_fails(self, tmp_path):
         """Module with large non-standard function fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_thin_orchestration,
-        )
-
         # Build a function with > 40 lines (THIN_WRAPPER_MAX_LINES)
         func_body = "\n".join(f"    x{i} = {i}" for i in range(45))
         content = f"def compute_results(data):\n{func_body}\n"
-        result = check_thin_orchestration(content, "/module.py")
+        result = check_thin_orchestration(content, (tmp_path / "module.py").as_posix())
         assert result is not None
         assert result["passed"] is False
         assert "compute_results" in result["message"]
 
-    def test_private_helper_passes(self):
+    def test_private_helper_passes(self, tmp_path):
         """Private helper functions (_prefixed) are allowed."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_thin_orchestration,
-        )
-
         func_body = "\n".join(f"    x{i} = {i}" for i in range(45))
         content = f"def _internal_helper():\n{func_body}\n"
-        result = check_thin_orchestration(content, "/module.py")
+        result = check_thin_orchestration(content, (tmp_path / "module.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
-    def test_orchestration_prefix_passes(self):
+    def test_orchestration_prefix_passes(self, tmp_path):
         """Functions with orchestration prefixes (handle_, show_, etc.) pass."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_thin_orchestration,
-        )
-
         func_body = "\n".join(f"    x{i} = {i}" for i in range(45))
         content = f"def handle_audit(args):\n{func_body}\n"
-        result = check_thin_orchestration(content, "/module.py")
+        result = check_thin_orchestration(content, (tmp_path / "module.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
-    def test_small_function_passes(self):
+    def test_small_function_passes(self, tmp_path):
         """Non-standard function under 40 lines is treated as thin wrapper."""
-        from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
-            check_thin_orchestration,
-        )
-
         content = "def compute_results(data):\n    return data\n"
-        result = check_thin_orchestration(content, "/module.py")
+        result = check_thin_orchestration(content, (tmp_path / "module.py").as_posix())
         assert result is not None
         assert result["passed"] is True
 
@@ -1607,8 +1254,6 @@ class TestAipassRootIsMatchedAsATokenNotASubstring:
     """
 
     def _check(self, line):
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import check_no_aipass_root
-
         return check_no_aipass_root([line + "\n"], "mod.py", [])
 
     def test_the_env_var_is_still_caught(self):
@@ -1620,18 +1265,18 @@ class TestAipassRootIsMatchedAsATokenNotASubstring:
     def test_a_bare_reference_is_still_caught(self):
         assert not self._check("path = AIPASS_ROOT / 'x'")["passed"]
 
-    def test_the_declared_roots_filename_is_NOT_a_violation(self):
+    def test_the_declared_roots_filename_is_not_a_violation(self):
         """@memory's exact line."""
         assert self._check('DECLARED_ROOTS = "AIPASS_ROOTS.json"')["passed"]
 
-    def test_a_future_AIPASS_ROOT_MAP_is_not_a_violation_either(self):
+    def test_a_future_aipass_root_map_is_not_a_violation_either(self):
         """The report named this one specifically as the next collision."""
         assert self._check('NAME = "AIPASS_ROOT_MAP.json"')["passed"]
 
-    def test_AIPASS_ROOTS_REGISTRY_is_not_a_violation(self):
+    def test_aipass_roots_registry_is_not_a_violation(self):
         assert self._check('NAME = "AIPASS_ROOTS_REGISTRY.json"')["passed"]
 
-    def test_a_LONGER_name_ENDING_in_the_token_is_not_a_violation(self):
+    def test_a_longer_name_ending_in_the_token_is_not_a_violation(self):
         """Prefix-only matching would still convict this one."""
         assert self._check('NAME = "MY_AIPASS_ROOT"')["passed"]
 
@@ -1655,24 +1300,15 @@ class TestImportsCheckLineNumbersSurviveDocstringFiltering:
     """
 
     def test_filter_docstrings_preserves_the_line_count(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import filter_docstrings
-
         source = ['"""doc\n', "more doc\n", '"""\n', "import os\n"]
         assert len(filter_docstrings(source)) == len(source)
 
     def test_the_docstring_body_is_still_neutralised(self):
         """Preserving the line must not un-filter its content."""
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import filter_docstrings
-
         out = filter_docstrings(['"""\n', "AIPASS_ROOT lives here\n", '"""\n', "import os\n"])
         assert "AIPASS_ROOT" not in "".join(out)
 
-    def test_a_violation_after_a_docstring_reports_its_REAL_line(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
-            check_no_aipass_root,
-            filter_docstrings,
-        )
-
+    def test_a_violation_after_a_docstring_reports_its_real_line(self):
         source = ['"""\n', "a\n", "b\n", "c\n", '"""\n', 'x = os.environ["AIPASS_ROOT"]\n']
         result = check_no_aipass_root(filter_docstrings(source), "mod.py", [])
         assert not result["passed"]
@@ -1681,8 +1317,6 @@ class TestImportsCheckLineNumbersSurviveDocstringFiltering:
     def test_the_real_reported_file_now_passes_end_to_end(self):
         """@memory's actual file, through the real entry point."""
         from pathlib import Path
-
-        from aipass.seedgo.apps.handlers.aipass_standards import imports_check
 
         target = Path(__file__).resolve().parents[2] / "memory" / "apps" / "handlers" / "monitor" / "registry_scope.py"
         if not target.exists():
@@ -1716,8 +1350,6 @@ class TestJsonStructureExemptsDeclarationOnlyModules:
     """
 
     def _score(self, source, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
-
         # MUST land under apps/handlers or the checker returns not-applicable
         # on the PATH and every assertion below passes for the wrong reason —
         # which is exactly what the first cut of this class did.
@@ -1732,7 +1364,7 @@ class TestJsonStructureExemptsDeclarationOnlyModules:
         result = self._score(self.DECLARATIONS_ONLY, tmp_path)
         assert result["score"] == 100, result["checks"]
 
-    def test_the_exemption_is_PUBLISHED_not_a_silent_pass(self, tmp_path):
+    def test_the_exemption_is_published_not_a_silent_pass(self, tmp_path):
         """A skip nobody can read is indistinguishable from a check that ran."""
         result = self._score(self.DECLARATIONS_ONLY, tmp_path)
         text = " ".join(c["message"] for c in result["checks"]).lower()
@@ -1740,7 +1372,7 @@ class TestJsonStructureExemptsDeclarationOnlyModules:
         assert "declarations only" in text, result["checks"]
         assert "performs no operations to log" in text, result["checks"]
 
-    def test_ONE_method_puts_the_module_back_in_scope(self, tmp_path):
+    def test_one_method_puts_the_module_back_in_scope(self, tmp_path):
         source = '"""Doc."""\n\n\nclass Thing:\n    def do(self):\n        return 1\n'
         assert self._score(source, tmp_path)["score"] < 100
 
@@ -1757,16 +1389,14 @@ class TestJsonStructureExemptsDeclarationOnlyModules:
         source = '"""Doc."""\n\nLIMIT = 10\n\n\nclass E(Exception):\n    pass\n'
         assert self._score(source, tmp_path)["score"] == 100
 
-    def test_an_UNPARSEABLE_file_does_not_earn_the_exemption(self, tmp_path):
+    def test_an_unparseable_file_does_not_earn_the_exemption(self, tmp_path):
         """A syntax error is not evidence of purity. Answering "no callable
         code" for a file we could not read hands out the exemption on
         ignorance — and the first cut of these pins let that mutant live."""
         assert self._score('"""Doc."""\n\nclass Broken(\n', tmp_path)["score"] < 100
 
-    def test_the_REAL_drone_file_is_exempt(self, tmp_path):
+    def test_the_real_drone_file_is_exempt(self, tmp_path):
         from pathlib import Path
-
-        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
 
         target = Path(__file__).resolve().parents[2] / "drone" / "apps" / "handlers" / "exceptions.py"
         if not target.exists():
@@ -1796,17 +1426,12 @@ class TestUnusedFunctionSaysWhatItActuallyMeasured:
     """
 
     def _report(self, tmp_path, monkeypatch):
-        from aipass.seedgo.apps.handlers.aipass_standards import unused_function_check
-
-        # This module's autouse _mock_infrastructure fixture replaces
-        # bypass.ignore_handler with a MagicMock, so is_seedgo_ignored() returns
-        # a TRUTHY Mock and the collector silently skips every file — the report
-        # then reads "No .py files found in branch" and any assertion about the
-        # message passes or fails for reasons unrelated to the message. A
-        # stand-in more generous than the real function, which is the exact trap
-        # @memory described on 2026-08-30. Pinned back to the real answer here.
-        monkeypatch.setattr(unused_function_check, "is_seedgo_ignored", lambda *a, **k: False)
-        monkeypatch.setattr(unused_function_check, "load_ignore_entries", lambda *a, **k: [])
+        # The REAL ignore handler runs here: it reads only this tmp branch. A
+        # MagicMock stand-in makes is_seedgo_ignored() return a TRUTHY Mock and the
+        # collector silently skips every file — the report then reads "No .py files
+        # found in branch" and any assertion about the message passes or fails for
+        # reasons unrelated to the message. A stand-in more generous than the real
+        # function is the exact trap @memory described on 2026-08-30.
 
         # A neutral branch root INSIDE tmp_path: pytest names tmp_path after the
         # test, and the collector's skip set is matched against every path part.
@@ -1856,9 +1481,11 @@ class TestCliCheckAllowsRelayingACapturedSubprocessStream:
     """
 
     def _lines(self, source):
-        from aipass.seedgo.apps.handlers.aipass_standards import cli_check
-
-        return [i for i, line in enumerate(source.splitlines(), 1) if cli_check._is_raw_write_violation(line)]
+        """Raw-write lines check_print_usage reports ([] for none). Mutant: raw-write rule bypassed in cli_check.py — killed."""
+        result = cli_check.check_print_usage(source, source.splitlines())
+        if result is None or "sys.stdout/stderr.write()" not in result["message"]:
+            return []
+        return ast.literal_eval(result["message"].rsplit(" on lines ", 1)[1].rstrip("."))
 
     def test_relaying_captured_stdout_attribute_is_allowed(self):
         assert self._lines("        sys.stdout.write(result.stdout)") == []
@@ -1869,16 +1496,16 @@ class TestCliCheckAllowsRelayingACapturedSubprocessStream:
     def test_relaying_captured_stderr_to_stderr_is_allowed(self):
         assert self._lines("        sys.stderr.write(result.stderr)") == []
 
-    def test_a_literal_is_STILL_a_violation(self):
+    def test_a_literal_is_still_a_violation(self):
         assert self._lines('        sys.stdout.write("hello")') != []
 
-    def test_an_fstring_is_STILL_a_violation(self):
+    def test_an_fstring_is_still_a_violation(self):
         assert self._lines('        sys.stdout.write(f"{count} done")') != []
 
-    def test_a_value_you_built_is_STILL_a_violation(self):
+    def test_a_value_you_built_is_still_a_violation(self):
         assert self._lines("        sys.stdout.write(rendered_table)") != []
 
-    def test_CROSSED_streams_stay_a_violation(self):
+    def test_crossed_streams_stay_a_violation(self):
         """Captured stderr written to stdout is a routing bug, not a relay."""
         assert self._lines("        sys.stdout.write(result.stderr)") != []
         assert self._lines('        sys.stderr.write(result["stdout"])') != []
@@ -1886,27 +1513,26 @@ class TestCliCheckAllowsRelayingACapturedSubprocessStream:
     def test_a_commented_out_relay_is_not_examined_at_all(self):
         assert self._lines("        # sys.stdout.write(result.stdout)") == []
 
-    def test_a_commented_out_VIOLATION_is_not_flagged(self):
+    def test_a_commented_out_violation_is_not_flagged(self):
         """The relay case above is inert either way — a mutant that stopped
         stripping comments survived it. This one only passes if comments are
-        actually stripped."""
-        assert self._lines('        # sys.stdout.write("hello")') == []
+        actually stripped. Behind code on the line, because check_print_usage
+        skips a whole-line comment before the raw-write rule ever reads it.
+        Mutant: the raw-write rule stops stripping comments in apps/handlers/aipass_standards/cli_check.py — killed."""
+        assert self._lines('        pass  # sys.stdout.write("hello")') == []
 
     def test_a_trailing_comment_does_not_hide_a_real_violation(self):
         assert self._lines('        sys.stdout.write("hello")  # relay') != []
 
-    def test_the_REAL_drone_entry_point_has_no_raw_write_violations(self):
+    def test_the_real_drone_entry_point_has_no_raw_write_violations(self):
         from pathlib import Path
-
-        from aipass.seedgo.apps.handlers.aipass_standards import cli_check
 
         target = Path(__file__).resolve().parents[2] / "drone" / "apps" / "drone.py"
         if not target.exists():
             import pytest
 
             pytest.skip("drone.py not on disk")
-        lines = target.read_text(encoding="utf-8").splitlines()
-        assert [i for i, line in enumerate(lines, 1) if cli_check._is_raw_write_violation(line)] == []
+        assert self._lines(target.read_text(encoding="utf-8")) == []
 
 
 class TestJsonStructureExemptsPreLoggingBootstrapModules:
@@ -1933,9 +1559,9 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         return root
 
     def _check(self, path):
-        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
-
-        return json_structure_check._is_prelogging_bootstrap(path, path.read_text(encoding="utf-8"))
+        """check_module grants the bootstrap exemption. Mutant: exemption bypassed in json_structure_check.py — killed."""
+        message = json_structure_check.check_module(str(path))["checks"][0]["message"]
+        return message.startswith("Pre-logging bootstrap module")
 
     def test_a_stdlib_only_module_the_logger_imports_is_exempt(self, tmp_path):
         root = self._universe(tmp_path)
@@ -1971,7 +1597,7 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         )
         assert self._check(boot) is False
 
-    def test_a_stdlib_only_module_the_chain_never_reaches_is_NOT_exempt(self, tmp_path):
+    def test_a_stdlib_only_module_the_chain_never_reaches_is_not_exempt(self, tmp_path):
         """Clause 2 is what keeps the exemption from being free — 79 fleet modules
         import nothing from aipass, and only 9 are in the chain."""
         root = self._universe(tmp_path)
@@ -1991,18 +1617,19 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         assert self._check(boot) is False
 
     def test_a_file_outside_any_aipass_source_root_is_not_exempt(self, tmp_path):
-        loose = tmp_path / "loose.py"
+        """Under apps/handlers/, so check_module asks the question and only the missing root answers it.
+        Mutant: a file with no aipass source root is exempt in apps/handlers/aipass_standards/json_structure_check.py — killed."""
+        loose = tmp_path / "apps" / "handlers" / "loose.py"
+        loose.parent.mkdir(parents=True)
         loose.write_text("import re\n\ndef parse(t):\n    return t\n", encoding="utf-8")
         assert self._check(loose) is False
 
-    def test_the_REAL_prax_repo_root_scores_100(self):
+    def test_the_real_prax_repo_root_scores_100(self):
         """The live case that prompted the rule — pinned against the real tree so a
         regression shows up as prax going red again, not as a green unit test."""
         from pathlib import Path
 
         import pytest
-
-        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
 
         target = Path(__file__).resolve().parents[2] / "prax" / "apps" / "handlers" / "repo_root.py"
         if not target.exists():
@@ -2011,19 +1638,17 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         assert result["score"] == 100
         assert "bootstrap" in result["checks"][0]["message"]
 
-    def test_the_REAL_memory_repo_root_is_NOT_exempt(self):
+    def test_the_real_memory_repo_root_is_not_exempt(self):
         """Same filename, same purpose, different position: memory's copy imports
         json_handler and the prax logger, so it is a consumer and stays in scope."""
         from pathlib import Path
 
         import pytest
 
-        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
-
         target = Path(__file__).resolve().parents[2] / "memory" / "apps" / "handlers" / "repo_root.py"
         if not target.exists():
             pytest.skip("memory/apps/handlers/repo_root.py not on disk")
-        assert json_structure_check._is_prelogging_bootstrap(target, target.read_text(encoding="utf-8")) is False
+        assert self._check(target) is False
 
 
 class TestAutoDetectionAsksAboutThePublicSurface:
@@ -2035,8 +1660,6 @@ class TestAutoDetectionAsksAboutThePublicSurface:
     tree, 2026-08-31)."""
 
     def _check(self, content):
-        from aipass.seedgo.apps.handlers.aipass_standards import handlers_check
-
         return handlers_check.check_auto_detection(content)
 
     def test_a_public_function_taking_module_name_still_needs_auto_detection(self):
@@ -2088,8 +1711,6 @@ class TestSilentCatchAllowsClassifyingAnExceptionIntoAValue:
     """
 
     def _lines(self, tmp_path, source):
-        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
-
         target = tmp_path / "probe.py"
         target.write_text(source, encoding="utf-8")
         result = silent_catch_check.check_module(str(target))
@@ -2124,7 +1745,7 @@ class TestSilentCatchAllowsClassifyingAnExceptionIntoAValue:
         _message, passed = self._lines(tmp_path, source)
         assert passed is True
 
-    def test_catching_Exception_broadly_keeps_its_finding(self, tmp_path):
+    def test_catching_exception_broadly_keeps_its_finding(self, tmp_path):
         """ "It failed" is not a classification: the type carries no meaning, so
         the caller learns nothing the return value could not have hidden."""
         source = "def f(run):\n    try:\n        return run()\n    except Exception:\n        return False\n"
@@ -2218,8 +1839,6 @@ class TestSilentCatchAllowsAHandlerThatReportsToAStream:
     """
 
     def _passed(self, tmp_path, source):
-        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
-
         target = tmp_path / "probe.py"
         target.write_text(source, encoding="utf-8")
         return silent_catch_check.check_module(str(target))["checks"][0]["passed"]
@@ -2239,7 +1858,7 @@ class TestSilentCatchAllowsAHandlerThatReportsToAStream:
         source = "import sys\n\ntry:\n    go()\nexcept OSError:\n    sys.stdout.write('failed\\n')\n"
         assert self._passed(tmp_path, source) is True
 
-    def test_the_write_must_be_to_a_STREAM_not_any_write_method(self, tmp_path):
+    def test_the_write_must_be_to_a_stream_not_any_write_method(self, tmp_path):
         """Negative control on the clause: ``handle.write(...)`` puts the
         failure in a file nobody is watching. Keying on the method name alone
         would have exempted every handler that quietly writes to disk.
@@ -2287,8 +1906,6 @@ class TestCliAllowsARawWriteBeforeTheConsoleExists:
     CONSOLE_IMPORT = "from aipass.cli.apps.modules import console\n"
 
     def _passed(self, tmp_path, source):
-        from aipass.seedgo.apps.handlers.aipass_standards import cli_check
-
         target = tmp_path / "modules" / "probe.py"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(source, encoding="utf-8")
@@ -2324,10 +1941,10 @@ class TestCliAllowsARawWriteBeforeTheConsoleExists:
 
     def test_an_unparseable_file_gets_no_window(self, tmp_path):
         """Ignorance is not evidence of a bootstrap: a file the checker cannot
-        parse keeps every finding rather than being exempted by the failure."""
-        from aipass.seedgo.apps.handlers.aipass_standards import cli_check
-
-        assert cli_check._console_import_line("def broken(:\n") is None
+        parse keeps every finding rather than being exempted by the failure.
+        Mutant: an unparseable file's console window opens anyway in apps/handlers/aipass_standards/cli_check.py — killed."""
+        source = "import sys\n\nsys.stderr.write('early\\n')\n\n" + self.CONSOLE_IMPORT + "def broken(:\n"
+        assert self._passed(tmp_path, source) is False
 
     def test_the_real_reported_shape_clears(self, tmp_path):
         """@commons' entry point, transcribed: the sys.path repair, its stderr
@@ -2364,11 +1981,7 @@ class TestAutoDetectionNoLongerMandatesTheDeadCwdDefect:
     entirely prospective, which is exactly when a checker is cheapest to fix.
     """
 
-    def _check(self, content):
-        from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-            check_auto_detection,
-        )
-
+    def _check(self, content) -> Any:
         return check_auto_detection(content)
 
     def test_the_cured_shape_passes_without_a_specially_named_helper(self):
@@ -2397,7 +2010,7 @@ class TestAutoDetectionNoLongerMandatesTheDeadCwdDefect:
         )
         assert self._check(content)["passed"] is True
 
-    def test_the_mechanism_must_be_CALLED_not_merely_mentioned(self):
+    def test_the_mechanism_must_be_called_not_merely_mentioned(self):
         """The substring hole, closed. A file whose only ``inspect.stack()`` is
         in a docstring was passing — and @drone hit the mirror image the same
         morning, a text BAN convicting the docstring that explained the cure.
@@ -2417,13 +2030,15 @@ class TestAutoDetectionNoLongerMandatesTheDeadCwdDefect:
 
     def test_an_optional_module_name_is_still_in_scope(self):
         """Negative control on the clause above — the narrowing must not
-        exempt the population the standard is actually about."""
-        assert self._check("def run(module_name=None):\n    return module_name\n") is not None
+        exempt the population the standard is actually about.
+        Mutant: every in-scope file passes in apps/handlers/aipass_standards/handlers_check.py — killed."""
+        assert self._check("def run(module_name=None):\n    return module_name\n")["passed"] is False
 
     def test_a_keyword_only_module_name_with_a_default_is_in_scope(self):
         """Boundary: the default lives in kw_defaults, a different list. Reading
-        only positional defaults would silently exempt every keyword-only API."""
-        assert self._check("def run(*, module_name=None):\n    return module_name\n") is not None
+        only positional defaults would silently exempt every keyword-only API.
+        Mutant: every in-scope file passes in apps/handlers/aipass_standards/handlers_check.py — killed."""
+        assert self._check("def run(*, module_name=None):\n    return module_name\n")["passed"] is False
 
     def test_a_keyword_only_module_name_without_a_default_is_not(self):
         content = "def run(*, module_name: str):\n    return module_name\n"
@@ -2472,8 +2087,6 @@ class TestAHandlerThatGuardsItsOwnDiagnosticIsNotSilent:
     """
 
     def _passed(self, tmp_path, source):
-        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
-
         target = tmp_path / "probe.py"
         target.write_text(source, encoding="utf-8")
         return silent_catch_check.check_module(str(target))["checks"][0]["passed"]
@@ -2496,13 +2109,13 @@ class TestAHandlerThatGuardsItsOwnDiagnosticIsNotSilent:
         )
         assert self._passed(tmp_path, source) is True
 
-    def test_a_pass_guarding_REAL_WORK_keeps_its_finding(self, tmp_path):
+    def test_a_pass_guarding_real_work_keeps_its_finding(self, tmp_path):
         """The clause is on what the block DOES, not on the handler being empty.
         A try that computes something and a bare pass is the original defect."""
         source = "def f(path):\n    try:\n        path.unlink()\n    except OSError:\n        pass\n"
         assert self._passed(tmp_path, source) is False
 
-    def test_a_report_STANDING_BESIDE_real_work_does_not_buy_the_exemption(self, tmp_path):
+    def test_a_report_standing_beside_real_work_does_not_buy_the_exemption(self, tmp_path):
         """The purity clause, pinned because a mutant walked through it.
 
         Dropping ``all(...)`` and keeping only ``any(...)`` leaves a rule that a
@@ -2552,8 +2165,6 @@ class TestAHandlerThatHandsTheExceptionOnIsNotSilent:
     """
 
     def _passed(self, tmp_path, source):
-        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
-
         target = tmp_path / "probe.py"
         target.write_text(source, encoding="utf-8")
         return silent_catch_check.check_module(str(target))["checks"][0]["passed"]
@@ -2596,8 +2207,6 @@ class TestErrorHandlingSharesTheDiagnosticGuardClause:
     """
 
     def _passed(self, tmp_path, source):
-        from aipass.seedgo.apps.handlers.aipass_standards import error_handling_check
-
         target = tmp_path / "probe.py"
         target.write_text(source, encoding="utf-8")
         return error_handling_check.check_module(str(target))["checks"][0]["passed"]
@@ -2626,8 +2235,6 @@ class TestTheBootstrapChainSeesRelativeImports:
     """
 
     def _resolve(self, module, level, package):
-        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
-
         return json_structure_check._resolve_relative(module, level, package)
 
     def test_a_sibling_import_resolves(self):
@@ -2645,7 +2252,7 @@ class TestTheBootstrapChainSeesRelativeImports:
         out exemptions. Coming up SHORT is the safe direction."""
         assert self._resolve("paths", 2, None) is None
 
-    def test_climbing_past_the_root_answers_None(self):
+    def test_climbing_past_the_root_answers_none(self):
         assert self._resolve("x", 9, "aipass.canary") is None
 
     def test_an_absolute_import_is_untouched_by_the_resolver(self):
@@ -2654,8 +2261,6 @@ class TestTheBootstrapChainSeesRelativeImports:
     def test_the_walk_reaches_a_relatively_imported_bootstrap_module(self, tmp_path):
         """End to end on the real tree: @canary's helper is in the chain now."""
         from pathlib import Path
-
-        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
 
         # parents[2] is src/aipass — parents[3] is src, and the wrong one made
         # this skip instead of run. A skip reports its own defeat as a pass,
@@ -2667,7 +2272,8 @@ class TestTheBootstrapChainSeesRelativeImports:
             import pytest
 
             pytest.skip(f"canary's paths.py is not on this machine ({target})")
-        assert json_structure_check._is_prelogging_bootstrap(target, target.read_text(encoding="utf-8")) is True
+        message = json_structure_check.check_module(str(target))["checks"][0]["message"]
+        assert message.startswith("Pre-logging bootstrap module"), message
 
 
 class TestEncapsulationDerivesItsInfrastructureAllowList:
@@ -2695,18 +2301,18 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
     find_repo_root / source_root / resolved_file IS that file.
     """
 
-    def _names(self, branch_root):
-        from aipass.seedgo.apps.handlers.aipass_standards import encapsulation_check
-
-        encapsulation_check._infrastructure_handlers.cache_clear()
-        return encapsulation_check._infrastructure_handlers(str(branch_root))
+    def _allowed(self, branch_root, handler):
+        """Entry point may import ``handler``. Mutant: allow list not derived in encapsulation_check.py — killed."""
+        line = f"from aipass.{branch_root.name}.apps.handlers.{handler} import x"
+        entry = str(branch_root / "apps" / f"{branch_root.name}.py")
+        return check_direct_handler_imports([line], entry)["passed"]
 
     def test_a_handler_that_publishes_the_guarded_spelling_is_infrastructure(self, tmp_path):
-        branch = tmp_path / "mybranch"
+        branch = tmp_path / "aipass" / "mybranch"
         handlers = branch / "apps" / "handlers"
         handlers.mkdir(parents=True)
         (handlers / "module_root.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
-        assert "module_root" in self._names(branch)
+        assert self._allowed(branch, "module_root") is True
 
     def test_the_canonical_json_shim_does_not_take_the_allow_list_with_it(self, tmp_path):
         """THE REGRESSION PIN. This is the CI red, reproduced.
@@ -2718,37 +2324,51 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
         checker had stopped being able to see it. Red-first: build exactly that
         branch and assert the name comes back.
         """
-        branch = tmp_path / "mybranch"
+        branch = tmp_path / "aipass" / "mybranch"
         handlers = branch / "apps" / "handlers"
         (handlers / "json").mkdir(parents=True)
         (handlers / "module_root.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
         (handlers / "json" / "json_handler.py").write_text(
             "from aipass.prax import json_handler\n\n_h = json_handler.for_module(__file__)\n", encoding="utf-8"
         )
-        assert "module_root" in self._names(branch), (
+        assert self._allowed(branch, "module_root") is True, (
             "the shim's arrival emptied the infrastructure set — this is the defect that reddened daemon on f8d7867f"
         )
 
     def test_the_file_name_varies_by_branch_and_the_function_name_does_not(self, tmp_path):
         """Four spellings ship in the fleet: module_root.py, paths.py,
         repo_root.py, module_paths.py. Keying on the file name would exempt
-        some branches and not others for no reason a reader could defend."""
-        branch = tmp_path / "mybranch"
-        handlers = branch / "apps" / "handlers"
-        handlers.mkdir(parents=True)
-        (handlers / "paths.py").write_text("def find_repo_root():\n    return None\n", encoding="utf-8")
-        (handlers / "repo_root.py").write_text("def source_root():\n    return None\n", encoding="utf-8")
-        (handlers / "module_paths.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
-        assert self._names(branch) == frozenset({"paths", "repo_root", "module_paths"})
+        some branches and not others for no reason a reader could defend.
+        One branch per spelling: the entry point's allow list matches by
+        substring, so "paths" in one branch would vouch for "module_paths".
+        Mutant: the entry point's allow list stops deriving from the handlers in apps/handlers/aipass_standards/encapsulation_check.py — killed."""
+        spellings = {
+            "paths": "def find_repo_root():\n    return None\n",
+            "repo_root": "def source_root():\n    return None\n",
+            "module_paths": "def module_file(f):\n    return f\n",
+        }
+        verdicts = []
+        for index, (name, source) in enumerate(spellings.items()):
+            branch = tmp_path / "aipass" / f"branch{index}"
+            handlers = branch / "apps" / "handlers"
+            handlers.mkdir(parents=True)
+            (handlers / f"{name}.py").write_text(source, encoding="utf-8")
+            (handlers / "openrouter.py").write_text("def get_response():\n    return None\n", encoding="utf-8")
+            verdicts.append((name, self._allowed(branch, name), self._allowed(branch, "openrouter")))
+        assert verdicts == [
+            ("paths", True, False),
+            ("repo_root", True, False),
+            ("module_paths", True, False),
+        ]
 
     def test_a_domain_handler_is_not_infrastructure(self, tmp_path):
         """Negative control: the set is DERIVED, not a longer allow-list. A
         domain handler stays behind its module entry point."""
-        branch = tmp_path / "mybranch"
+        branch = tmp_path / "aipass" / "mybranch"
         handlers = branch / "apps" / "handlers"
         handlers.mkdir(parents=True)
         (handlers / "openrouter.py").write_text("def get_response():\n    return None\n", encoding="utf-8")
-        assert "openrouter" not in self._names(branch)
+        assert self._allowed(branch, "openrouter") is False
 
     def test_calling_the_guarded_spelling_is_not_publishing_it(self, tmp_path):
         """The discriminator is DEFINING the function, not naming it.
@@ -2758,35 +2378,35 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
         standard would mean nothing — which is the failure mode the old
         substring-shaped rules in this pack were built out of.
         """
-        branch = tmp_path / "mybranch"
+        branch = tmp_path / "aipass" / "mybranch"
         handlers = branch / "apps" / "handlers"
         handlers.mkdir(parents=True)
         (handlers / "consumer.py").write_text(
             "from aipass.mybranch.apps.handlers.module_root import module_file\n\nROOT = module_file(__file__)\n",
             encoding="utf-8",
         )
-        assert "consumer" not in self._names(branch)
+        assert self._allowed(branch, "consumer") is False
 
     def test_a_nested_definition_does_not_publish_it(self, tmp_path):
         """Module level only. A local function of the same name inside some
         other handler's body is not the branch's resolution shim."""
-        branch = tmp_path / "mybranch"
+        branch = tmp_path / "aipass" / "mybranch"
         handlers = branch / "apps" / "handlers"
         handlers.mkdir(parents=True)
         (handlers / "sneaky.py").write_text(
             "def unrelated():\n    def module_file(f):\n        return f\n    return module_file\n",
             encoding="utf-8",
         )
-        assert "sneaky" not in self._names(branch)
+        assert self._allowed(branch, "sneaky") is False
 
     def test_an_unreadable_handler_grants_nothing(self, tmp_path):
         """Ignorance is not evidence: a handler that cannot be parsed keeps the
         ordinary rule rather than being exempted by the failure."""
-        branch = tmp_path / "mybranch"
+        branch = tmp_path / "aipass" / "mybranch"
         handlers = branch / "apps" / "handlers"
         handlers.mkdir(parents=True)
         (handlers / "module_root.py").write_text("def module_file(:\n", encoding="utf-8")
-        assert self._names(branch) == frozenset()
+        assert self._allowed(branch, "module_root") is False
 
 
 # ---------------------------------------------------------------------------
@@ -2828,8 +2448,6 @@ class TestHandlerSeparationJudgesTheStreamNotTheSpelling:
     """
 
     def _sep(self, content):
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import check_handler_separation
-
         return check_handler_separation(content)
 
     def test_a_stderr_directed_print_is_a_diagnostic_not_display(self):
@@ -2901,8 +2519,6 @@ class TestHandlerSeparationJudgesTheStreamNotTheSpelling:
         agreement it never checked."""
         from pathlib import Path
 
-        from aipass.seedgo.apps.handlers.aipass_standards import cli_check
-
         aipass_root = Path(__file__).resolve().parents[2]
         assert aipass_root.name == "aipass", aipass_root
         stream_write = aipass_root / "skills" / "apps" / "handlers" / "module_paths.py"
@@ -2927,8 +2543,6 @@ class TestTheCliRulingsAreQueryableNotJustEnforced:
     """
 
     def _content(self):
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_content import get_cli_standards
-
         return get_cli_standards()
 
     def test_the_pre_console_window_is_published_with_its_boundary(self):
@@ -2946,8 +2560,6 @@ class TestTheCliRulingsAreQueryableNotJustEnforced:
         """The point of publishing is that a branch reading it gets the same
         answer the audit gives. Runs the checker over the exact snippets the
         standard shows, so the two cannot drift apart silently."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import check_handler_separation
-
         allowed = "import sys\n\ndef f(msg):\n    print(msg, file=sys.stderr)\n"
         refused = "import sys\n\ndef f(msg):\n    print(msg, file=sys.stdout)\n"
         assert check_handler_separation(allowed)["passed"] is True
@@ -2974,75 +2586,61 @@ class TestTheEmptyAnswerIsAConstantWhateverItsType:
     them ``return []``, ``return {}`` or ``return set()``.
     """
 
-    def _judge(self, body):
-        import ast
-
-        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
-
+    def _judge(self, tmp_path, body):
+        """check_module flags the handler returning ``body``. Mutant: _judge_handler bypassed in silent_catch_check.py — killed."""
         source = f"def f(c):\n    try:\n        return parse(c)\n    except SyntaxError:\n        {body}\n"
-        tree = ast.parse(source)
-        flagged = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Try):
-                for handler in node.handlers:
-                    flagged += silent_catch_check._judge_handler(handler, node, "x.py")
-        return bool(flagged)
+        target = tmp_path / "probe.py"
+        target.write_text(source, encoding="utf-8")
+        return silent_catch_check.check_module(str(target))["checks"][0]["passed"] is False
 
     @pytest.mark.parametrize("body", ["return []", "return {}", "return ()", "return set()", "return frozenset()"])
-    def test_an_empty_container_is_the_same_answer_as_an_empty_string(self, body):
-        assert self._judge(body) is False, body
+    def test_an_empty_container_is_the_same_answer_as_an_empty_string(self, tmp_path, body):
+        assert self._judge(tmp_path, body) is False, body
 
-    def test_the_scalar_spellings_still_pass(self):
+    def test_the_scalar_spellings_still_pass(self, tmp_path):
         """Control: the clause this widens must keep working."""
-        assert self._judge('return ""') is False
-        assert self._judge("return 0") is False
+        assert self._judge(tmp_path, 'return ""') is False
+        assert self._judge(tmp_path, "return 0") is False
 
     @pytest.mark.parametrize("body", ["return [1, 2]", "return {'a': 1}", "return {'x'}"])
-    def test_a_NON_empty_literal_keeps_its_finding(self, body):
+    def test_a_non_empty_literal_keeps_its_finding(self, tmp_path, body):
         """The boundary, and the reason the clause is not just "any literal": a
         handler that invents content is not reporting an absence."""
-        assert self._judge(body) is True, body
+        assert self._judge(tmp_path, body) is True, body
 
     @pytest.mark.parametrize("body", ["return list(c)", "return dict(a=1)", "return set(c)"])
-    def test_a_builtin_called_WITH_arguments_keeps_its_finding(self, body):
+    def test_a_builtin_called_with_arguments_keeps_its_finding(self, tmp_path, body):
         """Negative control for the call form. ``set()`` is the empty set;
         ``set(c)`` is a computed answer wearing the same name."""
-        assert self._judge(body) is True, body
+        assert self._judge(tmp_path, body) is True, body
 
-    def test_a_computed_return_still_keeps_its_finding(self):
-        assert self._judge("return compute(c)") is True
+    def test_a_computed_return_still_keeps_its_finding(self, tmp_path):
+        assert self._judge(tmp_path, "return compute(c)") is True
 
     @pytest.mark.parametrize("body", ["return compute()", "return build_default()", "return Path()"])
-    def test_a_zero_ARGUMENT_call_to_anything_else_keeps_its_finding(self, body):
+    def test_a_zero_argument_call_to_anything_else_keeps_its_finding(self, tmp_path, body):
         """Mutation control (M4, survived the first run). Dropping the builtin
         name check exempted every no-argument call — a computed fallback that
         happens to take no arguments is still computed, and ``Path()`` is not an
         absence. The clause is the NAME and the emptiness together."""
-        assert self._judge(body) is True, body
+        assert self._judge(tmp_path, body) is True, body
 
-    def test_a_broad_except_gains_nothing_from_this(self):
+    def test_a_broad_except_gains_nothing_from_this(self, tmp_path):
         """The specific-exception clause is what makes the returned value
         meaningful. ``except Exception`` learns the caller nothing, so an empty
-        list from it is still a swallow."""
-        import ast
-
-        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
-
+        list from it is still a swallow.
+        Mutant: a broad except earns the empty-answer clause in apps/handlers/aipass_standards/silent_catch_check.py — killed."""
         source = "def f(c):\n    try:\n        return parse(c)\n    except Exception:\n        return []\n"
-        tree = ast.parse(source)
-        flagged = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Try):
-                for handler in node.handlers:
-                    flagged += silent_catch_check._judge_handler(handler, node, "x.py")
-        assert flagged
+        target = tmp_path / "probe.py"
+        target.write_text(source, encoding="utf-8")
+        result = silent_catch_check.check_module(str(target))
+        assert result["checks"][0]["passed"] is False
+        assert result["checks"][0]["message"].startswith("1 silent catch(es) on lines 4 ")
 
     def test_my_own_helper_is_the_case_that_found_this(self):
         """End-to-end on the live file, because dogfooding is what surfaced it
         and a synthetic-only pin would not have."""
         from pathlib import Path
-
-        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
 
         target = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "aipass_standards" / "cli_check.py"
         assert target.exists(), target
@@ -3053,8 +2651,6 @@ class TestTheEmptyAnswerIsAConstantWhateverItsType:
         """@commons' point, applied to my own new clause the same day: a rule
         that lives only in the checker makes every branch discover it by
         failing."""
-        from aipass.seedgo.apps.handlers.aipass_standards.silent_catch_content import get_silent_catch_standards
-
         content = get_silent_catch_standards()
         assert "EMPTY ANSWER" in content
         assert "return set()" in content
@@ -3083,8 +2679,6 @@ class TestFunctionDocstringsReadTheSourceNotTheStrings:
     """
 
     def _check(self, source):
-        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import check_function_docstrings
-
         return check_function_docstrings(source, source.split("\n"))
 
     def test_a_def_inside_a_docstring_is_not_a_function(self):
@@ -3127,7 +2721,7 @@ class TestFunctionDocstringsReadTheSourceNotTheStrings:
         assert result["passed"] is False
         assert "visible" in result["message"]
 
-    def test_an_undocumented_ASYNC_function_is_finally_seen(self):
+    def test_an_undocumented_async_function_is_finally_seen(self):
         """The line scan matched 'def ' and never 'async def', so @skills'
         telethon_auth.main has been invisible for as long as it has existed."""
         result = self._check("async def main() -> None:\n    return None\n")
@@ -3180,7 +2774,7 @@ class TestModuleDocstringReadsThePositionNotTheSpelling:
     def test_an_r_prefixed_docstring_is_a_docstring(self):
         """The false negative that started it."""
         source = 'r"""Raw module docstring."""\n\n\ndef f():\n    pass\n'
-        result = documentation_check.check_module_docstring(source.split("\n"))
+        result = documentation_check.check_module_docstring(list(source.split("\n")))
         assert result["passed"] is True
 
     @pytest.mark.parametrize("prefix", ["r", "R", "u", "b", "rb", "f"])
@@ -3192,61 +2786,61 @@ class TestModuleDocstringReadsThePositionNotTheSpelling:
         character."""
         source = prefix + '"""Text."""\n'
         expected = ast.get_docstring(ast.parse(source)) is not None
-        result = documentation_check.check_module_docstring(source.split("\n"))
+        result = documentation_check.check_module_docstring(list(source.split("\n")))
         assert result["passed"] is expected
 
-    def test_a_string_after_an_import_is_NOT_a_module_docstring(self):
+    def test_a_string_after_an_import_is_not_a_module_docstring(self):
         """@ai_mail's header.py, reduced. Python evaluates and discards it;
         ``help()`` shows nothing. A reader sees documentation, which is exactly
         why the scan agreed with the reader and not with the interpreter."""
         source = 'import os\n\n"""Looks like documentation."""\n'
-        result = documentation_check.check_module_docstring(source.split("\n"))
+        result = documentation_check.check_module_docstring(list(source.split("\n")))
         assert result["passed"] is False
 
     def test_a_function_docstring_is_not_credited_to_the_module(self):
         """@skills' registry.py, reduced - five files of theirs scored 100 on
         the strength of the first function's docstring."""
         source = 'from pathlib import Path\n\n\ndef f():\n    """Real, and not the module\'s."""\n'
-        result = documentation_check.check_module_docstring(source.split("\n"))
+        result = documentation_check.check_module_docstring(list(source.split("\n")))
         assert result["passed"] is False
 
     def test_a_class_docstring_is_not_credited_to_the_module(self):
         """@hooks' test_live_config_timeouts.py, reduced."""
         source = 'import json\n\n\nclass TestX:\n    """A class docstring."""\n'
-        result = documentation_check.check_module_docstring(source.split("\n"))
+        result = documentation_check.check_module_docstring(list(source.split("\n")))
         assert result["passed"] is False
 
     def test_a_real_module_docstring_still_passes(self):
         """The positive control. A rule that failed everything would satisfy
         every negative pin above and teach nothing."""
         source = '"""The module docstring."""\n\n\ndef f():\n    pass\n'
-        result = documentation_check.check_module_docstring(source.split("\n"))
+        result = documentation_check.check_module_docstring(list(source.split("\n")))
         assert result["passed"] is True
 
-    def test_a_docstring_after_the_AIPass_header_still_passes(self):
+    def test_a_docstring_after_the_aipass_header_still_passes(self):
         """Every file in the fleet opens with a comment banner. If the AST arm
         had been wrong about comments, 1,677 files would have gone red at once -
         which is the kind of blast radius worth pinning rather than assuming."""
         source = "# === AIPass ===\n# Name: x.py\n# ===\n\n" + '"""Doc."""\n'
-        result = documentation_check.check_module_docstring(source.split("\n"))
+        result = documentation_check.check_module_docstring(list(source.split("\n")))
         assert result["passed"] is True
 
-    def test_an_unparseable_file_falls_back_and_SAYS_SO(self):
+    def test_an_unparseable_file_falls_back_and_says_so(self):
         """The fallback must not read as a verdict from the real arm. My own
         round-2 sentence: an exemption bought with a SyntaxError is an exemption
         granted on ignorance."""
         source = '"""Doc."""\n\ndef broken(\n'
         with pytest.raises(SyntaxError):
             ast.parse(source)
-        result = documentation_check.check_module_docstring(source.split("\n"))
+        result = documentation_check.check_module_docstring(list(source.split("\n")))
         assert result["passed"] is True
         assert "does not parse" in result["message"]
 
-    def test_the_unparseable_fallback_can_still_FAIL(self):
+    def test_the_unparseable_fallback_can_still_fail(self):
         """The negative control for the control. A fallback that always passes
         would make every unparseable file clean, which is the exemption-on-
         ignorance shape one level down."""
         source = "import os\n\ndef broken(\n"
-        result = documentation_check.check_module_docstring(source.split("\n"))
+        result = documentation_check.check_module_docstring(list(source.split("\n")))
         assert result["passed"] is False
         assert "does not parse" in result["message"]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ignore_handler.py
 # Description: Ignore Pattern Configuration Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -47,20 +47,26 @@ TEMPLATE_IGNORE_PATTERNS = [
 # AUDIT IGNORE PATTERNS
 # =============================================
 
-# Patterns for files/directories to skip during audit
-# Used by standards_audit.py
-AUDIT_IGNORE_PATTERNS = [
-    "__pycache__",
-    "/.archive/",  # Temp archive directories
-    "/.backup/",  # Temp backup directories
-    "/backups/",  # Actual backup storage (backup/backups/)
-    "/artifacts/",  # Build artifacts
-    "/integrations/",  # Private integrations (gitignored content)
-    ".temp",  # Temp files
-    ".old",  # Old files
-    "/deprecated/",  # Deprecated code
-    "/test/",  # Test directories
-]
+# What the audit removes from a branch's corpus, as gitignore-style patterns
+# matched against the BRANCH-RELATIVE path (a leading "/" anchors to the branch
+# root; a bare "name/" matches that directory anywhere). Until 2026-09-25 these
+# were substrings of the whole lowercased path, and "/integrations/" and
+# "/artifacts/" silently removed 5 tracked source files (1,399 lines) in api and
+# commons (survey row #14, owner "Ok go."). Every entry carries its reason;
+# ignored_tracked_source() convicts any entry that removes a file git tracks.
+# Dropped that day: ".temp" and ".old" (the corpus is *.py, so they could only
+# ever hit a mid-name dot in real source) and "/test/" (tests live in tests/,
+# which joined the corpus 2026-09-21; a test/ directory under apps/ is product).
+AUDIT_IGNORE_RULES: Tuple[Tuple[str, str], ...] = (
+    ("__pycache__/", "bytecode caches: never source"),
+    (".archive/", "retired copies, same as applicability.RETIRED_DIRS"),
+    (".backup/", "rollover and snapshot storage, never source"),
+    ("deprecated/", "retired code, same as applicability.RETIRED_DIRS"),
+    ("/backups/", "@backup's storage at the branch root, gitignored (.gitignore backups/)"),
+    ("/artifacts/", "a branch's published artifacts/ at its root, gitignored (.gitignore artifacts/)"),
+    ("/apps/integrations/", "the private driver layer, gitignored (.gitignore src/aipass/*/apps/integrations/**)"),
+)
+AUDIT_IGNORE_PATTERNS = [pattern for pattern, _reason in AUDIT_IGNORE_RULES]
 
 # =============================================
 # DEPRECATED PATTERNS
@@ -105,6 +111,62 @@ def get_audit_ignore_patterns() -> List[str]:
     """
     json_handler.log_operation("config_accessed", {"config": "audit_ignore_patterns"})
     return AUDIT_IGNORE_PATTERNS.copy()
+
+
+def audit_ignore_match(rel_path: str) -> Optional[str]:
+    """The AUDIT_IGNORE_PATTERNS entry that removes a branch-relative path from the audit, or None."""
+    posix = Path(rel_path).as_posix()
+    return next(
+        (p for p in AUDIT_IGNORE_PATTERNS if pathspec.GitIgnoreSpec.from_lines([p]).match_file(posix)),
+        None,
+    )
+
+
+def find_repo_root(path: Path) -> Optional[Path]:
+    """The nearest ancestor holding a .git entry: the root git reads .gitignore files from."""
+    resolved = path.resolve()
+    return next((parent for parent in (resolved, *resolved.parents) if (parent / ".git").exists()), None)
+
+
+def _gitignore_spec(gitignore: Path) -> pathspec.GitIgnoreSpec:
+    """One .gitignore file compiled the way git reads it; an unreadable one raises, never reads as empty."""
+    return pathspec.GitIgnoreSpec.from_lines(gitignore.read_text(encoding="utf-8").splitlines())
+
+
+def gitignored(file_path: Path, repo_root: Path) -> bool:
+    """Whether the repository's .gitignore files ignore file_path, read without git.
+
+    Every .gitignore from the repository root down to the file's directory is
+    consulted in order and the deepest one that has an opinion wins, the way git
+    layers them. Negations (``!path``) are honoured, so commons' re-included
+    ``apps/handlers/artifacts/*.py`` reads as tracked. No subprocess: agents have
+    no git.
+    """
+    target = file_path.resolve()
+    root = repo_root.resolve()
+    rel = target.relative_to(root)
+    verdict = False
+    directory = root
+    for part in ("", *rel.parts[:-1]):
+        directory = directory / part if part else directory
+        gitignore = directory / ".gitignore"
+        if gitignore.is_file():
+            include = _gitignore_spec(gitignore).check_file(target.relative_to(directory).as_posix()).include
+            if include is not None:
+                verdict = include
+    return verdict
+
+
+def ignored_tracked_source(branch_path: Path, ignored_rel_paths: List[str]) -> List[str]:
+    """The files the audit ignore list removed that git does NOT ignore: tracked source dropped by a pattern.
+
+    Outside a git repository nothing is tracked, so the answer is every
+    removed file unverified -- returned as is, never as an acquittal.
+    """
+    repo_root = find_repo_root(branch_path)
+    if repo_root is None:
+        return list(ignored_rel_paths)
+    return [rel for rel in ignored_rel_paths if not gitignored(branch_path / rel, repo_root)]
 
 
 def get_deprecated_patterns() -> dict:

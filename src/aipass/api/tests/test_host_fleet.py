@@ -3,20 +3,25 @@
 # Description: Tests for the host API fleet lane — baud --snapshot contract
 # Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-09-14
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the Host API Fleet Lane
+"""Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
 
-The contract under test is @baud's, delivered 2026-08-14: `baud --snapshot`, one
-JSON envelope on stdout, three exit codes with distinct meanings.
+# Tests for the Host API Fleet Lane
+#
+# The contract under test is @baud's, delivered 2026-08-14: `baud --snapshot`, one
+# JSON envelope on stdout, three exit codes with distinct meanings.
+#
+# NOTHING HERE INVOKES THE REAL BINARY. It is a GUI application that this suite has
+# no business launching, and a test that shells a 5MB desktop binary is a test that
+# fails on a machine which has never built it. Every test drives a mocked
+# subprocess; the real binary is exercised by a live probe, recorded in FPLAN-0411.
 
-NOTHING HERE INVOKES THE REAL BINARY. It is a GUI application that this suite has
-no business launching, and a test that shells a 5MB desktop binary is a test that
-fails on a machine which has never built it. Every test drives a mocked
-subprocess; the real binary is exercised by a live probe, recorded in FPLAN-0411.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that fleet.py parses and imports
+# seedgo: no-test-needed(external) — the real baud binary; subprocess.run is scripted, a live probe covers it
+# seedgo: no-test-needed(constant) — SNAPSHOT_TIMEOUT_SECONDS and END_ROOM_TIMEOUT_SECONDS's values
 
 import json
 import subprocess
@@ -1349,7 +1354,14 @@ class TestTheMachineCache:
             "import aipass.api.apps.handlers.host.machine\n"
             "print('aipass.skills.lib.system_status.handler' in sys.modules)\n"
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False)
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            check=False,
+        )
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip().splitlines()[-1] == "False"
@@ -1617,7 +1629,14 @@ class TestTheLockCache:
             "import aipass.api.apps.handlers.host.lock\n"
             "print('aipass.skills.lib.screen_lock.handler' in sys.modules)\n"
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False)
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            check=False,
+        )
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip().splitlines()[-1] == "False"

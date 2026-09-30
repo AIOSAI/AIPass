@@ -1,38 +1,40 @@
 # =================== AIPass ====================
 # Name: test_public_surface.py
 # Description: Tests for ai_mail's package-level public surface (the feed path door)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the package-level door onto the notification feed (asked by @api).
+"""Tests for aipass/ai_mail/__init__.py's public surface: feed_path(), register_path(), outstanding_dispatches()."""
 
-@api serves the feed to the BAUD phone over /v1/feed and had no clean way to
-locate ``notifications.jsonl``. The only route was
-``from aipass.ai_mail.apps.handlers.notify import FEED_PATH`` — a reach into
-this branch's handlers layer that seedgo correctly flags — so they restated the
-path as their own constant instead. That duplicate goes stale the day the feed
-moves, and the symptom would be a phone quietly showing no notifications with
-no error logged anywhere.
+# Asked by @api. @api serves the feed to the BAUD phone over /v1/feed and had no clean way to
+# locate ``notifications.jsonl``. The only route was
+# ``from aipass.ai_mail.apps.handlers.notify import FEED_PATH`` — a reach into
+# this branch's handlers layer that seedgo correctly flags — so they restated the
+# path as their own constant instead. That duplicate goes stale the day the feed
+# moves, and the symptom would be a phone quietly showing no notifications with
+# no error logged anywhere.
+#
+# ``notify.py`` publishes the path as a contract, so a second reader is inside
+# the contract. What was missing was a public surface, the way @drone publishes
+# ``get_registry_path()``. This adds one.
+#
+# Two properties matter here:
+#
+# Laziness
+#     ``notify`` imports prax's logger and the JSON handler, so re-exporting it
+#     eagerly would make ``import aipass.ai_mail`` drag in the logging stack.
+#     The door is a function, and ``FEED_PATH`` resolves through PEP 562
+#     ``__getattr__``.
+#
+# One construction site
+#     ``feed_path()`` is where the path is built; ``FEED_PATH`` is that
+#     function's value at import. Duplicating the expression is the exact rot
+#     @api was trying to avoid, so it must not reappear inside this branch.
 
-``notify.py`` publishes the path as a contract, so a second reader is inside
-the contract. What was missing was a public surface, the way @drone publishes
-``get_registry_path()``. This adds one.
-
-Two properties matter here:
-
-Laziness
-    ``notify`` imports prax's logger and the JSON handler, so re-exporting it
-    eagerly would make ``import aipass.ai_mail`` drag in the logging stack.
-    The door is a function, and ``FEED_PATH`` resolves through PEP 562
-    ``__getattr__``.
-
-One construction site
-    ``feed_path()`` is where the path is built; ``FEED_PATH`` is that
-    function's value at import. Duplicating the expression is the exact rot
-    @api was trying to avoid, so it must not reappear inside this branch.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
 
 import subprocess
 import sys
@@ -43,14 +45,14 @@ import pytest
 
 import aipass.ai_mail as ai_mail
 import aipass.ai_mail.apps.handlers.notify as notify
+from aipass.ai_mail import feed_path, register_path
+from aipass.ai_mail.apps.handlers.dispatch import register
 
 
 class TestFeedPathDoor:
     """The public surface @api asked for."""
 
     def test_feed_path_is_importable_from_the_package(self):
-        from aipass.ai_mail import feed_path
-
         assert callable(feed_path)
 
     def test_feed_path_matches_the_handler_implementation(self):
@@ -117,6 +119,7 @@ class TestFeedPathDoor:
             [sys.executable, "-c", probe],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
         )
 
@@ -150,13 +153,9 @@ class TestRegisterDoor:
     """
 
     def test_register_path_is_importable_from_the_package(self):
-        from aipass.ai_mail import register_path
-
         assert callable(register_path)
 
     def test_register_path_matches_the_handler_implementation(self):
-        from aipass.ai_mail.apps.handlers.dispatch import register
-
         assert ai_mail.register_path() == register.register_file()
 
     def test_the_register_lives_where_the_contract_says(self):
@@ -179,8 +178,6 @@ class TestRegisterDoor:
 
     def test_register_path_resolves_fresh_at_call_time(self, monkeypatch, tmp_path):
         """A function, not a frozen constant — the feed's own lesson, reused."""
-        from aipass.ai_mail.apps.handlers.dispatch import register
-
         monkeypatch.setattr(register, "find_repo_root", lambda: tmp_path)
 
         assert ai_mail.register_path() == tmp_path / ".aipass" / "dispatch_register.jsonl"
@@ -203,8 +200,6 @@ class TestOutstandingDoor:
         what stops a second implementation of that rule existing.
         """
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
-        from aipass.ai_mail.apps.handlers.dispatch import register
-
         dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=tmp_path)
         assert dispatch_id
         assert len(ai_mail.outstanding_dispatches(tmp_path)) == 1, "anchor: it must be open first"
@@ -215,8 +210,6 @@ class TestOutstandingDoor:
 
     def test_each_entry_carries_the_overdue_verdict(self, tmp_path):
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
-        from aipass.ai_mail.apps.handlers.dispatch import register
-
         register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=tmp_path)
 
         assert ai_mail.outstanding_dispatches(tmp_path)[0]["overdue"] is False
@@ -230,8 +223,6 @@ class TestOutstandingDoor:
         handed the LIVE register after asking for another tree — and that is now
         structural: the return is always rooted at what the caller passed.
         """
-        from aipass.ai_mail.apps.handlers.dispatch import register
-
         orphan = tmp_path / "no-marker"
         orphan.mkdir()
         monkeypatch.setattr(register, "find_repo_root", lambda: orphan)
@@ -257,6 +248,7 @@ class TestImportStaysLight:
             [sys.executable, "-c", probe],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
         )
 
@@ -269,7 +261,9 @@ class TestImportStaysLight:
             "import sys; import aipass.ai_mail as m; p = m.register_path(); "
             "print(int(any(k.startswith('aipass.prax') for k in sys.modules)), p.name)"
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", timeout=60
+        )
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "1 dispatch_register.jsonl"
@@ -289,6 +283,7 @@ class TestImportStaysLight:
             [sys.executable, "-c", probe],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
         )
 

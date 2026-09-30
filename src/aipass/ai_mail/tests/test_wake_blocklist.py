@@ -1,15 +1,21 @@
 # =================== AIPass ====================
 # Name: test_wake_blocklist.py
 # Description: Tests for FPLAN-0190 Task B — manual wake blocklist
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-20
-# Modified: 2026-04-20
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for manual wake blocklist (FPLAN-0190 Task B)."""
+"""Tests for apps/handlers/dispatch/wake.py -- manual wake blocklist (FPLAN-0190 Task B)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — DAEMON_SESSION_PREFIX, unrelated to the blocklist
 
 import inspect
 from unittest.mock import MagicMock, patch
+
+from aipass.ai_mail.apps.handlers.dispatch.wake import WAKE_BLOCKLIST, is_wake_blocked
+from aipass.ai_mail.apps.modules import dispatch as dispatch_mod
 
 
 class TestIsWakeBlocked:
@@ -17,32 +23,22 @@ class TestIsWakeBlocked:
 
     def test_devpulse_with_at_is_blocked(self):
         """@devpulse with @ prefix is on the blocklist."""
-        from aipass.ai_mail.apps.handlers.dispatch.wake import is_wake_blocked
-
         assert is_wake_blocked("@devpulse") is True
 
     def test_devpulse_bare_is_blocked(self):
         """devpulse without @ prefix is normalized and blocked."""
-        from aipass.ai_mail.apps.handlers.dispatch.wake import is_wake_blocked
-
         assert is_wake_blocked("devpulse") is True
 
     def test_devpulse_uppercase_is_blocked(self):
         """Case-insensitive: @DEVPULSE is blocked."""
-        from aipass.ai_mail.apps.handlers.dispatch.wake import is_wake_blocked
-
         assert is_wake_blocked("@DEVPULSE") is True
 
     def test_drone_is_not_blocked(self):
         """@drone is not on the blocklist."""
-        from aipass.ai_mail.apps.handlers.dispatch.wake import is_wake_blocked
-
         assert is_wake_blocked("@drone") is False
 
     def test_ai_mail_is_not_blocked(self):
         """@ai_mail is not on the blocklist."""
-        from aipass.ai_mail.apps.handlers.dispatch.wake import is_wake_blocked
-
         assert is_wake_blocked("@ai_mail") is False
 
     def test_blocklist_is_frozenset(self):
@@ -54,15 +50,11 @@ class TestIsWakeBlocked:
         address is blocked from being woken, measured 2026-09-08, and widening
         that set is a decision that should have to edit this line.
         """
-        from aipass.ai_mail.apps.handlers.dispatch.wake import WAKE_BLOCKLIST
-
         assert isinstance(WAKE_BLOCKLIST, frozenset)
         assert WAKE_BLOCKLIST == frozenset({"@devpulse"}), sorted(WAKE_BLOCKLIST)
 
     def test_devpulse_in_blocklist(self):
         """@devpulse is present in WAKE_BLOCKLIST."""
-        from aipass.ai_mail.apps.handlers.dispatch.wake import WAKE_BLOCKLIST
-
         assert "@devpulse" in WAKE_BLOCKLIST
 
 
@@ -75,8 +67,6 @@ class TestOrchestrateWakeBlocklist:
         wake_branch is lazily imported inside _orchestrate_wake, so we patch it
         at the source module rather than as a dispatch module attribute.
         """
-        from aipass.ai_mail.apps.modules import dispatch as dispatch_mod
-
         status_mock = MagicMock()
         status_mock.format.return_value = ""
         wake_return = (status_mock, True)
@@ -86,7 +76,6 @@ class TestOrchestrateWakeBlocklist:
                 "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch",
                 return_value=wake_return,
             ),
-            patch("aipass.ai_mail.apps.modules.dispatch.console"),
             patch("aipass.ai_mail.apps.modules.dispatch.error") as mock_error,
         ):
             result = dispatch_mod._orchestrate_wake(args)
@@ -98,12 +87,17 @@ class TestOrchestrateWakeBlocklist:
         assert result is True
 
     def test_blocked_calls_error(self):
-        """Blocked wake prints a directive error mentioning 'protected' and 'dispatch'."""
+        """Blocked wake prints a directive error naming the target and the dispatch route.
+
+        The whole message is pinned, so the target and the command it hands back are
+        read in place. Killed by the mutant that drops the target from the dispatch
+        command (leg 5).
+        """
         result, mock_error = self._call_orchestrate_wake(["@devpulse"])
-        mock_error.assert_called_once()
-        msg = mock_error.call_args[0][0]
-        assert "protected" in msg
-        assert "dispatch" in msg
+        mock_error.assert_called_once_with(
+            "target @devpulse is protected from manual wake. "
+            'Use \'drone @ai_mail dispatch @devpulse "Subject" "Body"\' to send work instead.'
+        )
 
     def test_allowed_target_does_not_error(self):
         """Non-blocked target proceeds without an error message."""
@@ -118,7 +112,5 @@ class TestOrchestrateWakeBlocklist:
 
     def test_dispatch_send_does_not_check_blocklist(self):
         """_orchestrate_dispatch_send must not call is_wake_blocked (internal path)."""
-        from aipass.ai_mail.apps.modules import dispatch as dispatch_mod
-
         src = inspect.getsource(dispatch_mod._orchestrate_dispatch_send)
         assert "is_wake_blocked" not in src

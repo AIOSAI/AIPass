@@ -1,0 +1,175 @@
+{
+  "document_metadata": {
+    "document_type": "lane_fixture_expectations",
+    "document_name": "canary_6500dce9.EXPECTATIONS",
+    "version": "1.0.0",
+    "created": "2026-09-19",
+    "managed_by": "seedgo",
+    "record": "devpulse DPLAN-0352 round 0; seedgo FPLAN-0630"
+  },
+  "fixture": {
+    "subject": "@canary",
+    "commit": "6500dce9",
+    "tree": "src/aipass/canary/",
+    "tracked_fidelity": "every file tracked at 6500dce9 is byte-identical in tree/, verified file by file against git show",
+    "untracked_addendum": {
+      "paths": [
+        "tests/.archive/"
+      ],
+      "provenance": "copied from the live canary worktree on 2026-09-19, never committed to any branch so no commit can supply it",
+      "sha256": {
+        "tests/.archive/test_scaffold.py": "4b01d4130807e56fa063cd435cc2805df0c4536b4bdb7f8e78853c768ed3ec38",
+        "tests/.archive/deleted_2026-09-03_cli_routing.py": "84a6126a830f876803ae1d80b7efd8efc54183e798f75f9d0c9f064ad52ee34d",
+        "tests/.archive/deleted_2026-09-03_test_dead_cwd_imports_jsondir.py": "e0790c6ee8595b06611367a6138802ed0b31f937012eef64667d89cf49502109",
+        "tests/.archive/deleted_2026-09-03_test_dead_cwd_imports_modulefile.py": "cf64b6935ed137464026a0cf413712da3524180c13c3a86ac6aa3604ef35d3ad",
+        "tests/.archive/deleted_2026-09-03_test_json_handler.py": "86606be618b61347065cc243b2968dedeb94e4c6be7d85719ca5cbfc3c6472fd",
+        "tests/.archive/deleted_2026-09-07_test_json_handler.py": "277a99402183c1a8304332dd7bbc33dce4e7b00f0ff6cadf6eef1c98443882ae"
+      },
+      "live_drift_at_banking": "the live canary tracked tree differed from 6500dce9 in README.md only, so the untracked addendum is contemporaneous with the commit"
+    },
+    "why_not_under_payload": "the brief asked for the fixture under payload/. It cannot live there: adapters.execution_isolation() refuses to register any pack whose payload contains a file importing aipass, and canary's tree is nothing but such files. Measured by planting one canary module under payload/ - isolated: false, 4 offenders, pack registration refused. .seedgo/ is outside apps/ (so outside the audit's corpus), outside tests/ (so outside the test-write gate), and tracked (so the fixture is frozen and travels with the repo).",
+    "one_campaign_per_copy": "a gutting campaign mutates a copy of tree/, never tree/ itself. Two campaigns against one copy corrupt each other's baseline - measured.",
+    "layout_note": "Banked as src/aipass/canary rather than a bare tree/ so envcopy.detect_layout() returns a repo root and the COPY is importable as aipass.canary. Measured 2026-09-19: under the bare tree/ shape the fixture's own tests resolved aipass.canary through the venv to the LIVE branch (/home/patrick/.../src/aipass/canary/apps/canary.py), so any execution group ran the fixture's TESTS against the live SOURCE. That is round 0's own C2 row reproduced inside this instrument."
+  },
+  "release_check": {
+    "property": "every must_fire row nominated, every must_not_fire row silent, or the lane does not ship",
+    "pattern": "Semgrep rule tests - ruleid:/ok: annotations run as the rule's own regression",
+    "out_of_reach_is_a_finding": "a row here is not excused, it is reported. reach=none means no mechanism of this lane's class can see it; reach=mechanism_not_built names the mechanism that would."
+  },
+  "must_fire": [
+    {
+      "id": "A4-width-fragile-assert",
+      "source_row": "brief A, 'the suite is green only at console width 43 or wider'",
+      "file": "tests/test_note.py",
+      "line": 179,
+      "nodeid": "tests/test_note.py::test_corrupt_store_is_refused_by_name_and_left_untouched",
+      "group": "pytest.static_raw_needle",
+      "species": "WIDTH-FRAGILE-ASSERT",
+      "why": "assert \"will not parse\" in err matches a raw literal against un-normalised capture, one line below an assert that runs the same err through _squash for exactly this reason. Measured: COLUMNS 40-41 -> 18 failed, 42 -> 9 failed, 43+ -> 34 passed.",
+      "built": "2026-09-19 round 0"
+    },
+    {
+      "id": "C7-self-comparing-version-assert",
+      "source_row": "brief C, 'test_branch_name_is_set_at_import_time's version assertion compares an attribute to itself'",
+      "file": "tests/test_canary_cli.py",
+      "line": 243,
+      "nodeid": "tests/test_canary_cli.py::test_branch_name_is_set_at_import_time",
+      "group": "pytest.static_tautology_assert",
+      "species": "TAUTOLOGY-ASSERT",
+      "why": "importlib.reload returns the module object it was handed, so reloaded is canary_entry and assert reloaded.__version__ == canary_entry.__version__ cannot fail. The test's docstring claims the reload is what makes it meaningful, so it is a no-op wearing a rationale.",
+      "built": "2026-09-19 round 0"
+    },
+    {
+      "id": "C1-drifted-module-table",
+      "source_row": "brief C, 'the dead-cwd module table has drifted'",
+      "file": "tests/test_dead_cwd_imports.py",
+      "line": 61,
+      "nodeid": "tests/test_dead_cwd_imports.py::test_module_imports_with_no_readable_cwd",
+      "group": "pytest.static_drifted_inventory",
+      "species": "DRIFTED-INVENTORY",
+      "why": "CANARY_MODULES is commented 'Every importable module in canary's tree' and parametrizes the import probe, but omits aipass.canary.apps.modules.note, aipass.canary.apps.handlers.notes and aipass.canary.apps.handlers.notes.store. The list is both the inventory and the oracle, so the omission is invisible.",
+      "built": "2026-09-19 round 0"
+    }
+  ],
+  "must_not_fire": [
+    {
+      "id": "FP-vanishing-table",
+      "source_row": "brief, 'both are false positives - the table is a module-level dict with 9 entries'",
+      "file": "tests/test_note.py",
+      "nodeid": "tests/test_note.py::test_corrupt_store_is_refused_by_name_and_left_untouched",
+      "group": "pytest.static_empty_parametrize",
+      "species": "VANISHING-TABLE",
+      "why_false": "argvalues is list(CORRUPT_STORES.values()) and CORRUPT_STORES is a module-level dict literal with 9 entries in the same file, so the table cannot vanish at collection time.",
+      "cured": "2026-09-19 round 0 - _cannot_be_empty() now acquits a dict view (values/keys/items) taken from a name already proven non-empty. Terminal, never a chain."
+    },
+    {
+      "id": "FP-perma-skip-archived",
+      "source_row": "brief, 'the archived file does not run'",
+      "file": "tests/.archive/test_scaffold.py",
+      "nodeid": "tests/.archive/test_scaffold.py::test_conftest_fixtures_available",
+      "group": "pytest.static_self_skip",
+      "species": "PERMA-SKIP",
+      "why_false": "pytest's default norecursedirs includes .* so nothing under tests/.archive/ is ever collected. Nominating it as 'a test that never runs' reports on a test that does not exist.",
+      "cured": "2026-09-19 round 0 - corpus._walk() now prunes every dot-directory, so the static tier collects what pytest collects and every nominator gets the fix at once."
+    }
+  ],
+  "out_of_reach": [
+    {
+      "id": "A1-help-anywhere-blesses-data-loss",
+      "source_row": "brief A, THE HEADLINE MISS - 'a note whose text contains -h is silently discarded, and test_note.py asserts exactly that shape'",
+      "file": "tests/test_note.py",
+      "line": 235,
+      "reach": "none",
+      "why": "the code, the test and docs/note_module.md all agree - nothing in the repo disagrees with anything else, so no static rule and no mutant has a disagreement to find. A mutation that makes note.py CORRECT (first-arg help instead of help-anywhere) is reported as a killed mutant, because the blessing test fails against correct code. This is a specification defect, and only a spec written somewhere the test cannot edit could convict it. Verified: docs/note_module.md says nothing about help at all."
+    },
+    {
+      "id": "A3-deletable-subcommand-help-branch",
+      "source_row": "brief A, 'the whole subcommand-help branch can be deleted with both its tests green - a pseudo-tested function'",
+      "file": "apps/canary.py",
+      "line": 262,
+      "reach": "mechanism_not_built",
+      "why": "the brief ranked per-function gutting to catch this and gutting does NOT catch it - measured both ways. Gutting _print_subcommand_help's body KILLS the mutant (3 failures, all AssertionError). Deleting lines 262-266, the caller's guard in main(), leaves the suite green at 84 passed rc 0. Descartes' operator gutts the callee; the unwatched code is the caller's branch. Needs a statement/branch-deletion operator as a sibling group - no tuning of the gutting operator reaches it."
+    },
+    {
+      "id": "A2-half-applied-exit-code-cure",
+      "source_row": "brief A, 'probe exits 2, probe --help exits 0; main()'s docstring is false for that path'",
+      "file": "apps/canary.py",
+      "line": 247,
+      "reach": "mechanism_not_built",
+      "why": "a docstring promising 'exit 2 when a routed command refuses' beside a hardcoded return 0 is a doc-vs-code contradiction inside one function. Reachable by a contract-vs-behaviour rule reading the docstring as a spec; no group in the lane reads docstrings as specifications today."
+    },
+    {
+      "id": "A5-cmd-state-leaks-across-tests",
+      "source_row": "brief A, 'a process-global failure flag leaks across tests'",
+      "file": "tests/test_canary_cli.py",
+      "reach": "mechanism_not_built",
+      "why": "the file ends clean only because the last test happens to call main(), which resets aipass.cli's _CMD_STATE. Escapes under -k, a selection or a reorder - proven with an appended probe test, 1 failed. This is precisely the spine's declared order_dependence group (shuffle/select the suite and diff the verdicts); it is not_applicable: not built. No static rule should try: the mutation is in another branch's module, reached through a call chain."
+    },
+    {
+      "id": "B-contract-clauses-nothing-pins",
+      "source_row": "brief B, all eleven bullets (empty-store guard, non-string timestamp, per-row timestamp, markup=False/emoji=False, ensure_ascii/newline, bare note introspection, discover_modules and _module_summary zero coverage, first-match-wins routing, router continuing past an exploding module, import ordering, -h as a subcommand spelling and the win32 block)",
+      "reach": "mechanism_not_built",
+      "why": "every one is 'a mutation that leaves the suite green', which is targeted_mutation - declared, not_applicable: not built. Gutting reaches the two zero-coverage ones only as SURVIVORS, and the built engine confirms it cannot distinguish them from genuinely pseudo-tested code without a coverage pass. The win32 block is unreachable on any Linux host by construction and stays unreachable."
+    },
+    {
+      "id": "C2-probes-grade-the-installed-tree",
+      "source_row": "brief C, 'the probes grade the INSTALLED tree, not the collected one'",
+      "file": "tests/test_dead_cwd_imports.py",
+      "reach": "mechanism_not_built",
+      "why": "_run_child runs with cwd=REPO_ROOT, which contributes nothing to sys.path, so the child resolves aipass through the venv .pth back to the canonical checkout. Silent green in any worktree, relocated checkout or installed copy - including this lane's own relocated sandbox. Detectable dynamically by running the suite from a relocated copy and diffing the verdict, which is the same harness capability order_dependence needs. The lane's own env already proves a copy is live (assert_env_is_live); nothing yet asserts the CHILD processes a suite spawns resolve there too."
+    },
+    {
+      "id": "C3-preload-vacuity-mode",
+      "source_row": "brief C, 'a vacuity mode nothing watches'",
+      "file": "tests/test_dead_cwd_imports.py",
+      "line": 77,
+      "reach": "static_reachable_not_built",
+      "why": "PRELOAD runs before the injection, so a preloaded sibling that ever imports canary makes all 16 import pins report OK with the defect present. Honest today - zero canary modules in PRELOAD - and the file states the rule itself ('a preload is a claim you stop testing') while nothing enforces it. A static rule comparing a PRELOAD-shaped literal against the module prefix under test would catch it; drifted_inventory already reads this literal and correctly declines it (nothing parametrizes over it), so the shape is half-built."
+    },
+    {
+      "id": "C4-caller-is-none-pin-runs-one-world",
+      "source_row": "brief C, 'the caller-is-None pin runs world B only'",
+      "reach": "mechanism_not_built",
+      "why": "add a Path.cwd() to that branch and it dies under a dead cwd while the suite stays green: the AST ban misses it (wrong mechanism) and the behavioural pin misses it (wrong world). Catching it means noticing a parametrized world set applied unevenly across the tests in one file - a coverage-of-parametrization rule nobody has specified yet."
+    },
+    {
+      "id": "C5-ast-ban-pins-a-spelling",
+      "source_row": "brief C, 'the AST ban pins a spelling, not the mechanism'",
+      "reach": "static_reachable_not_built",
+      "why": "from inspect import stack and import inspect as i both walk past a ban written against the dotted spelling inspect.stack. This is an import-alias resolution gap, and it is the same gap in a test's own AST rule that self_skip's MACHINE_PROBES would have if it read spellings instead of bindings. A rule that resolves aliases before matching would catch it; none of the eleven static species resolves aliases today."
+    },
+    {
+      "id": "C6-bytes-and-mtime-is-really-just-bytes",
+      "source_row": "brief C, 'an mtime-only mutation escapes a single case 7 times in 20'",
+      "reach": "none",
+      "why": "a flaky escape rate (7 in 20) on a single case, masked by the family having nine add-cases. Nothing static sees a probabilistic escape, and a mutation run that samples it once reports killed 13 times in 20. Only a repeated-run mutation harness with a flake budget could measure it, which is a different instrument from anything the lane declares."
+    },
+    {
+      "id": "C8-gitignore-read-string-matches-one-line",
+      "source_row": "brief C, 'still string-matches one line, so appending a negation makes the store tracked while the test stays green'",
+      "reach": "mechanism_not_built",
+      "why": "a test asserting a substring of a config file rather than the config's effective semantics. Reachable only by a rule that knows .gitignore negation semantics, i.e. a domain oracle per config format. Not a generalisable test-quality species."
+    }
+  ],
+  "subject_path": "src/aipass/canary"
+}

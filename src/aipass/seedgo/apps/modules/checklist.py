@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-03-15
-# Modified: 2026-03-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -89,7 +89,7 @@ def _is_entry_point(file_path: str) -> bool:
     p = Path(file_path)
     if not p.name.endswith(".py"):
         return False
-    if "apps/" not in file_path:
+    if "apps/" not in file_path.replace("\\", "/"):
         return False
     return p.parent.name == "apps"
 
@@ -129,6 +129,37 @@ def _is_applicable(checker, file_path: str) -> bool:
 
     # Default: entry_point scope
     return _is_entry_point(file_path)
+
+
+def not_judged_here(file_path: str, pack_name: str = "aipass") -> List[str]:
+    """Branch-level standards that apply to this file but the checklist cannot run.
+
+    A ``branch_level`` checker with no ``check_module()`` only judges a whole
+    branch, so :func:`_is_applicable` drops it here without a trace. The result
+    was a clean "All N standards passed" on backup's conftest while the audit
+    convicted that same file under ``unused_conftest_fixture``. Naming the rows
+    that were not judged is what keeps a pass here from reading as a pass there.
+
+    Applicability still gates the list, so a production file never names a
+    tests-only row and vice versa. ``entry_point`` rows are deliberately not
+    listed: every one implements ``check_module()`` and runs here on the only
+    files it judges (``apps/{name}.py``); elsewhere it has nothing to say.
+    """
+    resolved = str(Path(file_path).resolve())
+    if not resolved.endswith(".py") or not Path(resolved).exists():
+        return []
+    pack_path = _resolve_pack_path(pack_name)
+    if pack_path is None:
+        return []
+    names = []
+    for name, checker in sorted(discover_checkers(pack_path).items()):
+        if getattr(checker, "AUDIT_SCOPE", "entry_point") != "branch_level":
+            continue
+        if not applicability.applies_to_file(checker, resolved):
+            continue
+        if not _is_applicable(checker, resolved):
+            names.append(name)
+    return names
 
 
 # =============================================================================
@@ -311,6 +342,39 @@ def _print_results(results: List[Dict], file_path: str) -> None:
         console.print(f"[green]All {len(results)} standards passed[/green]")
 
 
+def _is_skip_or_error(results: List[Dict]) -> bool:
+    """Whether the checklist declined the file (skip/error) or judged nothing.
+
+    A skipped file (throwaway, retired, prototype, ignored, not Python) was
+    judged by nothing, so naming the few rows it was not judged by would
+    mislead in the other direction.
+    """
+    if not results:
+        return True
+    return any(r.get("standard") in ("(skip)", "(error)") for r in results)
+
+
+def _print_not_judged(names: List[str]) -> None:
+    """One line naming the branch-level rows this lane did not judge.
+
+    ``soft_wrap`` keeps it one physical line at any console width, so a grep
+    for a standard's name finds the whole list rather than a wrapped fragment.
+
+    Printed AFTER the verdicts and behind a blank line: hooks' auto_fix parser
+    rejoins wrapped finding details until a blank line, a check or "All ", so
+    a line directly under the last finding would be glued onto it. It never
+    carries :data:`FINDING_MARKER` and never touches the pass count.
+    """
+    if not names:
+        return
+    console.print()
+    console.print(
+        f"[dim]Not judged here (branch-level, run by `drone @seedgo audit`): {', '.join(names)}[/dim]",
+        highlight=False,
+        soft_wrap=True,
+    )
+
+
 # =============================================================================
 # COMMAND HANDLER
 # =============================================================================
@@ -393,6 +457,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         for f in py_files:
             results = run_checklist(str(f), pack_name=pack_name, prototype=prototype)
             _print_results(results, str(f))
+            if not _is_skip_or_error(results):
+                _print_not_judged(not_judged_here(str(f), pack_name=pack_name))
             console.print()
         return True
 
@@ -401,6 +467,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # Print results
     _print_results(results, str(resolved))
+    if not _is_skip_or_error(results):
+        _print_not_judged(not_judged_here(str(resolved), pack_name=pack_name))
 
     return True
 
@@ -487,6 +555,7 @@ def print_help() -> None:
     console.print('  Checkers with [cyan]AUDIT_SCOPE = "entry_point"[/cyan] only run on apps/{name}.py files')
     console.print('  Checkers with [cyan]AUDIT_SCOPE = "all_files"[/cyan] run on any .py file')
     console.print('  Checkers with [cyan]AUDIT_SCOPE = "branch_level"[/cyan] are skipped (need full branch)')
+    console.print("  Skipped branch-level rows that apply to the file are named on one closing line, not counted")
     console.print()
 
     console.print("[yellow]EXAMPLES:[/yellow]")

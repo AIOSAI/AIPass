@@ -1,15 +1,50 @@
-"""Tests for seedgo checker handlers — batch 1 (8 checkers)."""
-
 # =================== META ====================
 # Name: test_checkers_batch1.py
 # Description: Unit tests for 8 aipass_standards checkers
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
-import pytest
+"""Tests for apps/handlers/aipass_standards/architecture_check.py and seven batch-1 sibling checkers."""
+
+# Covers architecture, cli, cli_flags, commented_logger, debug_print, deep_nesting,
+# documentation and encapsulation. Each checker gets 3 tests: clean pass, violation
+# caught, bypass respected.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the eight checker modules under test parse and import
+# seedgo: no-test-needed(constant) — each checker's STANDARD name string, not asserted by any test here
+
 from unittest.mock import MagicMock
+
+import pytest
+
+from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
+from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
+    check_module as check_architecture,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
+    check_module as check_cli,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check import (
+    check_module as check_cli_flags,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.commented_logger_check import (
+    check_module as check_commented_logger,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.debug_print_check import (
+    check_module as check_debug_print,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.deep_nesting_check import (
+    check_module as check_deep_nesting,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import (
+    check_module as check_documentation,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import (
+    check_module as check_encapsulation,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -18,56 +53,18 @@ from unittest.mock import MagicMock
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for standards checkers."""
-    import sys
+def _pin_bypass_log(monkeypatch):
+    """Point is_bypassed's json_handler at a mock for every test here.
 
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # -- bypass handler (used by architecture_check) ------------------------
-    bypass_pkg = MagicMock()
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
-    bypass_pkg.ignore_handler = bypass_ignore
-
-    # Use real is_bypassed — it only does string matching and calls
-    # json_handler.log_operation (already mocked above).
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as real_is_bypassed
-
-    bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = real_is_bypassed
-    bypass_pkg.utils = bypass_utils
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.ignore_handler", bypass_ignore)
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.utils", bypass_utils)
-
-    # Force re-imports so checkers pick up fresh mocks
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.aipass_standards.architecture_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.cli_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.commented_logger_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.debug_print_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.deep_nesting_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.documentation_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+    The bypass tests call the real is_bypassed, which appends to the
+    repo-tracked seedgo_json/utils_log.json via the json_handler global in
+    its OWN module — xdist workers racing on that shared file corrupt it
+    (JSONDecodeError: Extra data). sys.modules patching never reaches a
+    function's globals, so the pin must land on the utils module object.
+    """
+    mock_handler = MagicMock()
+    mock_handler.log_operation = MagicMock(return_value=True)
+    monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
 
 
 # ===========================================================================
@@ -85,9 +82,7 @@ def test_architecture_check_clean_passes(tmp_path):
         '"""Clean module."""\n\ndef do_work():\n    return True\n',
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import check_module
-
-    result = check_module(str(clean_file))
+    result = check_architecture(str(clean_file))
     assert isinstance(result, dict)
     assert "passed" in result and "score" in result and "checks" in result
     assert result["score"] >= 75, f"Clean module code should pass: {result}"
@@ -100,9 +95,7 @@ def test_architecture_check_violation_caught(tmp_path):
     bad_file.parent.mkdir(parents=True)
     lines = ['"""Big module."""\n'] + ["x = 1\n"] * 750
     bad_file.write_text("".join(lines), encoding="utf-8")
-    from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import check_module
-
-    result = check_module(str(bad_file))
+    result = check_architecture(str(bad_file))
     assert result["score"] < 100, f"Over-sized file outside 3-layer should lose points: {result}"
 
 
@@ -111,9 +104,7 @@ def test_architecture_check_bypass_respected(tmp_path):
     f = tmp_path / "bypassed.py"
     f.write_text("x = 1\n", encoding="utf-8")
     bypass_rules = [{"standard": "architecture", "file": "bypassed.py"}]
-    from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import check_module
-
-    result = check_module(str(f), bypass_rules=bypass_rules)
+    result = check_architecture(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
 
 
@@ -135,9 +126,7 @@ def test_cli_check_clean_passes(tmp_path):
         '    console.print("hello")\n',
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_check import check_module
-
-    result = check_module(str(clean_file))
+    result = check_cli(str(clean_file))
     assert result["score"] >= 75, f"Clean CLI code should pass: {result}"
 
 
@@ -150,9 +139,7 @@ def test_cli_check_violation_caught(tmp_path):
         '"""Noisy module."""\n\ndef run():\n    """Run it."""\n    print("raw output")\n    print("more raw output")\n',
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_check import check_module
-
-    result = check_module(str(bad_file))
+    result = check_cli(str(bad_file))
     assert result["score"] < 100, f"Bare print() should lose points: {result}"
 
 
@@ -161,9 +148,7 @@ def test_cli_check_bypass_respected(tmp_path):
     f = tmp_path / "bypassed.py"
     f.write_text('print("hello")\n', encoding="utf-8")
     bypass_rules = [{"standard": "cli", "file": "bypassed.py"}]
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_check import check_module
-
-    result = check_module(str(f), bypass_rules=bypass_rules)
+    result = check_cli(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
 
 
@@ -187,9 +172,7 @@ def test_cli_flags_check_clean_passes(tmp_path):
         "        return\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check import check_module
-
-    result = check_module(str(entry_file))
+    result = check_cli_flags(str(entry_file))
     assert result["score"] >= 75, f"Entry point with --version should pass: {result}"
 
 
@@ -202,9 +185,7 @@ def test_cli_flags_check_violation_caught(tmp_path):
         '"""Entry point."""\n\ndef main():\n    """Main entry."""\n    pass\n',
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check import check_module
-
-    result = check_module(str(entry_file))
+    result = check_cli_flags(str(entry_file))
     assert result["score"] < 100, f"Entry point without --version should lose points: {result}"
 
 
@@ -215,9 +196,7 @@ def test_cli_flags_check_bypass_respected(tmp_path):
     f = apps_dir / "mybranch.py"
     f.write_text('"""No flags."""\ndef main():\n    pass\n', encoding="utf-8")
     bypass_rules = [{"standard": "cli_flags", "file": "mybranch.py"}]
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check import check_module
-
-    result = check_module(str(f), bypass_rules=bypass_rules)
+    result = check_cli_flags(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
 
 
@@ -238,9 +217,7 @@ def test_commented_logger_check_clean_passes(tmp_path):
         "    return True\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.commented_logger_check import check_module
-
-    result = check_module(str(clean_file))
+    result = check_commented_logger(str(clean_file))
     assert result["score"] == 100, f"Clean code should score 100: {result}"
 
 
@@ -257,9 +234,7 @@ def test_commented_logger_check_violation_caught(tmp_path):
         "    return True\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.commented_logger_check import check_module
-
-    result = check_module(str(bad_file))
+    result = check_commented_logger(str(bad_file))
     assert result["score"] < 100, f"Commented-out loggers should lose points: {result}"
 
 
@@ -268,9 +243,7 @@ def test_commented_logger_check_bypass_respected(tmp_path):
     f = tmp_path / "bypassed.py"
     f.write_text('# logger.info("disabled")\n', encoding="utf-8")
     bypass_rules = [{"standard": "commented_logger", "file": "bypassed.py"}]
-    from aipass.seedgo.apps.handlers.aipass_standards.commented_logger_check import check_module
-
-    result = check_module(str(f), bypass_rules=bypass_rules)
+    result = check_commented_logger(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
 
 
@@ -291,9 +264,7 @@ def test_debug_print_check_clean_passes(tmp_path):
         "    return True\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.debug_print_check import check_module
-
-    result = check_module(str(clean_file))
+    result = check_debug_print(str(clean_file))
     assert result["score"] == 100, f"Clean code should score 100: {result}"
 
 
@@ -309,9 +280,7 @@ def test_debug_print_check_violation_caught(tmp_path):
         "    return True\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.debug_print_check import check_module
-
-    result = check_module(str(bad_file))
+    result = check_debug_print(str(bad_file))
     assert result["score"] < 100, f"Bare print() calls should lose points: {result}"
 
 
@@ -323,9 +292,7 @@ def test_debug_print_check_bypass_respected(tmp_path):
         encoding="utf-8",
     )
     bypass_rules = [{"standard": "debug_print", "file": "bypassed.py"}]
-    from aipass.seedgo.apps.handlers.aipass_standards.debug_print_check import check_module
-
-    result = check_module(str(f), bypass_rules=bypass_rules)
+    result = check_debug_print(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
 
 
@@ -339,9 +306,7 @@ def test_debug_print_string_literal_not_flagged(tmp_path):
         "    return msg\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.debug_print_check import check_module
-
-    result = check_module(str(f))
+    result = check_debug_print(str(f))
     assert result["score"] == 100, f"print() inside strings should not flag: {result}"
 
 
@@ -363,9 +328,7 @@ def test_deep_nesting_check_clean_passes(tmp_path):
         "    return None\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.deep_nesting_check import check_module
-
-    result = check_module(str(clean_file))
+    result = check_deep_nesting(str(clean_file))
     assert result["score"] == 100, f"Shallow nesting should score 100: {result}"
 
 
@@ -385,9 +348,7 @@ def test_deep_nesting_check_violation_caught(tmp_path):
         "    return None\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.deep_nesting_check import check_module
-
-    result = check_module(str(bad_file))
+    result = check_deep_nesting(str(bad_file))
     assert result["score"] < 100, f"Deep nesting should lose points: {result}"
 
 
@@ -407,9 +368,7 @@ def test_deep_nesting_check_bypass_respected(tmp_path):
         encoding="utf-8",
     )
     bypass_rules = [{"standard": "deep_nesting", "file": "bypassed.py"}]
-    from aipass.seedgo.apps.handlers.aipass_standards.deep_nesting_check import check_module
-
-    result = check_module(str(f), bypass_rules=bypass_rules)
+    result = check_deep_nesting(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
 
 
@@ -431,9 +390,7 @@ def test_documentation_check_clean_passes(tmp_path):
         "    return False\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import check_module
-
-    result = check_module(str(clean_file))
+    result = check_documentation(str(clean_file))
     assert result["score"] == 100, f"Documented code should score 100: {result}"
 
 
@@ -444,9 +401,7 @@ def test_documentation_check_violation_caught(tmp_path):
         "import os\n\ndef public_func():\n    return True\n\ndef another_public():\n    return False\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import check_module
-
-    result = check_module(str(bad_file))
+    result = check_documentation(str(bad_file))
     assert result["score"] < 100, f"Missing docstrings should lose points: {result}"
 
 
@@ -455,9 +410,7 @@ def test_documentation_check_bypass_respected(tmp_path):
     f = tmp_path / "bypassed.py"
     f.write_text("x = 1\n", encoding="utf-8")
     bypass_rules = [{"standard": "documentation", "file": "bypassed.py"}]
-    from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import check_module
-
-    result = check_module(str(f), bypass_rules=bypass_rules)
+    result = check_documentation(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
 
 
@@ -473,9 +426,7 @@ def test_encapsulation_check_clean_passes(tmp_path):
         '"""Clean module."""\n\nfrom pathlib import Path\n\ndef do_work():\n    """Do work."""\n    return True\n',
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import check_module
-
-    result = check_module(str(clean_file))
+    result = check_encapsulation(str(clean_file))
     assert result["score"] >= 75, f"Clean encapsulation should pass: {result}"
 
 
@@ -491,9 +442,7 @@ def test_encapsulation_check_violation_caught(tmp_path):
         "    return validate()\n",
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import check_module
-
-    result = check_module(str(bad_file))
+    result = check_encapsulation(str(bad_file))
     # The cross-branch check should flag at least one violation
     failed_checks = [c for c in result["checks"] if not c["passed"]]
     assert len(failed_checks) > 0, f"Cross-branch handler imports should be flagged: {result}"
@@ -507,7 +456,5 @@ def test_encapsulation_check_bypass_respected(tmp_path):
         encoding="utf-8",
     )
     bypass_rules = [{"standard": "encapsulation", "file": "bypassed.py"}]
-    from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_check import check_module
-
-    result = check_module(str(f), bypass_rules=bypass_rules)
+    result = check_encapsulation(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"

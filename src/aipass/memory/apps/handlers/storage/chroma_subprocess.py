@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2025-11-27
-# Modified: 2026-09-15
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -24,6 +24,7 @@ import subprocess
 import logging
 import hashlib
 from pathlib import Path
+from typing import TextIO
 from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = logging.getLogger(__name__)
@@ -457,10 +458,17 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
 # =============================================================================
 
 
-def main():
-    """Process ChromaDB operation from stdin JSON."""
+def main(stdin: TextIO | None = None):
+    """Process ChromaDB operation from stdin JSON.
+
+    Args:
+        stdin: The stream the request is read from; None reads sys.stdin, as
+            every product caller does. The parameter exists for the tests,
+            which send a request through this entry without patching sys.stdin
+            for the whole process.
+    """
     try:
-        input_data = json.load(sys.stdin)
+        input_data = json.load(sys.stdin if stdin is None else stdin)
         operation = input_data.get("operation")
 
         if operation == "store_vectors":

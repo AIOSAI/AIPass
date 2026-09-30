@@ -3,50 +3,54 @@
 # Description: Tests for secrets handler and get_secret_cmd orchestrator
 # Version: 1.0.0
 # Created: 2026-06-15
-# Modified: 2026-06-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd.
+"""Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
 
-Tests — handlers/auth/secrets.py (get_secret, list_secrets):
-- get_secret: JSON token extraction via _TOKEN_KEYS
-- get_secret: as_json returns full parsed dict
-- get_secret: raw file fallback returns stripped content
-- get_secret: missing provider directory returns None
-- get_secret: missing slug file returns None
-- get_secret: malformed JSON returns None
-- get_secret: unreadable file (OSError) returns None
-- get_secret: JSON with no matching token key returns json.dumps of dict
-- list_secrets: returns sorted slug names, strips .json extension
-- list_secrets: non-existent provider returns empty list
-- list_secrets: skips dotfiles, __pycache__, directories
+# Tests — handlers/auth/secrets.py (get_secret, list_secrets):
+# - get_secret: JSON token extraction via _TOKEN_KEYS
+# - get_secret: as_json returns full parsed dict
+# - get_secret: raw file fallback returns stripped content
+# - get_secret: missing provider directory returns None
+# - get_secret: missing slug file returns None
+# - get_secret: malformed JSON returns None
+# - get_secret: unreadable file (OSError) returns None
+# - get_secret: JSON with no matching token key returns json.dumps of dict
+# - list_secrets: returns sorted slug names, strips .json extension
+# - list_secrets: non-existent provider returns empty list
+# - list_secrets: skips dotfiles, __pycache__, directories
+#
+# Tests — handlers/auth/secrets.py (set_secret):
+# - set_secret: writes string value to provider/slug.json
+# - set_secret: as_json writes JSON-serialized dict
+# - set_secret: creates provider directory if missing
+# - set_secret: file has 0o600 permissions (POSIX)
+# - set_secret: provider dir has 0o700 permissions (POSIX)
+# - set_secret: overwrites existing secret
+# - set_secret: round-trip with get_secret returns same value
+# - set_secret: round-trip with get_secret as_json returns same dict
+#
+# Tests — modules/secrets.py (in-process door):
+# - get_secret wraps handler and logs operation
+# - set_secret wraps handler and logs operation
+# - list_secrets wraps handler
+#
+# Tests — api_key.py (get_secret_cmd — hardened, no raw values to stdout):
+# - get_secret_cmd default prints masked summary only
+# - get_secret_cmd --out writes to file with 0o600 perms
+# - get_secret_cmd --out --json writes JSON to file
+# - get_secret_cmd --list prints slug names
+# - get_secret_cmd no args calls error()
+# - get_secret_cmd provider only (no --list) calls error()
+# - get_secret_cmd only flags calls error()
+# - get_secret_cmd not found calls error()
+# - get_secret_cmd --out missing path calls error()
 
-Tests — handlers/auth/secrets.py (set_secret):
-- set_secret: writes string value to provider/slug.json
-- set_secret: as_json writes JSON-serialized dict
-- set_secret: creates provider directory if missing
-- set_secret: file has 0o600 permissions (POSIX)
-- set_secret: provider dir has 0o700 permissions (POSIX)
-- set_secret: overwrites existing secret
-- set_secret: round-trip with get_secret returns same value
-- set_secret: round-trip with get_secret as_json returns same dict
-
-Tests — modules/secrets.py (in-process door):
-- get_secret wraps handler and logs operation
-- set_secret wraps handler and logs operation
-- list_secrets wraps handler
-
-Tests — api_key.py (get_secret_cmd — hardened, no raw values to stdout):
-- get_secret_cmd default prints masked summary only
-- get_secret_cmd --out writes to file with 0o600 perms
-- get_secret_cmd --out --json writes JSON to file
-- get_secret_cmd --list prints slug names
-- get_secret_cmd no args calls error()
-- get_secret_cmd provider only (no --list) calls error()
-- get_secret_cmd only flags calls error()
-- get_secret_cmd not found calls error()
-- get_secret_cmd --out missing path calls error()
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — SECRETS_BASE's real home location; every test patches it to a temp dir
+# seedgo: no-test-needed(covered) — api_key's get_key() and validate_key() commands, tests/test_api_key.py
+# seedgo: no-test-needed(hardcoded_key) — that no real token sits in this file; every value is a fixture string
 
 from __future__ import annotations
 
@@ -80,6 +84,7 @@ PATCH_CMD_ERROR = "aipass.api.apps.modules.api_key.error"
 PATCH_CMD_SUCCESS = "aipass.api.apps.modules.api_key.success"
 PATCH_CMD_CONSOLE = "aipass.api.apps.modules.api_key.console"
 PATCH_CMD_JSON_HANDLER = "aipass.api.apps.modules.api_key.json_handler"
+GET_SECRET_USAGE = "Usage: drone @api get-secret <provider/slug> [--out FILE] [--json] [--list]"
 
 PATCH_MOD_HANDLER = "aipass.api.apps.modules.secrets._handler"
 PATCH_MOD_JSON_HANDLER = "aipass.api.apps.modules.secrets.json_handler"
@@ -98,7 +103,7 @@ class TestGetSecret:
         provider_dir = tmp_path / "telegram"
         provider_dir.mkdir()
         secret_file = provider_dir / "bot.json"
-        secret_file.write_text(json.dumps({"bot_token": "abc123", "extra": "stuff"}))
+        secret_file.write_text(json.dumps({"bot_token": "abc123", "extra": "stuff"}), encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
             result = get_secret("telegram", "bot")
@@ -111,7 +116,7 @@ class TestGetSecret:
         provider_dir.mkdir()
         # Has both 'api_key' and 'token'; api_key comes first in _TOKEN_KEYS
         secret_file = provider_dir / "creds.json"
-        secret_file.write_text(json.dumps({"token": "second", "api_key": "first"}))
+        secret_file.write_text(json.dumps({"token": "second", "api_key": "first"}), encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
             result = get_secret("discord", "creds")
@@ -123,7 +128,7 @@ class TestGetSecret:
         provider_dir = tmp_path / "telegram"
         provider_dir.mkdir()
         data = {"bot_token": "abc123", "webhook_url": "https://example.com"}
-        (provider_dir / "bot.json").write_text(json.dumps(data))
+        (provider_dir / "bot.json").write_text(json.dumps(data), encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
             result = get_secret("telegram", "bot", as_json=True)
@@ -134,7 +139,7 @@ class TestGetSecret:
         """When no JSON file exists, falls back to raw file and returns stripped content."""
         provider_dir = tmp_path / "generic"
         provider_dir.mkdir()
-        (provider_dir / "api_token").write_text("  raw-secret-value  \n")
+        (provider_dir / "api_token").write_text("  raw-secret-value  \n", encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
             result = get_secret("generic", "api_token")
@@ -162,14 +167,17 @@ class TestGetSecret:
         """Malformed JSON file returns None and logs a warning."""
         provider_dir = tmp_path / "telegram"
         provider_dir.mkdir()
-        (provider_dir / "bot.json").write_text("{not valid json")
+        (provider_dir / "bot.json").write_text("{not valid json", encoding="utf-8")
 
         mock_logger = MagicMock()
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER, mock_logger):
             result = get_secret("telegram", "bot")
 
         assert result is None
-        mock_logger.warning.assert_called()
+        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
+        assert len(warnings) == 2
+        assert warnings[0].startswith(f"Error reading secret file {provider_dir / 'bot.json'}: ")
+        assert warnings[1] == "Secret not found: telegram/bot"
 
     @pytest.mark.skipif(
         sys.platform == "win32",
@@ -180,7 +188,7 @@ class TestGetSecret:
         provider_dir = tmp_path / "telegram"
         provider_dir.mkdir()
         secret_file = provider_dir / "bot.json"
-        secret_file.write_text(json.dumps({"bot_token": "abc"}))
+        secret_file.write_text(json.dumps({"bot_token": "abc"}), encoding="utf-8")
         # Make unreadable
         secret_file.chmod(0o000)
 
@@ -198,7 +206,7 @@ class TestGetSecret:
         provider_dir = tmp_path / "custom"
         provider_dir.mkdir()
         data = {"username": "admin", "host": "localhost"}
-        (provider_dir / "config.json").write_text(json.dumps(data))
+        (provider_dir / "config.json").write_text(json.dumps(data), encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
             result = get_secret("custom", "config")
@@ -209,7 +217,7 @@ class TestGetSecret:
         """JSON file containing a non-dict value (e.g., a string) returns str of it."""
         provider_dir = tmp_path / "simple"
         provider_dir.mkdir()
-        (provider_dir / "token.json").write_text(json.dumps("plain-string-secret"))
+        (provider_dir / "token.json").write_text(json.dumps("plain-string-secret"), encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
             result = get_secret("simple", "token")
@@ -220,8 +228,8 @@ class TestGetSecret:
         """When both JSON and raw files exist, JSON takes priority."""
         provider_dir = tmp_path / "dual"
         provider_dir.mkdir()
-        (provider_dir / "cred.json").write_text(json.dumps({"api_key": "from-json"}))
-        (provider_dir / "cred").write_text("from-raw")
+        (provider_dir / "cred.json").write_text(json.dumps({"api_key": "from-json"}), encoding="utf-8")
+        (provider_dir / "cred").write_text("from-raw", encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
             result = get_secret("dual", "cred")
@@ -230,7 +238,7 @@ class TestGetSecret:
 
     def test_provider_is_file_not_dir(self, tmp_path: Path) -> None:
         """If provider path exists but is a file (not a directory), returns None."""
-        (tmp_path / "notadir").write_text("file content")
+        (tmp_path / "notadir").write_text("file content", encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
             result = get_secret("notadir", "slug")
@@ -250,9 +258,9 @@ class TestListSecrets:
         """Returns sorted slug names with .json extension stripped."""
         provider_dir = tmp_path / "telegram"
         provider_dir.mkdir()
-        (provider_dir / "webhook.json").write_text("{}")
-        (provider_dir / "bot.json").write_text("{}")
-        (provider_dir / "raw_token").write_text("tok")
+        (provider_dir / "webhook.json").write_text("{}", encoding="utf-8")
+        (provider_dir / "bot.json").write_text("{}", encoding="utf-8")
+        (provider_dir / "raw_token").write_text("tok", encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
             result = list_secrets("telegram")
@@ -270,8 +278,8 @@ class TestListSecrets:
         """Entries starting with '.' are excluded."""
         provider_dir = tmp_path / "provider"
         provider_dir.mkdir()
-        (provider_dir / ".hidden").write_text("secret")
-        (provider_dir / "visible.json").write_text("{}")
+        (provider_dir / ".hidden").write_text("secret", encoding="utf-8")
+        (provider_dir / "visible.json").write_text("{}", encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
             result = list_secrets("provider")
@@ -285,7 +293,7 @@ class TestListSecrets:
         # __pycache__ as a file (the check is name-based, not type-based for this entry)
         pycache = provider_dir / "__pycache__"
         pycache.mkdir()
-        (provider_dir / "real.json").write_text("{}")
+        (provider_dir / "real.json").write_text("{}", encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
             result = list_secrets("provider")
@@ -297,7 +305,7 @@ class TestListSecrets:
         provider_dir = tmp_path / "provider"
         provider_dir.mkdir()
         (provider_dir / "subdir").mkdir()
-        (provider_dir / "secret.json").write_text("{}")
+        (provider_dir / "secret.json").write_text("{}", encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
             result = list_secrets("provider")
@@ -306,7 +314,7 @@ class TestListSecrets:
 
     def test_provider_is_file_not_dir(self, tmp_path: Path) -> None:
         """If provider path is a file instead of a directory, returns empty list."""
-        (tmp_path / "notadir").write_text("file")
+        (tmp_path / "notadir").write_text("file", encoding="utf-8")
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
             result = list_secrets("notadir")
@@ -452,8 +460,7 @@ class TestGetSecretCmd:
         """Empty args list calls error() with usage message."""
         get_secret_cmd([])
 
-        mock_error.assert_called_once()
-        assert "Usage" in mock_error.call_args[0][0]
+        mock_error.assert_called_once_with(GET_SECRET_USAGE)
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_ERROR)
@@ -461,7 +468,7 @@ class TestGetSecretCmd:
         """Single provider name without --list flag calls error() with format message."""
         get_secret_cmd(["telegram"])
 
-        mock_error.assert_called_once()
+        mock_error.assert_called_once_with("Expected format: <provider>/<slug>  (e.g. telegram/bot)")
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_ERROR)
@@ -469,8 +476,7 @@ class TestGetSecretCmd:
         """Only flags (no positional args after stripping) calls error()."""
         get_secret_cmd(["--json"])
 
-        mock_error.assert_called_once()
-        assert "Usage" in mock_error.call_args[0][0]
+        mock_error.assert_called_once_with(GET_SECRET_USAGE)
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)
@@ -481,8 +487,7 @@ class TestGetSecretCmd:
 
         get_secret_cmd(["telegram/bot"])
 
-        mock_error.assert_called_once()
-        assert "not found" in mock_error.call_args[0][0].lower()
+        mock_error.assert_called_once_with("Secret not found: telegram/bot")
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_ERROR)
@@ -490,8 +495,7 @@ class TestGetSecretCmd:
         """--out without a file path argument calls error()."""
         get_secret_cmd(["telegram/bot", "--out"])
 
-        mock_error.assert_called_once()
-        assert "--out" in mock_error.call_args[0][0]
+        mock_error.assert_called_once_with("--out requires a file path argument")
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)
@@ -620,10 +624,10 @@ class TestSetSecretModule:
         mock_jh.log_operation.assert_called_once()
         assert mock_jh.log_operation.call_args[0][0] == "secrets_set"
 
-    def test_set_secret_as_json(self) -> None:
+    def test_set_secret_as_json(self, tmp_path: Path) -> None:
         """Module set_secret passes as_json through to handler."""
         mock_handler = MagicMock()
-        mock_handler.set_secret.return_value = Path("/fake/path.json")
+        mock_handler.set_secret.return_value = tmp_path / "path.json"
         mock_jh = MagicMock()
         data = {"bot_token": "abc"}
 

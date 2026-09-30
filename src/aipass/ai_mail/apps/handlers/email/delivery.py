@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.4.0
+# Version: 3.4.1
 # Created: 2025-12-02
-# Modified: 2026-09-10
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -63,14 +63,13 @@ def _load_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
     return get_caller_project_branches(caller_cwd)
 
 
-def _auto_register_contact(email: str, branch_path: Path, inbox_file: Path) -> None:
+def _auto_register_contact(email: str, inbox_file: Path) -> None:
     """Auto-register a recipient in the contacts address book after successful delivery.
 
     Non-critical: failures are logged and silently ignored.
 
     Args:
         email: Recipient email address (e.g., '@devpulse').
-        branch_path: Resolved path to the branch root directory.
         inbox_file: Path to the branch's inbox.json file.
     """
     try:
@@ -825,7 +824,7 @@ def deliver_email_to_branch(
         return False, f"Failed to acquire inbox lock: {e}"
 
     # Auto-register recipient in contacts for future fast lookup
-    _auto_register_contact(to_branch, branch_path, inbox_file)
+    _auto_register_contact(to_branch, inbox_file)
 
     # Auto-register sender if external project called with AIPASS_CALLER_BRANCH
     caller_branch = os.environ.get("AIPASS_CALLER_BRANCH", "")

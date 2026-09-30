@@ -1,19 +1,34 @@
 # =================== AIPass ====================
 # Name: test_pre_compact_prep.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-07-20
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for handlers/lifecycle/pre_compact_prep.py."""
+"""Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — _git_snapshot's three git subprocess.run calls; their text is git's own
+# seedgo: no-test-needed(generated) — the logger.info line on each read failure; its text is the exception's own
+# seedgo: no-test-needed(constant) — _DEFAULT_SUMMARY_CAP's value, asserted only as the fallback it is
 
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from aipass.hooks.apps.handlers.lifecycle import pre_compact_prep
+from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import (
+    _DEFAULT_SUMMARY_CAP,
+    _count_active_dispatch_locks,
+    _count_open_plans,
+    _inbox_unread,
+    _summary_cap,
+    handle,
+)
 
 MODULE = "aipass.hooks.apps.handlers.lifecycle.pre_compact_prep"
 
@@ -32,7 +47,6 @@ def _make_branch(tmp_path, with_local=True, sessions=None):
 
 class TestHandle:
     def test_stamps_session_entry_and_returns_stdout(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import handle
 
         branch_dir = _make_branch(tmp_path, sessions=[{"number": 3, "date": "2026-01-01", "summary": "old"}])
 
@@ -51,7 +65,6 @@ class TestHandle:
         assert "AUTO-COMPACT SNAPSHOT" in newest["summary"]
 
     def test_prepends_number_as_max_plus_one(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import handle
 
         branch_dir = _make_branch(
             tmp_path,
@@ -68,13 +81,11 @@ class TestHandle:
         assert data["sessions"][0]["number"] == 11
 
     def test_no_branch_dir_resolved_is_a_noop(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import handle
 
         result = handle({"cwd": str(tmp_path)})
         assert result == {"stdout": "", "exit_code": 0}
 
     def test_missing_local_json_skips_write_but_still_returns_snapshot(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import handle
 
         branch_dir = _make_branch(tmp_path, with_local=False)
 
@@ -85,7 +96,6 @@ class TestHandle:
         assert "AUTO-COMPACT SNAPSHOT" in result["stdout"]
 
     def test_malformed_local_json_never_raises_and_is_untouched(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import handle
 
         branch_dir = tmp_path / "src" / "aipass" / "widget"
         trinity = branch_dir / ".trinity"
@@ -100,7 +110,6 @@ class TestHandle:
         assert local_path.read_text(encoding="utf-8") == "{not valid json"
 
     def test_sessions_not_a_list_skips_write(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import handle
 
         branch_dir = tmp_path / "src" / "aipass" / "widget"
         trinity = branch_dir / ".trinity"
@@ -116,7 +125,6 @@ class TestHandle:
         assert data["sessions"] == "not-a-list"
 
     def test_summary_truncated_to_cap(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import handle
 
         branch_dir = _make_branch(tmp_path, sessions=[])
 
@@ -127,18 +135,15 @@ class TestHandle:
         data = json.loads((branch_dir / ".trinity" / "local.json").read_text(encoding="utf-8"))
         assert len(data["sessions"][0]["summary"]) == 300
 
-    def test_never_raises_on_unexpected_error(self):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import handle
-
+    def test_never_raises_on_unexpected_error(self, tmp_path):
         with patch("aipass.hooks.apps.modules.context_window.find_branch_dir", side_effect=RuntimeError("boom")):
-            result = handle({"cwd": "/tmp"})
+            result = handle({"cwd": str(tmp_path)})
 
         assert result == {"stdout": "", "exit_code": 0}
 
 
 class TestCountOpenPlans:
     def test_counts_only_matching_location(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _count_open_plans
 
         branch_dir = tmp_path / "src" / "aipass" / "widget"
         branch_dir.mkdir(parents=True)
@@ -155,7 +160,6 @@ class TestCountOpenPlans:
         assert count == 2
 
     def test_returns_none_on_import_failure(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _count_open_plans
 
         branch_dir = tmp_path / "src" / "aipass" / "widget"
         branch_dir.mkdir(parents=True)
@@ -168,10 +172,9 @@ class TestCountOpenPlans:
 
 class TestCountActiveDispatchLocks:
     def test_counts_lock_files_across_branches(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _count_active_dispatch_locks
 
         (tmp_path / "src" / "aipass" / "a" / ".ai_mail.local").mkdir(parents=True)
-        (tmp_path / "src" / "aipass" / "a" / ".ai_mail.local" / ".dispatch.lock").write_text("{}")
+        (tmp_path / "src" / "aipass" / "a" / ".ai_mail.local" / ".dispatch.lock").write_text("{}", encoding="utf-8")
         (tmp_path / "src" / "aipass" / "b" / ".ai_mail.local").mkdir(parents=True)
 
         registry = {
@@ -186,14 +189,12 @@ class TestCountActiveDispatchLocks:
         assert count == 1
 
     def test_returns_none_without_repo_root(self):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _count_active_dispatch_locks
 
         assert _count_active_dispatch_locks(None) is None
 
 
 class TestInboxUnread:
     def test_reads_unread_count(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _inbox_unread
 
         branch_dir = tmp_path / "widget"
         mail_dir = branch_dir / ".ai_mail.local"
@@ -203,7 +204,6 @@ class TestInboxUnread:
         assert _inbox_unread(branch_dir) == 4
 
     def test_returns_none_when_missing(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _inbox_unread
 
         assert _inbox_unread(tmp_path / "widget") is None
 
@@ -217,7 +217,6 @@ class TestSummaryCapUsesSupportedDoor:
     silently if they moved it AND ignored per_branch overrides entirely."""
 
     def test_reads_through_load_entry_limits(self):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _summary_cap
 
         el = MagicMock()
         el.load_entry_limits.return_value = {"entry_types": {"sessions": {"max_chars": 512}}}
@@ -228,7 +227,6 @@ class TestSummaryCapUsesSupportedDoor:
     def test_passes_the_branch_so_per_branch_overrides_apply(self):
         """The hardcoded read took the global default and would have stamped one
         branch against another branch's cap."""
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _summary_cap
 
         el = MagicMock()
         el.load_entry_limits.side_effect = lambda b: {
@@ -239,13 +237,11 @@ class TestSummaryCapUsesSupportedDoor:
             assert _summary_cap("ordinary") == 300
 
     def test_falls_back_when_memory_is_unavailable(self):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _DEFAULT_SUMMARY_CAP, _summary_cap
 
         with patch("importlib.import_module", side_effect=ImportError("no memory")):
             assert _summary_cap("widget") == _DEFAULT_SUMMARY_CAP
 
     def test_falls_back_on_reshaped_config(self):
-        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _DEFAULT_SUMMARY_CAP, _summary_cap
 
         el = MagicMock()
         el.load_entry_limits.return_value = {"entry_types": {}}
@@ -261,8 +257,6 @@ class TestSummaryCapUsesSupportedDoor:
         os.fdopen: a guard that trips on its own explanation gets deleted.
         """
         import ast
-
-        from aipass.hooks.apps.handlers.lifecycle import pre_compact_prep
 
         tree = ast.parse(Path(pre_compact_prep.__file__).read_text(encoding="utf-8"))
         docstrings = set()

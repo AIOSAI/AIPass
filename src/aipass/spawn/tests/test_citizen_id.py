@@ -1,30 +1,36 @@
 # =================== AIPass ====================
 # Name: test_citizen_id.py
 # Description: citizenship.citizen_id — the per-citizen UID stamped at birth
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-24
-# Modified: 2026-08-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the citizen_id contract (the owner's ruling, 2026-08-24).
+"""Tests for apps/handlers/registry.py and apps/handlers/placeholders.py — the citizen_id contract."""
 
-Two ids live near each other and mean different things:
-  - ``citizenship.registry_id`` — the id of the REGISTRY holding the citizen.
-    Shared by every citizen in a project. Rendered as "Branch reg no.".
-  - ``citizenship.citizen_id`` — the citizen's OWN unique id, the same value
-    the registry keeps in its ``branches[]`` entry. Rendered as "Passport no.".
-
-The load-bearing property is that those two copies of the citizen's own id are
-minted ONCE and therefore always agree. The mint used to happen inside
-add_to_registry, which runs after the passport is written — so this file pins
-the ordering, not just the presence of a field.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that registry.py, placeholders.py, and class_registry.py parse and import cleanly
+# seedgo: no-test-needed(documentation) — that the public functions in those modules carry docstrings
 
 import json
 import uuid
 
+from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict
 from aipass.spawn.apps.handlers.registry import add_to_registry
+
+# Context kept from the file's original docstring (the owner's ruling, 2026-08-24):
+#
+# Two ids live near each other and mean different things:
+#   - ``citizenship.registry_id`` — the id of the REGISTRY holding the citizen.
+#     Shared by every citizen in a project. Rendered as "Branch reg no.".
+#   - ``citizenship.citizen_id`` — the citizen's OWN unique id, the same value
+#     the registry keeps in its ``branches[]`` entry. Rendered as "Passport no.".
+#
+# The load-bearing property is that those two copies of the citizen's own id are
+# minted ONCE and therefore always agree. The mint used to happen inside
+# add_to_registry, which runs after the passport is written — so this file pins
+# the ordering, not just the presence of a field.
 
 
 def _fresh_registry(path):
@@ -122,8 +128,6 @@ def test_every_class_declares_citizen_id():
     CLASSES rather than the directory: the day a class stops resolving to it,
     this fails instead of quietly checking the same file twice.
     """
-    from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
-
     classes = get_available_classes()
     assert len(classes) == 2, f"the class registry offers {classes} - the loop below would check nothing"
     for citizen_class in classes:

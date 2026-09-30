@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_registry_handler.py
 # Description: Handler for internal module registry operations
-# Version: 2.0.0
+# Version: 2.0.2
 # Created: 2026-03-09
-# Modified: 2026-03-29
+# Modified: 2026-09-28
 # =============================================
 
 """Handler for internal module registry operations.
@@ -53,11 +53,14 @@ class _ExternalModuleConfig:
     version: str
 
 
-def _load_external_modules() -> dict[str, _ExternalModuleConfig]:
-    """Load external module declarations from routing_config.json."""
+def load_external_modules() -> tuple[dict[str, _ExternalModuleConfig], str | None]:
+    """Load external module declarations from routing_config.json, with the reason when they could not load.
+
+    Returns (modules, None) on success; ({}, reason) when the config is absent or unreadable.
+    """
     if not _ROUTING_CONFIG_PATH.exists():
-        logger.warning("_load_external_modules: config not found at %s", _ROUTING_CONFIG_PATH)
-        return {}
+        logger.warning("load_external_modules: config not found at %s", _ROUTING_CONFIG_PATH)
+        return {}, f"config not found at {_ROUTING_CONFIG_PATH}"
     try:
         with open(_ROUTING_CONFIG_PATH, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -70,13 +73,20 @@ def _load_external_modules() -> dict[str, _ExternalModuleConfig]:
                 description=cfg.get("description", ""),
                 version=cfg.get("version", "unknown"),
             )
-        return result
+        return result, None
     except Exception as exc:
-        logger.warning("_load_external_modules: failed to load config: %s", exc)
-        return {}
+        logger.warning("load_external_modules: failed to load config: %s", exc)
+        return {}, f"failed to load {_ROUTING_CONFIG_PATH}: {exc}"
 
 
-_EXTERNAL_MODULES: dict[str, _ExternalModuleConfig] = _load_external_modules()
+_EXTERNAL_MODULES: dict[str, _ExternalModuleConfig]
+_EXTERNAL_MODULES_ERROR: str | None
+_EXTERNAL_MODULES, _EXTERNAL_MODULES_ERROR = load_external_modules()
+
+
+def external_modules_error() -> str | None:
+    """Why the external modules could not load, or None when routing_config.json loaded."""
+    return _EXTERNAL_MODULES_ERROR
 
 
 @dataclass
@@ -163,11 +173,15 @@ def route_module_command(name: str, command: str, args: list[str] | None = None)
     return result
 
 
-def get_module_help(name: str, command: str | None = None) -> str:
+def get_module_help(name: str, command: str | None = None) -> str | None:
     """Get help text from a module.
 
     For external modules: captures branch's own --help output via
     generic_adapter. For internal modules: calls get_help() directly.
+
+    Returns "" when the module has no help to give, and None when an internal
+    module's adapter cannot be imported or read, so a caller can tell a broken
+    module from a quiet one.
     """
     ext = _EXTERNAL_MODULES.get(name)
     if ext is not None:
@@ -188,15 +202,19 @@ def get_module_help(name: str, command: str | None = None) -> str:
         return help_fn(command)
     except (ImportError, AttributeError) as exc:
         logger.warning("get_module_help: failed for module '%s': %s", name, exc)
-        return ""
+        return None
 
 
-def get_module_introspective(name: str) -> str:
+def get_module_introspective(name: str) -> str | None:
     """Get introspective view from a module.
 
     For external modules: captures branch's own no-args output via
     generic_adapter.  For internal modules: calls get_introspective()
     or falls back to get_help().
+
+    Returns "" when the module has nothing to show, and None when an internal
+    module's adapter cannot be imported or read, so a caller can tell a broken
+    module from a quiet one.
     """
     ext = _EXTERNAL_MODULES.get(name)
     if ext is not None:
@@ -217,4 +235,4 @@ def get_module_introspective(name: str) -> str:
         return ""
     except (ImportError, AttributeError) as exc:
         logger.warning("get_module_introspective: failed for module '%s': %s", name, exc)
-        return ""
+        return None

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provision.py
 # Description: Caller Auto-Provisioning Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2025-11-16
-# Modified: 2025-11-16
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -46,17 +46,20 @@ def read_json(file_path: Path) -> Optional[Dict[str, Any]]:
         file_path: Path to JSON file
 
     Returns:
-        Parsed JSON dict or None on error
-    """
-    try:
-        if not file_path.exists():
-            return None
+        Parsed JSON dict, or None when the file is absent.
 
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to read {file_path}: {e}")
+    Raises:
+        ValueError: The file does not parse (JSONDecodeError, UnicodeDecodeError).
+        OSError: The file exists but could not be read. Raised, never None:
+            ensure_caller_config used to read None as corrupt and regenerate,
+            so a transient read error overwrote a good config (api, fleet
+            green leg 3). Only the caller decides what corrupt means.
+    """
+    if not file_path.exists():
         return None
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def write_json(file_path: Path, data: Dict[str, Any]) -> bool:
@@ -260,7 +263,11 @@ def ensure_caller_config(caller: str | None = None) -> Dict[str, Any]:
         config_file = json_folder / "openrouter_config.json"
 
         if config_file.exists():
-            config = read_json(config_file)
+            try:
+                config = read_json(config_file)
+            except ValueError as e:
+                logger.warning(f"Config file for {caller} does not parse ({e}), regenerating")
+                config = None
             if config:
                 logger.info(f"Using existing config for {caller}")
                 return config

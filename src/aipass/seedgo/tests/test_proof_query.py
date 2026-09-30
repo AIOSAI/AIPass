@@ -1,15 +1,27 @@
-"""Tests for proof_query module."""
-
 # =================== META ====================
 # Name: test_proof_query.py
 # Description: Unit tests for the proof_query module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
+"""Tests for apps/modules/proof_query.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — importlib.util.spec_from_file_location's loading of a proof content handler
+
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused, proof_query
+from aipass.seedgo.apps.modules.proof_query import (
+    _discover_proof_content,
+    handle_command,
+    print_help,
+    print_introspection,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -20,44 +32,15 @@ from unittest.mock import MagicMock
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for proof_query."""
-    import sys
-
     mock_logger = MagicMock()
-    mock_console = MagicMock()
-    mock_header = MagicMock()
     mock_warning = MagicMock()
     mock_error = MagicMock()
     mock_json_handler = MagicMock()
 
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- cli ----------------------------------------------------------------
-    cli_mod = MagicMock()
-    cli_mod.console = mock_console
-    cli_mod.header = mock_header
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
-
-    cli_apps = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", cli_apps)
-
-    cli_modules = MagicMock()
-    cli_modules.error = mock_error
-    cli_modules.warning = mock_warning
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # Force re-import
-    monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.proof_query", raising=False)
+    monkeypatch.setattr(proof_query, "logger", mock_logger)
+    monkeypatch.setattr(proof_query, "warning", mock_warning)
+    monkeypatch.setattr(proof_query, "error", mock_error)
+    monkeypatch.setattr(proof_query, "json_handler", mock_json_handler)
 
 
 # ---------------------------------------------------------------------------
@@ -67,41 +50,56 @@ def _mock_infrastructure(monkeypatch):
 
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
-    from aipass.seedgo.apps.modules.proof_query import handle_command
-
     assert handle_command("wrong_command", []) is False
 
 
 def test_handle_command_no_args_shows_introspection():
-    """No args triggers introspection (returns True)."""
-    from aipass.seedgo.apps.modules.proof_query import handle_command
-
-    result = handle_command("proof_query", [])
-    assert result is True
+    """No args shows introspection, not help and not a pack lookup."""
+    with (
+        patch.object(proof_query, "print_introspection") as shown,
+        patch.object(proof_query, "print_help") as helped,
+    ):
+        assert proof_query.handle_command("proof_query", []) is True
+    shown.assert_called_once_with()
+    assert helped.call_args_list == []
 
 
 def test_handle_command_help_flag():
-    """--help flag is handled without error."""
-    from aipass.seedgo.apps.modules.proof_query import handle_command
-
-    result = handle_command("proof_query", ["--help"])
-    assert result is True
+    """--help explains and looks nothing up."""
+    with (
+        patch.object(proof_query, "print_help") as helped,
+        patch.object(proof_query, "_discover_proof_packs") as discovered,
+    ):
+        assert proof_query.handle_command("proof_query", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert discovered.call_args_list == []
 
 
 def test_handle_command_h_flag():
-    """-h flag is handled without error."""
-    from aipass.seedgo.apps.modules.proof_query import handle_command
+    """A help flag AFTER a pack name explains it, never looks up a proof named '-h'.
 
-    result = handle_command("proof_query", ["-h"])
-    assert result is True
+    The cured defect this pins, stated in handle_command itself: `proof_query
+    aipass_proof --help` used to look up a proof named '--help'. The return
+    value is True on both sides of that bug.
+    """
+    with (
+        patch.object(proof_query, "print_help") as helped,
+        patch.object(proof_query, "_discover_proof_packs") as discovered,
+    ):
+        assert proof_query.handle_command("proof_query", ["aipass_proof", "-h"]) is True
+    helped.assert_called_once_with()
+    assert discovered.call_args_list == []
 
 
 def test_handle_command_help_word():
-    """'help' word is handled without error."""
-    from aipass.seedgo.apps.modules.proof_query import handle_command
-
-    result = handle_command("proof_query", ["help"])
-    assert result is True
+    """The bare word 'help' reaches the same door as the flags."""
+    with (
+        patch.object(proof_query, "print_help") as helped,
+        patch.object(proof_query, "_discover_proof_packs") as discovered,
+    ):
+        assert proof_query.handle_command("proof_query", ["help"]) is True
+    helped.assert_called_once_with()
+    assert discovered.call_args_list == []
 
 
 def test_handle_command_unknown_pack():
@@ -111,63 +109,48 @@ def test_handle_command_unknown_pack():
     so a script reading the exit code saw a successful query of a pack that
     does not exist (the owner's standing ruling, fleet sweep 2026-09-07).
     """
-    import pytest
-
-    from aipass.seedgo.apps.handlers.audit_tests import refusal
-    from aipass.seedgo.apps.modules import CommandRefused
-    from aipass.seedgo.apps.modules.proof_query import handle_command
-
     with pytest.raises(CommandRefused) as refused:
         handle_command("proof_query", ["nonexistent_pack_xyz"])
     assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
     assert refused.value.token == "nonexistent_pack_xyz"
 
 
-def test_print_introspection_runs():
+def test_print_introspection_runs(capsys):
     """print_introspection prints the module banner and the pack roster.
 
-    "console.print was called" is not an oracle: it holds for a function that
-    prints one blank line, and it held while nothing else was measured. The two
-    strings pinned here were read off a real run (2026-09-07) and they are the
-    two the introspection contract owes a reader — WHICH module answered, and
-    the heading under which its discovered packs are listed.
+    "console.print was called" is not an oracle: it holds for a function that prints one blank line,
+    and it held while nothing else was measured. The two strings pinned here were read off a real
+    run (2026-09-07) and they are the two the introspection contract owes a reader — WHICH module
+    answered, and the heading under which its discovered packs are listed.
+    Mutant: malformed markup on the roster heading in apps/modules/proof_query.py — killed.
     """
-    import sys
-    from aipass.seedgo.apps.modules.proof_query import print_introspection
-
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    mock_cli.header.reset_mock()
     result = print_introspection()
-    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
+    printed = capsys.readouterr().out
     assert result is None
     assert "proof_query Module" in printed, f"introspection never named the module: {printed!r}"
     assert "Discovered Proof Packs:" in printed, f"introspection never listed the packs: {printed!r}"
 
 
-def test_print_help_runs():
+def test_print_help_runs(capsys):
     """print_help prints its banner and the pack+proof usage line.
 
-    Same reason as the introspection test above: `console.print.called` passes
-    for any function that prints anything at all. The usage line is the one a
-    reader comes to help FOR — the three-argument form that shows one proof's
-    content — so that is what is pinned, read off a real run (2026-09-07).
+    Same reason as the introspection test above: `console.print.called` passes for any function that
+    prints anything at all. The usage line is the one a reader comes to help FOR — the three-argument
+    form that shows one proof's content — so that is what is pinned, read off a real run (2026-09-07).
+    Mutant: malformed markup on that usage line in apps/modules/proof_query.py — killed.
     """
-    import sys
-    from aipass.seedgo.apps.modules.proof_query import print_help
-
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    mock_cli.header.reset_mock()
     result = print_help()
-    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
+    printed = capsys.readouterr().out
     assert result is None
     assert "Proof Query Module" in printed, f"help never named the module: {printed!r}"
     assert "proof_query <pack> <proof>" in printed, f"help never showed the pack+proof form: {printed!r}"
 
 
-def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch):
-    """_discover_proof_packs discovers *_proof dirs containing *_content.py files."""
+def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch, capsys):
+    """Only *_proof dirs holding a *_content.py are packs.
+
+    Mutant: a pack admitted without content in apps/modules/proof_query.py — killed.
+    """
     # Build: tmp_path/handlers/ with pack subdirectories
     handlers_dir = tmp_path / "handlers"
     handlers_dir.mkdir()
@@ -182,37 +165,44 @@ def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch):
     not_a_pack = handlers_dir / "random_dir"
     not_a_pack.mkdir()  # not *_proof -- should be skipped
 
-    import aipass.seedgo.apps.modules.proof_query as pq_mod
-
     # Patch __file__ so Path(__file__).parent.parent / "handlers" -> handlers_dir
     fake_file = tmp_path / "modules" / "proof_query.py"
     fake_file.parent.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(pq_mod, "__file__", str(fake_file))
+    monkeypatch.setattr(proof_query, "__file__", str(fake_file))
 
-    packs = pq_mod._discover_proof_packs()
-    assert isinstance(packs, dict)
-    assert "code_proof" in packs, "Should discover 'code_proof' from code_proof/"
-    assert packs["code_proof"] == valid_pack
-    assert "empty_proof" not in packs, "Should skip dirs without *_content.py"
-    assert "random_dir" not in packs, "Should skip non-*_proof dirs"
+    # code_proof is a pack, and its path is valid_pack: the proof listed is the one written there.
+    capsys.readouterr()
+    assert proof_query.handle_command("proof_query", ["code_proof"]) is True
+    assert "drone @seedgo proof_query code_proof triplet" in capsys.readouterr().out
+    for skipped in ("empty_proof", "random_dir"):
+        with pytest.raises(CommandRefused) as refused:
+            proof_query.handle_command("proof_query", [skipped])
+        assert refused.value.token == skipped, f"Should skip {skipped}"
 
 
 def test_discover_proof_content_empty_dir(tmp_path):
     """_discover_proof_content returns empty dict for a directory with no content files."""
-    from aipass.seedgo.apps.modules.proof_query import _discover_proof_content
-
     result = _discover_proof_content(tmp_path)
     assert result == {}
 
 
-def test_discover_proof_content_finds_content_files(tmp_path):
-    """_discover_proof_content discovers *_content.py files correctly."""
-    from aipass.seedgo.apps.modules.proof_query import _discover_proof_content
+def test_discover_proof_content_finds_content_files(tmp_path, monkeypatch, capsys):
+    """A pack's proofs are its *_content.py files, suffix stripped.
 
-    # Create a fake content file
-    (tmp_path / "triplet_content.py").write_text("# fake", encoding="utf-8")
-    (tmp_path / "not_a_content.py").write_text("# fake", encoding="utf-8")
-    result = _discover_proof_content(tmp_path)
+    Mutant: the _content suffix kept in apps/modules/proof_query.py — killed.
+    """
+    pack = tmp_path / "handlers" / "fake_proof"
+    pack.mkdir(parents=True)
+    (pack / "triplet_content.py").write_text("# fake", encoding="utf-8")
+    (pack / "not_a_content.py").write_text("# fake", encoding="utf-8")
+    monkeypatch.setattr(proof_query, "__file__", str(tmp_path / "modules" / "proof_query.py"))
+    capsys.readouterr()
+    assert proof_query.handle_command("proof_query", ["fake_proof"]) is True
+    result = [
+        line.strip()
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("  ") and " " not in line.strip()
+    ]
     assert "triplet" in result
     assert "not_a_content" not in result
 
@@ -224,12 +214,9 @@ def test_discover_proof_content_finds_content_files(tmp_path):
 
 def test_help_after_the_pack_name_does_not_query(monkeypatch, tmp_path):
     """`drone @seedgo proof_query aipass_proof --help` looked up a proof named '--help'."""
-    from aipass.seedgo.apps.modules import proof_query
-
     monkeypatch.setattr(proof_query, "_discover_proof_packs", MagicMock(return_value={"aipass_proof": tmp_path}))
     show = MagicMock()
     monkeypatch.setattr(proof_query, "_show_proof_content", show)
-    monkeypatch.setattr(proof_query, "_list_pack_proofs", MagicMock())
     shown = MagicMock()
     monkeypatch.setattr(proof_query, "print_help", shown)
 
@@ -240,12 +227,9 @@ def test_help_after_the_pack_name_does_not_query(monkeypatch, tmp_path):
 
 def test_proof_query_still_queries_without_a_help_flag(monkeypatch, tmp_path):
     """The gate must not swallow the real command."""
-    from aipass.seedgo.apps.modules import proof_query
-
     monkeypatch.setattr(proof_query, "_discover_proof_packs", MagicMock(return_value={"aipass_proof": tmp_path}))
     show = MagicMock()
     monkeypatch.setattr(proof_query, "_show_proof_content", show)
-    monkeypatch.setattr(proof_query, "print_help", MagicMock())
 
     assert proof_query.handle_command("proof_query", ["aipass_proof", "triplet"]) is True
     assert show.call_count == 1
@@ -253,8 +237,4 @@ def test_proof_query_still_queries_without_a_help_flag(monkeypatch, tmp_path):
 
 def test_proof_query_does_not_answer_for_another_command(monkeypatch):
     """Ownership first: a help flag never makes a module claim a command it does not own."""
-    from aipass.seedgo.apps.modules import proof_query
-
-    monkeypatch.setattr(proof_query, "print_help", MagicMock())
-
     assert proof_query.handle_command("standards_query", ["--help"]) is False

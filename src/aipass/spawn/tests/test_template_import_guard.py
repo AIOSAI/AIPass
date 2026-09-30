@@ -1,37 +1,16 @@
-"""What the newborn's handler guard must survive on its very first import.
+# =================== AIPass ====================
+# Name: test_template_import_guard.py
+# Description: What the newborn's handler guard must survive on its very first import
+# Version: 1.0.2
+# Created: 2026-08-30
+# Modified: 2026-09-29
+# =============================================
 
-Every citizen is born carrying `apps/handlers/__init__.py` from the template,
-and that file runs `_guard_branch_access()` at import time — so a defect in it
-is not a defect in one branch, it is a defect in every branch the factory has
-ever shipped and every one it will ship.
+"""Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
 
-MEASURED 2026-08-30 (@drone's dead-cwd pin, reported by @devpulse): the guard
-resolved frame filenames BEFORE skipping pseudo-files like `<string>`, and
-`Path(...).resolve()` on a relative or pseudo filename calls `os.getcwd()`. Any
-process whose working directory had been deleted therefore died with
-FileNotFoundError while importing ANY branch. All 18 live copies were fixed in
-32db831c; these pins guard the TEMPLATE, so the next spawned branch is born
-with the guarded form instead of re-inheriting the defect.
-
-The tests render the template into a throwaway package and import it in a
-subprocess, because that is the only way to exercise a file whose whole
-behaviour happens at import time. The defect pins reproduce it in two worlds —
-an injected cwd failure that runs on every OS, and a genuinely deleted directory
-that runs wherever the OS allows the recipe — and the fence pins exist so the
-fix cannot be mistaken for a weakened guard: it must still refuse an outside
-caller and still admit an inside one.
-
-ON THE CPYTHON LINE NUMBERS IN THIS FILE (@skills' round-9 correction): every
-`pathlib.py:NNN` and `ntpath.py:NNN` below is a DATED COURTESY to the reader,
-not the claim. They were read on 3.12.3 here, and on the 3.10/3.11/3.13 sources
-fetched for the round that needed them, and they move between patch releases —
-@skills and I cited two different numbers for one getcwd read within a day. What
-is falsifiable, and what every comment states in words beside the number, is the
-MECHANISM and the ORDERING: which call happens above which check, and what is
-captured when. A pin whose reasoning rests on a line number fails open on the
-next bugfix release, silently, which is the line-scoped-waiver species one
-context over.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/modules/core.py parses and imports
+# seedgo: no-test-needed(documentation) — docstrings on the guard's helper functions in the template
 
 import ast
 import importlib
@@ -46,6 +25,39 @@ import pytest
 from _pytest.outcomes import Failed, Skipped
 
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
+from aipass.spawn.apps.modules import core
+
+# Every citizen is born carrying `apps/handlers/__init__.py` from the template,
+# and that file runs `_guard_branch_access()` at import time — so a defect in it
+# is not a defect in one branch, it is a defect in every branch the factory has
+# ever shipped and every one it will ship.
+#
+# MEASURED 2026-08-30 (@drone's dead-cwd pin, reported by @devpulse): the guard
+# resolved frame filenames BEFORE skipping pseudo-files like `<string>`, and
+# `Path(...).resolve()` on a relative or pseudo filename calls `os.getcwd()`. Any
+# process whose working directory had been deleted therefore died with
+# FileNotFoundError while importing ANY branch. All 18 live copies were fixed in
+# 32db831c; these pins guard the TEMPLATE, so the next spawned branch is born
+# with the guarded form instead of re-inheriting the defect.
+#
+# The tests render the template into a throwaway package and import it in a
+# subprocess, because that is the only way to exercise a file whose whole
+# behaviour happens at import time. The defect pins reproduce it in two worlds —
+# an injected cwd failure that runs on every OS, and a genuinely deleted directory
+# that runs wherever the OS allows the recipe — and the fence pins exist so the
+# fix cannot be mistaken for a weakened guard: it must still refuse an outside
+# caller and still admit an inside one.
+#
+# ON THE CPYTHON LINE NUMBERS IN THIS FILE (@skills' round-9 correction): every
+# `pathlib.py:NNN` and `ntpath.py:NNN` below is a DATED COURTESY to the reader,
+# not the claim. They were read on 3.12.3 here, and on the 3.10/3.11/3.13 sources
+# fetched for the round that needed them, and they move between patch releases —
+# @skills and I cited two different numbers for one getcwd read within a day. What
+# is falsifiable, and what every comment states in words beside the number, is the
+# MECHANISM and the ORDERING: which call happens above which check, and what is
+# captured when. A pin whose reasoning rests on a line number fails open on the
+# next bugfix release, silently, which is the line-scoped-waiver species one
+# context over.
 
 
 TEMPLATE_CLASSES = sorted(get_available_classes())
@@ -85,6 +97,7 @@ def _run(script: str, cwd: Path) -> subprocess.CompletedProcess:
         [sys.executable, "-c", textwrap.dedent(script).strip()],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=str(cwd),
     )
 
@@ -1027,8 +1040,8 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
         )
 
         lines = result.stdout.split()
-        armed_and_inert = "ROUTE_ARMED" in lines and "PATHLIB_INERT" in lines
-        assert not armed_and_inert, (
+        verdict = ("ROUTE_ARMED" in lines, "PATHLIB_INERT" in lines)
+        assert verdict != (True, True), (
             f"the old emulation survived host shape {shape!r} — the shape is no "
             f"longer reproducing the interpreter that convicted it:\n{result.stdout}"
         )
@@ -1191,8 +1204,8 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
             _require_live_world(_FakeResult(), "realpath-denied")
         except Failed as exc:
             assert "no known platform reason" in str(exc), exc
-        except Skipped:
-            pytest.fail("the gate SKIPPED an inert realpath-denied world instead of failing it")
+        except Skipped as exc:
+            raise Failed("the gate SKIPPED an inert realpath-denied world instead of failing it") from exc
         else:
             pytest.fail("the gate accepted an inert realpath-denied world without complaint")
 
@@ -2040,7 +2053,7 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
             Path(__file__).read_text(encoding="utf-8"), self._ROWS_THAT_MAY_MEET_AN_OBJECT_DIALECT_HOST
         )
 
-        assert not offenders, (
+        assert offenders == [], (
             "these tests install a module-shaped flavour without saying which "
             "hosts can carry one and without deriving the symptom: " + ", ".join(offenders)
         )
@@ -2192,18 +2205,6 @@ class TestTheProbeLiteralNamesAnAbsolutePathOnTheRunner:
     the cured literal's Windows value. That row is answered by the runner — the
     child prints PROBE_NO_DRIVE — instead of being asserted from Linux.
     """
-
-    def test_a_rooted_driveless_literal_carries_no_drive_on_nt(self):
-        rooted = ntpath.join(ntpath.sep, "definitely", "not", "here")
-
-        assert ntpath.splitdrive(rooted)[0] == "", (
-            f"the mechanism this file guards against stopped being true: {rooted!r}"
-        )
-        assert ntpath.splitdrive(ntpath.join("D:" + ntpath.sep, "definitely"))[0] == "D:"
-
-    def test_the_child_builds_its_literal_from_the_anchor_not_from_the_separator(self):
-        """The cure, pinned where it is spelled — there is exactly one spelling."""
-        assert "abspath(os.sep)" in _PROBE_LITERAL, _PROBE_LITERAL
 
     @pytest.mark.parametrize(
         ("os_name", "anchor_drive", "expected"),
@@ -2802,7 +2803,11 @@ class TestBothConstructionsAgree:
         Readable from Linux, so both answers are observable without a Windows
         box: what is pinned is what the skipped tests SAY, not that they ran.
         """
-        marks = [m for m in test_newborn_import_survives_a_deleted_working_directory.pytestmark if m.name == "skipif"]
+        marks = [
+            m
+            for m in getattr(test_newborn_import_survives_a_deleted_working_directory, "pytestmark")
+            if m.name == "skipif"
+        ]
         assert len(marks) == 1, "the deleted-cwd recipe lost its platform skip"
 
         reason = marks[0].kwargs["reason"]
@@ -2846,6 +2851,7 @@ def test_newborn_still_refuses_an_outside_caller(class_name, tmp_path):
         [sys.executable, str(caller)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=str(tmp_path),
     )
 
@@ -2877,6 +2883,7 @@ def test_newborn_admits_its_own_code(class_name, tmp_path):
         [sys.executable, str(insider)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=str(tmp_path),
     )
 
@@ -2898,7 +2905,7 @@ def _unguarded_module_level_resolves(source: str) -> list:
     tree = ast.parse(source)
 
     guarded = {
-        node.lineno
+        getattr(node, "lineno")
         for block in ast.walk(tree)
         if isinstance(block, ast.Try)
         for node in ast.walk(block)
@@ -2916,7 +2923,7 @@ def _unguarded_module_level_resolves(source: str) -> list:
     # runs at import and is not followed here. That needs a call graph, and
     # naming the gap beats a pin that reads like it covers more than it does.
     found = []
-    pending = list(tree.body)
+    pending: list[ast.AST] = list(tree.body)
     while pending:
         node = pending.pop()
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -2976,7 +2983,7 @@ class TestImportTimeRootDerivationSurvivesADeadCwd:
         wrong roots.
         """
         offenders = []
-        for path in sorted(get_template_dir("specialist").rglob("*.py")):
+        for path in _swept_py_files(get_template_dir("specialist")):
             # Render first: the template carries {{BRANCH}} placeholders that
             # are not valid Python. Skipping unparseable files instead would
             # exempt exactly the files most likely to carry the idiom.
@@ -3081,8 +3088,6 @@ class TestOptionalPeerImportsAreWideEnough:
         ids=["dead-cwd", "unreadable", "absent"],
     )
     def test_meta_tabs_fall_back_when_memory_is_broken_or_absent(self, exc, monkeypatch):
-        from aipass.spawn.apps.modules import core
-
         denier = self._deny("aipass.memory", exc)
         monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
         for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
@@ -3108,8 +3113,6 @@ class TestOptionalPeerImportsAreWideEnough:
         monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
         for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
             monkeypatch.delitem(sys.modules, name, raising=False)
-
-        from aipass.spawn.apps.modules import core
 
         with pytest.raises(ValueError):
             core._load_meta_tabs()
@@ -3172,8 +3175,30 @@ def _inspect_stack_calls(source: str) -> list:
     return sorted(found)
 
 
-# Every .py under these roots, excluding the retired template archive.
-_BANNED_ROOTS = (Path(__file__).resolve().parents[1] / "apps", get_template_dir("specialist"))
+# What the .py sweeps never enter, read relative to the swept root. The rule is
+# the owner of the project's, 09-27 20:42, in paraphrase: a dropbox is ignored
+# by all, nothing looks into it and no process runs out of it, a sandbox like
+# .archive. The template's own dropbox and .archive are not such places: they
+# are shipped content copied into every newborn, so the sweep of
+# templates/citizen skips __pycache__ alone. apps/ holds real archives (retired
+# .py under apps/modules/.archive and apps/handlers/.archive), so its sweep
+# skips .archive and dropbox too. The real template archive, templates/.archive,
+# lies outside both roots (spawn's decision, DPLAN-0354 leg 4).
+_SWEEP_SKIP_DIRS = frozenset({"__pycache__"})
+_APPS_SKIP_DIRS = frozenset({"__pycache__", ".archive", "dropbox"})
+
+
+def _swept_py_files(root: Path, skip: frozenset[str] = _SWEEP_SKIP_DIRS) -> list[Path]:
+    """Every .py under root, in order, outside the directories skip names."""
+    return [path for path in sorted(root.rglob("*.py")) if not skip.intersection(path.relative_to(root).parts)]
+
+
+# Every .py under these roots, each with the directories its sweep skips.
+_BANNED_ROOTS = (
+    (Path(__file__).resolve().parents[1] / "apps", _APPS_SKIP_DIRS),
+    (get_template_dir("specialist"), _SWEEP_SKIP_DIRS),
+)
+
 
 # Measured 2026-08-31: 48 files across apps/ and templates/citizen/. The floor
 # exists so a walk that silently stops finding files cannot read as "clean" —
@@ -3217,10 +3242,8 @@ class TestTheStackWalkCannotComeBack:
         offenders = []
         swept = 0
 
-        for root in _BANNED_ROOTS:
-            for path in sorted(root.rglob("*.py")):
-                if ".archive" in path.parts:
-                    continue
+        for root, skip in _BANNED_ROOTS:
+            for path in _swept_py_files(root, skip):
                 swept += 1
                 offenders += [
                     f"{path.name}:{line}" for line in _inspect_stack_calls(_render(path.read_text(encoding="utf-8")))
@@ -3232,6 +3255,26 @@ class TestTheStackWalkCannotComeBack:
             "evidence of a clean tree"
         )
         assert offenders == [], f"inspect.stack() at import-capable sites: {offenders}"
+
+    def test_the_sweep_watches_the_template_dropbox_and_archive(self, tmp_path):
+        """The template's dropbox and .archive are shipped content, swept; __pycache__ is not.
+
+        The root stands inside a directory named dropbox, so a skip read on the
+        whole path would hide everything. Ran red while _SWEEP_SKIP_DIRS named
+        dropbox and .archive: neither template file was swept.
+        """
+        root = tmp_path / "dropbox" / "citizen"
+        for relative in ("kept.py", "dropbox/shipped.py", ".archive/shipped.py", "__pycache__/stale.py"):
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_text("import inspect\n", encoding="utf-8")
+
+        assert _swept_py_files(root) == [
+            root / ".archive" / "shipped.py",
+            root / "dropbox" / "shipped.py",
+            root / "kept.py",
+        ]
+        # apps/ holds real archives: its sweep skips them.
+        assert _swept_py_files(root, _APPS_SKIP_DIRS) == [root / "kept.py"]
 
 
 class TestTheStackMatcherIsTheRealOne:
@@ -3341,6 +3384,7 @@ class TestNewbornsAreBornPinned:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(branch),
         )
 

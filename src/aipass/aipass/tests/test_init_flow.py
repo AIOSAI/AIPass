@@ -1,12 +1,18 @@
 # =================== AIPass ====================
 # Name: test_init_flow.py
 # Description: Tests for aipass init_flow Phase 3
-# Version: 1.1.0
+# Version: 1.2.6
 # Created: 2026-04-16
-# Modified: 2026-09-15
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for aipass init_flow module — Phase 3 (FPLAN-0188)."""
+"""Tests for apps/modules/init_flow.py and the handlers it drives."""
+
+# Phase 3 (FPLAN-0188).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every stage function and helper in init_flow.py parses and imports
+# seedgo: no-test-needed(documentation) — that the public stage_* functions carry docstrings
 
 import json
 from pathlib import Path
@@ -15,16 +21,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.aipass.apps.handlers.init.bootstrap import init_project
+from aipass.aipass.apps.modules import doctor
 from aipass.aipass.apps.modules.init_flow import (
     AIPASS_SPECIFIC_STAGES,
+    STYLE_CHOICES,
     TEMPLATE_AIPASS,
     TEMPLATE_CHOICES,
     TEMPLATE_EMPTY,
     TOTAL_STAGES,
-    _get_last_completed_stage,
-    _get_setup_progress,
-    _handle_init_update,
-    _save_stage,
     handle_command,
     print_help,
     print_introspection,
@@ -48,12 +53,6 @@ from aipass.aipass.apps.modules.init_flow import (
 
 _POLICY_MOD = "aipass.aipass.apps.modules.init_flow"
 
-# Bound at import, so the two resolver tests below measure the REAL function while
-# the autouse fixture has the module attribute patched for everyone else.
-from aipass.aipass.apps.modules.init_flow import (  # noqa: E402
-    _get_test_write_policy_path as _real_policy_path,
-)
-
 
 @pytest.fixture
 def tmp_local_json(tmp_path: Path) -> Generator[Path, None, None]:
@@ -64,8 +63,19 @@ def tmp_local_json(tmp_path: Path) -> Generator[Path, None, None]:
         yield local_json
 
 
+@pytest.fixture
+def real_policy_resolver() -> None:
+    """Opt a test out of the autouse policy redirect below, so the REAL resolver runs.
+
+    Only for tests that reach the resolver through stage_1_welcome(dry_run=True):
+    the dry run prints the resolved path and writes nothing, and they stand in a
+    tmp_path project, so the real resolver cannot put a policy anywhere live.
+    """
+    return None
+
+
 @pytest.fixture(autouse=True)
-def test_write_policy_stays_in_tmp(tmp_path: Path) -> Generator[Path, None, None]:
+def test_write_policy_stays_in_tmp(tmp_path: Path, request: pytest.FixtureRequest) -> Generator[Path, None, None]:
     """No test in this file stamps a test-write policy into the real tree.
 
     stage_1_welcome calls _stamp_test_write_policy, which resolved bare cwd until
@@ -73,9 +83,13 @@ def test_write_policy_stays_in_tmp(tmp_path: Path) -> Generator[Path, None, None
     .aipass/test_write_policy.json beside the fleet's live one, and @hooks' gate
     walks up and reads the nearest copy first (found in the tree by @devpulse,
     twice: DPLAN-0337 R5 and again tonight). Tests that patch the path themselves
-    still win; this is the floor for the ones that do not.
+    still win; this is the floor for the ones that do not. A test asking for
+    real_policy_resolver keeps the real resolver on a dry run (see there).
     """
     policy = tmp_path / "policy-home" / ".aipass" / "test_write_policy.json"
+    if "real_policy_resolver" in request.fixturenames:
+        yield policy
+        return
     with patch(f"{_POLICY_MOD}._get_test_write_policy_path", return_value=policy):
         yield policy
 
@@ -98,29 +112,47 @@ def tmp_local_json_with_progress(tmp_local_json: Path) -> Path:
 # =============================================================================
 
 
+def _info_line(capsys: pytest.CaptureFixture[str]) -> str:
+    """Run `aipass init --info` through the command; return stdout, whitespace folded."""
+    assert handle_command("init", ["--info"]) is True
+    out, _err = capsys.readouterr()
+    return " ".join(out.split())
+
+
 class TestGetSetupProgress:
-    def test_returns_defaults_when_no_file(self, tmp_local_json) -> None:
-        """Returns default progress dict when local.json absent."""
-        result = _get_setup_progress()
-        assert result["last_completed_stage"] == 0
-        assert result["stages"] == {}
+    """The progress reader, read through `aipass init --info`, the door that shows it."""
 
-    def test_reads_existing_progress(self, tmp_local_json_with_progress) -> None:
-        """Returns stored progress when setup_progress key exists."""
-        result = _get_setup_progress()
-        assert result["last_completed_stage"] == 3
+    def test_returns_defaults_when_no_file(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
+        """No progress file reads as not started, and nothing is created by reading."""
+        assert "Setup not started" in _info_line(capsys)
+        assert not tmp_local_json.exists()
 
-    def test_returns_defaults_on_missing_key(self, tmp_local_json) -> None:
-        """Returns defaults when local.json has no setup_progress key."""
-        tmp_local_json.write_text(json.dumps({"user": {}}))
-        result = _get_setup_progress()
-        assert result["last_completed_stage"] == 0
+    def test_reads_existing_progress(self, tmp_local_json_with_progress, capsys: pytest.CaptureFixture[str]) -> None:
+        """Stored progress is read back: stage 3 of the fixture is what the door reports."""
+        assert f"stage 3/{TOTAL_STAGES} completed." in _info_line(capsys)
 
-    def test_handles_corrupt_file(self, tmp_local_json) -> None:
-        """Returns defaults on corrupt JSON."""
-        tmp_local_json.write_text("BAD JSON")
-        result = _get_setup_progress()
-        assert result["last_completed_stage"] == 0
+    def test_returns_defaults_on_missing_key(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
+        """A file with no setup_progress key reads as not started, not as an error."""
+        tmp_local_json.write_text(json.dumps({"user": {}}), encoding="utf-8")
+        printed = _info_line(capsys)
+        assert "Setup not started" in printed
+        assert "In progress" not in printed
+
+    def test_handles_corrupt_file(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
+        """Corrupt JSON reads as not started, and the user is told the file is unreadable.
+
+        Until 2026-09-28 the reader answered {} for a corrupt file, the same answer
+        as a missing one, so `aipass init` said "not started" over a stored
+        progress it could not read and the next saved stage replaced it silently.
+        Mutant 2026-09-28: the unreadable-file warning() sent to logger.warning instead reddens this.
+        """
+        tmp_local_json.write_text("BAD JSON", encoding="utf-8")
+        assert handle_command("init", ["--info"]) is True
+
+        out, err = capsys.readouterr()
+        assert "Setup not started" in out
+        assert "Init progress file unreadable" in err
+        assert "local.json" in err
 
 
 # =============================================================================
@@ -129,13 +161,39 @@ class TestGetSetupProgress:
 
 
 class TestGetLastCompletedStage:
-    def test_returns_zero_on_fresh_state(self, tmp_local_json) -> None:
-        """Returns 0 when no stages have been completed."""
-        assert _get_last_completed_stage() == 0
+    """The last completed stage decides where `aipass init run` starts; read through the command."""
 
-    def test_returns_stage_number(self, tmp_local_json_with_progress) -> None:
-        """Returns the last_completed_stage value from progress."""
-        assert _get_last_completed_stage() == 3
+    @staticmethod
+    def _first_stage_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> int:
+        """Run `aipass init run` (empty template) with every stage stubbed; return the first stage called."""
+        monkeypatch.chdir(tmp_path)
+        names = [
+            "stage_1_welcome",
+            "stage_2_system_detect",
+            "stage_3_user_profile",
+            "stage_4_style_questions",
+            "stage_5_tool_choice",
+            "stage_6_first_agent",
+            "stage_7_ping_sweep",
+            "stage_8_smoke_test",
+            "stage_9_handoff",
+            "stage_10_done",
+        ]
+        stubs = {name: MagicMock(return_value={}) for name in names}
+        with (
+            patch.multiple("aipass.aipass.apps.modules.init_flow", **stubs),
+            pytest.raises(SystemExit),
+        ):
+            handle_command("init", ["run", "--template", TEMPLATE_EMPTY])
+        return next(i for i, name in enumerate(names, start=1) if stubs[name].called)
+
+    def test_returns_zero_on_fresh_state(self, tmp_local_json, tmp_path, monkeypatch) -> None:
+        """Nothing completed: the run starts at stage 1."""
+        assert self._first_stage_run(tmp_path, monkeypatch) == 1
+
+    def test_returns_stage_number(self, tmp_local_json_with_progress, tmp_path, monkeypatch) -> None:
+        """Three completed in the fixture: the run starts at stage 4."""
+        assert self._first_stage_run(tmp_path, monkeypatch) == 4
 
 
 # =============================================================================
@@ -144,60 +202,96 @@ class TestGetLastCompletedStage:
 
 
 class TestSaveStage:
+    """The progress save, reached through the public stages that call it.
+
+    stage_4_style_questions saves {"style": ...} and stage_10_done saves no data;
+    both write only tmp_local_json here.
+    """
+
     def test_saves_stage_data(self, tmp_local_json) -> None:
         """Stage data is written to setup_progress.stages."""
-        _save_stage(1, {"foo": "bar"})
-        stored = json.loads(tmp_local_json.read_text())
-        assert stored["setup_progress"]["last_completed_stage"] == 1
-        assert stored["setup_progress"]["stages"]["1"]["foo"] == "bar"
+        stage_4_style_questions(non_interactive=True, style_override="just-exploring")
+        stored = json.loads(tmp_local_json.read_text(encoding="utf-8"))
+        assert stored["setup_progress"]["last_completed_stage"] == 4
+        assert stored["setup_progress"]["stages"]["4"]["style"] == "just-exploring"
 
     def test_save_increments_last_completed(self, tmp_local_json) -> None:
         """last_completed_stage advances after each save."""
-        _save_stage(1, {})
-        _save_stage(2, {})
-        stored = json.loads(tmp_local_json.read_text())
-        assert stored["setup_progress"]["last_completed_stage"] == 2
+        stage_4_style_questions(non_interactive=True)
+        stage_10_done()
+        stored = json.loads(tmp_local_json.read_text(encoding="utf-8"))
+        assert stored["setup_progress"]["last_completed_stage"] == 10
 
     def test_preserves_existing_stages(self, tmp_local_json_with_progress: Path) -> None:
         """Earlier stage data is not overwritten when saving a later stage."""
-        _save_stage(4, {"new": "data"})
+        stage_4_style_questions(non_interactive=True)
         stored = json.loads(tmp_local_json_with_progress.read_text(encoding="utf-8"))
         assert "1" in stored["setup_progress"]["stages"]
         assert "4" in stored["setup_progress"]["stages"]
 
+    def test_unreadable_progress_is_replaced_by_the_saved_stage(self, tmp_local_json) -> None:
+        """A progress file that is not JSON is replaced by a fresh record holding the stage.
+
+        Green on its first run; the proof is two mutants on _save_stage's None guard.
+        Mutant: guard removed -> red by the escaping AttributeError on None.get, not by the assert.
+        Mutant: guard turned into a plain return -> red by the assert on the file.
+        """
+        tmp_local_json.write_text("{not json", encoding="utf-8")
+        stage_10_done()
+        text = tmp_local_json.read_text(encoding="utf-8")
+        assert text != "{not json"
+        stored = json.loads(text)
+        assert stored["setup_progress"]["last_completed_stage"] == 10
+        assert "10" in stored["setup_progress"]["stages"]
+
     def test_timestamps_stage(self, tmp_local_json) -> None:
         """Saved stage includes a 'timestamp' field."""
-        _save_stage(1, {})
-        stored = json.loads(tmp_local_json.read_text())
-        assert "timestamp" in stored["setup_progress"]["stages"]["1"]
+        stage_10_done()
+        stored = json.loads(tmp_local_json.read_text(encoding="utf-8"))
+        assert "timestamp" in stored["setup_progress"]["stages"]["10"]
 
-    def test_stamps_test_write_policy_in_hooks_shape(self, tmp_local_json) -> None:
+    def test_stamps_test_write_policy_in_hooks_shape(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
         """A fresh init stamps the policy in the exact shape @hooks' reader validates.
 
         The three keys their validator consumes (mailed 2026-09-07, checked by
         them against their live file): agent_test_writing is the STRING "off" --
         a boolean is REFUSED -- allow is an array, block_test_edits a bool.
+        Reached through the public stage 1, which stamps it and says so.
         """
-        from aipass.aipass.apps.modules.init_flow import _stamp_test_write_policy
-
         policy = tmp_local_json.parent.parent / ".aipass" / "test_write_policy.json"
         with patch(
             "aipass.aipass.apps.modules.init_flow._get_test_write_policy_path",
             return_value=policy,
         ):
-            assert _stamp_test_write_policy() is True
+            stage_1_welcome()
 
-        stored = json.loads(policy.read_text())
+        assert "Test-write policy stamped (gate off)" in capsys.readouterr().out
+        stored = json.loads(policy.read_text(encoding="utf-8"))
         assert stored["agent_test_writing"] == "off"
         assert not isinstance(stored["agent_test_writing"], bool)
         assert stored["allow"] == []
         assert stored["block_test_edits"] is False
 
-    def test_policy_path_is_the_registry_root_not_cwd(self, tmp_path, monkeypatch) -> None:
+    @staticmethod
+    def _dry_run_policy_target(capsys: pytest.CaptureFixture[str]) -> str:
+        """Run stage 1 as a dry run; return where it says it would stamp, whitespace folded out."""
+        capsys.readouterr()
+        stage_1_welcome(dry_run=True)
+        printed = "".join(capsys.readouterr().out.split())
+        marker = "wouldstamptest-writepolicyat"
+        assert marker in printed
+        return printed.split(marker, 1)[1]
+
+    def test_policy_path_is_the_registry_root_not_cwd(
+        self, tmp_path, monkeypatch, real_policy_resolver, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """The policy belongs to the project: a run from a subdirectory must not fork it.
 
         Red before 2026-09-15: bare Path.cwd() put a second policy in whatever
         directory the caller stood in, and @hooks' gate reads the nearest one first.
+        Read through stage 1's dry run with the real resolver: it names the target
+        and writes nothing.
+        Mutant 2026-09-28: `registry.parent / ".aipass"` -> `Path.cwd() / ".aipass"` reddens this.
         """
         project = tmp_path / "project"
         (project / "src" / "aipass" / "aipass").mkdir(parents=True)
@@ -205,32 +299,35 @@ class TestSaveStage:
         monkeypatch.chdir(project / "src" / "aipass" / "aipass")
         monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
 
-        assert _real_policy_path() == project / ".aipass" / "test_write_policy.json"
+        target = self._dry_run_policy_target(capsys)
 
-    def test_policy_path_falls_back_to_cwd_on_a_fresh_install(self, tmp_path, monkeypatch) -> None:
-        """No registry yet means a fresh install: cwd IS the project root there."""
+        assert target == "".join(str(project / ".aipass" / "test_write_policy.json").split())
+        assert not (project / ".aipass").exists()
+
+    def test_policy_path_falls_back_to_cwd_on_a_fresh_install(
+        self, tmp_path, monkeypatch, real_policy_resolver, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """No registry yet means a fresh install: cwd IS the project root there (stage 1 dry run)."""
         fresh = tmp_path / "fresh"
         fresh.mkdir()
         monkeypatch.chdir(fresh)
         monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
         with patch(f"{_MOD}.find_registry", return_value=None):
-            resolved = _real_policy_path()
+            target = self._dry_run_policy_target(capsys)
 
-        assert resolved == fresh / ".aipass" / "test_write_policy.json"
+        assert target == "".join(str(fresh / ".aipass" / "test_write_policy.json").split())
+        assert not (fresh / ".aipass").exists()
 
     def test_stage_1_writes_no_policy_outside_the_project(self, tmp_local_json, tmp_path) -> None:
         """The door that leaked: stage 1 stamps only where the resolver points."""
         before = {p for p in Path.cwd().glob(".aipass/*")}
 
-        with patch(f"{_MOD}.console"):
-            stage_1_welcome()
+        stage_1_welcome()
 
         assert {p for p in Path.cwd().glob(".aipass/*")} == before
 
-    def test_test_write_policy_is_never_clobbered(self, tmp_local_json) -> None:
-        """An existing policy may hold a deliberate flip — init must not repeal it."""
-        from aipass.aipass.apps.modules.init_flow import _stamp_test_write_policy
-
+    def test_test_write_policy_is_never_clobbered(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
+        """An existing policy may hold a deliberate flip — init must not repeal it (through stage 1)."""
         policy = tmp_local_json.parent.parent / ".aipass" / "test_write_policy.json"
         policy.parent.mkdir(parents=True, exist_ok=True)
         local_ruling = '{"agent_test_writing": "on", "allow": ["canary"]}'
@@ -240,9 +337,10 @@ class TestSaveStage:
             "aipass.aipass.apps.modules.init_flow._get_test_write_policy_path",
             return_value=policy,
         ):
-            assert _stamp_test_write_policy() is False
+            stage_1_welcome()
 
         assert policy.read_text(encoding="utf-8") == local_ruling
+        assert "Test-write policy stamped" not in capsys.readouterr().out
 
     def test_write_goes_through_the_json_service(self, tmp_local_json) -> None:
         """The progress write routes through the fleet service, not a hand-rolled writer.
@@ -256,25 +354,37 @@ class TestSaveStage:
             "aipass.aipass.apps.modules.init_flow.json_handler.write_json",
             return_value=True,
         ) as mock_write:
-            _save_stage(1, {"foo": "bar"})
+            stage_4_style_questions(non_interactive=True, style_override="just-exploring")
 
         mock_write.assert_called_once()
         written_path, written_data = mock_write.call_args[0][0], mock_write.call_args[0][1]
         assert Path(written_path) == tmp_local_json
-        assert written_data["setup_progress"]["stages"]["1"]["foo"] == "bar"
+        assert written_data["setup_progress"]["stages"]["4"]["style"] == "just-exploring"
 
     def test_failed_write_raises_instead_of_answering_false(self, tmp_local_json) -> None:
         """A lost init stage must not look identical to a saved one.
 
         The service answers False and logs rather than raising; callers here are
         written against OSError, so the False is turned back into one.
+
+        The failure is also signalled on the bus: the trigger object is patched
+        where it lives (the name init_flow imports at fire time), so no event
+        reaches the real bus, and the one fire is asserted with its arguments.
+        Mutant 2026-09-28: the fired event renamed "profile_write_failed" -> "file_deleted" reddens this.
         """
-        with patch(
-            "aipass.aipass.apps.modules.init_flow.json_handler.write_json",
-            return_value=False,
+        with (
+            patch(
+                "aipass.aipass.apps.modules.init_flow.json_handler.write_json",
+                return_value=False,
+            ),
+            patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
         ):
             with pytest.raises(OSError):
-                _save_stage(1, {})
+                stage_10_done()
+
+        mock_trigger.fire.assert_called_once_with(
+            "profile_write_failed", path=str(tmp_local_json), reason="write_failure_cleanup"
+        )
 
 
 # =============================================================================
@@ -283,33 +393,38 @@ class TestSaveStage:
 
 
 class TestPrintIntrospection:
-    def test_not_started(self, tmp_local_json) -> None:
-        """Stage 0 prints the not-started line and the command that starts it."""
-        with patch("aipass.aipass.apps.modules.init_flow.console") as mock_console:
-            print_introspection()
-        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
-        assert "Setup not started. Run: aipass init run" in printed
+    def test_not_started(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
+        """Stage 0 prints the not-started line and the command that starts it.
 
-    def test_in_progress(self, tmp_local_json_with_progress) -> None:
-        """A part-done setup prints the stage reached and where it resumes."""
-        with patch("aipass.aipass.apps.modules.init_flow.console") as mock_console:
-            print_introspection()
-        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+        Mutant 2026-09-27: the line cut to "Setup not started." reddens this.
+        """
+        print_introspection()
+        out, _err = capsys.readouterr()
+        assert "Setup not started. Run: aipass init run" in " ".join(out.split())
+
+    def test_in_progress(self, tmp_local_json_with_progress, capsys: pytest.CaptureFixture[str]) -> None:
+        """A part-done setup prints the stage reached and where it resumes.
+
+        Mutant 2026-09-27: "resume from stage {last}" in place of {last + 1} reddens this.
+        """
+        print_introspection()
+        out, _err = capsys.readouterr()
+        printed = " ".join(out.split())
         assert f"stage 3/{TOTAL_STAGES} completed." in printed
         assert "resume from stage 4" in printed
 
-    def test_complete(self, tmp_local_json) -> None:
-        """A finished setup reports completion through success(), not a stage line."""
+    def test_complete(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
+        """A finished setup reports completion through success(), not a stage line.
+
+        Mutant 2026-09-27: `last > TOTAL_STAGES` in place of `>=` reddens this.
+        """
         data = {"setup_progress": {"last_completed_stage": TOTAL_STAGES, "stages": {}}}
-        tmp_local_json.write_text(json.dumps(data))
-        with (
-            patch("aipass.aipass.apps.modules.init_flow.console") as mock_console,
-            patch("aipass.aipass.apps.modules.init_flow.success") as mock_success,
-        ):
+        tmp_local_json.write_text(json.dumps(data), encoding="utf-8")
+        with patch("aipass.aipass.apps.modules.init_flow.success") as mock_success:
             print_introspection()
-        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+        out, _err = capsys.readouterr()
         assert mock_success.call_args[0][0] == "Setup complete."
-        assert "In progress:" not in printed
+        assert "In progress:" not in out
 
 
 # =============================================================================
@@ -318,7 +433,7 @@ class TestPrintIntrospection:
 
 
 class TestPrintHelp:
-    def test_calls_console_print(self) -> None:
+    def test_calls_console_print(self, capsys: pytest.CaptureFixture[str]) -> None:
         """print_help outputs via console.print.
 
         Absorbed the sibling `test_does_not_raise` on 2026-09-07 (DPLAN-0323
@@ -326,10 +441,11 @@ class TestPrintHelp:
         print_help raise killed BOTH tests identically, because both patched the
         same console and made the same call -- so this one, which additionally
         asserts console.print was reached, strictly subsumed it.
+        Mutant 2026-09-27: the "init update --dry-run" usage line renamed to --preview reddens this.
         """
-        with patch("aipass.aipass.apps.modules.init_flow.console") as mock_console:
-            print_help()
-        assert mock_console.print.called
+        print_help()
+        out, _err = capsys.readouterr()
+        assert "aipass init update --dry-run" in out
 
 
 # =============================================================================
@@ -371,14 +487,47 @@ class TestHandleCommand:
         assert result is True
         mock_help.assert_called_once()
 
-    def test_run_subcommand_calls_run_init(self, tmp_local_json) -> None:
-        """'init run' routes to run_init."""
-        with patch("aipass.aipass.apps.modules.init_flow._preflight_check", return_value=None):
-            with patch("aipass.aipass.apps.modules.init_flow.run_init", return_value=0) as mock_run:
-                with pytest.raises(SystemExit) as exc_info:
-                    handle_command("init", ["run"])
+    def test_run_subcommand_calls_run_init(
+        self, tmp_local_json: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolate_profile_store: Path
+    ) -> None:
+        """'init run --name --style' routes to run_init, and the two flags land.
+
+        Stages 3 and 4 run for real, so the effect is measured where the user
+        would see it: the name in the profile store (conftest's autouse temp
+        store) and the style in the progress file (tmp_local_json). Every other
+        stage is stubbed, cwd is tmp_path and the empty template builds no
+        scaffold, so nothing reaches live state. "just-exploring" is not the
+        non-interactive default, so a dropped --style cannot pass by luck.
+        Mutant 2026-09-28: `name = _flag_value("--name")` -> `name = None` reddens this.
+        Mutant 2026-09-28: `style = _flag_value("--style")` -> `style = None` reddens this.
+        """
+        monkeypatch.chdir(tmp_path)
+        stubbed = {
+            name: MagicMock(return_value={})
+            for name in (
+                "stage_1_welcome",
+                "stage_2_system_detect",
+                "stage_5_tool_choice",
+                "stage_6_first_agent",
+                "stage_7_ping_sweep",
+                "stage_8_smoke_test",
+                "stage_9_handoff",
+                "stage_10_done",
+            )
+        }
+        with (
+            patch.multiple("aipass.aipass.apps.modules.init_flow", **stubbed),
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            run_args = ["run", "--non-interactive", "--template", TEMPLATE_EMPTY]
+            handle_command("init", [*run_args, "--name", "Ada", "--style", "just-exploring"])
         assert exc_info.value.code == 0
-        mock_run.assert_called_once()
+        stored = json.loads((isolate_profile_store / "user_profile.json").read_text(encoding="utf-8"))
+        assert stored["profile"]["name"] == "Ada"
+        progress = json.loads(tmp_local_json.read_text(encoding="utf-8"))["setup_progress"]["stages"]
+        assert progress["3"]["name"] == "Ada"
+        assert progress["4"]["style"] == "just-exploring"
 
     def test_positional_args_treated_as_scaffold_target(self, tmp_local_json) -> None:
         """Positional args are treated as target path for scaffold."""
@@ -428,9 +577,8 @@ class TestRunInit:
     def test_already_complete_returns_zero(self, tmp_local_json) -> None:
         """Returns 0 immediately when all stages already done."""
         data = {"setup_progress": {"last_completed_stage": TOTAL_STAGES, "stages": {}}}
-        tmp_local_json.write_text(json.dumps(data))
-        with patch("aipass.aipass.apps.modules.init_flow.console"):
-            result = run_init(non_interactive=True)
+        tmp_local_json.write_text(json.dumps(data), encoding="utf-8")
+        result = run_init(non_interactive=True)
         assert result == 0
 
     def test_non_interactive_runs_all_stages(self, tmp_local_json) -> None:
@@ -442,17 +590,26 @@ class TestRunInit:
             mocks.append(ctx.enter_context(p))
         with ctx:
             with patch("aipass.aipass.apps.modules.init_flow.json_handler", autospec=True):
-                with patch("aipass.aipass.apps.modules.init_flow.console"):
-                    result = run_init(non_interactive=True, template=TEMPLATE_AIPASS)
+                result = run_init(non_interactive=True, template=TEMPLATE_AIPASS)
         assert result == 0
 
-    def test_keyboard_interrupt_pauses_gracefully(self, tmp_local_json) -> None:
-        """KeyboardInterrupt during a stage returns 0 (resume later)."""
-        with patch("aipass.aipass.apps.modules.init_flow.stage_1_welcome", side_effect=KeyboardInterrupt):
-            with patch("aipass.aipass.apps.modules.init_flow.console"):
-                with patch("aipass.aipass.apps.modules.init_flow.warning"):
-                    result = run_init(non_interactive=False, template=TEMPLATE_EMPTY)
-        assert result == 0
+    def test_keyboard_interrupt_pauses_gracefully(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
+        """Ctrl-C during a stage pauses with a resume hint and exits 130, never 0.
+
+        Until 2026-09-28 a pause exited 0, the same code as a finished init, so
+        `aipass init run && next-step` went on after the user stopped it. 130 is
+        the shell's code for an interrupt; the progress file keeps the resume.
+        Mutant 2026-09-28: the paused `return 130` put back to `return 0` reddens this.
+        """
+        with (
+            patch("aipass.aipass.apps.modules.init_flow.stage_1_welcome", side_effect=KeyboardInterrupt),
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            handle_command("init", ["run", "--template", TEMPLATE_EMPTY])
+
+        assert exit_info.value.code == 130
+        _out, err = capsys.readouterr()
+        assert "Paused at stage 1. Run 'aipass init run' to resume." in err
 
     def test_stage_error_continues(self, tmp_local_json) -> None:
         """Exception in a stage is logged and execution continues."""
@@ -479,7 +636,6 @@ class TestRunInit:
             stage_9_handoff=MagicMock(return_value={}),
             stage_10_done=MagicMock(return_value={}),
             warning=MagicMock(),
-            console=MagicMock(),
         ):
             result = run_init(non_interactive=True, template=TEMPLATE_AIPASS)
         assert result == 0
@@ -502,7 +658,6 @@ class TestRunInit:
             stage_9_handoff=MagicMock(return_value={}),
             stage_10_done=MagicMock(return_value={}),
             warning=MagicMock(),
-            console=MagicMock(),
         ):
             run_init(non_interactive=True, template=TEMPLATE_AIPASS)
         stage_1_mock.assert_not_called()
@@ -521,17 +676,15 @@ class TestStages:
 
     def test_stage_1_welcome_returns_dict(self, tmp_local_json) -> None:
         """stage_1_welcome runs and returns {}."""
-        with patch(f"{_MOD}.console"):
-            result = stage_1_welcome()
+        result = stage_1_welcome()
         assert result == {}
-        stored = json.loads(tmp_local_json.read_text())
+        stored = json.loads(tmp_local_json.read_text(encoding="utf-8"))
         assert stored["setup_progress"]["last_completed_stage"] == 1
 
     def test_stage_2_system_detect_returns_system_data(self, tmp_local_json) -> None:
         """stage_2_system_detect returns dict with os/python/shell keys."""
         with patch.multiple(
             _MOD,
-            console=MagicMock(),
             detect_python=MagicMock(return_value={"version": "3.12.0", "ok": True}),
             detect_git=MagicMock(return_value={"found": True, "version": "2.43"}),
             detect_shell=MagicMock(return_value={"name": "bash", "path": "/bin/bash"}),
@@ -542,7 +695,7 @@ class TestStages:
             detect_tmux=MagicMock(return_value=True),
             detect_wt=MagicMock(return_value=False),
         ):
-            result = stage_2_system_detect(non_interactive=True)
+            result = stage_2_system_detect()
         assert result["os"] == "Linux"
         assert result["python"] == "3.12.0"
         assert result["shell"] == "bash"
@@ -553,10 +706,9 @@ class TestStages:
         mock_profile_mod.get_user_profile.return_value = {
             f: None for f in ["name", "os", "shell", "preferred_cli", "install_method", "first_seen"]
         }
-        with patch(f"{_MOD}.console"):
-            with patch(f"{_MOD}.detect_os", return_value={"os_name": "Linux", "release": "6.0", "machine": "x86"}):
-                with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
-                    result = stage_3_user_profile(non_interactive=True)
+        with patch(f"{_MOD}.detect_os", return_value={"os_name": "Linux", "release": "6.0", "machine": "x86"}):
+            with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
+                result = stage_3_user_profile(non_interactive=True)
         assert result["name"] == "User"
 
     def test_stage_3_name_override(self, tmp_local_json) -> None:
@@ -565,35 +717,31 @@ class TestStages:
         mock_profile_mod.get_user_profile.return_value = {
             f: None for f in ["name", "os", "shell", "preferred_cli", "install_method", "first_seen"]
         }
-        with patch(f"{_MOD}.console"):
-            with patch(f"{_MOD}.detect_os", return_value={"os_name": "Linux", "release": "6.0", "machine": "x86"}):
-                with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
-                    result = stage_3_user_profile(non_interactive=True, name_override="user")
+        with patch(f"{_MOD}.detect_os", return_value={"os_name": "Linux", "release": "6.0", "machine": "x86"}):
+            with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
+                result = stage_3_user_profile(non_interactive=True, name_override="user")
         assert result["name"] == "user"
 
     def test_stage_4_non_interactive_returns_first_choice(self, tmp_local_json) -> None:
-        """non_interactive=True selects first STYLE_CHOICES entry."""
-        with patch(f"{_MOD}.console"):
-            result = stage_4_style_questions(non_interactive=True)
-        assert "style" in result
-        assert result["style"] is not None
+        """non_interactive=True selects first STYLE_CHOICES entry.
+
+        Mutant: STYLE_CHOICES[0] -> STYLE_CHOICES[1] in the non-interactive branch -> red.
+        """
+        result = stage_4_style_questions(non_interactive=True)
+        assert result["style"] == "building-my-own-project"
 
     def test_stage_4_style_override(self, tmp_local_json) -> None:
         """style_override is honoured when it's a valid choice."""
-        from aipass.aipass.apps.modules.init_flow import STYLE_CHOICES
-
         override = STYLE_CHOICES[0]
-        with patch(f"{_MOD}.console"):
-            result = stage_4_style_questions(non_interactive=True, style_override=override)
+        result = stage_4_style_questions(non_interactive=True, style_override=override)
         assert result["style"] == override
 
     def test_stage_5_non_interactive_defaults_to_claude(self, tmp_local_json) -> None:
         """non_interactive=True selects 'claude' as CLI."""
         mock_profile_mod = MagicMock()
         mock_profile_mod.get_user_profile.return_value = {}
-        with patch(f"{_MOD}.console"):
-            with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
-                result = stage_5_tool_choice(non_interactive=True)
+        with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
+            result = stage_5_tool_choice(non_interactive=True)
         assert result["cli"] == "claude"
         assert result["flag_variant"] == "default"
 
@@ -601,20 +749,18 @@ class TestStages:
         """cli_override sets the CLI choice."""
         mock_profile_mod = MagicMock()
         mock_profile_mod.get_user_profile.return_value = {}
-        with patch(f"{_MOD}.console"):
-            with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
-                result = stage_5_tool_choice(non_interactive=True, cli_override="codex")
+        with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
+            result = stage_5_tool_choice(non_interactive=True, cli_override="codex")
         assert result["cli"] == "codex"
 
     def test_stage_5_claude_present_no_prompt(self, tmp_local_json) -> None:
         """When claude is on PATH, no install prompt is shown."""
         mock_profile_mod = MagicMock()
         mock_profile_mod.get_user_profile.return_value = {}
-        with patch(f"{_MOD}.console"):
-            with patch(f"{_MOD}.shutil.which", return_value="/usr/bin/claude"):
-                with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
-                    with patch(f"{_MOD}._handle_missing_claude") as mock_handle:
-                        result = stage_5_tool_choice(non_interactive=True)
+        with patch(f"{_MOD}.shutil.which", return_value="/usr/bin/claude"):
+            with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
+                with patch(f"{_MOD}._handle_missing_claude") as mock_handle:
+                    result = stage_5_tool_choice(non_interactive=True)
         mock_handle.assert_not_called()
         assert result["cli"] == "claude"
 
@@ -622,9 +768,8 @@ class TestStages:
     @patch(f"{_MOD}._install_claude_code", return_value=True)
     @patch(f"{_MOD}._prompt", return_value="Y")
     @patch(f"{_MOD}.shutil.which", return_value=None)
-    @patch(f"{_MOD}.console")
     def test_stage_5_claude_missing_interactive_yes(
-        self, _con, _which, _prompt, mock_install, _choose, tmp_local_json
+        self, _which, _prompt, mock_install, _choose, tmp_local_json
     ) -> None:
         """Missing claude + interactive + yes → installer invoked."""
         mock_profile_mod = MagicMock()
@@ -638,9 +783,8 @@ class TestStages:
     @patch(f"{_MOD}._install_claude_code")
     @patch(f"{_MOD}._prompt", return_value="n")
     @patch(f"{_MOD}.shutil.which", return_value=None)
-    @patch(f"{_MOD}.console")
     def test_stage_5_claude_missing_interactive_no(
-        self, _con, _which, _prompt, mock_install, _choose, tmp_local_json
+        self, _which, _prompt, mock_install, _choose, tmp_local_json
     ) -> None:
         """Missing claude + interactive + no → no install, continues."""
         mock_profile_mod = MagicMock()
@@ -653,9 +797,8 @@ class TestStages:
     @patch(f"{_MOD}.warning")
     @patch(f"{_MOD}._install_claude_code")
     @patch(f"{_MOD}.shutil.which", return_value=None)
-    @patch(f"{_MOD}.console")
     def test_stage_5_claude_missing_non_interactive_warns(
-        self, _con, _which, mock_install, mock_warn, tmp_local_json
+        self, _which, mock_install, mock_warn, tmp_local_json
     ) -> None:
         """Missing claude + non-interactive → warning, no install."""
         mock_profile_mod = MagicMock()
@@ -669,19 +812,17 @@ class TestStages:
     def test_stage_6_non_interactive_creates_my_agent(self, tmp_local_json) -> None:
         """non_interactive=True uses 'my_agent' as default name."""
         mock_proc = MagicMock(returncode=0)
-        with patch(f"{_MOD}.console"):
-            with patch(f"{_MOD}.subprocess.run", return_value=mock_proc):
-                with patch(f"{_MOD}._resolve_package_dir", return_value=None):
-                    result = stage_6_first_agent(non_interactive=True)
+        with patch(f"{_MOD}.subprocess.run", return_value=mock_proc):
+            with patch(f"{_MOD}._resolve_package_dir", return_value=None):
+                result = stage_6_first_agent(non_interactive=True)
         assert result["agent_name"] == "my_agent"
         assert result["agent_path"] == "src/my_agent"
 
     def test_stage_6_drone_not_found(self, tmp_local_json) -> None:
         """FileNotFoundError from drone is handled gracefully."""
-        with patch(f"{_MOD}.console"):
-            with patch(f"{_MOD}.warning"):
-                with patch(f"{_MOD}.subprocess.run", side_effect=FileNotFoundError):
-                    result = stage_6_first_agent(non_interactive=True)
+        with patch(f"{_MOD}.warning"):
+            with patch(f"{_MOD}.subprocess.run", side_effect=FileNotFoundError):
+                result = stage_6_first_agent(non_interactive=True)
         assert "agent_name" in result
 
     def test_stage_7_ping_sweep_calls_sweep(self, tmp_local_json) -> None:
@@ -689,51 +830,42 @@ class TestStages:
         mock_ps = MagicMock()
         mock_ps.sweep_all_branches.return_value = {"drone": "ack", "prax": "timeout"}
         mock_ps.sweep_summary.return_value = "1 ack / 1 timeout / 0 error"
-        with patch(f"{_MOD}.console"):
-            with patch.dict("sys.modules", {"aipass.aipass.apps.handlers.ping_sweep": mock_ps}):
-                result = stage_7_ping_sweep(non_interactive=True)
+        with patch.dict("sys.modules", {"aipass.aipass.apps.handlers.ping_sweep": mock_ps}):
+            result = stage_7_ping_sweep()
         assert "ping_results" in result
 
     def test_stage_8_smoke_test_both_found(self, tmp_local_json) -> None:
         """smoke test passes when both drone and aipass are on PATH."""
-        with patch(f"{_MOD}.console"):
-            with patch(f"{_MOD}.shutil.which", return_value="/usr/bin/drone"):
-                result = stage_8_smoke_test()
+        with patch(f"{_MOD}.shutil.which", return_value="/usr/bin/drone"):
+            result = stage_8_smoke_test()
         assert result["drone"] == "/usr/bin/drone"
 
     def test_stage_8_smoke_test_missing(self, tmp_local_json) -> None:
         """Warnings emitted when binaries not found."""
-        with patch(f"{_MOD}.console"):
-            with patch(f"{_MOD}.warning"):
-                with patch(f"{_MOD}.shutil.which", return_value=None):
-                    result = stage_8_smoke_test()
+        with patch(f"{_MOD}.warning"):
+            with patch(f"{_MOD}.shutil.which", return_value=None):
+                result = stage_8_smoke_test()
         assert result["drone"] is None
         assert result["aipass"] is None
 
     def test_stage_9_default_variant_no_flag(self, tmp_local_json) -> None:
         """Default flag variant does not append --dangerously-skip-permissions."""
-        with patch(f"{_MOD}.console"):
-            result = stage_9_handoff(cli_choice="claude", flag_variant="default", non_interactive=True)
+        result = stage_9_handoff(cli_choice="claude", flag_variant="default", non_interactive=True)
         assert "--dangerously-skip-permissions" not in result["handoff_command"]
 
     def test_stage_9_skip_permissions_variant(self, tmp_local_json) -> None:
         """skip-permissions variant appends the flag for claude."""
-        with patch(f"{_MOD}.console"):
-            result = stage_9_handoff(cli_choice="claude", flag_variant="skip-permissions", non_interactive=True)
+        result = stage_9_handoff(cli_choice="claude", flag_variant="skip-permissions", non_interactive=True)
         assert "--dangerously-skip-permissions" in result["handoff_command"]
 
     def test_stage_9_handoff_command_contains_path(self, tmp_local_json) -> None:
         """Handoff command includes the agent path."""
-        with patch(f"{_MOD}.console"):
-            result = stage_9_handoff(agent_path="src/mybot", non_interactive=True)
+        result = stage_9_handoff(agent_path="src/mybot", non_interactive=True)
         assert "src/mybot" in result["handoff_command"]
 
     def test_stage_9_non_interactive_no_spawn(self, tmp_local_json) -> None:
         """Non-interactive stage 9 prints the command but never spawns a session."""
-        with (
-            patch(f"{_MOD}.console"),
-            patch("aipass.aipass.apps.modules.handoff.do_handoff") as mock_handoff,
-        ):
+        with patch("aipass.aipass.apps.modules.handoff.do_handoff") as mock_handoff:
             result = stage_9_handoff(non_interactive=True)
         mock_handoff.assert_not_called()
         assert result["launched"] is False
@@ -741,10 +873,9 @@ class TestStages:
 
     def test_stage_10_done_returns_empty(self, tmp_local_json) -> None:
         """stage_10_done returns {} and marks stage 10 complete."""
-        with patch(f"{_MOD}.console"):
-            result = stage_10_done()
+        result = stage_10_done()
         assert result == {}
-        stored = json.loads(tmp_local_json.read_text())
+        stored = json.loads(tmp_local_json.read_text(encoding="utf-8"))
         assert stored["setup_progress"]["last_completed_stage"] == 10
 
 
@@ -756,64 +887,72 @@ class TestStages:
 class TestProviderGaps:
     """Provider gaps reach the init report without running the full doctor."""
 
-    def test_collect_provider_gaps_reports_missing(self) -> None:
-        """Non-pass manifest results are collected; run_doctor is never called."""
-        from aipass.aipass.apps.modules import doctor
-        from aipass.aipass.apps.modules.init_flow import _collect_provider_gaps
-
-        gap = MagicMock(glyph="WARN", label="hooks", detail="wire the hook")
-        passing = MagicMock(glyph=doctor.GLYPH_PASS, label="env", detail="")
-        with patch.object(doctor, "_check_provider_manifest", return_value=[gap, passing]):
-            with patch.object(doctor, "run_doctor") as mock_run:
-                gaps = _collect_provider_gaps()
-        assert gaps == {"hooks": "wire the hook"}
-        mock_run.assert_not_called()
-
-    def test_collect_provider_gaps_swallows_errors(self) -> None:
-        """A failing manifest check degrades to an empty dict, not a crash."""
-        from aipass.aipass.apps.modules import doctor
-        from aipass.aipass.apps.modules.init_flow import _collect_provider_gaps
-
-        with patch.object(doctor, "_check_provider_manifest", side_effect=RuntimeError("boom")):
-            with patch(f"{_MOD}.logger"):
-                gaps = _collect_provider_gaps()
-        assert gaps == {}
-
-    def test_init_report_includes_provider_gaps(self, tmp_path: Path) -> None:
-        """_write_init_report embeds provider gaps + action when the manifest reports them."""
-        from aipass.aipass.apps.modules.init_flow import _write_init_report
-
+    @staticmethod
+    def _report_from_stage_10(tmp_path: Path) -> dict:
+        """Run the public stage 10 for an agent under tmp_path; return the init report it dropped."""
         agent_dir = tmp_path / "src" / "bot"
         agent_dir.mkdir(parents=True)
-        with patch(f"{_MOD}._collect_provider_gaps", return_value={"hooks": "missing"}):
-            _write_init_report(str(agent_dir), {"agent_name": "BOT"})
-        report = json.loads((agent_dir / "dropbox" / "init_report.json").read_text())
+        stage_10_done(accumulated={"agent_path": str(agent_dir), "agent_name": "BOT"})
+        return json.loads((agent_dir / "dropbox" / "init_report.json").read_text(encoding="utf-8"))
+
+    def test_collect_provider_gaps_reports_missing(self, tmp_local_json, tmp_path: Path) -> None:
+        """Only non-pass manifest results reach the report; run_doctor is never called."""
+        gap = MagicMock(glyph="WARN", label="hooks", detail="wire the hook")
+        passing = MagicMock(glyph=doctor.GLYPH_PASS, label="env", detail="")
+        with patch.object(doctor, "check_provider_manifest", return_value=[gap, passing]):
+            with patch.object(doctor, "run_doctor") as mock_run:
+                report = self._report_from_stage_10(tmp_path)
+        assert report["provider_gaps"] == {"hooks": "wire the hook"}
+        mock_run.assert_not_called()
+
+    def test_collect_provider_gaps_swallows_errors(self, tmp_local_json, tmp_path: Path) -> None:
+        """A failing manifest check still drops the report, with no gaps claimed, not a crash."""
+        with patch.object(doctor, "check_provider_manifest", side_effect=RuntimeError("boom")):
+            with patch(f"{_MOD}.logger"):
+                report = self._report_from_stage_10(tmp_path)
+        assert report["agent_name"] == "BOT"
+        assert "provider_gaps" not in report
+
+    def test_init_report_includes_provider_gaps(self, tmp_local_json, tmp_path: Path) -> None:
+        """The init report embeds provider gaps + action when the manifest reports them."""
+        gap = MagicMock(glyph="WARN", label="hooks", detail="missing")
+        with patch.object(doctor, "check_provider_manifest", return_value=[gap]):
+            report = self._report_from_stage_10(tmp_path)
         assert report["provider_gaps"] == {"hooks": "missing"}
         assert "provider_action" in report
 
-    def test_init_report_omits_provider_gaps_when_clean(self, tmp_path: Path) -> None:
+    def test_init_report_omits_provider_gaps_when_clean(self, tmp_local_json, tmp_path: Path) -> None:
         """No provider keys are written when the manifest is fully satisfied."""
-        from aipass.aipass.apps.modules.init_flow import _write_init_report
-
-        agent_dir = tmp_path / "src" / "bot"
-        agent_dir.mkdir(parents=True)
-        with patch(f"{_MOD}._collect_provider_gaps", return_value={}):
-            _write_init_report(str(agent_dir), {"agent_name": "BOT"})
-        report = json.loads((agent_dir / "dropbox" / "init_report.json").read_text())
+        passing = MagicMock(glyph=doctor.GLYPH_PASS, label="env", detail="")
+        with patch.object(doctor, "check_provider_manifest", return_value=[passing]):
+            report = self._report_from_stage_10(tmp_path)
         assert "provider_gaps" not in report
         assert "provider_action" not in report
 
 
 # =============================================================================
-# init_update_registry_sync: subprocess_sync
+# `aipass init update`: owner/identity check and fix via drone @spawn sync-registry
 # =============================================================================
 
 
 _MOD_UPDATE = "aipass.aipass.apps.modules.init_flow"
 
 
+def _init_update(args: list[str]) -> int:
+    """Run `aipass init update <args>` through the command and return its exit code.
+
+    The command's router ends in sys.exit with the handler's answer, so the
+    code a shell sees is read off the SystemExit, not the private handler.
+    """
+    with pytest.raises(SystemExit) as exit_info:
+        handle_command("init", ["update", *args])
+    code = exit_info.value.code
+    assert isinstance(code, int)
+    return code
+
+
 class TestInitUpdateRegistrySync:
-    """Tests for owner/identity check+fix in _handle_init_update (DPLAN-0239 P5)."""
+    """Tests for owner/identity check+fix in `aipass init update` (DPLAN-0239 P5)."""
 
     def test_clean_check_prints_ok(self, tmp_path: Path) -> None:
         """Clean --check (exit 0) prints 'Owner/identity OK.' and skips --fix."""
@@ -827,11 +966,10 @@ class TestInitUpdateRegistrySync:
             # (which needs a real project on disk) has its own suite below.
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=check_proc) as mock_run,
-            patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(tmp_path)])
+            rc = _init_update([str(tmp_path)])
         assert rc == 0
         mock_run.assert_called_once()
         args = mock_run.call_args[0][0]
@@ -855,12 +993,11 @@ class TestInitUpdateRegistrySync:
                 f"{_MOD_UPDATE}.subprocess.run",
                 side_effect=[check_proc, fix_proc],
             ) as mock_run,
-            patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
             patch(f"{_MOD_UPDATE}.warning"),
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(tmp_path)])
+            rc = _init_update([str(tmp_path)])
         assert rc == 0
         assert mock_run.call_count == 2
         fix_args = mock_run.call_args_list[1][0][0]
@@ -884,11 +1021,10 @@ class TestInitUpdateRegistrySync:
                 f"{_MOD_UPDATE}.subprocess.run",
                 side_effect=[check_proc, fix_proc],
             ),
-            patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.warning"),
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(tmp_path)])
+            rc = _init_update([str(tmp_path)])
         assert rc == 0
 
     def test_sync_missing_drone_degrades_silently(self, tmp_path: Path) -> None:
@@ -902,10 +1038,9 @@ class TestInitUpdateRegistrySync:
             # (which needs a real project on disk) has its own suite below.
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", side_effect=FileNotFoundError("drone not found")),
-            patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(tmp_path)])
+            rc = _init_update([str(tmp_path)])
         assert rc == 0
 
     def test_sync_timeout_degrades_silently(self, tmp_path: Path) -> None:
@@ -921,10 +1056,9 @@ class TestInitUpdateRegistrySync:
             # (which needs a real project on disk) has its own suite below.
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", side_effect=_sp.TimeoutExpired(cmd="drone", timeout=30)),
-            patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(tmp_path)])
+            rc = _init_update([str(tmp_path)])
         assert rc == 0
 
 
@@ -965,11 +1099,10 @@ class TestInitUpdateGitAuth:
                 return_value={"updated_files": [], "already_current": []},
             ),
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
-            patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(tmp_path)])
+            rc = _init_update([str(tmp_path)])
 
         assert rc == 0
         passport = json.loads(
@@ -987,11 +1120,10 @@ class TestInitUpdateGitAuth:
                 return_value={"updated_files": [], "already_current": []},
             ),
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
-            patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(tmp_path)])
+            rc = _init_update([str(tmp_path)])
 
         assert rc == 0
         assert any("nothing to repair" in str(c) for c in mock_success.call_args_list)
@@ -1008,12 +1140,11 @@ class TestInitUpdateGitAuth:
                 return_value={"updated_files": [], "already_current": []},
             ),
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
-            patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success"),
             patch(f"{_MOD_UPDATE}.cli_error") as mock_error,
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(tmp_path)])
+            rc = _init_update([str(tmp_path)])
 
         assert rc == 1
         assert any('"owner": true' in str(c) for c in mock_error.call_args_list)
@@ -1035,11 +1166,10 @@ class TestInitUpdateGitAuth:
                 return_value={"updated_files": [], "already_current": [], "pending": False},
             ) as mock_update,
             patch(f"{_MOD_UPDATE}.subprocess.run") as mock_run,
-            patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(tmp_path), "--dry-run"])
+            rc = _init_update([str(tmp_path), "--dry-run"])
 
         assert rc == 0
         mock_update.assert_called_once()
@@ -1060,11 +1190,10 @@ class TestInitUpdateGitAuth:
         with (
             patch("aipass.aipass.apps.handlers.init.bootstrap.update_project", return_value=plan),
             patch(f"{_MOD_UPDATE}.subprocess.run") as mock_run,
-            patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success"),
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(tmp_path), "--dry-run"])
+            rc = _init_update([str(tmp_path), "--dry-run"])
 
         assert rc == 2
         mock_run.assert_not_called()
@@ -1076,8 +1205,6 @@ class TestInitUpdateGitAuth:
         Built by the real init, never copied from a live project, so the door
         is exercised end to end — the plan is computed by the real handler.
         """
-        from aipass.aipass.apps.handlers.init.bootstrap import init_project
-
         target = root / "proj"
         target.mkdir()
         init_project(target, project_name="stamp")
@@ -1088,79 +1215,106 @@ class TestInitUpdateGitAuth:
         return target
 
     @staticmethod
-    def _printed(mock_console: MagicMock) -> str:
-        """Everything the door printed, joined — the sentence is the contract here."""
-        return "\n".join(str(c.args[0]) for c in mock_console.print.call_args_list if c.args)
+    def _squashed(text: str) -> str:
+        """The channel with every whitespace run removed: Rich folds long paths at the width."""
+        return "".join(text.split())
 
-    def test_stamp_only_dry_run_says_no_go_is_needed_and_still_exits_2(self, tmp_path: Path) -> None:
+    def test_stamp_only_dry_run_says_no_go_is_needed_and_still_exits_2(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """DPLAN-0337 R1: the preview names the apply as the next move, not a request.
 
         Exit stays 2 — the stamp IS pending, and 2 keeps meaning "there is a
         plan"; the sentence is what changes, because the go does not apply here.
+        Mutant 2026-09-27: "so no go is needed" cut to "so no go" reddens this.
         """
         target = self._stamp_behind_scaffold(tmp_path)
-        with (
-            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
-            patch(f"{_MOD_UPDATE}.console") as mock_console,
-        ):
-            rc = _handle_init_update([str(target), "--dry-run"])
+        capsys.readouterr()
+        with patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0):
+            rc = _init_update([str(target), "--dry-run"])
 
         assert rc == 2
-        printed = self._printed(mock_console)
-        assert "Stamp only: no file would change, so no go is needed" in printed
-        assert f"Run: aipass init update {target}" in printed
-        assert "Apply needs the owner's or devpulse's go" not in printed
+        out, _err = capsys.readouterr()
+        printed = self._squashed(out)
+        assert self._squashed("Stamp only: no file would change, so no go is needed") in printed
+        assert self._squashed(f"Run: aipass init update {target}") in printed
+        assert self._squashed("Apply needs the owner's or devpulse's go") not in printed
 
-    def test_a_plan_that_writes_a_file_still_asks_for_the_go(self, tmp_path: Path) -> None:
-        """The other half of R1: one file write and today's sentence stands."""
+    def test_a_plan_that_writes_a_file_still_asks_for_the_go(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The other half of R1: one file write and today's sentence stands.
+
+        Mutant 2026-09-27: "devpulse's go" cut to "devpulse" in the preview line reddens this.
+        """
         target = self._stamp_behind_scaffold(tmp_path)
         (target / ".claude" / "commands" / "prep.md").write_text("# mine\n", encoding="utf-8")
-        with (
-            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
-            patch(f"{_MOD_UPDATE}.console") as mock_console,
-        ):
-            rc = _handle_init_update([str(target), "--dry-run"])
+        capsys.readouterr()
+        with patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0):
+            rc = _init_update([str(target), "--dry-run"])
 
         assert rc == 2
-        printed = self._printed(mock_console)
-        assert "Apply needs the owner's or devpulse's go" in printed
-        assert "no go is needed" not in printed
+        out, _err = capsys.readouterr()
+        printed = self._squashed(out)
+        assert self._squashed("Apply needs the owner's or devpulse's go") in printed
+        assert self._squashed("no go is needed") not in printed
 
-    def test_json_carries_stamp_only_for_a_managers_agent(self, tmp_path: Path) -> None:
-        """A manager's agent reads the key, never the prose."""
+    def test_json_carries_stamp_only_for_a_managers_agent(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A manager's agent reads the key, never the prose.
+
+        Mutant 2026-09-27: the plan's "stamp_only" key renamed reddens this.
+        """
         target = self._stamp_behind_scaffold(tmp_path)
-        with (
-            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
-            patch(f"{_MOD_UPDATE}.console") as mock_console,
-        ):
-            rc = _handle_init_update([str(target), "--dry-run", "--json"])
+        capsys.readouterr()
+        with patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0):
+            rc = _init_update([str(target), "--dry-run", "--json"])
 
         assert rc == 2
-        emitted = json.loads(mock_console.print_json.call_args[0][0])
+        out, _err = capsys.readouterr()
+        emitted = json.loads(out)
         assert emitted["stamp_only"] is True
         assert emitted["pending"] is True
 
-    def test_applying_stamp_only_prints_the_stamp_as_written(self, tmp_path: Path) -> None:
+    def test_applying_stamp_only_prints_the_stamp_as_written(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """The receipt reports what happened: after apply the stamp is written,
-        not pending — the one word that would have been a lie in the receipt."""
+        not pending — the one word that would have been a lie in the receipt.
+        Mutant 2026-09-27: `state = "pending"` on both branches reddens this."""
         target = self._stamp_behind_scaffold(tmp_path)
+        capsys.readouterr()
         with (
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
-            patch(f"{_MOD_UPDATE}.console") as mock_console,
             patch(f"{_MOD_UPDATE}.success"),
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
-            rc = _handle_init_update([str(target)])
+            rc = _init_update([str(target)])
 
         assert rc == 0
-        stamp_lines = [line for line in self._printed(mock_console).splitlines() if "[yellow]stamp[/yellow]" in line]
+        out, _err = capsys.readouterr()
+        stamp_lines = [line for line in out.splitlines() if line.strip().startswith("stamp ")]
         assert len(stamp_lines) == 1
         assert stamp_lines[0].rstrip().endswith("written")
         assert "0.0.1 →" in stamp_lines[0]
 
-    def test_json_flag_emits_the_plan_as_parseable_json(self, tmp_path: Path) -> None:
-        """--json prints the plan document itself, not a rendered table."""
+    def test_json_flag_emits_the_plan_as_parseable_json(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--json prints the plan document itself, not a rendered table.
+
+        Stdout is exactly ONE JSON document with git-auth provisioning really
+        running: its prose goes to stderr, where a manager's agent piping stdout
+        into a JSON parser never meets it. Provisioning is a dry run here and its
+        far side stays in tmp_path: the registry walk stops at the DEMO registry
+        written under tmp_path, and its log_operation lands in the autouse json seam.
+
+        Mutant 2026-09-27: console.print_json swapped for console.print reddens this.
+        Mutant 2026-09-28: the --json redirect aimed at sys.stdout instead of sys.stderr reddens this.
+        Mutant (fleet green leg 4): the redirect removed -> red at the raw-text assert, before json.loads.
+        """
         self._project(tmp_path)
         plan = {
             "project_name": "DEMO",
@@ -1171,17 +1325,21 @@ class TestInitUpdateGitAuth:
 
         with (
             patch("aipass.aipass.apps.handlers.init.bootstrap.update_project", return_value=plan),
-            patch(f"{_MOD_UPDATE}.subprocess.run"),
-            patch(f"{_MOD_UPDATE}.console") as mock_console,
-            patch(f"{_MOD_UPDATE}.success"),
-            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
+            patch(f"{_MOD_UPDATE}.subprocess.run") as mock_run,
+            pytest.raises(SystemExit) as exit_info,
         ):
-            rc = _handle_init_update([str(tmp_path), "--dry-run", "--json"])
+            handle_command("init", ["update", str(tmp_path), "--dry-run", "--json"])
 
-        assert rc == 2
-        emitted = json.loads(mock_console.print_json.call_args[0][0])
+        assert exit_info.value.code == 2
+        mock_run.assert_not_called()
+        out, err = capsys.readouterr()
+        # On the raw text first, so a plan printed to stdout dies at an assert, not in json.loads.
+        assert "Git authorization (owner-tier)" not in out
+        emitted = json.loads(out)
         assert emitted["files"][0]["action"] == "update"
         assert emitted["handlers"][0]["name"] == "testwrite_gate"
+        assert "Git authorization (owner-tier)" in err
+        assert "would repair" in err
 
 
 # =============================================================================
@@ -1212,7 +1370,7 @@ class TestTemplateSelector:
     def test_empty_project_default_skips_agent_and_ping(self, tmp_local_json) -> None:
         """empty project (default) = no scaffold; framework-only stages 6,7 skipped; 9,10 run."""
         mocks = self._stage_patches()
-        with patch.multiple(_MOD, console=MagicMock(), warning=MagicMock(), **mocks):
+        with patch.multiple(_MOD, warning=MagicMock(), **mocks):
             result = run_init(non_interactive=True, template=TEMPLATE_EMPTY)
         assert result == 0
         for name in (
@@ -1232,7 +1390,7 @@ class TestTemplateSelector:
     def test_aipass_framework_runs_full_scaffold(self, tmp_local_json) -> None:
         """aipass_framework = full scaffold + all 10 stages."""
         mocks = self._stage_patches()
-        with patch.multiple(_MOD, console=MagicMock(), warning=MagicMock(), **mocks):
+        with patch.multiple(_MOD, warning=MagicMock(), **mocks):
             with patch(
                 "aipass.aipass.apps.handlers.init.bootstrap.init_project",
                 return_value={},
@@ -1242,12 +1400,14 @@ class TestTemplateSelector:
         for name in mocks:
             assert mocks[name].called, f"{name} should have been called"
 
-    def test_list_flag_shows_catalog(self) -> None:
-        """aipass init --list shows the catalog (not swallowed into run)."""
-        with patch(f"{_MOD}.console") as mock_console:
-            result = handle_command("init", ["--list"])
+    def test_list_flag_shows_catalog(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """aipass init --list shows the catalog (not swallowed into run).
+
+        Mutant 2026-09-27: the catalog loop printing nothing reddens this.
+        """
+        result = handle_command("init", ["--list"])
         assert result is True
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        printed, _err = capsys.readouterr()
         for t in TEMPLATE_CHOICES:
             assert t in printed
 
@@ -1279,10 +1439,9 @@ class TestTemplateSelector:
 
     def test_pip_hints_say_clone(self, tmp_local_json) -> None:
         """in-product hints say clone/setup.sh, not pip."""
-        with patch(f"{_MOD}.console"):
-            with patch(f"{_MOD}.warning") as mock_warn:
-                with patch(f"{_MOD}.shutil.which", return_value=None):
-                    stage_8_smoke_test()
+        with patch(f"{_MOD}.warning") as mock_warn:
+            with patch(f"{_MOD}.shutil.which", return_value=None):
+                stage_8_smoke_test()
         # THE FLOOR (v5 unentered_assert, 2026-09-08). A stage 8 that stopped
         # warning at all - or one that never reached the hint - made this a
         # silent pass, which is precisely the regression it guards.
@@ -1295,7 +1454,7 @@ class TestTemplateSelector:
     def test_empty_template_stage9_gets_cwd_as_agent_path(self, tmp_local_json) -> None:
         """Empty template sets agent_path='.' so stage 9 hands off from CWD."""
         mocks = self._stage_patches()
-        with patch.multiple(_MOD, console=MagicMock(), warning=MagicMock(), **mocks):
+        with patch.multiple(_MOD, warning=MagicMock(), **mocks):
             run_init(non_interactive=True, template=TEMPLATE_EMPTY)
         stage_9_call = mocks["stage_9_handoff"].call_args
         assert stage_9_call is not None
@@ -1306,7 +1465,7 @@ class TestTemplateSelector:
         """When stdin is not a TTY, run_init auto-forces non_interactive (no crash)."""
         mocks = self._stage_patches()
         with (
-            patch.multiple(_MOD, console=MagicMock(), warning=MagicMock(), **mocks),
+            patch.multiple(_MOD, warning=MagicMock(), **mocks),
             patch("sys.stdin") as mock_stdin,
         ):
             mock_stdin.isatty.return_value = False

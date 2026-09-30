@@ -1,21 +1,15 @@
 # =================== AIPass ====================
 # Name: test_commands.py
 # Description: Tests for the custom command registry
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the custom command registry.
+"""Tests for apps/modules/commands.py and the command registry handlers it drives."""
 
-Covers:
-- CRUD operations (add, remove, update, exists)
-- Exact-match lookup
-- Multi-word greedy matching
-- Registry auto-creation
-- List filtering by branch
-- Module orchestrator (handle_command)
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 import json
 from pathlib import Path
@@ -24,6 +18,7 @@ from typing import Any
 import pytest
 
 from aipass.drone.apps.handlers.command_registry import ops, lookup
+from aipass.drone.apps.modules.commands import handle_command, list_all
 
 
 # ---------------------------------------------------------------------------
@@ -82,13 +77,15 @@ class TestRegistryAutoCreation:
         assert registry["metadata"]["command_count"] == 0
 
     def test_load_recreates_on_non_dict(self, isolated_registry: Path) -> None:
-        """Non-dict top-level JSON triggers auto-recreation."""
+        """Non-dict top-level JSON triggers auto-recreation; mutant killed: the rebuilt registry never saved."""
         isolated_registry.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
 
         registry = ops.load_registry()
 
-        assert isinstance(registry, dict)
-        assert "commands" in registry
+        assert registry["commands"] == {}
+        assert registry["metadata"]["command_count"] == 0
+        on_disk = json.loads(isolated_registry.read_text(encoding="utf-8"))
+        assert on_disk["commands"] == {}
 
     def test_auto_heals_missing_keys(self, isolated_registry: Path) -> None:
         """Missing 'commands' or 'metadata' keys are auto-healed."""
@@ -301,6 +298,19 @@ class TestMultiWordMatching:
 
         assert result is None
 
+    def test_registry_load_failure_raises_not_no_match(
+        self, isolated_registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A registry that cannot load raises, never reads as "no match"; mutant: the except returns None."""
+
+        def unreadable() -> dict[str, Any]:
+            raise OSError("registry unreadable")
+
+        monkeypatch.setattr(lookup, "load_registry", unreadable)
+
+        with pytest.raises(OSError, match="registry unreadable"):
+            lookup.match_command(["audit"])
+
     def test_exact_match_no_remaining(self, isolated_registry: Path) -> None:
         """match_command with no extra args returns empty remaining list."""
         ops.add_command("audit", "@seedgo", "audit")
@@ -384,17 +394,16 @@ class TestSaveValidation:
 
 
 class TestModuleOrchestrator:
-    def test_handle_command_introspection(self, isolated_registry: Path) -> None:
-        """handle_command with no args triggers introspection."""
-        from aipass.drone.apps.modules.commands import handle_command
+    def test_handle_command_introspection(self, isolated_registry: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """handle_command with no args triggers introspection; mutant killed: introspection skipped."""
 
         result = handle_command()
 
         assert result is True
+        assert "commands Module" in capsys.readouterr().out
 
     def test_handle_command_add(self, isolated_registry: Path) -> None:
         """handle_command 'add' creates a command."""
-        from aipass.drone.apps.modules.commands import handle_command
 
         result = handle_command("add", ["test_cmd", "@branch", "do_thing", "--desc=A test"])
 
@@ -406,7 +415,6 @@ class TestModuleOrchestrator:
 
     def test_handle_command_remove(self, isolated_registry: Path) -> None:
         """handle_command 'remove' deletes a command."""
-        from aipass.drone.apps.modules.commands import handle_command
 
         ops.add_command("doomed", "@t", "c")
         result = handle_command("remove", ["doomed"])
@@ -414,18 +422,17 @@ class TestModuleOrchestrator:
         assert result is True
         assert ops.command_exists("doomed") is False
 
-    def test_handle_command_list(self, isolated_registry: Path) -> None:
-        """handle_command 'list' succeeds."""
-        from aipass.drone.apps.modules.commands import handle_command
+    def test_handle_command_list(self, isolated_registry: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """handle_command 'list' prints each command; mutant killed: the list loop printing nothing."""
 
         ops.add_command("a", "@t", "c1")
         result = handle_command("list", [])
 
         assert result is True
+        assert "a -> @t c1" in capsys.readouterr().out
 
     def test_handle_command_unknown(self, isolated_registry: Path) -> None:
         """handle_command with unknown subcommand returns False."""
-        from aipass.drone.apps.modules.commands import handle_command
 
         result = handle_command("unknown_sub", ["arg"])
 
@@ -442,7 +449,6 @@ class TestListAll:
 
     def test_list_all_empty(self, isolated_registry: Path) -> None:
         """list_all returns empty list when no commands registered."""
-        from aipass.drone.apps.modules.commands import list_all
 
         result = list_all()
         assert result == []
@@ -453,8 +459,6 @@ class TestListAll:
         ops.add_command("alpha", "@t", "c2")
         ops.add_command("middle", "@t", "c3")
 
-        from aipass.drone.apps.modules.commands import list_all
-
         result = list_all()
         names = [c["name"] for c in result]
         assert names == ["alpha", "middle", "zebra"]
@@ -462,8 +466,6 @@ class TestListAll:
     def test_list_all_returns_all_fields(self, isolated_registry: Path) -> None:
         """list_all returns full command dicts with expected keys."""
         ops.add_command("audit", "@seedgo", "audit", ["aipass"], "Run audit", "seedgo")
-
-        from aipass.drone.apps.modules.commands import list_all
 
         result = list_all()
         assert len(result) == 1

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_watcher.py
 # Description: Memory File System Watcher
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2025-11-26
-# Modified: 2026-09-18
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -24,7 +24,7 @@ Independence:
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING, Dict, Any, Iterable
 
 if TYPE_CHECKING:
     pass
@@ -44,14 +44,14 @@ except ImportError:
     logger.info("Optional dependency 'watchdog' not available")
 
 # Handler imports (relative within package — after conditional watchdog block)
-from aipass.memory.apps.handlers.tracking.line_counter import update_line_count  # noqa: E402
-from aipass.memory.apps.handlers.monitor.detector import check_single_file  # noqa: E402
+from aipass.memory.apps.handlers.tracking.line_counter import update_line_count
+from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, check_single_file
 from aipass.memory.apps.handlers import repo_root
-from aipass.memory.apps.handlers.repo_root import exists_exactly  # noqa: E402
-from aipass.prax.apps.modules.logger import get_system_logger  # noqa: E402
-from aipass.memory.apps.handlers.json import json_handler  # noqa: E402
-from aipass.memory.apps.handlers.json import config_loader  # noqa: E402
-from aipass.memory.apps.handlers.repo_root import module_file  # noqa: E402
+from aipass.memory.apps.handlers.repo_root import exists_exactly
+from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.json import config_loader
+from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
@@ -137,7 +137,13 @@ def check_and_rollover() -> Dict[str, Any]:
     }
 
     # Get all branch paths
-    branch_paths = _get_branch_paths()
+    try:
+        branch_paths = _get_branch_paths()
+    except RegistryUnreadable as e:
+        logger.error(f"[memory_watcher] {e}")
+        results["success"] = False
+        results["error"] = str(e)
+        return results
 
     if not branch_paths:
         results["error"] = "No branch paths found"
@@ -377,19 +383,26 @@ def _get_branch_paths() -> list[Path]:
     return paths
 
 
-def _is_memory_file(file_path: Path) -> bool:
+def _is_memory_file(file_path: Path, roots: frozenset[Path]) -> bool:
     """
-    Check if file is a memory file in .trinity/ (local.json or observations.json)
+    Check if file is a memory file of a watched root: ``<root>/.trinity/<name>``
+
+    Nothing deeper. A root is scheduled recursively, so a copy of a memory file
+    inside ``<root>/dropbox/...`` or ``<root>/.archive/`` is heard too; it is a
+    sandbox and is never rewritten, measured or checked (the owner's ruling of
+    2026-09-27; this gate is memory's cure, fleet green leg 4).
 
     Args:
         file_path: Path to check
+        roots: The branch roots the watcher was handed
 
     Returns:
-        True if memory file, False otherwise
+        True if memory file of a watched root, False otherwise
     """
-    name = file_path.name
-    parent = file_path.parent.name
-    return parent == ".trinity" and name in ("local.json", "observations.json")
+    trinity = file_path.parent
+    return (
+        trinity.name == ".trinity" and trinity.parent in roots and file_path.name in ("local.json", "observations.json")
+    )
 
 
 # =============================================================================
@@ -398,10 +411,11 @@ def _is_memory_file(file_path: Path) -> bool:
 
 
 class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
-    """Watch for memory file modifications"""
+    """Watch for memory file modifications of the roots it is handed"""
 
-    def __init__(self):
+    def __init__(self, roots: Iterable[Path]):
         super().__init__()
+        self._roots = frozenset(Path(root) for root in roots)
         # Track recent modifications to avoid duplicate processing
         self._recent_modifications = set()
 
@@ -414,7 +428,7 @@ class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
         file_path = Path(event.src_path)
 
         # Only process memory files
-        if not _is_memory_file(file_path):
+        if not _is_memory_file(file_path, self._roots):
             return
 
         # Skip if we just processed this file
@@ -489,13 +503,17 @@ def start_memory_watcher() -> Dict[str, Any]:
         return {"success": False, "error": "Watcher already running"}
 
     # Get all branch paths
-    branch_paths = _get_branch_paths()
+    try:
+        branch_paths = _get_branch_paths()
+    except RegistryUnreadable as e:
+        logger.error(f"[memory_watcher] Not started: {e}")
+        return {"success": False, "error": str(e)}
 
     if not branch_paths:
         return {"success": False, "error": "No branch paths found in AIPASS_REGISTRY.json"}
 
     # Create watcher instance
-    watcher = MemoryFileWatcher()
+    watcher = MemoryFileWatcher(branch_paths)
 
     # Create observer
     new_observer = Observer()  # type: ignore[misc]
@@ -560,7 +578,12 @@ def get_watcher_status() -> Dict[str, Any]:
         return {"active": False, "message": "Watcher not running"}
 
     # Get watched paths
-    branch_paths = _get_branch_paths()
+    try:
+        branch_paths = _get_branch_paths()
+    except RegistryUnreadable as e:
+        # The observer runs; what it watches cannot be listed.
+        logger.error(f"[memory_watcher] {e}")
+        return {"active": True, "error": str(e)}
 
     return {"active": True, "watched_directories": len(branch_paths), "paths": [str(p) for p in branch_paths]}
 

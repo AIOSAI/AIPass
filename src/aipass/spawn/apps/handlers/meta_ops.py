@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: meta_ops.py
 # Description: Branch metadata operations for update tracking
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-03-10
+# Modified: 2026-09-28
 # =============================================
 
 """Branch metadata operations — manages .spawn/.branch_meta.json for per-branch tracking.
@@ -267,6 +267,13 @@ def generate_branch_meta(branch_dir: Path, template_registry: dict) -> dict:
 
     # Scan only template-relevant directories (shallow iterdir, not rglob)
     for scan_rel in sorted(_scan_dirs):
+        # The owner of the project's rule of 09-27 20:42, in paraphrase: nothing
+        # looks into a dropbox, a sandbox like .archive. The template ships a
+        # README into each, so the scan would list and hash what a branch drops
+        # there; it lists the directory from the root and never enters it
+        # (spawn's decision, DPLAN-0354 leg 4).
+        if Path(scan_rel).parts[:1] in (("dropbox",), (".archive",)):
+            continue
         scan_path = branch_dir / scan_rel if scan_rel else branch_dir
         if not scan_path.is_dir():
             continue

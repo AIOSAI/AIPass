@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.6.0
+# Version: 2.9.0
 # Created: 2026-02-10
-# Modified: 2026-08-09
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -133,10 +133,18 @@ def _is_medic_enabled() -> bool:
 
     Reads medic_enabled from medic_state.json. If disabled with a TTL
     (medic_disabled_until timestamp), treats an expired TTL as enabled.
-    Defaults to True if config is missing or unreadable.
+    Defaults to True when no state file exists.
 
     Returns:
         True if medic dispatch is enabled
+
+    Raises:
+        RuntimeError: the state exists but cannot be read. It may hold a
+            person's 'medic off', and answering enabled mailed and woke
+            branches against it. @trigger's decision in fleet green leg 4
+            (2026-09-29): the one caller, handle_error_detected, has already
+            counted the error into the escalation lane; its outer except logs
+            this and dispatches nothing.
     """
     try:
         config = _read_medic_state().get("config", {})
@@ -148,8 +156,7 @@ def _is_medic_enabled() -> bool:
             return True
         return False
     except Exception as exc:
-        logger.warning(f"_is_medic_enabled config read failed: {exc}")
-        return True
+        raise RuntimeError(f"medic state unreadable ({MEDIC_STATE_FILE.name}): {exc}") from exc
 
 
 def _mute_entry_matches(entry, branch_lower: str, now: datetime) -> bool:
@@ -210,16 +217,25 @@ def _get_registered_emails() -> set:
     Read registered branch emails from AIPASS_REGISTRY.json.
 
     Returns:
-        Set of registered email addresses (e.g., {'@flow', '@drone'})
+        Set of registered email addresses (e.g., {'@flow', '@drone'}); empty
+        when no registry file exists
+
+    Raises:
+        RuntimeError: the registry exists but cannot be read or parsed. An
+            unreadable registry is not a registry with nobody in it: answering
+            an empty set made every branch read as unregistered, so medic
+            logged 'Unknown branch skipped' and the escalation lane mailed
+            'no registered owner' for a branch that has one. Each caller
+            handles the raise: handle_error_detected's outer except logs it,
+            escalation._has_registered_owner answers True.
     """
-    try:
-        if BRANCH_REGISTRY_FILE.exists():
-            data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
-            return {b["email"] for b in data.get("branches", [])}
-    except Exception as exc:
-        logger.warning(f"_get_registered_emails registry read failed: {exc}")
+    if not BRANCH_REGISTRY_FILE.exists():
         return set()
-    return set()
+    try:
+        data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
+        return {b["email"] for b in data.get("branches", [])}
+    except Exception as exc:
+        raise RuntimeError(f"branch registry unreadable ({BRANCH_REGISTRY_FILE.name}): {exc}") from exc
 
 
 def _is_rate_limited(branch_email: str) -> bool:
@@ -338,18 +354,33 @@ Log context (surrounding lines):
 
     # Registry tracking info (Medic v2)
     registry_block = ""
-    if fingerprint or registry_id:
-        display_fp = fingerprint[:12] if fingerprint else "n/a"
-        display_id = registry_id if registry_id else "n/a"
+    if fingerprint:
         registry_block = f"""
 Registry tracking:
-  Fingerprint: {display_fp}
-  Registry ID: {display_id}
+  Fingerprint: {fingerprint[:12]}
 """
+
+    # The ID the responder is told to investigate has to be the one the registry
+    # verbs accept. @hooks, 2026-09-24: this slot printed the legacy error_hash,
+    # so `errors detail <that>` answered "Error not found" while the real row sat
+    # under a different string. And with no closing verb named anywhere, three
+    # cured entries stayed at status new and re-dispatched two days later.
+    if registry_id:
+        identity_line = f"Error ID: {registry_id}"
+        closing_block = f"""CLOSE IT - a dispatch nobody closes comes back:
+  drone @trigger errors resolve {registry_id}            once the fix is verified
+  drone @trigger errors suppress {registry_id} "reason"  when it is known and not worth fixing
+"""
+    else:
+        identity_line = f"Reference: {error_hash} (not tracked in the registry - errors detail cannot find it)"
+        closing_block = """CLOSE IT: this occurrence has no registry entry, so there is nothing to resolve.
+Say so to @devpulse - a dispatch with no row is a defect in the lane that fired it.
+"""
+    report_ref = registry_id or error_hash
 
     return f"""Error detected - investigate and respond.
 
-Error ID: {error_hash}
+{identity_line}
 Module: {module}
 Timestamp: {timestamp}
 Log file: {log_path}
@@ -378,8 +409,9 @@ SEEDGO STANDARDS REMINDER:
 - After fixing, run: drone @seedgo checklist <modified_file>
 - Fixes scoring below 80% on Seedgo audit should NOT be shipped - clean up first
 
+{closing_block}
 REPORT TO @devpulse:
-  ai_mail email @devpulse "ERROR {error_hash} - [STATUS]" "Findings..."
+  ai_mail email @devpulse "ERROR {report_ref} - [STATUS]" "Findings..."
 
   Include: Error ID, severity (low/medium/high/critical), what you found, action taken or recommended.
 """

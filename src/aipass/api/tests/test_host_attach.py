@@ -1,37 +1,41 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_attach.py
 # Description: Tests for the host API attach lane — a real PTY running a tmux client
 # Version: 1.0.0
 # Created: 2026-08-14
+# Modified: 2026-09-29
 # =============================================
 
-"""
-Tests for the Attach Lane
+"""Tests for apps/handlers/host/attach.py and the WS /v1/room/attach route in apps/handlers/host/server.py."""
 
-DPLAN-0300 Round 18b/18c. `WS /v1/room/attach` runs a PTY hosting a tmux CLIENT
-into a branch's persistent room — the desktop's window over a different wire.
+# Tests for the Attach Lane
+#
+# DPLAN-0300 Round 18b/18c. `WS /v1/room/attach` runs a PTY hosting a tmux CLIENT
+# into a branch's persistent room — the desktop's window over a different wire.
+#
+# THE THREE THINGS THIS LANE COULD GET WRONG, and none of them is "does it work":
+#
+#   1. **Killing a room it was only supposed to leave.** Detach is a SIGHUP to the
+#      client; the session survives. If this ever became a kill, closing a sheet on
+#      a phone would end an agent mid-task. Pinned by behaviour AND by reading the
+#      module source for kill-session, because the failure is one word long.
+#
+#   2. **Leaking the token into a log.** A WebSocket cannot carry an Authorization
+#      header, and the easy answer — a query parameter — writes the credential into
+#      every access log, proxy log and browser history entry. The bearer rides the
+#      subprotocol, and the ACCEPTED protocol is the sentinel rather than the token.
+#
+#   3. **Spawning a PTY for an unauthenticated caller.** The scope check happens
+#      BEFORE accept, so a refused socket never reaches a shell.
+#
+# REAL PTYs, DELIBERATELY. These tests spawn actual processes — `cat` and `echo`,
+# never tmux and never a room. A mocked PTY would prove the mock's behaviour, and
+# the interesting failures here (EOF on close, SIGHUP not killing a session,
+# TIOCSWINSZ argument order) live precisely in the parts a mock invents.
 
-THE THREE THINGS THIS LANE COULD GET WRONG, and none of them is "does it work":
-
-  1. **Killing a room it was only supposed to leave.** Detach is a SIGHUP to the
-     client; the session survives. If this ever became a kill, closing a sheet on
-     a phone would end an agent mid-task. Pinned by behaviour AND by reading the
-     module source for kill-session, because the failure is one word long.
-
-  2. **Leaking the token into a log.** A WebSocket cannot carry an Authorization
-     header, and the easy answer — a query parameter — writes the credential into
-     every access log, proxy log and browser history entry. The bearer rides the
-     subprotocol, and the ACCEPTED protocol is the sentinel rather than the token.
-
-  3. **Spawning a PTY for an unauthenticated caller.** The scope check happens
-     BEFORE accept, so a refused socket never reaches a shell.
-
-REAL PTYs, DELIBERATELY. These tests spawn actual processes — `cat` and `echo`,
-never tmux and never a room. A mocked PTY would prove the mock's behaviour, and
-the interesting failures here (EOF on close, SIGHUP not killing a session,
-TIOCSWINSZ argument order) live precisely in the parts a mock invents.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
+# seedgo: no-test-needed(generated) — the tmux client that attach_command() builds; these tests spawn cat, never tmux
 
 import ast
 import errno
@@ -96,14 +100,21 @@ def quiet():
 FD_DIR = "/dev/fd"
 
 
-def _open_descriptors() -> int:
+def _open_descriptors(listdir: Any = None) -> int:
     """
     Count the descriptors this process holds open.
+
+    Args:
+        listdir: What lists the directory; None means os.listdir, resolved at
+            call time. Handed in by the no-/proc census case, so that case
+            manufactures its host without replacing os.listdir for the whole
+            process (api, fleet green leg 5).
 
     Returns:
         The number of open descriptors, the listing's own handle included.
     """
-    return len(os.listdir(FD_DIR))
+    lister = listdir if listdir is not None else os.listdir
+    return len(lister(FD_DIR))
 
 
 fd_census_required = pytest.mark.skipif(
@@ -574,8 +585,8 @@ class TestThePumpMovesRealBytes:
         # returned nothing passed this (seedgo assertion_shape, 2026-09-07). The
         # loop above already waits for data, so an empty read here is a real
         # failure and is asserted as one.
-        assert data, "the pump returned nothing within five seconds"
         assert isinstance(data, bytes), f"the pump decoded to text: {type(data).__name__}"
+        assert data.startswith(b"x"), f"the pump did not hand back what cat echoed: {data!r}"
 
     def test_a_closed_pty_reads_empty_rather_than_raising(self, quiet: Any, tmux_preflight: Any) -> None:
         """
@@ -623,19 +634,22 @@ class TestTheRoomCanActuallyHearAResize:
         and until the fix it was true only by that accident — two independent
         defaults agreeing, which is not the same as a contract.
         """
-        import fcntl
         import struct
-        import termios
 
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
         try:
-            packed = fcntl.ioctl(session.descriptor, termios.TIOCGWINSZ, b"\0" * 8)
+            packed = host_attach.fcntl.ioctl(session.descriptor, host_attach.termios.TIOCGWINSZ, b"\0" * 8)
             rows, cols, _, _ = struct.unpack("HHHH", packed)
+            # The published door itself, on the same real PTY: a later stamp
+            # lands in the kernel rows-first, never transposed.
+            host_attach.set_winsize(session.descriptor, 132, 50)
+            restamped = host_attach.fcntl.ioctl(session.descriptor, host_attach.termios.TIOCGWINSZ, b"\0" * 8)
         finally:
             session.hangup()
 
+        assert struct.unpack("HHHH", restamped)[:2] == (50, 132)
         assert (cols, rows) == (host_attach.DEFAULT_COLS, host_attach.DEFAULT_ROWS)
         assert (cols, rows) != (0, 0)
 
@@ -708,7 +722,7 @@ class TestTheRoomCanActuallyHearAResize:
         for parameter in signature.parameters.values():
             assert parameter.default is not inspect.Parameter.empty
 
-    def test_the_pre_3_11_fallback_does_setsid_then_TIOCSCTTY(self) -> None:
+    def test_the_pre_3_11_fallback_does_setsid_then_tiocsctty(self) -> None:
         """
         The branch that never runs on this interpreter, and would ship untested.
 
@@ -765,7 +779,7 @@ class TestTheRoomCanActuallyHearAResize:
 
         login_tty.assert_called_once_with(0)
 
-    def test_a_real_child_ends_up_owning_the_terminal(self, quiet: Any, tmux_preflight: Any, monkeypatch: Any) -> None:
+    def test_a_real_child_ends_up_owning_the_terminal(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         The property itself, on a real process rather than a mock.
 
@@ -782,24 +796,27 @@ class TestTheRoomCanActuallyHearAResize:
         a read taken after the subject died was green here for a reason that has
         nothing to do with the property under test. The stand-in refuses once
         the session is closed, exactly as the runner does, so moving either read
-        back below the hangup goes red on this box too.
+        back below the hangup goes red on this box too. The test calls the
+        stand-in by name rather than replacing os.getpgid for the process: the
+        product never reads a pgid, so only this read needs the macOS answer
+        (api, fleet green leg 5).
         """
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
-        real_getpgid = os.getpgid
-
         def macos_getpgid(pid: int) -> int:
             if session.closed:
                 raise ProcessLookupError(errno.ESRCH, "No such process")
-            return real_getpgid(pid)
-
-        monkeypatch.setattr(os, "getpgid", macos_getpgid)
+            return os.getpgid(pid)
 
         try:
-            time.sleep(0.3)
+            child_group = macos_getpgid(session.process.pid)
+            # Polled on the real condition: the child's exec claims the
+            # terminal, and until it has the foreground is still ours.
+            deadline = time.monotonic() + 5
             foreground = os.tcgetpgrp(session.descriptor)
-            child_group = os.getpgid(session.process.pid)
+            while foreground != child_group and time.monotonic() < deadline:
+                foreground = os.tcgetpgrp(session.descriptor)
         finally:
             session.hangup()
 
@@ -818,13 +835,11 @@ class TestResizeIsAnIoctlAndItsArgumentsAreOrdered:
 
     def test_a_resize_reaches_the_terminal(self, cat_session: Any) -> None:
         """Read the size back off the descriptor rather than trusting the call."""
-        import fcntl
         import struct
-        import termios
 
         cat_session.resize(100, 30)
 
-        packed = fcntl.ioctl(cat_session.descriptor, termios.TIOCGWINSZ, b"\0" * 8)
+        packed = host_attach.fcntl.ioctl(cat_session.descriptor, host_attach.termios.TIOCGWINSZ, b"\0" * 8)
         rows, cols, _, _ = struct.unpack("HHHH", packed)
 
         assert (cols, rows) == (100, 30)
@@ -944,12 +959,17 @@ class TestOpeningAnAttach:
         a shell has no branch, and an empty label in the logs is a session
         nobody can point at.
         """
-        with patch.object(host_attach, "client_command", lambda room: ["cat"]):
+        attached_to = []
+        with patch.object(host_attach, "client_command", lambda room: attached_to.append(room) or ["cat"]):
             session = host_attach.open_attach("", cwd=tmp_path, room="baud-shell-aipass")
 
         try:
-            assert session.room == "baud-shell-aipass"
+            # What the product DID with the room: the client it built targets it.
+            assert attached_to == ["baud-shell-aipass"]
             assert session.branch == "baud-shell-aipass"
+            # The session answers for the room it attached, not another (api, fleet green leg 3).
+            # Mutant: AttachSession handed a room other than the one client_command got.
+            assert session.room == attached_to[0]
         finally:
             session.hangup()
 
@@ -1054,7 +1074,7 @@ class TestOpeningAnAttach:
         assert _open_descriptors() <= before + 1
 
     @fd_census_required
-    def test_the_descriptor_census_counts_this_process_without_proc(self, monkeypatch: Any) -> None:
+    def test_the_descriptor_census_counts_this_process_without_proc(self) -> None:
         """
         The instrument above, measured on a host that has no /proc.
 
@@ -1076,12 +1096,10 @@ class TestOpeningAnAttach:
                 raise FileNotFoundError(errno.ENOENT, "No such file or directory", str(path))
             return real_listdir(path, *args, **kwargs)
 
-        monkeypatch.setattr(os, "listdir", no_proc)
-
-        before = _open_descriptors()
+        before = _open_descriptors(no_proc)
         holder = open(os.devnull, "rb")
         try:
-            assert _open_descriptors() == before + 1, "the census does not see this process's own descriptors"
+            assert _open_descriptors(no_proc) == before + 1, "the census does not see this process's own descriptors"
         finally:
             holder.close()
 
@@ -1164,9 +1182,9 @@ class TestTheBearerRidesTheSubprotocolAndNeverTheUrl:
         Protocol order is the client's to choose, and a 401 that depends on it
         would be unexplainable from the phone end.
         """
-        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        record, raw = host_tokens.issue_token("pixel-8", scope="operate")
 
-        assert host_server.socket_bearer(self._socket(f"{raw}, aipass.bearer")) is not None
+        assert host_server.socket_bearer(self._socket(f"{raw}, aipass.bearer"))["id"] == record["id"]
 
     def test_an_unknown_token_is_refused(self, store: Any) -> None:
         """Same wall as the HTTP lane, same store, same compare."""
@@ -1551,7 +1569,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
 
         assert session.writes == [b"echo still-listening", b"\r"]
 
-    def test_a_disconnect_on_a_SILENT_room_still_detaches_promptly(self, store: Any, seated: Any) -> None:
+    def test_a_disconnect_on_a_silent_room_still_detaches_promptly(self, store: Any, seated: Any) -> None:
         """
         The bug this file found, pinned so it cannot come back.
 
@@ -1865,7 +1883,7 @@ class TestAWatchIsNotAnchorTooling:
 
         assert "@prax monitors the seat, not" not in source
 
-    def test_an_external_project_watch_opens_instead_of_refusing(self, store: Any, seated: Any) -> None:
+    def test_an_external_project_watch_opens_instead_of_refusing(self, store: Any, seated: Any, tmp_path: Path) -> None:
         """
         The parked refusal, through the real socket.
 
@@ -1882,7 +1900,7 @@ class TestAWatchIsNotAnchorTooling:
         # check. What is under test is that no project fence stands in front of
         # the spawn; the gate itself has its own tests next door.
         with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
-            with patch.object(host_verbs, "citizen_address", return_value="@vera"):
+            with patch.object(host_verbs.host_reads, "resolve_branch_root", return_value=tmp_path / "vera") as gate:
                 with patch.object(host_attach, "open_monitor") as spawn:
                     spawn.side_effect = host_attach.AttachUnavailable("stop here, the fence is what is under test")
                     client = TestClient(host_server.create_app())
@@ -1895,7 +1913,10 @@ class TestAWatchIsNotAnchorTooling:
 
         # Reaching the spawn AT ALL is the assertion: before this, the route
         # refused on the project and open_monitor was never called.
-        spawn.assert_called_once()
+        assert spawn.call_count == 1
+        assert spawn.call_args.args[0] == "vera"
+        # The REAL citizen_address ran: it asked the gate with the project.
+        gate.assert_called_once_with("vera", "VERA-STUDIO")
         assert "anchor tooling" not in closed["reason"]
 
     def test_no_allowlist_of_watchable_projects_is_built_here(self) -> None:
@@ -1937,10 +1958,8 @@ class TestOneRoomHonoursAnOutsideSeat:
         registry, so without this every case here fails on 'demo' not existing
         — which measures the registry, not the room resolution under test.
         """
-        with (
-            patch.object(host_server.host_verbs, "citizen_address", return_value="@demo"),
-            patch.object(host_server.host_reads, "resolve_branch_root", return_value=tmp_path),
-        ):
+        # Only the registry is stubbed: the real citizen_address runs on top.
+        with patch.object(host_server.host_reads, "resolve_branch_root", return_value=tmp_path):
             yield
 
     def test_an_outside_room_is_attached_and_never_created(self) -> None:
@@ -1957,6 +1976,7 @@ class TestOneRoomHonoursAnOutsideSeat:
 
         assert room == "aipass-42", "the snapshot's own name must be used verbatim"
         assert attach_only is True
+        assert target == "@demo", "the citizen address the real gate composed"
 
     def test_the_attach_only_flag_actually_reaches_the_spawned_argv(self, monkeypatch) -> None:
         """
@@ -2079,15 +2099,16 @@ class TestTheOneSeatHostsAnyProjectsRoom:
     away from losing it quietly.
     """
 
-    def test_an_external_projects_room_reaches_the_spawn(self, store: Any) -> None:
+    def test_an_external_projects_room_reaches_the_spawn(self, store: Any, tmp_path: Path) -> None:
         """The census resolves it; the seat never gets a vote."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        vera_root = tmp_path / "projects" / "vera" / "src" / "vera"
 
         with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
             with patch.object(host_server.host_fleet, "resolve_branch") as census:
-                census.return_value = {"name": "vera", "path": "/projects/vera/src/vera"}
+                census.return_value = {"name": "vera", "path": str(vera_root)}
                 with patch.object(host_attach, "open_attach") as spawn:
                     spawn.side_effect = host_attach.AttachUnavailable("stop here, resolution is what is under test")
                     client = TestClient(host_server.create_app())
@@ -2099,7 +2120,7 @@ class TestTheOneSeatHostsAnyProjectsRoom:
                         socket.receive()
 
         census.assert_called_once_with("VERA-STUDIO", "vera")
-        assert spawn.call_args.kwargs["cwd"] == Path("/projects/vera/src/vera")
+        assert spawn.call_args.kwargs["cwd"] == vera_root
 
     def test_the_room_carries_the_projects_scope(self, store: Any) -> None:
         """
@@ -2459,11 +2480,13 @@ class TestTheDetachIsWrittenDownToo:
                     socket.close(code=1000)
                     line = wait_for_log(log, "socket detached from")
 
-        held = float(re.search(r"after (\d+\.\d+)s", line).group(1))
+        stamp = re.search(r"after (\d+\.\d+)s", line)
+        assert stamp is not None, line
+        held = float(stamp.group(1))
 
         assert held >= 0.5, line
 
-    def test_a_room_that_ends_first_says_so_instead_of_printing_None(self, store: Any, seated: Any) -> None:
+    def test_a_room_that_ends_first_says_so_instead_of_printing_none(self, store: Any, seated: Any) -> None:
         """
         The detach nobody's client caused.
 
@@ -2552,18 +2575,20 @@ class TestTypingIntoAWatchLeavesARecord:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = RefusingSession()
 
-        with patch(PATCH_SERVER_LOGGER), patch(PATCH_PUMP_LOGGER), patch(PATCH_SERVER_JSON):
-            with patch(PATCH_PUMP_JSON) as audit:
-                with patch.object(host_attach, "open_attach", return_value=session):
-                    client = TestClient(host_server.create_app())
-                    with client.websocket_connect(
-                        "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
-                    ) as socket:
-                        socket.send_bytes(b"rm -rf /")
+        with (
+            patch(PATCH_SERVER_LOGGER),
+            patch(PATCH_PUMP_LOGGER),
+            patch(PATCH_SERVER_JSON),
+            patch(PATCH_PUMP_JSON) as audit,
+            patch.object(host_attach, "open_attach", return_value=session),
+        ):
+            client = TestClient(host_server.create_app())
+            with client.websocket_connect("/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]) as socket:
+                socket.send_bytes(b"rm -rf /")
 
-                        deadline = time.monotonic() + 10
-                        while session.hangups == 0 and time.monotonic() < deadline:
-                            time.sleep(0.01)
+                deadline = time.monotonic() + 10
+                while session.hangups == 0 and time.monotonic() < deadline:
+                    time.sleep(0.01)
 
         recorded = [call for call in audit.log_operation.call_args_list if call.args[0] == "host_api_input_refused"]
 

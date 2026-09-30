@@ -19,7 +19,6 @@ Usage:
     Standalone: drone @flow close <number>
 """
 
-# ruff: noqa: E402
 import sys
 import os
 

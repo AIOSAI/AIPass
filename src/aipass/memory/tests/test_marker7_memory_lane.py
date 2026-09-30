@@ -1,34 +1,40 @@
 # =================== AIPass ====================
 # Name: test_marker7_memory_lane.py
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-09-18
+# Modified: 2026-09-29
 # =============================================
 
-"""Marker 7 — the memory lane, and the rulings that came with it.
+"""Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
 
-THE LAW OF THE MARKER: self-healing is TRIGGER-DRIVEN, never a daemon. Idle
-means zero processes.  Every pin here is written against that shape — a lane
-that heals because something HAPPENED, not because something is watching.
+# Marker 7 — the memory lane, and the rulings that came with it.
+#
+# THE LAW OF THE MARKER: self-healing is TRIGGER-DRIVEN, never a daemon. Idle
+# means zero processes.  Every pin here is written against that shape — a lane
+# that heals because something HAPPENED, not because something is watching.
+#
+# The five behaviours under test, and the wrong implementation each pin kills:
+#
+# - **One fleet, one definition** — rollover/lint/health reaching 19 branches
+#   while the push reaches 22, so three citizens' memories could overflow with
+#   no rollover ever running on them.
+# - **Rollover normalizes on touch, SCOPED** — a branch that rolls heals its own
+#   machine frame; healing the fleet from one branch's rollover is the 23:37
+#   write that opened this whole arc.
+# - **A verb whose name promises a write it no longer does** — `sync-lines`
+#   stopped writing when the health stamp was deleted, and kept the name.
+# - **The grandfather clause, narrowed not removed** — post-push the fleet is
+#   green, so "unchanged and over cap" hides new drift for the three archivable
+#   containers; for `todos` it is the only thing standing between a branch the
+#   push may not prune and a rollover lane that refuses to write to it.
+# - **A template bump heals through the push's gates** — never around them.
 
-The five behaviours under test, and the wrong implementation each pin kills:
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — rollover.show_status(), driven by tests/test_rollover_pipeline.py
+# seedgo: no-test-needed(covered_elsewhere) — trinity_push.build_frame(), the push's write; tests/test_trinity_push.py
 
-- **One fleet, one definition** — rollover/lint/health reaching 19 branches
-  while the push reaches 22, so three citizens' memories could overflow with
-  no rollover ever running on them.
-- **Rollover normalizes on touch, SCOPED** — a branch that rolls heals its own
-  machine frame; healing the fleet from one branch's rollover is the 23:37
-  write that opened this whole arc.
-- **A verb whose name promises a write it no longer does** — `sync-lines`
-  stopped writing when the health stamp was deleted, and kept the name.
-- **The grandfather clause, narrowed not removed** — post-push the fleet is
-  green, so "unchanged and over cap" hides new drift for the three archivable
-  containers; for `todos` it is the only thing standing between a branch the
-  push may not prune and a rollover lane that refuses to write to it.
-- **A template bump heals through the push's gates** — never around them.
-"""
-
+import hashlib
 import json
 import sys
 import types
@@ -44,11 +50,13 @@ from unittest.mock import MagicMock, patch
 # inside a test body raises "not a package". Collection-time imports resolve
 # against the real modules and are cached — the pattern the rest of the suite
 # already follows.
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.templates import trinity_push
 from aipass.memory.apps.handlers.templates import template_bump
 from aipass.memory.apps.handlers.rollover import normalizer
+from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.json import memory_files
 from aipass.memory.apps.handlers import write_fence
@@ -56,6 +64,26 @@ from aipass.memory.apps.handlers.tracking import line_counter
 from aipass.memory.apps.handlers.templates import spawn_pusher
 from aipass.memory.apps.modules import rollover
 from aipass.memory.apps.modules import templates
+
+# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
+# whole path: a checkout that lives under a directory named dropbox must not hide itself.
+# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
+# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+_SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+
+def _walk(root: Path, pattern: str = "*.py") -> list[Path]:
+    """Every file under *root* matching *pattern*, outside the skipped directories."""
+    return sorted(path for path in root.rglob(pattern) if not _SKIPPED_DIRS.intersection(path.relative_to(root).parts))
+
+
+def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path: Path) -> None:
+    """Red first against a bare rglob. The root stands inside a directory named dropbox; live/ is the control."""
+    root = tmp_path / "dropbox" / "checkout"
+    for name in (*sorted(_SKIPPED_DIRS), "live"):
+        (root / name).mkdir(parents=True)
+        (root / name / "test_x.py").write_text("", encoding="utf-8")
+    assert _walk(root) == [root / "live" / "test_x.py"]
 
 
 _MEMORY_ROOT = Path(__file__).resolve().parents[1]
@@ -184,10 +212,9 @@ class TestOneFleetOneDefinition:
 
         There is no collision today; that is luck, not a guard. Six external
         names against twenty-two of ours, and nothing stops the twenty-third.
-        """
-        from aipass.memory.apps.handlers.rollover import normalizer
-        from aipass.memory.apps.modules import rollover as rollover_module
 
+        Mutant (2026-09-27, killed): `wanted` built from `rolled[:1]` only.
+        """
         seen = []
         monkeypatch.setattr(
             normalizer,
@@ -195,10 +222,12 @@ class TestOneFleetOneDefinition:
             lambda name, path, config: seen.append((name, Path(path))) or {"success": True},
         )
         # Every citizen in the fleet claims to have rolled, external ones included.
-        every_name = [item["name"] for item in registry_scope.fleet_branches()]
-        rollover_module._normalize_rolled(every_name)
+        fleet = registry_scope.fleet_branches()
+        every_name = [item["name"] for item in fleet]
+        in_repo = {item["name"] for item in fleet if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL}
+        rollover._normalize_rolled(every_name)
 
-        assert seen, "nothing was normalized, so the scope was never exercised"
+        assert {name for name, _ in seen} == in_repo, "every in-repo citizen that rolled heals, and nobody else"
         home = registry_scope.REPO_ROOT.resolve()
         outside = [p for _, p in seen if home not in p.resolve().parents and p.resolve() != home]
         assert not outside, f"normalize would write outside this repo: {outside}"
@@ -219,9 +248,6 @@ class TestOneFleetOneDefinition:
         Meanwhile the out-of-scope case IS named. One failure mode announced,
         the other invisible, in the same function.
         """
-        from aipass.memory.apps.handlers.rollover import normalizer
-        from aipass.memory.apps.modules import rollover as rollover_module
-
         monkeypatch.setattr(
             normalizer,
             "normalize_branch",
@@ -231,9 +257,9 @@ class TestOneFleetOneDefinition:
         # necessarily propagate to the root under every suite ordering, and a
         # pin that only holds when it runs first is not a pin.
         said = []
-        monkeypatch.setattr(rollover_module.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
+        monkeypatch.setattr(rollover.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
 
-        rollover_module._normalize_rolled(["memory"])
+        rollover._normalize_rolled(["memory"])
 
         joined = " ".join(said)
         assert "memory" in joined, joined
@@ -252,14 +278,14 @@ class TestOneFleetOneDefinition:
         Measured while writing it: three external citizens (@verify, @vera,
         @research) carry 49 over-cap entries between them. Rollover reaching
         them would be a lane writing into repos nobody declared it for.
-        """
-        from aipass.memory.apps.handlers.monitor import detector
 
+        Mutant (2026-09-27, killed): detector's core registry read replaced by `[]`.
+        """
         rolled = {Path(item["path"]).resolve() for item in detector._read_registry()}
-        assert rolled, "an empty scope proves nothing about what it excludes"
+        assert _MEMORY_ROOT.resolve() in rolled, "a scope without this branch proves nothing about what it excludes"
         home = registry_scope.REPO_ROOT.resolve()
         outside = [p for p in rolled if home not in p.parents and p != home]
-        assert not outside, f"rollover would write outside this repo: {outside}"
+        assert outside == [], f"rollover would write outside this repo: {outside}"
 
     # -- THE WRITE FENCE (2026-09-18) -----------------------------------------
     #
@@ -553,23 +579,25 @@ class TestRolloverHealsWhatItTouches:
         """
         with (
             patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea")),
-            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs"),
+            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs") as tabs,
             patch.object(rollover, "_normalize_rolled") as normalized,
         ):
             rollover.run_rollover()
 
         normalized.assert_called_once_with(["guinea"])
+        tabs.assert_called_once_with(branches=["guinea"])
 
     def test_the_rollover_normalizes_only_the_branches_it_rolled(self):
         """The 2026-08-25 shape: a per-branch verb with a fleet-wide tail."""
         with (
             patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea", "guinea")),
-            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs"),
+            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs") as tabs,
             patch.object(rollover, "_normalize_rolled") as normalized,
         ):
             rollover.run_rollover()
 
         assert normalized.call_args.args[0] == ["guinea"]
+        tabs.assert_called_once_with(branches=["guinea"])
 
     def test_nothing_rolled_means_nothing_normalized(self):
         """Idle costs nothing — the law of the marker, at the call site."""
@@ -587,7 +615,7 @@ class TestRolloverHealsWhatItTouches:
         """The entries are already archived. A cosmetic re-render cannot undo that."""
         with (
             patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea")),
-            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs"),
+            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs") as tabs,
             patch.object(normalizer, "normalize_branch", side_effect=RuntimeError("frame boom")),
             patch.object(
                 registry_scope,
@@ -596,6 +624,28 @@ class TestRolloverHealsWhatItTouches:
             ),
         ):
             assert rollover.run_rollover() is True
+
+        tabs.assert_called_once_with(branches=["guinea"])
+
+    def test_a_tab_refresh_crash_is_logged_as_an_error_and_keeps_the_rollover(self):
+        """The rollover landed, so the run stands; the fault is an error, not a degradation.
+
+        Leg 4 of DPLAN-0354 (answer D of leg 3b): it was logged at warning.
+        """
+        with (
+            patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea")),
+            patch(
+                "aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs",
+                side_effect=RuntimeError("tab boom"),
+            ),
+            patch.object(rollover, "_normalize_rolled") as normalized,
+            patch.object(rollover, "logger") as log,
+        ):
+            assert rollover.run_rollover() is True
+
+        log.error.assert_any_call("[rollover] Tab refresh failed: tab boom")
+        assert all("Tab refresh failed" not in str(call) for call in log.warning.call_args_list)
+        normalized.assert_called_once_with(["guinea"])
 
 
 # =============================================================================
@@ -610,12 +660,96 @@ class TestSyncLinesTellsTheTruth:
     fleet-wide `refresh_all_tabs()` inside what is now a read-only reporter.
     """
 
+    @staticmethod
+    def _tmp_fleet(tmp_path: Path, monkeypatch) -> tuple[list[Path], MagicMock]:
+        """A one-citizen fleet under tmp_path, and the detector pointed at it.
+
+        The reporter reads every branch the detector's write scope names; left
+        alone that is the live machine's fleet. The core registry is read off
+        ``detector._REPO_ROOT`` and caller discovery walks the cwd, so both are
+        repointed: the only memory files in reach are the two written here.
+        """
+        trinity = tmp_path / "guinea" / ".trinity"
+        trinity.mkdir(parents=True)
+        local = trinity / "local.json"
+        local.write_text('{\n  "sessions": []\n}\n', encoding="utf-8")
+        observations = trinity / "observations.json"
+        observations.write_text('{\n  "observations": []\n}\n', encoding="utf-8")
+        registry = {"branches": [{"name": "GUINEA", "path": "guinea", "status": "active"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+        monkeypatch.setattr(line_counter, "json_handler", MagicMock())
+        recorder = MagicMock()
+        monkeypatch.setattr(rollover, "json_handler", recorder)
+        return [local, observations], recorder
+
     def test_the_reporter_verb_exists_under_a_true_name(self):
         assert "report-lines" in rollover.SUBCOMMANDS
 
-    def test_the_old_name_still_routes_and_says_what_changed(self):
-        """Never a silent removal: the old verb answers, and names its successor."""
+    def test_the_old_name_still_routes_and_says_what_changed(self, tmp_path, monkeypatch, capsys):
+        """Never a silent removal: the old verb answers, and names its successor.
+
+        The router's True alone passed with the rename notice deleted and the
+        reporter never run; the notice and the measured count are the effect.
+        """
+        self._tmp_fleet(tmp_path, monkeypatch)
+
         assert rollover.handle_command("rollover", ["sync-lines"]) is True
+
+        said = capsys.readouterr()
+        assert "'sync-lines' is now 'report-lines'" in said.err, said.err
+        assert "Measured 2 files" in said.out, said.out
+
+    def test_the_reporter_measures_the_fleet_and_writes_nothing(self, tmp_path, monkeypatch, capsys):
+        """report_line_counts, run for real over a tmp_path fleet.
+
+        Mutation: dropping `_handler_sync_line_counts()` for a constant zero
+        result, or re-adding a stamp write to the measured files.
+        """
+        files, recorder = self._tmp_fleet(tmp_path, monkeypatch)
+        before = [path.read_bytes() for path in files]
+
+        rollover.report_line_counts()
+
+        assert "Measured 2 files" in capsys.readouterr().out
+        assert [path.read_bytes() for path in files] == before
+        recorder.log_operation.assert_called_once_with("rollover_report_lines", {"measured": 2, "failed": 0})
+
+    def test_push_defaults_rewrites_per_branch_in_a_redirected_config(self, tmp_path, monkeypatch, capsys):
+        """push_defaults, run for real — against a tmp_path config, never the operator's.
+
+        It WRITES memory.config.json, so the redirect is proved before the call:
+        the patched loader must be the very module the product's function-local
+        import will resolve, its path must sit under tmp_path, and the operator
+        file's bytes are hashed before and after. A redirect that stopped
+        holding fails here instead of writing the live file.
+
+        Mutation: merging per_branch instead of replacing it (the stale entry
+        survives), or dropping the operator's other keys on the write.
+        """
+        _files, recorder = self._tmp_fleet(tmp_path, monkeypatch)
+        seeded = tmp_path / "memory.config.json"
+        operator_file = _MEMORY_ROOT / "memory_json" / "custom_config" / "memory.config.json"
+        seeded.write_text(
+            json.dumps({"operator_key": "kept", "rollover": {"per_branch": {"stale": {"local": {}}}}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(config_loader, "_CONFIG_PATH", seeded)
+        monkeypatch.setattr(config_loader, "_find_repo_root", lambda: tmp_path)
+        assert sys.modules.get(config_loader.__name__) is config_loader, "the product would import an unpatched loader"
+        live_before = hashlib.sha256(operator_file.read_bytes()).hexdigest() if operator_file.exists() else None
+
+        rollover.push_defaults()
+
+        live_after = hashlib.sha256(operator_file.read_bytes()).hexdigest() if operator_file.exists() else None
+        assert live_after == live_before, "the operator's memory.config.json was written"
+        written = json.loads(seeded.read_text(encoding="utf-8"))
+        assert written["operator_key"] == "kept"
+        assert set(written["rollover"]["per_branch"]) == {"guinea"}
+        assert written["rollover"]["per_branch"]["guinea"]["local"]["todos"] == {"count": 10}
+        assert "Pushed defaults to 1 branches" in capsys.readouterr().out
+        recorder.log_operation.assert_called_once_with("push_defaults", {"branches": 1, "json": False})
 
     def test_the_reporter_does_not_re_render_the_fleets_tabs(self):
         """A read-only reporter that rewrites 22 branches' files is the old lie again."""
@@ -702,7 +836,7 @@ class TestGrandfatherNarrowedToTodos:
 
         assert hits == []
 
-    def test_a_NEW_over_cap_todo_is_still_refused(self):
+    def test_a_new_over_cap_todo_is_still_refused(self):
         """The exemption covers what is already on disk, never a fresh violation."""
         before = {"todos": []}
         after = {"todos": [{"number": 1, "date": "d", "task": "y" * 99, "priority": "p", "status": "s"}]}
@@ -787,7 +921,7 @@ class TestTemplateBumpFiresThePush:
 
         assert template_bump.bump_pending()["pending"] is True
 
-    def test_a_bump_runs_the_push_as_a_DRY_RUN_by_default(self, tmp_path, monkeypatch):
+    def test_a_bump_runs_the_push_as_a_dry_run_by_default(self, tmp_path, monkeypatch):
         """Self-healing 22 branches' memory files unprompted is not healing."""
         calls = []
         monkeypatch.setattr(template_bump, "_ledger_path", lambda: tmp_path / "absent.json")
@@ -939,7 +1073,7 @@ class TestTheDeadTemplateLaneIsRetired:
 
     def test_no_live_handler_still_scans_the_pre_trinity_layout(self):
         """The suffix scan is what made zero matches possible. It is gone everywhere."""
-        live = (_MEMORY_ROOT / "apps").rglob("*.py")
+        live = _walk(_MEMORY_ROOT / "apps")
         offenders = [
             path.name
             for path in live
@@ -980,8 +1114,6 @@ class TestTheDeadTemplateLaneIsRetired:
         `is True` says the verb was CLAIMED. It said nothing about the exit code,
         and under `warning()` that code was 0 — the shape the fleet sweep found.
         """
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-
         for verb in ("push-templates", "diff-templates"):
             reset_command_state()
             assert templates.handle_command(verb, ["--dry-run"]) is True
@@ -1105,7 +1237,7 @@ class TestTheLiveGuardRefusesAHalfPresentWorld:
         """
         try:
             return request.getfixturevalue(name)
-        except Skipped as skipped:  # noqa: F841 — re-raised as a failure, deliberately
+        except Skipped as skipped:  # re-raised as a failure, deliberately
             pytest.fail(f"{name} skipped a world it should have accepted: {skipped}")
 
     @staticmethod

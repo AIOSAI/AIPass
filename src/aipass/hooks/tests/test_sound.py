@@ -1,31 +1,37 @@
 # =================== AIPass ====================
 # Name: test_sound.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-05-22
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for apps/sound.py — shared speak/play with mute support."""
+"""Tests for apps/sound.py."""
 
-from pathlib import Path
+# Shared speak/play with mute support.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — PIPER_BIN and PIPER_VOICE's install locations under the home directory
+# seedgo: no-test-needed(documentation) — print_introspection() output, a help screen
+# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing the mute flag's directory
+
+import subprocess as real_sub
 from unittest.mock import patch, MagicMock
+
+from aipass.hooks.apps import sound
+from aipass.hooks.apps.sound import is_muted, mute, play, speak, unmute
 
 
 class TestIsMuted:
     """Mute flag detection."""
 
     def test_not_muted_when_flag_missing(self):
-        from aipass.hooks.apps.sound import is_muted
-
         with patch("aipass.hooks.apps.sound.MUTE_FLAG") as mock_flag:
             mock_flag.exists.return_value = False
             assert is_muted() is False
 
     def test_muted_when_flag_exists(self):
-        from aipass.hooks.apps.sound import is_muted
-
         with patch("aipass.hooks.apps.sound.MUTE_FLAG") as mock_flag:
             mock_flag.exists.return_value = True
             assert is_muted() is True
@@ -34,9 +40,7 @@ class TestIsMuted:
 class TestSpeak:
     """Piper TTS with mute support."""
 
-    def test_speak_calls_piper_when_not_muted(self):
-        from aipass.hooks.apps.sound import speak
-
+    def test_speak_calls_piper_when_not_muted(self, tmp_path):
         with (
             patch("aipass.hooks.apps.sound.is_muted", return_value=False),
             patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
@@ -48,19 +52,27 @@ class TestSpeak:
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
             mock_file = MagicMock()
-            mock_file.name = "/tmp/test.wav"
+            mock_file.name = str(tmp_path / "test.wav")
             mock_tmp.NamedTemporaryFile.return_value = mock_file
             mock_sub.run.return_value = MagicMock(returncode=0)
             mock_path.return_value.exists.return_value = True
 
             speak("test text")
 
-        mock_sub.run.assert_called_once()
-        mock_sub.Popen.assert_called_once()
+        wav = str(tmp_path / "test.wav")
+        mock_sub.run.assert_called_once_with(
+            [str(mock_bin), "-m", str(mock_voice), "-f", wav],
+            input="test text",
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        assert mock_sub.Popen.call_count == 1
+        (play_cmd,), play_kwargs = mock_sub.Popen.call_args
+        assert play_cmd[-1] == wav
+        assert play_kwargs == {"stdout": mock_sub.DEVNULL, "stderr": mock_sub.DEVNULL}
 
     def test_speak_skips_when_muted(self):
-        from aipass.hooks.apps.sound import speak
-
         with (
             patch("aipass.hooks.apps.sound.is_muted", return_value=True),
             patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
@@ -70,8 +82,6 @@ class TestSpeak:
         mock_sub.run.assert_not_called()
 
     def test_speak_skips_when_piper_missing(self):
-        from aipass.hooks.apps.sound import speak
-
         with (
             patch("aipass.hooks.apps.sound.is_muted", return_value=False),
             patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
@@ -82,7 +92,7 @@ class TestSpeak:
 
         mock_sub.run.assert_not_called()
 
-    def test_speak_graceful_on_timeout(self):
+    def test_speak_graceful_on_timeout(self, tmp_path):
         """A piper timeout is caught and named in the log, never raised.
 
         Had no oracle: "graceful" was asserted by the absence of a traceback, so
@@ -90,9 +100,6 @@ class TestSpeak:
         patch that stopped biting - passed exactly the same. The log line is
         what proves the except leg is the one that ran.
         """
-        import subprocess as real_sub
-        from aipass.hooks.apps.sound import speak
-
         with (
             patch("aipass.hooks.apps.sound.is_muted", return_value=False),
             patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
@@ -104,7 +111,7 @@ class TestSpeak:
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
             mock_file = MagicMock()
-            mock_file.name = "/tmp/test.wav"
+            mock_file.name = str(tmp_path / "test.wav")
             mock_tmp.NamedTemporaryFile.return_value = mock_file
             mock_sub.run.side_effect = real_sub.TimeoutExpired("piper", 5)
             mock_sub.TimeoutExpired = real_sub.TimeoutExpired
@@ -114,10 +121,8 @@ class TestSpeak:
         assert mock_sub.run.call_count == 1
         mock_logger.info.assert_called_once_with("[HOOKS] speak: piper timed out")
 
-    def test_speak_graceful_on_os_error(self):
+    def test_speak_graceful_on_os_error(self, tmp_path):
         """A missing piper binary is caught and the reason carried into the log."""
-        from aipass.hooks.apps.sound import speak
-
         with (
             patch("aipass.hooks.apps.sound.is_muted", return_value=False),
             patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
@@ -129,7 +134,7 @@ class TestSpeak:
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
             mock_file = MagicMock()
-            mock_file.name = "/tmp/test.wav"
+            mock_file.name = str(tmp_path / "test.wav")
             mock_tmp.NamedTemporaryFile.return_value = mock_file
 
             speak("test")
@@ -144,8 +149,6 @@ class TestPlay:
     """WAV playback with mute support."""
 
     def test_play_calls_aplay_when_not_muted(self):
-        from aipass.hooks.apps.sound import play
-
         with (
             patch("aipass.hooks.apps.sound.is_muted", return_value=False),
             patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
@@ -155,22 +158,21 @@ class TestPlay:
 
             play(mock_path)
 
-        mock_sub.Popen.assert_called_once()
+        assert mock_sub.Popen.call_count == 1
+        (play_cmd,), play_kwargs = mock_sub.Popen.call_args
+        assert play_cmd[-1] == str(mock_path)
+        assert play_kwargs == {"stdout": mock_sub.DEVNULL, "stderr": mock_sub.DEVNULL}
 
-    def test_play_skips_when_muted(self):
-        from aipass.hooks.apps.sound import play
-
+    def test_play_skips_when_muted(self, tmp_path):
         with (
             patch("aipass.hooks.apps.sound.is_muted", return_value=True),
             patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
         ):
-            play(Path("/tmp/sound.wav"))
+            play(tmp_path / "sound.wav")
 
         mock_sub.Popen.assert_not_called()
 
     def test_play_skips_when_file_missing(self):
-        from aipass.hooks.apps.sound import play
-
         with (
             patch("aipass.hooks.apps.sound.is_muted", return_value=False),
             patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
@@ -189,11 +191,9 @@ class TestPlay:
         pinning the template is what separates "the player is missing" from
         "the sound file is missing" - two failures with one silent outcome.
         """
-        from aipass.hooks.apps.sound import play
-
         with (
             patch("aipass.hooks.apps.sound.is_muted", return_value=False),
-            patch("aipass.hooks.apps.sound.subprocess.Popen", side_effect=OSError("no aplay")),
+            patch("aipass.hooks.apps.sound.subprocess.Popen", side_effect=OSError("no player")),
             patch("aipass.hooks.apps.sound.logger") as mock_logger,
         ):
             mock_path = MagicMock()
@@ -204,7 +204,7 @@ class TestPlay:
         assert mock_logger.info.call_count == 1
         template, exc = mock_logger.info.call_args[0]
         assert template == "[HOOKS] play: playback error: %s"
-        assert str(exc) == "no aplay"
+        assert str(exc) == "no player"
 
 
 class TestMuteWritePair:
@@ -216,15 +216,11 @@ class TestMuteWritePair:
         return flag
 
     def test_mute_creates_the_flag(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.sound import mute
-
         flag = self._isolated(tmp_path, monkeypatch)
         assert mute() is True
         assert flag.exists()
 
     def test_unmute_removes_the_flag(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.sound import unmute
-
         flag = self._isolated(tmp_path, monkeypatch)
         flag.touch()
         assert unmute() is False
@@ -232,15 +228,11 @@ class TestMuteWritePair:
 
     def test_unmute_is_idempotent_on_missing_flag(self, tmp_path, monkeypatch):
         """Was a caller-side exists() check; missing_ok owns it now."""
-        from aipass.hooks.apps.sound import unmute
-
         self._isolated(tmp_path, monkeypatch)
         assert unmute() is False
         assert unmute() is False
 
     def test_mute_is_idempotent(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.sound import mute
-
         flag = self._isolated(tmp_path, monkeypatch)
         assert mute() is True
         assert mute() is True
@@ -248,8 +240,6 @@ class TestMuteWritePair:
 
     def test_round_trip_agrees_with_is_muted(self, tmp_path, monkeypatch):
         """@api flips then reads back through is_muted() — the two halves must agree."""
-        from aipass.hooks.apps.sound import is_muted, mute, unmute
-
         self._isolated(tmp_path, monkeypatch)
         assert mute() == is_muted() is True
         assert unmute() == is_muted() is False
@@ -257,12 +247,8 @@ class TestMuteWritePair:
     def test_writes_are_logged(self, tmp_path, monkeypatch):
         """A state change nobody can audit left no trace before — hooksound imported
         the logger and never called it."""
-        from unittest.mock import patch as _patch
-
-        from aipass.hooks.apps import sound
-
         self._isolated(tmp_path, monkeypatch)
-        with _patch.object(sound, "logger") as mock_logger:
+        with patch.object(sound, "logger") as mock_logger:
             sound.mute()
             sound.unmute()
         assert len(mock_logger.info.call_args_list) == 2

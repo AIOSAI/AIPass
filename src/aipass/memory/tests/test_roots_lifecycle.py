@@ -1,40 +1,46 @@
 # =================== AIPass ====================
 # Name: test_roots_lifecycle.py
 # Description: Pins the template, verbs and healing for AIPASS_ROOTS.json
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-08-30
+# Modified: 2026-09-27
 # =============================================
 
-"""The anchor is written by code, from a template, or it is not written.
+"""Tests for apps/modules/roots.py and apps/handlers/monitor/roots_file.py."""
 
-FPLAN-0460 phase 4. @devpulse created AIPASS_ROOTS.json by hand this morning and
-The owner ruled on seeing it, verbatim: "jsons are normally created by code, so if
-they corrupt or get deleted they are always rebuilt from default settings from a
-template directory."
+# The anchor is written by code, from a template, or it is not written.
+#
+# FPLAN-0460 phase 4. @devpulse created AIPASS_ROOTS.json by hand this morning and
+# The owner ruled on seeing it, verbatim: "jsons are normally created by code, so if
+# they corrupt or get deleted they are always rebuilt from default settings from a
+# template directory."
+#
+# THE ASYMMETRY THAT SHAPES ALL OF THIS. The reader already refuses a row it cannot
+# use -- a path that does not exist, one that overlaps AIPass home, a duplicate.
+# Refusing at READ time means the file is allowed to carry a row that will never be
+# honoured, and the only place that fact appears is a log line nobody is reading.
+# So every one of those refusals now happens at WRITE time too, against the same
+# predicate, so the file cannot contain a declaration the reader will silently
+# drop.
+#
+# HEALING IS A SEPARATE, DELIBERATE VERB, never a side effect of reading. Stated
+# here because it is a design ruling and not an implementation detail: an automatic
+# rebuild would replace the owner's declarations with an empty scaffold as a
+# side effect of any lane that happened to read the file first -- rollover, lint,
+# health, @daemon's scheduler -- and because ZERO ROOTS IS A LEGAL STATE, nothing
+# downstream would fail. The system would keep running and quietly maintain
+# nothing. That is re-declaring on the owner's behalf, which is exactly what
+# declaration-is-the-credential forbids. Same principle as the One Law's fourth
+# hat: unreadable gold REFUSES rather than scoring zero.
+#
+# So: the reader keeps refusing, exactly as it does today, and ``roots heal`` is
+# the one thing that may write a scaffold over a broken file -- after preserving
+# the original bytes and printing what it could not carry across.
 
-THE ASYMMETRY THAT SHAPES ALL OF THIS. The reader already refuses a row it cannot
-use -- a path that does not exist, one that overlaps AIPass home, a duplicate.
-Refusing at READ time means the file is allowed to carry a row that will never be
-honoured, and the only place that fact appears is a log line nobody is reading.
-So every one of those refusals now happens at WRITE time too, against the same
-predicate, so the file cannot contain a declaration the reader will silently
-drop.
-
-HEALING IS A SEPARATE, DELIBERATE VERB, never a side effect of reading. Stated
-here because it is a design ruling and not an implementation detail: an automatic
-rebuild would replace the owner's declarations with an empty scaffold as a
-side effect of any lane that happened to read the file first -- rollover, lint,
-health, @daemon's scheduler -- and because ZERO ROOTS IS A LEGAL STATE, nothing
-downstream would fail. The system would keep running and quietly maintain
-nothing. That is re-declaring on the owner's behalf, which is exactly what
-declaration-is-the-credential forbids. Same principle as the One Law's fourth
-hat: unreadable gold REFUSES rather than scoring zero.
-
-So: the reader keeps refusing, exactly as it does today, and ``roots heal`` is
-the one thing that may write a scaffold over a broken file -- after preserving
-the original bytes and printing what it could not carry across.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — handle_command's writing verbs hit the live find_repo_root() file; add_root() pinned
+# seedgo: no-test-needed(shared) — show_roots() table text; list_roots() rows it prints are pinned here
+# seedgo: no-test-needed(shared) — json_handler.log_operation() audit line on each roots command
 
 import json
 import pathlib
@@ -42,8 +48,10 @@ from pathlib import Path
 
 import pytest
 
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.monitor import registry_scope as rs
 from aipass.memory.apps.handlers.monitor import roots_file as rf
+from aipass.memory.apps.modules import fleet, roots
 
 
 TODAY = "2026-08-30"
@@ -182,12 +190,13 @@ class TestAddRefusesAtWriteWhatTheReaderRefusesAtRead:
         assert _read(home)["roots"] == []
 
     def test_the_same_root_cannot_be_declared_twice(self, home):
+        """Mutant: add_root's duplicate refusal writes a second row before refusing — killed."""
         rf.init_roots(home, today=TODAY)
         rf.add_root(home, "../wren", today=TODAY)
         ok, message = rf.add_root(home, str(home.parent / "wren"), today=TODAY)
         assert not ok, "the same directory was declared twice under two spellings"
         assert "already" in message.lower()
-        assert len(_read(home)["roots"]) == 1
+        assert [row["path"] for row in _read(home)["roots"]] == ["../wren"]
 
     def test_the_label_defaults_to_the_directory_name(self, home):
         rf.init_roots(home, today=TODAY)
@@ -222,12 +231,16 @@ class TestRemoveTakesOnlyWhatIsThere:
         assert [row["path"] for row in _read(home)["roots"]] == ["../Demo"]
 
     def test_removing_something_never_declared_is_refused_not_ignored(self, home):
-        """A no-op that reports success teaches the operator the wrong thing."""
+        """A no-op that reports success teaches the operator the wrong thing.
+
+        Mutant: remove_root's not-declared refusal writes an empty roots[] before refusing — killed.
+        """
         rf.init_roots(home, today=TODAY)
         rf.add_root(home, "../wren", today=TODAY)
         ok, message = rf.remove_root(home, "../Demo", today=TODAY)
         assert not ok
         assert "not declared" in message.lower()
+        assert [row["path"] for row in _read(home)["roots"]] == ["../wren"]
         assert len(_read(home)["roots"]) == 1
 
     def test_a_root_that_no_longer_exists_on_disk_can_still_be_removed(self, home):
@@ -310,10 +323,15 @@ class TestHealingIsDeliberateAndNeverReDeclares:
         assert _read(home)["roots"] == [], "a salvaged path was silently re-declared"
 
     def test_heal_refuses_when_there_is_no_file_at_all(self, home):
-        """Absent is `init`'s job. Two verbs that both create is one too many."""
-        ok, message, _ = rf.heal(home, today=TODAY)
+        """Absent is `init`'s job. Two verbs that both create is one too many.
+
+        Mutant: heal's absent-file refusal writes render_scaffold() before refusing — killed.
+        """
+        ok, message, salvaged = rf.heal(home, today=TODAY)
         assert not ok
         assert "init" in message.lower()
+        assert salvaged == []
+        assert not (home / rs.DECLARED_ROOTS).exists(), "heal created the file init owns"
 
 
 class TestOnePredicateNotTwo:
@@ -389,8 +407,6 @@ class TestTheOperatorLane:
     """
 
     def test_it_answers_only_its_own_command(self):
-        from aipass.memory.apps.modules import roots
-
         assert roots.handle_command("rollover", []) is False
         assert roots.handle_command("search", ["x"]) is False
 
@@ -401,16 +417,11 @@ class TestTheOperatorLane:
         A gate reading args[0] alone treats that as a path and refuses, which is
         the worst possible answer to a request for help.
         """
-        from aipass.memory.apps.modules import roots
-
         assert roots.handle_command("roots", args) is True
         assert "roots Module" in capsys.readouterr().out
 
     def test_an_unknown_subcommand_is_named_not_swallowed(self, capsys):
         """REWRITTEN 2026-09-08: named AND non-zero, not named and exit 0."""
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-        from aipass.memory.apps.modules import roots
-
         reset_command_state()
         assert roots.handle_command("roots", ["nonsense"]) is True
         assert resolve_exit(True) == 2, "an unknown subcommand refused but would exit 0"
@@ -420,10 +431,6 @@ class TestTheOperatorLane:
     @pytest.mark.parametrize("verb", ["add", "remove"])
     def test_a_verb_that_needs_a_path_refuses_without_one(self, capsys, verb):
         """Never operate on a default. A missing path is a question, not a zero."""
-        from aipass.memory.apps.modules import roots
-
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-
         reset_command_state()
         assert roots.handle_command("roots", [verb]) is True
         assert resolve_exit(True) == 2, f"roots {verb} refused but would exit 0"
@@ -436,8 +443,6 @@ class TestTheOperatorLane:
         ``modules/fleet.py`` carries a pin that its command surface computes
         nothing. These verbs write files, which is why they are not on it.
         """
-        from aipass.memory.apps.modules import fleet, roots
-
         assert hasattr(roots, "handle_command")
         assert not hasattr(fleet, "add_root"), "the write lane leaked onto the read gateway"
 

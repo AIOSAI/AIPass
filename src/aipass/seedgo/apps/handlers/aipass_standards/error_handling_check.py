@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_handling_check.py
 # Description: Error Handling Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -22,6 +22,8 @@ from aipass.seedgo.apps.handlers.aipass_standards import exception_handling
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: pytest.raises is the test idiom; a test's except blocks are deliberate.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 
@@ -69,7 +71,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return {
             "passed": True,
             "checks": [
-                {"name": "Error handling", "passed": True, "message": "No try/except blocks detected (not applicable)"}
+                {
+                    "name": "Error handling",
+                    "passed": True,
+                    "message": "No try/except blocks detected (not applicable)",
+                    "declined": True,
+                }
             ],
             "score": 100,
             "standard": "ERROR_HANDLING",

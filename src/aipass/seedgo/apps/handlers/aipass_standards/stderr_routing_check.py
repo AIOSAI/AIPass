@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stderr_routing_check.py
 # Description: Stderr Routing Standards Checker
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-13
-# Modified: 2026-03-13
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -31,6 +31,8 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
+# APPLIES_TO: stream choice is a product decision.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 
@@ -139,7 +141,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return {
             "passed": True,
             "checks": [
-                {"name": "Stderr routing", "passed": True, "message": "No error/warning output patterns (skipped)"}
+                {
+                    "name": "Stderr routing",
+                    "passed": True,
+                    "message": "No error/warning output patterns (skipped)",
+                    "declined": True,
+                }
             ],
             "score": 100,
             "standard": "STDERR_ROUTING",

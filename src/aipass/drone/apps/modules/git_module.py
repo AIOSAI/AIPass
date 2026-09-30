@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.4.1
+# Version: 1.4.3
 # Created: 2026-03-17
-# Modified: 2026-09-15
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -39,7 +39,7 @@ from aipass.drone.apps.handlers.git import (
     remote_handler,
     repo_door,
 )
-from aipass.drone.apps.handlers.help_flags import wants_help
+from aipass.drone.apps.handlers.help_flags import help_topic, wants_help
 from aipass.drone.apps.handlers.router_handler import caller_cwd
 from aipass.drone.apps.handlers.json_flags import strip_json_flag, wants_json
 
@@ -124,6 +124,9 @@ def _detect_branch_dir() -> tuple[str, Path] | None:
     Returns None when the process has no CWD — this detects the branch from
     LOCATION, and there is nothing to detect from. Identity assigned at spawn
     is a different question, answered elsewhere and unaffected.
+
+    Raises ValueError when a passport is found but cannot be read: a corrupt
+    passport is a failure to report, never "not inside a branch".
     """
     cwd = caller_cwd()
     if cwd is None:
@@ -142,7 +145,7 @@ def _detect_branch_dir() -> tuple[str, Path] | None:
                     return name, current
             except Exception as exc:
                 logger.warning("Failed to read passport at %s: %s", passport, exc)
-                return None
+                raise ValueError(f"Unreadable passport at {passport}: {exc}") from exc
         parent = current.parent
         if parent == current:
             break
@@ -170,7 +173,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             return {"stdout": "", "stderr": "", "exit_code": 0}
         args = []
     if wants_help(command, args):
-        print_help()
+        print_help(help_topic(command, args))
         return {"stdout": "", "stderr": "", "exit_code": 0}
 
     if command is None:
@@ -559,6 +562,18 @@ def _handle_close_pr(args: list[str]) -> dict:
     return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
 
+def _terminal_answer(prompt: str) -> str | None:
+    """The typed answer to *prompt* on a real terminal, or None when stdin is not one.
+
+    Its body is the two calls the merge gate made inline. It has a name of its
+    own for the tests: they hand the gate a terminal through this name instead of
+    replacing sys.stdin for the whole process (drone's decision, DPLAN-0354 leg 5).
+    """
+    if not sys.stdin.isatty():
+        return None
+    return input(prompt)
+
+
 def _confirm_merge(pr_number: str, caller: str, confirmed: bool) -> dict | None:
     """Joint-decision gate: merges must never happen accidentally (DPLAN-0256).
 
@@ -570,8 +585,8 @@ def _confirm_merge(pr_number: str, caller: str, confirmed: bool) -> dict | None:
         json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "--confirm"})
         return None
 
-    if sys.stdin.isatty():
-        answer = input(f"Merge PR #{pr_number}? Merges are a joint decision. [y/N] ")
+    answer = _terminal_answer(f"Merge PR #{pr_number}? Merges are a joint decision. [y/N] ")
+    if answer is not None:
         if answer.strip().lower() in ("y", "yes"):
             json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "tty-yes"})
             return None
@@ -707,9 +722,12 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
         if result.get("ok", True):
             result["message"] = f"{result['total']} file(s) changed in {repo_root}"
     else:
-        detected = _detect_branch_dir()
-        if detected is None:
+        try:
+            detected = _detect_branch_dir()
             message = "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/"
+        except ValueError as exc:
+            detected, message = None, str(exc)
+        if detected is None:
             if as_json:
                 # This refusal fires BEFORE the branch is known, which is how a
                 # machine caller ends up parsing a bare sentence. Every exit from a
@@ -778,13 +796,13 @@ def _handle_diff(args: list[str], repo_root: Path | None = None) -> dict:
     if repo_root is not None:
         result = diff_handler.get_branch_diff(repo_root, staged=staged, repo_root=repo_root)
     else:
-        detected = _detect_branch_dir()
+        try:
+            detected = _detect_branch_dir()
+            message = "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/"
+        except ValueError as exc:
+            detected, message = None, str(exc)
         if detected is None:
-            return {
-                "stdout": "",
-                "stderr": "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/",
-                "exit_code": 1,
-            }
+            return {"stdout": "", "stderr": message, "exit_code": 1}
 
         branch_name, branch_dir = detected
         show_all = "--all" in args
@@ -1331,8 +1349,12 @@ def print_introspection() -> None:
     c.print()
 
 
-def print_help() -> None:
+def print_help(command: str | None = None) -> None:
     """Print help (seedgo compliance).
+
+    Args:
+        command: The verb to explain. None prints the top-level page; an
+            unknown verb falls through to it inside ``get_help``.
 
     ``markup=False``: this page is documentation, not styled output, and its
     argument placeholders are literal. Rendered as markup, Rich read ``[count]``
@@ -1341,4 +1363,4 @@ def print_help() -> None:
     standard scoring 100, because the literal is returned by ``get_help()``
     rather than written at the print site.
     """
-    _get_console().print(get_help(), markup=False)
+    _get_console().print(get_help(command), markup=False)

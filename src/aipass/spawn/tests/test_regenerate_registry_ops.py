@@ -1,24 +1,28 @@
 # =================== AIPass ====================
 # Name: test_regenerate_registry_ops.py
 # Description: Tests for regenerate_registry_ops handler
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for regenerate_registry_ops: template registry regeneration, ID preservation, scanning."""
+"""Tests for apps/handlers/regenerate_registry_ops.py and apps/modules/regenerate_registry.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that regenerate_registry_ops.py and regenerate_registry.py parse and import
+# seedgo: no-test-needed(documentation) — docstrings on the scan/regenerate helper functions
 
 import json
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from aipass.spawn.apps.handlers.regenerate_registry_ops import (
-    regenerate_template_registry,
-    _scan_template_directory,
-    _next_id,
-)
+from aipass.spawn.apps.handlers import regenerate_registry_ops
+from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
+from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
+from aipass.spawn.apps.modules import regenerate_registry as regenerate_registry_module
 from aipass.spawn.apps.modules.regenerate_registry import handle_regenerate_registry
 
 
@@ -498,25 +502,69 @@ class TestHashLengthCompat:
 # =============================================================================
 
 
+def _seed_registry(tpl: Path, files: dict | None = None, directories: dict | None = None) -> None:
+    """Write an existing .spawn/.template_registry.json into a tmp_path template."""
+    spawn_dir = tpl / ".spawn"
+    spawn_dir.mkdir(parents=True, exist_ok=True)
+    registry = {"metadata": {"last_updated": "2026-01-01"}, "files": files or {}, "directories": directories or {}}
+    (spawn_dir / ".template_registry.json").write_text(json.dumps(registry), encoding="utf-8")
+
+
+def _file_entry(path: str) -> dict:
+    return {"path": path, "name": path, "content_hash": _hash_for(path)}
+
+
+def _id_of(entries: dict, path: str) -> str:
+    return next(eid for eid, entry in entries.items() if entry["path"] == path)
+
+
 class TestNextId:
-    """Tests 14-16 — _next_id function."""
+    """Tests 14-16 — new-ID assignment, observed through regenerate_template_registry."""
 
-    def test_next_id_basic(self):
-        """Test 14 — empty claimed set returns prefix + 001."""
-        assert _next_id("f", set()) == "f001"
+    def test_next_id_basic(self, tmp_path):
+        """Test 14 — nothing claimed yet: the first file gets prefix + 001.
 
-    def test_next_id_skips_claimed(self):
+        Mutant: new IDs numbered from 0 -> red.
+        """
+        tpl = _make_template(tmp_path, files={"only.py": "x"})
+
+        result = regenerate_template_registry(tpl)
+
+        assert list(result["files"]) == ["f001"]
+
+    def test_next_id_skips_claimed(self, tmp_path):
         """Test 15 — skips past consecutively claimed IDs."""
-        assert _next_id("f", {"f001", "f002"}) == "f003"
+        tpl = _make_template(tmp_path, files={"a.py": "a", "b.py": "b", "c.py": "c"})
+        _seed_registry(tpl, files={"f001": _file_entry("a.py"), "f002": _file_entry("b.py")})
 
-    def test_next_id_fills_gaps(self):
-        """Test 16 — fills gaps in the sequence."""
-        assert _next_id("f", {"f001", "f003"}) == "f002"
+        result = regenerate_template_registry(tpl)
 
-    def test_next_id_directory_prefix(self):
-        """Bonus — works with 'd' prefix for directories."""
-        assert _next_id("d", set()) == "d001"
-        assert _next_id("d", {"d001"}) == "d002"
+        assert _id_of(result["files"], "c.py") == "f003"
+
+    def test_next_id_fills_gaps(self, tmp_path):
+        """Test 16 — fills gaps in the sequence.
+
+        Mutant: the next ID counts past the highest claimed instead of filling the first gap -> red.
+        """
+        tpl = _make_template(tmp_path, files={"a.py": "a", "c.py": "c", "new.py": "n"})
+        _seed_registry(tpl, files={"f001": _file_entry("a.py"), "f003": _file_entry("c.py")})
+
+        result = regenerate_template_registry(tpl)
+
+        assert _id_of(result["files"], "new.py") == "f002"
+
+    def test_next_id_directory_prefix(self, tmp_path):
+        """Bonus — directories draw from the 'd' prefix."""
+        fresh = _make_template(tmp_path / "fresh", dirs=["x"])
+        assert list(regenerate_template_registry(fresh)["directories"]) == ["d001"]
+
+        tpl = _make_template(tmp_path / "seeded", dirs=["x", "y"])
+        _seed_registry(tpl, directories={"d001": {"path": ".spawn", "name": ".spawn"}})
+
+        result = regenerate_template_registry(tpl)
+
+        assert sorted(result["directories"]) == ["d001", "d002", "d003"]
+        assert _id_of(result["directories"], ".spawn") == "d001"
 
 
 # =============================================================================
@@ -549,7 +597,8 @@ class TestScanTemplateDirectoryOrdering:
             dirs=["z_dir", "a_dir"],
         )
 
-        files, directories = _scan_template_directory(tpl, None)
+        result = regenerate_template_registry(tpl)
+        files, directories = result["files"], result["directories"]
 
         # Files should have been scanned in sorted order (a_, m_, z_)
         file_paths = [entry["path"] for entry in files.values()]
@@ -575,9 +624,26 @@ def _shipped_registry_path() -> Path:
     are archived, so this reads the live one through the class registry rather
     than hardcoding a name that a rename would point at nothing.
     """
-    from aipass.spawn.apps.handlers.class_registry import get_template_dir
-
     return get_template_dir() / ".spawn" / ".template_registry.json"
+
+
+class TestRegistryDateSeam:
+    """The clock seam itself, unpatched: every other date test replaces it."""
+
+    def test_the_seam_answers_an_iso_day(self, tmp_path):
+        """The real clock stamps a ten-character day that date.fromisoformat takes.
+
+        Reached through regenerate_template_registry on a fresh template, which
+        stamps last_updated from the seam with nothing patched. Compares against
+        no second clock, so midnight cannot redden it.
+        Mutant: the body formats day/month/year with slashes -> red.
+        """
+        tpl = _make_template(tmp_path, files={"main.py": "print('hi')"}, dirs=["apps"])
+
+        answer = regenerate_template_registry(tpl)["metadata"]["last_updated"]
+
+        assert len(answer) == 10
+        assert date.fromisoformat(answer).isoformat() == answer
 
 
 class TestLastUpdatedTracksContentNotTheCalendar:
@@ -589,33 +655,55 @@ class TestLastUpdatedTracksContentNotTheCalendar:
     only field that moved was the one that moved for free.
     """
 
+    _FIXED_DAY = "2031-06-15"
+
+    @pytest.fixture(autouse=True)
+    def _fixed_clock(self, monkeypatch):
+        """Pin "today" at the product's clock seam, never at the stdlib.
+
+        These asserts used to compare the product's datetime.now() against the
+        test's own date.today(): a run that crossed midnight between the two read
+        two different days and went red. The seam (_registry_date, added by
+        spawn's decision, DPLAN-0354 leg 3) makes "today" one value both sides see.
+        """
+        monkeypatch.setattr(regenerate_registry_ops, "_registry_date", lambda: self._FIXED_DAY)
+
     @staticmethod
-    def _regenerate(template: Path, date: str) -> None:
-        """Regenerate with the clock pinned to `date`."""
-        with patch("aipass.spawn.apps.handlers.regenerate_registry_ops.datetime") as fake:
-            fake.now.return_value.strftime.return_value = date
-            regenerate_template_registry(template)
+    def _regenerate(template: Path) -> None:
+        """Regenerate on the seam's fixed day; the old stamp is moved on disk."""
+        regenerate_template_registry(template)
+
+    def _today(self) -> str:
+        return self._FIXED_DAY
 
     @staticmethod
     def _registry(template: Path) -> dict:
         return json.loads((template / ".spawn" / ".template_registry.json").read_text(encoding="utf-8"))
 
     def _settled(self, tmp_path: Path, date: str = "2026-01-01") -> Path:
-        """A template whose registry is already stable.
+        """A template whose registry is already stable, stamped on a day that is not today.
 
         The FIRST regenerate creates .spawn/, which the scanner then tracks as a
         directory — so run #2 legitimately sees new content. Settling twice makes
         the run under test a genuine no-change run rather than a disguised one.
+        The stamp is then backdated ON DISK, in the product's own serialisation,
+        so the run under test happens on a different calendar day than the stamp.
         """
         template = _make_template(tmp_path, files={"README.md": "hello"})
-        self._regenerate(template, date)
-        self._regenerate(template, date)
+        self._regenerate(template)
+        self._regenerate(template)
+        registry = self._registry(template)
+        registry["metadata"]["last_updated"] = date
+        (template / ".spawn" / ".template_registry.json").write_text(
+            json.dumps(registry, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
         return template
 
     def test_no_change_regenerate_preserves_the_existing_date(self, tmp_path):
+        """Mutant: a no-change regenerate stamps today's date -> red."""
         template = self._settled(tmp_path)
 
-        self._regenerate(template, "2099-12-31")
+        self._regenerate(template)
 
         assert self._registry(template)["metadata"]["last_updated"] == "2026-01-01"
 
@@ -624,51 +712,55 @@ class TestLastUpdatedTracksContentNotTheCalendar:
         registry_path = template / ".spawn" / ".template_registry.json"
         before = registry_path.read_bytes()
 
-        self._regenerate(template, "2099-12-31")
+        self._regenerate(template)
 
         assert registry_path.read_bytes() == before
 
     def test_changed_content_does_bump_the_date(self, tmp_path):
-        """The other half — preserving must never become freezing."""
+        """The other half — preserving must never become freezing.
+
+        Mutant: the existing date kept even when the content changed -> red.
+        Mutant: the date read from datetime.now() past the _registry_date seam -> red.
+        """
         template = self._settled(tmp_path)
 
         (template / "README.md").write_text("hello, world", encoding="utf-8")
-        self._regenerate(template, "2099-12-31")
+        self._regenerate(template)
 
-        assert self._registry(template)["metadata"]["last_updated"] == "2099-12-31"
+        assert self._registry(template)["metadata"]["last_updated"] == self._today()
 
     def test_a_new_file_bumps_the_date(self, tmp_path):
         template = self._settled(tmp_path)
 
         (template / "NEW.md").write_text("new", encoding="utf-8")
-        self._regenerate(template, "2099-12-31")
+        self._regenerate(template)
 
-        assert self._registry(template)["metadata"]["last_updated"] == "2099-12-31"
+        assert self._registry(template)["metadata"]["last_updated"] == self._today()
 
     def test_a_new_directory_bumps_the_date(self, tmp_path):
         template = self._settled(tmp_path)
 
         (template / "extra").mkdir()
         (template / "extra" / "README.md").write_text("x", encoding="utf-8")
-        self._regenerate(template, "2099-12-31")
+        self._regenerate(template)
 
-        assert self._registry(template)["metadata"]["last_updated"] == "2099-12-31"
+        assert self._registry(template)["metadata"]["last_updated"] == self._today()
 
     def test_a_removed_file_bumps_the_date(self, tmp_path):
         template = self._settled(tmp_path)
 
         (template / "README.md").unlink()
-        self._regenerate(template, "2099-12-31")
+        self._regenerate(template)
 
-        assert self._registry(template)["metadata"]["last_updated"] == "2099-12-31"
+        assert self._registry(template)["metadata"]["last_updated"] == self._today()
 
     def test_first_ever_regenerate_stamps_today(self, tmp_path):
         """No prior registry to preserve — today is the honest answer."""
         template = _make_template(tmp_path, files={"README.md": "hello"})
 
-        self._regenerate(template, "2026-01-01")
+        self._regenerate(template)
 
-        assert self._registry(template)["metadata"]["last_updated"] == "2026-01-01"
+        assert self._registry(template)["metadata"]["last_updated"] == self._today()
 
 
 class TestHandleRegenerateRegistry:
@@ -697,26 +789,23 @@ class TestHandleRegenerateRegistry:
         """
         import shutil
 
-        from aipass.spawn.apps.handlers.class_registry import get_available_classes as real_classes
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir as real_template_dir
-
         sandbox = tmp_path / "templates"
         sandbox.mkdir()
-        for class_name in real_classes():
-            shutil.copytree(real_template_dir(class_name), sandbox / class_name)
+        for class_name in get_available_classes():
+            shutil.copytree(get_template_dir(class_name), sandbox / class_name)
 
         def fake_template_dir(class_name: str = "specialist") -> Path:
             return sandbox / class_name
 
         def fake_template_dirs() -> list[Path]:
-            return sorted({sandbox / class_name for class_name in real_classes()})
+            return sorted({sandbox / class_name for class_name in get_available_classes()})
 
         with (
             patch("aipass.spawn.apps.modules.regenerate_registry.get_template_dir", side_effect=fake_template_dir),
             patch("aipass.spawn.apps.modules.regenerate_registry.get_template_dirs", side_effect=fake_template_dirs),
             patch(
                 "aipass.spawn.apps.modules.regenerate_registry.get_available_classes",
-                side_effect=real_classes,
+                side_effect=get_available_classes,
             ),
         ):
             yield
@@ -729,9 +818,11 @@ class TestHandleRegenerateRegistry:
         gate. If this fails, add the new name to the fixture above — do not
         widen the list without redirecting it.
         """
-        from aipass.spawn.apps.modules import regenerate_registry as module
-
-        found = {name for name in dir(module) if name.startswith("get_template_dir") or name.endswith("_template_dirs")}
+        found = {
+            name
+            for name in dir(regenerate_registry_module)
+            if name.startswith("get_template_dir") or name.endswith("_template_dirs")
+        }
 
         assert found == _TEMPLATE_LOOKUPS, (
             f"template lookups on the module changed: {sorted(found)} != {sorted(_TEMPLATE_LOOKUPS)}. "
@@ -780,9 +871,7 @@ class TestHandleRegenerateRegistry:
         shipped = _shipped_registry_path()
         before = shipped.read_bytes()
 
-        with patch("aipass.spawn.apps.handlers.regenerate_registry_ops.datetime") as fake:
-            fake.now.return_value.strftime.return_value = "2099-12-31"
-
+        with patch.object(regenerate_registry_ops, "_registry_date", return_value="2099-12-31"):
             assert handle_regenerate_registry([]) == 0
             assert handle_regenerate_registry(["--all"]) == 0
 
@@ -797,9 +886,7 @@ class TestHandleRegenerateRegistry:
         never widened to the new one, so --all walked straight to the shipped
         tree while the single-class path stayed correctly sandboxed.
         """
-        from aipass.spawn.apps.modules import regenerate_registry as module
-
-        resolved = module.get_template_dirs()
+        resolved = regenerate_registry_module.get_template_dirs()
 
         assert resolved, "get_template_dirs() returned nothing — the --all branch would be a silent no-op"
         for template_dir in resolved:

@@ -3,34 +3,24 @@
 # Description: Pins devpulse imports against a dead working directory
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""Every devpulse module must import without a readable working directory.
+"""Tests for apps/handlers/__init__.py and apps/handlers/module_root.py with no readable working directory."""
 
-The mechanism, measured on the Windows CI gate 2026-08-31 (@memory's finding):
-ntpath.realpath calls os.getcwd() UNCONDITIONALLY - not only for relative
-paths, the way posixpath does - and Path.resolve() routes through it. So on
-Windows every module-level Path(__file__).resolve() is an import-time
-working-directory read, and a process whose cwd was deleted cannot import the
-module at all. devpulse carried six such sites.
-
-The world injects ntpath's behaviour as a CONDITION rather than a platform:
-os.path.realpath is wrapped to read os.getcwd() first, then os.getcwd is
-denied. The injection happens in a child process before any aipass import, so
-no module has cached the real functions.
-
-Where the interpreter's own pathlib never routes resolve() through
-os.path.realpath (3.10 resolves absolute paths without touching cwd), the
-denial cannot fire and the probe says so - the pin still asserts the imports
-succeed there, it just proves less. Pinned as a probe with both outcomes,
-never a skipif: the vacuous world is named in the output, and the test
-asserts vacuity only occurs on interpreters where it is the truth.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — ntpath's own realpath; the world injects its cwd read as a condition
 
 import subprocess
 import sys
+from pathlib import Path
 
+from aipass.devpulse.apps.handlers import module_root
+
+# ntpath.realpath reads os.getcwd() for every path and Path.resolve() routes through
+# it (Windows CI, 2026-08-31). The world injects that as a condition, in a child
+# process before any aipass import; where resolve() never reaches the denial the
+# probe says PROBE_VACUOUS, and the test allows that only on pre-3.11 interpreters.
 WORLD = r"""
 # Other branches' import-time code is held CONSTANT: preloaded in the healthy
 # world, before the denial. Their dead-cwd cure is their own build (fleet
@@ -110,8 +100,6 @@ def test_the_guard_never_calls_inspect_stack():
     during an import. @trigger measured the hole - restoring the defect left
     their whole suite green. Only a parse of the file convicts it.
     """
-    from pathlib import Path
-
     guard = (Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py").read_text(encoding="utf-8")
 
     assert _inspect_stack_calls(guard) == [], (
@@ -131,6 +119,17 @@ def test_the_guard_never_calls_inspect_stack():
     assert _inspect_stack_calls("import numpy\nnumpy.stack([])\n") == []
 
 
+class _UnresolvablePath(type(Path())):
+    """A path whose resolve() fails the way a dead working directory makes it fail.
+
+    Bound as module_root's own Path (@daemon's shape, 2026-09-27), so only
+    module_file() meets it: pathlib.Path is left alone for the rest of the process.
+    """
+
+    def resolve(self, strict=False):
+        raise OSError("resolve denied")
+
+
 def test_fallback_diagnostics_never_take_the_lane_down(monkeypatch, capsys):
     """@daemon's flag on this branch (2026-08-31): module_file's fallback
     logged OUTSIDE its own protection. The world that reaches the fallback
@@ -139,19 +138,12 @@ def test_fallback_diagnostics_never_take_the_lane_down(monkeypatch, capsys):
     import crash the helper exists to prevent. Mutant-verified: restoring
     the unprotected logger.debug in module_file's except turns this red.
     """
-    from pathlib import Path
-
-    from aipass.devpulse.apps.handlers import module_root
 
     def _logger_is_down(*args, **kwargs):
         raise OSError("logger lane is down with the cwd")
 
     monkeypatch.setattr(module_root.logger, "debug", _logger_is_down)
-
-    def _resolve_denied(self, strict=False):
-        raise OSError("resolve denied")
-
-    monkeypatch.setattr(module_root.Path, "resolve", _resolve_denied)
+    monkeypatch.setattr(module_root, "Path", _UnresolvablePath)
 
     result = module_root.module_file(__file__)
 
@@ -212,6 +204,8 @@ def test_the_none_branch_is_reachable_by_direct_call():
         [sys.executable, "-c", DIRECT_CALL_WORLD],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     out = result.stdout
@@ -227,6 +221,8 @@ def test_handlers_import_with_dead_cwd():
         [sys.executable, "-c", WORLD],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
     out = result.stdout

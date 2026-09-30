@@ -1,22 +1,32 @@
 # =================== AIPass ====================
 # Name: test_activity_report.py
 # Description: Tests for the activity_report CLI module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for the activity_report CLI module (apps/modules/activity_report.py)."""
+"""Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that activity_report.py parses and imports
+# seedgo: no-test-needed(generated) — the report bodies; handlers/monitoring/report_generator builds them
 
 import re
-from unittest.mock import patch
+from datetime import datetime
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from aipass.cli.apps.modules import console as cli_console
+from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
+from aipass.daemon.apps.handlers.monitoring.activity_collector import scan_branch_activity
+from aipass.daemon.apps.modules import activity_report
+from aipass.daemon.apps.modules.activity_report import handle_command
+from aipass.memory.apps.modules import health as memory_health
 
 MODULE = "aipass.daemon.apps.modules.activity_report"
-
-# activity_report no longer imports error() at all (FPLAN-0492 wave 2b): a verb
-# RAISES UnknownArgument and apps/daemon.py renders it, so error() is patched on
-# the router and the refusal itself is asserted on the exception.
-ROUTER = "aipass.daemon.apps.daemon"
 
 
 # =============================================
@@ -24,42 +34,31 @@ ROUTER = "aipass.daemon.apps.daemon"
 # =============================================
 
 
-@patch(f"{MODULE}.json_handler")
-@patch(f"{MODULE}.console")
-@patch(f"{ROUTER}.error")
-@patch(f"{MODULE}.logger")
 class TestHandleCommandRouting:
     """Tests for handle_command routing and unknown commands."""
 
-    def test_unknown_command_returns_false(self, _log, _err, _con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_unknown_command_returns_false(self, capsys):
         assert handle_command("not_a_real_command", []) is False
+        assert capsys.readouterr().out == ""
 
-    def test_activity_no_args_calls_generate(self, _log, _err, mock_con, mock_jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
-        with patch(f"{MODULE}.generate_activity_report", return_value="report") as mock_gen:
+    def test_activity_no_args_calls_generate(self, capsys):
+        """Mutant killed: activity prints "" instead of the report."""
+        with patch(f"{MODULE}.generate_activity_report", return_value="REPORT-SENTINEL") as mock_gen:
             result = handle_command("activity", [])
 
         assert result is True
         mock_gen.assert_called_once_with(since_hours=24.0, verbosity="normal")
-        mock_con.print.assert_called_with("report")
+        assert "REPORT-SENTINEL" in capsys.readouterr().out
 
-    def test_activity_help_shows_help(self, _log, _err, mock_con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_activity_help_shows_help(self, capsys):
         with patch(f"{MODULE}.generate_activity_report") as mock_gen:
             result = handle_command("activity", ["--help"])
 
         assert result is True
         mock_gen.assert_not_called()
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("ACTIVITY" in c for c in calls)
+        assert "ACTIVITY" in capsys.readouterr().out
 
-    def test_activity_hours_48(self, _log, _err, _con, mock_jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_activity_hours_48(self):
         with patch(f"{MODULE}.generate_activity_report", return_value="report") as mock_gen:
             result = handle_command("activity", ["--hours", "48"])
 
@@ -72,45 +71,34 @@ class TestHandleCommandRouting:
 # =============================================
 
 
-@patch(f"{MODULE}.json_handler")
-@patch(f"{MODULE}.console")
-@patch(f"{ROUTER}.error")
-@patch(f"{MODULE}.logger")
 class TestActivityReportCommand:
     """Tests for 'activity-report' command."""
 
-    def test_activity_report_no_args(self, _log, _err, _con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_activity_report_no_args(self):
         with patch(f"{MODULE}.generate_activity_report", return_value="detailed") as mock_gen:
             result = handle_command("activity-report", [])
 
         assert result is True
         mock_gen.assert_called_once_with(since_hours=24.0, verbosity="detailed")
 
-    def test_activity_report_help(self, _log, _err, mock_con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_activity_report_help(self, capsys):
         with patch(f"{MODULE}.generate_activity_report") as mock_gen:
             result = handle_command("activity-report", ["--help"])
 
         assert result is True
         mock_gen.assert_not_called()
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("ACTIVITY-REPORT" in c for c in calls)
+        assert "ACTIVITY-REPORT" in capsys.readouterr().out
 
-    def test_activity_report_json(self, _log, _err, mock_con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_activity_report_json(self, capsys):
+        """Mutant killed: --json prints an empty dict instead of get_json_report's data."""
         with patch(f"{MODULE}.get_json_report", return_value={"branches": []}) as mock_json:
             result = handle_command("activity-report", ["--json"])
 
         assert result is True
         mock_json.assert_called_once_with(24.0)
+        assert '"branches": []' in capsys.readouterr().out
 
-    def test_activity_report_json_short_flag(self, _log, _err, mock_con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_activity_report_json_short_flag(self):
         with patch(f"{MODULE}.get_json_report", return_value={}) as mock_json:
             result = handle_command("activity-report", ["-j"])
 
@@ -123,30 +111,21 @@ class TestActivityReportCommand:
 # =============================================
 
 
-@patch(f"{MODULE}.json_handler")
-@patch(f"{MODULE}.console")
-@patch(f"{ROUTER}.error")
-@patch(f"{MODULE}.logger")
 class TestActivityReportAlias:
     """Tests for 'activity_report' underscore alias."""
 
-    def test_activity_report_alias_works(self, _log, _err, _con, mock_jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_activity_report_alias_works(self):
         with patch(f"{MODULE}.generate_activity_report", return_value="r") as mock_gen:
             result = handle_command("activity_report", [])
 
         assert result is True
         mock_gen.assert_called_once()
 
-    def test_activity_report_alias_help(self, _log, _err, mock_con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_activity_report_alias_help(self, capsys):
         result = handle_command("activity_report", ["--help"])
         assert result is True
         # Shows introspection (module info)
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("activity_report Module" in c for c in calls)
+        assert "activity_report Module" in capsys.readouterr().out
 
 
 # =============================================
@@ -162,33 +141,22 @@ ROSTER = ["DAEMON", "drone"]
 ROSTER_TARGET = f"{MODULE}._known_branch_names"
 
 
-@patch(f"{MODULE}.json_handler")
-@patch(f"{MODULE}.console")
-@patch(f"{ROUTER}.error")
-@patch(f"{MODULE}.logger")
 class TestBranchHealthCommand:
     """Tests for 'branch-health' command."""
 
-    def test_branch_health_no_args(self, _log, _err, _con, mock_jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_branch_health_no_args(self):
         with patch(f"{MODULE}.generate_activity_report", return_value="all") as mock_gen:
             result = handle_command("branch-health", [])
 
         assert result is True
         mock_gen.assert_called_once_with(since_hours=24, verbosity="normal")
 
-    def test_branch_health_help(self, _log, _err, mock_con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_branch_health_help(self, capsys):
         result = handle_command("branch-health", ["--help"])
         assert result is True
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert any("BRANCH-HEALTH" in c for c in calls)
+        assert "BRANCH-HEALTH" in capsys.readouterr().out
 
-    def test_branch_health_with_branch(self, _log, _err, mock_con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_branch_health_with_branch(self):
         with patch(ROSTER_TARGET, return_value=ROSTER):
             with patch(f"{MODULE}.generate_branch_report", return_value="DRONE report") as mock_br:
                 result = handle_command("branch-health", ["DRONE"])
@@ -200,9 +168,7 @@ class TestBranchHealthCommand:
         # generate_branch_report already re-derived the same name internally.
         mock_br.assert_called_once_with("drone", since_hours=24.0)
 
-    def test_branch_health_with_branch_and_hours(self, _log, _err, mock_con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_branch_health_with_branch_and_hours(self):
         with patch(ROSTER_TARGET, return_value=ROSTER):
             with patch(f"{MODULE}.generate_branch_report", return_value="report") as mock_br:
                 result = handle_command("branch-health", ["DRONE", "--hours", "48"])
@@ -210,23 +176,18 @@ class TestBranchHealthCommand:
         assert result is True
         mock_br.assert_called_once_with("drone", since_hours=48.0)
 
-    def test_branch_health_only_flags_refuses_non_zero(self, _log, mock_err, mock_con, _jh):
+    def test_branch_health_only_flags_refuses_non_zero(self):
         """A missing branch name is a refusal, and a refusal exits non-zero.
 
         Was `assert result is True` — the command printed "requires a branch
         name" and handed its caller a 0, so `daemon branch-health --hours 48 &&
         next-thing` ran next-thing.
         """
-        import pytest
-
-        from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
         with pytest.raises(UnknownArgument) as exc:
             handle_command("branch-health", ["--hours", "48"])
         assert exc.value.verb == "branch-health"
 
-    def test_unknown_branch_refuses_non_zero_and_names_the_token(self, _log, mock_err, mock_con, _jh):
+    def test_unknown_branch_refuses_non_zero_and_names_the_token(self):
         """@devpulse's 2026-09-07 fleet sweep, row 21: EXIT-0-ON-FAILURE.
 
         `branch-health not_a_real_subarg_xyz` printed "Branch not found" twice —
@@ -235,11 +196,6 @@ class TestBranchHealthCommand:
         token named. The token has to appear, or the caller cannot tell WHICH
         argument was rejected.
         """
-        import pytest
-
-        from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
         with patch(f"{MODULE}.generate_branch_report") as mock_br:
             with pytest.raises(UnknownArgument) as exc:
                 handle_command("branch-health", ["not_a_real_subarg_xyz"])
@@ -248,9 +204,7 @@ class TestBranchHealthCommand:
         mock_br.assert_not_called()
         assert exc.value.token == "not_a_real_subarg_xyz"
 
-    def test_a_known_branch_resolves_case_insensitively(self, _log, _err, mock_con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_a_known_branch_resolves_case_insensitively(self):
         with patch(ROSTER_TARGET, return_value=ROSTER):
             with patch(f"{MODULE}.generate_branch_report", return_value="r") as mock_br:
                 assert handle_command("branch-health", ["dRoNe"]) is True
@@ -258,54 +212,58 @@ class TestBranchHealthCommand:
 
 
 # =============================================
-# _parse_hours_arg
+# --hours / -t parsing, through the activity command
 # =============================================
 
 
-@patch(f"{MODULE}.logger")
 class TestParseHoursArg:
-    """Tests for _parse_hours_arg helper."""
+    """The --hours / -t window, read through `activity` the way a user types it."""
 
-    def test_hours_flag(self, _log):
-        from aipass.daemon.apps.modules.activity_report import _parse_hours_arg
+    def _since_hours(self, args):
+        with patch(f"{MODULE}.generate_activity_report", return_value="r") as mock_gen:
+            handle_command("activity", args)
+        return mock_gen.call_args.kwargs["since_hours"]
 
-        assert _parse_hours_arg(["--hours", "48"]) == 48.0
+    def test_hours_flag(self):
+        assert self._since_hours(["--hours", "48"]) == 48.0
 
-    def test_short_flag(self, _log):
-        from aipass.daemon.apps.modules.activity_report import _parse_hours_arg
+    def test_short_flag(self):
+        assert self._since_hours(["-t", "12"]) == 12.0
 
-        assert _parse_hours_arg(["-t", "12"]) == 12.0
+    def test_no_flag_returns_default(self):
+        assert self._since_hours([]) == 24.0
 
-    def test_no_flag_returns_default(self, _log):
-        from aipass.daemon.apps.modules.activity_report import _parse_hours_arg
+    def test_invalid_value_returns_default(self, monkeypatch):
+        """Mutant killed: the bad --hours value logged at info, not warning."""
+        mock_log = MagicMock()
+        monkeypatch.setattr(activity_report, "logger", mock_log)
 
-        assert _parse_hours_arg([]) == 24.0
-
-    def test_invalid_value_returns_default(self, mock_log):
-        from aipass.daemon.apps.modules.activity_report import _parse_hours_arg
-
-        result = _parse_hours_arg(["--hours", "abc"])
-        assert result == 24.0
-        mock_log.warning.assert_called()
+        assert self._since_hours(["--hours", "abc"]) == 24.0
+        warned = [str(c) for c in mock_log.warning.call_args_list]
+        assert any("abc" in c for c in warned)
 
 
 # =============================================
-# _extract_branch_name
+# branch name extraction, through branch-health
 # =============================================
 
 
 class TestExtractBranchName:
-    """Tests for _extract_branch_name helper."""
+    """Which token branch-health takes as the branch, around its flags."""
 
     def test_branch_with_flags(self):
-        from aipass.daemon.apps.modules.activity_report import _extract_branch_name
-
-        assert _extract_branch_name(["DRONE", "--hours", "48"]) == "DRONE"
+        """Mutant killed: extraction stops skipping the --hours value and takes "48" as the branch."""
+        with patch(ROSTER_TARGET, return_value=ROSTER):
+            with patch(f"{MODULE}.generate_branch_report", return_value="r") as mock_br:
+                assert handle_command("branch-health", ["--hours", "48", "DRONE"]) is True
+        mock_br.assert_called_once_with("drone", since_hours=48.0)
 
     def test_only_flags_returns_none(self):
-        from aipass.daemon.apps.modules.activity_report import _extract_branch_name
-
-        assert _extract_branch_name(["--hours", "48"]) is None
+        with patch(f"{MODULE}.generate_branch_report") as mock_br:
+            with pytest.raises(UnknownArgument) as exc:
+                handle_command("branch-health", ["-t", "12"])
+        mock_br.assert_not_called()
+        assert exc.value.token == "-t 12"
 
 
 # =============================================
@@ -342,8 +300,6 @@ def _clean_payload(**overrides):
 
 def _render(branch="DAEMON"):
     """Resolve the renderer by name so this file imports before the fix lands."""
-    from aipass.daemon.apps.modules import activity_report
-
     fn = getattr(activity_report, "_render_entry_health")
     return fn(branch)
 
@@ -420,25 +376,20 @@ class TestRenderEntryHealthDegradation:
         assert "observations" in out
         assert "221" in out
 
-    def test_memory_branch_unavailable_is_visible(self):
-        import sys
-
-        with patch.dict(sys.modules, {"aipass.memory.apps.modules.health": None}):
-            out = _render()
+    def test_memory_branch_unavailable_is_visible(self, monkeypatch):
+        """Mutant killed: the ImportError branch returns "" instead of the UNAVAILABLE line."""
+        # A module without the name makes the renderer's from-import raise
+        # ImportError — @memory absent, with the real module still imported.
+        monkeypatch.delattr(memory_health, "get_branch_health")
+        out = _render()
 
         assert "unavailable" in out.lower()
 
 
-@patch(f"{MODULE}.json_handler")
-@patch(f"{MODULE}.console")
-@patch(f"{ROUTER}.error")
-@patch(f"{MODULE}.logger")
 class TestBranchHealthWiring:
     """branch-health must actually call @memory's API — the todo's whole point."""
 
-    def test_branch_health_prints_entry_health(self, _log, _err, mock_con, _jh):
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
+    def test_branch_health_prints_entry_health(self, capsys):
         with patch(ROSTER_TARGET, return_value=ROSTER):
             with patch(f"{MODULE}.generate_branch_report", return_value="base report"):
                 with patch(f"{MODULE}._render_entry_health", return_value="ENTRY HEALTH BLOCK") as mock_render:
@@ -446,26 +397,20 @@ class TestBranchHealthWiring:
 
         assert result is True
         mock_render.assert_called_once_with("DAEMON")
-        printed = [str(c) for c in mock_con.print.call_args_list]
-        assert any("ENTRY HEALTH BLOCK" in c for c in printed)
+        assert "ENTRY HEALTH BLOCK" in capsys.readouterr().out
 
-    def test_base_branch_report_still_printed(self, _log, _err, mock_con, _jh):
+    def test_base_branch_report_still_printed(self, capsys):
         """Behaviour preservation: the existing report is not displaced by the new block."""
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
         with patch(ROSTER_TARGET, return_value=ROSTER):
             with patch(f"{MODULE}.generate_branch_report", return_value="base report") as mock_gen:
                 with patch(f"{MODULE}._render_entry_health", return_value="block"):
                     handle_command("branch-health", ["DAEMON", "--hours", "48"])
 
         mock_gen.assert_called_once_with("DAEMON", since_hours=48.0)
-        printed = [str(c) for c in mock_con.print.call_args_list]
-        assert any("base report" in c for c in printed)
+        assert "base report" in capsys.readouterr().out
 
-    def test_no_args_summary_does_not_call_memory(self, _log, _err, _con, _jh):
+    def test_no_args_summary_does_not_call_memory(self):
         """Bare branch-health is the all-branches summary — no per-branch API call."""
-        from aipass.daemon.apps.modules.activity_report import handle_command
-
         with patch(f"{MODULE}.generate_activity_report", return_value="summary"):
             with patch(f"{MODULE}._render_entry_health") as mock_render:
                 handle_command("branch-health", [])
@@ -597,12 +542,31 @@ class TestSharedConsoleContract:
     """
 
     def test_shared_console_still_eats_lowercase_tags(self):
-        from aipass.cli.apps.modules import console
-
-        with console.capture() as captured:
-            console.print("[ok] alpha [OK] beta")
+        with cli_console.capture() as captured:
+            cli_console.print("[ok] alpha [OK] beta")
         out = _strip_ansi(captured.get())
 
         assert "[ok]" not in out, "cli console stopped parsing markup — revisit the marker convention"
         assert "[OK]" in out
         assert "alpha" in out and "beta" in out
+
+
+class TestCollectorSkipsSandboxes:
+    """The activity scan never reads a dropbox or an .archive (owner's ruling 2026-09-27 20:42, paraphrased:
+    a dropbox is a sandbox like .archive; nothing looks into it)."""
+
+    def test_a_file_in_a_dropbox_or_an_archive_is_not_activity(self, tmp_path):
+        """Only the branch's own file counts; the skip is judged below the branch, whose root stands in a dropbox.
+
+        Red first: the scan walked into dropbox/ and counted dropbox/stray.py (leg 3 code).
+        Mutant killed: the dropbox name dropped from the skip.
+        """
+        branch = tmp_path / "dropbox" / "branch"
+        for rel in ("apps/kept.py", "dropbox/stray.py", ".archive/old.py", "apps/dropbox/stray.py"):
+            (branch / rel).parent.mkdir(parents=True, exist_ok=True)
+            (branch / rel).write_text("", encoding="utf-8")
+
+        found = scan_branch_activity("BRANCH", str(branch), since=datetime(2000, 1, 1))
+
+        assert [Path(f["path"]).relative_to(branch).as_posix() for f in found["code_files"]] == ["apps/kept.py"]
+        assert found["total_files"] == 1

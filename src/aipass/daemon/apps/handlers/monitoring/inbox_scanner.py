@@ -3,7 +3,7 @@
 # Description: Cheap cross-branch scan for unread mail sitting past a staleness threshold
 # Version: 1.1.0
 # Created: 2026-08-11
-# Modified: 2026-08-12
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -36,10 +36,15 @@ TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # Skip reason — a branch can be stale but ineligible for a wake.
 SKIP_MANAGER = "manager"
+SKIP_PASSPORT_UNREADABLE = "passport_unreadable"
 
 
 def _parse_timestamp(raw: str) -> Optional[datetime]:
-    """Parse an ai_mail message timestamp. Returns None if unparseable."""
+    """Parse an ai_mail message timestamp. Returns None if unparseable.
+
+    Unparseable answers None like a missing stamp, so the message is not aged:
+    a sweep that cannot tell a message's age must not wake a branch over it.
+    """
     if not raw:
         return None
 
@@ -56,7 +61,11 @@ def _parse_timestamp(raw: str) -> Optional[datetime]:
 
 
 def _load_inbox(inbox_file: Path) -> Optional[dict]:
-    """Read an inbox.json. Returns parsed dict or None on any failure."""
+    """Read an inbox.json. Returns parsed dict or None on any failure.
+
+    Unreadable answers None like malformed, so the branch is not reported: the
+    woken agent could not read that inbox either, and the warning names the file.
+    """
     try:
         with open(inbox_file, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -82,7 +91,12 @@ def _skip_reason(branch_path: Path, owner: str) -> Optional[str]:
     Only passport-local reasons are decided here. ai_mail's wake blocklist is a
     wake-policy concern and is applied by the inbox_sweep module.
     """
-    if citizen_class_for(branch_path) == MANAGER_CLASS:
+    citizen_class = citizen_class_for(branch_path)
+    if citizen_class is None:
+        # A passport that exists but cannot be read may be a manager's: not woken.
+        logger.warning("[inbox_scanner] %s passport unreadable — not wakeable", owner)
+        return SKIP_PASSPORT_UNREADABLE
+    if citizen_class == MANAGER_CLASS:
         logger.info("[inbox_scanner] %s is manager-class — not wakeable", owner)
         return SKIP_MANAGER
 

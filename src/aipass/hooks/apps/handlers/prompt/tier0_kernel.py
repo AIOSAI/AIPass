@@ -72,7 +72,7 @@ def _turn_or_none() -> int | None:
 
     try:
         return importlib.import_module("aipass.hooks.apps.modules.cadence").current_turn()
-    except Exception as exc:  # noqa: BLE001 - an unreadable turn only raises the log level
+    except Exception as exc:  # an unreadable turn only raises the log level
         logger.info("[HOOKS] tier0_kernel: turn unreadable, degraded line logs at WARNING: %s", exc)
         return None
 

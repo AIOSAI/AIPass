@@ -1,15 +1,14 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/conftest.py
-# Date: 2025-11-08
-# Version: 1.0.0
-# Category: spawn/tests
+# Description: Shared pytest fixtures for aipass tests — json and profile redirects, console width, command state
+# Version: 1.2.0
+# Created: 2026-05-04
+# Modified: 2026-09-28
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.2.0 (2026-09-28): header_events recorder keeps cli's header off the real trigger bus (DPLAN-0354 leg 3)
+#   - v1.1.0 (2026-09-27): template C1/C2 fixtures; unused mock_json_handler removed (DPLAN-0354)
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
-#
-# CODE STANDARDS:
-#   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
 
 """Shared pytest fixtures for aipass tests."""
@@ -19,7 +18,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # The seam must exist at IMPORT time, not only inside the autouse fixture: the
 # repo-root conftest guard refuses to import a branch's json shim while
@@ -32,6 +31,8 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import pytest
 
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.modules import profile as profile_mod
+from aipass.cli.apps.modules import display
 
 
 @pytest.fixture
@@ -86,11 +87,9 @@ def isolate_profile_store(tmp_path_factory) -> Generator[Path, None, None]:
     that reaches profile code through an unmocked path is a candidate, and
     naming them one by one only holds until the next import order changes.
     """
-    from aipass.aipass.apps.modules import profile as profile_mod
-
     store_dir = tmp_path_factory.mktemp("profile_store")
     with (
-        patch.object(profile_mod, "_PROFILE_JSON", store_dir / profile_mod._PROFILE_FILENAME),
+        patch.object(profile_mod, "_PROFILE_JSON", store_dir / "user_profile.json"),
         patch.object(profile_mod, "_LEGACY_LOCAL_JSON", store_dir / "local.json"),
     ):
         yield store_dir
@@ -102,21 +101,38 @@ def sample_test_data() -> dict:
     return {"test_key": "test_value", "sample_data": "example"}
 
 
-@pytest.fixture
-def mock_json_handler():
-    """Mock json_handler with functional read_json but stubbed logging.
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
 
-    Use when tests need real file I/O via read_json but want to
-    suppress log_operation and ensure_module_jsons side effects.
-    """
-    with (
-        patch("aipass.aipass.apps.handlers.json.json_handler.log_operation") as mock_log,
-        patch(
-            "aipass.aipass.apps.handlers.json.json_handler.ensure_module_jsons",
-            return_value=True,
-        ) as mock_ensure,
-    ):
-        mock = MagicMock()
-        mock.log_operation = mock_log
-        mock.ensure_module_jsons = mock_ensure
-        yield mock
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
+
+
+class _HeaderEvents:
+    """Stands where cli's display keeps its trigger, and records each fire."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    def fire(self, event: str, **data: object) -> None:
+        self.calls.append((event, data))
+
+
+@pytest.fixture(autouse=True)
+def header_events(monkeypatch: pytest.MonkeyPatch) -> _HeaderEvents:
+    """cli's header() fires cli_header_displayed on the real trigger bus, which has a
+    live handler, and display caches the trigger it loaded in _TRIGGER. A test that
+    prints through the real console must not fire it, so every test gets a recorder
+    in that slot; a test about a header asserts the title off .calls."""
+    events = _HeaderEvents()
+    monkeypatch.setattr(display, "_TRIGGER", events)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return events

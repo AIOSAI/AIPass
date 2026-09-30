@@ -1,32 +1,62 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane.py
 # Description: tests for the pytest pack, the payload gate and the verb
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Phase 4-5 of the audit-tests lane: the pack, the payload and the runner.
+"""Tests for apps/modules/audit_tests.py, apps/handlers/audit_tests/runner.py and the pytest pack it drives."""
 
-THE CREATION-SIDE BAR THIS LANE PROPOSES, APPLIED TO ITSELF. Law L0 says a test
-proves something when there EXISTS a change to production code that makes it
-fail, so every test here is written to name one behaviour that a mutation could
-remove. Assertions on a law's PREFIX rather than on its own message have
-already let a deleted rule survive once in this suite; the fix was to assert
-the branch's own words, and that discipline is kept here.
-"""
+# Phase 4-5 of the audit-tests lane: the pack, the payload and the runner.
+#
+# THE CREATION-SIDE BAR THIS LANE PROPOSES, APPLIED TO ITSELF. Law L0 says a test
+# proves something when there EXISTS a change to production code that makes it
+# fail, so every test here is written to name one behaviour that a mutation could
+# remove. Assertions on a law's PREFIX rather than on its own message have
+# already let a deleted rule survive once in this suite; the fix was to assert
+# the branch's own words, and that discipline is kept here.
 
-import importlib
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/audit_tests/ and handlers/tests_pytest_standards/ parses
+# seedgo: no-test-needed(documentation) — that the public lane functions carry docstrings
+# seedgo: no-test-needed(stdlib) — hashlib.md5's digest of a file's bytes
+
 import importlib.util
 import json
 import os
+import re
+import subprocess
+import sys
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
-from aipass.seedgo.apps.handlers.audit_tests import m10, refusal, runner, spine, target as target_module
-from aipass.seedgo.apps.handlers.tests_pytest_standards import adapter, envcopy, gatelog
+from aipass.seedgo.apps import seedgo as entry
+from aipass.seedgo.apps.handlers.audit_tests import (
+    adapters,
+    artifact,
+    m10,
+    refusal,
+    runner,
+    selfcheck,
+    spine,
+    target as target_module,
+)
+from aipass.seedgo.apps.handlers.tests_pytest_standards import (
+    adapter,
+    corpus,
+    diff_scope,
+    envcopy,
+    envdiff,
+    gatelog,
+    nominators,
+    statement_deletion as SD,
+    unread_redirect_check as R,
+)
+from aipass.seedgo.apps.modules import CommandRefused, audit_tests, standards_audit
+from aipass.seedgo.apps.modules import audit_tests as verb
 
 # The payload is deliberately NOT an importable aipass module - that is the
 # property `execution_isolation` proves. Loading it by path here is how a test
@@ -103,28 +133,28 @@ class TestAllowances:
         state.canary_path = os.path.join(state.target_root, ".audit_tests_canary_1")
         assert plugin.classify(state.canary_path, state) == ("canary", "canary")
 
-    def test_pycache_is_allowed_anywhere(self, state):
-        assert plugin.classify("/anywhere/__pycache__/mod.cpython-312.pyc", state)[1] == "pycache_dir"
+    def test_pycache_is_allowed_anywhere(self, state, tmp_path):
+        assert plugin.classify(str(tmp_path / "__pycache__" / "mod.cpython-312.pyc"), state)[1] == "pycache_dir"
 
-    def test_a_bytecode_file_outside_pycache_is_still_allowed(self, state):
-        assert plugin.classify("/anywhere/mod.pyc", state) == ("allowed", "bytecode")
+    def test_a_bytecode_file_outside_pycache_is_still_allowed(self, state, tmp_path):
+        assert plugin.classify(str(tmp_path / "mod.pyc"), state) == ("allowed", "bytecode")
 
-    def test_coverage_data_is_allowed(self, state):
-        assert plugin.classify("/anywhere/.coverage.host.1", state) == ("allowed", "coverage_data")
+    def test_coverage_data_is_allowed(self, state, tmp_path):
+        assert plugin.classify(str(tmp_path / ".coverage.host.1"), state) == ("allowed", "coverage_data")
 
     def test_devnull_is_allowed_because_pytests_own_logging_opens_it(self, state):
         assert plugin.classify(os.devnull, state) == ("allowed", "devnull")
 
-    def test_every_allowance_name_the_classifier_can_return_is_declared(self, state):
+    def test_every_allowance_name_the_classifier_can_return_is_declared(self, state, tmp_path):
         # A gate that acquits under a name it never published has widened its
         # own sandbox silently, which is the one thing a gate may never do.
         declared = {name for name, _ in plugin.ALLOWANCES}
         returned = {
             plugin.classify(state.log_path, state)[1],
-            plugin.classify("/x/__pycache__/a.pyc", state)[1],
-            plugin.classify("/x/.pytest_cache/v/f", state)[1],
-            plugin.classify("/x/mod.pyc", state)[1],
-            plugin.classify("/x/.coverage", state)[1],
+            plugin.classify(str(tmp_path / "__pycache__" / "a.pyc"), state)[1],
+            plugin.classify(str(tmp_path / ".pytest_cache" / "v" / "f"), state)[1],
+            plugin.classify(str(tmp_path / "mod.pyc"), state)[1],
+            plugin.classify(str(tmp_path / ".coverage"), state)[1],
             plugin.classify(os.devnull, state)[1],
             plugin.classify(os.path.join(state.tmp_root, "f"), state)[1],
             plugin.classify(os.path.join(state.pytest_basetemp, "f"), state)[1],
@@ -153,12 +183,15 @@ class TestSeparatorPortability:
     def windows(self, monkeypatch):
         monkeypatch.setattr(plugin, "SEPARATORS", self.WINDOWS)
 
-    def test_a_forward_slash_pycache_is_a_pycache_dir_on_windows_too(self, state, windows):
-        assert plugin.classify("/anywhere/__pycache__/m.pyc", state) == ("allowed", "pycache_dir")
+    def test_a_forward_slash_pycache_is_a_pycache_dir_on_windows_too(self, state, windows, tmp_path):
+        assert plugin.classify(str(tmp_path / "__pycache__" / "m.pyc"), state) == ("allowed", "pycache_dir")
 
-    def test_a_forward_slash_coverage_file_is_never_a_violation_on_windows(self, state, windows):
+    def test_a_forward_slash_coverage_file_is_never_a_violation_on_windows(self, state, windows, tmp_path):
+        """Mutant: the classifier splits on the first separator alone in payload/audit_hygiene_plugin.py — killed."""
         # The one that made the gate lie: it read as violation/outside_copy.
-        assert plugin.classify("/anywhere/.coverage.host.1", state) == ("allowed", "coverage_data")
+        # as_posix(), not str(): on Windows str() spells it with backslashes and the
+        # forward-slash case this test is named for would never be exercised.
+        assert plugin.classify((tmp_path / ".coverage.host.1").as_posix(), state) == ("allowed", "coverage_data")
 
     def test_a_native_backslash_path_still_classifies_on_windows(self, state, windows):
         assert plugin.classify("D:\\x\\__pycache__\\m.pyc", state) == ("allowed", "pycache_dir")
@@ -213,8 +246,8 @@ class TestWriteDetection:
 class TestSqliteClassification:
     """Three buckets, because a bare count over-reports the blind spot."""
 
-    def test_a_file_path_is_file_backed(self):
-        assert plugin.classify_sqlite("/tmp/probe.db") == "file_backed"
+    def test_a_file_path_is_file_backed(self, tmp_path):
+        assert plugin.classify_sqlite(str(tmp_path / "probe.db")) == "file_backed"
 
     def test_memory_is_not_a_file(self):
         assert plugin.classify_sqlite(":memory:") == "memory"
@@ -514,8 +547,6 @@ class TestAdapterShape:
         assert not hasattr(adapter, "check_branch")
 
     def test_the_adapter_declares_the_api_this_core_speaks(self):
-        from aipass.seedgo.apps.handlers.audit_tests import adapters
-
         assert adapter.ADAPTER_API == adapters.SUPPORTED_ADAPTER_API
 
     def test_the_pack_manifest_declares_execution_kind(self):
@@ -531,13 +562,9 @@ class TestPayloadIsolation:
     """The condition @devpulse's bypass grant is conditional on."""
 
     def test_the_real_payload_imports_no_aipass(self):
-        from aipass.seedgo.apps.handlers.audit_tests import adapters
-
         assert adapters.execution_isolation(Path(adapter.__file__).parent)["isolated"] is True
 
     def test_a_planted_aipass_import_fails_registration(self, tmp_path):
-        from aipass.seedgo.apps.handlers.audit_tests import adapters
-
         payload = tmp_path / "payload"
         payload.mkdir()
         (payload / "leaky.py").write_text("from aipass.prax import logger\n", encoding="utf-8")
@@ -576,8 +603,12 @@ class TestNominate:
     """Static species nominate; they never score (Law M1)."""
 
     def test_every_nominated_group_carries_no_score(self, tmp_path):
+        # Pinned against the DECLARATION, not a count. `== 13` re-broke the
+        # moment three species were added, which is the growth the pack's own
+        # "three files and one line" promise invites - a count here taxes
+        # every addition and measures nothing the next line does not.
         documents = adapter.nominate(_spec_for(tmp_path))
-        assert len(documents) == 13
+        assert set(documents) == set(adapter.ADAPTER_GROUPS)
 
         for document in documents.values():
             assert document["score"] is None
@@ -591,11 +622,22 @@ class TestNominate:
         did_not_run = {name for name, document in documents.items() if document["status"] == "not_applicable"}
         silent = sorted(name for name in did_not_run if not documents[name]["reason"])
 
-        assert did_not_run == set(adapter.UNBUILT_EXECUTION_GROUPS)
+        # Both DECLARATIONS, unioned, rather than one of them plus a literal:
+        # a group moving from "unbuilt" to "opt-in" is a legitimate edit and
+        # must not need this line rewritten to stay true.
+        assert did_not_run == set(adapter.UNBUILT_EXECUTION_GROUPS) | set(adapter.OPT_IN_EXECUTION_GROUPS)
         assert silent == []
 
     def test_the_unbuilt_execution_groups_are_still_not_applicable(self, tmp_path):
-        assert len(adapter.UNBUILT_EXECUTION_GROUPS) == 2
+        """Law S1 for every group that does not run, however many there are.
+
+        The count is gone for the same reason it went in the two tests above:
+        `pseudo_tested` passed through this tuple while its engine existed and
+        its RUN LOOP did not, and a `== 2` turned that honest state into a red.
+        It has since left for OPT_IN_EXECUTION_GROUPS, which is the same fact
+        moving again - and this test did not have to change for either.
+        """
+        assert {"scoped_survival", "targeted_mutation"} <= set(adapter.UNBUILT_EXECUTION_GROUPS)
 
         for name in adapter.UNBUILT_EXECUTION_GROUPS:
             document = adapter.nominate(_spec_for(tmp_path))[name]
@@ -605,6 +647,104 @@ class TestNominate:
         # A declared group the adapter never fills would vanish from the
         # published list, which is precisely what S3 exists to catch.
         assert set(adapter.declared_groups()) == set(adapter.nominate(_spec_for(tmp_path)))
+
+
+class TestOptInExecutionGroups:
+    """A BUILT group nobody asked for still publishes, and says which it is.
+
+    The defect these pin is the one the seam was built to end: two engines
+    shipped, measured and unreachable, with the published artifact calling
+    them "not built". A group that cannot be told apart from an unimplemented
+    one is a group nobody will ever turn on.
+    """
+
+    def test_both_opt_in_groups_are_still_in_the_published_list(self, tmp_path):
+        """Law S3: opting out may never remove a group from the artifact."""
+        documents = adapter.nominate(_spec_for(tmp_path))
+
+        for name in adapter.OPT_IN_EXECUTION_GROUPS:
+            assert name in adapter.declared_groups()
+            assert name in documents
+
+    def test_an_unrequested_opt_in_group_is_not_reported_as_unbuilt(self, tmp_path):
+        """The reason must not borrow the wording of the groups beside it.
+
+        `not built` was true for these two yesterday and is false today, and a
+        stale sentence in a `not_applicable` is worse than no sentence: it
+        tells a reader deciding whether to spend the wall clock that there is
+        nothing to spend it on.
+        """
+        documents = adapter.nominate(_spec_for(tmp_path))
+
+        for name in adapter.OPT_IN_EXECUTION_GROUPS:
+            reason = documents[name]["reason"]
+            assert documents[name]["status"] == "not_applicable"
+            assert "not built" not in reason
+            assert adapter.OPT_IN_FLAGS[name] in reason, "the reason must name the flag that runs it"
+
+    def test_no_opt_in_group_carries_a_score(self, tmp_path):
+        """Neither is in SCORED_GROUPS, so Law S7a refuses a score on either."""
+        documents = adapter.nominate(_spec_for(tmp_path))
+
+        for name in adapter.OPT_IN_EXECUTION_GROUPS:
+            assert documents[name]["score"] is None
+
+    def test_the_request_rides_on_the_spec_rather_than_on_a_new_parameter(self, tmp_path):
+        """The seam itself: `nominate(spec)` can see what the operator asked for.
+
+        Pinned because the whole point of this design is that it cost no
+        signature change. A future refactor that moved the request into a
+        second argument would pass its own tests and silently stop honouring
+        `--width-coupling` for every caller that still holds the old shape.
+        """
+        spec = _spec_for(tmp_path)
+        spec.execution_groups = ["width_coupling"]
+
+        assert "width_coupling" in spec.execution_groups
+        assert spec.to_document()["execution_groups"] == ["width_coupling"]
+
+    def test_a_run_that_opted_in_does_not_document_as_one_that_did_not(self, tmp_path):
+        """Two artifacts identical in what was ASKED FOR are unreadable later."""
+        plain = _spec_for(tmp_path).to_document()
+        opted = _spec_for(tmp_path)
+        opted.execution_groups = ["pseudo_tested"]
+
+        assert plain != opted.to_document()
+        assert plain["execution_groups"] == []
+
+    def test_the_opt_in_list_is_deduplicated_in_the_order_it_was_asked_for(self):
+        """A flag typed twice must not read back as two campaigns requested."""
+        assert envcopy.normalise_execution_groups(["width_coupling", "pseudo_tested", "width_coupling"]) == [
+            "width_coupling",
+            "pseudo_tested",
+        ]
+
+    def test_nothing_is_requested_when_nothing_was_asked_for(self):
+        """The default is the behaviour the lane had before the seam existed."""
+        assert envcopy.normalise_execution_groups(None) == []
+
+    def test_an_engine_that_raises_produces_a_group_and_never_a_crash(self, monkeypatch, tmp_path):
+        """Law S1 at its sharpest: could-not-run and found-nothing differ.
+
+        `nominate()` is called inside the runner's try block, so an exception
+        escaping one campaign would refuse the WHOLE target and publish nothing
+        about the other seventeen groups - a measurement lost to a dependency
+        the target never needed.
+        """
+
+        def _explode(*args, **kwargs):
+            raise RuntimeError("no interpreter")
+
+        monkeypatch.setattr(envdiff, "measure_width_coupling", _explode)
+        spec = _spec_for(tmp_path)
+        spec.execution_groups = [envdiff.GROUP]
+
+        document = adapter.nominate(spec)[envdiff.GROUP]
+
+        assert document["status"] == "not_applicable"
+        assert "RuntimeError" in document["reason"] and "no interpreter" in document["reason"]
+        assert document["score"] is None
+        assert document["diverged"] == []
 
 
 class TestTeardown:
@@ -627,7 +767,9 @@ class TestTeardown:
         assert not env.exists()
 
     def test_teardown_refuses_the_home_directory(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        # Path.home() reads HOME on POSIX and USERPROFILE on Windows; the env is the seam.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         tmp_path.mkdir(exist_ok=True)
         adapter.teardown(_spec_for(tmp_path))
         assert tmp_path.exists()
@@ -773,9 +915,8 @@ class TestSnapshotDiff:
         first, second = tmp_path / "a.json", tmp_path / "b.json"
         first.write_text('{"a": 1}', encoding="utf-8")
         second.write_text('{"a": 2}', encoding="utf-8")
-        left = m10._fingerprint(str(first), m10.HASH_SIZE_LIMIT)
-        right = m10._fingerprint(str(second), m10.HASH_SIZE_LIMIT)
-        assert left is not None and right is not None
+        snapshot = m10.snapshot_tree(tmp_path)
+        left, right = snapshot[str(first)], snapshot[str(second)]
         assert left[1] == right[1]
         assert left[4] != right[4]
 
@@ -792,8 +933,7 @@ class TestSnapshotDiff:
     def test_a_file_too_large_to_hash_is_still_fingerprinted_by_stat(self, tmp_path):
         probe = tmp_path / "big.bin"
         probe.write_bytes(b"x" * 64)
-        fingerprint = m10._fingerprint(str(probe), 8)
-        assert fingerprint is not None
+        fingerprint = m10.snapshot_tree(tmp_path, 8)[str(probe)]
         assert fingerprint[4] == ""
 
     def test_a_file_that_vanished_is_absent_rather_than_an_error(self, tmp_path):
@@ -826,87 +966,160 @@ def _target(tmp_path) -> target_module.Target:
     return target_module.Target(name="probe", path=tmp_path, kind="directory", resolved_from="test")
 
 
+class _SealedAdapter:
+    """The pytest adapter with its subprocess edge sealed: `run_gated` hands back a canned run.
+
+    Everything between the claim and the published artifact is the real runner, so a
+    test reaches scoring, group composition, the M10 proof and the refusal wording the
+    way `audit-tests` does - through `runner.run_target` - and reads the document.
+    """
+
+    ECOSYSTEM = "pytest"
+
+    def __init__(self, run: "dict | Callable[[], dict]", nominations=None) -> None:
+        self.run = run
+        self.nominations = dict(nominations or {})
+
+    def declared_groups(self) -> list:
+        """One adapter group, so composition has a namespaced group to place."""
+        return ["static_nominators"]
+
+    def build_env(self, path, env_root, options) -> envcopy.EnvSpec:
+        """A scratch spec; nothing is copied because nothing runs."""
+        return _spec_for(env_root)
+
+    def assert_env_is_live(self, spec) -> dict:
+        """The copy is declared live."""
+        return {"live": True}
+
+    def run_gated(self, spec, budget, options) -> dict:
+        """The canned run, or the run a callable builds while the window is open."""
+        return self.run() if callable(self.run) else self.run
+
+    def nominate(self, spec) -> dict:
+        """The canned nominations."""
+        return self.nominations
+
+    def teardown(self, spec) -> None:
+        """Nothing was built, so nothing is torn down."""
+
+
+def _measured(tmp_path, monkeypatch, run, *, options=None, nominations=None) -> dict:
+    """`runner.run_target` over `tmp_path/real` with the adapter sealed; the published document."""
+    monkeypatch.setattr(artifact, "ARTIFACT_DIR", tmp_path / "artifacts")
+    sealed = _SealedAdapter(run, nominations)
+    monkeypatch.setattr(runner.adapters, "discover_adapters", lambda: ([sealed], []))
+    monkeypatch.setattr(
+        runner.adapters, "claim_target", lambda registered, path: (sealed, {"pytest": {"unit_count": 1}})
+    )
+    real = tmp_path / "real"
+    real.mkdir(exist_ok=True)
+    target = target_module.Target(name="probe", path=real, kind="directory", resolved_from="test")
+    return runner.run_target(target, {"no_m10_proof": True} if options is None else options).document
+
+
+def _proven_run(violations: int = 0) -> dict:
+    """A run whose gate is proven, with `violations` recorded writes."""
+    return {
+        "gate": gatelog.measure(_records(violations=violations), timed_out=False),
+        "budget_seconds": 900,
+        "elapsed_seconds": 1.5,
+    }
+
+
+def _suite_writes(path: Path, text: str):
+    """A run that writes `path` from a CHILD process, as a measured suite would.
+
+    In-process writes inside the window are the audit's own carrier writes and are
+    subtracted by design; a child process is what the suite under measurement is.
+    """
+
+    def run() -> dict:
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; open(sys.argv[1], 'w', encoding='utf-8').write(sys.argv[2])",
+                str(path),
+                text,
+            ],
+            check=True,
+        )
+        return _proven_run()
+
+    return run
+
+
 class TestScoring:
     """The score is a gate, not an opinion: 100 or 0, never a percentage."""
 
-    def test_a_clean_proven_run_scores_one_hundred(self):
-        document = _hygiene(violations=[])
+    def test_a_clean_proven_run_scores_one_hundred(self, tmp_path, monkeypatch):
+        document = _hygiene(tmp_path, monkeypatch, violations=0)
         assert document["score"] == 100
         assert document["passed"] is True
 
-    def test_a_single_violation_scores_zero(self):
-        assert _hygiene(violations=[{"path": "/real/state.json"}])["score"] == 0
+    def test_a_single_violation_scores_zero(self, tmp_path, monkeypatch):
+        assert _hygiene(tmp_path, monkeypatch, violations=1)["score"] == 0
 
-    def test_many_violations_score_the_same_zero_as_one(self):
+    def test_many_violations_score_the_same_zero_as_one(self, tmp_path, monkeypatch):
         # No partial credit: forging 31 log entries instead of 79 is not a
         # better suite, and a percentage would let a branch improve its number
         # without fixing anything.
-        assert _hygiene(violations=[{"path": f"/real/{i}"} for i in range(31)])["score"] == 0
+        assert _hygiene(tmp_path, monkeypatch, violations=31)["score"] == 0
 
-    def test_a_measured_group_declares_itself_measured(self):
-        assert _hygiene(violations=[])["status"] == "measured"
+    def test_a_measured_group_declares_itself_measured(self, tmp_path, monkeypatch):
+        assert _hygiene(tmp_path, monkeypatch, violations=0)["status"] == "measured"
 
-    def test_the_proven_flag_survives_into_the_published_group(self):
-        assert _hygiene(violations=[])["gate_proven"] is True
+    def test_the_proven_flag_survives_into_the_published_group(self, tmp_path, monkeypatch):
+        assert _hygiene(tmp_path, monkeypatch, violations=0)["gate_proven"] is True
 
-    def test_the_published_group_carries_no_internal_proven_key(self):
+    def test_the_published_group_carries_no_internal_proven_key(self, tmp_path, monkeypatch):
         # `proven`/`unproven_reason` are the adapter's vocabulary. Leaking them
         # into the artifact would publish two names for one fact.
-        document = _hygiene(violations=[])
+        document = _hygiene(tmp_path, monkeypatch, violations=0)
         assert "proven" not in document
         assert "unproven_reason" not in document
 
-    def test_the_budget_and_elapsed_are_both_published(self):
-        document = _hygiene(violations=[])
+    def test_the_budget_and_elapsed_are_both_published(self, tmp_path, monkeypatch):
+        document = _hygiene(tmp_path, monkeypatch, violations=0)
         assert document["budget_seconds"] == 900
         assert document["elapsed_seconds"] == 1.5
 
 
-def _hygiene(*, violations):
-    """A scored hygiene group built from a proven gate measurement."""
-    gate = gatelog.measure(_records(), timed_out=False)
-    gate["violations"] = violations
-    gate["violation_count"] = len(violations)
-    return runner._hygiene_group(
-        gate,
-        budget_seconds=900,
-        elapsed_seconds=1.5,
-        config_note="serial",
-        environment={"m10_complete": True},
-        liveness={"live": True},
-    )
+def _hygiene(tmp_path, monkeypatch, *, violations: int) -> dict:
+    """The published hygiene group of a proven run with `violations` recorded writes."""
+    return _measured(tmp_path, monkeypatch, _proven_run(violations))["groups"]["hygiene"]
 
 
 class TestGroupComposition:
     """Every declared group appears, in order, and none of them is ever 0."""
 
-    def test_the_published_groups_match_the_group_list_exactly_and_in_order(self):
+    def test_the_published_groups_match_the_group_list_exactly_and_in_order(self, tmp_path, monkeypatch):
+        """Mutant: groups composed in reverse group_list order in apps/handlers/audit_tests/runner.py — killed."""
         group_list = spine.compose_group_list("pytest", ["static_nominators"])
-        groups = runner._compose_groups(group_list, "pytest", _hygiene(violations=[]), {})
-        assert list(groups) == group_list
+        document = _measured(tmp_path, monkeypatch, _proven_run())
+        # A refused run also lists every group in order, so the pin is on a PUBLISHED one.
+        assert document["status"] == "published"
+        assert list(document["groups"]) == group_list
 
-    def test_an_unimplemented_spine_group_is_not_applicable_with_a_reason(self):
-        group_list = spine.compose_group_list("pytest", [])
-        groups = runner._compose_groups(group_list, "pytest", _hygiene(violations=[]), {})
+    def test_an_unimplemented_spine_group_is_not_applicable_with_a_reason(self, tmp_path, monkeypatch):
+        groups = _measured(tmp_path, monkeypatch, _proven_run())["groups"]
         assert groups["order_dependence"]["status"] == "not_applicable"
         assert groups["order_dependence"]["reason"]
 
-    def test_an_unimplemented_spine_group_is_never_scored_zero(self):
-        group_list = spine.compose_group_list("pytest", [])
-        groups = runner._compose_groups(group_list, "pytest", _hygiene(violations=[]), {})
+    def test_an_unimplemented_spine_group_is_never_scored_zero(self, tmp_path, monkeypatch):
+        groups = _measured(tmp_path, monkeypatch, _proven_run())["groups"]
         assert groups["oracle_execution"]["score"] is None
 
-    def test_an_adapter_group_is_matched_by_its_bare_name(self):
-        group_list = spine.compose_group_list("pytest", ["static_nominators"])
+    def test_an_adapter_group_is_matched_by_its_bare_name(self, tmp_path, monkeypatch):
         nominations = {
             "static_nominators": {"tier": "static", "status": "not_applicable", "reason": "x", "score": None}
         }
-        groups = runner._compose_groups(group_list, "pytest", _hygiene(violations=[]), nominations)
+        groups = _measured(tmp_path, monkeypatch, _proven_run(), nominations=nominations)["groups"]
         assert groups["pytest.static_nominators"]["reason"] == "x"
 
-    def test_a_declared_group_the_adapter_forgot_still_appears_and_names_the_adapter(self):
-        group_list = spine.compose_group_list("pytest", ["static_nominators"])
-        groups = runner._compose_groups(group_list, "pytest", _hygiene(violations=[]), {})
+    def test_a_declared_group_the_adapter_forgot_still_appears_and_names_the_adapter(self, tmp_path, monkeypatch):
+        groups = _measured(tmp_path, monkeypatch, _proven_run())["groups"]
         document = groups["pytest.static_nominators"]
         assert document["status"] == "not_applicable"
         assert "pytest adapter declared" in document["reason"]
@@ -920,32 +1133,30 @@ class TestM10Proof:
     this lane exists to catch. So the failing direction is pinned first.
     """
 
-    def test_an_untouched_tree_proves_m10_held(self, tmp_path):
-        (tmp_path / "state.json").write_text("{}", encoding="utf-8")
-        before = m10.snapshot_tree(tmp_path)
-        proof = runner._m10_proof(_target(tmp_path), before, {})
+    def test_an_untouched_tree_proves_m10_held(self, tmp_path, monkeypatch):
+        (tmp_path / "real").mkdir()
+        (tmp_path / "real" / "state.json").write_text("{}", encoding="utf-8")
+        proof = _measured(tmp_path, monkeypatch, _proven_run(), options={})["m10_proof"]
         assert proof["probed"] is True
         assert proof["real_tree_unchanged"] is True
 
-    def test_a_forged_file_makes_the_proof_report_a_violation(self, tmp_path):
-        probe = tmp_path / "state.json"
+    def test_a_forged_file_makes_the_proof_report_a_violation(self, tmp_path, monkeypatch):
+        (tmp_path / "real").mkdir()
+        probe = tmp_path / "real" / "state.json"
         probe.write_text("{}", encoding="utf-8")
-        before = m10.snapshot_tree(tmp_path)
-        probe.write_text('{"forged": true}', encoding="utf-8")
-        proof = runner._m10_proof(_target(tmp_path), before, {})
+        proof = _measured(tmp_path, monkeypatch, _suite_writes(probe, '{"forged": true}'), options={})["m10_proof"]
         assert proof["real_tree_unchanged"] is False
         assert str(probe) in proof["diff"]["modified"]
 
-    def test_a_new_file_in_the_real_tree_is_a_violation_too(self, tmp_path):
-        before = m10.snapshot_tree(tmp_path)
-        (tmp_path / "left_behind.json").write_text("{}", encoding="utf-8")
-        assert runner._m10_proof(_target(tmp_path), before, {})["real_tree_unchanged"] is False
+    def test_a_new_file_in_the_real_tree_is_a_violation_too(self, tmp_path, monkeypatch):
+        run = _suite_writes(tmp_path / "real" / "left_behind.json", "{}")
+        assert _measured(tmp_path, monkeypatch, run, options={})["m10_proof"]["real_tree_unchanged"] is False
 
-    def test_the_number_of_files_compared_is_published(self, tmp_path):
-        (tmp_path / "a.json").write_text("{}", encoding="utf-8")
-        (tmp_path / "b.json").write_text("{}", encoding="utf-8")
-        before = m10.snapshot_tree(tmp_path)
-        assert runner._m10_proof(_target(tmp_path), before, {})["files_fingerprinted"] == 2
+    def test_the_number_of_files_compared_is_published(self, tmp_path, monkeypatch):
+        (tmp_path / "real").mkdir()
+        (tmp_path / "real" / "a.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "real" / "b.json").write_text("{}", encoding="utf-8")
+        assert _measured(tmp_path, monkeypatch, _proven_run(), options={})["m10_proof"]["files_fingerprinted"] == 2
 
     def test_a_disturbed_tree_is_recorded_as_an_operational_event(self, tmp_path, monkeypatch):
         # The most serious thing this lane can discover about ITSELF, so it is
@@ -968,35 +1179,40 @@ class TestM10Proof:
         m10.diff_snapshots(before, m10.snapshot_tree(tmp_path))
         assert recorded == []
 
-    def test_a_skipped_proof_says_not_probed_rather_than_reporting_clean(self, tmp_path):
+    def test_a_skipped_proof_says_not_probed_rather_than_reporting_clean(self, tmp_path, monkeypatch):
         # not_probed and passed must never look the same - Law S1 applied to
         # the lane's own harness.
-        proof = runner._m10_proof(_target(tmp_path), None, {})
+        proof = _measured(tmp_path, monkeypatch, _proven_run(), options={"no_m10_proof": True})["m10_proof"]
         assert proof["probed"] is False
         assert proof["real_tree_unchanged"] is None
 
-    def test_a_skipped_proof_still_says_why(self, tmp_path):
-        assert runner._m10_proof(_target(tmp_path), None, {})["note"]
+    def test_a_skipped_proof_still_says_why(self, tmp_path, monkeypatch):
+        assert _measured(tmp_path, monkeypatch, _proven_run(), options={"no_m10_proof": True})["m10_proof"]["note"]
 
-    def test_the_proof_is_skipped_only_when_explicitly_asked(self, tmp_path):
-        assert runner._fingerprint_target(_target(tmp_path), {"no_m10_proof": True}) is None
-        assert runner._fingerprint_target(_target(tmp_path), {}) is not None
+    def test_the_proof_is_skipped_only_when_explicitly_asked(self, tmp_path, monkeypatch):
+        """Mutant: an unasked run fingerprints nothing in apps/handlers/audit_tests/runner.py — killed."""
+        (tmp_path / "real").mkdir()
+        (tmp_path / "real" / "state.json").write_text("{}", encoding="utf-8")
+        asked = _measured(tmp_path, monkeypatch, _proven_run(), options={"no_m10_proof": True})["m10_proof"]
+        unasked = _measured(tmp_path, monkeypatch, _proven_run(), options={})["m10_proof"]
+        assert asked["probed"] is False
+        assert unasked["files_fingerprinted"] == 1
 
 
 class TestUnprovenRefusalWording:
     """Each pre-built refusal is used only where its wording is true."""
 
-    def test_a_timeout_gets_the_budget_refusal(self):
-        built = runner._unproven_refusal({}, {"timed_out": True, "budget_seconds": 300}, 301.0)
-        assert built.code == refusal.EXIT_BUDGET_EXHAUSTED
-        assert built.law == "T-BUDGET"
+    def test_a_timeout_gets_the_budget_refusal(self, tmp_path, monkeypatch):
+        built = _measured(tmp_path, monkeypatch, {"gate": {}, "timed_out": True, "budget_seconds": 300})["refusal"]
+        assert built["code"] == refusal.EXIT_BUDGET_EXHAUSTED
+        assert built["law"] == "T-BUDGET"
 
-    def test_a_missed_canary_gets_the_canary_refusal_only_when_the_hook_was_installed(self):
+    def test_a_missed_canary_gets_the_canary_refusal_only_when_the_hook_was_installed(self, tmp_path, monkeypatch):
         gate = {"hook_installed": True, "canary": {"attempted": True, "caught": False}}
-        built = runner._unproven_refusal(gate, {}, 1.0)
-        assert "did not catch its own planted canary" in built.reason
+        built = _measured(tmp_path, monkeypatch, {"gate": gate})["refusal"]
+        assert "did not catch its own planted canary" in built["reason"]
 
-    def test_a_disabled_gate_is_not_reported_as_a_blind_gate(self):
+    def test_a_disabled_gate_is_not_reported_as_a_blind_gate(self, tmp_path, monkeypatch):
         # --prove-refusal switches the hook OFF, and the canary is still
         # written and still not caught - so the canary branch fires unless the
         # hook check comes first. It reported a blind gate for a run where no
@@ -1006,17 +1222,17 @@ class TestUnprovenRefusalWording:
             "canary": {"attempted": True, "caught": False},
             "unproven_reason": "the write gate was not installed, so a clean result would mean nothing (Law T10)",
         }
-        assert "was not installed" in runner._unproven_refusal(gate, {}, 1.0).reason
+        assert "was not installed" in _measured(tmp_path, monkeypatch, {"gate": gate})["refusal"]["reason"]
 
-    def test_an_uninstalled_hook_keeps_the_measurements_own_reason(self):
+    def test_an_uninstalled_hook_keeps_the_measurements_own_reason(self, tmp_path, monkeypatch):
         # Reaching for the canary builder here would restate a cause the run
         # never established.
         gate = {"canary": {"attempted": False}, "unproven_reason": "the write gate was not installed"}
-        built = runner._unproven_refusal(gate, {}, 1.0)
-        assert built.reason == "the write gate was not installed"
+        built = _measured(tmp_path, monkeypatch, {"gate": gate})["refusal"]
+        assert built["reason"] == "the write gate was not installed"
 
-    def test_every_unproven_refusal_carries_detail_a_reader_can_act_on(self):
-        assert runner._unproven_refusal({}, {}, 1.0).detail
+    def test_every_unproven_refusal_carries_detail_a_reader_can_act_on(self, tmp_path, monkeypatch):
+        assert _measured(tmp_path, monkeypatch, {"gate": {}})["refusal"]["detail"]
 
 
 class TestRefusalPath:
@@ -1045,8 +1261,6 @@ class TestRefusalPath:
 
 def _publish_refusal(tmp_path, monkeypatch, code, reason) -> dict:
     """Run the refusal path against a redirected artifact directory."""
-    from aipass.seedgo.apps.handlers.audit_tests import artifact
-
     monkeypatch.setattr(artifact, "ARTIFACT_DIR", tmp_path / "artifacts")
     result = runner.refuse(_target(tmp_path), refusal.Refusal(code=code, reason=reason))
     return result.document
@@ -1072,7 +1286,7 @@ class TestFleetForm:
         result = runner.RunResult(
             _target(tmp_path),
             {"status": "published", "groups": {"hygiene": {"score": 0, "violation_count": 31}}},
-            Path("/tmp/a.json"),
+            tmp_path / "a.json",
             refusal.EXIT_SCORED_FAILED,
         )
         assert "hygiene 0" in result.summary_line()
@@ -1087,14 +1301,14 @@ class TestFleetForm:
 class TestBranchNameResolution:
     """The registry spells some branches uppercase and everyone types lowercase."""
 
-    def test_an_exact_name_resolves(self):
-        resolved = target_module.resolve("@CANARY", {"CANARY": Path("/x/canary")})
+    def test_an_exact_name_resolves(self, tmp_path):
+        resolved = target_module.resolve("@CANARY", {"CANARY": tmp_path / "canary"})
         assert resolved.name == "CANARY"
 
-    def test_a_lowercase_argument_resolves_to_the_canonical_spelling(self):
+    def test_a_lowercase_argument_resolves_to_the_canonical_spelling(self, tmp_path):
         # The CANONICAL name, not the typed one: two spellings of one branch
         # must never produce two artifacts.
-        resolved = target_module.resolve("@canary", {"CANARY": Path("/x/canary")})
+        resolved = target_module.resolve("@canary", {"CANARY": tmp_path / "canary"})
         assert resolved.name == "CANARY"
         assert resolved.artifact_name() == "audit_tests_CANARY"
 
@@ -1130,28 +1344,20 @@ class TestVerbIsDiscoverable:
     """
 
     def test_the_verb_module_imports_cleanly(self):
-        module = importlib.import_module("aipass.seedgo.apps.modules.audit_tests")
-
-        assert callable(module.handle_command)
-        assert module.COMMANDS == ("audit-tests", "audit_tests")
+        assert callable(audit_tests.handle_command)
+        assert audit_tests.COMMANDS == ("audit-tests", "audit_tests")
 
     def test_seedgos_own_discovery_finds_the_verb(self):
-        from aipass.seedgo.apps import seedgo as entry
-
         names = {getattr(module, "__name__", "") for module in entry.discover_modules()}
         assert "audit_tests" in names
 
     def test_the_discovered_module_actually_claims_the_verb(self, monkeypatch):
-        from aipass.seedgo.apps import seedgo as entry
-
         claimed = [module for module in entry.discover_modules() if getattr(module, "__name__", "") == "audit_tests"]
         assert claimed, "audit_tests did not survive discovery"
         monkeypatch.setattr(claimed[0], "print_introspection", lambda: None)
         assert claimed[0].handle_command("audit-tests", []) is True
 
     def test_no_arguments_shows_introspection_rather_than_running(self, monkeypatch):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
         seen = []
         monkeypatch.setattr(verb, "print_introspection", lambda: seen.append(True))
         monkeypatch.setattr(verb, "_run", lambda args: seen.append("ran"))
@@ -1159,8 +1365,6 @@ class TestVerbIsDiscoverable:
         assert seen == [True]
 
     def test_help_is_intercepted_before_any_target_is_resolved(self, monkeypatch):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
         # Written first as "raise inside _run", which could NEVER fail:
         # handle_command catches every exception by design, so the assertion
         # was swallowed and the mutant that deleted this whole gate survived.
@@ -1176,70 +1380,97 @@ class TestVerbClaiming:
     """Claim exactly, claim before working, and never claim a prefix."""
 
     def test_the_hyphenated_verb_is_claimed(self, monkeypatch):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
-        monkeypatch.setattr(verb, "_run", lambda args: None)
-        assert verb.handle_command("audit-tests", []) is True
+        # The True alone could not tell "claimed and ran" from "claimed and
+        # did nothing" — and doing nothing is what a broken claim looks like.
+        # It also hid that the old `[]` argument never reached _run at all:
+        # no args takes the introspection door, so patching _run and asserting
+        # True was green either way.
+        ran = []
+        monkeypatch.setattr(verb, "_run", lambda args: ran.append(args))
+        assert verb.handle_command("audit-tests", ["@backup"]) is True
+        assert ran == [["@backup"]]
 
     def test_the_underscore_alias_is_claimed(self, monkeypatch):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
-        monkeypatch.setattr(verb, "_run", lambda args: None)
-        assert verb.handle_command("audit_tests", []) is True
+        ran = []
+        monkeypatch.setattr(verb, "_run", lambda args: ran.append(args))
+        assert verb.handle_command("audit_tests", ["@backup"]) is True
+        assert ran == [["@backup"]], "the alias must forward its args, not just answer True"
 
     def test_the_audit_verb_is_never_swallowed(self):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
         # audit_tests.py sorts BEFORE standards_audit.py, so a prefix claim
         # here would silently take the audit verb away from its owner.
         assert verb.handle_command("audit", []) is False
 
-    def test_a_crash_after_claiming_still_returns_true(self, monkeypatch):
-        from aipass.seedgo.apps.modules import audit_tests as verb
+    def test_a_crash_after_claiming_refuses_with_the_unproven_code(self, monkeypatch):
+        """A crashed lane exits 2, and is never reported as an unknown command.
+
+        Renamed from `..._still_returns_true` on 2026-09-20. That test patched
+        `_run`, called `handle_command("audit-tests", [])` and asserted True —
+        but `[]` takes the introspection door and never enters `_run`, so it
+        was green over a crash that never happened, and it went on asserting a
+        contract the module had already replaced. The live behaviour is the
+        owner's 2026-09-07 exit-code ruling: a lane that could not run refuses
+        with EXIT_UNPROVEN (2) rather than telling the shell it succeeded.
+
+        `handle_command`'s own docstring still reads "Returns True once
+        claimed, always" and calls the unconditional True "the whole safety
+        property". That text is now wrong about its own function; it is
+        reported, not edited here.
+        """
+        entered = []
 
         def explode(args):
+            entered.append(args)
             raise RuntimeError("the lane broke")
 
         monkeypatch.setattr(verb, "_run", explode)
-        # route_command() swallows exceptions and moves on, so a lane that
-        # raised would be reported to the user as an unknown command.
-        assert verb.handle_command("audit-tests", []) is True
+        with pytest.raises(CommandRefused) as refused:
+            verb.handle_command("audit-tests", ["@backup"])
+
+        assert entered == [["@backup"]], "the crash must happen inside _run, not before it"
+        assert refused.value.code == refusal.EXIT_UNPROVEN
+
+
+def _parsed(monkeypatch, argv: list) -> tuple:
+    """`(target, options, refused_token)` as `audit-tests argv` hands them to the runner.
+
+    The runner is a recorder, so nothing is measured; a refusal comes back as the token
+    it named, and "" when the verb reached the runner.
+    """
+    handed: list = []
+    monkeypatch.setattr(verb.runner, "run", lambda argument, options: handed.append((argument, options)) or ([], 0))
+    try:
+        verb.handle_command("audit-tests", argv)
+    except CommandRefused as refused:
+        return "", {}, refused.token
+    ((target, options),) = handed
+    return target, options, ""
 
 
 class TestVerbParsing:
     """Options are read positionally-safe; the target is the first bare token."""
 
-    def test_a_bare_token_is_the_target(self):
-        from aipass.seedgo.apps.modules import audit_tests as verb
+    def test_a_bare_token_is_the_target(self, monkeypatch):
+        assert _parsed(monkeypatch, ["@backup"])[0] == "@backup"
 
-        assert verb._parse(["@backup"])[0] == "@backup"
+    def test_the_budget_is_read_as_an_integer(self, monkeypatch):
+        assert _parsed(monkeypatch, ["@backup", "--budget", "300"])[1]["budget_seconds"] == 300
 
-    def test_the_budget_is_read_as_an_integer(self):
-        from aipass.seedgo.apps.modules import audit_tests as verb
+    def test_a_non_numeric_budget_falls_back_to_the_default(self, monkeypatch):
+        # A target beside it: with none, the verb refuses before any option is used.
+        options = _parsed(monkeypatch, ["@backup", "--budget", "soon"])[1]
+        assert options["budget_seconds"] == runner.DEFAULT_BUDGET_SECONDS
 
-        assert verb._parse(["@backup", "--budget", "300"])[1]["budget_seconds"] == 300
+    def test_prove_refusal_is_recognised(self, monkeypatch):
+        assert _parsed(monkeypatch, ["@backup", "--prove-refusal"])[1]["prove_refusal"] is True
 
-    def test_a_non_numeric_budget_falls_back_to_the_default(self):
-        from aipass.seedgo.apps.modules import audit_tests as verb
+    def test_a_flag_is_never_mistaken_for_the_target(self, monkeypatch):
+        assert _parsed(monkeypatch, ["--prove-refusal", "@backup"])[0] == "@backup"
 
-        assert verb._parse(["--budget", "soon"])[1]["budget_seconds"] == runner.DEFAULT_BUDGET_SECONDS
-
-    def test_prove_refusal_is_recognised(self):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
-        assert verb._parse(["@backup", "--prove-refusal"])[1]["prove_refusal"] is True
-
-    def test_a_flag_is_never_mistaken_for_the_target(self):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
-        assert verb._parse(["--prove-refusal", "@backup"])[0] == "@backup"
-
-    def test_symlink_siblings_is_off_unless_asked_for(self):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
+    def test_symlink_siblings_is_off_unless_asked_for(self, monkeypatch):
         # Copy-always is the default deliberately: a symlinked sibling is
         # writable and a write through one lands in the real tree.
-        assert "symlink_siblings" not in verb._parse(["@backup"])[1]
+        assert "symlink_siblings" not in _parsed(monkeypatch, ["@backup"])[1]
 
 
 # =============================================================================
@@ -1254,15 +1485,11 @@ def _audit_vocabulary():
     built from a private duplicate would keep offering flags the verb had
     stopped accepting, which is the same silent drift Law ARGV exists to end.
     """
-    from aipass.seedgo.apps.modules import standards_audit
-
     return standards_audit.AUDIT_FLAGS, standards_audit.SIBLING_VERBS
 
 
 def _lane_vocabulary():
     """The `audit-tests` verb's own flag list and sibling verbs."""
-    from aipass.seedgo.apps.modules import audit_tests as verb
-
     return verb.LANE_FLAGS, verb.SIBLING_VERBS
 
 
@@ -1273,25 +1500,6 @@ def _built_refusal():
     return refusal.refusal_for_unknown_argument(
         "-tests", refusal.suggested_command("-tests", "audit", argv, flags, siblings), "audit"
     )
-
-
-def _capture_output(monkeypatch, module):
-    """Collect everything a verb prints, in order, without a real console."""
-    printed: list = []
-    monkeypatch.setattr(module, "error", lambda message, **kwargs: printed.append(str(message)))
-    monkeypatch.setattr(module, "console", _Recorder(printed))
-    return printed
-
-
-class _Recorder:
-    """A console stand-in that keeps the text instead of wrapping it."""
-
-    def __init__(self, printed: list) -> None:
-        self.printed = printed
-
-    def print(self, text: str = "", **kwargs) -> None:
-        """Record one printed line."""
-        self.printed.append(str(text))
 
 
 class TestUnknownArgumentSuggestion:
@@ -1407,45 +1615,35 @@ class TestUnknownArgumentRefusal:
         )
         assert refusal.worst_code([refusal.EXIT_UNKNOWN_ARGUMENT, refusal.EXIT_UNPROVEN]) == refusal.EXIT_UNPROVEN
 
-    def test_the_verb_prints_the_refused_line_the_code_and_the_detail(self, monkeypatch):
+    def test_the_verb_prints_the_refused_line_the_code_and_the_detail(self, capsys):
         """The refusal is only real once a reader sees it."""
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
-        from aipass.seedgo.apps.modules import CommandRefused
-
-        printed = _capture_output(monkeypatch, verb)
-
         # Raises since 2026-09-07: the printed "exit code: 7" and the code the
         # process leaves with are one number, not two (the owner's standing
         # ruling, fleet sweep 2026-09-07).
         with pytest.raises(CommandRefused) as refused:
-            verb._refuse_unknown_argument("--nonsense", ["@backup", "--nonsense"])
+            verb.handle_command("audit-tests", ["@backup", "--nonsense"])
 
-        assert any(line.startswith("REFUSED: [ARGV]") and "'--nonsense'" in line for line in printed)
-        assert any("exit code: 7" in line for line in printed)
-        assert any("try: drone @seedgo audit-tests" in line for line in printed)
+        out, err = capsys.readouterr()
+        assert "REFUSED: [ARGV] unknown argument '--nonsense'" in err
+        assert "exit code: 7" in out
+        assert "try: drone @seedgo audit-tests" in out
         assert refused.value.code == 7
 
 
 class TestLaneParsingRefusesTheUnrecognized:
     """`audit-tests` collects what it could not read, and never drops it."""
 
-    def test_an_unknown_flag_is_collected(self):
-        from aipass.seedgo.apps.modules import audit_tests as verb
+    def test_an_unknown_flag_is_collected(self, monkeypatch):
+        assert _parsed(monkeypatch, ["@backup", "--nonsense"])[2] == "--nonsense"
 
-        assert verb._parse(["@backup", "--nonsense"])[2] == ["--nonsense"]
-
-    def test_a_second_target_is_collected_because_a_run_measures_one(self):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
+    def test_a_second_target_is_collected_because_a_run_measures_one(self, monkeypatch):
         # `runner.run()` takes ONE argument, so a second bare word named
         # nothing and used to vanish. `aipass` is the fleet form.
-        assert verb._parse(["@backup", "@flow"])[2] == ["@flow"]
+        assert _parsed(monkeypatch, ["@backup", "@flow"])[2] == "@flow"
 
-    def test_argv_order_is_kept_so_the_first_mistake_is_the_one_reported(self):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
-        assert verb._parse(["--first", "@backup", "--second"])[2] == ["--first", "--second"]
+    def test_argv_order_is_kept_so_the_first_mistake_is_the_one_reported(self, monkeypatch):
+        """Mutant: unrecognised tokens collected newest-first in apps/modules/audit_tests.py — killed."""
+        assert _parsed(monkeypatch, ["--first", "@backup", "--second"])[2] == "--first"
 
     @pytest.mark.parametrize(
         "argv",
@@ -1462,45 +1660,35 @@ class TestLaneParsingRefusesTheUnrecognized:
             ["@backup", "--budget", "300", "--prove-refusal", "--symlink-siblings", "--no-tmpdir-allowance"],
         ],
     )
-    def test_every_documented_invocation_still_parses_clean(self, argv):
+    def test_every_documented_invocation_still_parses_clean(self, argv, monkeypatch):
         """A refusal that rejects a valid command is worse than the bug it fixes."""
-        from aipass.seedgo.apps.modules import audit_tests as verb
+        target, options, refused = _parsed(monkeypatch, argv)
 
-        target, options, unrecognized = verb._parse(argv)
-
-        assert unrecognized == [], f"{argv} is documented usage and must not be refused"
+        assert refused == "", f"{argv} is documented usage and must not be refused"
         assert target, f"{argv} names a target"
 
-    def test_a_budget_with_no_value_keeps_the_default_rather_than_being_refused(self):
+    def test_a_budget_with_no_value_keeps_the_default_rather_than_being_refused(self, monkeypatch):
         """The flag IS known; only its value is missing. Refusing it would lie."""
-        from aipass.seedgo.apps.modules import audit_tests as verb
+        target, options, refused = _parsed(monkeypatch, ["@backup", "--budget"])
 
-        target, options, unrecognized = verb._parse(["@backup", "--budget"])
-
-        assert unrecognized == []
+        assert refused == ""
         assert options["budget_seconds"] == runner.DEFAULT_BUDGET_SECONDS
 
 
 class TestLaneVerbRefusesTheUnrecognized:
     """The refusal happens before anything is measured."""
 
-    def test_nothing_is_measured_once_a_token_is_unrecognized(self, monkeypatch):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
-        from aipass.seedgo.apps.modules import CommandRefused
-
-        printed = _capture_output(monkeypatch, verb)
-        monkeypatch.setattr(verb.runner, "run", lambda *a, **k: printed.append("MEASURED"))
+    def test_nothing_is_measured_once_a_token_is_unrecognized(self, monkeypatch, capsys):
+        measured: list = []
+        monkeypatch.setattr(verb.runner, "run", lambda *a, **k: measured.append("MEASURED"))
 
         with pytest.raises(CommandRefused):
-            verb._run(["@backup", "--nonsense"])
+            verb.handle_command("audit-tests", ["@backup", "--nonsense"])
 
-        assert "MEASURED" not in printed, "the lane measured a target it had already failed to understand"
-        assert any(line.startswith("REFUSED: [ARGV]") and "'--nonsense'" in line for line in printed)
+        assert measured == [], "the lane measured a target it had already failed to understand"
+        assert "REFUSED: [ARGV] unknown argument '--nonsense'" in capsys.readouterr().err
 
     def test_a_help_flag_beside_an_unknown_token_still_explains(self, monkeypatch):
-        from aipass.seedgo.apps.modules import audit_tests as verb
-
         # help_flag_safety: a help flag ANYWHERE means explain, never execute -
         # and never refuse either. The unknown token is collected during the
         # scan and acted on only after help has had its say.
@@ -1511,6 +1699,14 @@ class TestLaneVerbRefusesTheUnrecognized:
         verb.handle_command("audit-tests", ["-tests", "--help"])
 
         assert seen == ["help"]
+
+
+def _harness_rows(m10_proof: dict) -> list:
+    """The harness's published rows for a run carrying this M10 proof."""
+    block = selfcheck.harness_block(
+        document={}, hygiene={}, run={}, environment={}, liveness={}, m10_proof=m10_proof, config_note=""
+    )
+    return block["checks"]
 
 
 class TestLiveWriterProbeWindowIsDisclosed:
@@ -1537,58 +1733,40 @@ class TestLiveWriterProbeWindowIsDisclosed:
     The window is published instead, and the reader judges.
     """
 
-    def _proof(self, **options):
-        from aipass.seedgo.apps.handlers.audit_tests import runner
-
-        return runner._m10_not_probed("test"), options
-
-    def test_the_not_probed_proof_carries_the_window_field_too(self):
+    def test_the_not_probed_proof_carries_the_window_field_too(self, tmp_path, monkeypatch):
         """A missing field and a zero window must not look the same.
 
         The not-probed shape is built to mirror the probed one exactly - the
         module says so in its own words - so a field added to one and not the
         other reintroduces the drift that shape was created to prevent.
         """
-        from aipass.seedgo.apps.handlers.audit_tests import runner
 
-        assert "live_writer_probe_seconds" in runner._m10_not_probed("test")
+        assert "live_writer_probe_seconds" in _measured(tmp_path, monkeypatch, _proven_run())["m10_proof"]
 
-    def test_an_unprobed_run_publishes_none_not_a_misleading_zero(self):
-        from aipass.seedgo.apps.handlers.audit_tests import runner
+    def test_an_unprobed_run_publishes_none_not_a_misleading_zero(self, tmp_path, monkeypatch):
+        assert _measured(tmp_path, monkeypatch, _proven_run())["m10_proof"]["live_writer_probe_seconds"] is None
 
-        assert runner._m10_not_probed("test")["live_writer_probe_seconds"] is None
+    def test_the_probe_records_how_long_its_window_actually_was(self, tmp_path, monkeypatch):
+        (tmp_path / "real").mkdir()
+        (tmp_path / "real" / "f.txt").write_text("x", encoding="utf-8")
+        proof = _measured(tmp_path, monkeypatch, _proven_run(), options={})["m10_proof"]
 
-    def test_the_probe_records_how_long_its_window_actually_was(self, tmp_path):
-        from aipass.seedgo.apps.handlers.audit_tests import runner
-        from aipass.seedgo.apps.handlers.audit_tests import target as target_module
-
-        (tmp_path / "f.txt").write_text("x")
-        options: dict = {}
-        runner._probe_live_writers(
-            target_module.Target(name="t", path=tmp_path, kind="branch", resolved_from="test"), options
-        )
-
-        assert options["live_writers_probed"] is True
-        window = options["live_writer_probe_seconds"]
+        assert proof["live_writers_probed"] is True
+        window = proof["live_writer_probe_seconds"]
         assert isinstance(window, float)
         assert window >= 0.0
 
     def test_a_failed_probe_still_publishes_a_window_of_none(self, tmp_path, monkeypatch):
         """The probe failing is the case where a bare `true` misleads most."""
-        from aipass.seedgo.apps.handlers.audit_tests import m10, runner
-        from aipass.seedgo.apps.handlers.audit_tests import target as target_module
 
         def boom(*a, **k):
             raise OSError("no")
 
         monkeypatch.setattr(m10, "live_writers", boom)
-        options: dict = {}
-        runner._probe_live_writers(
-            target_module.Target(name="t", path=tmp_path, kind="branch", resolved_from="test"), options
-        )
+        proof = _measured(tmp_path, monkeypatch, _proven_run(), options={})["m10_proof"]
 
-        assert options["live_writers_probed"] is False
-        assert options["live_writer_probe_seconds"] is None
+        assert proof["live_writers_probed"] is False
+        assert proof["live_writer_probe_seconds"] is None
 
     def test_the_unattributed_row_states_the_window_beside_the_probe_flag(self):
         """The two numbers must meet in ONE sentence to be comparable.
@@ -1596,9 +1774,8 @@ class TestLiveWriterProbeWindowIsDisclosed:
         Repointed to check 17 when the verdict was split (@trigger, same day):
         the window is what makes an UNATTRIBUTED red judgeable, so it belongs on
         the row that reds on unattributed changes, not on the forgery row.
+        Mutant: the window no longer stated beside the probe flag in apps/handlers/audit_tests/selfcheck.py — killed.
         """
-        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
-
         proof = {
             "probed": True,
             "files_fingerprinted": 3,
@@ -1609,12 +1786,10 @@ class TestLiveWriterProbeWindowIsDisclosed:
             "changed_by_the_measured_suite": [],
             "diff": {},
         }
-        checks = selfcheck._m10_rows(proof)
-        row = [c for c in checks if c["check"] == 17]
-        assert row, "check 17 must be present"
-        assert "0.02" in row[0]["detail"]
+        row = next(c for c in _harness_rows(proof) if c["check"] == 17)
+        assert re.search(r"\(probe ran: True, window 0\.02s", row["detail"])
 
-    def test_the_PUBLISHED_proof_carries_the_window_not_just_the_options_dict(self, tmp_path):
+    def test_the_published_proof_carries_the_window_not_just_the_options_dict(self, tmp_path, monkeypatch):
         """The reader of the ARTIFACT is who needs this number.
 
         The first cut of this class pinned the options dict and the not-probed
@@ -1623,20 +1798,13 @@ class TestLiveWriterProbeWindowIsDisclosed:
         green. A disclosure nobody can read is not a disclosure, so the pin
         belongs on the document, not on the intermediate state.
         """
-        from aipass.seedgo.apps.handlers.audit_tests import m10, runner
-        from aipass.seedgo.apps.handlers.audit_tests import target as target_module
+        (tmp_path / "real").mkdir()
+        (tmp_path / "real" / "f.txt").write_text("x", encoding="utf-8")
 
-        (tmp_path / "f.txt").write_text("x")
-        target = target_module.Target(name="t", path=tmp_path, kind="branch", resolved_from="test")
-        before = m10.snapshot_tree(tmp_path)
-        options: dict = {}
-        runner._probe_live_writers(target, options)
-
-        proof = runner._m10_proof(target, before, options)
+        proof = _measured(tmp_path, monkeypatch, _proven_run(), options={})["m10_proof"]
 
         assert proof["probed"] is True
         assert "live_writer_probe_seconds" in proof
-        assert proof["live_writer_probe_seconds"] == options["live_writer_probe_seconds"]
         assert isinstance(proof["live_writer_probe_seconds"], float)
 
 
@@ -1678,52 +1846,690 @@ class TestCheck12VerdictIsSplitFromUnattributedChanges:
         assert found, f"check {number} must be present"
         return found[0]
 
-    def test_check_12_passes_when_the_SUITE_changed_nothing(self):
+    def test_check_12_passes_when_the_suite_changed_nothing(self):
         """@trigger's exact case: ten unattributed, zero from the suite."""
-        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
-
-        rows = selfcheck._m10_rows(self._proof(by_suite=[], unattributed=["a", "b"]))
+        rows = _harness_rows(self._proof(by_suite=[], unattributed=["a", "b"]))
         assert self._row(rows, 12)["status"] == selfcheck.PASS
 
-    def test_check_12_still_fails_when_the_suite_DID_write_the_real_tree(self):
+    def test_check_12_still_fails_when_the_suite_did_write_the_real_tree(self):
         """The finding the lane exists for must not be softened by the split."""
-        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
-
-        rows = selfcheck._m10_rows(self._proof(by_suite=["logs/x.jsonl"], unattributed=[]))
+        rows = _harness_rows(self._proof(by_suite=["logs/x.jsonl"], unattributed=[]))
         assert self._row(rows, 12)["status"] == selfcheck.FAIL
         assert "logs/x.jsonl" in self._row(rows, 12)["detail"]
 
     def test_the_unattributed_set_gets_its_own_row_and_is_not_swallowed(self):
         """Splitting must not become hiding."""
-        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
-
-        rows = selfcheck._m10_rows(self._proof(by_suite=[], unattributed=["a", "b"]))
+        rows = _harness_rows(self._proof(by_suite=[], unattributed=["a", "b"]))
         assert self._row(rows, 17)["status"] == selfcheck.FAIL
 
     def test_the_unattributed_row_names_the_probe_window_so_the_red_is_judgeable(self):
         """A short probe UNDER-detects; the reader needs that number here."""
-        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
-
-        rows = selfcheck._m10_rows(self._proof(by_suite=[], unattributed=["a"]))
+        rows = _harness_rows(self._proof(by_suite=[], unattributed=["a"]))
         assert "0.02" in self._row(rows, 17)["detail"]
 
     def test_the_two_rows_do_not_share_a_name(self):
         """If both rows say the same thing the split bought nothing."""
-        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
-
-        rows = selfcheck._m10_rows(self._proof(by_suite=["x"], unattributed=["a"]))
+        rows = _harness_rows(self._proof(by_suite=["x"], unattributed=["a"]))
         assert self._row(rows, 12)["name"] != self._row(rows, 17)["name"]
 
     def test_a_clean_run_passes_both_rows(self):
-        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
-
-        rows = selfcheck._m10_rows(self._proof(by_suite=[], unattributed=[]))
+        rows = _harness_rows(self._proof(by_suite=[], unattributed=[]))
         assert self._row(rows, 12)["status"] == selfcheck.PASS
         assert self._row(rows, 17)["status"] == selfcheck.PASS
 
     def test_an_unprobed_proof_publishes_both_rows_rather_than_one(self):
         """A missing row and a passing row must never look the same."""
-        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
-
-        rows = selfcheck._m10_rows({"probed": False, "note": "no fingerprint"})
+        rows = _harness_rows({"probed": False, "note": "no fingerprint"})
         assert {r["check"] for r in rows} >= {1, 12, 17}
+
+
+# =============================================================================
+# STATEMENT DELETION — the operator commissioned by DPLAN-0352 round 2
+#
+# The species is three-instanced: a statement that executes, is documented as
+# doing something, and that no test observes. Whole-body gutting cannot
+# isolate it because the body has other work in it.
+# =============================================================================
+
+
+class TestStatementDeletionStaysAtStatementLevel:
+    """The brief's hard boundary: statement level, never branch deletion."""
+
+    def _sites(self, tmp_path, source):
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        (apps / "mod.py").write_text(source, encoding="utf-8")
+        return SD.discover_statements(tmp_path)
+
+    def test_a_compound_header_is_never_a_deletion_site(self, tmp_path):
+        """Deleting an `if` deletes its block, which is branch deletion and a
+        different, harder operator. The boundary is enforced, not documented."""
+        source = (
+            "def f(flag):\n"
+            "    if flag:\n"
+            "        trail('taken')\n"
+            "    for item in flag:\n"
+            "        trail(item)\n"
+            "    return 1\n"
+        )
+        kinds = {s.kind for s in self._sites(tmp_path, source)}
+        assert "If" not in kinds
+        assert "For" not in kinds
+        assert "Expr" in kinds, "but it must still reach the statements INSIDE the block"
+
+    def test_statements_inside_a_compound_are_reached(self, tmp_path):
+        """The trail call round 3 found was inside a block, not beside one."""
+        source = (
+            "def f(x):\n    try:\n        trail('before')\n        raise ValueError(x)\n"
+            "    finally:\n        trail('after')\n"
+        )
+        lines = {s.source_line for s in self._sites(tmp_path, source)}
+        assert "trail('before')" in lines
+        assert "trail('after')" in lines
+        assert "raise ValueError(x)" in lines
+
+
+class TestStatementDeletionAridList:
+    """Declared from line one, with the reason each cannot change behaviour."""
+
+    def _sites(self, tmp_path, source):
+        apps = tmp_path / "apps"
+        apps.mkdir(exist_ok=True)
+        (apps / "mod.py").write_text(source, encoding="utf-8")
+        return SD.discover_statements(tmp_path)
+
+    def test_a_docstring_is_arid_and_carries_its_reason(self, tmp_path):
+        sites = self._sites(tmp_path, 'def f():\n    """The docstring."""\n    return work()\n')
+        doc = [s for s in sites if s.source_line.startswith('"""')]
+        assert doc and doc[0].arid_reason == SD.ARID_DOCSTRING
+        assert SD.ARID_REASONS[SD.ARID_DOCSTRING]
+
+    def test_every_arid_reason_is_declared_with_a_why(self, tmp_path):
+        """A suppression with no reason is a denylist, which is the thing the
+        brief said must not happen."""
+        for name in (SD.ARID_DOCSTRING, SD.ARID_PASS, SD.ARID_ELLIPSIS, SD.ARID_SOLE_RETURN_NONE):
+            assert SD.ARID_REASONS.get(name), f"{name} is suppressed with no reason"
+
+    def test_a_logging_call_is_never_arid(self, tmp_path):
+        """Trail and telemetry calls LOOK arid and are the species itself.
+        Suppressing them would have suppressed all three sightings."""
+        sites = self._sites(tmp_path, "def f():\n    logger.info('did the thing')\n    return 1\n")
+        trail = [s for s in sites if "logger.info" in s.source_line]
+        assert trail and trail[0].arid_reason is None
+
+    def test_arid_statements_are_returned_not_dropped(self, tmp_path):
+        """A list that quietly drops half the tree then reports a rate is
+        lying about its denominator."""
+        sites = self._sites(tmp_path, 'def f():\n    """Doc."""\n    return work()\n')
+        assert any(s.arid_reason for s in sites), "arid sites stay in the list"
+        assert all(s.arid_reason is None for s in SD.probeable(sites)), "but never get probed"
+
+    def _return_arid(self, tmp_path, source):
+        """The arid reason on every bare `return` in `source`, in line order."""
+        sites = self._sites(tmp_path, source)
+        return [s.arid_reason for s in sorted(sites, key=lambda s: s.lineno) if s.kind == "Return"]
+
+    def test_a_guard_return_is_never_arid(self, tmp_path):
+        """THE ROUND-5 DEFECT (devpulse, canary a36f500a). `is_last` was
+        computed per BLOCK, so the `return` closing an `if` was declared arid.
+        That is the definition of a guard clause and the species this operator
+        exists to probe: canary's `kv.py:238` was filtered out before it was
+        ever run, and deleting it leaves 91 tests green while
+        `kv --json FILE set K V` prints its refusal, exits 2, AND writes."""
+        source = "def f(a):\n    if a:\n        log('refused')\n        return\n    write(a)\n"
+        assert self._return_arid(tmp_path, source) == [None]
+
+    def test_a_return_in_tail_position_is_still_arid(self, tmp_path):
+        """The cure must not simply stop suppressing. Both of these DO fall
+        off the end of the function, so deleting them changes nothing."""
+        flat = "def f(a):\n    write(a)\n    return\n"
+        assert self._return_arid(tmp_path, flat) == [SD.ARID_SOLE_RETURN_NONE]
+
+        nested = "def f(a):\n    if a:\n        write(a)\n        return\n"
+        assert self._return_arid(tmp_path, nested) == [SD.ARID_SOLE_RETURN_NONE]
+
+    def test_a_return_closing_a_loop_body_is_never_arid(self, tmp_path):
+        """Not in the round-5 report — measured here. Reaching the end of a
+        loop body starts the next iteration, so deleting the `return` keeps
+        looping instead of leaving the function."""
+        source = "def f(xs):\n    for x in xs:\n        if x:\n            return\n    write('done')\n"
+        assert self._return_arid(tmp_path, source) == [None]
+
+        while_tail = "def f(xs):\n    while xs:\n        xs.pop()\n        return\n"
+        assert self._return_arid(tmp_path, while_tail) == [None]
+
+    def test_a_return_closing_a_finally_is_never_arid(self, tmp_path):
+        """Also measured here, not reported. A `return` in a `finally`
+        SWALLOWS the pending return value or exception; deleting it stops the
+        swallowing, which is the opposite of a no-op."""
+        source = "def f():\n    try:\n        return compute()\n    finally:\n        return\n"
+        assert self._return_arid(tmp_path, source) == [None, None]
+
+    def test_a_return_closing_a_try_body_with_an_else_is_never_arid(self, tmp_path):
+        """An `else` runs when the try completes normally, so falling off the
+        try body runs code the `return` skipped."""
+        source = "def f():\n    try:\n        return\n    except E:\n        h()\n    else:\n        k()\n"
+        assert self._return_arid(tmp_path, source) == [None]
+
+    def test_a_return_closing_an_except_handler_at_the_tail_is_arid(self, tmp_path):
+        """Falling off a handler leaves the whole `try`, and here that is the
+        end of the function. Keeping this one arid is what stops the cure from
+        convicting equivalent mutants."""
+        source = "def f():\n    try:\n        g()\n    except E:\n        return\n"
+        assert self._return_arid(tmp_path, source) == [SD.ARID_SOLE_RETURN_NONE]
+
+
+class TestStatementDeletionDiscoveryIsUnique:
+    """One statement, one site. A double-counted tree lies about its rate."""
+
+    def test_a_nested_def_is_walked_once_not_twice(self, tmp_path):
+        """Found here, not in the round-5 report. `discover_statements` finds
+        functions with `ast.walk`, which already reaches every nested `def`,
+        and `_walk_block` descended into them as well — so each nested
+        statement was emitted twice, once under each qualname. It inflates any
+        denominator built on the site count and pays to run one mutant twice."""
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        (apps / "mod.py").write_text(
+            "def outer(a):\n    x = 1\n    def inner(b):\n        y = 2\n        return y\n    return inner(a) + x\n",
+            encoding="utf-8",
+        )
+        sites = SD.discover_statements(tmp_path)
+        addresses = [(s.relpath, s.lineno) for s in sites]
+        assert len(addresses) == len(set(addresses)), f"a line was emitted twice: {addresses}"
+        inner_y = [s for s in sites if s.source_line == "y = 2"]
+        assert len(inner_y) == 1
+        assert inner_y[0].function_qualname == "inner", "attributed to its own function"
+
+
+class TestStatementDeletionConviction:
+    """The sentence IS the product. A percentage teaches nobody."""
+
+    def _result(self, statement, tests=5, relpath="apps/m.py", line=87):
+        site = SD.StatementSite(
+            relpath=relpath,
+            qualname="f",
+            function_qualname="f",
+            lineno=line,
+            end_lineno=line,
+            body_lineno=line,
+            body_col_offset=0,
+            kind="Expr",
+            is_sole_statement=False,
+            source_line=statement,
+        )
+        return SD.StatementResult(site=site, outcome=SD.OUTCOME_SURVIVED, selected_tests=tests)
+
+    def test_a_conviction_names_file_line_statement_and_the_observation(self):
+        """The brief's four-part contract, one assertion per part."""
+        line = SD.conviction_line(self._result('json_handler.log_operation("table_refused", {})', tests=20))
+        assert "apps/m.py:87" in line, "the address a builder navigates by"
+        assert "log_operation" in line, "the statement itself"
+        assert "reached by 20 tests" in line, "the count that makes it a conviction, not a coverage note"
+        assert "operations trail for 'table_refused'" in line, "what would observe it"
+
+    def test_the_observation_clause_follows_the_statement_shape(self):
+        assert "captured log record at warning" in SD.observation_clause('logger.warning("x", a)')
+        assert "captured stdout" in SD.observation_clause('console.print("hello")')
+        assert "refusal reason" in SD.observation_clause('error("kv refused: no verb")')
+        assert "did not happen" in SD.observation_clause("return"), "a guard return, the round-5 species"
+
+    def test_a_chained_call_names_the_function_it_actually_calls(self):
+        """Reading the FIRST identifier sends the builder to assert on the
+        wrong thing: these two are calls to `unlink` and `__init__`, and both
+        are real canary a36f500a survivors."""
+        assert "unlink()" in SD.observation_clause("Path(temp_name).unlink(missing_ok=True)")
+        assert "__init__()" in SD.observation_clause("super().__init__(reason)")
+
+    def test_an_unparseable_statement_still_gets_a_sentence(self):
+        """The fall-through matches everything rather than guessing."""
+        assert SD.observation_clause("del broken(((")
+        assert SD.observation_clause("")
+
+    def test_a_statement_no_test_reaches_is_never_convicted(self):
+        """A statement with no covering test is a COVERAGE fact. Convicting it
+        would blame the assertions for a gap in what the suite executes."""
+        campaign = SD.StatementCampaign(
+            baseline=None,
+            results=[
+                SD.StatementResult(
+                    site=self._result("trail('x')").site,
+                    outcome=SD.OUTCOME_SURVIVED,
+                    reason=SD.REASON_NO_COVERING_TEST,
+                )
+            ],
+        )
+        document = SD.summarize(campaign, [])
+        assert document["convictions"] == []
+        assert document["survived_no_covering_test"] == 1
+
+
+class TestStatementDeletionCostIsSplit:
+    """Fixed setup is not a per-mutant cost, and naming it one misled an owner."""
+
+    def _campaign(self, own_times, elapsed):
+        results = []
+        for index, seconds in enumerate(own_times):
+            site = SD.StatementSite(
+                relpath="apps/m.py",
+                qualname="f",
+                function_qualname="f",
+                lineno=index + 1,
+                end_lineno=index + 1,
+                body_lineno=index + 1,
+                body_col_offset=0,
+                kind="Expr",
+                is_sole_statement=False,
+                source_line="trail('x')",
+            )
+            results.append(SD.StatementResult(site=site, outcome=SD.OUTCOME_KILLED, elapsed_seconds=seconds))
+        return SD.StatementCampaign(baseline=None, results=results, elapsed_seconds=elapsed)
+
+    def test_setup_is_not_charged_to_the_mutants(self):
+        """THE DEVPULSE CORRECTION, with its own numbers. 278.72s over 2
+        mutants published 139.36 s/mutant, while the two mutants' own clocks
+        read 0.98 and 1.58. I reported that 139 upward as a per-mutant floor."""
+        document = SD.summarize(self._campaign([0.98, 1.58], 278.72), [])
+        assert document["setup_seconds"] == 276.16, "the one-time cost, named as one-time"
+        assert document["seconds_per_mutant_mean"] == 1.28
+        assert document["seconds_per_mutant_max"] == 1.58
+        assert "seconds_per_mutant" not in document, "the conflated metric is gone, not renamed"
+
+    def test_the_median_travels_beside_the_mean(self):
+        """A deletion campaign's tail is long — canary read a 0.74s median
+        against a 2.14s mean with one mutant at 15.13s. A mean alone hides it."""
+        document = SD.summarize(self._campaign([0.5, 0.5, 0.5, 30.0], 40.0), [])
+        assert document["seconds_per_mutant_median"] == 0.5
+        assert document["seconds_per_mutant_mean"] == 7.88
+        assert document["seconds_per_mutant_max"] == 30.0
+
+    def test_the_cost_model_says_how_to_project(self):
+        """A reader who multiplies the wrong number reprices the whole lane."""
+        model = SD.summarize(self._campaign([1.0, 1.0], 50.0), [])["cost_model"]
+        assert "setup_seconds" in model and "does NOT scale" in model
+
+
+class TestStatementDeletionHangTimeout:
+    """The ceiling has to clear an honest mutant and still catch a hang."""
+
+    def test_the_ceiling_leaves_room_above_the_baseline(self, tmp_path):
+        """ROUND-5 DEFECT TWO. The ceiling was `int(baseline)` exactly, argued
+        from 'a run over a SUBSET cannot outlast the whole suite'. When
+        selection has no coverage entry it falls back to the WHOLE suite, so
+        the honest cost IS the baseline and the ceiling loses a coin toss:
+        canary's only two `not_run / mutant_timeout` of 153 were its only two
+        `unmapped_test_context` mutants, both at 19.03s against a 19s wall."""
+        assert SD.hang_timeout(19.0) > 19, "a whole-suite fallback must fit under its own ceiling"
+        assert SD.hang_timeout(19.0) == 38
+
+    def test_the_floor_still_holds_for_a_fast_suite(self, tmp_path):
+        assert SD.hang_timeout(0.0) == SD.HANG_TIMEOUT_FLOOR_SECONDS
+        assert SD.hang_timeout(1.0) == SD.HANG_TIMEOUT_FLOOR_SECONDS
+
+
+class TestStatementDeletionMutant:
+    """The splice itself."""
+
+    def _site(self, tmp_path, source, needle):
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        (apps / "mod.py").write_text(source, encoding="utf-8")
+        return next(s for s in SD.discover_statements(tmp_path) if needle in s.source_line)
+
+    def test_deletion_removes_only_that_statement(self, tmp_path):
+        """Mutant: the splice leaves a blank line where the statement was in apps/handlers/tests_pytest_standards/statement_deletion.py — killed."""
+        source = "def f(x):\n    trail('here')\n    return x + 1\n"
+        site = self._site(tmp_path, source, "trail(")
+        mutant = SD.delete_statement(source, site)
+        assert mutant == "def f(x):\n    return x + 1\n", "the statement's own lines go and nothing else changes"
+        assert "trail(" not in mutant
+        assert "def f(x):" in mutant, "the signature stays byte-identical or selection is unsound"
+        assert "return x + 1" in mutant
+
+    def test_a_sole_statement_becomes_pass_rather_than_a_syntax_error(self, tmp_path):
+        """Mutant: pass inserted above the sole statement, which stays, in apps/handlers/tests_pytest_standards/statement_deletion.py — killed."""
+        source = "def f(x):\n    if x:\n        trail('only')\n    return x\n"
+        site = self._site(tmp_path, source, "trail(")
+        mutant = SD.delete_statement(source, site)
+        assert mutant == "def f(x):\n    if x:\n        pass\n    return x\n", "pass REPLACES the statement"
+        compile(mutant, "mod.py", "exec")
+
+    def test_a_statement_spans_its_own_lines_not_the_functions(self, tmp_path):
+        """This IS the cost argument: a statement is judged by the tests that
+        execute its own lines, a strictly smaller set than the function's."""
+        source = "def f(x):\n    a = 1\n    trail('here')\n    return a + x\n"
+        site = self._site(tmp_path, source, "trail(")
+        probe = site.as_function_site()
+        assert probe.body_lineno == site.lineno == 3
+        assert probe.end_lineno == 3, "one statement, not the whole body"
+
+
+class TestEnvcopySourcesSiblingsForABankedFixture:
+    """seedgo todo 123: both banked fixtures refused, and the sentence the
+    lane printed named a plugin rather than the cause."""
+
+    def test_a_fixture_borrows_siblings_from_the_running_checkout(self, tmp_path):
+        fixture = tmp_path / "src" / "aipass" / "canary"
+        fixture.mkdir(parents=True)
+        source, basis = envcopy.sibling_source(tmp_path, "canary")
+        assert basis == envcopy.SIBLINGS_FROM_HOST_REPO
+        assert (source / "prax").is_dir(), "the real dependencies, or the conftest import fails"
+
+    def test_a_real_repo_uses_its_own_siblings(self):
+        root = envcopy.host_repo_root()
+        assert root is not None
+        assert envcopy.sibling_source(root, "canary")[1] == envcopy.SIBLINGS_FROM_OWN_ROOT
+
+    def test_the_host_root_is_found_by_marker_not_by_counting_parents(self):
+        """A parent count is a silent liar the day the file moves one level,
+        and the first cut of this was off by exactly one."""
+        root = envcopy.host_repo_root()
+        assert root is not None, "the running checkout always holds src/aipass"
+        assert (root / "src" / "aipass").is_dir()
+
+    def test_no_siblings_anywhere_refuses_by_name(self, tmp_path, monkeypatch):
+        """Mutant: the host checkout never consulted in apps/handlers/tests_pytest_standards/envcopy.py — killed."""
+        (tmp_path / "src" / "aipass" / "canary").mkdir(parents=True)
+        asked: list = []
+        monkeypatch.setattr(envcopy, "host_repo_root", lambda: asked.append("host"))
+        with pytest.raises(envcopy.EnvError) as excinfo:
+            envcopy.sibling_source(tmp_path, "canary")
+        assert "no sibling packages for canary" in str(excinfo.value)
+        assert asked == ["host"], "the running checkout is asked before the refusal"
+
+
+class TestStatementDeletionIsDeclaredToTheLane:
+    """An execution group that runs mutants is bound by the lane's own laws."""
+
+    def test_the_group_is_opt_in_and_flagged(self):
+        assert SD.GROUP in adapter.OPT_IN_EXECUTION_GROUPS
+        assert adapter.OPT_IN_FLAGS[SD.GROUP] == "--statement-deletion"
+
+    def test_it_is_kill_cause_bound_and_carries_a_contract(self):
+        """It executes mutants, so Law S9 requires a kill_cause on every
+        record and the artifact needs the contract that reads them."""
+        assert SD.GROUP in spine.KILL_CAUSE_BOUND
+        assert "branch deletion is out of reach" in spine.GROUP_CONTRACTS[SD.GROUP]
+
+    def test_the_not_requested_reason_names_the_flag_and_not_not_built(self, tmp_path):
+        reason = adapter.nominate(_spec_for(tmp_path))[SD.GROUP]["reason"]
+        assert "--statement-deletion" in reason
+        assert "not built" not in reason
+
+    def test_the_cli_flag_reaches_the_group(self):
+        assert audit_tests.OPT_IN_GROUP_FLAGS["--statement-deletion"] == "statement_deletion"
+        assert "--statement-deletion" in audit_tests.LANE_FLAGS
+
+
+class TestStatementDeletionRefusesAnUncompilableMutant:
+    """An engine bug must never reach the suite dressed as a perfect kill."""
+
+    def test_a_semicolon_line_is_reported_not_written(self, tmp_path):
+        """Two statements on one line are one LINE RANGE, so deleting either
+        deletes both and can empty a block. The mutant is compiled before it
+        is written, so this comes back `mutation_failed` - which is not
+        evidence about the suite - rather than as a green run against a file
+        that never imported. It is also this operator's honest limit: a
+        semicolon line is mutated as a unit."""
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        source = "def f(x):\n    if x:\n        a = 1; trail('x')\n    return x\n"
+        (apps / "mod.py").write_text(source, encoding="utf-8")
+
+        site = next(s for s in SD.discover_statements(tmp_path) if "a = 1" in s.source_line)
+        assert site.is_sole_statement is False, "the block holds two statements by AST count"
+
+        mutant, failure = SD._mutant_text(source, site)
+        assert mutant is None
+        assert failure == SD.REASON_MUTANT_NOT_PARSEABLE
+
+    def test_a_bare_string_is_arid_anywhere_in_the_body(self, tmp_path):
+        """Not only at position 0 - a string alone on a line is evaluated and
+        discarded wherever it sits."""
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        (apps / "mod.py").write_text(
+            'def f(x):\n    """Doc."""\n    x = 1\n    "mid body"\n    return x\n', encoding="utf-8"
+        )
+        sites = SD.discover_statements(tmp_path)
+        mid = next(s for s in sites if "mid body" in s.source_line)
+        assert mid.arid_reason == SD.ARID_DOCSTRING
+
+
+class TestStatementDeletionSurvivorRollup:
+    """A survivor list nobody can triage is worse than no operator (the brief).
+
+    Measured on canary's round-4 tree: 230 survivors, 188 of them inside
+    `print_help` and `print_introspection` - two functions `pseudo_tested`
+    already convicts whole. The statement-level list this operator exists for
+    was the other 42, buried under 82% noise from one cause.
+    """
+
+    def _campaign(self, rows):
+        """rows: (file, qualname, lineno, outcome) -> a campaign to roll up."""
+        results = []
+        for relpath, qualname, lineno, outcome in rows:
+            site = SD.StatementSite(
+                relpath=relpath,
+                qualname=f"{qualname}:{lineno}",
+                function_qualname=qualname,
+                lineno=lineno,
+                end_lineno=lineno,
+                body_lineno=lineno,
+                body_col_offset=4,
+                kind="Expr",
+                is_sole_statement=False,
+                source_line="console.print()",
+            )
+            results.append(SD.StatementResult(site=site, outcome=outcome))
+        return SD.StatementCampaign(baseline=None, results=results)
+
+    def test_a_function_whose_every_statement_survived_becomes_one_row(self):
+        campaign = self._campaign(
+            [("apps/m.py", "print_help", n, SD.OUTCOME_SURVIVED) for n in (10, 11, 12, 13)]
+            + [("apps/m.py", "_top", 40, SD.OUTCOME_SURVIVED), ("apps/m.py", "_top", 41, SD.OUTCOME_KILLED)]
+        )
+        rollup = SD.summarize(campaign, [r.site for r in campaign.results])["survivor_rollup"]
+
+        assert rollup["survivors_total"] == 5
+        assert rollup["statements_rolled_up"] == 4
+        assert rollup["survivors_after_rollup"] == 1, "the one statement-level finding, not five"
+        assert [r["function"] for r in rollup["functions_wholly_unobserved"]] == ["print_help"]
+        assert rollup["functions_wholly_unobserved"][0]["first_line"] == 10
+
+    def test_a_function_with_one_kill_is_never_rolled_up(self):
+        """One surviving statement inside an otherwise observed function is
+        exactly the species this operator was commissioned for - the trail call
+        beside a `raise` that kills. Rolling it up would delete the finding."""
+        campaign = self._campaign(
+            [
+                ("apps/h.py", "_refuse", 87, SD.OUTCOME_SURVIVED),
+                ("apps/h.py", "_refuse", 88, SD.OUTCOME_KILLED),
+            ]
+        )
+        rollup = SD.summarize(campaign, [r.site for r in campaign.results])["survivor_rollup"]
+
+        assert rollup["functions_wholly_unobserved"] == []
+        assert rollup["survivors_after_rollup"] == 1
+
+    def test_a_lone_surviving_statement_is_a_statement_finding_not_a_function_one(self):
+        """A function with exactly one executed mutant says nothing about the
+        function when that mutant survives - there is no 'every' to be true of."""
+        campaign = self._campaign([("apps/m.py", "_add", 99, SD.OUTCOME_SURVIVED)])
+        rollup = SD.summarize(campaign, [r.site for r in campaign.results])["survivor_rollup"]
+
+        assert rollup["functions_wholly_unobserved"] == []
+        assert rollup["survivors_after_rollup"] == 1
+        assert SD.ROLLUP_MIN_STATEMENTS == 2
+
+    def test_the_rollup_is_a_collapse_and_never_a_suppression(self):
+        """Law: nothing leaves `mutants[]`. The rollup is a reading aid over a
+        record that still carries every verdict."""
+        campaign = self._campaign([("apps/m.py", "print_help", n, SD.OUTCOME_SURVIVED) for n in (10, 11)])
+        sites = [r.site for r in campaign.results]
+        document = SD.summarize(campaign, sites)
+
+        assert document["survived"] == 2, "the headline count is untouched by the rollup"
+        assert len(document["mutants"]) == 2, "both mutants still carry their own verdict"
+        assert document["survivor_rollup"]["survivors_after_rollup"] == 0
+        assert any("never a suppression" in limit for limit in document["limits"])
+
+    def test_a_partly_observed_function_is_the_species_and_keeps_its_rows(self):
+        """canary.py's print_help: 41 of 43 statements deleted green, 2 killed.
+        Gutting cannot report it - those 2 assertions protect the whole body -
+        so the 41 must stay statement-level and the row must say 41 of 43."""
+        rows = [("apps/canary.py", "print_help", n, SD.OUTCOME_SURVIVED) for n in range(10, 51)]
+        rows += [("apps/canary.py", "print_help", n, SD.OUTCOME_KILLED) for n in (51, 52)]
+        campaign = self._campaign(rows)
+        rollup = SD.summarize(campaign, [r.site for r in campaign.results])["survivor_rollup"]
+
+        assert rollup["functions_wholly_unobserved"] == [], "one observed statement blocks the rollup"
+        assert rollup["survivors_after_rollup"] == 41
+        row = rollup["survivors_by_function"][0]
+        assert (row["statements"], row["of_executed"]) == (41, 43)
+
+    def test_survivors_by_function_ranks_the_worst_first(self):
+        rows = [("apps/a.py", "small", 10, SD.OUTCOME_SURVIVED)]
+        rows += [("apps/b.py", "big", n, SD.OUTCOME_SURVIVED) for n in (20, 21, 22)]
+        campaign = self._campaign(rows)
+        rollup = SD.summarize(campaign, [r.site for r in campaign.results])["survivor_rollup"]
+
+        assert [r["function"] for r in rollup["survivors_by_function"]] == ["big", "small"]
+
+
+class TestDiffScopeIsLinesNotFiles:
+    """The brief's first boundary: a one-line fix probes one statement."""
+
+    def test_a_hunk_header_yields_only_its_own_lines(self):
+        diff = "+++ b/src/aipass/seedgo/apps/m.py\n@@ -10,1 +10,3 @@\n+a\n+b\n+c\n"
+        assert diff_scope.parse_changed_lines(diff) == {"src/aipass/seedgo/apps/m.py": {10, 11, 12}}
+
+    def test_a_pure_deletion_puts_nothing_in_scope(self):
+        """A `+` count of 0 adds no line, so there is nothing to splice into -
+        limit 2 falling out of the parse rather than bolted on after it."""
+        diff = "+++ b/apps/m.py\n@@ -10,4 +9,0 @@\n-gone\n"
+        assert diff_scope.parse_changed_lines(diff) == {}
+
+    def test_the_granularity_is_published_not_inferred(self):
+        """The brief: if file scope ever ships because line scope is harder,
+        the artifact must SAY so rather than let a count imply line scope."""
+        scope = diff_scope.DiffScope(changed={"apps/m.py": {4}}, ref="HEAD~1")
+        document = scope.to_document()
+        assert document["granularity"] == diff_scope.GRANULARITY_LINE
+        assert diff_scope.GRANULARITY is diff_scope.GRANULARITY_LINE
+        assert document["ref"] == "HEAD~1"
+
+    def test_a_multi_line_statement_is_in_scope_when_its_middle_changed(self):
+        scope = diff_scope.DiffScope(changed={"apps/m.py": {21}})
+        assert scope.holds("apps/m.py", 20, 23) is True
+        assert scope.holds("apps/m.py", 30, 33) is False
+        assert scope.holds("apps/other.py", 20, 23) is False
+
+    def test_the_scope_carries_its_blind_spots(self):
+        """The load-bearing one is the statement that did not change and became
+        unobserved anyway. A cost strategy that reads as a coverage claim is
+        the way this feature goes wrong."""
+        limits = " ".join(diff_scope.SCOPE_LIMITS).lower()
+        assert "unobserved because of a change elsewhere" in limits
+        assert "untracked files are invisible" in limits
+        assert "never a coverage claim" in limits
+        assert diff_scope.DiffScope().to_document()["limits"] == list(diff_scope.SCOPE_LIMITS)
+
+    def test_a_target_outside_the_repository_refuses_by_name(self, tmp_path):
+        """An empty scope would probe nothing and report it as a clean run."""
+        with pytest.raises(diff_scope.DiffScopeError) as caught:
+            diff_scope.read_scope(tmp_path / "not_in_here", tmp_path / "repo", ref=None)
+        assert "not inside" in str(caught.value)
+
+
+class TestUnreadRedirectNominatesTheMechanism:
+    """One autouse fixture that nothing reads blinds a whole seam."""
+
+    def _corpus(self, tmp_path, conftest: str, test_body: str):
+
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "conftest.py").write_text(conftest, encoding="utf-8")
+        (tests / "test_thing.py").write_text(test_body, encoding="utf-8")
+        return corpus.build(tmp_path)
+
+    REDIRECT = (
+        "import pytest\n"
+        "@pytest.fixture(autouse=True)\n"
+        "def seam(tmp_path, monkeypatch):\n"
+        "    monkeypatch.setenv('AIPASS_TEST_LOG_DIR', str(tmp_path))\n"
+        "    return tmp_path\n"
+    )
+
+    def test_an_unread_redirect_that_hands_a_target_back_is_nominated(self, tmp_path):
+        scanned = self._corpus(tmp_path, self.REDIRECT, "def test_a():\n    assert True\n")
+        rows = R.nominate(scanned)
+        assert [r["species"] for r in rows] == ["UNREAD-REDIRECT"]
+        assert rows[0]["evidence"]["fixture"] == "seam"
+        assert rows[0]["verdict"] == corpus.VERDICT_IMPROVE
+
+    def test_a_fence_that_hands_nothing_back_is_never_nominated(self, tmp_path):
+        """No target means nothing to read, so nothing reading it is the
+        design. This clause is what acquits every isolation guard in the fleet."""
+        fence = (
+            "import pytest\n"
+            "@pytest.fixture(autouse=True)\n"
+            "def fence(tmp_path, monkeypatch):\n"
+            "    monkeypatch.setenv('AIPASS_TEST_LOG_DIR', str(tmp_path))\n"
+        )
+        scanned = self._corpus(tmp_path, fence, "def test_a():\n    assert True\n")
+        assert R.nominate(scanned) == []
+        assert R.acquitted(scanned)[0]["why_not"].startswith("it hands nothing back")
+
+    def test_a_requested_fixture_is_never_nominated(self, tmp_path):
+        scanned = self._corpus(tmp_path, self.REDIRECT, "def test_a(seam):\n    assert seam.exists()\n")
+        assert R.nominate(scanned) == []
+
+    def test_usefixtures_counts_as_requesting_it(self, tmp_path):
+        body = "import pytest\n@pytest.mark.usefixtures('seam')\ndef test_a():\n    assert True\n"
+        scanned = self._corpus(tmp_path, self.REDIRECT, body)
+        assert R.nominate(scanned) == []
+
+    def test_substituting_the_writer_is_the_second_door_and_acquits(self, tmp_path):
+        """MEASURED, not imagined: this is how seedgo observes its own trail,
+        and the first cut of the rule reported seedgo as blind because of it."""
+        body = (
+            "def test_a(monkeypatch):\n"
+            "    seen = []\n"
+            "    monkeypatch.setattr(mod.json_handler, 'log_operation', lambda n, p: seen.append(n))\n"
+            "    assert seen == []\n"
+        )
+        scanned = self._corpus(tmp_path, self.REDIRECT, body)
+        assert R.nominate(scanned) == []
+
+    def test_a_dotted_patch_target_is_the_same_door(self, tmp_path):
+        """`patch("a.b.json_handler.log_operation")` names the writer inside
+        one string. Comparing the whole literal made devpulse and hooks false
+        positives; the comparison takes the dotted tail."""
+        body = (
+            "from unittest.mock import patch\n"
+            "def test_a():\n"
+            "    with patch('aipass.x.apps.handlers.json.json_handler.log_operation'):\n"
+            "        assert True\n"
+        )
+        scanned = self._corpus(tmp_path, self.REDIRECT, body)
+        assert R.nominate(scanned) == []
+        assert "substitutes the seam writer" in R.acquitted(scanned)[0]["why_not"]
+
+    def test_a_fixture_that_is_not_autouse_is_out_of_scope(self, tmp_path):
+        plain = (
+            "import pytest\n"
+            "@pytest.fixture\n"
+            "def seam(tmp_path, monkeypatch):\n"
+            "    monkeypatch.setenv('AIPASS_TEST_LOG_DIR', str(tmp_path))\n"
+            "    return tmp_path\n"
+        )
+        scanned = self._corpus(tmp_path, plain, "def test_a():\n    assert True\n")
+        assert R.nominate(scanned) == []
+        assert R.acquitted(scanned) == []
+
+    def test_the_rule_declares_itself_to_the_lane(self):
+        assert R.GROUP in adapter.STATIC_GROUPS
+        assert R.GROUP in nominators.declared_groups()
+        assert not hasattr(R, "check_module") and not hasattr(R, "check_branch")
+        assert any("floor" in limit.lower() for limit in R.SPECIFICATION["limits"])

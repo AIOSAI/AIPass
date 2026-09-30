@@ -3,64 +3,13 @@
 # Description: Every flow module imports, and keeps logging, without a readable working directory
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-28
 # =============================================
 
-"""Flow must import, and must keep its audit line alive, with no cwd.
+"""Tests for aipass/flow/apps/__init__.py and every module beneath it importing with no readable working directory."""
 
-THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
-relayed by @devpulse). ``ntpath.realpath`` calls ``os.getcwd()``
-UNCONDITIONALLY — on its first lines, before it even asks whether the path is
-absolute — where ``posixpath`` only reads the cwd for a relative one. And
-``Path.resolve()`` routes through ``os.path.realpath``. So on Windows every
-module-level ``Path(__file__).resolve()`` is an import-time working-directory
-dependency, and a process whose cwd is gone cannot import the module at all.
-Guarding INSIDE that module's functions changes nothing: the import died before
-any of them existed.
-
-``inspect.stack()`` carries the same defect one layer down and needs a
-DIFFERENT world to convict it. It builds a ``FrameInfo`` per frame, and for a
-frame whose filename is a PSEUDO-file it reaches ``getmodule()``, whose
-``os.path.realpath(f)`` sits outside every ``try`` in that function. On POSIX
-the equivalent raise happens EARLIER, inside ``getabsfile()``, where ``inspect``
-catches it — which is exactly why two calls on flow's every-import and
-every-write paths survived years of Linux CI carrying this.
-
-TWO WORLDS, and @seedgo's asymmetry is why both are here rather than one:
-
-* **World A** emulates ntpath — ``os.path.realpath`` is wrapped to read
-  ``os.getcwd()`` first, then ``os.getcwd`` is denied. This convicts a raw
-  ``resolve()``. It does NOT convict ``inspect.stack()`` on Linux, because
-  ``getabsfile`` raises inside inspect's own catch before ``getmodule`` is
-  reached.
-* **World B** denies ``os.path.realpath`` outright while ``abspath`` keeps
-  working. This is what reaches ``getmodule``'s unguarded call and convicts
-  ``inspect.stack()``.
-
-THIRD INGREDIENT for world B (@hooks): the frame must be ``<string>`` — an
-interpreter ``-c`` or ``compile()`` frame — and NEVER ``<stdin>``. A
-heredoc-fed child puts ``<stdin>`` in ``linecache.cache``, ``getsourcefile``
-early-returns, and the probe reports green while the same world kills imports
-for real. Every assertion below is preceded by a control that states whether its
-world is armed, so a probe that quietly stopped biting cannot pass itself off as
-a cure.
-
-WHAT FLOW CARRIED, measured not estimated. Before this build, **61 of 61** flow
-modules died on import in BOTH worlds — every one of them inside
-``handlers/__init__.py``, at the ``inspect.stack()`` on line 20 and the
-``Path(__file__).resolve()`` on line 21. Those two lines MASKED everything under
-them, which is why the count only became true as cures landed: curing the guard
-took it to 43/61 and revealed ``json/json_handler.py:38`` (masking 31 modules on
-its own) plus twelve more; routing all **29** module-level
-``Path(__file__).resolve()`` sites and all **7** private ``_find_repo_root``
-copies through ``handlers/repo_root.py`` took it to **0/62**.
-
-AND ONE LIVE SITE NO IMPORT PROBE REACHES. ``log_operation`` is the audit line
-flow writes on essentially every registry operation, and its
-``_get_caller_module_name`` called ``inspect.stack()``. The stack it walks is
-the CALLER'S, so the shape that convicts it is a ``<string>`` frame — which is
-precisely what @drone's router produces when it invokes flow.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import ast
 import subprocess
@@ -68,6 +17,61 @@ import sys
 from pathlib import Path
 
 import pytest
+
+import aipass.flow.apps as flow_apps
+
+# THE MECHANISM, measured on the Windows CI gate 2026-08-31. ``ntpath.realpath``
+# calls ``os.getcwd()`` UNCONDITIONALLY — on its first lines, before it even
+# asks whether the path is absolute — where ``posixpath`` only reads the cwd
+# for a relative one. And ``Path.resolve()`` routes through
+# ``os.path.realpath``. So on Windows every module-level
+# ``Path(__file__).resolve()`` is an import-time working-directory dependency,
+# and a process whose cwd is gone cannot import the module at all. Guarding
+# INSIDE that module's functions changes nothing: the import died before any
+# of them existed.
+#
+# ``inspect.stack()`` carries the same defect one layer down and needs a
+# DIFFERENT world to convict it. It builds a ``FrameInfo`` per frame, and for a
+# frame whose filename is a PSEUDO-file it reaches ``getmodule()``, whose
+# ``os.path.realpath(f)`` sits outside every ``try`` in that function. On POSIX
+# the equivalent raise happens EARLIER, inside ``getabsfile()``, where
+# ``inspect`` catches it — which is exactly why two calls on flow's
+# every-import and every-write paths survived years of Linux CI carrying this.
+#
+# TWO WORLDS, and @seedgo's asymmetry is why both are here rather than one:
+#
+# * World A emulates ntpath — ``os.path.realpath`` is wrapped to read
+#   ``os.getcwd()`` first, then ``os.getcwd`` is denied. This convicts a raw
+#   ``resolve()``. It does NOT convict ``inspect.stack()`` on Linux, because
+#   ``getabsfile`` raises inside inspect's own catch before ``getmodule`` is
+#   reached.
+# * World B denies ``os.path.realpath`` outright while ``abspath`` keeps
+#   working. This is what reaches ``getmodule``'s unguarded call and convicts
+#   ``inspect.stack()``.
+#
+# THIRD INGREDIENT for world B: the frame must be ``<string>`` — an interpreter
+# ``-c`` or ``compile()`` frame — and NEVER ``<stdin>``. A heredoc-fed child
+# puts ``<stdin>`` in ``linecache.cache``, ``getsourcefile`` early-returns, and
+# the probe reports green while the same world kills imports for real. Every
+# assertion below is preceded by a control that states whether its world is
+# armed, so a probe that quietly stopped biting cannot pass itself off as a
+# cure.
+#
+# WHAT FLOW CARRIED, measured not estimated. Before this build, 61 of 61 flow
+# modules died on import in BOTH worlds — every one of them inside
+# ``handlers/__init__.py``, at the ``inspect.stack()`` on line 20 and the
+# ``Path(__file__).resolve()`` on line 21. Those two lines MASKED everything
+# under them, which is why the count only became true as cures landed: curing
+# the guard took it to 43/61 and revealed ``json/json_handler.py:38`` (masking
+# 31 modules on its own) plus twelve more; routing all 29 module-level
+# ``Path(__file__).resolve()`` sites and all 7 private ``_find_repo_root``
+# copies through ``handlers/repo_root.py`` took it to 0/62.
+#
+# AND ONE LIVE SITE NO IMPORT PROBE REACHES. ``log_operation`` is the audit
+# line flow writes on essentially every registry operation, and its
+# ``_get_caller_module_name`` called ``inspect.stack()``. The stack it walks is
+# the CALLER'S, so the shape that convicts it is a ``<string>`` frame — which
+# is precisely what @drone's router produces when it invokes flow.
 
 # Other branches' import-time code is held CONSTANT: preloaded in the healthy
 # world, before any denial. Their cure is their own build; this file measures
@@ -208,19 +212,28 @@ print("STACK_DIES: " + _ns["out"])
 """
 
 
-def _flow_modules() -> list[str]:
+# Directories no walk in this file enters. That nothing looks into a dropbox or
+# an .archive follows the project owner's ruling of 2026-09-27 20:42 (as
+# paraphrased: nothing looks into a dropbox and nothing runs out of one, a
+# sandbox like .archive). That __pycache__ is skipped too, and that the skip is
+# these three literal names, compared relative to the walk's root, is flow's
+# decision (leg 3), not imported from seedgo's skip_dirs.py.
+_WALK_IGNORED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+
+def _flow_modules(root: Path | None = None) -> list[str]:
     """Every importable module under ``aipass.flow.apps``, by walking the tree.
 
     Named from the filesystem rather than from a hand-written list: the whole
     species this file is about is a fix landing on some of N identical paths,
     and a list in a test is one more place for N to be undercounted.
-    """
-    import aipass.flow.apps as flow_apps
 
-    root = Path(flow_apps.__file__).parent
+    ``root`` defaults to the real apps/ tree; the dropbox pin passes a tmp_path one.
+    """
+    root = root or Path(flow_apps.__file__).parent
     names = set()
     for source in sorted(root.rglob("*.py")):
-        if "__pycache__" in source.parts or ".archive" in source.parts:
+        if _WALK_IGNORED_DIRS.intersection(source.relative_to(root).parts):
             continue
         rel = source.relative_to(root).with_suffix("")
         parts = [p for p in rel.parts if p != "__init__"]
@@ -234,11 +247,12 @@ def _run_world(world: str, control: str, body: str) -> subprocess.CompletedProce
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=300,
     )
 
 
-def _flow_modules_by_import_machinery() -> list[str]:
+def _flow_modules_by_import_machinery(root: Path | None = None) -> list[str]:
     """The same set, derived through importlib's finder instead of the filesystem.
 
     A SECOND MECHANISM, on purpose. ``_flow_modules`` globs and manipulates
@@ -246,21 +260,23 @@ def _flow_modules_by_import_machinery() -> list[str]:
     that decides what a module IS — and imports nothing. Re-running the same
     rglob logic twice would be the table-written-twice failure: two copies of one
     belief agree with each other no matter how wrong they are.
+
+    ``root`` defaults to the real apps/ tree; the dropbox pin passes a tmp_path one.
     """
     import pkgutil
-
-    import aipass.flow.apps as flow_apps
 
     def walk(path: Path, prefix: str) -> set[str]:
         found = set()
         for info in pkgutil.iter_modules([str(path)]):
+            if info.name in _WALK_IGNORED_DIRS:
+                continue
             name = f"{prefix}.{info.name}"
             found.add(name)
             if info.ispkg:
                 found |= walk(path / info.name, name)
         return found
 
-    root = Path(flow_apps.__file__).parent
+    root = root or Path(flow_apps.__file__).parent
     names = walk(root, "aipass.flow.apps") | {"aipass.flow.apps"}
     return sorted(name for name in names if ".archive" not in name)
 
@@ -296,6 +312,63 @@ def flow_modules() -> list[str]:
         "tree that is not there, which set equality alone cannot catch"
     )
     return modules
+
+
+def _tree_with_a_dropbox_and_an_archive(tmp_path: Path) -> Path:
+    """An apps/ stand-in: real.py (the live control), beside a dropbox, an .archive
+    and a __pycache__ each holding a package.
+
+    The root itself stands inside a directory named dropbox: a skip that read
+    the parts of the whole path, not the parts below the root, would drop
+    real.py too.
+    """
+    root = tmp_path / "dropbox" / "apps"
+    for package in (root, root / "dropbox", root / ".archive", root / "__pycache__"):
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+    (root / "real.py").write_text("", encoding="utf-8")
+    (root / "dropbox" / "stray.py").write_text("", encoding="utf-8")
+    (root / ".archive" / "old.py").write_text("", encoding="utf-8")
+    (root / "__pycache__" / "cached.py").write_text("", encoding="utf-8")
+    return root
+
+
+class TestTheWalksNeverEnterADropbox:
+    """Every walk in this file skips dropbox/, .archive/ and __pycache__/.
+
+    The first two follow the project owner's ruling of 2026-09-27 (as
+    paraphrased above _WALK_IGNORED_DIRS); __pycache__ and the literal names are
+    flow's decision (leg 3). The walks are test-module code the mutant runner
+    cannot serve, and these pins were green from their first run; their proof
+    is two hand mutants of leg 4 (__pycache__ dropped from the set; the skip read
+    on the whole path instead of below the root), each of which reddens them.
+    """
+
+    def test_the_filesystem_walk_skips_a_dropbox(self, tmp_path):
+        assert _flow_modules(_tree_with_a_dropbox_and_an_archive(tmp_path)) == [
+            "aipass.flow.apps",
+            "aipass.flow.apps.real",
+        ]
+
+    def test_the_finder_walk_skips_a_dropbox(self, tmp_path):
+        """dropbox/ and __pycache__/ are proved here; .archive/ is not.
+
+        pkgutil passes over a directory whose name holds a dot by itself (it is
+        no identifier), so this pin stays green with ".archive" dropped from the
+        skip. The .archive half of the skip is proved by the filesystem walk's
+        pin above, not by this one.
+        """
+        assert _flow_modules_by_import_machinery(_tree_with_a_dropbox_and_an_archive(tmp_path)) == [
+            "aipass.flow.apps",
+            "aipass.flow.apps.real",
+        ]
+
+    def test_the_source_sweep_skips_a_dropbox(self, tmp_path):
+        root = _tree_with_a_dropbox_and_an_archive(tmp_path)
+
+        swept = TestNoModuleLevelLocationCallSurvives._apps_sources(root)
+
+        assert [p.relative_to(root).as_posix() for p in swept] == ["__init__.py", "real.py"]
 
 
 class TestTheModuleCountIsDerivedFromTwoMechanisms:
@@ -340,6 +413,19 @@ class TestTheModuleCountIsDerivedFromTwoMechanisms:
             "then comparing a value with itself"
         )
         assert "rglob" not in finder_source, "the second derivation is globbing, which is the first mechanism"
+        # The effect the name claims, as a value: of every discovery mechanism the
+        # file knows, the second derivation calls exactly one, and it is pkgutil's.
+        mechanisms = {"pkgutil.iter_modules", "pkgutil.walk_packages", "_flow_modules", "rglob", "glob", "os.walk"}
+        called = set()
+        for statement in body:
+            for node in ast.walk(statement):
+                if isinstance(node, ast.Call):
+                    name = ast.unparse(node.func)
+                    # root.rglob / path.glob: the receiver varies, the mechanism does not.
+                    called.add(name.rsplit(".", 1)[-1] if name.endswith("glob") else name)
+        assert called & mechanisms == {"pkgutil.iter_modules"}, (
+            f"the second derivation's discovery calls are {sorted(called & mechanisms)}, not pkgutil's finder alone"
+        )
 
     def test_the_fixture_compares_one_against_the_other(self):
         """And that the fixture actually uses both, rather than one twice."""
@@ -864,7 +950,9 @@ except OSError:
 
     @staticmethod
     def _run(script: str) -> str:
-        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
         assert result.returncode == 0, result.stdout + result.stderr
         return result.stdout
 
@@ -879,7 +967,9 @@ except OSError:
         say UNAVAILABLE with the child's own reason and skip that row, never
         fail on an interpreter you do not have.
         """
-        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
         if result.returncode != 0:
             return result.stdout, (result.stderr.strip().splitlines() or ["no diagnostic"])[-1]
         return result.stdout, None
@@ -1193,6 +1283,13 @@ print("PATHLIB_FILE_ABS_TO_POSIX:", __import__("posixpath").isabs(str(pathlib.__
             "unvaried on this host and the litmus above is passing for free. With one fake "
             "per platform that should be impossible — unless both were refused, or both "
             f"now supply what the host already had: {verdicts}"
+        )
+        # Named, not just counted: the fake of the OTHER platform is the one that
+        # must change what a probe reads on this host (the host's own fake may be
+        # ALREADY). Asserted on its verdict string, which is a value.
+        foreign = "posix" if sys.platform == "win32" else "windows"
+        assert verdicts[foreign] == "CHANGED", (
+            f"the {foreign} fake is the foreign one on this host and changed nothing: {verdicts}"
         )
 
     @pytest.mark.parametrize("simulated_host", ["posix", "windows"])
@@ -1878,11 +1975,10 @@ class TestNoModuleLevelLocationCallSurvives:
     )
 
     @staticmethod
-    def _apps_sources() -> list[Path]:
-        import aipass.flow.apps as flow_apps
-
-        root = Path(flow_apps.__file__).parent
-        return [p for p in sorted(root.rglob("*.py")) if "__pycache__" not in p.parts and ".archive" not in p.parts]
+    def _apps_sources(root: Path | None = None) -> list[Path]:
+        """Every .py under apps/ (or ``root``, which the dropbox pin passes), ignored dirs skipped."""
+        root = root or Path(flow_apps.__file__).parent
+        return [p for p in sorted(root.rglob("*.py")) if not _WALK_IGNORED_DIRS.intersection(p.relative_to(root).parts)]
 
     @staticmethod
     def _module_level_location_calls(tree: ast.Module) -> list[tuple[int, str]]:

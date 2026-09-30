@@ -17,7 +17,7 @@ pack inventory.
 | `audit/branch_audit.py` | The per-branch scoring engine. `discover_checkers()` loads every `*_check.py` in a pack directory that exports `check_module` or `check_branch`; the branch score is the mean over consulted standards, with `ADVISORY = True` standards kept out of it. |
 | `audit/discovery.py` | Branch discovery, CWD-first registry. |
 | `audit/audit_display.py` | Rich result formatting — the score grid, the violation detail, the info lines. |
-| `audit/incremental_cache.py` | Content-hash cache: a branch whose inputs did not change replays its stored score instead of re-running every checker. |
+| `audit/incremental_cache.py` | Content-hash cache: a branch whose inputs did not change replays its stored score instead of re-running every checker, and a branch where one checker changed re-runs that checker alone. |
 | `audit/artifact.py` | The untruncated violation set → `.seedgo/last_audit_<branch>.json`, because the console view is capped and the full set is what you actually debug against. |
 | `module_root.py` | The guarded `module_file()` — the one import-time `__file__` resolve in the branch. |
 | `registry_scan.py` | Case-EXACT registry discovery — the one reader every lane uses. |
@@ -45,10 +45,28 @@ globs `*_REGISTRY.json` rather than hardcoding a filename.
 
 ## Two lanes, and a finding can exist in only one
 
-The **audit** walks a branch's `apps/**/*.py`; `tests/` is not in its corpus. The
-PostToolUse **checklist** hook checks whatever file was just edited, including tests. A
+The **audit** walks a branch's `apps/**/*.py` plus the `test_*.py` and `conftest.py` files
+under `tests/`. The PostToolUse **checklist** hook checks whatever file was just edited. A
 bypass rule can therefore be live in one lane and dead in the other — the mistake a naive
 rot detector makes.
+
+`tests/` joined the corpus on **2026-09-21** (owner ruling 21:20). Four standards in the pack
+are written for test files, and an `apps/`-only corpus handed them nothing: they printed a
+grey unscored backlog line and never a row. They score like any other standard now, and
+branch scores dropped on arrival — which is the ruling of 2026-09-20, *let all files fail*.
+
+Which files enter and which do not:
+
+| | In the corpus |
+|---|---|
+| `apps/**/*.py` | yes (`__init__.py` only for `INCLUDE_INIT_FILES` checkers) |
+| `tests/**/test_*.py`, `tests/**/conftest.py` | yes |
+| `tests/helpers.py` and anything else beside the tests | no — a standard for a test's author has nothing to say to it |
+| `tests/parked/**`, `.archive/`, `deprecated/`, `(disabled)` names | no — retired code is not lintable |
+
+WHICH checkers run on each file is still decided per checker by `APPLIES_TO`, never by the
+corpus. Every checker in the pack declares one as of the same ruling; the default is still
+`everywhere`, and forgetting it still costs noise rather than a missed bug.
 
 A pack declares its own corpus in `pack.json`, and the banner printed over its scores is that
 declaration, not the engine's file count.
@@ -72,6 +90,75 @@ declares it:
   names @memory's config and gold templates.
 
 Without those two channels a cache hit is a stale answer wearing a fresh timestamp.
+
+### What invalidates what
+
+Two stamps, not one, because they answer different questions (2026-09-21):
+
+- **Per checker** — `compute_checker_stamps()` fingerprints each `*_check.py` on its own.
+  Edit one and only that checker re-runs, across the branch; every other checker's cached
+  per-file results are served, and so is the branch-level lane where `ruff` and pyright sit.
+- **Pack-wide** — `compute_pack_stamp()` covers what every checker answers *through*: the
+  shared helpers, `diagnostics.json`, `diagnostics_check.py`. Any of those busts the branch
+  whole. So does the machinery stamp (`audit/`, `bypass/`) and the bypass/ignore stamp — a
+  stale green is worse than a slow audit.
+- **Neither** — a standard's `.md` page and its `*_content.py`. Both belong to
+  `standards_query`, a separate command with no cache; no audit output carries a line of
+  either, checked against the live cache doc. Rewording a page is a cache hit.
+
+Measured on @memory: a one-checker edit cost 76.9s before the split and 8.7s after; a doc-page
+edit 78.4s and 1.4s. Across the fleet, 1261.3s and 475.2s — of which seedgo's own 404.5s is
+irreducible, because the checker file it edited *is* one of the files seedgo audits.
+
+---
+
+## Declined files: the stand-down contract
+
+An `all_files` row is the mean of its files' scores. A file leaves that mean only when the
+checker says, in a field, that it did not judge the file: every check passed and at least one
+carries `"declined": True`. A file with any failing check is always averaged, whatever else it
+declines. The engine never reads message text to decide it. Until 2026-09-25 any passing
+message containing "skipped" or "not applicable" stood a file down, so a word choice decided the
+row (owner, 14:58: *"if stuff is being skipped or ignored that is not intended we have to
+resolve that"*).
+
+Every declined file is named: `audit_branch` returns `declined` (`{row: [rel paths]}`), the
+summary prints `Not judged: <Row> N declined`, and each artifact branch entry carries the list.
+The `entry_point` and `branch_level` lanes stand a whole row down with a result-level
+`"not_applicable": True` instead; they do not read `declined`.
+
+---
+
+## The audit ignore list: anchored, named, and checked against git's view
+
+`bypass/ignore_handler.AUDIT_IGNORE_RULES` removes paths from the corpus before any checker
+sees them. Each entry is a gitignore-style pattern read against the **branch-relative** path,
+and each carries its reason:
+
+| Pattern | Why it is out |
+|---|---|
+| `__pycache__/` | bytecode, never source |
+| `.archive/`, `deprecated/` | retired code, same as `applicability.RETIRED_DIRS` |
+| `.backup/` | rollover and snapshot storage |
+| `/backups/` | @backup's storage at the branch root (gitignored) |
+| `/artifacts/` | a branch's published `artifacts/` at its root (gitignored) |
+| `/apps/integrations/` | the private driver layer (gitignored) |
+
+Until 2026-09-25 these were substrings of the whole path, and `/integrations/` and
+`/artifacts/` silently removed five tracked files (1,399 lines) in api's
+`handlers/integrations/` and commons' `handlers/artifacts/`. `.temp`, `.old` and `/test/` went
+the same day: in a `*.py` corpus they could only ever hit real source.
+
+Every removal is named. `audit_branch` returns `ignored` (`{pattern: [rel paths]}`), the
+summary prints `Ignored by the audit list: <pattern> N`, and each artifact branch entry
+carries the list. It also returns `ignored_tracked`: the removed files that the repository's
+`.gitignore` files do **not** ignore, read with `pathspec` (no git subprocess, negations
+honoured). Anything there prints red, `Ignore list drops tracked source`, because a file git
+tracks is source, and source is judged. The one known gap is git's rule that a file cannot be
+re-included under an excluded parent directory, which `pathspec` does not apply.
+
+Pyright's filter in `diagnostics_check` reads the same list through `audit_ignore_match`, so
+the two lanes cannot drift.
 
 ---
 
@@ -102,6 +189,25 @@ never match anything the checker can produce is noise, and it says so.
 
 A score of 100 with documented exceptions under it is a real score, not a clean sheet — read
 the rules with it.
+
+### Dead rules and dead comments
+
+`bypass/dead_rules.py` judges every rule on every audit, cached or not (survey rows #11-#13,
+2026-09-25). A rule is **dead** — it matches nothing, so it does nothing — when its `file` is a
+substring of no file on disk (the matcher's own semantics; retired directories and `(disabled)`
+names are never handed to a checker), its `standard` is not a checker, or every line it names
+lies past the end of every file it matches. A rule with a blank `file` or blank `standard` is
+never convicted: a blank field means *every*, and that breadth is not ruled (row #10).
+
+An inline `# seedgo:bypass …` comment is also named. No code path has ever read one, so each is
+a comment that claims an exception nobody grants; the only way to grant one is a rule in
+`bypass.json`.
+
+The audit returns `bypass_dead` (index, file, standard, why, the rule's own reason) and
+`bypass_markers` (`rel:line`), prints one warning per item, and each artifact branch entry
+carries both. `drone @seedgo bypass prune @branch [--dry-run]` removes exactly the convicted
+rules, prints each with its reason, and refuses to rewrite a file `json.dumps` cannot reproduce
+byte for byte. A dead rule matches nothing, so pruning one moves no score.
 
 ---
 

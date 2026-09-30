@@ -3,7 +3,7 @@
 # Description: Branch Red Flag Detection Engine
 # Version: 0.1.0
 # Created: 2026-01-30
-# Modified: 2026-01-30
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -47,6 +47,9 @@ def _parse_iso_datetime(iso_string: str) -> Optional[datetime]:
 
     Returns:
         datetime object or None if parsing fails.
+
+    Unparseable answers None like empty, so that one mtime is left out of the
+    latest-change comparison rather than guessed into it.
     """
     if not iso_string:
         return None

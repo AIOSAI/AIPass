@@ -104,7 +104,7 @@ def _in_mirror_dir(path: Path) -> bool:
         return False
 
 
-def find_pending_file(session_id: str) -> Path | None:  # noqa: ARG001
+def find_pending_file(session_id: str) -> Path | None:
     """Find pending file matching current context via multi-bot matching.
 
     Priority 1: AIPASS_BOT_ID env var -> bot-{bot_id}.json (mirror dir first, then pending)

@@ -65,9 +65,9 @@ help output rots the next time a verb is added. The generated surface is the one
 
 Three layers. `apps/seedgo.py` is a thin router: it discovers modules, dispatches to the first
 one that claims a command, and turns a refusal into an exit code. `apps/modules/` holds one
-business-logic module per verb — audit_tests, checklist, diagnostics_audit, inbox_audit,
+business-logic module per verb — audit_tests, bypass, checklist, diagnostics_audit, inbox_audit,
 inventory, permissions, proof_query, readme_update, seedgo_proof, shadow_cycle,
-standards_audit, standards_query and test_map. `apps/handlers/` holds the implementation,
+standards_audit, standards_query, test_map and tests_lane. `apps/handlers/` holds the implementation,
 grouped one directory per concern: the checker packs (`*_standards/`), the proof pack, the
 audit engine, the bypass and ignore systems, the test lanes, and the json shim every branch
 shares.
@@ -89,6 +89,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/audit_engine.md](docs/audit_engine.md) | Discovery, scoring, the incremental cache, the info channel, bypass and `.seedgoignore` |
 | [docs/checklist_and_hooks.md](docs/checklist_and_hooks.md) | The per-file lane and the hook that runs it |
 | [docs/proof_and_coverage.md](docs/proof_and_coverage.md) | Proof certification, coverage mapping, the test inventory, the weekly cycle |
+| [docs/test_gold_standard.md](docs/test_gold_standard.md) | What a good test is here, when NOT to write one, and how a justified pass is declared |
 
 ---
 

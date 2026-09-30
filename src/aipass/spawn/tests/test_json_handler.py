@@ -1,34 +1,35 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
 # Description: Tests that spawn's shim is wired to the fleet json service
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-03-25
-# Modified: 2026-09-03
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for spawn's JSON handler shim.
+"""Tests for apps/handlers/json/json_handler.py — spawn's shim onto the fleet json service."""
 
-Only the WIRING is tested here: that spawn's shim binds the fleet's one json
-service (DPLAN-0325), that it lands in spawn_json/, and that it adds nothing of
-its own. The service's BEHAVIOUR - defaults, validation, provisioning, rotation,
-durability - is pinned once for all eighteen branches by seedgo's
-tests/test_json_handler_contract.py and is deliberately not re-tested here.
-
-What this file used to be is in tests/.archive/: the DPLAN-0059 universal
-template stamp, discovering a ``_JSON_DIR`` attribute by name and patching it.
-The service computes its directory per call and the shim has no attributes at
-all, so the stamp SKIPPED itself module-wide the moment the shim landed - a file
-that reports "1 skipped" and tests nothing. It is not rewritten; seedgo's
-contract already carries every claim it made.
-
-Redirection here is the ``AIPASS_TEST_LOG_DIR`` seam the conftest sets per test.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in apps/handlers/json/ parses and imports
+# seedgo: no-test-needed(covered_elsewhere) — behaviour, in tests/test_json_handler_contract.py
 
 import json
 from pathlib import Path
 
-
 from aipass.spawn.apps.handlers.json import json_handler
+
+# Only the WIRING is tested here: that spawn's shim binds the fleet's one json
+# service (DPLAN-0325), that it lands in spawn_json/, and that it adds nothing of
+# its own. The service's BEHAVIOUR is pinned once for all eighteen branches by
+# seedgo's contract test above, and is deliberately not re-tested here.
+#
+# What this file used to be is in tests/.archive/: the DPLAN-0059 universal
+# template stamp, discovering a ``_JSON_DIR`` attribute by name and patching it.
+# The service computes its directory per call and the shim has no attributes at
+# all, so the stamp SKIPPED itself module-wide the moment the shim landed - a file
+# that reports "1 skipped" and tests nothing. It is not rewritten; seedgo's
+# contract already carries every claim it made.
+#
+# Redirection here is the ``AIPASS_TEST_LOG_DIR`` seam the conftest sets per test.
 
 
 BOUND_NAMES = (

@@ -1,4 +1,16 @@
-"""Tests for the fleet inbox sweep — stale unread mail detection and waking."""
+# =================== AIPass ====================
+# Name: test_inbox_sweep.py
+# Description: Fleet inbox sweep tests — stale unread mail detection, wake policy and waking
+# Version: 1.1.0
+# Created: 2026-08-11
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/modules/inbox_sweep.py and the handlers/monitoring/inbox_scanner.py it drives."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — wake_branch's own spawn and blocklist file; @ai_mail's dispatch tests
+# seedgo: no-test-needed(constant) — MAX_WAKES, WAKE_MODEL and the help and introspection text
 
 import json
 import shutil
@@ -12,10 +24,10 @@ import pytest
 from aipass.daemon.apps.handlers.monitoring.inbox_scanner import (
     DEFAULT_STALE_HOURS,
     SKIP_MANAGER,
-    _parse_timestamp,
     find_stale_inboxes,
     scan_branch_inbox,
 )
+from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
 from aipass.daemon.apps.modules import inbox_sweep
 from aipass.daemon.apps.modules.inbox_sweep import SKIP_BLOCKLIST
 
@@ -23,6 +35,8 @@ from aipass.daemon.apps.modules.inbox_sweep import SKIP_BLOCKLIST
 NOW = datetime(2026, 8, 11, 12, 0, 0)
 
 SCANNER = "aipass.daemon.apps.handlers.monitoring.inbox_scanner"
+DISCOVERY = "aipass.daemon.apps.handlers.schedule.discovery"
+WAKE = "aipass.ai_mail.apps.handlers.dispatch.wake"
 
 
 # ── Fixtures ──────────────────────────────────────────
@@ -72,7 +86,7 @@ def entry(owner: str, age: float = 48.0, skip_reason=None, stale_count: int = 1)
     return {
         "owner": owner,
         "branch": owner.lstrip("@"),
-        "path": f"/tmp/{owner.lstrip('@')}",
+        "path": str(Path(tempfile.gettempdir()) / owner.lstrip("@")),
         "unread_total": stale_count,
         "stale_count": stale_count,
         "oldest_age_hours": age,
@@ -82,21 +96,37 @@ def entry(owner: str, age: float = 48.0, skip_reason=None, stale_count: int = 1)
     }
 
 
-# ── _parse_timestamp ──────────────────────────────────
+# ── message timestamps, through scan_branch_inbox ─────
+
+
+def oldest_age_beside(branch: Path, timestamp: str) -> float:
+    """oldest_age_hours for an unread message stamped `timestamp`, beside one sent 30h before NOW."""
+    stamped = message(0)
+    stamped["timestamp"] = timestamp
+    write_inbox(branch, [stamped, message(30)])
+    result = scan_branch_inbox(branch, "@test", now=NOW)
+    assert result is not None
+    return result["oldest_age_hours"]
 
 
 class TestParseTimestamp:
-    def test_ai_mail_format(self):
-        assert _parse_timestamp("2026-08-11 10:52:55") == datetime(2026, 8, 11, 10, 52, 55)
+    def test_ai_mail_format(self, branch_dir):
+        """Mutant killed: strptime's result .replace(second=0) in _parse_timestamp (49.4, not 49.3)."""
+        assert oldest_age_beside(branch_dir, "2026-08-09 10:39:30") == 49.3
 
-    def test_iso_format_fallback(self):
-        assert _parse_timestamp("2026-08-11T10:52:55") == datetime(2026, 8, 11, 10, 52, 55)
+    def test_iso_format_fallback(self, branch_dir):
+        """Mutant killed: _parse_timestamp returns None instead of trying datetime.fromisoformat.
 
-    def test_garbage_returns_none(self):
-        assert _parse_timestamp("not a date") is None
+        Mutant killed: fromisoformat's result .replace(second=0) in _parse_timestamp (49.4, not 49.3).
+        """
+        assert oldest_age_beside(branch_dir, "2026-08-09T10:39:30") == 49.3
 
-    def test_empty_returns_none(self):
-        assert _parse_timestamp("") is None
+    def test_garbage_returns_none(self, branch_dir):
+        """Mutant killed: the fromisoformat except (ValueError, TypeError) removed from _parse_timestamp."""
+        assert oldest_age_beside(branch_dir, "not a date") == 30.0
+
+    def test_empty_returns_none(self, branch_dir):
+        assert oldest_age_beside(branch_dir, "") == 30.0
 
 
 # ── scan_branch_inbox ─────────────────────────────────
@@ -120,8 +150,12 @@ class TestScanBranchInbox:
         assert scan_branch_inbox(branch_dir, "@test", now=NOW) is None
 
     def test_exactly_at_threshold_counts_as_stale(self, branch_dir):
+        """Mutant killed: age_hours >= stale_hours narrowed to > in scan_branch_inbox."""
         write_inbox(branch_dir, [message(DEFAULT_STALE_HOURS)])
-        assert scan_branch_inbox(branch_dir, "@test", now=NOW) is not None
+        result = scan_branch_inbox(branch_dir, "@test", now=NOW)
+        assert result is not None
+        assert result["stale_count"] == 1
+        assert result["oldest_age_hours"] == float(DEFAULT_STALE_HOURS)
 
     def test_oldest_message_drives_the_entry(self, branch_dir):
         write_inbox(branch_dir, [message(30, subject="newer"), message(96, subject="oldest")])
@@ -139,8 +173,11 @@ class TestScanBranchInbox:
         assert result["unread_total"] == 2
 
     def test_custom_threshold(self, branch_dir):
+        """Mutant killed: scan_branch_inbox compares against DEFAULT_STALE_HOURS, ignoring stale_hours."""
         write_inbox(branch_dir, [message(5)])
-        assert scan_branch_inbox(branch_dir, "@test", now=NOW, stale_hours=4) is not None
+        result = scan_branch_inbox(branch_dir, "@test", now=NOW, stale_hours=4)
+        assert result is not None
+        assert result["stale_count"] == 1
         assert scan_branch_inbox(branch_dir, "@test", now=NOW, stale_hours=8) is None
 
     def test_missing_inbox_returns_none(self, branch_dir):
@@ -170,17 +207,33 @@ class TestScanBranchInbox:
         assert result["skip_reason"] == SKIP_MANAGER
 
     def test_non_manager_branch_is_wakeable(self, branch_dir):
+        """Mutant killed: _skip_reason returns SKIP_MANAGER for any readable passport."""
         write_inbox(branch_dir, [message(48)])
         write_passport(branch_dir, "aipass_framework")
         result = scan_branch_inbox(branch_dir, "@test", now=NOW)
         assert result is not None
-        assert result["skip_reason"] is None
+        assert {key: result[key] for key in ("owner", "skip_reason")} == {"owner": "@test", "skip_reason": None}
 
     def test_missing_passport_is_wakeable(self, branch_dir):
+        """Mutant killed: _skip_reason returns SKIP_MANAGER when the passport is unreadable."""
         write_inbox(branch_dir, [message(48)])
         result = scan_branch_inbox(branch_dir, "@test", now=NOW)
         assert result is not None
-        assert result["skip_reason"] is None
+        assert {key: result[key] for key in ("owner", "skip_reason")} == {"owner": "@test", "skip_reason": None}
+
+    def test_unreadable_passport_is_not_wakeable(self, branch_dir):
+        """A passport that exists but cannot be read may belong to a manager: not woken, and the reason named.
+
+        Mutant killed: _skip_reason ignoring an unreadable passport (the manager would be woken).
+        """
+        write_inbox(branch_dir, [message(48)])
+        (branch_dir / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        result = scan_branch_inbox(branch_dir, "@test", now=NOW)
+        assert result is not None
+        assert {key: result[key] for key in ("owner", "skip_reason")} == {
+            "owner": "@test",
+            "skip_reason": "passport_unreadable",
+        }
 
 
 # ── find_stale_inboxes ────────────────────────────────
@@ -275,12 +328,12 @@ class TestRunSweep:
         assert results["wake_targets"] == ["@a", "@b"]
         assert results["woken"] == 0
 
-    def test_wakes_each_wakeable_branch_once(self):
+    def test_wakes_each_wakeable_branch_once(self, monkeypatch):
+        monkeypatch.setattr(inbox_sweep, "WAKE_STAGGER_SECONDS", 0)
         entries = [entry("@a"), entry("@b")]
         with patch.object(inbox_sweep, "find_stale_inboxes", return_value=entries):
             with patch.object(inbox_sweep, "_wake_owner", return_value=(True, "ok")) as wake:
-                with patch.object(inbox_sweep.time, "sleep"):
-                    results = inbox_sweep.run_sweep()
+                results = inbox_sweep.run_sweep()
         assert wake.call_count == 2
         assert results["woken"] == 2
         assert [c.args[0]["owner"] for c in wake.call_args_list] == ["@a", "@b"]
@@ -295,22 +348,22 @@ class TestRunSweep:
         assert results["skipped"] == 1
         assert results["skipped_targets"] == ["@boss (manager)"]
 
-    def test_limit_defers_rest_without_dropping_them(self):
+    def test_limit_defers_rest_without_dropping_them(self, monkeypatch):
+        monkeypatch.setattr(inbox_sweep, "WAKE_STAGGER_SECONDS", 0)
         entries = [entry(f"@b{i}") for i in range(4)]
         with patch.object(inbox_sweep, "find_stale_inboxes", return_value=entries):
             with patch.object(inbox_sweep, "_wake_owner", return_value=(True, "ok")) as wake:
-                with patch.object(inbox_sweep.time, "sleep"):
-                    results = inbox_sweep.run_sweep(limit=2)
+                results = inbox_sweep.run_sweep(limit=2)
         assert wake.call_count == 2
         assert results["deferred"] == 2
         assert results["deferred_targets"] == ["@b2", "@b3"]
 
-    def test_wake_failure_is_counted_not_fatal(self):
+    def test_wake_failure_is_counted_not_fatal(self, monkeypatch):
+        monkeypatch.setattr(inbox_sweep, "WAKE_STAGGER_SECONDS", 0)
         entries = [entry("@a"), entry("@b")]
         with patch.object(inbox_sweep, "find_stale_inboxes", return_value=entries):
             with patch.object(inbox_sweep, "_wake_owner", side_effect=[(False, "locked"), (True, "ok")]):
-                with patch.object(inbox_sweep.time, "sleep"):
-                    results = inbox_sweep.run_sweep()
+                results = inbox_sweep.run_sweep()
         assert results["woken"] == 1
         assert results["failed"] == 1
 
@@ -320,39 +373,38 @@ class TestRunSweep:
         assert find.call_args.kwargs["stale_hours"] == 72
 
 
-# ── _apply_wake_policy ────────────────────────────────
+# ── wake policy, through run_sweep ────────────────────
 
 
 class TestApplyWakePolicy:
     """The blocklist is wake policy — stamped by the module, not the scanner."""
 
     def test_blocklisted_owner_is_flagged(self):
+        """Mutant killed: _apply_wake_policy never stamps SKIP_BLOCKLIST."""
         entries = [entry("@devpulse"), entry("@a")]
-        with patch.dict(
-            "sys.modules",
-            {
-                "aipass.ai_mail.apps.handlers.dispatch.wake": MagicMock(
-                    is_wake_blocked=lambda owner: owner == "@devpulse"
-                )
-            },
+        with (
+            patch.object(inbox_sweep, "find_stale_inboxes", return_value=entries),
+            patch(f"{WAKE}.is_wake_blocked", side_effect=lambda owner: owner == "@devpulse"),
         ):
-            inbox_sweep._apply_wake_policy(entries)
-        assert entries[0]["skip_reason"] == SKIP_BLOCKLIST
-        assert entries[1]["skip_reason"] is None
+            results = inbox_sweep.run_sweep(dry_run=True)
+        assert results["skipped_targets"] == [f"@devpulse ({SKIP_BLOCKLIST})"]
+        assert results["wake_targets"] == ["@a"]
 
     def test_existing_skip_reason_is_not_overwritten(self):
+        """Mutant killed: _apply_wake_policy stamps the blocklist over an existing skip_reason."""
         entries = [entry("@boss", skip_reason=SKIP_MANAGER)]
-        with patch.dict(
-            "sys.modules",
-            {"aipass.ai_mail.apps.handlers.dispatch.wake": MagicMock(is_wake_blocked=lambda owner: True)},
+        with (
+            patch.object(inbox_sweep, "find_stale_inboxes", return_value=entries),
+            patch(f"{WAKE}.is_wake_blocked", side_effect=lambda owner: owner == "@boss"),
         ):
-            inbox_sweep._apply_wake_policy(entries)
-        assert entries[0]["skip_reason"] == SKIP_MANAGER
+            results = inbox_sweep.run_sweep(dry_run=True)
+        assert results["skipped_targets"] == [f"@boss ({SKIP_MANAGER})"]
 
     def test_real_blocklist_catches_devpulse(self):
-        entries = [entry("@devpulse")]
-        inbox_sweep._apply_wake_policy(entries)
-        assert entries[0]["skip_reason"] == SKIP_BLOCKLIST
+        with patch.object(inbox_sweep, "find_stale_inboxes", return_value=[entry("@devpulse")]):
+            results = inbox_sweep.run_sweep(dry_run=True)
+        assert results["skipped_targets"] == [f"@devpulse ({SKIP_BLOCKLIST})"]
+        assert results["wake_targets"] == []
 
     def test_blocklisted_branch_is_never_woken(self):
         entries = [entry("@devpulse"), entry("@a")]
@@ -364,21 +416,22 @@ class TestApplyWakePolicy:
         assert results["skipped_targets"] == [f"@devpulse ({SKIP_BLOCKLIST})"]
 
 
-# ── _wake_owner ───────────────────────────────────────
+# ── waking an owner, through run_sweep ────────────────
 
 
 class TestWakeOwner:
-    def test_wake_uses_daemon_sender_and_light_model(self):
+    def test_wake_uses_daemon_sender_and_light_model(self, capsys):
+        """Mutant killed: _wake_owner sends as a sender other than @daemon."""
         status = MagicMock()
         status.summary = "spawned"
-        wake_branch = MagicMock(return_value=(status, True))
-        with patch.dict(
-            "sys.modules",
-            {"aipass.ai_mail.apps.handlers.dispatch.wake": MagicMock(wake_branch=wake_branch)},
+        with (
+            patch.object(inbox_sweep, "find_stale_inboxes", return_value=[entry("@a")]),
+            patch(f"{WAKE}.wake_branch", return_value=(status, True)) as wake_branch,
         ):
-            ok, detail = inbox_sweep._wake_owner(entry("@a"))
-        assert ok is True
-        assert detail == "spawned"
+            results = inbox_sweep.run_sweep()
+        assert results["woken"] == 1
+        assert "OK: @a — spawned" in capsys.readouterr().out
+        assert wake_branch.call_args.args == ("@a",)
         kwargs = wake_branch.call_args.kwargs
         assert kwargs["sender"] == "@daemon"
         assert kwargs["auto"] is True
@@ -386,18 +439,26 @@ class TestWakeOwner:
         assert kwargs["model"] == inbox_sweep.WAKE_MODEL
         assert kwargs["wake_back"] is False, "a nudge must never wake @daemon back"
 
-    def test_wake_exception_is_caught(self):
-        wake_branch = MagicMock(side_effect=RuntimeError("boom"))
-        with patch.dict(
-            "sys.modules",
-            {"aipass.ai_mail.apps.handlers.dispatch.wake": MagicMock(wake_branch=wake_branch)},
+    def test_wake_exception_is_caught(self, capsys):
+        """Mutant killed: _wake_owner's except Exception narrowed so the error escapes run_sweep."""
+        with (
+            patch.object(inbox_sweep, "find_stale_inboxes", return_value=[entry("@a")]),
+            patch(f"{WAKE}.wake_branch", side_effect=RuntimeError("boom")),
         ):
-            ok, detail = inbox_sweep._wake_owner(entry("@a"))
-        assert ok is False
-        assert "boom" in detail
+            results = inbox_sweep.run_sweep()
+        assert (results["woken"], results["failed"]) == (0, 1)
+        assert "ERROR: @a — boom" in capsys.readouterr().out
 
     def test_wake_message_names_the_backlog(self):
-        text = inbox_sweep._wake_message(entry("@a", age=48.0, stale_count=3))
+        """Mutant killed: _wake_owner passes an empty custom_message."""
+        status = MagicMock()
+        status.summary = "spawned"
+        with (
+            patch.object(inbox_sweep, "find_stale_inboxes", return_value=[entry("@a", age=48.0, stale_count=3)]),
+            patch(f"{WAKE}.wake_branch", return_value=(status, True)) as wake_branch,
+        ):
+            inbox_sweep.run_sweep()
+        text = wake_branch.call_args.kwargs["custom_message"]
         assert "3 unread emails" in text
         assert "48h old" in text
 
@@ -420,8 +481,10 @@ class TestCliRouting:
         assert sweep.call_args.kwargs["dry_run"] is False
 
     def test_underscore_alias_routes(self):
-        with patch.object(inbox_sweep, "run_sweep", return_value={}):
+        """Mutant killed: "inbox_sweep" dropped from HANDLED_COMMANDS."""
+        with patch.object(inbox_sweep, "run_sweep", return_value={}) as sweep:
             assert inbox_sweep.handle_command("inbox_sweep", []) is True
+        sweep.assert_called_once_with(dry_run=False, stale_hours=DEFAULT_STALE_HOURS, limit=inbox_sweep.MAX_WAKES)
 
     def test_flags_are_parsed(self):
         with patch.object(inbox_sweep, "run_sweep", return_value={}) as sweep:
@@ -452,9 +515,7 @@ class TestScheduleEntry:
     no job may carry the name, and no job's prompt may run the command.
     """
 
-    def test_no_job_runs_the_sweep(self):
-        from aipass.daemon.apps.handlers.schedule.discovery import _validate_job
-
+    def test_no_job_runs_the_sweep(self, tmp_path):
         schedule_file = Path(__file__).resolve().parents[1] / ".daemon" / "schedule.json"
         data = json.loads(schedule_file.read_text(encoding="utf-8"))
 
@@ -463,4 +524,15 @@ class TestScheduleEntry:
         for job in data["jobs"]:
             assert job["id"] != "inbox-sweep"
             assert "inbox-sweep" not in job.get("prompt", "")
-            assert _validate_job(job, schedule_file) is True
+        # Every job in the shipped file passes discovery's validation: a temp tree
+        # holding only @daemon, its .daemon/ a copy of the real file.
+        daemon_dir = tmp_path / "src" / "aipass" / "daemon" / ".daemon"
+        daemon_dir.mkdir(parents=True)
+        shutil.copy(schedule_file, daemon_dir / "schedule.json")
+        registry = {
+            "branches": [{"name": "DAEMON", "email": "@daemon", "path": "src/aipass/daemon", "status": "active"}]
+        }
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        with patch(f"{DISCOVERY}._REPO_ROOT", tmp_path):
+            discovered = [job["id"] for job in discover_jobs()]
+        assert discovered == [job["id"] for job in data["jobs"]]

@@ -1,36 +1,42 @@
 # =================== AIPass ====================
 # Name: test_trinity_check.py
 # Description: Unit tests for trinity_check - trinity memory file standards checker
-# Version: 1.4.0
+# Version: 1.5.1
 # Created: 2026-08-25
-# Modified: 2026-09-16
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for trinity_check -- the trinity memory file standards checker.
+"""Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
 
-The contract under test is devpulse ``dropbox/trinity_pattern.md``. The drift
-classes exercised by the regression suite are devpulse
-``dropbox/trinity_audit/MASTER_LIST.md`` D1-D16, each named in its own test so
-a future blindness fails BY NAME rather than as an anonymous score drop.
+# Tests for trinity_check -- the trinity memory file standards checker.
+#
+# The contract under test is devpulse ``dropbox/trinity_pattern.md``. The drift
+# classes exercised by the regression suite are devpulse
+# ``dropbox/trinity_audit/MASTER_LIST.md`` D1-D16, each named in its own test so
+# a future blindness fails BY NAME rather than as an anonymous score drop.
+#
+# THE ONE LAW, and the reason this standard exists at all: a field the checker
+# cannot measure is a VIOLATION, never a silent pass. The old gate measured an
+# unparseable shape as zero chars and passed it fleet-wide for months.
+# ``TestTheOneLaw`` exists so that cannot come back.
+#
+# Fixtures are synthetic: config and gold templates are pinned onto the module so
+# a config edit on @memory's branch can never turn these tests red. The single
+# exception is the fleet acceptance bar in ``TestFleetAcceptanceBar``, which is
+# deliberately coupled to live branch state -- see its docstring.
 
-THE ONE LAW, and the reason this standard exists at all: a field the checker
-cannot measure is a VIOLATION, never a silent pass. The old gate measured an
-unparseable shape as zero chars and passed it fleet-wide for months.
-``TestTheOneLaw`` exists so that cannot come back.
-
-Fixtures are synthetic: config and gold templates are pinned onto the module so
-a config edit on @memory's branch can never turn these tests red. The single
-exception is the fleet acceptance bar in ``TestFleetAcceptanceBar``, which is
-deliberately coupled to live branch state -- see its docstring.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — json.loads() of a well-formed trinity file; only the malformed ones are the subject
 
 import copy
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+from aipass.seedgo.apps.handlers.aipass_standards import ruff_check, template_check, trinity_check, trinity_groups
+from aipass.seedgo.apps.handlers.audit import branch_audit
 
 # @memory's renderer is resolved and imported at module scope, BEFORE the
 # autouse infrastructure mock swaps aipass.prax in sys.modules -- it reaches
@@ -459,32 +465,20 @@ def _fleet_dir() -> Path | None:
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports and force a fresh checker import."""
+    """Patch the logger and json_handler at the edge, on both modules that read them."""
     mock_logger = MagicMock()
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
 
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-
-    monkeypatch.delitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.aipass_standards.trinity_check",
-        raising=False,
-    )
+    for module in (trinity_check, trinity_groups):
+        monkeypatch.setattr(module, "logger", mock_logger)
+        monkeypatch.setattr(module, "json_handler", mock_json_handler)
     return {"logger": mock_logger, "json_handler": mock_json_handler}
 
 
 @pytest.fixture
 def checker(_mock_infrastructure):
-    """The freshly imported trinity_check module, infrastructure mocked."""
-    from aipass.seedgo.apps.handlers.aipass_standards import trinity_check
-
+    """The trinity_check module, infrastructure patched at the edge."""
     return trinity_check
 
 
@@ -702,10 +696,10 @@ class TestTheOneLaw:
         _assert_failed(_group(result, "Receipt"), "gold templates unreadable")
 
     def test_validate_entry_shape_refuses_an_unknown_section(self, trinity):
+        """Mutant: the problem drops the section's name, in trinity_groups.py — killed."""
         problems = trinity.validate_entry_shape("nonexistent", {"number": 1}, _shapes(trinity))
 
-        assert problems
-        assert "no canonical shape" in problems[0]
+        assert problems == ["unknown section 'nonexistent' -- no canonical shape to measure against"]
 
     def test_validate_entry_shape_refuses_a_non_dict_entry(self, trinity):
         assert trinity.validate_entry_shape("observations", ["a", "list"], _shapes(trinity)) == [
@@ -1096,7 +1090,8 @@ class TestTrinityIsAGateNotAReport:
     so there was nothing to flip, and these tests exist so it stays that way.
 
     The family's own vocabulary:
-      * ``ADVISORY = True`` marks a standard that never gates (ruff, template).
+      * ``ADVISORY = True`` marks a standard that never gates (template). ruff
+        gated from 2026-09-25 (owner 00:33), once CI ruff was green fleet-wide.
         trinity does not set it, so it counts in the gating average.
       * ``passed`` is the block signal. trinity requires a PERFECT 100, which
         is stricter than every other branch_level standard -- json_handler,
@@ -1113,15 +1108,11 @@ class TestTrinityIsAGateNotAReport:
 
     def test_advisory_is_how_this_family_says_non_gating(self, checker):
         """The pin is only meaningful if ADVISORY still means what it means."""
-        from aipass.seedgo.apps.handlers.aipass_standards import ruff_check, template_check
-
-        assert ruff_check.ADVISORY is True
+        assert getattr(ruff_check, "ADVISORY", False) is False
         assert template_check.ADVISORY is True
 
     def test_a_gating_standard_is_counted_in_the_average(self, checker):
         """The audit computes its average over non-ADVISORY standards only."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         source = Path(branch_audit.__file__).read_text(encoding="utf-8")
         assert 'getattr(mod, "ADVISORY", False) is True' in source
         assert "gating_scores = {k: v for k, v in scores.items() if k not in advisory_standards}" in source
@@ -2633,8 +2624,6 @@ class TestTheEntryShapeComesFromTheConfig:
 
     def test_the_module_carries_no_copy_of_the_shape(self, trinity):
         """The mirror is GONE, not merely unused -- an unused copy grows a caller."""
-        from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
-
         carried: set = set()
         for name, value in vars(trinity_groups).items():
             if name.startswith("__") or callable(value):
@@ -2685,6 +2674,8 @@ class TestTheEntryShapeComesFromTheConfig:
         pins the surviving claim: for the LIVE config, what this checker
         composes is what @memory's ``draft_target`` answers -- computed there,
         read here, never copied.
+
+        Mutant: expected_meta_line drops the prose after the tab, in trinity_groups.py — killed.
         """
         assert _memory_limits is not None, (
             f"@memory's limits gateway is the source of the draft number and it is unreachable "
@@ -2697,7 +2688,7 @@ class TestTheEntryShapeComesFromTheConfig:
 
         line = trinity.expected_meta_line("sessions", "memory", capped, _PROSE["sessions"])
 
-        assert f"≤{cap} chars · draft to {_memory_limits.draft_target(cap)} ⟧" in line
+        assert line.endswith(f"≤{cap} chars · draft to {_memory_limits.draft_target(cap)} ⟧ {_PROSE['sessions']}")
 
 
 # ===========================================================================
@@ -2761,8 +2752,6 @@ class TestTheDraftPercentIsRead:
     def test_no_percent_literal_came_back_into_the_module(self):
         """The mirror is gone from the SOURCE, not merely unreferenced."""
         import ast
-
-        from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
 
         source = Path(trinity_groups.__file__).read_text(encoding="utf-8")
         ints = {
@@ -2847,8 +2836,6 @@ class TestTheGroupSplitKeepsEveryGroup:
     """
 
     def test_all_groups_returns_every_weighted_group_in_reporting_order(self, trinity, tmp_path):
-        from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
-
         branch = _write_branch(tmp_path)
         ctx = trinity._build_context(branch)
 

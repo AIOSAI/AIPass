@@ -3,19 +3,32 @@
 # Description: Tests for integrations_manager command handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-28
 # =============================================
 
-"""
-Tests for integrations_manager.py -- handle_command, _run_list, _run_call,
-print_introspection, print_help.
+"""Tests for apps/modules/integrations_manager.py, the integrations command handler."""
 
-Existing test_integrations.py covers bridge, registry, fetch_contracts,
-call_contract. This file covers the remaining uncovered functions.
-"""
+# Tests for integrations_manager.py -- handle_command, _run_list, _run_call,
+# print_introspection, print_help.
+#
+# Existing test_integrations.py covers bridge, registry, fetch_contracts,
+# call_contract. This file covers the remaining uncovered functions.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that integrations_manager.py parses and imports
+# seedgo: no-test-needed(covered_elsewhere) — fetch_contracts and call_contract, tests/test_integrations.py
+# seedgo: no-test-needed(covered_elsewhere) — the bridge registry itself, tests/test_bridge_module.py
 
 import pytest
 from unittest.mock import patch, MagicMock
+
+from aipass.api.apps.modules.integrations_manager import (
+    _run_call,
+    _run_list,
+    handle_command,
+    print_help,
+    print_introspection,
+)
 
 _IM = "aipass.api.apps.modules.integrations_manager"
 
@@ -28,70 +41,58 @@ _IM = "aipass.api.apps.modules.integrations_manager"
 class TestHandleCommand:
     """Tests for integrations_manager.handle_command()."""
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     def test_wrong_command_returns_false(
         self,
         _mock_error: MagicMock,
         _mock_header: MagicMock,
-        _mock_console: MagicMock,
     ) -> None:
         """Non-integrations command returns False."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         result = handle_command("status", [])
         assert result is False
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     def test_help_flag_returns_true(
         self,
         _mock_error: MagicMock,
         _mock_header: MagicMock,
-        _mock_console: MagicMock,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """--help flag triggers print_help and returns True."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         result = handle_command("integrations", ["--help"])
         assert result is True
+        assert "USAGE:" in capsys.readouterr().out
 
     @patch(f"{_IM}.json_handler", autospec=True)
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     def test_no_args_shows_introspection(
         self,
         _mock_error: MagicMock,
         _mock_header: MagicMock,
-        _mock_console: MagicMock,
-        _mock_jh: MagicMock,
+        mock_jh: MagicMock,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """No args triggers introspection and returns True."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         result = handle_command("integrations", [])
         assert result is True
+        assert "integrations call <name>" in capsys.readouterr().out
+        mock_jh.log_operation.assert_called_once_with("integrations_introspection", {})
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     def test_unknown_subcommand_exits(
         self,
         mock_error: MagicMock,
         _mock_header: MagicMock,
-        _mock_console: MagicMock,
     ) -> None:
         """Unknown subcommand calls error() and raises SystemExit."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         with pytest.raises(SystemExit):
             handle_command("integrations", ["bogus"])
         mock_error.assert_called_once()
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(f"{_IM}.registry", autospec=True)
@@ -104,27 +105,20 @@ class TestHandleCommand:
         _mock_registry: MagicMock,
         _mock_error: MagicMock,
         _mock_header: MagicMock,
-        _mock_console: MagicMock,
     ) -> None:
         """list subcommand loads drivers and calls sys.exit."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         with pytest.raises(SystemExit) as exc_info:
             handle_command("integrations", ["list"])
         assert exc_info.value.code == 0
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     def test_call_without_name_exits_1(
         self,
         mock_error: MagicMock,
         _mock_header: MagicMock,
-        _mock_console: MagicMock,
     ) -> None:
         """call subcommand without contract name shows error and exits 1."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         with pytest.raises(SystemExit) as exc_info:
             handle_command("integrations", ["call"])
         assert exc_info.value.code == 1
@@ -139,7 +133,6 @@ class TestHandleCommand:
 class TestRunList:
     """Tests for integrations_manager._run_list()."""
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.get_contracts", return_value={"contracts": [], "count": 0, "success": True})
     @patch(f"{_IM}.list_contracts", return_value=[])
@@ -148,15 +141,17 @@ class TestRunList:
         _mock_list: MagicMock,
         _mock_get: MagicMock,
         _mock_header: MagicMock,
-        mock_console: MagicMock,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Empty contracts list prints 'No integrations configured.'."""
-        from aipass.api.apps.modules.integrations_manager import _run_list
-
         result = _run_list()
         assert result == 0
+        # The docstring's line is read, not only the exit code (api, fleet green leg 3).
+        # Mutant that reddens it: the empty-list line dropped or reworded.
+        out = capsys.readouterr().out
+        assert "No integrations configured." in out
+        assert "apps/integrations/{project}/driver.py" in out
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(
         f"{_IM}.get_contracts",
@@ -168,16 +163,13 @@ class TestRunList:
         _mock_list: MagicMock,
         _mock_get: MagicMock,
         _mock_header: MagicMock,
-        mock_console: MagicMock,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """With contracts, prints each name and returns 0."""
-        from aipass.api.apps.modules.integrations_manager import _run_list
-
         result = _run_list()
         assert result == 0
         # Each contract name is printed
-        printed = [str(c) for c in mock_console.print.call_args_list]
-        full_output = " ".join(printed)
+        full_output = capsys.readouterr().out
         assert "alpha" in full_output
         assert "beta" in full_output
 
@@ -190,23 +182,18 @@ class TestRunList:
 class TestRunCall:
     """Tests for integrations_manager._run_call()."""
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(f"{_IM}.resolve", return_value=None)
     def test_contract_not_found(
         self,
         _mock_resolve: MagicMock,
         mock_error: MagicMock,
-        _mock_console: MagicMock,
     ) -> None:
         """Unresolved contract calls error() and returns 1."""
-        from aipass.api.apps.modules.integrations_manager import _run_call
-
         result = _run_call("missing", [])
         assert result == 1
         mock_error.assert_called_once()
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(
         f"{_IM}.invoke",
@@ -218,17 +205,16 @@ class TestRunCall:
         mock_resolve: MagicMock,
         _mock_invoke: MagicMock,
         _mock_error: MagicMock,
-        mock_console: MagicMock,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Successful call returns 0 and prints result."""
-        from aipass.api.apps.modules.integrations_manager import _run_call
-
         mock_resolve.return_value = MagicMock()
 
         result = _run_call("mycontract", ["arg1"])
         assert result == 0
+        # The driver's result is what the caller sees (api, fleet green leg 3).
+        assert capsys.readouterr().out == "done\n"
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(
         f"{_IM}.invoke",
@@ -240,11 +226,8 @@ class TestRunCall:
         mock_resolve: MagicMock,
         _mock_invoke: MagicMock,
         mock_error: MagicMock,
-        _mock_console: MagicMock,
     ) -> None:
         """Failed driver returns 1 and calls error()."""
-        from aipass.api.apps.modules.integrations_manager import _run_call
-
         mock_resolve.return_value = MagicMock()
 
         result = _run_call("failing", [])
@@ -261,32 +244,30 @@ class TestPrintFunctions:
     """Tests for print_introspection and print_help."""
 
     @patch(f"{_IM}.json_handler", autospec=True)
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     def test_print_introspection(
         self,
         _mock_header: MagicMock,
-        mock_console: MagicMock,
         _mock_jh: MagicMock,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """print_introspection runs without error and prints output."""
-        from aipass.api.apps.modules.integrations_manager import print_introspection
-
+        """print_introspection prints the subcommands it offers."""
         print_introspection()
-        assert mock_console.print.called
+        out = capsys.readouterr().out
+        assert "integrations list" in out
+        assert "integrations call <name>" in out
 
-    @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     def test_print_help(
         self,
         _mock_header: MagicMock,
-        mock_console: MagicMock,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """print_help runs without error and prints output."""
-        from aipass.api.apps.modules.integrations_manager import print_help
-
+        """print_help prints the usage lines."""
         print_help()
-        assert mock_console.print.called
+        out = capsys.readouterr().out
+        assert "USAGE:" in out
+        assert "drone @api integrations list" in out
 
 
 class TestTrailingHelpDoesNotDispatch:
@@ -308,8 +289,6 @@ class TestTrailingHelpDoesNotDispatch:
         mock_help: MagicMock,
     ) -> None:
         """`integrations call <contract> --help` prints help, dispatches nothing."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         assert handle_command("integrations", ["call", "publish_devto", "--help"]) is True
 
         mock_call.assert_not_called()
@@ -325,8 +304,6 @@ class TestTrailingHelpDoesNotDispatch:
         mock_help: MagicMock,
     ) -> None:
         """`integrations list --help` prints help instead of listing."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         assert handle_command("integrations", ["list", "--help"]) is True
 
         mock_list.assert_not_called()
@@ -342,8 +319,6 @@ class TestTrailingHelpDoesNotDispatch:
         mock_help: MagicMock,
     ) -> None:
         """A bare `help` is a contract argument, not a flag."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         with pytest.raises(SystemExit):
             handle_command("integrations", ["call", "publish_devto", "help"])
 

@@ -3,10 +3,15 @@
 # Description: Tests for the watchdog schedule handler + router integration
 # Version: 1.0.0
 # Created: 2026-04-14
-# Modified: 2026-04-14
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for watchdog schedule handler (Phase 3, FPLAN-0186)."""
+"""Tests for apps/handlers/watchdog/schedule.py and the watchdog schedule command that drives it."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/watchdog/schedule.py parses and imports
+# seedgo: no-test-needed(documentation) — that parse_schedule, format_wait and wake_at carry docstrings
+# seedgo: no-test-needed(constant) — the wording of _SCHEDULE_HELP_TEXT
 
 import sys
 from datetime import datetime, timedelta
@@ -165,10 +170,10 @@ class _FakeClock:
 
 def test_wake_at_relative_with_injected_clock():
     start = datetime(2026, 4, 14, 10, 0, 0)
-    clock = _FakeClock(start, step_seconds=10.0)
+    # A step as long as the wait: the first loop read is already due, so nothing sleeps.
+    clock = _FakeClock(start, step_seconds=30.0)
 
-    with patch.object(schedule_handler.time, "sleep", return_value=None):
-        result = schedule_handler.wake_at("+30s", now_fn=clock)
+    result = schedule_handler.wake_at("+30s", now_fn=clock)
 
     assert result["woke"] is True
     assert result["state"] == "woke"
@@ -183,10 +188,9 @@ def test_wake_at_relative_with_injected_clock():
 
 def test_wake_at_wall_clock_with_injected_clock():
     start = datetime(2026, 4, 14, 10, 0, 0)
-    clock = _FakeClock(start, step_seconds=60.0)
+    clock = _FakeClock(start, step_seconds=300.0)
 
-    with patch.object(schedule_handler.time, "sleep", return_value=None):
-        result = schedule_handler.wake_at("10:05", now_fn=clock)
+    result = schedule_handler.wake_at("10:05", now_fn=clock)
 
     assert result["scheduled_for"] == datetime(2026, 4, 14, 10, 5, 0).isoformat()
     assert result["elapsed"] >= 300
@@ -209,8 +213,7 @@ def test_wake_at_runs_echo_command():
     start = datetime(2026, 4, 14, 10, 0, 0)
     clock = _FakeClock(start, step_seconds=5.0)
 
-    with patch.object(schedule_handler.time, "sleep", return_value=None):
-        result = schedule_handler.wake_at("+1s", command="echo hello", now_fn=clock)
+    result = schedule_handler.wake_at("+1s", command="echo hello", now_fn=clock)
 
     assert result["command"] == "echo hello"
     assert result["command_exit_code"] == 0
@@ -221,8 +224,7 @@ def test_wake_at_failing_command_no_exception():
     start = datetime(2026, 4, 14, 10, 0, 0)
     clock = _FakeClock(start, step_seconds=5.0)
 
-    with patch.object(schedule_handler.time, "sleep", return_value=None):
-        result = schedule_handler.wake_at("+1s", command="false", now_fn=clock)
+    result = schedule_handler.wake_at("+1s", command="false", now_fn=clock)
 
     assert result["command"] == "false"
     assert result["command_exit_code"] != 0
@@ -232,12 +234,11 @@ def test_wake_at_nonexistent_command():
     start = datetime(2026, 4, 14, 10, 0, 0)
     clock = _FakeClock(start, step_seconds=5.0)
 
-    with patch.object(schedule_handler.time, "sleep", return_value=None):
-        result = schedule_handler.wake_at(
-            "+1s",
-            command="this-command-does-not-exist-xyz-123",
-            now_fn=clock,
-        )
+    result = schedule_handler.wake_at(
+        "+1s",
+        command="this-command-does-not-exist-xyz-123",
+        now_fn=clock,
+    )
 
     # shell=True routes through /bin/sh which reports 127 for not-found.
     assert result["command_exit_code"] != 0
@@ -250,7 +251,7 @@ def test_wake_at_nonexistent_command():
 
 
 def test_wake_at_sleeps_in_chunks():
-    """Long waits should call time.sleep repeatedly, never once with a big value."""
+    """Long waits sleep in chunks of at most 5.0s, never once; mutant chunk 5.5 reddens it."""
     start = datetime(2026, 4, 14, 10, 0, 0)
     # Real-time clock — no advancement per call — so wake_at relies on sleep.
     # We fake sleep to advance our synthetic clock instead.
@@ -265,8 +266,8 @@ def test_wake_at_sleeps_in_chunks():
     with patch.object(schedule_handler.time, "sleep", side_effect=fake_sleep) as sleep_mock:
         schedule_handler.wake_at("+30s", now_fn=fake_clock)
 
-    # Each chunk is capped at _SLEEP_CHUNK_SECONDS (5.0) so 30s -> >= 6 calls.
-    max_chunk = schedule_handler._SLEEP_CHUNK_SECONDS
+    # Each chunk is capped at 5.0 seconds, so 30s -> >= 6 calls.
+    max_chunk = 5.0
     assert sleep_mock.call_count >= 6
     for call in sleep_mock.call_args_list:
         (value,) = call.args
@@ -310,25 +311,25 @@ def _fake_schedule_module(**overrides):
     return fake
 
 
-def test_router_schedule_wall_clock(_bypass_caller_guard):
+def test_router_schedule_wall_clock(_bypass_caller_guard, monkeypatch):
     fake = _fake_schedule_module()
-    with patch("importlib.import_module", return_value=fake):
-        result = wd_mod.handle_command("watchdog", ["schedule", "02:00"])
+    monkeypatch.setattr(schedule_handler, "wake_at", fake.wake_at)
+    result = wd_mod.handle_command("watchdog", ["schedule", "02:00"])
     assert result is True
     assert ("wake_at", "02:00", None) in fake.calls
 
 
-def test_router_schedule_relative(_bypass_caller_guard):
+def test_router_schedule_relative(_bypass_caller_guard, monkeypatch):
     fake = _fake_schedule_module()
-    with patch("importlib.import_module", return_value=fake):
-        wd_mod.handle_command("watchdog", ["schedule", "+30m"])
+    monkeypatch.setattr(schedule_handler, "wake_at", fake.wake_at)
+    wd_mod.handle_command("watchdog", ["schedule", "+30m"])
     assert ("wake_at", "+30m", None) in fake.calls
 
 
-def test_router_schedule_with_command(_bypass_caller_guard):
+def test_router_schedule_with_command(_bypass_caller_guard, monkeypatch):
     fake = _fake_schedule_module()
-    with patch("importlib.import_module", return_value=fake):
-        wd_mod.handle_command("watchdog", ["schedule", "02:00", "drone @git status"])
+    monkeypatch.setattr(schedule_handler, "wake_at", fake.wake_at)
+    wd_mod.handle_command("watchdog", ["schedule", "02:00", "drone @git status"])
     assert ("wake_at", "02:00", "drone @git status") in fake.calls
 
 
@@ -349,17 +350,14 @@ def test_router_schedule_empty_shows_help(_bypass_caller_guard, capsys):
     assert "schedule" in combined.lower()
 
 
-def test_router_schedule_invalid_time(_bypass_caller_guard, capsys):
+def test_router_schedule_invalid_time(_bypass_caller_guard, capsys, monkeypatch):
     """ValueError from wake_at surfaces as a clean router error."""
-    fake = type(sys)("fake_schedule_mod")
 
     def wake_at(time_str, command=None, now_fn=None):
         raise ValueError(f"bad schedule: {time_str}")
 
-    fake.wake_at = wake_at
-
-    with patch("importlib.import_module", return_value=fake):
-        result = wd_mod.handle_command("watchdog", ["schedule", "notatime"])
+    monkeypatch.setattr(schedule_handler, "wake_at", wake_at)
+    result = wd_mod.handle_command("watchdog", ["schedule", "notatime"])
 
     assert result is True
     captured = capsys.readouterr()

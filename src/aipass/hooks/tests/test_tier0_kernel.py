@@ -1,16 +1,25 @@
 # =================== AIPass ====================
 # Name: test_tier0_kernel.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Tests for tier0_kernel prompt handler
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-09-16
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for handlers/prompt/tier0_kernel.py."""
+"""Tests for apps/handlers/prompt/tier0_kernel.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — DEGRADED_HEADING's full wording beyond the prefix asserted here
+# seedgo: no-test-needed(generated) — the logger.warning DEGRADED line; its text is the joined failures
+# seedgo: no-test-needed(stdlib) — importlib.import_module resolving the real cadence module
 
 import importlib
 from unittest.mock import patch, MagicMock
+
+from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
+from aipass.hooks.apps.modules import grounding_content
+from aipass.hooks.apps.modules.grounding_content import _find_project_dir
 
 _real_import_module = importlib.import_module
 _CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
@@ -39,7 +48,6 @@ def _patch_cadence(cadence_mock=None, error=None):
 
 class TestTier0KernelHandler:
     def test_loads_tier0_kernel(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -57,7 +65,6 @@ class TestTier0KernelHandler:
         assert result["sound"] == "tier0 kernel"
 
     def test_returns_empty_when_file_missing(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         monkeypatch.chdir(tmp_path)
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}):
@@ -69,7 +76,6 @@ class TestTier0KernelHandler:
         assert "sound" not in result
 
     def test_empty_hook_data(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -87,7 +93,6 @@ class TestTier0KernelHandler:
         assert result["stdout"] == "content"
 
     def test_skips_on_cadence_skip(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -103,7 +108,6 @@ class TestTier0KernelHandler:
         assert "sound" not in result
 
     def test_fires_anyway_on_cadence_error(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -118,7 +122,6 @@ class TestTier0KernelHandler:
         assert "kernel content" in result["stdout"]
 
     def test_external_project_gets_own_file(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         project = tmp_path / "my-project"
         project.mkdir()
@@ -136,7 +139,6 @@ class TestTier0KernelHandler:
         assert result["sound"] == "tier0 kernel"
 
     def test_cadence_called_with_tier0_name(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         monkeypatch.chdir(tmp_path)
         mock = _mock_cadence(False)
@@ -168,7 +170,6 @@ class TestDegradedGroundingIsLoud:
         return root
 
     def test_a_whole_stamped_project_that_is_not_a_branch_hears_nothing(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         project = self._stamped(tmp_path / "project")
         monkeypatch.chdir(project)
@@ -190,8 +191,6 @@ class TestDegradedGroundingIsLoud:
         climbing past this fake home to whatever lies above. Asserting silence
         would make the pin a property of the host it runs on.
         """
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
-        from aipass.hooks.apps.modules.grounding_content import _find_project_dir
 
         home = tmp_path / "home"
         (home / ".aipass").mkdir(parents=True)
@@ -211,7 +210,6 @@ class TestDegradedGroundingIsLoud:
         assert out.startswith("[GROUNDING DEGRADED") and "kernel: this tree is AIPass-stamped" in out
 
     def test_a_branch_missing_its_prompt_gets_the_kernel_and_the_reason(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         project = self._stamped(tmp_path / "project")
         seat = project / "src" / "pkg" / "seat"
@@ -228,7 +226,6 @@ class TestDegradedGroundingIsLoud:
         assert out.endswith("KERNEL"), "the kernel still goes out, after the banner"
 
     def test_a_corrupt_passport_is_named_with_the_parse_error(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         project = self._stamped(tmp_path / "project")
         seat = project / "src" / "pkg" / "seat"
@@ -243,7 +240,6 @@ class TestDegradedGroundingIsLoud:
         assert "identity: loading it raised JSONDecodeError" in result["stdout"]
 
     def test_a_missing_kernel_still_says_why_instead_of_going_quiet(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         project = self._stamped(tmp_path / "project", kernel=False)
         monkeypatch.chdir(project)
@@ -256,8 +252,6 @@ class TestDegradedGroundingIsLoud:
 
     def test_the_banner_never_carries_the_home_directory(self, tmp_path, monkeypatch):
         from pathlib import Path
-
-        from aipass.hooks.apps.modules import grounding_content
 
         with patch.object(grounding_content, "load_kernel", side_effect=OSError(f"denied: {Path.home()}/x")):
             _, failures = grounding_content.grounding_report({"cwd": str(tmp_path)})
@@ -278,7 +272,6 @@ class TestCadenceDegradedMode:
         return root
 
     def test_a_degraded_cadence_puts_the_reason_on_the_kernel(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         project = self._project(tmp_path / "project")
         monkeypatch.chdir(project)
@@ -294,7 +287,6 @@ class TestCadenceDegradedMode:
         assert out.endswith("KERNEL")
 
     def test_a_cadence_that_will_not_import_still_gets_the_kernel_out_with_the_cause(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         project = self._project(tmp_path / "project")
         monkeypatch.chdir(project)
@@ -305,7 +297,6 @@ class TestCadenceDegradedMode:
         assert result["stdout"].endswith("KERNEL")
 
     def test_a_healthy_cadence_adds_nothing(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 
         project = self._project(tmp_path / "project")
         monkeypatch.chdir(project)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_ops.py
 # Description: Template copy and file operations
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-10
+# Modified: 2026-09-28
 # =============================================
 
 """Template copy and file rename operations."""
@@ -182,6 +182,12 @@ def regenerate_template_registry(target_dir):
 
         # Skip .spawn internal files and __pycache__
         if ".spawn" in rel.parts or "__pycache__" in rel.parts:
+            continue
+        # A dropbox or an .archive is listed, never entered. The owner of the
+        # project's rule of 09-27 20:42, in paraphrase: nothing looks into a
+        # dropbox, a sandbox like .archive. sync-registry --fix runs this over
+        # living branches (spawn's decision, DPLAN-0354 leg 4).
+        if {"dropbox", ".archive"}.intersection(rel.parts[:-1]):
             continue
 
         if item.is_dir():

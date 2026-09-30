@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_inbox_ops.py
 # Description: Tests for inbox operations handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for inbox operations handler -- inbox loading and migration."""
+"""Tests for apps/handlers/email/inbox_ops.py -- inbox loading and migration."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — json.JSONDecodeError handling on a malformed inbox file
 
 import json
 import pytest

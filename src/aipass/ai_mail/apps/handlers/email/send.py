@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send.py
 # Description: Email Send Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-08-12
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -177,13 +177,15 @@ def send_to_broadcast(
         mark_sent_record_refused(email_file, first_error)
     log_operation_fn("broadcast_sent", {"recipients": len(branches), "successful": success_count})
 
-    # Fire trigger event (best-effort)
-    try:
-        from aipass.trigger.apps.modules.core import trigger
+    # Fire trigger event (best-effort) - only when something was delivered, the
+    # rule the single send follows: a broadcast every recipient refused sent nothing.
+    if success_count > 0:
+        try:
+            from aipass.trigger.apps.modules.core import trigger
 
-        trigger.fire("email_broadcast_sent", recipients=len(branches), successful=success_count, subject=subject)
-    except ImportError as e:
-        logger.warning("[send] trigger import unavailable for broadcast event: %s", e)
+            trigger.fire("email_broadcast_sent", recipients=len(branches), successful=success_count, subject=subject)
+        except ImportError as e:
+            logger.warning("[send] trigger import unavailable for broadcast event: %s", e)
 
     # The one central aggregation for the whole broadcast (best-effort).
     try:

@@ -1,17 +1,23 @@
 # =================== AIPass ====================
 # Name: test_hookstatus.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Tests for hookstatus module (drone @hooks status)
 # Branch: hooks
 # Created: 2026-05-28
-# Modified: 2026-05-28
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for modules/hookstatus.py — read-only hook config viewer."""
+"""Tests for apps/modules/hookstatus.py — read-only hook config viewer."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — HELP_COMMANDS and the help screen's fixed lines
+# seedgo: no-test-needed(constant) — EVENT_TYPES, the fixed order the status table walks
 
 from unittest.mock import patch
 
 import pytest
+
+from aipass.hooks.apps.modules.hookstatus import _render_status, handle_command, print_introspection
 
 SAMPLE_CONFIG = {
     "hooks_enabled": True,
@@ -41,13 +47,11 @@ class TestHandleCommand:
 
     def test_returns_false_for_unknown_command(self):
         """Non-status commands return False for routing."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
 
         assert handle_command("unknown", []) is False
 
-    def test_routes_status_command(self):
-        """Status command is handled and returns True."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
+    def test_routes_status_command(self, capsys):
+        """Status command is handled: the config it found is rendered."""
 
         with patch(
             "aipass.hooks.apps.modules.hookstatus.find_project_config",
@@ -55,31 +59,32 @@ class TestHandleCommand:
         ):
             assert handle_command("status", []) is True
 
-    def test_help_flag(self):
-        """--help flag is handled."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
+        assert "3 enabled / 5 total" in capsys.readouterr().err
+
+    def test_help_flag(self, capsys):
+        """--help flag is handled: the help screen prints."""
 
         assert handle_command("status", ["--help"]) is True
+        assert "drone @hooks status --help    Show this help" in capsys.readouterr().err
 
-    def test_help_short_flag(self):
-        """-h flag is handled."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
+    def test_help_short_flag(self, capsys):
+        """-h flag is handled: the help screen prints."""
 
         assert handle_command("status", ["-h"]) is True
+        assert "drone @hooks status --help    Show this help" in capsys.readouterr().err
 
-    def test_help_word(self):
-        """help subcommand is handled."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
+    def test_help_word(self, capsys):
+        """help subcommand is handled: the help screen prints."""
 
         assert handle_command("status", ["help"]) is True
+        assert "drone @hooks status --help    Show this help" in capsys.readouterr().err
 
 
 class TestConfigPresent:
     """Tests with a valid config file found."""
 
-    def test_shows_enabled_and_disabled_hooks(self):
-        """Verify mixed enabled/disabled hooks render without error."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
+    def test_shows_enabled_and_disabled_hooks(self, capsys):
+        """Verify mixed enabled/disabled hooks both render."""
 
         with patch(
             "aipass.hooks.apps.modules.hookstatus.find_project_config",
@@ -88,50 +93,32 @@ class TestConfigPresent:
             result = handle_command("status", [])
 
         assert result is True
+        err = capsys.readouterr().err
+        assert "identity_injector" in err
+        assert "branch_prompt" in err
 
-    def test_counts_enabled_total(self):
+    def test_counts_enabled_total(self, capsys):
         """Verify footer shows correct enabled/total counts."""
-        from aipass.hooks.apps.modules.hookstatus import _render_status
-        from io import StringIO
-        from rich.console import Console
 
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False)
+        _render_status(SAMPLE_CONFIG)
 
-        with patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console):
-            _render_status(SAMPLE_CONFIG)
-
-        output = buf.getvalue()
+        output = capsys.readouterr().err
         assert "3 enabled / 5 total" in output
 
-    def test_shows_matcher(self):
+    def test_shows_matcher(self, capsys):
         """Verify matcher values appear in output."""
-        from aipass.hooks.apps.modules.hookstatus import _render_status
-        from io import StringIO
-        from rich.console import Console
 
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False)
+        _render_status(SAMPLE_CONFIG)
 
-        with patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console):
-            _render_status(SAMPLE_CONFIG)
-
-        output = buf.getvalue()
+        output = capsys.readouterr().err
         assert "Bash|Edit" in output
 
-    def test_shows_event_group_headers(self):
+    def test_shows_event_group_headers(self, capsys):
         """Verify event type section headers appear."""
-        from aipass.hooks.apps.modules.hookstatus import _render_status
-        from io import StringIO
-        from rich.console import Console
 
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False)
+        _render_status(SAMPLE_CONFIG)
 
-        with patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console):
-            _render_status(SAMPLE_CONFIG)
-
-        output = buf.getvalue()
+        output = capsys.readouterr().err
         assert "UserPromptSubmit" in output
         assert "PreToolUse" in output
         assert "Stop" in output
@@ -140,14 +127,8 @@ class TestConfigPresent:
 class TestConfigAbsent:
     """Tests when no config is loaded — for any of the loader's refusals."""
 
-    def test_no_config_shows_message(self):
+    def test_no_config_shows_message(self, capsys):
         """Verify a genuinely missing config still says exactly that."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
-        from io import StringIO
-        from rich.console import Console
-
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False)
 
         with (
             patch(
@@ -158,7 +139,6 @@ class TestConfigAbsent:
                 "aipass.hooks.apps.modules.hookstatus.config_unavailable_reason",
                 return_value="No .aipass/hooks.json found — run from an AIPass project directory.",
             ),
-            patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console),
         ):
             with pytest.raises(SystemExit) as exit_info:
                 handle_command("status", [])
@@ -166,16 +146,10 @@ class TestConfigAbsent:
         # Rewritten 2026-09-07 (canary refusal sweep): this asserted `is True`,
         # i.e. exit 0, for a command that rendered no status at all.
         assert exit_info.value.code == 1
-        assert "No .aipass/hooks.json found" in buf.getvalue()
+        assert "No .aipass/hooks.json found" in capsys.readouterr().err
 
-    def test_untrusted_config_reports_the_real_refusal(self):
+    def test_untrusted_config_reports_the_real_refusal(self, capsys):
         """Present-but-unenrolled must not be rendered as file-not-found."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
-        from io import StringIO
-        from rich.console import Console
-
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False, width=200)
 
         with (
             patch(
@@ -186,7 +160,6 @@ class TestConfigAbsent:
                 "aipass.hooks.apps.modules.hookstatus.config_unavailable_reason",
                 return_value="not enrolled in the trust registry\nFix: aipass trust /proj",
             ),
-            patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console),
         ):
             with pytest.raises(SystemExit) as exit_info:
                 handle_command("status", [])
@@ -195,7 +168,7 @@ class TestConfigAbsent:
         # it exited 0. That is the shape that hid a live trust break for two
         # hours on 2026-09-07 — every surface said so, none said it in an exit code.
         assert exit_info.value.code == 1
-        output = buf.getvalue()
+        output = capsys.readouterr().err
         assert "not enrolled in the trust registry" in output
         assert "aipass trust /proj" in output
         assert "No .aipass/hooks.json found" not in output
@@ -204,35 +177,25 @@ class TestConfigAbsent:
 class TestMasterSwitchOff:
     """Tests when hooks_enabled is false."""
 
-    def test_master_off_shows_warning(self):
-        """Verify master switch OFF renders loud warning."""
-        from aipass.hooks.apps.modules.hookstatus import _render_status
-        from io import StringIO
-        from rich.console import Console
+    def test_master_off_shows_warning(self, capsys):
+        """Verify master switch OFF renders loud warning.
 
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False)
+        Plain text loses the bold red that tells OFF from the bold green ON;
+        the words that differ ("OFF", "ALL HOOKS DISABLED") are what is pinned.
+        """
 
-        with patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console):
-            _render_status(MASTER_OFF_CONFIG)
+        _render_status(MASTER_OFF_CONFIG)
 
-        output = buf.getvalue()
+        output = capsys.readouterr().err
         assert "OFF" in output
         assert "ALL HOOKS DISABLED" in output
 
-    def test_master_off_still_counts_hooks(self):
+    def test_master_off_still_counts_hooks(self, capsys):
         """Verify hook counts still shown even with master OFF."""
-        from aipass.hooks.apps.modules.hookstatus import _render_status
-        from io import StringIO
-        from rich.console import Console
 
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False)
+        _render_status(MASTER_OFF_CONFIG)
 
-        with patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console):
-            _render_status(MASTER_OFF_CONFIG)
-
-        output = buf.getvalue()
+        output = capsys.readouterr().err
         assert "1 enabled / 1 total" in output
 
 
@@ -245,7 +208,6 @@ class TestPrintIntrospection:
         "Runs without raising" was the whole test and it asserted nothing, so
         an introspection that printed nothing at all was green.
         """
-        from aipass.hooks.apps.modules.hookstatus import print_introspection
 
         print_introspection()
 

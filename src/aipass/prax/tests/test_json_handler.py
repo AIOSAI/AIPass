@@ -1,25 +1,29 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
 # Description: Tests for the fleet json service through prax's own shim
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-28
-# Modified: 2026-09-11
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the fleet's one json service (DPLAN-0325), exercised through prax's
-own shim.
+"""Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
 
-What this file used to be is in tests/.archive/: eighteen tests that re-simulated
-the handler's logic inline (``json.loads`` on a template they had just written,
-``all(k in data for k in required)``) and never called the module under test. The
-v4 template stamp; every one of them passed against a handler that had been
-deleted. They are subsumed by seedgo's cross-branch contract and are not
-rewritten here.
+# Tests for the fleet's one json service (DPLAN-0325), exercised through prax's
+# own shim.
+#
+# What this file used to be is in tests/.archive/: eighteen tests that re-simulated
+# the handler's logic inline (``json.loads`` on a template they had just written,
+# ``all(k in data for k in required)``) and never called the module under test. The
+# v4 template stamp; every one of them passed against a handler that had been
+# deleted. They are subsumed by seedgo's cross-branch contract and are not
+# rewritten here.
+#
+# These call the service. Redirection is the AIPASS_TEST_LOG_DIR seam, never a
+# patched module attribute — the service resolves its directory per call, and the
+# shim has no attributes to patch.
 
-These call the service. Redirection is the AIPASS_TEST_LOG_DIR seam, never a
-patched module attribute — the service resolves its directory per call, and the
-shim has no attributes to patch.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(json_handler) — that json_handler.py binds byte-identically fleet-wide
 
 import json
 import logging

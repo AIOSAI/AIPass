@@ -1,16 +1,22 @@
 # =================== AIPass ====================
 # Name: test_dispatch_status.py
 # Description: Tests for dispatch status handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for dispatch status handler -- dispatch log I/O and age calculation."""
+"""Tests for apps/handlers/dispatch/status.py."""
+
+# Dispatch log I/O and age calculation.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — check_pid_status()'s subprocess.SubprocessError/OSError branch
 
 import json
 import pytest
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.status as status_mod
 from aipass.ai_mail.apps.handlers.dispatch.status import (
@@ -129,14 +135,16 @@ def test_save_dispatch_log_truncates_to_50(dispatch_log_file):
 
 def test_log_dispatch_creates_entry(dispatch_log_file, monkeypatch):
     """log_dispatch creates an entry with correct fields."""
-    # Mock json_handler.log_operation to avoid side effects
+    # log_operation writes the live prax log, so the patch stays and is asserted (ai_mail, leg 5)
+    log_op = MagicMock()
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.dispatch.status.json_handler.log_operation",
-        lambda *args, **kwargs: None,
+        log_op,
     )
 
     result = log_dispatch("@flow", 4242, "spawned")
     assert result is True
+    log_op.assert_called_once_with("log_dispatch", {"branch": "@flow", "status": "spawned"})
 
     data = json.loads(dispatch_log_file.read_text(encoding="utf-8"))
     assert len(data["dispatches"]) == 1
@@ -155,13 +163,16 @@ def test_log_dispatch_creates_entry(dispatch_log_file, monkeypatch):
 
 def test_log_dispatch_with_error(dispatch_log_file, monkeypatch):
     """log_dispatch with error_msg includes an 'error' key in the entry."""
+    # log_operation writes the live prax log, so the patch stays and is asserted (ai_mail, leg 5)
+    log_op = MagicMock()
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.dispatch.status.json_handler.log_operation",
-        lambda *args, **kwargs: None,
+        log_op,
     )
 
     result = log_dispatch("@backup", None, "failed", error_msg="Connection timeout")
     assert result is True
+    log_op.assert_called_once_with("log_dispatch", {"branch": "@backup", "status": "failed"})
 
     data = json.loads(dispatch_log_file.read_text(encoding="utf-8"))
     assert len(data["dispatches"]) == 1

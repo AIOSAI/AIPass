@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: orchestrator.py
 # Description: Rollover Orchestration Handler
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-03-08
-# Modified: 2026-09-18
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -33,6 +33,7 @@ from aipass.memory.apps.handlers.json import json_handler
 
 # Handler imports (relative within the memory package)
 from aipass.memory.apps.handlers.monitor import detector
+from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable
 from aipass.memory.apps.handlers.rollover import extractor
 from aipass.memory.apps.handlers.tracking import line_counter
 from aipass.memory.apps.handlers.repo_root import module_file
@@ -203,12 +204,20 @@ def get_branch_local_chroma_path(branch_name: str) -> Path | None:
         branch_name: Branch name (e.g., "SEEDGO", "AIPASS")
 
     Returns:
-        Path to branch's local .chroma directory, or None if branch not found
+        Path to branch's local .chroma directory, or None if branch not found,
+        or None with an error logged when the registry cannot be read. The
+        local store is the second store: execute_rollover calls this after the
+        file is trimmed, and a raise here left the entries in neither store
+        (DPLAN-0354 leg 3b). The global store still takes them.
     """
     if not branch_name:
         return None
 
-    registry = detector._read_registry()
+    try:
+        registry = detector._read_registry()
+    except RegistryUnreadable as e:
+        logger.error(f"[rollover] No local store for {branch_name}: {e}")
+        return None
 
     for branch in registry:
         if branch.get("name", "").upper() == branch_name.upper():
@@ -525,9 +534,10 @@ def execute_rollover() -> Dict[str, Any]:
     if success_count > 0:
         # Post-rollover: fire event for trigger system
         try:
-            from aipass.trigger.apps.modules.core import Trigger
+            # The published door is the instance; aliased, `trigger` is this function's loop name.
+            from aipass.trigger.apps.modules.core import trigger as trigger_bus
 
-            Trigger.fire(
+            trigger_bus.fire(
                 "rollover_complete", triggers_count=len(triggers), success_count=success_count, failed_count=len(failed)
             )
             logger.info("[rollover] Fired rollover_complete event")

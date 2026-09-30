@@ -1,32 +1,36 @@
-"""Tests for the audit-tests lane core: spine, refusal vocabulary, laws.
-
-These pin the three things the design argues are load-bearing, and each was
-written to fail against an implementation that got it wrong:
-
-  1. The group list COMPOSES (spine + namespaced adapter groups) rather than
-     equalling a constant. Revision 1's constant is the one shape the design
-     review called a true rebuild trigger.
-  2. A refusal is never a score, and the fleet form ranks an UNPROVEN harness
-     as worse than an honest gate failure.
-  3. Every law bites. A law that cannot fail is decoration, and a suite that
-     cannot fail is the exact species this whole lane exists to catch (L0).
-
-Law S9 and the rev-4 group contracts are pinned even though the groups they
-bind report `not_applicable: "not built"` — that is the point of writing a
-contract before the capability, and an untested contract is a promise.
-"""
-
 # =================== META ====================
 # Name: test_audit_tests_core.py
 # Description: Core pins for the audit-tests lane (spine, refusal, laws)
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-27
 # =============================================
 
-# seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
-# seedgo:bypass standard=encapsulation reason="tests import handlers directly for unit testing"
+"""Tests for apps/handlers/audit_tests/spine.py, refusal.py, laws.py and runner.py."""
 
+# Tests for the audit-tests lane core: spine, refusal vocabulary, laws.
+#
+# These pin the three things the design argues are load-bearing, and each was
+# written to fail against an implementation that got it wrong:
+#
+#   1. The group list COMPOSES (spine + namespaced adapter groups) rather than
+#      equalling a constant. Revision 1's constant is the one shape the design
+#      review called a true rebuild trigger.
+#   2. A refusal is never a score, and the fleet form ranks an UNPROVEN harness
+#      as worse than an honest gate failure.
+#   3. Every law bites. A law that cannot fail is decoration, and a suite that
+#      cannot fail is the exact species this whole lane exists to catch (L0).
+#
+# Law S9 and the rev-4 group contracts are pinned even though the groups they
+# bind report `not_applicable: "not built"` — that is the point of writing a
+# contract before the capability, and an untested contract is a promise.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under audit_tests/ parses and imports
+# seedgo: no-test-needed(constant) — CORE_SPINE's group names; the fixture is built from it, not a copy
+
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -148,10 +152,26 @@ class TestRev4Contracts:
     """The contracts bind groups that do not exist yet. That is the point."""
 
     def test_kill_cause_contract_is_attached_to_every_bound_group(self):
-        assert len(spine.KILL_CAUSE_BOUND) == 3
+        """Every group that executes a mutant carries the split, however many there are.
+
+        Pinned by NAME and not by COUNT. A bare `== 3` here made the contract
+        list unable to grow: adding `pseudo_tested`, the per-function probe
+        contract 2 promised, reddened this test for doing exactly what the
+        contract asks. That is the equality S3/S4 was revised to stop, in the
+        lane's own suite.
+        """
+        assert {"oracle_execution", "scoped_survival", "targeted_mutation"} <= set(spine.KILL_CAUSE_BOUND)
 
         for name in spine.KILL_CAUSE_BOUND:
             assert "kill_cause" in spine.contract_for(name)
+
+    def test_pseudo_tested_contract_refuses_the_rate_reading(self):
+        """Gutting survivors are a superset of pseudo-tested functions - say so."""
+        contract = spine.contract_for("pseudo_tested")
+
+        assert "kill_cause" in contract
+        assert "SUPERSET" in contract
+        assert "coverage" in contract
 
     def test_contract_resolves_through_the_namespaced_name(self):
         """Callers legitimately hold `pytest.scoped_survival`, not the bare name."""
@@ -274,7 +294,7 @@ class TestS3S4:
         problems = laws.validate(document, previous_group_list=previous)
         assert any("pytest.retired_yesterday" in p and p.startswith("S3") for p in problems)
 
-    def test_a_vanished_group_WITH_a_ruling_is_allowed(self):
+    def test_a_vanished_group_with_a_ruling_is_allowed(self):
         """S3 is a no-vanishing property, not a freeze - retirement stays possible."""
         document = _lawful_document()
         document["retired_groups"] = [
@@ -388,7 +408,7 @@ class TestS9:
 
         assert any(p.startswith("S9") for p in laws.validate(document))
 
-    def test_a_mutant_record_WITH_a_kill_cause_passes(self):
+    def test_a_mutant_record_with_a_kill_cause_passes(self):
         document = _lawful_document()
         document["groups"]["oracle_execution"]["mutants"] = [
             {"id": "m1", "killed": True, "kill_cause": "AssertionError"}
@@ -420,8 +440,21 @@ class TestBudget:
         assert any("still carries a score" in p for p in laws.validate(document))
 
     def test_an_unbuilt_execution_group_needs_no_budget(self):
-        """not_applicable groups never ran, so a budget would be theatre."""
-        assert laws.validate(_lawful_document()) == []
+        """Unbuilt exec groups carry no budget and pass.
+
+        not_applicable groups never ran, so a budget would be theatre.
+        Mutant: spine budget stamp / laws skip dropped — killed.
+        """
+        document = _lawful_document()
+        unbuilt = {
+            name: group
+            for name, group in document["groups"].items()
+            if group["tier"] == "exec" and group["status"] == "not_applicable"
+        }
+
+        assert sorted(unbuilt) == ["oracle_execution", "order_dependence"]
+        assert [group.get("budget_seconds") for group in unbuilt.values()] == [None, None]
+        assert laws.check_budget(unbuilt) == []
 
 
 class TestS5:
@@ -618,7 +651,11 @@ class TestCarrierRecorder:
         subtraction wearing a clean face.
         """
         carrier_window(tmp_path)
-        m10.carrier_hook("open", 42)
+        # 42 is not a tuple, and that is the input under test: the audit hook
+        # receives whatever the interpreter hands it, so the malformed case is
+        # the case. The checker is told here rather than the shape being
+        # corrected, because correcting it would delete the test.
+        m10.carrier_hook("open", 42)  # type: ignore[arg-type]
 
         assert m10.stop_carrier_recording()[1] == 1
 
@@ -758,6 +795,26 @@ class TestCarrierSubtraction:
 
         assert proof["probed"] is False
         assert laws.check_m10(proof) == []
+
+
+# An unlistable directory is the only route to a walk error, and it is not one
+# everywhere: Windows ignores the mode bits and root lists through them.
+_MODE_BITS_HOLD = sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0
+
+
+class TestSnapshotTree:
+    @pytest.mark.skipif(not _MODE_BITS_HOLD, reason="a directory cannot be made unlistable on this platform")
+    def test_an_unlistable_subtree_fails_the_fingerprint_instead_of_vanishing_from_it(self, tmp_path):
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        (locked / "state.json").write_text("{}", encoding="utf-8")
+
+        locked.chmod(0o000)
+        try:
+            with pytest.raises(PermissionError):
+                m10.snapshot_tree(tmp_path)
+        finally:
+            locked.chmod(0o755)
 
 
 class TestCarrierLaw:

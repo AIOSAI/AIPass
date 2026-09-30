@@ -1,17 +1,51 @@
-"""Tests for seedgo checker handlers — batch 8 (7 checkers)."""
-
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.0.0
+# Version: 1.0.4
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-27
 # =============================================
 
-import pytest
-from typing import List
-from unittest.mock import MagicMock
+"""Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
 
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the seven checker modules under test parse and import
+# seedgo: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
+# seedgo: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
+
+from typing import List
+
+import pytest
+
+from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+    _branch_before,
+    check_auto_detection,
+    check_handler_independence,
+    check_no_orchestration,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.log_handler_check import (
+    check_no_raw_file_handler,
+    check_no_raw_stream_handler,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.log_level_check import (
+    check_command_routing_level,
+    check_error_not_user_input,
+)
+from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
+from aipass.seedgo.apps.handlers.aipass_standards.log_structure_check import check_branch_info
+from aipass.seedgo.apps.handlers.aipass_standards.meta_check import (
+    check_meta_placement,
+    check_meta_presence,
+    check_required_fields,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
+    PYTEST_CONTRACT_GLOBALS,
+    check_class_naming,
+    check_constant_naming,
+    check_file_naming,
+    check_function_naming,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.permission_flags_check import check_no_dangerous_flags
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -21,78 +55,6 @@ from unittest.mock import MagicMock
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
     return text.split("\n")
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for standards checkers."""
-    import sys
-
-    # Resolved BEFORE the bypass package is swapped for a MagicMock below --
-    # importing it afterwards returns the mock's auto-created 'utils' attribute,
-    # whose is_bypassed() is a truthy MagicMock that silently bypasses every
-    # violation and turns the violation-detection tests green-for-nothing.
-    from aipass.seedgo.apps.handlers.bypass import utils as real_bypass_utils
-
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # -- bypass handler -----------------------------------------------------
-    bypass_pkg = MagicMock()
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
-    bypass_pkg.ignore_handler = bypass_ignore
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        bypass_ignore,
-    )
-    # bypass.utils must be pinned too: the parent is a MagicMock, not a package,
-    # so a checker importing bypass.utils on re-import raises ModuleNotFoundError
-    # unless the full dotted name is already in sys.modules. Without this the
-    # log_structure tests below pass only when an earlier test file happened to
-    # import the real bypass.utils first -- green by collection order, red alone.
-    # The REAL module goes in, not a mock: bypass matching is the behaviour under
-    # test in the permission_flags cases, and a stubbed is_bypassed would quietly
-    # make every bypass rule a no-op.
-    bypass_pkg.utils = real_bypass_utils
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.utils",
-        real_bypass_utils,
-    )
-
-    # Force re-imports so checkers pick up fresh mocks
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.aipass_standards.handlers_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.log_handler_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.log_level_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.log_structure_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.meta_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.naming_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.permission_flags_check",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
 
 
 # ===========================================================================
@@ -109,10 +71,6 @@ def test_handler_independence_clean(tmp_path):
     )
     handler_path = str(tmp_path / "seedgo" / "apps" / "handlers" / "audit" / "clean.py")
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
-
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is True
 
@@ -125,10 +83,6 @@ def test_handler_independence_cross_branch_import_fails():
         "\ndef do_work():\n    return True\n"
     )
     handler_path = "src/aipass/seedgo/apps/handlers/audit/cross.py"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
 
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is False
@@ -144,10 +98,6 @@ def test_handler_independence_same_package(tmp_path):
     )
     handler_path = str(tmp_path / "seedgo" / "apps" / "handlers" / "audit" / "same.py")
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
-
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is True
 
@@ -161,10 +111,6 @@ def test_handler_independence_allows_the_standards_own_documented_example():
     """`drone @seedgo standard handlers` prints this exact import as ALLOWED."""
     content = "from aipass.flow.apps.handlers.registry.load import load_registry\n"
     handler_path = "src/aipass/flow/apps/handlers/plan/create.py"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
 
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is True, "Checker rejects the standard's own ALLOWED example"
@@ -183,10 +129,6 @@ def test_handler_independence_root_level_file_can_pass():
     )
     handler_path = "src/aipass/trigger/apps/handlers/escalation.py"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
-
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is True
 
@@ -195,10 +137,6 @@ def test_handler_independence_same_branch_across_packages():
     """Sibling packages inside one branch import each other freely."""
     content = "from aipass.trigger.apps.handlers.medic.state import load\n"
     handler_path = "src/aipass/trigger/apps/handlers/escalation/runner.py"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
 
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is True
@@ -213,36 +151,24 @@ def test_handler_independence_cross_branch_json_handler_is_not_exempt():
     content = "from aipass.memory.apps.handlers.json import json_handler\n"
     handler_path = "src/aipass/trigger/apps/handlers/escalation.py"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
-
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is False
 
 
-def test_handler_independence_absolute_path_resolves_branch():
+def test_handler_independence_absolute_path_resolves_branch(tmp_path):
     """The PostToolUse hook passes absolute paths - branch detection must survive it."""
     content = "from aipass.trigger.apps.handlers.error_registry import n\n"
-    handler_path = "/home/user/Projects/AIPass/src/aipass/trigger/apps/handlers/escalation.py"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
+    handler_path = str(tmp_path / "Projects/AIPass/src/aipass/trigger/apps/handlers/escalation.py")
 
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is True
 
 
-def test_handler_independence_unknown_layout_says_so():
+def test_handler_independence_unknown_layout_says_so(tmp_path):
     """A path with no branch is reported as not-evaluated, not silently passed."""
     content = "from aipass.memory.apps.handlers.error import error_handler\n"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
-
-    result = check_handler_independence(content, _lines(content), "/random/path/handler.py")
+    result = check_handler_independence(content, _lines(content), str(tmp_path / "random/path/handler.py"))
     assert result["passed"] is True
     assert "could not be determined" in result["message"]
 
@@ -256,10 +182,6 @@ def test_handler_independence_fstring_guard_text_not_flagged(tmp_path):
         "    )\n"
     )
     handler_path = str(tmp_path / "apps" / "handlers" / "audit" / "guard.py")
-
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
 
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is True
@@ -277,10 +199,6 @@ def test_handler_independence_flags_real_import_alongside_guard_text(tmp_path):
     )
     handler_path = str(tmp_path / "apps" / "handlers" / "audit" / "mixed.py")
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_handler_independence,
-    )
-
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is False
     assert "line 1" in result["message"]
@@ -295,10 +213,6 @@ def test_auto_detection_not_needed():
     """No module_name parameter means auto-detection is not needed (returns None)."""
     content = "def do_work(file_path):\n    return True\n"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_auto_detection,
-    )
-
     result = check_auto_detection(content)
     assert result is None
 
@@ -306,10 +220,6 @@ def test_auto_detection_not_needed():
 def test_auto_detection_present():
     """Handler with module_name and inspect.stack() passes."""
     content = "import inspect\ndef do_work(module_name=None):\n    frame = inspect.stack()\n    return True\n"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_auto_detection,
-    )
 
     result = check_auto_detection(content)
     assert result is not None
@@ -319,10 +229,6 @@ def test_auto_detection_present():
 def test_auto_detection_missing():
     """Handler with module_name but no inspect.stack() fails."""
     content = "def do_work(module_name=None):\n    return True\n"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_auto_detection,
-    )
 
     result = check_auto_detection(content)
     assert result is not None
@@ -339,10 +245,6 @@ def test_auto_detection_with_get_caller():
     """Handler with _get_caller_module_name passes auto-detection."""
     content = "def _get_caller_module_name():\n    pass\ndef do_work(module_name=None):\n    return True\n"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_auto_detection,
-    )
-
     result = check_auto_detection(content)
     assert result is not None
     assert result["passed"] is True
@@ -357,10 +259,6 @@ def test_no_orchestration_clean():
     """Handler with no module imports passes."""
     content = '"""Clean handler."""\n\ndef do_work():\n    return True\n'
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_no_orchestration,
-    )
-
     result = check_no_orchestration(content, _lines(content))
     assert result is not None
     assert result["passed"] is True
@@ -370,10 +268,6 @@ def test_no_orchestration_module_import():
     """Handler importing from apps.modules fails."""
     content = (
         '"""Bad handler."""\nfrom aipass.seedgo.apps.modules import audit_module\n\ndef do_work():\n    return True\n'
-    )
-
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_no_orchestration,
     )
 
     result = check_no_orchestration(content, _lines(content))
@@ -390,7 +284,6 @@ def test_branch_before_says_none_rather_than_guessing():
     .apps.handlers -- a confident wrong branch name. Pinned directly because
     both callers pre-filter on the marker, so no behavioural test reaches it.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import _branch_before
 
     assert _branch_before("aipass.spawn.apps.modules", ".apps.handlers") is None
     assert _branch_before("aipass.spawn.apps.modules", ".apps.modules") == "spawn"
@@ -398,7 +291,7 @@ def test_branch_before_says_none_rather_than_guessing():
     assert _branch_before(".apps.handlers.x", ".apps.handlers") is None
 
 
-def test_no_orchestration_allows_another_branchs_modules_gateway():
+def test_no_orchestration_allows_another_branchs_modules_gateway(tmp_path):
     """Consuming ANOTHER branch's modules/ is the sanctioned door, not orchestration.
 
     The two handler rules used to contradict each other: check_handler_independence
@@ -410,24 +303,20 @@ def test_no_orchestration_allows_another_branchs_modules_gateway():
     """
     content = '"""Handler."""\nfrom aipass.spawn.apps.modules import get_template_dir\n'
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_no_orchestration,
+    result = check_no_orchestration(
+        content, _lines(content), str(tmp_path / "repo/src/aipass/seedgo/apps/handlers/x/y.py")
     )
-
-    result = check_no_orchestration(content, _lines(content), "/repo/src/aipass/seedgo/apps/handlers/x/y.py")
     assert result is not None
     assert result["passed"] is True, result["message"]
 
 
-def test_no_orchestration_still_flags_own_branch_modules():
+def test_no_orchestration_still_flags_own_branch_modules(tmp_path):
     """The real layering violation survives: a handler reaching up its OWN branch."""
     content = '"""Handler."""\nfrom aipass.seedgo.apps.modules import audit_module\n'
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_no_orchestration,
+    result = check_no_orchestration(
+        content, _lines(content), str(tmp_path / "repo/src/aipass/seedgo/apps/handlers/x/y.py")
     )
-
-    result = check_no_orchestration(content, _lines(content), "/repo/src/aipass/seedgo/apps/handlers/x/y.py")
     assert result is not None
     assert result["passed"] is False
     assert "orchestration" in result["message"]
@@ -443,10 +332,6 @@ def test_no_orchestration_unknown_path_stays_strict():
     """
     content = '"""Handler."""\nfrom aipass.spawn.apps.modules import get_template_dir\n'
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_no_orchestration,
-    )
-
     result = check_no_orchestration(content, _lines(content))
     assert result is not None
     assert result["passed"] is False
@@ -456,10 +341,6 @@ def test_no_orchestration_in_docstring():
     """Module import inside docstring is not flagged."""
     content = (
         '"""\nExample: from aipass.seedgo.apps.modules import audit_module\n"""\n\ndef do_work():\n    return True\n'
-    )
-
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_no_orchestration,
     )
 
     result = check_no_orchestration(content, _lines(content))
@@ -482,10 +363,6 @@ def test_no_orchestration_fstring_guard_text_not_flagged():
         "    )\n"
     )
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_no_orchestration,
-    )
-
     result = check_no_orchestration(content, _lines(content))
     assert result is not None
     assert result["passed"] is True
@@ -502,10 +379,6 @@ def test_no_orchestration_flags_real_import_alongside_guard_text():
         "    )\n"
     )
 
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
-        check_no_orchestration,
-    )
-
     result = check_no_orchestration(content, _lines(content))
     assert result is not None
     assert result["passed"] is False
@@ -517,7 +390,7 @@ def test_no_orchestration_flags_real_import_alongside_guard_text():
 # ===========================================================================
 
 
-def test_no_raw_file_handler_clean():
+def test_no_raw_file_handler_clean(tmp_path):
     """File without logging.FileHandler passes."""
     lines: List[str] = [
         '"""Clean module."""',
@@ -526,17 +399,12 @@ def test_no_raw_file_handler_clean():
         "",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_handler_check import (
-        check_no_raw_file_handler,
-    )
-
-    result = check_no_raw_file_handler(lines, "/fake/path.py")
+    result = check_no_raw_file_handler(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
 
-def test_no_raw_file_handler_violation():
+def test_no_raw_file_handler_violation(tmp_path):
     """File with logging.FileHandler fails."""
-    # seedgo:bypass standard=log_handler reason="test data for checker validation"
     lines: List[str] = [
         '"""Bad module."""',
         "import logging",
@@ -544,11 +412,7 @@ def test_no_raw_file_handler_violation():
         "",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_handler_check import (
-        check_no_raw_file_handler,
-    )
-
-    result = check_no_raw_file_handler(lines, "/fake/path.py")
+    result = check_no_raw_file_handler(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
     assert "FileHandler" in result["message"]
 
@@ -558,7 +422,7 @@ def test_no_raw_file_handler_violation():
 # ===========================================================================
 
 
-def test_no_raw_stream_handler_no_file_logging():
+def test_no_raw_stream_handler_no_file_logging(tmp_path):
     """No file-based logging means stream handler check not applicable."""
     lines: List[str] = [
         "import logging",
@@ -567,18 +431,13 @@ def test_no_raw_stream_handler_no_file_logging():
     ]
     content = "\n".join(lines)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_handler_check import (
-        check_no_raw_stream_handler,
-    )
-
-    result = check_no_raw_stream_handler(lines, "/fake/path.py", content)
+    result = check_no_raw_stream_handler(lines, str(tmp_path / "fake/path.py"), content)
     assert result["passed"] is True
     assert "not applicable" in result["message"]
 
 
-def test_no_raw_stream_handler_violation():
+def test_no_raw_stream_handler_violation(tmp_path):
     """StreamHandler with file logging is a violation."""
-    # seedgo:bypass standard=log_handler reason="test data for checker validation"
     lines: List[str] = [
         "import logging",
         'handler = logging.FileHandler("app.log")',
@@ -587,18 +446,13 @@ def test_no_raw_stream_handler_violation():
     ]
     content = "\n".join(lines)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_handler_check import (
-        check_no_raw_stream_handler,
-    )
-
-    result = check_no_raw_stream_handler(lines, "/fake/path.py", content)
+    result = check_no_raw_stream_handler(lines, str(tmp_path / "fake/path.py"), content)
     assert result["passed"] is False
     assert "StreamHandler" in result["message"]
 
 
-def test_no_raw_stream_handler_clean():
+def test_no_raw_stream_handler_clean(tmp_path):
     """File logging present but no StreamHandler passes."""
-    # seedgo:bypass standard=log_handler reason="test data for checker validation"
     lines: List[str] = [
         "import logging",
         'handler = logging.FileHandler("app.log")',
@@ -606,11 +460,7 @@ def test_no_raw_stream_handler_clean():
     ]
     content = "\n".join(lines)
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_handler_check import (
-        check_no_raw_stream_handler,
-    )
-
-    result = check_no_raw_stream_handler(lines, "/fake/path.py", content)
+    result = check_no_raw_stream_handler(lines, str(tmp_path / "fake/path.py"), content)
     assert result["passed"] is True
 
 
@@ -619,7 +469,7 @@ def test_no_raw_stream_handler_clean():
 # ===========================================================================
 
 
-def test_error_not_user_input_clean():
+def test_error_not_user_input_clean(tmp_path):
     """ERROR used for system failures passes."""
     lines: List[str] = [
         '"""Module."""',
@@ -627,35 +477,25 @@ def test_error_not_user_input_clean():
         "",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_level_check import (
-        check_error_not_user_input,
-    )
-
-    result = check_error_not_user_input(lines, "/fake/path.py")
+    result = check_error_not_user_input(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
 
-def test_error_not_user_input_violation():
+def test_error_not_user_input_violation(tmp_path):
     """ERROR used for user-input pattern fails."""
-    # seedgo:bypass standard=log_level reason="test data for checker validation"
     lines: List[str] = [
         '"""Module."""',
         'logger.error("Unknown command: %s", cmd)',
         "",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_level_check import (
-        check_error_not_user_input,
-    )
-
-    result = check_error_not_user_input(lines, "/fake/path.py")
+    result = check_error_not_user_input(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
     assert "user input" in result["message"]
 
 
-def test_error_not_user_input_in_docstring():
+def test_error_not_user_input_in_docstring(tmp_path):
     """ERROR pattern inside a docstring is ignored."""
-    # seedgo:bypass standard=log_level reason="test data for checker validation"
     lines: List[str] = [
         '"""',
         'logger.error("Unknown command: %s", cmd)',
@@ -664,11 +504,7 @@ def test_error_not_user_input_in_docstring():
         "",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_level_check import (
-        check_error_not_user_input,
-    )
-
-    result = check_error_not_user_input(lines, "/fake/path.py")
+    result = check_error_not_user_input(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
 
@@ -677,41 +513,28 @@ def test_error_not_user_input_in_docstring():
 # ===========================================================================
 
 
-def test_command_routing_level_no_routing():
+def test_command_routing_level_no_routing(tmp_path):
     """File without command routing returns None."""
     content = "def do_work():\n    pass\n"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_level_check import (
-        check_command_routing_level,
-    )
-
-    result = check_command_routing_level(content, _lines(content), "/fake/path.py")
+    result = check_command_routing_level(content, _lines(content), str(tmp_path / "fake/path.py"))
     assert result is None
 
 
-def test_command_routing_level_clean():
+def test_command_routing_level_clean(tmp_path):
     """Command routing with proper WARNING level passes."""
     content = 'def route_command(cmd):\n    logger.warning("Unknown command: %s", cmd)\n'
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_level_check import (
-        check_command_routing_level,
-    )
-
-    result = check_command_routing_level(content, _lines(content), "/fake/path.py")
+    result = check_command_routing_level(content, _lines(content), str(tmp_path / "fake/path.py"))
     assert result is not None
     assert result["passed"] is True
 
 
-def test_command_routing_level_violation():
+def test_command_routing_level_violation(tmp_path):
     """Command routing with ERROR for user-input pattern fails."""
-    # seedgo:bypass standard=log_level reason="test data for checker validation"
     content = 'def route_command(cmd):\n    logger.error("Unknown command: %s", cmd)\n'
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_level_check import (
-        check_command_routing_level,
-    )
-
-    result = check_command_routing_level(content, _lines(content), "/fake/path.py")
+    result = check_command_routing_level(content, _lines(content), str(tmp_path / "fake/path.py"))
     assert result is not None
     assert result["passed"] is False
     assert result["message"] == "Command routing failures logged as ERROR on lines [2] - should be WARNING"
@@ -758,7 +581,6 @@ def _branch_with_local_logs(tmp_path, name="mybranch", local_logs=1):
 
 def test_system_log_observation_carries_no_score():
     """The branch-level scoring surface is gone -- runtime log state cannot move a score."""
-    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
 
     assert not hasattr(log_structure_check, "check_branch_post"), (
         "log_structure must expose no branch-level scoring surface: the only thing it scored "
@@ -772,8 +594,6 @@ def test_error_path_only_branch_is_not_penalised(tmp_path):
     module = branch / "apps" / "cli.py"
     module.parent.mkdir(parents=True)
     module.write_text('"""Entry."""\nlogger.error("module load failed")\n', encoding="utf-8")
-
-    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
 
     before = log_structure_check.check_module(str(module))
     # A system log appears (or rotates away) -- the same code, a different
@@ -796,8 +616,6 @@ def test_observe_lane_accepts_the_kwarg_the_pipeline_passes(tmp_path):
     """
     branch = _branch_with_local_logs(tmp_path, local_logs=3)
 
-    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
-
     observe = getattr(log_structure_check, "check_branch_observe")
     records = observe(str(branch), bypass_rules=[])
 
@@ -815,8 +633,6 @@ def test_observe_records_would_be_score_and_when(tmp_path):
 
     branch = _branch_with_local_logs(tmp_path, local_logs=3)
 
-    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
-
     observe = getattr(log_structure_check, "check_branch_observe")
     record = observe(str(branch), bypass_rules=[])[0]
 
@@ -832,8 +648,6 @@ def test_observe_reads_100_when_system_logs_are_present(tmp_path):
     """The healthy reading — same shape, so 'never fired' is provable, not inferred."""
     branch = _branch_with_local_logs(tmp_path, local_logs=3)
     (tmp_path / "system_logs" / "mybranch_cli.log").write_text("system", encoding="utf-8")
-
-    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
 
     observe = getattr(log_structure_check, "check_branch_observe")
     record = observe(str(branch))[0]
@@ -851,8 +665,6 @@ def test_observe_excludes_mail_lane_artifacts(tmp_path):
     branch = _branch_with_local_logs(tmp_path, local_logs=0)
     (branch / "logs" / "dispatch_20260814.log").write_text("delivery", encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
-
     observe = getattr(log_structure_check, "check_branch_observe")
     record = observe(str(branch))[0]
 
@@ -866,8 +678,6 @@ def test_observe_reports_unobservable_branch_without_a_number(tmp_path):
     (branch / "logs").mkdir(parents=True)
     (branch / "logs" / "app.log").write_text("log", encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
-
     observe = getattr(log_structure_check, "check_branch_observe")
     record = observe(str(branch))[0]
 
@@ -878,8 +688,6 @@ def test_observe_reports_unobservable_branch_without_a_number(tmp_path):
 def test_observe_honours_a_branch_bypass(tmp_path):
     """bypass_rules is not decoration — a bypassed branch reads as bypassed."""
     branch = _branch_with_local_logs(tmp_path, local_logs=3)
-
-    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
 
     rules = [{"file": "mybranch", "standard": "log_structure", "reason": "test"}]
     observe = getattr(log_structure_check, "check_branch_observe")
@@ -892,8 +700,6 @@ def test_observe_honours_a_branch_bypass(tmp_path):
 def test_check_branch_info_reports_missing_system_logs(tmp_path):
     """The observation survives -- as an info line, on the channel that carries no score."""
     branch = _branch_with_local_logs(tmp_path, local_logs=3)
-
-    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
 
     # Resolved off the module exactly as branch_audit does (getattr on a
     # dynamically discovered checker, called positionally with the branch path),
@@ -922,8 +728,6 @@ def test_dispatch_artifacts_are_not_the_branchs_logs(tmp_path):
     for name in ("dispatch_stderr.log", "dispatch_stdout.log", "dispatch_wake.log"):
         (logs / name).write_text("mail lane", encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_structure_check import check_branch_info
-
     assert check_branch_info(str(branch)) == []
 
 
@@ -931,8 +735,6 @@ def test_real_logs_still_counted_alongside_dispatch_artifacts(tmp_path):
     """Control -- a branch's own log still reports, and the count excludes the artifacts."""
     branch = _branch_with_local_logs(tmp_path, local_logs=1)
     (branch / "logs" / "dispatch_wake.log").write_text("mail lane", encoding="utf-8")
-
-    from aipass.seedgo.apps.handlers.aipass_standards.log_structure_check import check_branch_info
 
     lines = check_branch_info(str(branch))
     assert len(lines) == 1
@@ -944,10 +746,6 @@ def test_check_branch_info_silent_when_system_logs_exist(tmp_path):
     branch = _branch_with_local_logs(tmp_path)
     (tmp_path / "system_logs" / "mybranch_module.log").write_text("system log", encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_structure_check import (
-        check_branch_info,
-    )
-
     assert check_branch_info(str(branch)) == []
 
 
@@ -958,10 +756,6 @@ def test_check_branch_info_silent_without_local_logs(tmp_path):
     (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
     (tmp_path / "system_logs").mkdir()
 
-    from aipass.seedgo.apps.handlers.aipass_standards.log_structure_check import (
-        check_branch_info,
-    )
-
     assert check_branch_info(str(branch)) == []
 
 
@@ -970,10 +764,6 @@ def test_check_branch_info_silent_outside_a_repo(tmp_path):
     branch = tmp_path / "mybranch"
     (branch / "logs").mkdir(parents=True)
     (branch / "logs" / "app.log").write_text("log line", encoding="utf-8")
-
-    from aipass.seedgo.apps.handlers.aipass_standards.log_structure_check import (
-        check_branch_info,
-    )
 
     assert check_branch_info(str(branch)) == []
 
@@ -995,10 +785,6 @@ def test_meta_presence_valid():
         "# =============================================\n"
     )
 
-    from aipass.seedgo.apps.handlers.aipass_standards.meta_check import (
-        check_meta_presence,
-    )
-
     result = check_meta_presence(content)
     assert result["passed"] is True
 
@@ -1006,10 +792,6 @@ def test_meta_presence_valid():
 def test_meta_presence_missing_header():
     """Content without header marker fails."""
     content = "# Name: test.py\n# =============================================\n"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.meta_check import (
-        check_meta_presence,
-    )
 
     result = check_meta_presence(content)
     assert result["passed"] is False
@@ -1022,10 +804,6 @@ def test_meta_presence_legacy_header():
         "# =================== META ====================\n"
         "# Name: test.py\n"
         "# =============================================\n"
-    )
-
-    from aipass.seedgo.apps.handlers.aipass_standards.meta_check import (
-        check_meta_presence,
     )
 
     result = check_meta_presence(content)
@@ -1041,10 +819,6 @@ def test_meta_placement_at_top():
     """META block at line 1 passes."""
     content = "# =================== AIPass ====================\nrest of file\n"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.meta_check import (
-        check_meta_placement,
-    )
-
     result = check_meta_placement(content)
     assert result["passed"] is True
 
@@ -1052,10 +826,6 @@ def test_meta_placement_at_top():
 def test_meta_placement_not_at_top():
     """META block not at line 1 fails."""
     content = '"""Docstring first."""\n# =================== AIPass ====================\n'
-
-    from aipass.seedgo.apps.handlers.aipass_standards.meta_check import (
-        check_meta_placement,
-    )
 
     result = check_meta_placement(content)
     assert result["passed"] is False
@@ -1079,10 +849,6 @@ def test_required_fields_all_present():
         "# =============================================\n"
     )
 
-    from aipass.seedgo.apps.handlers.aipass_standards.meta_check import (
-        check_required_fields,
-    )
-
     results = check_required_fields(content, "test.py")
     assert all(r["passed"] for r in results)
 
@@ -1096,10 +862,6 @@ def test_required_fields_missing_version():
         "# Created: 2026-01-01\n"
         "# Modified: 2026-01-01\n"
         "# =============================================\n"
-    )
-
-    from aipass.seedgo.apps.handlers.aipass_standards.meta_check import (
-        check_required_fields,
     )
 
     results = check_required_fields(content, "test.py")
@@ -1120,10 +882,6 @@ def test_required_fields_wrong_name():
         "# =============================================\n"
     )
 
-    from aipass.seedgo.apps.handlers.aipass_standards.meta_check import (
-        check_required_fields,
-    )
-
     results = check_required_fields(content, "test.py")
     name_result = [r for r in results if "Name" in r["name"]]
     assert len(name_result) == 1
@@ -1141,10 +899,6 @@ def test_file_naming_snake_case(tmp_path):
     f = tmp_path / "good_module.py"
     f.write_text("pass", encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_file_naming,
-    )
-
     result = check_file_naming(str(f), f)
     assert result["passed"] is True
 
@@ -1153,10 +907,6 @@ def test_file_naming_bad_case(tmp_path):
     """Uppercase filename fails."""
     f = tmp_path / "BadModule.py"
     f.write_text("pass", encoding="utf-8")
-
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_file_naming,
-    )
 
     result = check_file_naming(str(f), f)
     assert result["passed"] is False
@@ -1170,10 +920,6 @@ def test_file_naming_redundant_prefix(tmp_path):
     f = parent / "audit_ops.py"
     f.write_text("pass", encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_file_naming,
-    )
-
     result = check_file_naming(str(f), f)
     assert result["passed"] is False
     assert "redundant prefix" in result["message"]
@@ -1183,10 +929,6 @@ def test_file_naming_init(tmp_path):
     """__init__.py passes (Python-reserved)."""
     f = tmp_path / "__init__.py"
     f.write_text("", encoding="utf-8")
-
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_file_naming,
-    )
 
     result = check_file_naming(str(f), f)
     assert result["passed"] is True
@@ -1201,10 +943,6 @@ def test_function_naming_all_snake():
     """All snake_case functions pass."""
     content = "def do_work():\n    pass\n\ndef get_data():\n    pass\n"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_function_naming,
-    )
-
     result = check_function_naming(content)
     assert result is not None
     assert result["passed"] is True
@@ -1213,10 +951,6 @@ def test_function_naming_all_snake():
 def test_function_naming_camel_case():
     """CamelCase function fails."""
     content = "def DoWork():\n    pass\n"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_function_naming,
-    )
 
     result = check_function_naming(content)
     assert result is not None
@@ -1228,10 +962,6 @@ def test_function_naming_no_functions():
     """No functions returns None."""
     content = "X = 42\n"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_function_naming,
-    )
-
     result = check_function_naming(content)
     assert result is None
 
@@ -1239,10 +969,6 @@ def test_function_naming_no_functions():
 def test_function_naming_dunder_skipped():
     """Dunder methods are skipped from violation checks but still counted."""
     content = "class Foo:\n    def __init__(self):\n        pass\n"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_function_naming,
-    )
 
     result = check_function_naming(content)
     # __init__ is found but skipped from violation checks, so it passes
@@ -1259,10 +985,6 @@ def test_constant_naming_upper():
     """UPPER_CASE constants pass."""
     content = 'MY_CONST = "hello"\nANOTHER = 42\n'
 
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_constant_naming,
-    )
-
     result = check_constant_naming(content)
     assert result is not None
     assert result["passed"] is True
@@ -1271,10 +993,6 @@ def test_constant_naming_upper():
 def test_constant_naming_lowercase():
     """Lowercase constants fail."""
     content = 'my_const = "hello"\n'
-
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_constant_naming,
-    )
 
     result = check_constant_naming(content)
     assert result is not None
@@ -1285,10 +1003,6 @@ def test_constant_naming_lowercase():
 def test_constant_naming_function_call_ignored():
     """Constants assigned via function call are ignored."""
     content = "logger = logging.getLogger(__name__)\n"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_constant_naming,
-    )
 
     result = check_constant_naming(content)
     # Function call assignment is skipped, no constants to check
@@ -1306,10 +1020,6 @@ def test_constant_naming_exempts_the_pytest_contract_globals():
     of them a conftest going from FAIL to no-verdict, and no file moves from
     pass to fail.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        PYTEST_CONTRACT_GLOBALS,
-        check_constant_naming,
-    )
 
     # Floor: the set itself is the contract, so name it. An empty or shrunken
     # set would make the loop below a silent pass on the exemption it guards.
@@ -1327,7 +1037,7 @@ def test_constant_naming_exempts_the_pytest_contract_globals():
         )
 
 
-def test_the_exemption_is_a_NAMED_SET_and_not_a_lowercase_amnesty():
+def test_the_exemption_is_a_named_set_and_not_a_lowercase_amnesty():
     """The control that keeps the cure narrow.
 
     An exemption that widened to "lowercase module globals in files that look
@@ -1335,9 +1045,6 @@ def test_the_exemption_is_a_NAMED_SET_and_not_a_lowercase_amnesty():
     lowercase global that is NOT in the set still fails, and it fails in the
     same file as an exempt one - which is the arrangement a real conftest has.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_constant_naming,
-    )
 
     result = check_constant_naming('collect_ignore_glob = ["x"]\nmy_helper = 3\n')
     assert result is not None, "the non-contract name was swallowed with the exempt one"
@@ -1354,10 +1061,6 @@ def test_the_real_conftest_that_reported_it_is_no_longer_nominated():
     so rather than passing quietly on a file it never opened.
     """
     from pathlib import Path
-
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_constant_naming,
-    )
 
     conftest = Path(__file__).resolve().parents[2] / "conftest.py"
     if not conftest.is_file():
@@ -1378,10 +1081,6 @@ def test_class_naming_pascal():
     """PascalCase class passes."""
     content = "class MyClass:\n    pass\n"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_class_naming,
-    )
-
     result = check_class_naming(content)
     assert result is not None
     assert result["passed"] is True
@@ -1390,10 +1089,6 @@ def test_class_naming_pascal():
 def test_class_naming_snake():
     """snake_case class fails."""
     content = "class my_class:\n    pass\n"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_class_naming,
-    )
 
     result = check_class_naming(content)
     assert result is not None
@@ -1405,10 +1100,6 @@ def test_class_naming_no_classes():
     """No classes returns None."""
     content = "def do_work():\n    pass\n"
 
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_class_naming,
-    )
-
     result = check_class_naming(content)
     assert result is None
 
@@ -1416,10 +1107,6 @@ def test_class_naming_no_classes():
 def test_class_naming_private_pascal_passes():
     """PEP 8 sanctions a single leading underscore on an internal PascalCase class."""
     content = "class _LivenessState:\n    pass\n"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_class_naming,
-    )
 
     result = check_class_naming(content)
     assert result is not None
@@ -1429,10 +1116,6 @@ def test_class_naming_private_pascal_passes():
 def test_class_naming_private_snake_still_fails():
     """A leading underscore does not excuse a non-PascalCase body."""
     content = "class _foo_bar:\n    pass\n"
-
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
-        check_class_naming,
-    )
 
     result = check_class_naming(content)
     assert result is not None
@@ -1445,7 +1128,7 @@ def test_class_naming_private_snake_still_fails():
 # ===========================================================================
 
 
-def test_no_dangerous_flags_clean():
+def test_no_dangerous_flags_clean(tmp_path):
     """File with only approved permission flags passes."""
     lines: List[str] = [
         '"""Clean module."""',
@@ -1453,35 +1136,25 @@ def test_no_dangerous_flags_clean():
         "",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.permission_flags_check import (
-        check_no_dangerous_flags,
-    )
-
-    result = check_no_dangerous_flags(lines, "/fake/path.py")
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
 
-def test_no_dangerous_flags_violation():
+def test_no_dangerous_flags_violation(tmp_path):
     """File with prohibited permission bypass flag fails."""
-    # seedgo:bypass standard=permission_flags reason="test data for checker validation"
     lines: List[str] = [
         '"""Module."""',
         'cmd = "--dangerously-skip-permissions"',
         "",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.permission_flags_check import (
-        check_no_dangerous_flags,
-    )
-
-    result = check_no_dangerous_flags(lines, "/fake/path.py")
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
     assert "Dangerous" in result["message"]
 
 
-def test_no_dangerous_flags_in_docstring():
+def test_no_dangerous_flags_in_docstring(tmp_path):
     """Prohibited flag inside docstring is ignored."""
-    # seedgo:bypass standard=permission_flags reason="test data for checker validation"
     lines: List[str] = [
         '"""',
         "Use --dangerously-skip-permissions for testing",
@@ -1490,44 +1163,30 @@ def test_no_dangerous_flags_in_docstring():
         "",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.permission_flags_check import (
-        check_no_dangerous_flags,
-    )
-
-    result = check_no_dangerous_flags(lines, "/fake/path.py")
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
 
-def test_no_dangerous_flags_skip_permissions():
+def test_no_dangerous_flags_skip_permissions(tmp_path):
     """File with --skip-permissions fails."""
-    # seedgo:bypass standard=permission_flags reason="test data for checker validation"
     lines: List[str] = [
         '"""Module."""',
         'cmd = "--skip-permissions"',
         "",
     ]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.permission_flags_check import (
-        check_no_dangerous_flags,
-    )
-
-    result = check_no_dangerous_flags(lines, "/fake/path.py")
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
 
 
-def test_no_dangerous_flags_bypass_rule():
+def test_no_dangerous_flags_bypass_rule(tmp_path):
     """Prohibited flag bypassed by rule passes."""
-    # seedgo:bypass standard=permission_flags reason="test data for checker validation"
     lines: List[str] = [
         '"""Module."""',
         'cmd = "--dangerously-skip-permissions"',
         "",
     ]
-    bypass_rules = [{"standard": "permission_flags", "file": "/fake/path.py"}]
+    bypass_rules = [{"standard": "permission_flags", "file": str(tmp_path / "fake/path.py")}]
 
-    from aipass.seedgo.apps.handlers.aipass_standards.permission_flags_check import (
-        check_no_dangerous_flags,
-    )
-
-    result = check_no_dangerous_flags(lines, "/fake/path.py", bypass_rules=bypass_rules)
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"), bypass_rules=bypass_rules)
     assert result["passed"] is True

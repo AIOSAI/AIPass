@@ -1,13 +1,18 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Tests for rm_gate security handler
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-08-14
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for handlers/security/rm_gate.py."""
+"""Tests for apps/handlers/security/rm_gate.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — that the gate's functions carry docstrings
+# seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
+# seedgo: no-test-needed(stdlib) — shlex's tokenising itself; the gate's reading of the tokens is pinned here
 
 import json
 import logging
@@ -169,7 +174,7 @@ class TestClauseHasRawRecursiveRm:
 
 
 class TestHandle:
-    CWD = "/home/patrick/Projects/AIPass/src/aipass/hooks"
+    CWD = str(_BRANCH)
 
     def _bash(self, command: str) -> dict:
         return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.CWD})
@@ -242,7 +247,7 @@ class TestDeletionRecord:
     silently today. This is a RECORD, not a gate - nothing new is blocked.
     """
 
-    CWD = "/home/patrick/Projects/AIPass/src/aipass/hooks"
+    CWD = str(_BRANCH)
 
     def _bash(self, command: str, cwd: str | None = None) -> dict:
         return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd or self.CWD})
@@ -373,7 +378,7 @@ class TestDeletionRecord:
             self._bash('rm "my notes.txt"')
 
         records = self._audit_records(caplog)
-        assert records
+        assert len(records) == 1
         assert 'rm "my notes.txt"' in records[0].getMessage()
 
 
@@ -417,7 +422,54 @@ class TestAllowDenyUnchanged:
                 {
                     "tool_name": "Bash",
                     "tool_input": {"command": command},
-                    "cwd": "/home/patrick/Projects/AIPass/src/aipass/hooks",
+                    "cwd": str(_BRANCH),
                 }
             )
             assert result["exit_code"] == expected, f"decision changed for: {command!r}"
+
+
+class TestOneDeleteSpelledManyWays:
+    """A rename is not a bypass — the owner's go, 2026-09-19 (devpulse DPLAN-0352).
+
+    Measured on this gate BEFORE the cure: every row below was allowed AND
+    unrecorded except the bare lowercase spelling. Two losses in one, and the
+    second is the quiet one — the record is the only trace the unsanctioned lane
+    leaves, so a spelling the gate could not read deleted without a line.
+    """
+
+    CWD = str(Path(__file__).resolve().parent.parent)
+
+    BLOCKED = (
+        "rm.exe -rf /tmp/x",
+        "RM -rf /tmp/x",
+        "Rm -rf /tmp/x",
+        "/usr/bin/rm.exe -rf /tmp/x",
+        "C:\\Windows\\System32\\rm.exe -rf C:\\tmp\\x",
+        "sudo RM.EXE -rf /tmp/x",
+    )
+    ALLOWED = ("rm.exe /tmp/x", "RM /tmp/x", "drone rm /tmp/x", "DRONE rm -rf /tmp/x")
+
+    def _bash(self, command: str) -> dict:
+        return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.CWD})
+
+    def test_every_spelling_of_a_recursive_delete_is_blocked(self):
+        for command in self.BLOCKED:
+            assert self._bash(command)["exit_code"] == 2, f"not refused: {command!r}"
+
+    def test_the_sanctioned_lane_and_plain_deletes_are_unchanged(self):
+        """The cure widens what counts as the verb, never what counts as recursive."""
+        for command in self.ALLOWED:
+            assert self._bash(command)["exit_code"] == 0, f"wrongly refused: {command!r}"
+
+    def test_a_renamed_delete_reaches_the_record(self, caplog):
+        with caplog.at_level(logging.INFO):
+            self._bash("rm.exe notes.txt")
+
+        records = [r for r in caplog.records if "DELETE" in r.getMessage()]
+        assert len(records) == 1
+        assert "rm.exe notes.txt" in records[0].getMessage()
+
+    def test_the_reader_being_away_leaves_the_old_narrow_reading(self):
+        """Fail-safe direction: the bare spelling still refuses, and the log says so."""
+        with patch("aipass.hooks.apps.modules.bash_writes.verb_name", side_effect=RuntimeError("boom")):
+            assert self._bash("rm -rf /tmp/x")["exit_code"] == 2

@@ -1,67 +1,16 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Every drone module imports without a readable working directory
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-28
 # =============================================
 
-"""Drone must import, and must keep logging, with no working directory.
+"""Tests for apps/ and apps/handlers/json/json_handler.py: every drone module imports and logs with no cwd."""
 
-THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
-relayed by @devpulse). ``ntpath.realpath`` calls ``os.getcwd()``
-UNCONDITIONALLY — on its first lines, before it even asks whether the path is
-absolute — where ``posixpath`` only reads the cwd for a relative one. And
-``Path.resolve()`` routes through ``os.path.realpath``. So on Windows every
-module-level ``Path(__file__).resolve()`` is an import-time working-directory
-dependency, and a process whose cwd is gone cannot import the module at all.
-Guarding INSIDE that module's functions changes nothing: the import died before
-any of them existed.
-
-``inspect.stack()`` carries the same defect one layer down and needs a
-different world to convict it. It builds a ``FrameInfo`` per frame, and for a
-frame whose filename is a PSEUDO-file it reaches ``getmodule()``, whose
-``os.path.realpath(f)`` sits outside every ``try`` in that function. On POSIX
-the equivalent raise happens EARLIER, inside ``getabsfile()``, where
-``inspect`` catches it — which is exactly why a call on drone's every-import
-path survived years of Linux CI carrying this.
-
-TWO WORLDS, and @seedgo's asymmetry is why both are here rather than one:
-
-* **World A** emulates ntpath — ``os.path.realpath`` is wrapped to read
-  ``os.getcwd()`` first, then ``os.getcwd`` is denied. This convicts a raw
-  ``resolve()``. It does NOT convict ``inspect.stack()`` on Linux, because
-  ``getabsfile`` raises inside inspect's own catch before ``getmodule`` is
-  reached.
-* **World B** denies ``os.path.realpath`` outright while ``abspath`` keeps
-  working. This is what reaches ``getmodule``'s unguarded call and convicts
-  ``inspect.stack()``.
-
-THIRD INGREDIENT for world B (@hooks): the frame must be ``<string>`` —
-an interpreter ``-c`` or ``compile()`` frame — and NEVER ``<stdin>``. A heredoc-fed
-child puts ``<stdin>`` in ``linecache.cache``, ``getsourcefile`` early-returns,
-and the probe reports green while the same world kills imports for real. Every
-assertion below is preceded by a control that states whether its world is armed,
-so a probe that quietly stopped biting cannot pass itself off as a cure.
-
-WHAT DRONE CARRIED, measured not estimated. Before this build, 63 of 63 drone
-modules died on import in BOTH worlds — every one of them at
-``handlers/__init__.py:57``, the module-level ``_BRANCH_ROOT`` resolve. That
-line MASKED everything under it, which is why the count only became true as
-cures landed: curing the guard took it to 56/63 and revealed
-``json_handler.py:41``, and curing the three module-level sites took it to 0.
-Session 74's inner ``try/except OSError`` around the frame-filename resolve was
-below both crash lines the whole time — decorative, exactly as @trigger and
-@prax found in their own trees.
-
-And one live site that no import probe reaches: ``log_operation`` is the audit
-line drone writes on essentially every operation, and its
-``_get_caller_module_name`` called ``inspect.stack()``. Under world B, called
-across a ``<string>`` frame, it raised ``FileNotFoundError`` — drone's logging
-taking down the caller it was logging for, on the very recovery lane (``drone
-rm`` from a directory that was just deleted) sessions 68 and 77 exist to keep
-alive.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — run-time location-inference sites, pinned in tests/test_no_cwd_sweep.py
+# seedgo: no-test-needed(external) — other branches' import-time code (prax.logger, cli, api), preloaded and held here
 
 import ast
 import subprocess
@@ -69,6 +18,68 @@ import sys
 from pathlib import Path
 
 import pytest
+
+import aipass.drone.apps as drone_apps
+
+# The three skipped names live in conftest (dropbox and .archive: the owner's ruling of
+# 2026-09-27; __pycache__), never imported from seedgo's handlers.
+from .conftest import SANDBOX_DIRS
+
+# Drone must import, and must keep logging, with no working directory.
+#
+# THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
+# relayed by @devpulse). ``ntpath.realpath`` calls ``os.getcwd()``
+# UNCONDITIONALLY — on its first lines, before it even asks whether the path is
+# absolute — where ``posixpath`` only reads the cwd for a relative one. And
+# ``Path.resolve()`` routes through ``os.path.realpath``. So on Windows every
+# module-level ``Path(__file__).resolve()`` is an import-time working-directory
+# dependency, and a process whose cwd is gone cannot import the module at all.
+# Guarding INSIDE that module's functions changes nothing: the import died before
+# any of them existed.
+#
+# ``inspect.stack()`` carries the same defect one layer down and needs a
+# different world to convict it. It builds a ``FrameInfo`` per frame, and for a
+# frame whose filename is a PSEUDO-file it reaches ``getmodule()``, whose
+# ``os.path.realpath(f)`` sits outside every ``try`` in that function. On POSIX
+# the equivalent raise happens EARLIER, inside ``getabsfile()``, where
+# ``inspect`` catches it — which is exactly why a call on drone's every-import
+# path survived years of Linux CI carrying this.
+#
+# TWO WORLDS, and @seedgo's asymmetry is why both are here rather than one:
+#
+# * **World A** emulates ntpath — ``os.path.realpath`` is wrapped to read
+#   ``os.getcwd()`` first, then ``os.getcwd`` is denied. This convicts a raw
+#   ``resolve()``. It does NOT convict ``inspect.stack()`` on Linux, because
+#   ``getabsfile`` raises inside inspect's own catch before ``getmodule`` is
+#   reached.
+# * **World B** denies ``os.path.realpath`` outright while ``abspath`` keeps
+#   working. This is what reaches ``getmodule``'s unguarded call and convicts
+#   ``inspect.stack()``.
+#
+# THIRD INGREDIENT for world B (@hooks): the frame must be ``<string>`` —
+# an interpreter ``-c`` or ``compile()`` frame — and NEVER ``<stdin>``. A heredoc-fed
+# child puts ``<stdin>`` in ``linecache.cache``, ``getsourcefile`` early-returns,
+# and the probe reports green while the same world kills imports for real. Every
+# assertion below is preceded by a control that states whether its world is armed,
+# so a probe that quietly stopped biting cannot pass itself off as a cure.
+#
+# WHAT DRONE CARRIED, measured not estimated. Before this build, 63 of 63 drone
+# modules died on import in BOTH worlds — every one of them at
+# ``handlers/__init__.py:57``, the module-level ``_BRANCH_ROOT`` resolve. That
+# line MASKED everything under it, which is why the count only became true as
+# cures landed: curing the guard took it to 56/63 and revealed
+# ``json_handler.py:41``, and curing the three module-level sites took it to 0.
+# Session 74's inner ``try/except OSError`` around the frame-filename resolve was
+# below both crash lines the whole time — decorative, exactly as @trigger and
+# @prax found in their own trees.
+#
+# And one live site that no import probe reaches: ``log_operation`` is the audit
+# line drone writes on essentially every operation, and its
+# ``_get_caller_module_name`` called ``inspect.stack()``. Under world B, called
+# across a ``<string>`` frame, it raised ``FileNotFoundError`` — drone's logging
+# taking down the caller it was logging for, on the very recovery lane (``drone
+# rm`` from a directory that was just deleted) sessions 68 and 77 exist to keep
+# alive.
 
 # Other branches' import-time code is held CONSTANT: preloaded in the healthy
 # world, before any denial. Their cure is their own build; this file measures
@@ -276,19 +287,17 @@ print("STACK_DIES: " + _ns["out"])
 """
 
 
-def _drone_modules() -> list[str]:
+def _drone_modules(root: Path | None = None) -> list[str]:
     """Every importable module under ``aipass.drone.apps``, by walking the tree.
 
     Named from the filesystem rather than from a hand-written list: the whole
     species this file is about is a fix landing on some of N identical paths,
     and a list in a test is one more place for N to be undercounted.
     """
-    import aipass.drone.apps as drone_apps
-
-    root = Path(drone_apps.__file__).parent
+    root = root or Path(drone_apps.__file__).parent
     names = set()
     for source in sorted(root.rglob("*.py")):
-        if "__pycache__" in source.parts:
+        if SANDBOX_DIRS.intersection(source.relative_to(root).parts):
             continue
         rel = source.relative_to(root).with_suffix("")
         parts = [p for p in rel.parts if p != "__init__"]
@@ -302,6 +311,7 @@ def _run_world(world: str, control: str, body: str) -> subprocess.CompletedProce
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=300,
     )
 
@@ -475,7 +485,9 @@ os.path.realpath = _bare
 
     @staticmethod
     def _run(script: str) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        return subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
 
     def test_a_bare_module_patch_does_not_reach_a_pre_captured_accessor(self):
         """CI's Python 3.10 failure, reproduced here. This is the red-first half.
@@ -682,11 +694,9 @@ class TestNoModuleLevelLocationCallSurvives:
     BANNED_ATTRS = frozenset({"resolve", "cwd", "getcwd", "realpath", "abspath"})
 
     @staticmethod
-    def _apps_sources() -> list[Path]:
-        import aipass.drone.apps as drone_apps
-
-        root = Path(drone_apps.__file__).parent
-        return [p for p in sorted(root.rglob("*.py")) if "__pycache__" not in p.parts]
+    def _apps_sources(root: Path | None = None) -> list[Path]:
+        root = root or Path(drone_apps.__file__).parent
+        return [p for p in sorted(root.rglob("*.py")) if not SANDBOX_DIRS.intersection(p.relative_to(root).parts)]
 
     @staticmethod
     def _module_level_location_calls(tree: ast.Module) -> list[tuple[int, str]]:
@@ -795,3 +805,34 @@ class TestNoModuleLevelLocationCallSurvives:
     def test_the_stack_detector_clears_an_unrelated_stack_attribute(self):
         tree = ast.parse("import numpy\nx = numpy.stack([1, 2])\ntraceback = []\ntraceback.stack()\n")
         assert self._inspect_stack_calls(tree) == [], "the ban is on inspect.stack, not on the word stack"
+
+
+class TestTheSourceWalksSkipADropboxAndAnArchive:
+    """Nothing looks into a dropbox or an .archive (owner ruling): both are
+    sandboxes, so neither walk may import or parse what sits in one."""
+
+    @pytest.fixture()
+    def apps_tree(self, tmp_path: Path) -> Path:
+        apps = tmp_path / "apps"
+        for sandbox in ("dropbox", ".archive"):
+            (apps / "handlers" / sandbox).mkdir(parents=True)
+            (apps / "handlers" / sandbox / "probe.py").write_text("x = 1\n", encoding="utf-8")
+        (apps / "handlers" / "real.py").write_text("x = 1\n", encoding="utf-8")
+        return apps
+
+    def test_the_import_walk_names_no_module_in_a_dropbox_or_an_archive(self, apps_tree: Path) -> None:
+        assert _drone_modules(apps_tree) == ["aipass.drone.apps.handlers.real"]
+
+    def test_the_parse_walk_reads_no_source_in_a_dropbox_or_an_archive(self, apps_tree: Path) -> None:
+        sources = TestNoModuleLevelLocationCallSurvives._apps_sources(apps_tree)
+        assert [p.relative_to(apps_tree).as_posix() for p in sources] == ["handlers/real.py"]
+
+    def test_a_root_that_stands_inside_a_dropbox_is_still_walked(self, tmp_path: Path) -> None:
+        """The skip judges the parts below the walked root, never the whole path: a project
+        living under a directory named dropbox keeps every source. Green from its first run;
+        its proof is that comparing the whole path empties both lists."""
+        apps = tmp_path / "dropbox" / "apps"
+        (apps / "handlers").mkdir(parents=True)
+        (apps / "handlers" / "real.py").write_text("x = 1\n", encoding="utf-8")
+        assert _drone_modules(apps) == ["aipass.drone.apps.handlers.real"]
+        assert TestNoModuleLevelLocationCallSurvives._apps_sources(apps) == [apps / "handlers" / "real.py"]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: executor.py
 # Description: Safe subprocess execution for branch command routing
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-09
-# Modified: 2026-08-27
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -122,6 +122,16 @@ class CommandResult:
     exit_code: int
     branch: str
     command: str
+
+
+def _poll_pause(seconds: float) -> None:
+    """The hang guard's pause between polls: the one place the wait loop yields.
+
+    Named apart from time.sleep because the loop spends nearly all its time
+    here, so this is where Ctrl+C lands, while the reaping that follows
+    (Popen.wait in _stop_process) sleeps on its own and must run to the end.
+    """
+    time.sleep(seconds)
 
 
 def _stop_process(proc: "subprocess.Popen[bytes]") -> None:
@@ -259,7 +269,7 @@ def _capture_with_hang_guard(
                 break
             now = time.monotonic()
             if now < deadline:
-                time.sleep(min(_POLL_INTERVAL, deadline - now))
+                _poll_pause(min(_POLL_INTERVAL, deadline - now))
                 continue
             with lock:
                 quiet_for = now - last_output_at

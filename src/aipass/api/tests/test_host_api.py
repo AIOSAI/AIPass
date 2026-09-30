@@ -3,71 +3,77 @@
 # Description: Tests for the Stage 0 host API — config, bind gate, tokens, auth
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/host/{config,tokens,server}.py and apps/modules/host_api.py.
+"""Tests for apps/modules/host_api.py and apps/handlers/host/{config,tokens,server}.py."""
 
-FPLAN-0411 Phase 1. The two failures that would make everything downstream moot
-are a bind that silently widens and an auth check that honours a revoked token,
-so those carry the most tests.
+# FPLAN-0411 Phase 1. The two failures that would make everything downstream moot
+# are a bind that silently widens and an auth check that honours a revoked token,
+# so those carry the most tests.
+#
+# Tests — handlers/host/config.py (the bind gate, design call D1):
+# - validate_bind: wildcard 0.0.0.0 refused (it binds fine — that is the danger)
+# - validate_bind: IPv6 wildcard :: refused
+# - validate_bind: hostname refused as ambiguous
+# - validate_bind: empty address refused
+# - validate_bind: address this machine does not hold refused, no fallback
+# - validate_bind: non-loopback refused while LOOPBACK_ONLY (Phase 5 gate)
+# - validate_bind: non-loopback message names the review gate
+# - validate_bind: loopback accepted
+# - validate_bind: port out of range refused (0, 65536, non-int, bool)
+# - validate_bind: tailnet-shaped address accepted once LOOPBACK_ONLY is lifted
+# - load_config: defaults when the store is absent
+# - load_config: stored values merge over defaults
+# - load_config: non-dict store falls back to defaults
+# - save_config: round-trips through the store
+#
+# Tests — handlers/host/tokens.py (design call D2):
+# - issue_token: returns a raw value that is NOT in the store
+# - issue_token: store holds a sha256 hash of the raw
+# - issue_token: record carries id, label, scope, created, revoked=False
+# - issue_token: last_used stays null in Phase 1 (reservation, not a write)
+# - issue_token: empty label refused
+# - issue_token: unknown scope refused
+# - issue_token: two tokens are distinct and both verify
+# - verify_token: accepts the issued raw value
+# - verify_token: rejects an unknown value
+# - verify_token: rejects empty and non-string input
+# - verify_token: revoked token rejected with NO restart (store re-read per call)
+# - verify_token: malformed store denies everything rather than admitting one
+# - revoke_token: unknown id returns False
+# - revoke_token: already-revoked id returns False
+# - scope_allows: operate implies read; read does not imply operate
+# - scope_allows: unknown scope allows nothing
+# - store: token file is 0600 (POSIX)
+#
+# Tests — handlers/host/server.py:
+# - create_app: raises with install instructions when the extra is missing
+# - GET /v1/ping: 204, no auth, no body
+# - GET /v1/whoami: 401 with no Authorization header
+# - GET /v1/whoami: 401 with an unknown bearer token
+# - GET /v1/whoami: 200 with a valid read token
+# - GET /v1/whoami: 401 after revocation, same running app
+# - require_scope('operate'): 403 for a read token, 200 for an operate token
+# - errors: every failure carries the {error:{code,message}} envelope
+#
+# Tests — modules/host_api.py:
+# - handle_command: no args prints introspection
+# - handle_command: help flag ANYWHERE explains, never runs (S58/S59 lesson)
+# - handle_command: -h in trailing position explains
+# - handle_command: foreign command passes through
+# - handle_command: unknown subcommand reports, does not raise
+# - issue-token: refuses without --out (no raw secret to stdout, S49 precedent)
+# - issue-token: writes the raw value to a 0600 file
+# - issue-token: missing label refused
+# - serve: BindRefused is reported, server never starts
 
-Tests — handlers/host/config.py (the bind gate, design call D1):
-- validate_bind: wildcard 0.0.0.0 refused (it binds fine — that is the danger)
-- validate_bind: IPv6 wildcard :: refused
-- validate_bind: hostname refused as ambiguous
-- validate_bind: empty address refused
-- validate_bind: address this machine does not hold refused, no fallback
-- validate_bind: non-loopback refused while LOOPBACK_ONLY (Phase 5 gate)
-- validate_bind: non-loopback message names the review gate
-- validate_bind: loopback accepted
-- validate_bind: port out of range refused (0, 65536, non-int, bool)
-- validate_bind: tailnet-shaped address accepted once LOOPBACK_ONLY is lifted
-- load_config: defaults when the store is absent
-- load_config: stored values merge over defaults
-- load_config: non-dict store falls back to defaults
-- save_config: round-trips through the store
-
-Tests — handlers/host/tokens.py (design call D2):
-- issue_token: returns a raw value that is NOT in the store
-- issue_token: store holds a sha256 hash of the raw
-- issue_token: record carries id, label, scope, created, revoked=False
-- issue_token: last_used stays null in Phase 1 (reservation, not a write)
-- issue_token: empty label refused
-- issue_token: unknown scope refused
-- issue_token: two tokens are distinct and both verify
-- verify_token: accepts the issued raw value
-- verify_token: rejects an unknown value
-- verify_token: rejects empty and non-string input
-- verify_token: revoked token rejected with NO restart (store re-read per call)
-- verify_token: malformed store denies everything rather than admitting one
-- revoke_token: unknown id returns False
-- revoke_token: already-revoked id returns False
-- scope_allows: operate implies read; read does not imply operate
-- scope_allows: unknown scope allows nothing
-- store: token file is 0600 (POSIX)
-
-Tests — handlers/host/server.py:
-- create_app: raises with install instructions when the extra is missing
-- GET /v1/ping: 204, no auth, no body
-- GET /v1/whoami: 401 with no Authorization header
-- GET /v1/whoami: 401 with an unknown bearer token
-- GET /v1/whoami: 200 with a valid read token
-- GET /v1/whoami: 401 after revocation, same running app
-- require_scope('operate'): 403 for a read token, 200 for an operate token
-- errors: every failure carries the {error:{code,message}} envelope
-
-Tests — modules/host_api.py:
-- handle_command: no args prints introspection
-- handle_command: help flag ANYWHERE explains, never runs (S58/S59 lesson)
-- handle_command: -h in trailing position explains
-- handle_command: foreign command passes through
-- handle_command: unknown subcommand reports, does not raise
-- issue-token: refuses without --out (no raw secret to stdout, S49 precedent)
-- issue-token: writes the raw value to a 0600 file
-- issue-token: missing label refused
-- serve: BindRefused is reported, server never starts
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
+# seedgo: no-test-needed(constant) — print_help() and print_introspection() display text beyond the names asserted
+# seedgo: no-test-needed(windows_compat) — the 0o600 token file mode on Windows; the POSIX tests carry a skipif
+# seedgo: no-test-needed(duplicate_test) — the face lane in depth, covered by tests/test_host_face.py
+# seedgo: no-test-needed(duplicate_test) — the lifetime and fleet lanes in depth, tests/test_host_lifetime.py
 
 import json
 import os
@@ -951,7 +957,7 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
         api, read_raw, _ = routed
         owned = {"model": "opus", "outputStyle": None, "statusLine": None}
 
-        with patch.object(host_server.host_reads, "resolve_branch_root"):
+        with patch.object(host_server.host_reads, "resolve_branch_root") as resolver:
             with patch.object(host_server.host_settings, "read_agent_settings", return_value=owned) as reader:
                 response = api.get(
                     "/v1/agent-settings",
@@ -961,7 +967,8 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
 
         assert response.status_code == 200
         assert response.json() == owned
-        reader.assert_called_once()
+        resolver.assert_called_once_with("demo")
+        reader.assert_called_once_with(resolver.return_value)
 
     def test_agent_settings_refuses_a_patch_that_is_not_an_object(self, routed: Any) -> None:
         """
@@ -987,25 +994,27 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
         api, read_raw, _ = routed
         document = {"theme": "dark", "fontSize": 14}
 
-        with patch.object(host_server.host_reads, "repo_root"):
+        with patch.object(host_server.host_reads, "repo_root") as root:
             with patch.object(host_server.host_settings, "read_baud_settings", return_value=document) as reader:
                 response = api.get("/v1/baud-settings", headers={"Authorization": f"Bearer {read_raw}"})
 
         assert response.status_code == 200
         assert response.json() == document
-        reader.assert_called_once()
+        root.assert_called_once_with()
+        reader.assert_called_once_with(root.return_value)
 
     def test_baud_settings_answers_503_when_the_document_cannot_be_read(self, routed: Any) -> None:
         """A SettingsUnavailable becomes 503, not a 500 traceback at the phone."""
         api, read_raw, _ = routed
         broken = host_settings.SettingsUnavailable("the settings file is not readable")
 
-        with patch.object(host_server.host_reads, "repo_root"):
-            with patch.object(host_server.host_settings, "read_baud_settings", side_effect=broken):
+        with patch.object(host_server.host_reads, "repo_root") as root:
+            with patch.object(host_server.host_settings, "read_baud_settings", side_effect=broken) as reader:
                 response = api.get("/v1/baud-settings", headers={"Authorization": f"Bearer {read_raw}"})
 
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "settings_unavailable"
+        reader.assert_called_once_with(root.return_value)
 
     def test_hooks_sound_reads_the_live_flag_through_the_route(self, routed: Any) -> None:
         """GET /v1/hooks-sound answers 200 and reports the flag as a bool."""
@@ -1036,17 +1045,30 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
         assert response.status_code == 400
         assert response.json()["error"]["code"] == "settings_refused"
 
-    def test_projects_answers_the_census_through_the_route(self, routed: Any) -> None:
-        """GET /v1/projects answers 200 with @baud's project census."""
+    def test_projects_answers_the_census_through_the_route(self, routed: Any, tmp_path: Path) -> None:
+        """
+        GET /v1/projects answers 200 with @baud's project census.
+
+        list_projects runs for real; only its far side is stubbed — the binary
+        lookup, the repo root, and the exec itself, which records its argv.
+        """
         api, read_raw, _ = routed
         census = {"projects": [{"name": "AIPass", "path": "/somewhere"}]}
+        answered = host_fleet.subprocess.CompletedProcess(["baud"], 0, stdout=json.dumps(census), stderr="")
 
-        with patch.object(host_server.host_fleet, "list_projects", return_value=census) as lister:
+        with (
+            patch.object(host_fleet, "snapshot_binary", return_value="baud"),
+            patch.object(host_fleet, "repo_root", return_value=tmp_path),
+            patch.object(host_fleet, "json_handler") as journal,
+            patch.object(host_fleet.subprocess, "run", return_value=answered) as run,
+        ):
             response = api.get("/v1/projects", headers={"Authorization": f"Bearer {read_raw}"})
 
         assert response.status_code == 200
         assert response.json() == census
-        lister.assert_called_once()
+        assert run.call_args.args[0] == ["baud", "--list-projects"]
+        assert run.call_args.kwargs["cwd"] == str(tmp_path)
+        journal.log_operation.assert_called_once_with("host_api_project_census", {"projects": 1})
 
     def test_projects_answers_503_when_the_fleet_binary_is_unreachable(self, routed: Any) -> None:
         """
@@ -1486,7 +1508,9 @@ class TestDetachStatusAndStop:
         """
         handle_command("host-api", ["serv"])
 
-        quiet_module["error"].assert_called_once()
+        quiet_module["error"].assert_called_once_with(
+            "Unknown host-api subcommand: serv", suggestion="Run 'drone @api host-api --help' for available subcommands"
+        )
 
     def test_host_serve_declines_commands_that_are_not_host_api(self) -> None:
         """It answers for `host-api` subcommands and nothing else."""
@@ -1577,7 +1601,9 @@ class TestDetachStatusAndStop:
         printed = _printed(quiet_module["console"].print)
         printed += _printed(quiet_module["error"])
 
-        quiet_module["error"].assert_called()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [
+            ("Cannot tell — the supervisor did not answer",)
+        ]
         assert "did not answer" in printed
         assert "No server is running" not in printed
 
@@ -1600,7 +1626,7 @@ class TestDetachStatusAndStop:
 
         handle_command("host-api", ["stop"])
 
-        quiet_module["error"].assert_called_once()
+        quiet_module["error"].assert_called_once_with("did not exit within 10.0s")
 
 
 @pytest.fixture
@@ -1703,7 +1729,9 @@ class TestServeCommand:
         with patch.object(host_server, "is_available", return_value=False):
             handle_command("host-api", ["serve"])
 
-        quiet_module["error"].assert_called_once()
+        quiet_module["error"].assert_called_once_with(
+            "Server libraries not installed", suggestion=host_server.INSTALL_HINT
+        )
 
 
 class TestSetConfigCommand:
@@ -1731,7 +1759,7 @@ class TestSetConfigCommand:
         """A set command with nothing to set is a mistake, not a no-op."""
         handle_command("host-api", ["set-config"])
 
-        quiet_module["error"].assert_called_once()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [("Nothing to set",)]
 
     def test_non_numeric_port_refused(self, store: Path, quiet_module: dict) -> None:
         """A bad port never reaches the store."""
@@ -1767,7 +1795,9 @@ class TestSetConfigCommand:
         with patch(PATCH_CONFIG_LOGGER):
             handle_command("host-api", ["set-config", "--face-dir", str(tmp_path / "never-built")])
 
-        quiet_module["error"].assert_called_once()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [
+            ("Refusing to store a face dir that would not serve",)
+        ]
         assert "not a directory" in str(quiet_module["error"].call_args)
         assert host_config.face_dir() is None
 
@@ -1786,7 +1816,9 @@ class TestSetConfigCommand:
         with patch(PATCH_CONFIG_LOGGER):
             handle_command("host-api", ["set-config", "--host", "0.0.0.0", "--face-dir", str(bundle)])
 
-        quiet_module["error"].assert_called_once()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [
+            ("Refusing to store a bind that would not start",)
+        ]
         assert host_config.face_dir() is None
 
     def test_bind_and_face_dir_together_keep_both(self, store: Path, quiet_module: dict, tmp_path: Path) -> None:
@@ -1859,7 +1891,9 @@ class TestSetConfigCommand:
         with patch(PATCH_CONFIG_LOGGER):
             handle_command("host-api", ["set-config", "--baud-bin", str(tmp_path / "never-installed")])
 
-        quiet_module["error"].assert_called_once()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [
+            ("Refusing to store a baud binary that would not run",)
+        ]
         assert "does not exist" in str(quiet_module["error"].call_args)
         assert host_config.baud_bin() is None
 
@@ -1880,7 +1914,9 @@ class TestSetConfigCommand:
                 ["set-config", "--face-dir", str(bundle), "--baud-bin", str(tmp_path / "never-installed")],
             )
 
-        quiet_module["error"].assert_called_once()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [
+            ("Refusing to store a baud binary that would not run",)
+        ]
         assert host_config.face_dir() is None
         assert host_config.baud_bin() is None
 
@@ -1945,7 +1981,7 @@ class TestIntrospection:
             host_config.save_config({"host": TAILNET_SHAPED, "port": 8787})
             handle_command("host-api", ["config"])
 
-        quiet_module["warning"].assert_called_once()
+        quiet_module["warning"].assert_called_once_with("Bind address would be REFUSED")
 
     def test_help_does_not_claim_loopback_only_while_the_gate_is_open(self) -> None:
         """

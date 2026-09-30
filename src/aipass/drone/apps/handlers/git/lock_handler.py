@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_handler.py
 # Description: Atomic lock management for git PR workflow
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-17
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -146,6 +146,18 @@ def find_repo_root() -> Path:
     return cwd
 
 
+def _create_exclusive(path: str) -> int:
+    """Create the lock file exclusively and return its open fd.
+
+    O_CREAT | O_EXCL is the whole atomicity of the PR lock: of two acquirers,
+    the OS lets exactly one create the file. It stands alone because this one
+    create is where platforms answer differently - Windows answers a lock that
+    another process is mid-removing (delete pending) with PermissionError, not
+    FileExistsError - and acquire_lock's answer to each is what every PR relies on.
+    """
+    return os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+
+
 def acquire_lock(branch_name: str) -> dict:
     """Acquire an atomic lock for git PR workflow.
 
@@ -169,7 +181,7 @@ def acquire_lock(branch_name: str) -> dict:
     }
 
     try:
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        fd = _create_exclusive(str(lock_path))
         try:
             os.write(fd, json.dumps(lock_data, indent=2).encode("utf-8"))
         finally:

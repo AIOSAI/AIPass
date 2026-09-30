@@ -1,12 +1,16 @@
 # =================== AIPass ====================
 # Name: test_repair.py
 # Description: Tests for repair handler — move, registry path update, pollution cleanup
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-05-15
-# Modified: 2026-05-15
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for repair handler — move_branch, update_registry_path, pollution cleanup."""
+"""Tests for apps/handlers/repair_ops.py — move_branch, update_registry_path, pollution cleanup."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in apps/handlers/ and apps/modules/ parses and imports
+# seedgo: no-test-needed(documentation) — that move_branch, detect_pollution and repair_project carry docstrings
 
 import json
 import shutil
@@ -14,6 +18,25 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from aipass.spawn.apps.handlers import repair_ops
+from aipass.spawn.apps.handlers.class_registry import get_template_dir
+from aipass.spawn.apps.handlers.delete_ops import ARCHIVE_EXCLUDE as delete_ops_archive_exclude
+from aipass.spawn.apps.handlers.delete_ops import delete_branch
+from aipass.spawn.apps.handlers.registry import is_protected
+from aipass.spawn.apps.handlers.repair_ops import (
+    ARCHIVE_EXCLUDE,
+    cleanup_pollution,
+    detect_pollution,
+    move_branch,
+    repair_project,
+    update_registry_path,
+)
+from aipass.spawn.apps.modules.repair import handle_repair
+from aipass.spawn.apps.spawn import main
+
+# Also exercises apps/spawn.py's CLI routing into the repair module, and the shared
+# ARCHIVE_EXCLUDE / is_protected helpers repair_ops and delete_ops both draw on.
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +93,21 @@ def _make_project(tmp_path, project_name="testproj", branches=None):
     return project, registry_path
 
 
+def _empty_registry(project):
+    """Give a tmp project a registry of its own, with no branches.
+
+    Without one, ``is_protected`` falls back to ``find_registry()``, which walks
+    up to the LIVE fleet registry — a pollution test must answer from its own
+    tmp_path, never from the machine it runs on.
+    """
+    reg = project / f"{project.name.upper()}_REGISTRY.json"
+    reg.write_text(
+        json.dumps({"metadata": {"version": "1.0.0", "total_branches": 0}, "branches": []}),
+        encoding="utf-8",
+    )
+    return reg
+
+
 # ---------------------------------------------------------------------------
 # update_registry_path
 # ---------------------------------------------------------------------------
@@ -80,13 +118,12 @@ class TestUpdateRegistryPath:
 
     def test_updates_path_preserves_fields(self, tmp_path):
         """Path updated, creation date and name preserved."""
-        from aipass.spawn.apps.handlers.repair_ops import update_registry_path
 
         _project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         result = update_registry_path(reg, "NAV", "src/compass/navigator")
 
         assert result is True
-        data = json.loads(reg.read_text())
+        data = json.loads(reg.read_text(encoding="utf-8"))
         entry = data["branches"][0]
         assert entry["path"] == "src/compass/navigator"
         assert entry["created"] == "2026-01-01"
@@ -94,7 +131,6 @@ class TestUpdateRegistryPath:
 
     def test_not_found_returns_false(self, tmp_path):
         """Unknown branch returns False."""
-        from aipass.spawn.apps.handlers.repair_ops import update_registry_path
 
         _project, reg = _make_project(tmp_path, branches=[])
         result = update_registry_path(reg, "GHOST", "somewhere")
@@ -102,12 +138,11 @@ class TestUpdateRegistryPath:
 
     def test_case_insensitive_match(self, tmp_path):
         """Lowercase name matches uppercase registry entry."""
-        from aipass.spawn.apps.handlers.repair_ops import update_registry_path
 
         _project, reg = _make_project(tmp_path, branches=[{"name": "POLY", "path": "polyglot"}])
         result = update_registry_path(reg, "poly", "src/aipl/polyglot")
         assert result is True
-        data = json.loads(reg.read_text())
+        data = json.loads(reg.read_text(encoding="utf-8"))
         assert data["branches"][0]["path"] == "src/aipl/polyglot"
 
 
@@ -121,7 +156,6 @@ class TestMoveBranch:
 
     def test_moves_dir_updates_registry_and_passport(self, tmp_path):
         """Full move: directory relocated, registry path updated, passport paths updated."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         result = move_branch("NAV", "src/compass/navigator", registry_path=reg)
@@ -133,31 +167,29 @@ class TestMoveBranch:
         assert not (project / "navigator").exists()
         assert (project / "src" / "compass" / "navigator").is_dir()
 
-        data = json.loads(reg.read_text())
+        data = json.loads(reg.read_text(encoding="utf-8"))
         assert data["branches"][0]["path"] == "src/compass/navigator"
 
         passport_path = project / "src" / "compass" / "navigator" / ".trinity" / "passport.json"
-        passport = json.loads(passport_path.read_text())
+        passport = json.loads(passport_path.read_text(encoding="utf-8"))
         assert passport["branch_info"]["path"] == "src/compass/navigator"
 
     def test_creates_archive(self, tmp_path):
         """Archive created before move contains original files."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         marker = project / "navigator" / "test_file.txt"
-        marker.write_text("hello")
+        marker.write_text("hello", encoding="utf-8")
 
         result = move_branch("NAV", "src/compass/navigator", registry_path=reg)
         assert result["success"] is True
 
         archive_dir = Path(result["archive_path"])
         assert archive_dir.is_dir()
-        assert (archive_dir / "test_file.txt").read_text() == "hello"
+        assert (archive_dir / "test_file.txt").read_text(encoding="utf-8") == "hello"
 
     def test_dry_run_no_changes(self, tmp_path):
         """Dry run reports actions but makes no filesystem or registry changes."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         result = move_branch("NAV", "src/compass/navigator", registry_path=reg, dry_run=True)
@@ -167,12 +199,11 @@ class TestMoveBranch:
         assert len(result["actions"]) > 0
 
         assert (project / "navigator").is_dir()
-        data = json.loads(reg.read_text())
+        data = json.loads(reg.read_text(encoding="utf-8"))
         assert data["branches"][0]["path"] == "navigator"
 
     def test_source_missing_fails(self, tmp_path):
         """Fails when source directory does not exist on disk."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         shutil.rmtree(project / "navigator")
@@ -183,7 +214,6 @@ class TestMoveBranch:
 
     def test_target_exists_fails(self, tmp_path):
         """Fails when target directory already exists."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         (project / "src" / "compass" / "navigator").mkdir(parents=True)
@@ -194,7 +224,6 @@ class TestMoveBranch:
 
     def test_branch_not_in_registry(self, tmp_path):
         """Fails for branch name not found in registry."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         _project, reg = _make_project(tmp_path, branches=[])
         result = move_branch("GHOST", "somewhere", registry_path=reg)
@@ -203,12 +232,67 @@ class TestMoveBranch:
 
     def test_outside_project_root_fails(self, tmp_path):
         """Fails when target path escapes project root."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         _project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         result = move_branch("NAV", str(tmp_path / "escape_attempt"), registry_path=reg)
         assert result["success"] is False
         assert "outside project root" in result["error"]
+
+    def test_an_unreadable_passport_is_reported_as_a_failure_not_a_skip(self, tmp_path):
+        """A passport that exists but cannot be read is a failure, and says so.
+
+        False used to stand for both "no passport to update" and "the update
+        failed"; spawn's decision (DPLAN-0354 leg 3) is that a failure raises in
+        the helper and move_branch reports it under ``passport_error``.
+        Mutant: the helper answers False for an unreadable passport -> red.
+        """
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / "navigator" / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+
+        result = move_branch("NAV", "src/compass/navigator", registry_path=reg)
+
+        passport = (project / "src" / "compass" / "navigator").resolve() / ".trinity" / "passport.json"
+        assert result["success"] is True
+        assert result["passport_updated"] is False
+        assert result["passport_error"] == f"passport at {passport} could not be read"
+
+    def test_a_passport_that_cannot_be_written_is_reported_as_a_failure(self, tmp_path):
+        """The json writer answering False, where repair_ops binds it, lands in passport_error.
+
+        Mutant: the helper answers False for a failed write -> red.
+        """
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        passport = (project / "src" / "compass" / "navigator").resolve() / ".trinity" / "passport.json"
+        real_write = repair_ops.json_handler.write_json
+        refused: list[Path] = []
+
+        def refuse_the_passport(path, data):
+            """The registry write goes through the same shim and stays real."""
+            if Path(path) == passport:
+                refused.append(Path(path))
+                return False
+            return real_write(path, data)
+
+        with patch.object(repair_ops.json_handler, "write_json", side_effect=refuse_the_passport):
+            result = move_branch("NAV", "src/compass/navigator", registry_path=reg)
+
+        assert refused == [passport]
+        assert result["success"] is True
+        assert result["passport_updated"] is False
+        assert result["passport_error"] == f"passport at {passport} could not be written"
+
+    def test_a_missing_passport_is_a_skip_with_no_error(self, tmp_path):
+        """No passport at all is the skip: False, and no error beside it."""
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / "navigator" / ".trinity" / "passport.json").unlink()
+
+        result = move_branch("NAV", "src/compass/navigator", registry_path=reg)
+
+        assert result["passport_updated"] is False
+        assert result["passport_error"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -221,11 +305,11 @@ class TestDetectPollution:
 
     def test_finds_root_duplicate(self, tmp_path):
         """Detects project_name/project_name/ at root level."""
-        from aipass.spawn.apps.handlers.repair_ops import detect_pollution
 
         project = tmp_path / "compass"
         project.mkdir()
         (project / "compass").mkdir()
+        _empty_registry(project)
 
         issues = detect_pollution(project)
         assert len(issues) == 1
@@ -234,11 +318,11 @@ class TestDetectPollution:
 
     def test_finds_src_duplicate(self, tmp_path):
         """Detects src/pkg/pkg/ duplication."""
-        from aipass.spawn.apps.handlers.repair_ops import detect_pollution
 
         project = tmp_path / "myproj"
         project.mkdir()
         (project / "src" / "mypkg" / "mypkg").mkdir(parents=True)
+        _empty_registry(project)
 
         issues = detect_pollution(project)
         assert len(issues) == 1
@@ -246,7 +330,6 @@ class TestDetectPollution:
 
     def test_clean_project_no_issues(self, tmp_path):
         """Clean project returns empty issues list."""
-        from aipass.spawn.apps.handlers.repair_ops import detect_pollution
 
         project = tmp_path / "clean"
         project.mkdir()
@@ -266,13 +349,13 @@ class TestCleanupPollution:
 
     def test_archives_and_removes(self, tmp_path):
         """Pollution dir archived then removed from filesystem."""
-        from aipass.spawn.apps.handlers.repair_ops import cleanup_pollution
 
         project = tmp_path / "compass"
         project.mkdir()
         dup = project / "compass"
         dup.mkdir()
-        (dup / "junk.txt").write_text("pollution")
+        (dup / "junk.txt").write_text("pollution", encoding="utf-8")
+        _empty_registry(project)
 
         result = cleanup_pollution(project)
         assert result["success"] is True
@@ -283,12 +366,12 @@ class TestCleanupPollution:
 
     def test_dry_run_no_changes(self, tmp_path):
         """Dry run reports issues but leaves filesystem unchanged."""
-        from aipass.spawn.apps.handlers.repair_ops import cleanup_pollution
 
         project = tmp_path / "compass"
         project.mkdir()
         dup = project / "compass"
         dup.mkdir()
+        _empty_registry(project)
 
         result = cleanup_pollution(project, dry_run=True)
         assert result["success"] is True
@@ -298,7 +381,6 @@ class TestCleanupPollution:
 
     def test_no_pollution_returns_empty(self, tmp_path):
         """Clean project returns zero issues."""
-        from aipass.spawn.apps.handlers.repair_ops import cleanup_pollution
 
         project = tmp_path / "clean"
         project.mkdir()
@@ -318,7 +400,6 @@ class TestRepairProject:
 
     def test_detects_pollution_and_mismatches(self, tmp_path):
         """Finds both pollution and registry mismatches in one scan."""
-        from aipass.spawn.apps.handlers.repair_ops import repair_project
 
         project, _reg = _make_project(
             tmp_path,
@@ -336,7 +417,6 @@ class TestRepairProject:
 
     def test_clean_project_no_issues(self, tmp_path):
         """Clean project reports zero issues."""
-        from aipass.spawn.apps.handlers.repair_ops import repair_project
 
         project, _reg = _make_project(tmp_path, branches=[{"name": "AGENT", "path": "agent"}])
         result = repair_project(project)
@@ -345,7 +425,6 @@ class TestRepairProject:
 
     def test_no_registry_fails(self, tmp_path):
         """Fails when no *_REGISTRY.json found."""
-        from aipass.spawn.apps.handlers.repair_ops import repair_project
 
         project = tmp_path / "empty"
         project.mkdir()
@@ -356,7 +435,6 @@ class TestRepairProject:
 
     def test_nonexistent_path_fails(self, tmp_path):
         """Fails when project path does not exist."""
-        from aipass.spawn.apps.handlers.repair_ops import repair_project
 
         result = repair_project(tmp_path / "does_not_exist")
         assert result["success"] is False
@@ -373,7 +451,6 @@ class TestRepairCLI:
 
     def test_repair_command_routes(self):
         """Verify spawn.py routes 'repair' to repair module."""
-        from aipass.spawn.apps.spawn import main
 
         with patch("sys.argv", ["spawn", "repair", "--help"]):
             result = main()
@@ -381,17 +458,100 @@ class TestRepairCLI:
 
     def test_handle_repair_help(self):
         """--help returns exit code 0."""
-        from aipass.spawn.apps.modules.repair import handle_repair
 
         result = handle_repair(["--help"])
         assert result == 0
 
     def test_handle_repair_no_args(self):
         """No args returns exit code 1."""
-        from aipass.spawn.apps.modules.repair import handle_repair
 
         result = handle_repair([])
         assert result == 1
+
+    def test_relocate_flag_moves_the_branch(self, tmp_path, monkeypatch):
+        """--relocate, through handle_repair, moves the branch and rewrites its registry path.
+
+        The world is tmp_path: its own registry, the cwd there, repair_ops's
+        find_registry pointed at it, the operations log redirected by conftest.
+        Mutant: the --relocate check never matches (the args fall to the scan) -> red.
+        """
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        monkeypatch.chdir(project)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: reg)
+
+        assert handle_repair(["--relocate", "@nav", "src/compass/navigator", "--apply"]) == 0
+
+        assert not (project / "navigator").exists()
+        assert (project / "src" / "compass" / "navigator").is_dir()
+        assert json.loads(reg.read_text(encoding="utf-8"))["branches"][0]["path"] == "src/compass/navigator"
+
+    def test_relocate_artifacts_flag_moves_chroma_into_the_branch(self, tmp_path, monkeypatch):
+        """--relocate-artifacts, through handle_repair, carries the root .chroma/ into the branch.
+
+        Mutant: --relocate-artifacts ignored (relocate_artifacts = False) -> red.
+        """
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / ".chroma").mkdir()
+        monkeypatch.chdir(project)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: reg)
+
+        args = ["--relocate", "@nav", "src/compass/navigator", "--relocate-artifacts", "--apply"]
+        assert handle_repair(args) == 0
+
+        assert not (project / ".chroma").exists()
+        assert (project / "src" / "compass" / "navigator" / ".chroma").is_dir()
+
+    def test_relocate_warns_on_screen_when_the_passport_is_not_updated(self, tmp_path, monkeypatch, capsys):
+        """A passport the move could not update is named on screen, and the exit stays 0.
+
+        Mutant: the passport warning line removed from the repair command -> red.
+        """
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / "navigator" / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        monkeypatch.chdir(project)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: reg)
+
+        assert handle_repair(["--relocate", "@nav", "src/compass/navigator", "--apply"]) == 0
+
+        assert "Passport not updated: passport at " in capsys.readouterr().err
+
+    def test_relocate_warns_on_screen_when_chroma_is_not_moved(self, tmp_path, monkeypatch, capsys):
+        """A .chroma move that failed is named on screen with its error.
+
+        Mutant: the .chroma warning line removed from the repair command -> red.
+        """
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / ".chroma").mkdir()
+        monkeypatch.chdir(project)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: reg)
+
+        args = ["--relocate", "@nav", "src/compass/navigator", "--relocate-artifacts", "--apply"]
+        with patch.object(repair_ops, "_move_chroma", side_effect=OSError("device is full")):
+            assert handle_repair(args) == 0
+
+        assert ".chroma not relocated: device is full" in capsys.readouterr().err
+
+    def test_clean_pollution_flag_archives_the_duplicate(self, tmp_path, monkeypatch):
+        """--clean-pollution, through handle_repair, archives and removes the nested duplicate.
+
+        The project carries its own empty registry and the product hands it on:
+        repair_ops finds it in the project and passes it to is_protected, so no
+        lookup of the live registry is ever made.
+        Mutant: the --clean-pollution check never matches (the args fall to the
+        read-only scan) -> red.
+        """
+        project = tmp_path / "polluted"
+        (project / "polluted").mkdir(parents=True)
+        (project / "polluted" / "junk.txt").write_text("dup", encoding="utf-8")
+        _empty_registry(project)
+        monkeypatch.chdir(project)
+
+        assert handle_repair([str(project), "--clean-pollution", "--apply"]) == 0
+
+        assert not (project / "polluted").exists()
+        archived = list((project / ".archive" / "pollution").iterdir())
+        assert len(archived) == 1
+        assert (archived[0] / "junk.txt").read_text(encoding="utf-8") == "dup"
 
 
 # ---------------------------------------------------------------------------
@@ -404,23 +564,23 @@ class TestChromaRelocation:
 
     def test_relocates_chroma_single_branch(self, tmp_path):
         """Moves .chroma/ into branch dir when only 1 branch in registry."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         chroma = project / ".chroma"
         chroma.mkdir()
-        (chroma / "data.bin").write_text("vectors")
+        (chroma / "data.bin").write_text("vectors", encoding="utf-8")
 
         result = move_branch("NAV", "src/compass/navigator", registry_path=reg, relocate_artifacts=True)
 
         assert result["success"] is True
         assert result["chroma_relocated"] is True
         assert not chroma.exists()
-        assert (project / "src" / "compass" / "navigator" / ".chroma" / "data.bin").read_text() == "vectors"
+        assert (project / "src" / "compass" / "navigator" / ".chroma" / "data.bin").read_text(
+            encoding="utf-8"
+        ) == "vectors"
 
     def test_skips_chroma_multiple_branches(self, tmp_path):
         """Does not relocate .chroma/ when more than 1 branch exists."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         project, reg = _make_project(
             tmp_path,
@@ -440,7 +600,6 @@ class TestChromaRelocation:
 
     def test_skips_when_no_chroma(self, tmp_path):
         """Does not fail when .chroma/ does not exist at project root."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         _project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         result = move_branch("NAV", "src/compass/navigator", registry_path=reg, relocate_artifacts=True)
@@ -450,7 +609,6 @@ class TestChromaRelocation:
 
     def test_skips_when_chroma_already_in_branch(self, tmp_path):
         """Does not overwrite existing .chroma/ inside the branch."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         (project / ".chroma").mkdir()
@@ -463,7 +621,6 @@ class TestChromaRelocation:
 
     def test_no_relocation_without_flag(self, tmp_path):
         """Default relocate_artifacts=False leaves .chroma/ in place."""
-        from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
         (project / ".chroma").mkdir()
@@ -473,6 +630,42 @@ class TestChromaRelocation:
         assert result["success"] is True
         assert result.get("chroma_relocated") is False
         assert (project / ".chroma").exists()
+
+    def test_a_failed_chroma_move_is_reported_as_a_failure_not_a_skip(self, tmp_path):
+        """A .chroma move that raises is named under chroma_error, never a bare False.
+
+        spawn's decision (DPLAN-0354 leg 3): the helper raises on failure and
+        move_branch records it; False is left meaning "skipped" only.
+        Mutant: the helper swallows the move error and answers False -> red.
+        """
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / ".chroma").mkdir()
+
+        with patch.object(repair_ops, "_move_chroma", side_effect=OSError("device is full")) as move:
+            result = move_branch("NAV", "src/compass/navigator", registry_path=reg, relocate_artifacts=True)
+
+        move.assert_called_once_with(
+            str(project / ".chroma"), str((project / "src" / "compass" / "navigator").resolve() / ".chroma")
+        )
+        assert result["success"] is True
+        assert result["chroma_relocated"] is False
+        assert result["chroma_error"] == "device is full"
+        assert (project / ".chroma").is_dir()
+
+    def test_a_skipped_chroma_move_carries_no_error(self, tmp_path):
+        """More than one branch is a skip: False, and chroma_error stays None."""
+
+        project, reg = _make_project(
+            tmp_path,
+            branches=[{"name": "NAV", "path": "navigator"}, {"name": "LOG", "path": "logger"}],
+        )
+        (project / ".chroma").mkdir()
+
+        result = move_branch("NAV", "src/compass/navigator", registry_path=reg, relocate_artifacts=True)
+
+        assert result["chroma_relocated"] is False
+        assert result["chroma_error"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +678,6 @@ class TestIsProtected:
 
     def test_hardcoded_floor_spawn(self, tmp_path):
         """spawn is protected by the hardcoded floor."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
         protected, reason = is_protected("spawn")
         assert protected is True
@@ -493,19 +685,17 @@ class TestIsProtected:
 
     def test_hardcoded_floor_case_insensitive(self, tmp_path):
         """Floor check is case-insensitive."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
         protected, _reason = is_protected("DEVPULSE")
         assert protected is True
 
     def test_registry_owner_protected(self, tmp_path):
         """Branch with owner:true in registry is protected."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
         project, reg = _make_project(tmp_path, branches=[{"name": "MYOWNER", "path": "myowner"}])
-        reg_data = json.loads(reg.read_text())
+        reg_data = json.loads(reg.read_text(encoding="utf-8"))
         reg_data["branches"][0]["owner"] = True
-        reg.write_text(json.dumps(reg_data))
+        reg.write_text(json.dumps(reg_data), encoding="utf-8")
 
         protected, reason = is_protected("myowner", registry_path=reg)
         assert protected is True
@@ -513,7 +703,6 @@ class TestIsProtected:
 
     def test_active_passport_protected(self, tmp_path):
         """Branch with citizenship.registered=True passport is protected."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
         project, reg = _make_project(tmp_path, branches=[{"name": "CITIZEN", "path": "citizen"}])
         protected, reason = is_protected("citizen", registry_path=reg)
@@ -522,7 +711,6 @@ class TestIsProtected:
 
     def test_no_passport_not_protected(self, tmp_path):
         """Branch without passport (no citizenship.registered) is not protected."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
         project = tmp_path / "proj"
         project.mkdir()
@@ -536,7 +724,8 @@ class TestIsProtected:
                     "metadata": {"version": "1.0.0", "last_updated": "2026-01-01", "total_branches": 1},
                     "branches": [{"name": "EPHEMERAL", "path": "ephemeral", "status": "active"}],
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         protected, _reason = is_protected("ephemeral", registry_path=reg)
@@ -544,21 +733,21 @@ class TestIsProtected:
 
     def test_minimal_passport_not_protected(self, tmp_path):
         """Passport without citizenship.registered is not protected."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
         branch = tmp_path / "minimal"
         branch.mkdir()
         (branch / ".trinity").mkdir()
-        (branch / ".trinity" / "passport.json").write_text(json.dumps({"name": "MINIMAL", "role": "test"}))
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"name": "MINIMAL", "role": "test"}), encoding="utf-8"
+        )
 
-        protected, _reason = is_protected("minimal", branch_dir=branch)
+        protected, _reason = is_protected("minimal", branch_dir=branch, registry_path=_empty_registry(tmp_path))
         assert protected is False
 
-    def test_unknown_branch_not_protected(self):
+    def test_unknown_branch_not_protected(self, tmp_path):
         """Completely unknown branch is not protected."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
-        protected, _reason = is_protected("nonexistent", branch_dir=None, registry_path=None)
+        protected, _reason = is_protected("nonexistent", branch_dir=None, registry_path=_empty_registry(tmp_path))
         assert protected is False
 
 
@@ -572,7 +761,6 @@ class TestDetectPollutionProtection:
 
     def test_skips_branch_with_active_passport(self, tmp_path):
         """src/pkg/pkg/ with active passport is NOT flagged as pollution."""
-        from aipass.spawn.apps.handlers.repair_ops import detect_pollution
 
         project = tmp_path / "myproj"
         project.mkdir()
@@ -588,7 +776,8 @@ class TestDetectPollutionProtection:
                     "identity": {"citizen_class": "specialist"},
                     "citizenship": {"registered": True},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         reg = project / "MYPROJ_REGISTRY.json"
@@ -598,7 +787,8 @@ class TestDetectPollutionProtection:
                     "metadata": {"version": "1.0.0", "last_updated": "2026-01-01", "total_branches": 1},
                     "branches": [{"name": "MYPKG", "path": "src/mypkg/mypkg", "status": "active"}],
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         issues = detect_pollution(project)
@@ -606,11 +796,11 @@ class TestDetectPollutionProtection:
 
     def test_still_flags_real_pollution(self, tmp_path):
         """src/pkg/pkg/ without passport IS flagged as pollution."""
-        from aipass.spawn.apps.handlers.repair_ops import detect_pollution
 
         project = tmp_path / "myproj"
         project.mkdir()
         (project / "src" / "mypkg" / "mypkg").mkdir(parents=True)
+        _empty_registry(project)
 
         issues = detect_pollution(project)
         assert len(issues) == 1
@@ -618,7 +808,6 @@ class TestDetectPollutionProtection:
 
     def test_skips_owner_branch_at_root(self, tmp_path):
         """project/project/ with owner flag is NOT flagged as pollution."""
-        from aipass.spawn.apps.handlers.repair_ops import detect_pollution
 
         project = tmp_path / "compass"
         project.mkdir()
@@ -632,7 +821,8 @@ class TestDetectPollutionProtection:
                     "metadata": {"version": "1.0.0", "last_updated": "2026-01-01", "total_branches": 1},
                     "branches": [{"name": "COMPASS", "path": "compass", "status": "active", "owner": True}],
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         issues = detect_pollution(project)
@@ -649,8 +839,6 @@ class TestDeleteOwnerProtection:
 
     def test_delete_owner_refused(self, tmp_path):
         """Cannot delete a branch with owner:true in registry."""
-        from aipass.spawn.apps.handlers.delete_ops import delete_branch
-
         project = tmp_path / "repo"
         project.mkdir()
         branch = project / "src" / "aipass" / "aipass_branch"
@@ -662,7 +850,8 @@ class TestDeleteOwnerProtection:
                     "identity": {"citizen_class": "manager"},
                     "citizenship": {"registered": True},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         reg = project / "AIPASS_REGISTRY.json"
@@ -680,7 +869,8 @@ class TestDeleteOwnerProtection:
                         }
                     ],
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=reg):
@@ -700,20 +890,31 @@ class TestDeleteOwnerProtection:
 class TestArchiveExclude:
     """Tests for ARCHIVE_EXCLUDE constant shared between repair_ops and delete_ops."""
 
-    def test_archive_exclude_defined_in_repair_ops(self):
-        """ARCHIVE_EXCLUDE is a set in repair_ops."""
-        from aipass.spawn.apps.handlers.repair_ops import ARCHIVE_EXCLUDE
+    def test_archive_exclude_defined_in_repair_ops(self, tmp_path):
+        """ARCHIVE_EXCLUDE is a set in repair_ops, and the pollution archive honours it.
+
+        Mutant: cleanup_pollution copies without the ARCHIVE_EXCLUDE ignore -> red.
+        """
 
         assert isinstance(ARCHIVE_EXCLUDE, set)
         assert ".venv" in ARCHIVE_EXCLUDE
         assert ".git" in ARCHIVE_EXCLUDE
 
+        project = tmp_path / "compass"
+        dup = project / "compass"
+        (dup / ".venv").mkdir(parents=True)
+        (dup / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
+        (dup / "junk.txt").write_text("pollution", encoding="utf-8")
+        _empty_registry(project)
+
+        result = cleanup_pollution(project)
+
+        archive = Path(result["cleaned"][0]["archive"])
+        assert sorted(p.name for p in archive.iterdir()) == ["junk.txt"]
+
     def test_delete_ops_imports_archive_exclude(self):
         """delete_ops imports ARCHIVE_EXCLUDE from repair_ops (same object)."""
-        from aipass.spawn.apps.handlers.delete_ops import ARCHIVE_EXCLUDE as del_exclude
-        from aipass.spawn.apps.handlers.repair_ops import ARCHIVE_EXCLUDE as rep_exclude
-
-        assert del_exclude is rep_exclude
+        assert delete_ops_archive_exclude is ARCHIVE_EXCLUDE
 
 
 # ---------------------------------------------------------------------------
@@ -731,20 +932,19 @@ class TestTemplateFiles:
     """
 
     def _template(self):
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir
 
         return get_template_dir()
 
     def test_citizen_gitignore_has_venv(self):
         """The citizen template .gitignore includes the .venv/ entry."""
-        content = (self._template() / ".gitignore").read_text()
+        content = (self._template() / ".gitignore").read_text(encoding="utf-8")
         assert ".venv/" in content
 
     def test_requirements_project_exists(self):
         """The citizen template includes requirements.project.txt."""
         req = self._template() / "requirements.project.txt"
         assert req.exists()
-        content = req.read_text()
+        content = req.read_text(encoding="utf-8")
         assert "Project-specific" in content
 
     def test_retired_class_named_template_dirs_are_archived_not_live(self):
@@ -778,7 +978,7 @@ class TestTemplateFiles:
 
 
 def _case_insensitive_listing(monkeypatch):
-    """Make pathlib's glob behave the way a Windows volume does.
+    """Make repair_ops's registry listing behave the way a Windows volume does.
 
     The defect is not in the reader — it is in what the FILESYSTEM hands the
     reader back, so this supplies that listing rather than patching the code
@@ -786,20 +986,23 @@ def _case_insensitive_listing(monkeypatch):
     case-insensitive volume does, and it means these pins run RED on the Linux
     dev box instead of only on the Windows gate (@drone's construction, adopted
     here on @devpulse's relay, 2026-08-31).
+
+    It patches the listing seam ``_list_registry_candidates`` (whose body is
+    exactly the glob), not ``pathlib.Path.glob`` process-wide (spawn's decision,
+    DPLAN-0354 leg 3). Returns the list of roots the seam was asked to list.
     """
     import fnmatch
-    import pathlib
     import re
 
-    real_glob = pathlib.Path.glob
+    calls = []
+    rx = re.compile(fnmatch.translate("*" + repair_ops.REGISTRY_SUFFIX), re.IGNORECASE)
 
-    def insensitive_glob(self, pattern, *args, **kwargs):
-        if "/" in pattern or "**" in pattern:
-            return real_glob(self, pattern, *args, **kwargs)
-        rx = re.compile(fnmatch.translate(pattern), re.IGNORECASE)
-        return iter(sorted(p for p in self.iterdir() if rx.match(p.name)))
+    def insensitive_listing(root):
+        calls.append(root)
+        return iter(sorted(p for p in root.iterdir() if rx.match(p.name)))
 
-    monkeypatch.setattr(pathlib.Path, "glob", insensitive_glob)
+    monkeypatch.setattr(repair_ops, "_list_registry_candidates", insensitive_listing)
+    return calls
 
 
 class TestRegistryLookupIsCaseSensitive:
@@ -815,23 +1018,29 @@ class TestRegistryLookupIsCaseSensitive:
     """
 
     def test_a_lowercase_lookalike_is_not_served_as_the_registry(self, tmp_path, monkeypatch):
-        from aipass.spawn.apps.handlers.repair_ops import _registry_in
+        """The lookup reads the listing seam and filters what it lists.
+
+        Mutant: _registry_in globs inline instead of calling the seam -> red.
+        """
 
         real = tmp_path / "AIPASS_REGISTRY.json"
         real.write_text(json.dumps({"branches": []}), encoding="utf-8")
         decoy = tmp_path / ".template_registry.json"
         decoy.write_text(json.dumps({"files": {}}), encoding="utf-8")
 
-        _case_insensitive_listing(monkeypatch)
+        calls = _case_insensitive_listing(monkeypatch)
 
-        # The decoy sorts first, so an unfiltered first-match returns it.
-        assert sorted(p.name for p in tmp_path.glob("*_REGISTRY.json"))[0] == decoy.name
-
-        assert _registry_in(tmp_path) == real
+        # The decoy sorts first (".t" before "A"), so an unfiltered first-match returns it.
+        # Reached through repair_project, the public door onto the one lookup.
+        # Mutant: the lookup drops its case-sensitive suffix check -> red.
+        assert repair_project(tmp_path, dry_run=True)["registry"] == real.name
+        # The lookup asked the seam (once for the scan, once for the pollution
+        # check), so the stand-in listing is what it read.
+        # Mutant: _registry_in globs inline instead of calling the seam -> red.
+        assert calls == [tmp_path.resolve(), tmp_path.resolve()]
 
     def test_repair_project_reports_the_real_registry(self, tmp_path, monkeypatch):
         """End-to-end through the call site, not just the helper."""
-        from aipass.spawn.apps.handlers.repair_ops import repair_project
 
         project = tmp_path / "someproj"
         project.mkdir()
@@ -848,30 +1057,28 @@ class TestRegistryLookupIsCaseSensitive:
 
     def test_an_external_lowercase_stem_is_still_a_registry(self, tmp_path, monkeypatch):
         """Suffix only, never the stem — external projects name their own."""
-        from aipass.spawn.apps.handlers.repair_ops import _registry_in
 
         theirs = tmp_path / "vera_studio_REGISTRY.json"
         theirs.write_text(json.dumps({"branches": []}), encoding="utf-8")
 
         _case_insensitive_listing(monkeypatch)
 
-        assert _registry_in(tmp_path) == theirs
+        assert repair_project(tmp_path, dry_run=True)["registry"] == theirs.name
 
     def test_absence_is_reported_as_absence(self, tmp_path, monkeypatch):
-        from aipass.spawn.apps.handlers.repair_ops import _registry_in
 
         (tmp_path / ".template_registry.json").write_text("{}", encoding="utf-8")
 
         _case_insensitive_listing(monkeypatch)
 
-        assert _registry_in(tmp_path) is None
+        result = repair_project(tmp_path, dry_run=True)
+        assert result["success"] is False
+        assert result["error"] == f"No *_REGISTRY.json found in {tmp_path.resolve()}"
 
     def test_both_call_sites_go_through_the_one_lookup(self):
         """The extraction is the fix — a second inline glob would undo it."""
         import ast
         import inspect
-
-        from aipass.spawn.apps.handlers import repair_ops
 
         tree = ast.parse(inspect.getsource(repair_ops))
         inline = [

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.2.0
+# Version: 1.2.5
 # Created: 2026-07-05
-# Modified: 2026-09-14
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -49,7 +49,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict
+from typing import Any, Callable, Dict
 
 from aipass.cli.apps.modules import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
@@ -114,7 +114,7 @@ def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
     return Path(raw).expanduser().resolve()
 
 
-def _install_lock_path(home: Path) -> Path:
+def install_lock_path(home: Path) -> Path:
     """The lock guarding one install of `home`.
 
     Lives in the PARENT, not in `home`: on a fresh machine `home` does not exist
@@ -162,30 +162,40 @@ def _clear_stale_lock(lock: Path, holder_pid: str) -> bool:
     return True
 
 
-def _acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
+def acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
     """Claim the install lock for `home`, or return None if another run holds it.
 
     Refuses by NAMING the lock and its holder rather than dying somewhere deep
     in a half-finished clone, which is what a second concurrent install used to
     do (FPLAN-0492 wave 6). A lock whose pid is gone is stale and is taken over,
     announced -- a crashed install must not wedge the machine forever.
+
+    Public with install_lock_path and release_install_lock: the lock is a unit
+    this module exists to keep (one install per home, never stolen on an unknown
+    holder), with a contract of its own. Caller: run_install, which takes and
+    drops it (aipass's decision, fleet green leg 4).
     """
-    lock = _install_lock_path(home)
+    lock = install_lock_path(home)
     try:
         lock.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         logger.info("[install] install lock %s already held, inspecting holder", lock)
         holder_pid = _lock_holder_pid(lock)
-        if _retry and holder_pid and not _pid_alive(int(holder_pid)):
+        # Only a holder PROVEN dead (False) is taken over; unknown (None) is left alone.
+        alive = _pid_alive(int(holder_pid)) if holder_pid else None
+        if _retry and alive is False:
             if not _clear_stale_lock(lock, holder_pid):
                 return None
             # _retry=False: one takeover only, so two racing installs that both
             # see the same stale lock cannot ping-pong clearing each other.
-            return _acquire_install_lock(home, _retry=False)
+            return acquire_install_lock(home, _retry=False)
+        holder = f", held by pid {holder_pid}" if holder_pid else ""
+        if holder_pid and alive is None:
+            holder += f" - could not tell whether pid {holder_pid} is alive"
         error(
             f"REFUSED: another install of {home} is already running "
-            f"(lock: {lock}{f', held by pid {holder_pid}' if holder_pid else ''}). "
+            f"(lock: {lock}{holder}). "
             "Wait for it to finish, or delete the lock if you know it is dead."
         )
         return None
@@ -199,16 +209,31 @@ def _acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
     return lock
 
 
-def _pid_alive(pid: int) -> bool:
-    """True when `pid` names a live process, on POSIX and on Windows.
+def _pid_alive(
+    pid: int,
+    platform_name: str | None = None,
+    runner: Callable[..., Any] | None = None,
+) -> bool | None:
+    """True when `pid` names a live process, False when it is gone, on POSIX and on Windows.
+
+    ``platform_name`` and ``runner`` exist for the test: it hands in "win32" and a
+    tasklist that raises, rather than patching sys.platform and subprocess.run for
+    the whole process. The defaults are sys.platform and subprocess.run, read at
+    call time, so every caller runs as before.
+
+    None when the Windows probe itself fails: the caller cannot know, so it must
+    not steal the lock, and names the doubt in its refusal (aipass's decision,
+    fleet green leg 3; the probe used to answer True, a guess dressed as "alive").
 
     signal 0 is a POSIX-only probe: on Windows os.kill TERMINATES the target
     whatever the signal, so a liveness check written that way would kill an
-    unrelated process that happened to reuse the pid.
+    unrelated process that happened to reuse the pid. On POSIX a PermissionError
+    IS the answer: the process exists, owned by someone else.
     """
-    if sys.platform == "win32":
+    run = subprocess.run if runner is None else runner
+    if (platform_name is None and sys.platform == "win32") or platform_name == "win32":
         try:
-            out = subprocess.run(
+            out = run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
                 capture_output=True,
                 text=True,
@@ -216,7 +241,7 @@ def _pid_alive(pid: int) -> bool:
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             logger.warning("[install] tasklist probe for pid %s failed: %s", pid, exc)
-            return True  # unknown means occupied: never steal a live lock
+            return None  # unknown: the caller never steals on it
         return str(pid) in out.stdout
 
     try:
@@ -228,7 +253,7 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _release_install_lock(lock: Path | None) -> None:
+def release_install_lock(lock: Path | None) -> None:
     """Drop the install lock, never raising — a failed release must not mask the install."""
     if lock is None:
         return
@@ -273,15 +298,22 @@ def _announce_cloned_branch(home: Path) -> None:
     console.print(f"  [dim]branch:[/dim] [cyan]{branch}[/cyan] [dim](the repo default)[/dim]")
 
 
-def _clone_repo(home: Path, dry_run: bool) -> bool:
-    """git clone the public AIPass repo into `home`. Returns True on success."""
+def _clone_repo(home: Path, dry_run: bool, which: Callable[[str], str | None] | None = None) -> bool:
+    """git clone the public AIPass repo into `home`. Returns True on success.
+
+    *which* is ``shutil.which`` when None, resolved at call time. A seam, and the reason
+    is the test: test_install's clone tests answer "git is on PATH" here instead of
+    patching shutil for the whole process (fleet green leg 6). No product caller hands it.
+    """
+    if which is None:
+        which = shutil.which
     if dry_run:
         console.print(f"[yellow]\\[dry-run][/yellow] would run: git clone --depth 1 {REPO_URL} {home}")
         return True
     if home.exists() and any(home.iterdir()):
         warning(f"{home} exists and is not empty — pass an empty --path, or remove it first.")
         return False
-    if shutil.which("git") is None:
+    if which("git") is None:
         warning("git not found — the installer needs git to fetch AIPass. Install git and retry.")
         return False
     home.parent.mkdir(parents=True, exist_ok=True)
@@ -608,8 +640,10 @@ def run_install(
     # Claimed before the first mutating step (clone) and dropped before the
     # welcome chat: _end_in_chat's launch_inline REPLACES this process and never
     # returns, so a release after it would never run and would wedge the home.
-    install_lock = _acquire_install_lock(home)
-    if install_lock is None:
+    # A dry run takes no lock: it writes nothing, so it has nothing to guard,
+    # and must not mkdir the home's parent or touch a real lock file.
+    install_lock = None if dry_run else acquire_install_lock(home)
+    if install_lock is None and not dry_run:
         return 1
 
     try:
@@ -638,7 +672,7 @@ def run_install(
         if not dry_run:
             _check_and_fix_owner(home)
     finally:
-        _release_install_lock(install_lock)
+        release_install_lock(install_lock)
 
     # Step 4 — the phone face, best-effort: its result is reported, never fatal
     console.print()
@@ -689,6 +723,8 @@ def print_help() -> None:
     )
     console.print()
     console.print("[dim]Project creation isn't part of install — run 'aipass init run' for that, whenever ready.[/dim]")
+    # aipass's decision, fleet green leg 2: a dry run writes nothing, so it takes no lock.
+    console.print("[dim]A dry run takes no install lock, so it can preview beside a live install.[/dim]")
     console.print()
 
 

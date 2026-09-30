@@ -1,12 +1,17 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access, new handlers, and PR deprecation
-# Version: 1.1.0
+# Version: 1.1.7
 # Created: 2026-05-12
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for tier-based git access, new handlers (diff, log, commit, checkout), and PR deprecation."""
+"""Tests for apps/plugins/devpulse_ops/auth.py's git tiers and the git doors of apps/modules/git_module.py."""
+
+# The git doors pinned here: diff, log, show, commit and checkout.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — subprocess.run; git and gh are stubbed except in the tmp_path repos of the door tests
 
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ import inspect
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -31,7 +37,7 @@ from aipass.drone.apps.handlers.git import commit_handler
 from aipass.drone.apps.handlers.git.commit_handler import commit_changes, stage_branch_dir
 from aipass.drone.apps.handlers.git.checkout_handler import checkout_branch
 from aipass.drone.apps.handlers.git import repo_door
-from aipass.drone.apps.modules.git_module import handle_command
+from aipass.drone.apps.modules.git_module import get_help, get_introspective, handle_command
 
 from .conftest import OWNER_REGISTRY_ID, make_owner_project
 
@@ -78,6 +84,29 @@ def repo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+def _registered_verbs() -> list[str]:
+    """Every verb the module registers, read from its own unknown-command refusal.
+
+    The gate is a recorder here, so the refusal is the router's and no git runs.
+    """
+    with patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="devpulse") as gate:
+        result = handle_command("no-such-verb", ["x"])
+    gate.assert_called_once_with("no-such-verb")
+    assert result["exit_code"] == 1
+    return result["stderr"].split("Available: ", 1)[1].split(", ")
+
+
+def _failing_resolve(target: Path, failure: type[Exception]) -> Callable[[Path], Path]:
+    """A stand-in for auth's resolve seam that raises *failure* for *target* and resolves every other path."""
+
+    def resolve(path: Path) -> Path:
+        if path == target:
+            raise failure("simulated resolve failure")
+        return path.resolve()
+
+    return resolve
+
+
 # ===========================================================================
 # 1. GIT_ACCESS_TIERS config structure
 # ===========================================================================
@@ -117,10 +146,6 @@ class TestGitAccessTiers:
         """
         assert "allowed_callers" not in GIT_ACCESS_TIERS["owner"]
 
-    def test_pr_in_owner_tier(self) -> None:
-        cmds = GIT_ACCESS_TIERS["owner"]["commands"]
-        assert "pr" in cmds
-
     def test_prune_temp_in_owner_tier(self) -> None:
         """prune-temp deletes merged remote citizen/* branches — delete-branch class.
 
@@ -142,18 +167,14 @@ class TestGitAccessTiers:
         the specific verb would only have caught the one instance, so assert the
         rule instead — the next verb added without a tier fails here.
         """
-        from aipass.drone.apps.modules.git_module import _COMMANDS
-
         tiered = set(GIT_ACCESS_TIERS["global"]["commands"]) | set(GIT_ACCESS_TIERS["owner"]["commands"])
-        orphaned = sorted(set(_COMMANDS) - tiered)
+        orphaned = sorted(set(_registered_verbs()) - tiered)
         assert orphaned == [], f"registered but unreachable — in no tier: {orphaned}"
 
     def test_no_tier_grants_a_command_that_does_not_exist(self) -> None:
         """The mirror: a tier entry with no registered command is a dead grant."""
-        from aipass.drone.apps.modules.git_module import _COMMANDS
-
         tiered = set(GIT_ACCESS_TIERS["global"]["commands"]) | set(GIT_ACCESS_TIERS["owner"]["commands"])
-        phantom = sorted(tiered - set(_COMMANDS))
+        phantom = sorted(tiered - set(_registered_verbs()))
         assert phantom == [], f"granted but not registered: {phantom}"
 
 
@@ -212,7 +233,11 @@ class TestVerifyGitAccessPrOwnerOnly:
         result = verify_git_access("pr")
         assert result == "devpulse"
 
-    def test_pr_denied_for_seedgo(self, seedgo_dir: Path) -> None:
+    def test_pr_denied_for_a_manager_who_is_not_the_owner(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        make_owner_project(tmp_path, owner=False)
+        monkeypatch.chdir(tmp_path)
         with pytest.raises(PermissionError, match="not authorized"):
             verify_git_access("pr")
 
@@ -360,6 +385,98 @@ class TestOwnerTierIsEarnedPerRepo:
         monkeypatch.chdir(rogue)
         with pytest.raises(PermissionError, match="outside its recorded home"):
             verify_git_access("commit")
+
+    @pytest.mark.parametrize("failure", [OSError, RuntimeError])
+    def test_recorded_home_that_cannot_resolve_is_named(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
+    ) -> None:
+        """Mutant: _recorded_home's except returns None — an unresolvable path is refused as "records no path".
+
+        RuntimeError is Python 3.12's answer to a symlink loop in a non-strict resolve; mutant: the except
+        narrowed back to OSError, and the loop escapes the owner gate as a traceback.
+        """
+        marker = tmp_path / "unresolvable_home"
+        make_owner_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
+        registry = {
+            "metadata": {"id": OWNER_REGISTRY_ID},
+            "branches": {"devpulse": {"name": "devpulse", "path": str(marker), "owner": True}},
+        }
+        monkeypatch.setattr("aipass.drone.apps.plugins.devpulse_ops.auth.load_registry", lambda *a, **k: registry)
+        monkeypatch.setattr(
+            "aipass.drone.apps.plugins.devpulse_ops.auth._resolve_location", _failing_resolve(marker, failure)
+        )
+        with pytest.raises(PermissionError, match="could not be resolved") as refused:
+            verify_git_access("commit")
+        assert "records no path" not in str(refused.value)
+
+    def test_recorded_home_failure_is_named_for_its_own_type(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A RecursionError is a RuntimeError but not a symlink loop; the refusal names what was raised.
+
+        Mutant: the RuntimeError arm relabels as f"symlink loop: {exc}" again — killed.
+        """
+        marker = tmp_path / "unresolvable_home"
+        make_owner_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
+        registry = {
+            "metadata": {"id": OWNER_REGISTRY_ID},
+            "branches": {"devpulse": {"name": "devpulse", "path": str(marker), "owner": True}},
+        }
+        monkeypatch.setattr("aipass.drone.apps.plugins.devpulse_ops.auth.load_registry", lambda *a, **k: registry)
+        monkeypatch.setattr(
+            "aipass.drone.apps.plugins.devpulse_ops.auth._resolve_location", _failing_resolve(marker, RecursionError)
+        )
+        with pytest.raises(PermissionError, match="could not be resolved") as refused:
+            verify_git_access("commit")
+        assert "RecursionError: simulated resolve failure" in str(refused.value)
+        assert "symlink loop" not in str(refused.value)
+
+    @pytest.mark.parametrize("failure", [OSError, RuntimeError, RecursionError])
+    def test_registry_directory_that_cannot_resolve_is_refused_not_raised(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
+    ) -> None:
+        """The registry's own directory failing to resolve is a named refusal, never a traceback out of the gate.
+
+        Mutant: the registry-root try removed (a bare resolve, as before) — the failure escapes uncaught, killed.
+        """
+        make_owner_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
+        monkeypatch.setattr(
+            "aipass.drone.apps.plugins.devpulse_ops.auth._resolve_location", _failing_resolve(tmp_path, failure)
+        )
+        with pytest.raises(PermissionError, match="could not be resolved") as refused:
+            verify_git_access("commit")
+        assert f"{failure.__name__}: simulated resolve failure" in str(refused.value)
+        assert "AIPASS_REGISTRY.json" in str(refused.value)
+
+    @pytest.mark.parametrize("mode", ["enforce", "warn"])
+    def test_an_unresolvable_registry_directory_is_an_authority_refusal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, mode: str
+    ) -> None:
+        """The refusal is of the species authority: it stands under enforcement, and the
+        warn-mode rollback lifts it as it lifts every other owner-tier authority refusal.
+        The warning names the directory that could not be resolved.
+
+        Green on the tree from its first run; its proof is its mutants: the species
+        changed to capability (warn raises "cannot run"), and the warning removed."""
+        make_owner_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
+        monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", mode)
+        monkeypatch.setattr(
+            "aipass.drone.apps.plugins.devpulse_ops.auth._resolve_location", _failing_resolve(tmp_path, OSError)
+        )
+        if mode == "warn":
+            assert verify_git_access("commit") == "devpulse"
+        else:
+            with pytest.raises(PermissionError, match="is not authorized for 'commit'"):
+                verify_git_access("commit")
+        assert f"Registry directory {tmp_path} could not be resolved: OSError" in caplog.text
 
     def test_subdirectory_of_recorded_home_allowed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Path-binding accepts at-or-under, so working from a subdir still authorizes."""
@@ -814,13 +931,13 @@ class TestShowHandler:
 
     def test_ref_that_git_would_read_as_a_flag_is_refused(self, repo_dir: Path) -> None:
         """Refuse before any argv is built — the tag_handler lesson (S49)."""
-        for bad in ("", "-n", "--output=/tmp/x", "-"):
+        for bad in ("", "-n", "--output=x.patch", "-"):
             result = show_object(bad)
             assert result["success"] is False, f"accepted flag-like ref {bad!r}"
             assert "content" in result
 
     def test_path_that_git_would_read_as_a_flag_is_refused(self, repo_dir: Path) -> None:
-        result = show_object("abc1234", "--output=/tmp/pwned")
+        result = show_object("abc1234", "--output=pwned.patch")
         assert result["success"] is False
 
     def test_git_failure_reports_honestly(self, repo_dir: Path) -> None:
@@ -892,6 +1009,18 @@ class TestStageBranchDir:
         assert "failed" in result["message"].lower()
 
 
+@pytest.fixture()
+def ruff_in_venv(repo_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A ruff the commit lane finds on disk: none on PATH, one in the repo's own .venv."""
+    empty_path = tmp_path / "empty_path"
+    empty_path.mkdir()
+    monkeypatch.setenv("PATH", str(empty_path))
+    ruff = repo_dir / ".venv" / "bin" / "ruff"
+    ruff.parent.mkdir(parents=True)
+    ruff.write_text("", encoding="utf-8")
+    return ruff
+
+
 def _assert_ordered_calls(mock_run: MagicMock, expected: list[tuple[tuple[str, ...], tuple[str, ...]]]) -> None:
     """Assert subprocess.run's recorded calls match expected (required, forbidden) argv markers, in order.
 
@@ -948,7 +1077,7 @@ class TestCommitChanges:
         assert result["exit_code"] == 1
         assert "nothing to commit" in result["stderr"].lower()
 
-    def test_commit_all_stages_first(self, repo_dir: Path) -> None:
+    def test_commit_all_stages_first(self, repo_dir: Path, ruff_in_venv: Path) -> None:
         mock_ruff_fix = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_format = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_gate = MagicMock(returncode=0, stdout="", stderr="")
@@ -957,10 +1086,7 @@ class TestCommitChanges:
         mock_diff = MagicMock(returncode=1, stdout="", stderr="")
         mock_commit = MagicMock(returncode=0, stdout="[main def456] all commit", stderr="")
 
-        branch_dir = repo_dir / "src" / "aipass" / "api"
-
         with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
             patch(
                 "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
                 side_effect=[
@@ -974,7 +1100,7 @@ class TestCommitChanges:
                 ],
             ) as mock_run,
         ):
-            result = commit_changes("all commit", branch_dir=branch_dir, all_files=True)
+            result = commit_changes("all commit", all_files=True)
 
         assert result["exit_code"] == 0
         _assert_ordered_calls(
@@ -982,7 +1108,7 @@ class TestCommitChanges:
             [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _GIT_ADD_ALL, _GIT_DIFF_CACHED, _GIT_COMMIT],
         )
 
-    def test_commit_all_blocks_on_test_failure(self, repo_dir: Path) -> None:
+    def test_commit_all_blocks_on_test_failure(self, repo_dir: Path, ruff_in_venv: Path) -> None:
         mock_ruff_fix = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_format = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_gate = MagicMock(returncode=0, stdout="", stderr="")
@@ -1004,7 +1130,6 @@ class TestCommitChanges:
         test_dir.mkdir()
 
         with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
             patch(
                 "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
                 side_effect=[mock_ruff_fix, mock_ruff_format, mock_ruff_gate, mock_status, mock_pytest],
@@ -1017,7 +1142,7 @@ class TestCommitChanges:
         assert "drone" in result["stderr"]
         _assert_ordered_calls(mock_run, [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _PYTEST])
 
-    def test_commit_all_passes_with_green_tests(self, repo_dir: Path) -> None:
+    def test_commit_all_passes_with_green_tests(self, repo_dir: Path, ruff_in_venv: Path) -> None:
         mock_ruff_fix = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_format = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_gate = MagicMock(returncode=0, stdout="", stderr="")
@@ -1038,7 +1163,6 @@ class TestCommitChanges:
         test_dir.mkdir()
 
         with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
             patch(
                 "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
                 side_effect=[
@@ -1061,7 +1185,7 @@ class TestCommitChanges:
             [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _PYTEST, _GIT_ADD_ALL, _GIT_DIFF_CACHED, _GIT_COMMIT],
         )
 
-    def test_commit_all_skips_branches_without_tests(self, repo_dir: Path) -> None:
+    def test_commit_all_skips_branches_without_tests(self, repo_dir: Path, ruff_in_venv: Path) -> None:
         mock_ruff_fix = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_format = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_gate = MagicMock(returncode=0, stdout="", stderr="")
@@ -1075,7 +1199,6 @@ class TestCommitChanges:
         mock_commit = MagicMock(returncode=0, stdout="[main skip77] no tests", stderr="")
 
         with (
-            patch("shutil.which", return_value="/usr/bin/ruff"),
             patch(
                 "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
                 side_effect=[
@@ -1138,11 +1261,14 @@ class TestCommitSubjectCap:
         assert mock_run.call_count == 0, "a refused subject must not reach git"
 
     def test_refusal_names_the_length_the_cap_and_the_rule(self, repo_dir: Path) -> None:
+        """Mutant: a `git status` run ahead of the refusal — the refused commit reaches git."""
         essay = "feat(drone): " + "x" * commit_handler.SUBJECT_CAP
         subject_length = len(essay)
 
-        with patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run"):
+        with patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run") as mock_run:
             result = commit_changes(essay)
+
+        mock_run.assert_not_called()
 
         stderr = result["stderr"]
         assert str(subject_length) in stderr, f"refusal must show the offending length: {stderr!r}"
@@ -1191,32 +1317,32 @@ class TestCommitSubjectCap:
         assert result["exit_code"] == 1
         assert mock_run.call_count == 0
 
-    def test_refusal_precedes_the_lint_and_test_lane(self, repo_dir: Path) -> None:
-        """--all runs ruff and the suite; a subject refusal must cost neither."""
+    def test_refusal_precedes_the_lint_and_test_lane(self, repo_dir: Path, ruff_in_venv: Path) -> None:
+        """--all runs ruff and the suite; a subject refusal must cost neither, with a ruff there to run."""
         essay = "feat(drone): " + "x" * commit_handler.SUBJECT_CAP
 
-        with (
-            patch("shutil.which", return_value="/usr/bin/ruff") as mock_which,
-            patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run") as mock_run,
-        ):
+        with patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run") as mock_run:
             result = commit_changes(essay, all_files=True)
 
         assert result["exit_code"] == 1
         assert mock_run.call_count == 0, "no ruff, no pytest, no git add"
-        assert mock_which.call_count == 0
 
     def test_refusal_precedes_repo_resolution(self, repo_dir: Path) -> None:
-        """Nothing is touched — not even the repo the commit would have landed in."""
+        """Nothing is touched — not even the repo the commit would have landed in.
+
+        Mutant: a `git status` run ahead of the refusal — git is reached.
+        """
         essay = "feat(drone): " + "x" * commit_handler.SUBJECT_CAP
 
         with (
             patch("aipass.drone.apps.handlers.git.commit_handler.find_repo_root") as mock_root,
-            patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run"),
+            patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run") as mock_run,
         ):
             result = commit_changes(essay)
 
         assert result["exit_code"] == 1
         assert mock_root.call_count == 0
+        mock_run.assert_not_called()
 
     def test_the_external_repo_door_gets_the_same_refusal(self, repo_dir: Path) -> None:
         """--repo names another repo and gets that repo's own seat — cap included."""
@@ -1314,9 +1440,11 @@ class TestPrCommand:
 
     @patch("aipass.drone.apps.handlers.git.dev_pr_handler.create_branch_pr")
     def test_pr_with_description_calls_handler(self, mock_pr: MagicMock, devpulse_dir: Path) -> None:
+        """Mutant: `description = args[0]` in _handle_pr — only the first word reaches the PR."""
         mock_pr.return_value = {"success": True, "message": "PR created", "pr_url": "https://example.com"}
-        handle_command("pr", ["test description"])
-        mock_pr.assert_called_once()
+        result = handle_command("pr", ["fix", "the", "thing"])
+        mock_pr.assert_called_once_with("fix the thing")
+        assert result == {"stdout": "PR created", "stderr": "", "exit_code": 0}
 
 
 # ===========================================================================
@@ -1332,7 +1460,7 @@ class TestNewCommandRouting:
         trinity = repo_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"branch_info": {"branch_name": "test_branch"}}))
+        passport.write_text(json.dumps({"branch_info": {"branch_name": "test_branch"}}), encoding="utf-8")
 
         mock_result = MagicMock(returncode=0, stdout="", stderr="")
         with patch("aipass.drone.apps.handlers.git.diff_handler.subprocess.run", return_value=mock_result):
@@ -1383,14 +1511,17 @@ class TestNewCommandRouting:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
     def test_log_unknown_arg_still_warns(self, _mock_auth: MagicMock, repo_dir: Path) -> None:
-        """Genuinely unparseable args still warn — the fix narrows the noise, it doesn't silence it."""
+        """Unparseable args still warn, by name — the fix narrows the noise, it doesn't silence it.
+
+        Mutant: the warning drops the '%s' argument.
+        """
         mock_result = MagicMock(returncode=0, stdout="abc123 test\n", stderr="")
         with (
             patch("aipass.drone.apps.handlers.git.log_handler.subprocess.run", return_value=mock_result),
             patch("aipass.drone.apps.modules.git_module.logger") as mock_logger,
         ):
             handle_command("log", ["--bogus"])
-        mock_logger.warning.assert_called_once()
+        mock_logger.warning.assert_called_once_with("git log refused unknown argument '%s'", "--bogus")
 
     @pytest.mark.parametrize("bad_count", ["0", "-n 0"])
     @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
@@ -1439,45 +1570,31 @@ class TestUpdatedHelp:
     """Help and introspection reflect new commands and tiers."""
 
     def test_help_includes_diff(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         text = get_help()
         assert "diff" in text
 
     def test_help_includes_log(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         text = get_help()
         assert "log" in text
 
     def test_help_includes_commit(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         text = get_help()
         assert "commit" in text
 
     def test_help_includes_checkout(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         text = get_help()
         assert "checkout" in text
 
     def test_help_shows_tier_sections(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         text = get_help()
         assert "global" in text.lower()
         assert "owner" in text.lower()
 
     def test_help_includes_pr_command(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         text = get_help()
         assert "pr" in text.lower()
 
     def test_introspection_includes_new_handlers(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_introspective
-
         text = get_introspective()
         assert "diff_handler" in text
         assert "log_handler" in text
@@ -1485,8 +1602,6 @@ class TestUpdatedHelp:
         assert "checkout_handler" in text
 
     def test_introspection_shows_tiers(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_introspective
-
         text = get_introspective()
         assert "global" in text.lower()
         assert "owner" in text.lower()
@@ -1627,42 +1742,28 @@ class TestGhPassthroughHelp:
     """Help text includes passthrough commands."""
 
     def test_help_includes_issue(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         assert "issue" in get_help()
 
     def test_help_includes_run(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         assert "run" in get_help()
 
     def test_help_includes_workflow(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         assert "workflow" in get_help()
 
     def test_per_command_help_issue(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         text = get_help("issue")
         assert "gh issue" in text
         assert "global" in text.lower()
 
     def test_per_command_help_run(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         text = get_help("run")
         assert "gh run" in text
 
     def test_per_command_help_workflow(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         text = get_help("workflow")
         assert "gh workflow" in text
 
     def test_introspection_includes_passthrough(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_introspective
-
         text = get_introspective()
         assert "issue" in text
         assert "run" in text
@@ -1678,7 +1779,9 @@ _RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller"
 
 def _git(cwd: Path, *argv: str) -> str:
     """Run git in *cwd* for fixture setup and read-back; raises on failure."""
-    return subprocess.run(["git", *argv], cwd=str(cwd), capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(
+        ["git", *argv], cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", check=True
+    ).stdout.strip()
 
 
 def _ledger(tmp_path: Path) -> list[dict]:
@@ -1799,6 +1902,20 @@ class TestRepoDoorRefusals:
             "exit_code": 1,
         }
 
+    def test_git_that_cannot_run_is_named_not_read_as_no_repo(
+        self, door_world: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: _git_toplevel's except returns None — git failing to run reads as "not a git repository"."""
+        (door_world["root"] / "projects" / "plain").mkdir()
+        monkeypatch.setenv("PATH", "")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("log", ["--repo", "projects/plain"])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"] != repo_door.REFUSE_NOT_REPO.format(path="projects/plain")
+        assert result["stderr"].startswith("--repo projects/plain: git could not run")
+
     def test_a_path_that_does_not_exist_is_refused(self, door_world: dict[str, Path], tmp_path: Path) -> None:
         with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
             result = handle_command("tag", ["v0.2.0", "--repo", "projects/nowhere"])
@@ -1841,8 +1958,6 @@ class TestRepoDoorRefusals:
         assert _git(door_world["origin"], "rev-parse", "main") == head
 
     def test_help_prints_the_refusals_the_door_prints(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
-
         text = get_help()
         assert repo_door.REFUSE_NOT_ADMIN.format(caller="<caller>") in text
         assert repo_door.REFUSE_AIPASS.format(path="<path>") in text

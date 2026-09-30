@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.6.0
+# Version: 2.7.0
 # Created: 2026-02-02
-# Modified: 2026-08-04
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -295,9 +295,12 @@ def _flush_trigger_data(force: bool = False) -> None:
             logger.warning("Failed to flush trigger_data.json: %s", exc)
 
 
-def _is_stale_entry(timestamp_str: str) -> bool:
+def is_stale_entry(timestamp_str: str) -> bool:
     """
     Check if a log entry timestamp is older than the freshness threshold.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     Parses common timestamp formats and returns True if the entry
     is too old to process (prevents re-flagging old entries).
@@ -332,9 +335,12 @@ def _is_stale_entry(timestamp_str: str) -> bool:
     return True
 
 
-def _generate_error_hash(source_module: str, message: str) -> str:
+def generate_error_hash(source_module: str, message: str) -> str:
     """
     Generate hash for error deduplication.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     BACKWARD COMPAT: Kept for fallback when error_registry is unavailable.
     Primary dedup path is now error_registry.report() (Medic v2).
@@ -380,9 +386,12 @@ def _known_branch_names() -> tuple:
     return resolved
 
 
-def _classify_log_path(path: PurePath) -> str:
+def classify_log_path(path: PurePath) -> str:
     """
     Say which tree a log file belongs to, from its path components.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     Components, never separators: this used to test `"/logs/" in file_path`,
     so every Windows path — `...\\aipass\\hooks\\logs\\edit_gate.log` — classified
@@ -437,9 +446,12 @@ def _system_log_branch_twin(log_path: str) -> Optional[Path]:
     return None
 
 
-def _detect_branch_from_path(log_path: str) -> str:
+def detect_branch_from_path(log_path: str) -> str:
     """
     Detect branch name from log file path.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     Handles two path patterns:
         - src/aipass/<branch>/logs/<file>.log
@@ -450,40 +462,43 @@ def _detect_branch_from_path(log_path: str) -> str:
         log_path: Full path to log file
 
     Returns:
-        Branch name in uppercase (e.g., 'FLOW', 'PRAX')
+        Branch name in uppercase (e.g., 'FLOW', 'PRAX'), or 'UNKNOWN' for a
+        path outside every known tree. A path that cannot be read raises:
+        UNKNOWN is an answer, never a failure. Both callers
+        (_process_log_line, _process_warning_line) contain the raise and
+        skip that one line, so the observer thread never sees it.
     """
-    try:
-        path = Path(log_path)
+    path = Path(log_path)
 
-        # Check system_logs/ files first
-        if path.parent == SYSTEM_LOGS_DIR:
-            filename = path.name
-            # Explicit mapping for known services
-            if filename in SYSTEM_LOGS_BRANCH_MAP:
-                return SYSTEM_LOGS_BRANCH_MAP[filename]
-            # Match filename prefix against live branch names (longest-first)
-            name_stem = path.stem  # e.g. "memory_rollover" from "memory_rollover.log"
-            for prefix in _known_branch_names():
-                if name_stem.startswith(prefix + "_") or name_stem == prefix:
-                    return prefix.upper()
-            return "UNKNOWN"
-
-        # Standard src/aipass/<branch>/logs/ pattern
-        parts = path.parts
-        for i, part in enumerate(parts):
-            if part == "aipass" and i + 1 < len(parts) and parts[i + 1] != "__pycache__":
-                # Check if this looks like a branch dir (has logs/ subdir)
-                if i + 2 < len(parts) and parts[i + 2] == "logs":
-                    return parts[i + 1].upper()
-        return "UNKNOWN"
-    except Exception as exc:
-        logger.warning("Failed to detect branch from path '%s': %s", log_path, exc)
+    # Check system_logs/ files first
+    if path.parent == SYSTEM_LOGS_DIR:
+        filename = path.name
+        # Explicit mapping for known services
+        if filename in SYSTEM_LOGS_BRANCH_MAP:
+            return SYSTEM_LOGS_BRANCH_MAP[filename]
+        # Match filename prefix against live branch names (longest-first)
+        name_stem = path.stem  # e.g. "memory_rollover" from "memory_rollover.log"
+        for prefix in _known_branch_names():
+            if name_stem.startswith(prefix + "_") or name_stem == prefix:
+                return prefix.upper()
         return "UNKNOWN"
 
+    # Standard src/aipass/<branch>/logs/ pattern
+    parts = path.parts
+    for i, part in enumerate(parts):
+        if part == "aipass" and i + 1 < len(parts) and parts[i + 1] != "__pycache__":
+            # Check if this looks like a branch dir (has logs/ subdir)
+            if i + 2 < len(parts) and parts[i + 2] == "logs":
+                return parts[i + 1].upper()
+    return "UNKNOWN"
 
-def _parse_prax_log_line(log_line: str, levels: tuple = ERROR_LEVELS) -> Optional[Dict[str, str]]:
+
+def parse_prax_log_line(log_line: str, levels: tuple = ERROR_LEVELS) -> Optional[Dict[str, str]]:
     """
     Parse a log line in Prax format or Python logging format.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     Formats supported:
         - Prax:   timestamp | module | LEVEL | message
@@ -496,47 +511,47 @@ def _parse_prax_log_line(log_line: str, levels: tuple = ERROR_LEVELS) -> Optiona
 
     Returns:
         Dict with keys: timestamp, module, level, message
-        None if parsing fails or the line's level is not in *levels*
+        None if the line matches no format or its level is not in *levels*.
+        A line that cannot be read raises: None means "not a line for this
+        lane", never a failure. Both callers (_process_log_line,
+        _process_warning_line) contain the raise and skip that one line, so
+        the observer thread never sees it.
     """
-    try:
-        # Try Prax format first (pipe-separated)
-        if " | " in log_line:
-            parts = log_line.split(" | ", 3)
-            if len(parts) >= 4:
-                level = parts[2].strip().upper()
-                if level in levels:
-                    return {
-                        "timestamp": parts[0].strip(),
-                        "module": parts[1].strip(),
-                        "level": level,
-                        "message": parts[3].strip(),
-                    }
-                return None
+    # Try Prax format first (pipe-separated)
+    if " | " in log_line:
+        parts = log_line.split(" | ", 3)
+        if len(parts) >= 4:
+            level = parts[2].strip().upper()
+            if level in levels:
+                return {
+                    "timestamp": parts[0].strip(),
+                    "module": parts[1].strip(),
+                    "level": level,
+                    "message": parts[3].strip(),
+                }
+            return None
 
-        # Fallback: Python logging format (dash-separated)
-        # Format: 2026-02-10 15:12:29,460 - telegram_bridge - ERROR - message
-        # NOTE: We do NOT pre-check ' - ERROR - ' in log_line because that
-        # matches ERROR appearing anywhere in the text (false positive).
-        # Instead, we split positionally and validate parts[2] is a
-        # standalone level word.
-        if " - " in log_line:
-            parts = log_line.split(" - ", 3)
-            if len(parts) >= 4:
-                level = parts[2].strip().upper()
-                # Strict check: level field must be EXACTLY a known level,
-                # not a longer string that happens to contain one.
-                if level in levels:
-                    return {
-                        "timestamp": parts[0].strip(),
-                        "module": parts[1].strip(),
-                        "level": level,
-                        "message": parts[3].strip(),
-                    }
+    # Fallback: Python logging format (dash-separated)
+    # Format: 2026-02-10 15:12:29,460 - telegram_bridge - ERROR - message
+    # NOTE: We do NOT pre-check ' - ERROR - ' in log_line because that
+    # matches ERROR appearing anywhere in the text (false positive).
+    # Instead, we split positionally and validate parts[2] is a
+    # standalone level word.
+    if " - " in log_line:
+        parts = log_line.split(" - ", 3)
+        if len(parts) >= 4:
+            level = parts[2].strip().upper()
+            # Strict check: level field must be EXACTLY a known level,
+            # not a longer string that happens to contain one.
+            if level in levels:
+                return {
+                    "timestamp": parts[0].strip(),
+                    "module": parts[1].strip(),
+                    "level": level,
+                    "message": parts[3].strip(),
+                }
 
-        return None
-    except Exception as exc:
-        logger.warning("Failed to parse log line: %s", exc)
-        return None
+    return None
 
 
 def set_event_callback(callback: Callable[..., object]) -> None:
@@ -655,7 +670,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         filename = Path(file_path).name
         if filename.lower() in _EXCLUDED_LOG_FILES_LOWER:
             return False
-        kind = _classify_log_path(Path(file_path))
+        kind = classify_log_path(Path(file_path))
         if kind == "branch":
             return True
         if kind != "system":
@@ -753,7 +768,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
             if not _warning_capture_enabled():
                 return
 
-            parsed = _parse_prax_log_line(log_line, levels=WARNING_LEVELS)
+            parsed = parse_prax_log_line(log_line, levels=WARNING_LEVELS)
             if not parsed:
                 return
 
@@ -761,7 +776,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
             # lines replayed from a rotation, are not new signal.
             if _SEMANTIC_EXCLUSION_PATTERNS.search(parsed["message"]):
                 return
-            if _is_stale_entry(parsed["timestamp"]):
+            if is_stale_entry(parsed["timestamp"]):
                 return
 
             if _fire_event is None:
@@ -769,9 +784,9 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
 
             _fire_event(
                 "warning_logged",
-                branch=_detect_branch_from_path(log_path),
+                branch=detect_branch_from_path(log_path),
                 message=parsed["message"],
-                error_hash=_generate_error_hash(parsed["module"], parsed["message"]),
+                error_hash=generate_error_hash(parsed["module"], parsed["message"]),
                 timestamp=parsed["timestamp"],
                 log_file=log_path,
                 module_name=parsed["module"],
@@ -798,7 +813,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
             log_path: Path to log file
         """
         try:
-            parsed = _parse_prax_log_line(log_line)
+            parsed = parse_prax_log_line(log_line)
             if not parsed:
                 self._process_warning_line(log_line, log_path)
                 return
@@ -809,10 +824,10 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
                 return
 
             # Skip stale entries — prevents re-flagging old log lines
-            if _is_stale_entry(parsed["timestamp"]):
+            if is_stale_entry(parsed["timestamp"]):
                 return
 
-            branch = _detect_branch_from_path(log_path)
+            branch = detect_branch_from_path(log_path)
             module = parsed["module"]
             message = parsed["message"]
 
@@ -861,7 +876,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
                     logger.warning("Registry report failed for %s:%s — using MD5 fallback: %s", branch, module, e)
 
             # Fallback path: retry lazy import of registry, else track count locally
-            error_hash = _generate_error_hash(module, message)
+            error_hash = generate_error_hash(module, message)
 
             # Retry registry import — may have failed at module load but be available now
             try:

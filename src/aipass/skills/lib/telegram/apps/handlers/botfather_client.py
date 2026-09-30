@@ -37,7 +37,7 @@ from typing import Any, Optional
 from aipass.prax import logger
 
 # JSON handler (seedgo standard)
-from aipass.skills.apps.handlers.json import json_handler  # noqa: F401
+from aipass.skills.apps.handlers.json import json_handler
 
 # Sibling imports
 from .config import _get_secret
@@ -45,7 +45,7 @@ from .config import _get_secret
 # Third party (Telethon) — runtime-imported in methods to avoid Pyright issues
 TELETHON_AVAILABLE = False
 try:
-    import telethon as _telethon_check  # noqa: F401  # type: ignore[import-untyped]
+    import telethon as _telethon_check  # type: ignore[import-untyped]
 
     TELETHON_AVAILABLE = True
     del _telethon_check

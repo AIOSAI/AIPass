@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -179,8 +179,8 @@ def _looks_like_path(token):
 
 def handle_create(args):
     """Handle the create command with optional citizen class."""
-    from aipass.spawn.apps.modules.core import _spawn_agent as spawn_agent
     from aipass.spawn.apps.modules.core import (
+        spawn_agent,
         validate_class,
         get_available_classes,
         refuse_retired_or_forbidden,
@@ -211,7 +211,7 @@ def handle_create(args):
     # None means "no class was typed — decide at mint from the citizen number"
     # (DPLAN-0319 R3: a project's first citizen is its manager, everyone after is
     # a specialist). This used to seed get_default_class() here, which handed
-    # _spawn_agent an EXPLICIT "specialist" on every CLI create — and an explicit
+    # spawn_agent an EXPLICIT "specialist" on every CLI create — and an explicit
     # class always wins, so the mint-time decision could never fire through the
     # CLI. `drone @spawn create ./firstborn` in a fresh project minted a
     # specialist with no manager anywhere in it.
@@ -355,7 +355,7 @@ def print_introspection():
     console.print()
     console.print("[yellow]Connected Modules:[/yellow]")
     console.print("  [cyan]modules/[/cyan]")
-    console.print("    [dim]- core.py (handle_command, _spawn_agent — agent creation orchestrator)[/dim]")
+    console.print("    [dim]- core.py (handle_command, spawn_agent — agent creation orchestrator)[/dim]")
     console.print("    [dim]- update.py (handle_update — single/all branch updates)[/dim]")
     console.print("    [dim]- delete.py (handle_delete — archive and deregister branch)[/dim]")
     console.print("    [dim]- sync_registry.py (handle_sync_registry — registry repair)[/dim]")

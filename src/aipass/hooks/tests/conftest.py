@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.2.0
+# Version: 2.3.1
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -36,9 +36,65 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 
+from aipass.cli.apps.modules import display
+from aipass.hooks.apps.handlers.config import diagnostics
 from aipass.hooks.apps.handlers.json import json_handler
 
 collect_ignore_glob = [".archive/*"]
+
+
+@pytest.fixture(autouse=True)
+def isolated_engine_log(tmp_path_factory, monkeypatch) -> Path:
+    """The engine's diagnostics log goes to a file under the pytest temp root, per test.
+
+    diagnostics._get_log_file answers a shared directory under the system temp during
+    pytest, the same one for every run and every seat; engine._log writes through it
+    on every dispatch. Pointing the function at a sandbox, by name, lets a test that
+    does not pin the log stop patching engine._log (devpulse's decision G, leg 4).
+    No product change and no environment variable.
+    """
+    sandbox = tmp_path_factory.mktemp("engine_log") / "engine.jsonl"
+    monkeypatch.setattr(diagnostics, "_get_log_file", lambda: sandbox)
+    return sandbox
+
+
+class TriggerRecorder:
+    """Stands where cli keeps its trigger: records each fire and reaches no bus."""
+
+    def __init__(self) -> None:
+        self.fired: list[tuple[str, dict]] = []
+
+    def fire(self, event: str, **kwargs) -> None:
+        self.fired.append((event, kwargs))
+
+
+@pytest.fixture(autouse=True)
+def recorded_cli_trigger(monkeypatch) -> TriggerRecorder:
+    """cli's header fires cli_header_displayed on the real bus; here it fires on a recorder.
+
+    A test that leaves mock_console for the real console used to reach the trigger
+    bus through display._TRIGGER. The recorder stands on that name, and the loaded
+    flag stays set so cli never imports the real trigger in its place (leg 4, 5b).
+    """
+    recorder = TriggerRecorder()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return recorder
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -165,11 +221,17 @@ def isolated_diagnostics_state(tmp_path_factory, monkeypatch):
     The file sits at src/aipass/ and every live session's auto_fix writes it. A test
     whose Edit targets a .py file reached edit_gate's diagnostics block with whatever
     error another branch had open at that moment. Measured 2026-09-18: @memory's
-    open import error turned two tests red in one run and green in the next. The
-    tests that exercise the state patch STATE_FILE on top of this.
+    open import error turned two tests red in one run and green in the next.
+
+    Measured 2026-09-27: TestAutofixPython wrote it, then removed it, so a run could
+    erase a live session's open error. Since leg 4 the state is one file per seat in
+    STATE_DIR under the system temp, and the version 1 file (LEGACY_FILE) is removed by
+    the next write: both point into one sandbox, and auto_fix writes through them.
     """
     ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
-    monkeypatch.setattr(ds, "STATE_FILE", tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json")
+    sandbox = tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json"
+    monkeypatch.setattr(ds, "LEGACY_FILE", sandbox)
+    monkeypatch.setattr(ds, "STATE_DIR", sandbox.parent / "seats")
 
 
 @pytest.fixture
@@ -193,7 +255,7 @@ def registered_projects(tmp_path: Path) -> dict:
     aipass = projects / "AIPass"
     for name in ("devpulse", "hooks", "memory", "seedgo", "spawn", "flow"):
         (aipass / "src" / "aipass" / name).mkdir(parents=True)
-    rows = [{"name": name, "path": f"src/aipass/{name}"} for name in ("HOOKS", "seedgo", "spawn", "flow")]
+    rows: list[dict] = [{"name": name, "path": f"src/aipass/{name}"} for name in ("HOOKS", "seedgo", "spawn", "flow")]
     rows.append({"name": "memory", "path": str(aipass / "src" / "aipass" / "memory")})
     rows.append({"name": "devpulse", "path": "src/aipass/devpulse", "owner": True, "admin": True})
     (aipass / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": rows}), encoding="utf-8")

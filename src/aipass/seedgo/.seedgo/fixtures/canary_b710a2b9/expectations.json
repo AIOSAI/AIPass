@@ -1,0 +1,133 @@
+{
+  "document_metadata": {
+    "document_type": "lane_fixture_expectations",
+    "document_name": "canary_b710a2b9.EXPECTATIONS",
+    "version": "1.0.0",
+    "created": "2026-09-20",
+    "managed_by": "seedgo",
+    "record": "devpulse DPLAN-0352 round 2; seedgo FPLAN-0634"
+  },
+  "subject_path": "src/aipass/canary",
+  "fixture": {
+    "subject": "@canary",
+    "commit": "b710a2b9",
+    "tracked_fidelity": "all 49 files verified byte-identical against `drone @git show b710a2b9 <path>`, one call per file, 2026-09-20. 0 differ.",
+    "what_is_new": "canary's third blind build: the leaderboard reader (`drone @canary top N FILE`, `--json`), 68 cases in tests/test_top.py, and a seventh refusal canary invented of its own (extra arguments after N and FILE).",
+    "layout_note": "Banked as src/aipass/canary so envcopy.detect_layout() returns a repo root and the COPY is importable as aipass.canary - the same reason as the two earlier fixtures.",
+    "untracked_excluded": "The live canary tree at bank time also held apps/handlers/table/, apps/modules/align.py, tests/test_align.py and docs/align_module.md - a FOURTH build, untracked, dated 2026-09-20, in flight while this fixture was being cut. align.py appeared on disk AFTER the copy began. None of it is part of b710a2b9 and all of it is excluded: including it would have changed every count in this key. Reported, attributed to no one.",
+    "untracked_excluded_resolved": "Identified 2026-09-20 later the same day, from devpulse mail 1d4b67b0: it is canary's round-4 blind build, a column aligner, 58 cases, since landed as d002a0bd (verified in the log, the commit after c8ce3989). The exclusion stands and the fixture is unchanged - b710a2b9 is still b710a2b9. The 'attributed to no one' line stays above as written rather than being edited away: the record of what was unknown at bank time is the point.",
+    "one_campaign_per_copy": "a campaign mutates a copy, never this tree."
+  },
+  "release_check": {
+    "property": "every must_fire row nominated, every must_not_fire row silent, or the lane does not ship",
+    "pattern": "Semgrep rule tests - ruleid:/ok: annotations run as the rule's own regression",
+    "out_of_reach_is_a_finding": "a row here is not excused, it is reported. reach=none means no mechanism of this lane's class can see it; reach=mechanism_not_built names the mechanism that would."
+  },
+  "opening_measurement": {
+    "baseline": "208 passed, 0 failed, 0 errors in the scratch env - the first banked fixture whose suite RUNS. Both earlier fixtures refused with T10 'the gate produced no records at all'.",
+    "what_unblocked_it": "envcopy sourced sibling packages from `detect_layout()`'s repo_root, which for a banked fixture is the fixture itself - so zero siblings were copied, `aipass` being a regular package hid the real ones behind the env's own `src`, the fixture conftest's `from aipass.prax import json_handler` failed, and pytest aborted before the hygiene plugin could report. Cured 2026-09-20: siblings come from the running checkout when the target's own root has none, and the choice is published as `sibling_basis`.",
+    "sibling_basis": "host_repo - 19 siblings copied from the running checkout. The TARGET is frozen at b710a2b9; its dependencies are not, and the artifact says so rather than implying the whole env was frozen."
+  },
+  "must_fire": [
+    {
+      "id": "R3-1-width-coupled-refusal-family",
+      "source_row": "round 2 brief 1, '35 assertions of the form reason in captured.err. 31 of 68 red at COLUMNS=40'",
+      "file": "tests/test_top.py",
+      "group": "pytest.width_coupling",
+      "species": "WIDTH-COUPLED-VERDICT",
+      "match_on": "diverged_nodeids",
+      "expected_count": 31,
+      "why": "Reproduced independently 2026-09-20: 31 of 68 red at COLUMNS=40, 0 of 68 at COLUMNS=200. Over the whole branch suite, 76 of 209 diverge - exactly the number devpulse measured from a separate seat. This row pins that the axis KEEPS convicting them.",
+      "built": "2026-09-19 round 1, re-measured round 2"
+    },
+    {
+      "id": "R3-2-xdist-is-the-same-axis-at-a-second-lever",
+      "source_row": "round 2 brief 2, 'under plain pytest -n 4 with COLUMNS untouched, 2 of 68 fail ... I do not think the width axis in its current form sees it'",
+      "file": "tests/test_top.py",
+      "group": "pytest.width_coupling",
+      "species": "WIDTH-COUPLED-VERDICT",
+      "match_on": "diverged_nodeids",
+      "nodeid_prefix": "tests/test_top.py::test_a_file_that_is_not_there_is_refused_rather_than_read_as_empty",
+      "expected_count": 2,
+      "why": "MEASURED, AND THE BRIEF'S PREDICTION WAS WRONG: the width axis DOES see it. Under `pytest -n 4` with COLUMNS untouched, 2 of 68 fail - both parametrizations of test_a_file_that_is_not_there_is_refused_rather_than_read_as_empty. Both are already inside the 31 the axis convicts at COLUMNS=40. Across the whole 209-test suite, 2 of 2 xdist failures fall inside the 76 width-divergent nodeids; 0 fall outside. Mechanism: the xdist worker id lengthens tmp_path until the path wraps mid-token at the DEFAULT width - captured.err reads '.../now\\nhere.txt'. Same root cause, second lever: path length rather than terminal width. This is a second sample point on one axis, not a new axis.",
+      "limit": "Containment is empirical on this tree, not a proof. It holds because the only mechanism here is wrap-at-width and xdist only lengthens the string; an xdist failure from a NON-width cause (shared state, ordering, parallel file contention) would not be covered. The axis is not a general xdist guard.",
+      "built": "2026-09-20 round 2"
+    },
+    {
+      "id": "R3-6-entry-point-help-lines-unpinned",
+      "source_row": "round 2 brief 6, 'the top Commands and Examples strings in canary.py are not read by any test in the whole branch suite'",
+      "file": "apps/canary.py",
+      "group": "pytest.statement_deletion",
+      "species": "UNOBSERVED-STATEMENT",
+      "why": "Second sighting. Whole-body gutting cannot isolate these: the help printer has other work in it. Statement deletion is the operator built for exactly this, and this row is what it was commissioned against.",
+      "built": "2026-09-20 round 2"
+    },
+    {
+      "id": "R3-7-pseudo-tested-display-functions",
+      "source_row": "round 2 brief 7, 'the same three pseudo-tested display functions in canary.py, third sighting: _module_summary, print_introspection, print_help'",
+      "file": "apps/canary.py",
+      "group": "pytest.pseudo_tested",
+      "species": "PSEUDO-TESTED-FUNCTION",
+      "why": "Pre-existing display code, third sighting. The gutting group finds these WHEN IT CAN RUN - and before 2026-09-20 it could not run on any banked fixture at all. This row is the regression pin for both the finding and the env fix that made it reachable.",
+      "built": "2026-09-20 round 2"
+    }
+  ],
+  "must_not_fire": [
+    {
+      "id": "R3-the-68-cases-themselves",
+      "source_row": "round 2 brief, 'must_not_fire: the 68 real cases. Specifically do not let redundancy read as vacuity'",
+      "file": "tests/test_top.py",
+      "group_glob": "pytest.static_*",
+      "why_false": "Round A found the 68 cases collapsing to 48 distinct kill-signatures with only 15 being the sole killer of any mutant. That is a well-factored suite, not a weak one - one error() mutation killing 32 refusal cases at once is the CODE being well factored. Zero vacuous cases across all three rounds. Any static nomination against these 68 is a false positive.",
+      "scope": "every pytest.static_* group must be silent on tests/test_top.py - one scope row rather than 68 written out, so the key needs no edit when canary adds a parametrize case"
+    },
+    {
+      "id": "R3-redundancy-is-not-vacuity",
+      "file": "tests/test_top.py",
+      "group_glob": "pytest.*",
+      "why_false": "A case that shares a kill-signature with another case is redundant, not vacuous. No group may nominate a test for being killed by the same mutant as its neighbour.",
+      "scope": "no group may report a row whose only evidence is a shared kill-signature"
+    }
+  ],
+  "out_of_reach": [
+    {
+      "id": "R3-3-inert-control-already-sorted",
+      "source_row": "round 2 brief 3, 'the [already_sorted] case names itself in its own docstring as the control for tie-break ordering ... I suspect this one is reachable statically. Speculative - measure before believing me.'",
+      "file": "tests/test_top.py",
+      "reach": "static_reachable_not_built",
+      "why": "MEASURED AND THE SUSPICION IS SOUND, but the rule is not built. The shape - a parametrized case whose id or docstring claims a property its input does not vary along - needs a static rule that reads the case id, the docstring claim and the fixture value together. Nothing in the static tier reads a parametrize id against its own data today. Declared, not built; it does not belong in must_fire until it is.",
+      "second_instance": "2026-09-20, devpulse mail 2d3ea264, from canary's round-4 tree (d002a0bd): the JSON form's documented 'same row order' clause is unpinned because replacing the payload with a sorted copy is green - all four JSON fixtures are already in sorted order. Different build, different session, different contract, same shape, two rounds apart. That takes the species from one-off to two-instanced and is what promotes it from a suspicion to a build. Seedgo todo 127.",
+      "built": "not built"
+    },
+    {
+      "id": "R3-4-json-parsed-not-byte-pinned",
+      "source_row": "round 2 brief 4, 'the test round-trips through json.loads, the docstring promises bytes. An ensure_ascii flip survives.'",
+      "file": "tests/test_top.py",
+      "reach": "mechanism_not_built",
+      "why": "Third sighting (rounds 2, 3 and now this fixture). Needs targeted_mutation. The width axis cannot see it either - both mutants stay green at BOTH widths, so there is no verdict to diff. Banked here as the brief directs, not as must_fire.",
+      "built": "not built"
+    },
+    {
+      "id": "R3-5-content-stripping-on-refusal-messages",
+      "source_row": "round 2 brief 5, 'six content-stripping mutations on refusal messages all green - offending token, path, byte offset, strerror, prefix, suggestion'",
+      "file": "apps/modules/top.py",
+      "reach": "none",
+      "why": "Agreed reach=none and agreed low value. The tests assert a reason phrase is present; they do not assert what else the message carries, and no mechanism of this lane's class disagrees with a message that is merely less helpful. Nothing in the tree contradicts anything else.",
+      "built": "n/a"
+    }
+  ],
+  "instrument_findings": [
+    {
+      "id": "F1-banked-fixtures-could-not-run-at-all",
+      "what": "Both previously banked fixtures refused with T10 'the gate produced no records at all - the plugin never reported'. The sentence names the symptom and nothing about the cause.",
+      "root_cause": "envcopy._build_aipass_env sourced siblings from detect_layout()'s repo_root. For a banked fixture that IS the fixture directory, whose src/aipass holds only the frozen branch, so _place_siblings copied zero packages. `aipass` is a regular package and the env's src goes first on PYTHONPATH, so the real siblings were hidden rather than merged, the fixture conftest's `from aipass.prax import json_handler` failed, and pytest aborted before the hygiene plugin's sessionfinish could write a record.",
+      "cure": "sibling_source() takes siblings from the running checkout when the target's own root has none, raises EnvError naming both roots when neither has any, and publishes the choice as sibling_basis. Fixture three's baseline then came back green at 208 passed.",
+      "note": "This is round 0's C2 finding one level out: not 'the probes grade the installed tree' but 'the probes could not grade anything at all, and said so in a sentence about a plugin'."
+    },
+    {
+      "id": "F2-the-brief-s-own-ranking-was-wrong-again",
+      "what": "Row 2 predicted the width axis would NOT see the xdist variant. It does - 2 of 2, with 0 outside the divergent set.",
+      "why_it_matters": "Second round running that a ranking handed to the lane was wrong in the direction of underestimating an instrument that was BUILT AS A VERDICT DIFF. A shape matcher would have had to be taught the xdist shape; an axis that subtracts verdicts got it for free, because a second lever on the same mechanism produces the same divergence."
+    }
+  ]
+}

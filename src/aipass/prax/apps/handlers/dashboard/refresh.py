@@ -23,15 +23,15 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 logger = get_direct_logger()
 
 # Same-package imports allowed
-from .operations import cap_subject, create_fresh_dashboard, save_dashboard  # noqa: E402
-from .status import calculate_quick_status, merge_quick_status, read_existing_quick_status  # noqa: E402
+from .operations import cap_subject, create_fresh_dashboard, save_dashboard
+from .status import calculate_quick_status, merge_quick_status, read_existing_quick_status
 
 # Cross-handler imports for central reader
-from ..central.reader import read_all_centrals  # noqa: E402
+from ..central.reader import read_all_centrals
 
-from aipass.prax.apps.handlers.json import json_handler  # noqa: E402
-from .template_pusher import DEPRECATED_SECTIONS  # noqa: E402
-from aipass.prax.apps.handlers.repo_root import find_repo_root  # noqa: E402
+from aipass.prax.apps.handlers.json import json_handler
+from .template_pusher import DEPRECATED_SECTIONS
+from aipass.prax.apps.handlers.repo_root import find_repo_root
 
 # Sections managed by the refresh path — everything else is write-through only
 REFRESH_MANAGED_SECTIONS = {"ai_mail", "flow", "memory"}

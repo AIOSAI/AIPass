@@ -1,19 +1,27 @@
 # =================== AIPass ====================
 # Name: test_profile.py
 # Description: Tests for aipass profile Phase 3
-# Version: 1.1.0
+# Version: 1.2.6
 # Created: 2026-04-16
-# Modified: 2026-08-27
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for aipass profile command — Phase 3 (FPLAN-0188)."""
+"""Tests for apps/modules/profile.py and the handlers it drives."""
 
+# Phase 3 (FPLAN-0188).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/modules/profile.py parses and imports
+# seedgo: no-test-needed(constant) — USER_FIELDS' literal contents and the store's filename
+
+import io
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from aipass.aipass.apps.modules import profile as profile_mod
 from aipass.aipass.apps.modules.profile import (
     USER_FIELDS,
     get_user_profile,
@@ -46,19 +54,29 @@ def tmp_store(tmp_path):
             yield store
 
 
+class _CtrlCStdin(io.StringIO):
+    """A stdin the user presses Ctrl-C on: input() reads it and gets KeyboardInterrupt.
+
+    Stands where the other clear tests put their StringIO, so the product's own
+    input() runs and nothing process-wide is replaced.
+    """
+
+    def readline(self, size: int | None = -1) -> str:
+        """Raise as a terminal does when Ctrl-C arrives mid-read."""
+        raise KeyboardInterrupt
+
+
 @pytest.fixture
 def tmp_legacy(tmp_store):
     """Return the patched legacy local.json path alongside the store."""
-    from aipass.aipass.apps.modules import profile as profile_mod
-
-    return profile_mod._LEGACY_LOCAL_JSON
+    return tmp_store.parent.parent / ".trinity" / "local.json"
 
 
 @pytest.fixture
 def tmp_store_with_data(tmp_store):
     """Pre-populate the store with a full profile."""
     data = {"profile": {f: f"test_{f}" for f in USER_FIELDS}}
-    tmp_store.write_text(json.dumps(data))
+    tmp_store.write_text(json.dumps(data), encoding="utf-8")
     return tmp_store
 
 
@@ -70,21 +88,37 @@ def tmp_store_with_data(tmp_store):
 class TestLiveStoreIsolation:
     """The suite must never write the branch's real profile store."""
 
-    def test_store_path_is_not_the_live_branch_file(self) -> None:
-        """conftest's autouse guard has redirected both profile paths."""
-        from aipass.aipass.apps.modules import profile as profile_mod
+    def test_store_path_is_not_the_live_branch_file(
+        self, isolate_profile_store: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """conftest's autouse guard has redirected both profile paths, seen through `aipass profile`.
 
-        live_store = profile_mod._BRANCH_ROOT / "aipass_json" / "user_profile.json"
-        live_legacy = profile_mod._BRANCH_ROOT / ".trinity" / "local.json"
-        assert profile_mod._PROFILE_JSON != live_store
-        assert profile_mod._LEGACY_LOCAL_JSON != live_legacy
+        A legacy "user" section planted in the guard's temp local.json is what the
+        command shows, so the legacy read is the temp one; the store write the
+        first read makes is recorded, never performed, so even a broken guard
+        writes nothing live. The live store is spelled from the module's file.
+        """
+        live_store = Path(profile_mod.__file__).parents[2] / "aipass_json" / "user_profile.json"
+        (isolate_profile_store / "local.json").write_text(
+            json.dumps({"user": {"name": "LegacyProbe"}}), encoding="utf-8"
+        )
+        with (
+            patch("aipass.aipass.apps.modules.profile.json_handler.write_json", return_value=True) as mock_write,
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+        ):
+            assert handle_command("profile", []) is True
+
+        assert "LegacyProbe" in capsys.readouterr().out
+        written = Path(mock_write.call_args[0][0])
+        assert written == isolate_profile_store / "user_profile.json"
+        assert written != live_store
 
     def test_unmocked_save_lands_in_the_temp_store(self, isolate_profile_store) -> None:
         """A save with no local patching writes under the guard's temp dir."""
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "IsolationProbe"})
         written = isolate_profile_store / "user_profile.json"
-        assert json.loads(written.read_text())["profile"]["name"] == "IsolationProbe"
+        assert json.loads(written.read_text(encoding="utf-8"))["profile"]["name"] == "IsolationProbe"
 
 
 # =============================================================================
@@ -109,39 +143,74 @@ class TestWriteDurability:
             side_effect=OSError("no space left on device"),
         )
 
+    @staticmethod
+    def _assert_one_write_failed_fire(mock_trigger, store: Path) -> None:
+        """The failed save fired its one bus event, with the full payload profile.py sends."""
+        mock_trigger.fire.assert_called_once_with(
+            "profile_write_failed",
+            path=str(store),
+            reason="write_failure_cleanup",
+            detail="json_handler removed its own temp file; the store was left untouched",
+        )
+
     def test_oserror_mid_write_leaves_the_store_byte_intact(self, tmp_store) -> None:
-        """A failed save must not half-write or truncate the previous profile."""
+        """A failed save must not half-write or truncate the previous profile.
+
+        The bus is patched where it lives, so the failure's event never reaches
+        the real trigger bus; the one fire is asserted with its arguments.
+        Mutant 2026-09-28: the fired path str(_PROFILE_JSON) -> str(_LEGACY_LOCAL_JSON) reddens this.
+        """
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Original", "os": "Linux"})
         before = tmp_store.read_bytes()
 
-        with self._fail_the_replace():
-            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
-                with pytest.raises(OSError):
-                    save_profile({"name": "Replacement", "os": "Windows"})
+        with (
+            self._fail_the_replace(),
+            patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+        ):
+            with pytest.raises(OSError):
+                save_profile({"name": "Replacement", "os": "Windows"})
 
         assert tmp_store.read_bytes() == before
         assert get_user_profile()["name"] == "Original"
+        self._assert_one_write_failed_fire(mock_trigger, tmp_store)
 
     def test_failed_write_leaves_no_temp_file_behind(self, tmp_store) -> None:
-        """The handler unlinks its own temp file on the failure path."""
+        """The handler unlinks its own temp file on the failure path; the bus is patched where it lives."""
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Original"})
 
-        with self._fail_the_replace():
-            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
-                with pytest.raises(OSError):
-                    save_profile({"name": "Replacement"})
+        with (
+            self._fail_the_replace(),
+            patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+        ):
+            with pytest.raises(OSError):
+                save_profile({"name": "Replacement"})
 
         leftovers = [p.name for p in tmp_store.parent.iterdir() if p.name != tmp_store.name]
         assert leftovers == []
+        self._assert_one_write_failed_fire(mock_trigger, tmp_store)
 
     def test_write_failure_raises_instead_of_answering_false(self, tmp_store) -> None:
-        """json_handler answers False; save_profile must not pass that off as success."""
-        with self._fail_the_replace():
-            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
-                with pytest.raises(OSError):
-                    save_profile({"name": "Doomed"})
+        """json_handler answers False; save_profile must not pass that off as success.
+
+        What it adds to its neighbours: the FIRST save, with no store on disk yet. The failure
+        still raises and fires, and leaves no store behind that a later read would take for a
+        profile. The bus is patched where it lives; the one fire is asserted with its arguments.
+        """
+        assert not tmp_store.exists()
+        with (
+            self._fail_the_replace(),
+            patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+        ):
+            with pytest.raises(OSError):
+                save_profile({"name": "Doomed"})
+
+        assert not tmp_store.exists()
+        self._assert_one_write_failed_fire(mock_trigger, tmp_store)
 
     def test_trigger_fires_on_write_failure(self, tmp_store) -> None:
         """The write-failure event fires under its true name, with the payload kept.
@@ -180,8 +249,6 @@ class TestWriteDurability:
         the same writer and would have surfaced as the next failure once the
         mkdir went, because the audit reports only the first violation it finds.
         """
-        from aipass.aipass.apps.modules import profile as profile_mod
-
         source = Path(profile_mod.__file__).read_text(encoding="utf-8")
         body = [line for line in source.splitlines() if line.strip() and not line.strip().startswith("#")]
         for forbidden in (".mkdir(", ".write_text(", ".read_text(", "json.dump(", "json.load("):
@@ -201,13 +268,18 @@ class TestRoundTrip:
         """
         save_profile({f: f"kept_{f}" for f in USER_FIELDS})
         assert get_user_profile()["name"] == "kept_name"
-        assert json.loads(tmp_store.read_text())["profile"]["os"] == "kept_os"
+        assert json.loads(tmp_store.read_text(encoding="utf-8"))["profile"]["os"] == "kept_os"
 
-    def test_store_name_is_outside_the_managed_triplet(self) -> None:
-        """The filename must not collide with <module>_{config,data,log}.json."""
-        from aipass.aipass.apps.modules import profile as profile_mod
+    def test_store_name_is_outside_the_managed_triplet(self, isolate_profile_store) -> None:
+        """The filename must not collide with <module>_{config,data,log}.json.
 
-        assert profile_mod._PROFILE_FILENAME not in (
+        Read off the file a save actually writes (2026-09-27), not the constant.
+        """
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+            save_profile({"name": "NameProbe"})
+        written = {p.name for p in isolate_profile_store.iterdir() if p.is_file()}
+        assert written == {"user_profile.json"}
+        assert "user_profile.json" not in (
             "profile_config.json",
             "profile_data.json",
             "profile_log.json",
@@ -229,34 +301,34 @@ class TestGetUserProfile:
 
     def test_creates_profile_section_if_missing(self, tmp_store) -> None:
         """Writes defaults to disk when the profile key is absent."""
-        tmp_store.write_text(json.dumps({"other": "data"}))
+        tmp_store.write_text(json.dumps({"other": "data"}), encoding="utf-8")
         result = get_user_profile()
         assert all(v is None for v in result.values())
-        stored = json.loads(tmp_store.read_text())
+        stored = json.loads(tmp_store.read_text(encoding="utf-8"))
         assert "profile" in stored
 
     def test_adopts_legacy_user_section(self, tmp_store, tmp_legacy) -> None:
         """A pre-1.1.0 local.json "user" section is read when the store is absent."""
-        tmp_legacy.write_text(json.dumps({"sessions": [], "user": {"name": "Bob", "os": "Linux"}}))
+        tmp_legacy.write_text(json.dumps({"sessions": [], "user": {"name": "Bob", "os": "Linux"}}), encoding="utf-8")
         result = get_user_profile()
         assert result["name"] == "Bob"
         assert result["os"] == "Linux"
         assert result["shell"] is None
-        assert json.loads(tmp_store.read_text())["profile"]["name"] == "Bob"
+        assert json.loads(tmp_store.read_text(encoding="utf-8"))["profile"]["name"] == "Bob"
 
     def test_legacy_local_json_is_never_written(self, tmp_store, tmp_legacy) -> None:
         """Reading and saving leave local.json byte-identical -- .trinity is not ours."""
         original = json.dumps({"sessions": [1, 2, 3], "user": {"name": "Bob"}})
-        tmp_legacy.write_text(original)
+        tmp_legacy.write_text(original, encoding="utf-8")
         get_user_profile()
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Changed"})
-        assert tmp_legacy.read_text() == original
+        assert tmp_legacy.read_text(encoding="utf-8") == original
 
     def test_store_wins_over_legacy(self, tmp_store, tmp_legacy) -> None:
         """Once the store exists the legacy section is ignored, not merged."""
-        tmp_store.write_text(json.dumps({"profile": {"name": "Store"}}))
-        tmp_legacy.write_text(json.dumps({"user": {"name": "Legacy"}}))
+        tmp_store.write_text(json.dumps({"profile": {"name": "Store"}}), encoding="utf-8")
+        tmp_legacy.write_text(json.dumps({"user": {"name": "Legacy"}}), encoding="utf-8")
         assert get_user_profile()["name"] == "Store"
 
     def test_returns_empty_dict_on_corrupt_file(self, tmp_store) -> None:
@@ -266,7 +338,7 @@ class TestGetUserProfile:
         every degraded return, including one carrying a stale profile read
         from somewhere else.
         """
-        tmp_store.write_text("NOT JSON")
+        tmp_store.write_text("NOT JSON", encoding="utf-8")
         result = get_user_profile()
         assert isinstance(result, dict)
         assert result == {field: None for field in USER_FIELDS}
@@ -277,10 +349,20 @@ class TestGetUserProfile:
         The loop became a set comparison 2026-09-08 (v5 unentered_assert): an
         empty USER_FIELDS made the old body a silent pass, and the set says the
         same thing without a branch to not enter.
+        Premise added 2026-09-27: a store written before the other fields
+        existed, so the fill-in answers, not the defaults path.
+        Mutant: get_user_profile returns the stored dict as is (no fill-in) -> red.
         """
+        tmp_store.write_text(json.dumps({"profile": {"name": "Bob"}}), encoding="utf-8")
         result = get_user_profile()
-        assert USER_FIELDS, "USER_FIELDS is empty - there is nothing to be present"
-        assert set(USER_FIELDS) <= set(result), f"missing: {set(USER_FIELDS) - set(result)}"
+        assert result == {
+            "name": "Bob",
+            "os": None,
+            "shell": None,
+            "preferred_cli": None,
+            "install_method": None,
+            "first_seen": None,
+        }
 
 
 # =============================================================================
@@ -293,15 +375,15 @@ class TestSaveProfile:
         """Profile dict is written to user section of local.json."""
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "user", "os": "Linux"})
-        stored = json.loads(tmp_store.read_text())
+        stored = json.loads(tmp_store.read_text(encoding="utf-8"))
         assert stored["profile"]["name"] == "user"
 
     def test_save_replaces_whole_profile(self, tmp_store) -> None:
         """The store holds only the profile -- a save is a full replace."""
-        tmp_store.write_text(json.dumps({"profile": {"name": "Old", "os": "Linux"}}))
+        tmp_store.write_text(json.dumps({"profile": {"name": "Old", "os": "Linux"}}), encoding="utf-8")
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Bob"})
-        stored = json.loads(tmp_store.read_text())
+        stored = json.loads(tmp_store.read_text(encoding="utf-8"))
         assert stored["profile"] == {"name": "Bob"}
 
     def test_logs_operation(self, tmp_store) -> None:
@@ -313,7 +395,8 @@ class TestSaveProfile:
         # one hop down makes patch() itself raise the day the name moves.
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation") as mock_log:
             save_profile({"name": "Test"})
-        mock_log.assert_called_once()
+        # Mutant: log_operation("profile_save", ...) -> ("profile_saved", ...) -> red.
+        mock_log.assert_called_once_with("profile_save", {"fields": ["name"]})
 
     def test_creates_parent_dirs(self, tmp_path) -> None:
         """Missing aipass_json/ directory is created on write."""
@@ -360,34 +443,19 @@ class TestPrintIntrospection:
         for field in USER_FIELDS:
             assert field in rendered, f"{field} is missing from the rendered table"
 
-    def test_outputs_field_names(self, tmp_store) -> None:
-        """The header, the table and the set-hint all reach console.print.
+    def test_outputs_field_names(self, tmp_store, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: set-hint line dropped -> red.
 
-        Docstring corrected 2026-09-07: it claimed all USER_FIELDS appear in the
-        output, which this never checked -- the console is a MagicMock here, so
-        nothing is rendered to check. Named for what it actually pins.
-
-        capsys dropped 2026-09-08 (v5 capture_never_read): the fixture was in
-        the signature and never read, and it never COULD have been read -- the
-        console is patched, so nothing was ever written to stdout for it to
-        capture. The rendered-text claim lives in the sibling above, which does
-        not patch. What this unit can honestly see is the call args, so that is
-        what it now asserts.
+        Console no longer patched (mock_console, 2026-09-27): the header, every
+        field row in USER_FIELDS order, and the set-hint are read off stdout.
         """
-        from rich.table import Table
-
-        with patch("aipass.aipass.apps.modules.profile.console") as mock_console:
-            print_introspection()
-        args = [a for call in mock_console.print.call_args_list for a in call[0]]
-        printed = " ".join(str(a) for a in args)
-        tables = [a for a in args if isinstance(a, Table)]
-        # The header is pinned WITH ITS MARKUP: the bare three words also
-        # appear in the set-hint below, so the loose form survived renaming
-        # the header (measured 2026-09-08).
-        assert "[bold cyan]aipass profile[/bold cyan]" in args
-        assert "aipass profile set <field> <value>" in printed
-        assert len(tables) == 1
-        assert list(tables[0].columns[0].cells) == USER_FIELDS
+        print_introspection()
+        out, _err = capsys.readouterr()
+        lines = [line.strip() for line in out.splitlines() if line.strip()]
+        assert lines[0] == "aipass profile"
+        positions = [out.index(field) for field in USER_FIELDS]
+        assert positions == sorted(positions)
+        assert "Use 'aipass profile set <field> <value>' to update." in out
 
 
 # =============================================================================
@@ -396,17 +464,12 @@ class TestPrintIntrospection:
 
 
 class TestPrintHelp:
-    def test_prints_something(self) -> None:
-        """print_help calls console.print at least once.
-
-        Absorbed the sibling `test_does_not_raise` on 2026-09-07 (DPLAN-0323
-        contested band, MERGE). Mutation-checked: making print_help raise killed
-        both tests identically -- same console patch, same call -- so this one
-        subsumed it.
-        """
-        with patch("aipass.aipass.apps.modules.profile.console") as mock_console:
-            print_help()
-        assert mock_console.print.called
+    def test_prints_something(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: FIELDS line dropped from help -> red."""
+        print_help()
+        out, _err = capsys.readouterr()
+        assert "aipass profile — user memory read/write" in out
+        assert "FIELDS: " + ", ".join(USER_FIELDS) in out
 
 
 # =============================================================================
@@ -434,100 +497,138 @@ class TestHandleCommand:
         assert result is True
         mock_pi.assert_called_once()
 
-    def test_help_flag_returns_true(self) -> None:
-        """--help flag is handled."""
-        with patch("aipass.aipass.apps.modules.profile.print_help"):
-            assert handle_command("profile", ["--help"]) is True
+    def test_help_flag_returns_true(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: help branch skips print_help -> red."""
+        assert handle_command("profile", ["--help"]) is True
+        out, _err = capsys.readouterr()
+        assert "user memory read/write" in out
 
-    def test_h_flag_returns_true(self) -> None:
-        """-h flag is handled."""
-        with patch("aipass.aipass.apps.modules.profile.print_help"):
-            assert handle_command("profile", ["-h"]) is True
+    def test_h_flag_returns_true(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: help branch skips print_help -> red."""
+        assert handle_command("profile", ["-h"]) is True
+        out, _err = capsys.readouterr()
+        assert "user memory read/write" in out
 
-    def test_help_word_returns_true(self) -> None:
-        """'help' subcommand is handled."""
-        with patch("aipass.aipass.apps.modules.profile.print_help"):
-            assert handle_command("profile", ["help"]) is True
+    def test_help_word_returns_true(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: help branch skips print_help -> red."""
+        assert handle_command("profile", ["help"]) is True
+        out, _err = capsys.readouterr()
+        assert "user memory read/write" in out
 
     def test_set_valid_field(self, tmp_store) -> None:
         """'set name user' stores value and returns True."""
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             result = handle_command("profile", ["set", "name", "user"])
         assert result is True
-        stored = json.loads(tmp_store.read_text())
+        stored = json.loads(tmp_store.read_text(encoding="utf-8"))
         assert stored["profile"]["name"] == "user"
 
-    def test_set_invalid_field_returns_true(self, tmp_store) -> None:
-        """Setting an unknown field returns True (handled with error msg)."""
-        with patch("aipass.aipass.apps.modules.profile.console"):
-            result = handle_command("profile", ["set", "INVALID_FIELD", "val"])
+    def test_set_invalid_field_returns_true(self, tmp_store, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: 'Unknown field' error dropped -> red."""
+        result = handle_command("profile", ["set", "INVALID_FIELD", "val"])
         assert result is True
+        _out, err = capsys.readouterr()
+        assert "Unknown field: INVALID_FIELD" in err
 
-    def test_set_missing_value_returns_true(self) -> None:
-        """'set name' without value returns True (error shown)."""
-        with patch("aipass.aipass.apps.modules.profile.console"):
-            result = handle_command("profile", ["set", "name"])
+    def test_set_missing_value_returns_true(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: usage error dropped -> red."""
+        result = handle_command("profile", ["set", "name"])
         assert result is True
+        _out, err = capsys.readouterr()
+        assert "Usage: aipass profile set <field> <value>" in err
 
     def test_clear_confirmed(self, tmp_store) -> None:
         """'clear' with 'aipass' confirmation resets profile."""
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
-            with patch("builtins.input", return_value="aipass"):
-                with patch("aipass.aipass.apps.modules.profile.console"):
-                    result = handle_command("profile", ["clear"])
+            with patch("sys.stdin", io.StringIO("aipass\n")):
+                result = handle_command("profile", ["clear"])
         assert result is True
-        stored = json.loads(tmp_store.read_text())
+        stored = json.loads(tmp_store.read_text(encoding="utf-8"))
         assert all(v is None for v in stored["profile"].values())
 
-    def test_clear_cancelled(self, tmp_store) -> None:
+    def test_clear_cancelled(self, tmp_store, capsys: pytest.CaptureFixture[str]) -> None:
         """A wrong confirmation clears nothing, so it must not exit 0.
+
+        Mutant: its Cancelled error() dropped -> red (stderr read).
 
         Rewritten 2026-09-07 (FPLAN-0492 wave 6). This asserted `result is True`
         -- the assertion that PINNED the defect: the user asked for a clear, the
         clear did not happen, and the command reported success anyway.
         """
-        before = tmp_store.read_text() if tmp_store.exists() else None
-        with patch("builtins.input", return_value="nope"):
-            with patch("aipass.aipass.apps.modules.profile.console"):
-                with pytest.raises(SystemExit) as exc:
-                    handle_command("profile", ["clear"])
+        before = tmp_store.read_text(encoding="utf-8") if tmp_store.exists() else None
+        with patch("sys.stdin", io.StringIO("nope\n")):
+            with pytest.raises(SystemExit) as exc:
+                handle_command("profile", ["clear"])
 
         assert exc.value.code == 1
-        assert (tmp_store.read_text() if tmp_store.exists() else None) == before
+        assert (tmp_store.read_text(encoding="utf-8") if tmp_store.exists() else None) == before
+        _out, err = capsys.readouterr()
+        assert "confirmation was 'nope', not 'aipass'. Profile NOT cleared." in err
 
-    def test_clear_keyboard_interrupt(self, tmp_store) -> None:
-        """Ctrl-C during clear leaves the profile intact and refuses non-zero."""
-        before = tmp_store.read_text() if tmp_store.exists() else None
-        with patch("builtins.input", side_effect=KeyboardInterrupt):
-            with patch("aipass.aipass.apps.modules.profile.console"):
-                with pytest.raises(SystemExit) as exc:
-                    handle_command("profile", ["clear"])
+    def test_clear_keyboard_interrupt(self, tmp_store, capsys: pytest.CaptureFixture[str]) -> None:
+        """Ctrl-C during clear leaves the profile intact and refuses non-zero.
+
+        Mutant: its Cancelled error() dropped -> red (stderr read).
+        """
+        before = tmp_store.read_text(encoding="utf-8") if tmp_store.exists() else None
+        with patch("sys.stdin", _CtrlCStdin()):
+            with pytest.raises(SystemExit) as exc:
+                handle_command("profile", ["clear"])
 
         assert exc.value.code == 1
-        assert (tmp_store.read_text() if tmp_store.exists() else None) == before
+        assert (tmp_store.read_text(encoding="utf-8") if tmp_store.exists() else None) == before
+        _out, err = capsys.readouterr()
+        assert "Cancelled — no confirmation read, profile NOT cleared." in err
 
-    def test_clear_eof_error(self, tmp_store) -> None:
+    def test_clear_eof_error(self, tmp_store, capsys: pytest.CaptureFixture[str]) -> None:
         """A PIPED clear has no stdin to confirm on: refuse, never report success.
+
+        Mutant: its Cancelled error() dropped -> red (stderr read).
 
         This is the row canary's sweep named directly -- `aipass profile clear`
         in a pipe hit EOFError, printed Cancelled and exited 0 while the profile
         sat untouched, so a script could not tell a clear from a no-op.
         """
-        before = tmp_store.read_text() if tmp_store.exists() else None
-        with patch("builtins.input", side_effect=EOFError):
-            with patch("aipass.aipass.apps.modules.profile.console"):
-                with pytest.raises(SystemExit) as exc:
-                    handle_command("profile", ["clear"])
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+            save_profile({"name": "Kept", "os": "Linux"})
+        before = tmp_store.read_text(encoding="utf-8")
+        with patch("sys.stdin", io.StringIO("")):
+            with pytest.raises(SystemExit) as exc:
+                handle_command("profile", ["clear"])
 
         assert exc.value.code == 1
-        assert (tmp_store.read_text() if tmp_store.exists() else None) == before
+        assert tmp_store.read_text(encoding="utf-8") == before
+        _out, err = capsys.readouterr()
+        assert "Cancelled — no confirmation read, profile NOT cleared." in err
 
-    def test_clear_confirmed_still_exits_zero(self, tmp_store) -> None:
-        """The counterfactual: the real clear path must NOT have become a refusal."""
+    def test_clear_yes_clears_a_piped_store_without_asking(self, tmp_store) -> None:
+        """The pipe's own door is `clear --yes`: the same empty stdin with the flag clears the
+        store on disk without asking, so a script that means it can.
+
+        Moved out of test_clear_eof_error on 2026-09-28, one behaviour per test.
+        Mutant 2026-09-28: the skip-confirm flags `("--yes", "-y")` became `("-y",)`, so --yes no
+        longer skips the prompt, and this test went red.
+        """
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
-            with patch("builtins.input", return_value="aipass"):
-                with patch("aipass.aipass.apps.modules.profile.console"):
-                    assert handle_command("profile", ["clear"]) is True
+            save_profile({"name": "Kept", "os": "Linux"})
+        with (
+            patch("sys.stdin", io.StringIO("")),
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+        ):
+            assert handle_command("profile", ["clear", "--yes"]) is True
+        stored = json.loads(tmp_store.read_text(encoding="utf-8"))
+        assert stored["profile"] == {f: None for f in USER_FIELDS}
+
+    def test_clear_confirmed_still_exits_zero(self, tmp_store, capsys: pytest.CaptureFixture[str]) -> None:
+        """The counterfactual: the real clear path must NOT have become a refusal.
+
+        Mutant: confirmed clear skips its 'Profile cleared.' -> red.
+        """
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+            with patch("sys.stdin", io.StringIO("aipass\n")):
+                assert handle_command("profile", ["clear"]) is True
+        out, _err = capsys.readouterr()
+        assert "Profile cleared." in out
 
     def test_unknown_subcommand_shows_help(self) -> None:
         """Unrecognised subcommand falls through to help (returns True)."""

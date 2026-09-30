@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: post_close_runner.py
 # Description: Background post-close processing
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-02-14
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -21,7 +21,6 @@ running": it is logged as an error and the runner exits non-zero.
 This script lives inside the flow branch so handler import guards allow it.
 """
 
-# ruff: noqa: E402
 import sys
 import os
 
@@ -91,9 +90,10 @@ def handle_command(command: str, args: list) -> bool:
     # Run the post-close processing directly (foreground)
     try:
         acquired = acquire_lock(LOCK_FILE)
-    except PermissionError as e:
-        # Denied past lock_ops' retry budget: a permissions problem, not a
-        # running instance, so it must not be reported as one.
+    except OSError as e:
+        # Denied past lock_ops' retry budget (PermissionError), or a lock that
+        # exists but cannot be read or removed: not a running instance, so it
+        # must not be reported as one.
         logger.error("[%s] Could not create lock %s: %s", MODULE_NAME, LOCK_FILE, e)
         error(f"Could not create lock: {e}")
         return True
@@ -161,18 +161,34 @@ def print_help():
     console.print()
 
 
-if __name__ == "__main__":
-    if "--help" in sys.argv or "-h" in sys.argv:
+def main(argv: list[str]) -> int:
+    """Run the pass close_plan starts as a detached program; answer its exit code.
+
+    The body of the ``__main__`` guard, moved here for the test: run as a
+    program, the module binds the real LOCK_FILE, which no test may touch, so a
+    test calls this with LOCK_FILE redirected instead (flow's decision, leg 3b).
+    The guard is this one call.
+
+    Args:
+        argv: The program's arguments (sys.argv).
+
+    Returns:
+        0 when done or when another instance holds the lock, 1 when the lock
+        cannot be created.
+    """
+    if "--help" in argv or "-h" in argv:
         print_help()
-        sys.exit(0)
+        return 0
 
     try:
         acquired = acquire_lock(LOCK_FILE)
-    except PermissionError as e:
+    except OSError as e:
+        # The same catch as handle_command: denied past the retry budget, or a
+        # lock that exists but cannot be read or removed.
         logger.error("[%s] Could not create lock %s: %s", MODULE_NAME, LOCK_FILE, e)
-        sys.exit(1)
+        return 1
     if not acquired:
-        sys.exit(0)
+        return 0
 
     try:
         process_closed_plans()
@@ -193,3 +209,8 @@ if __name__ == "__main__":
         logger.error(f"[{MODULE_NAME}] Background processing failed: {e}")
     finally:
         release_lock(LOCK_FILE)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

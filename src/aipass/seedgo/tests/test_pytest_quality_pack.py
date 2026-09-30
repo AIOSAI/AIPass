@@ -1,43 +1,47 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack.py
 # Description: behavioural pins for the pytest_quality standards pack
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-01
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Pins for the pytest_quality pack: the static corpus reader and the no_oracle
-check. Every test here names the defect or contract it protects.
+"""Tests for apps/handlers/pytest_quality_standards/corpus.py and the pack's checkers beside it."""
 
-The owner's standing rule governs this file - never add a test without a defect it
-pins - and it applies with extra force here, because the standard under test is
-the one that convicts tests which prove nothing. A vacuous pin on the
-vacuous-test detector would be the joke telling itself. Every test below was
-confirmed RED against a named one-line mutation of the source before it shipped.
+# Pins for the pytest_quality pack: the static corpus reader and the no_oracle
+# check. Every test here names the defect or contract it protects.
+#
+# The owner's standing rule governs this file - never add a test without a defect it
+# pins - and it applies with extra force here, because the standard under test is
+# the one that convicts tests which prove nothing. A vacuous pin on the
+# vacuous-test detector would be the joke telling itself. Every test below was
+# confirmed RED against a named one-line mutation of the source before it shipped.
+#
+# What is pinned is what a plausible future edit could break:
+#
+#   * the vendor skip (losing it scores a project on its DEPENDENCIES' tests -
+#     the single worst failure mode a portable pack has, because the number it
+#     prints would be about code the project does not own)
+#   * `with pytest.raises(...)` as an oracle (it appears in no `ast.Assert` node
+#     and it is not a bare call expression; missing it convicts a large, correct
+#     family of exception tests as assertion-free)
+#   * the delegation exemption (flagging `_assert_document_is_lawful(...)` would
+#     teach projects to inline their helpers to please the checker - the exact
+#     behaviour v4 produced and this pack exists to stop)
+#   * `not_applicable` on an empty project (zero tests measured is not zero
+#     quality found; a 0 blames a project for a fact about its layout)
+#   * unparseable files named as NOT measured (a broken file must never read as
+#     a clean one)
+#
+# NOTHING HERE ASSERTS A FACT ABOUT THIS MACHINE, and nothing here reads the live
+# repo tree. No Python version, no platform, no path separator, no fleet count - a
+# pin whose answer changes when the fleet changes is a change detector wearing a
+# test's name. Every project under test is written into `tmp_path` by the test
+# that reads it.
 
-What is pinned is what a plausible future edit could break:
-
-  * the vendor skip (losing it scores a project on its DEPENDENCIES' tests -
-    the single worst failure mode a portable pack has, because the number it
-    prints would be about code the project does not own)
-  * `with pytest.raises(...)` as an oracle (it appears in no `ast.Assert` node
-    and it is not a bare call expression; missing it convicts a large, correct
-    family of exception tests as assertion-free)
-  * the delegation exemption (flagging `_assert_document_is_lawful(...)` would
-    teach projects to inline their helpers to please the checker - the exact
-    behaviour v4 produced and this pack exists to stop)
-  * `not_applicable` on an empty project (zero tests measured is not zero
-    quality found; a 0 blames a project for a fact about its layout)
-  * unparseable files named as NOT measured (a broken file must never read as
-    a clean one)
-
-NOTHING HERE ASSERTS A FACT ABOUT THIS MACHINE, and nothing here reads the live
-repo tree. No Python version, no platform, no path separator, no fleet count - a
-pin whose answer changes when the fleet changes is a change detector wearing a
-test's name. Every project under test is written into `tmp_path` by the test
-that reads it.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — the prose the content pages return, e.g. pytest_quality_standards/no_oracle_content.py
+# seedgo: no-test-needed(constant) — the manifest text in pytest_quality_standards/pack.json
 
 import ast
 import textwrap
@@ -994,7 +998,7 @@ class TestAssertionShapeBranchCheck:
         assert "NOT measured" in named[0]["message"]
 
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import unentered_assert_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import unentered_assert_check
 
 # =============================================================================
 # UNENTERED ASSERTIONS - THE ASSERT THAT MAY NEVER EXECUTE
@@ -1319,7 +1323,7 @@ class TestUnenteredAssertReachability:
 # was appended while another author was appending to the same file; E402 is
 # ignored repo-wide, and a local import cannot collide with a concurrent edit.
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import mock_drift_check, self_skip_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import mock_drift_check, self_skip_check
 
 
 def _drift_rows(root: Path) -> list:
@@ -2336,7 +2340,7 @@ class TestSelfSkipScoring:
 # CAPTURE NEVER READ - THE OUTPUT THE TEST ASKED FOR AND NEVER LOOKED AT
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import (  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import (
     capture_never_read_check,
     empty_parametrize_check,
 )
@@ -3379,7 +3383,7 @@ class TestEmptyParametrizeBranchCheck:
 # POSIX LITERAL - A ROOTED PATH LITERAL PUT THROUGH A RESOLVER
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import posix_literal_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import posix_literal_check
 
 # NOTHING IN THIS SECTION ASKS THE MACHINE ANYTHING. The rule under test is about
 # path separators, which makes it the one rule in the pack whose pins could most
@@ -4310,7 +4314,7 @@ class TestPosixLiteralRenderedAndReturnedPaths:
 # COVERAGE SLOT - THE TEST THAT SAYS OUT LOUD WHY IT EXISTS
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import coverage_slot_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import coverage_slot_check
 
 
 def _coverage_slot_project(root: Path) -> Path:
@@ -4821,7 +4825,7 @@ class TestCoverageSlotBranchCheck:
 # ENTRY POINT DIFF - THE VERB THE SUITE HAS NEVER ONCE SAID OUT LOUD
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import (  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import (
     docstring_pin_check,
     entry_point_diff_check,
 )
@@ -5697,6 +5701,7 @@ class TestTheTeachingTemplatesStillRun:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=300,
         )
 
@@ -5723,7 +5728,7 @@ class TestTheTeachingTemplatesStillRun:
 # HOST STATE - DID THE TEST PUT THE MACHINE BACK
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import host_state_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import host_state_check
 
 # NOTHING IN THIS SECTION TOUCHES HOST STATE, and the rule under test is why that
 # has to be written down rather than assumed. A pin for a checker about services,
@@ -6769,7 +6774,7 @@ class TestHostStateBranchCheck:
 # FRESH CLONE - WOULD THIS TEST PASS ON A MACHINE THAT HAS ONLY WHAT THE REPO SHIPS
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import fresh_clone_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import fresh_clone_check
 
 # NOTHING IN THIS SECTION READS THE LIVE CHECKOUT, and the rule under test is the
 # reason that has to be written down rather than assumed. A pin for a checker
@@ -7780,7 +7785,7 @@ class TestFreshCloneBranchCheck:
 # PLATFORM ORACLE - IS THE VERDICT ABOUT THE CODE, OR ABOUT THE HOST
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import platform_oracle_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import platform_oracle_check
 
 # NOTHING IN THIS SECTION ASKS THIS MACHINE ANYTHING, and the rule under test is
 # the reason that has to be written down rather than assumed. A pin for a checker
@@ -8176,14 +8181,17 @@ class TestPlatformOracleDetection:
         green here forever. It NOMINATES, because whether production walks up is
         a fact about production and this checker reads test units. Mutation
         caught: `CWD_SEAM_NEEDLES: tuple = ("Path.cwd", "os.getcwd", "getcwdb",
-        "pathlib.Path.cwd")` becoming `CWD_SEAM_NEEDLES: tuple = ()`.
+        "pathlib.Path.cwd")` becoming `CWD_SEAM_NEEDLES: tuple = ()`. The seal is
+        the plain `patch`, so the alias test below pins `_patch` apart from it.
+        Mutant: `"patch"` dropped from `_is_patching_call`'s tail set in
+        apps/handlers/pytest_quality_standards/platform_oracle_check.py — killed.
         """
         _write(
             tmp_path,
             "tests/test_operations.py",
             """
             def test_the_dashboard_names_the_branch(tmp_path, capsys):
-                with _patch("pathlib.Path.cwd", return_value=tmp_path):
+                with patch("pathlib.Path.cwd", return_value=tmp_path):
                     mod._handle_refresh([])
                 assert tmp_path.name.upper() in capsys.readouterr().out
             """,
@@ -9067,7 +9075,7 @@ class TestPlatformOracleBranchCheck:
 # MODULE EVICTION - DID THE TEST PUT THE IMPORT CACHE BACK
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import module_eviction_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import module_eviction_check
 
 # NOTHING IN THIS SECTION EVICTS A MODULE, and the rule under test is why that is
 # written down. A pin for a checker about sys.modules is the one place in this
@@ -9978,7 +9986,7 @@ class TestModuleEvictionBranchCheck:
 # HOST LEAK - IS THE FAKE WORLD FAKED ALL THE WAY
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import host_leak_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import host_leak_check
 
 # NOTHING IN THIS SECTION FAKES A PLATFORM, and the rule under test is why that is
 # written down. A pin for a checker about units that force `sys.platform` is the

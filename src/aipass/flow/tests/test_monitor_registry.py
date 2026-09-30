@@ -3,34 +3,20 @@
 # Description: Tests for monitor_ops handler and registry_monitor module
 # Version: 2.0.0
 # Created: 2026-03-08
-# Modified: 2026-04-22
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for monitor_ops handler and registry_monitor module."""
+"""Tests for apps/handlers/registry/monitor_ops.py and apps/modules/registry_monitor.py."""
 
-import builtins
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that monitor_ops.py and registry_monitor.py parse and import
+
 import os
-import types
-from collections.abc import Mapping, Sequence
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
-# ─── Import helpers ───────────────────────────────────────
-
-
-def _import_monitor_ops():
-    """Import monitor_ops module and return it."""
-    import aipass.flow.apps.handlers.registry.monitor_ops as mod
-
-    return mod
-
-
-def _import_registry_monitor():
-    """Import registry_monitor module and return it."""
-    import aipass.flow.apps.modules.registry_monitor as mod
-
-    return mod
+from aipass.flow.apps.handlers.registry import monitor_ops
+from aipass.flow.apps.modules import registry_monitor
 
 
 def _make_plan_file(directory: Path, number: str) -> Path:
@@ -49,10 +35,13 @@ def _make_plan_file(directory: Path, number: str) -> Path:
 class TestHandleWalkError:
     """Tests for the handle_walk_error inner function in scan_plan_files_impl."""
 
-    def test_permission_error_is_silenced(self, tmp_path):
-        """PermissionError should not trigger a warning log."""
-        mod = _import_monitor_ops()
-        with patch.object(mod, "_fire_event", return_value=False):
+    def test_permission_error_is_silenced(self, tmp_path, mock_logger):
+        """PermissionError should not trigger a warning log.
+
+        Mutant: if not isinstance(error, PermissionError): -> if isinstance(error, OSError): reddens this.
+        """
+        mod = monitor_ops
+        with patch.object(mod, "_fire_event", return_value=True):
             restricted = tmp_path / "restricted"
             restricted.mkdir()
             _make_plan_file(tmp_path, "0001")
@@ -63,14 +52,17 @@ class TestHandleWalkError:
                     ecosystem_root=tmp_path,
                     load_registry=lambda: {"plans": {}},
                 )
-                assert isinstance(result, dict)
-                assert "total_plans" in result
+                # The scan still finds the readable plan, and says nothing
+                # about the directory it was refused.
+                assert result["added"] == ["0001"]
+                warned = [str(c) for c in mock_logger.warning.call_args_list]
+                assert not any("Error during scan" in w for w in warned), warned
             finally:
                 os.chmod(str(restricted), 0o755)
 
     def test_generic_os_error_logs_warning(self, tmp_path, mock_logger):
         """Non-PermissionError OSError should be logged as warning."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         missing = tmp_path / "nonexistent_root"
         with patch.object(mod, "_fire_event", return_value=False):
             result = mod.scan_plan_files_impl(
@@ -91,7 +83,7 @@ class TestScanPlanFilesImpl:
 
     def test_detects_plan_files_in_root(self, tmp_path):
         """Plan files at root level should be detected."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         _make_plan_file(tmp_path, "0001")
         _make_plan_file(tmp_path, "0002")
 
@@ -106,7 +98,7 @@ class TestScanPlanFilesImpl:
 
     def test_detects_plan_files_in_subdirectories(self, tmp_path):
         """Plan files in subdirectories should be detected."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         sub = tmp_path / "projects" / "alpha"
         sub.mkdir(parents=True)
         _make_plan_file(sub, "0010")
@@ -120,7 +112,7 @@ class TestScanPlanFilesImpl:
 
     def test_ignores_non_plan_files(self, tmp_path):
         """Non-plan files should be ignored even if they look similar."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         _make_plan_file(tmp_path, "0001")
         (tmp_path / "DPLAN-0002.md").write_text("also a plan", encoding="utf-8")
         (tmp_path / "FPLAN-ABC.md").write_text("bad number", encoding="utf-8")
@@ -136,7 +128,7 @@ class TestScanPlanFilesImpl:
 
     def test_skips_ignored_folders(self, tmp_path):
         """Directories in IGNORE_FOLDERS should be skipped."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         git_dir = tmp_path / ".git"
         git_dir.mkdir()
         _make_plan_file(git_dir, "0001")
@@ -160,7 +152,7 @@ class TestScanPlanFilesImpl:
 
     def test_detects_plan_files_with_slug_and_date_suffix(self, tmp_path):
         """Real plan filenames carry a subject slug + date suffix and must still match."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         (tmp_path / "FPLAN-0001_some_subject_slug_2026-07-27.md").write_text("plan", encoding="utf-8")
 
         with patch.object(mod, "_fire_event", return_value=True):
@@ -172,7 +164,7 @@ class TestScanPlanFilesImpl:
 
     def test_ignored_folder_requires_exact_name_match(self, tmp_path):
         """Substring matches (e.g. 'dev' in 'devpulse') must not skip unrelated directories."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         lookalike_dir = tmp_path / "devpulse"
         lookalike_dir.mkdir()
         _make_plan_file(lookalike_dir, "0001")
@@ -186,7 +178,7 @@ class TestScanPlanFilesImpl:
 
     def test_dropbox_folder_is_ignored(self, tmp_path):
         """dropbox/ is a received-files inbox -- old snapshot copies must never register."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         dropbox_dir = tmp_path / "dropbox"
         dropbox_dir.mkdir()
         _make_plan_file(dropbox_dir, "0001")
@@ -205,7 +197,7 @@ class TestScanPlanFilesImpl:
 
     def test_dropbox_ignore_requires_exact_name_match(self, tmp_path):
         """Lookalike names (e.g. 'dropbox-clone') must not be skipped -- exact match only."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         lookalike_dir = tmp_path / "dropbox-clone"
         lookalike_dir.mkdir()
         _make_plan_file(lookalike_dir, "0001")
@@ -219,7 +211,7 @@ class TestScanPlanFilesImpl:
 
     def test_orphaned_closed_plan_does_not_fire_deleted(self, tmp_path):
         """Closed plans are expected to be archived out of the scan tree — not orphans."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         registry = {
             "plans": {
                 "0001": {"file_path": str(tmp_path / "FPLAN-0001.md"), "status": "closed"},
@@ -236,7 +228,7 @@ class TestScanPlanFilesImpl:
 
     def test_detects_orphaned_registry_entries(self, tmp_path):
         """Registry entries with no matching file should fire deleted events."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         registry = {
             "plans": {
                 "0001": {"file_path": str(tmp_path / "FPLAN-0001.md"), "status": "open"},
@@ -254,7 +246,7 @@ class TestScanPlanFilesImpl:
 
     def test_detects_moved_files(self, tmp_path):
         """Files that exist but at a different path should fire moved events."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         new_dir = tmp_path / "new_location"
         new_dir.mkdir()
         _make_plan_file(new_dir, "0001")
@@ -276,7 +268,7 @@ class TestScanPlanFilesImpl:
 
     def test_no_changes_needed(self, tmp_path):
         """When disk matches registry, no healing should be needed."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         plan = _make_plan_file(tmp_path, "0001")
 
         registry = {
@@ -297,7 +289,7 @@ class TestScanPlanFilesImpl:
 
     def test_duplicate_plan_files_renumbered(self, tmp_path):
         """Duplicate plan numbers should be auto-renumbered."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         dir_a = tmp_path / "project_a"
         dir_a.mkdir()
         dir_b = tmp_path / "project_b"
@@ -318,7 +310,7 @@ class TestScanPlanFilesImpl:
 
     def test_scan_calls_json_handler_log(self, tmp_path, mock_json_handler):
         """Scan should log its results via json_handler."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         _make_plan_file(tmp_path, "0001")
 
         with patch.object(mod, "_fire_event", return_value=True):
@@ -333,7 +325,7 @@ class TestScanPlanFilesImpl:
 
     def test_fire_event_failure_excludes_from_results(self, tmp_path):
         """If _fire_event returns False, the plan should not appear in added."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         _make_plan_file(tmp_path, "0001")
 
         with patch.object(mod, "_fire_event", return_value=False):
@@ -354,7 +346,7 @@ class TestGetStatusImpl:
 
     def test_status_returns_correct_fields(self, tmp_path):
         """Status should return all expected fields."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         registry = {
             "plans": {
                 "0001": {"status": "open"},
@@ -373,7 +365,7 @@ class TestGetStatusImpl:
 
     def test_status_with_empty_registry(self, tmp_path):
         """Status should handle empty registry."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         result = mod.get_status_impl(tmp_path, load_registry=lambda: {"plans": {}})
         assert result["total_plans"] == 0
         assert result["open_plans"] == 0
@@ -389,7 +381,7 @@ class TestRegistryMonitorGetStatus:
 
     def test_get_status_delegates_to_impl(self):
         """get_status should delegate to get_status_impl with correct args."""
-        mod = _import_registry_monitor()
+        mod = registry_monitor
         expected = {
             "module": "registry_monitor",
             "version": "2.0.0",
@@ -416,36 +408,25 @@ class TestRegistryMonitorGetStatus:
 class TestFireEvent:
     """Tests for the _fire_event helper function."""
 
-    def test_fire_event_success(self):
+    def test_fire_event_success(self, tmp_path):
         """Successful event fire should return True."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         mock_trigger = MagicMock()
         fake_core = MagicMock(trigger=mock_trigger)
+        plan_path = str(tmp_path / "FPLAN-0001.md")
         with patch.dict(
             "sys.modules",
             {"aipass.trigger.apps.modules.core": fake_core},
         ):
-            result = mod._fire_event("plan_file_created", path="/test/FPLAN-0001.md")
+            result = mod._fire_event("plan_file_created", path=plan_path)
         assert result is True
-        mock_trigger.fire.assert_called_once_with("plan_file_created", path="/test/FPLAN-0001.md")
+        mock_trigger.fire.assert_called_once_with("plan_file_created", path=plan_path)
 
     def test_fire_event_import_error(self, mock_logger):
         """ImportError should return False and log warning."""
-        mod = _import_monitor_ops()
-        real_import = builtins.__import__
-
-        def _failing_import(
-            name: str,
-            globals: Mapping[str, object] | None = None,
-            locals: Mapping[str, object] | None = None,
-            fromlist: Sequence[str] = (),
-            level: int = 0,
-        ) -> types.ModuleType:
-            if name == "aipass.trigger.apps.modules.core":
-                raise ImportError("trigger not installed")
-            return real_import(name, globals, locals, fromlist, level)
-
-        with patch.object(builtins, "__import__", side_effect=_failing_import):
+        mod = monitor_ops
+        # A None entry in sys.modules makes the import raise ImportError.
+        with patch.dict("sys.modules", {"aipass.trigger.apps.modules.core": None}):
             result = mod._fire_event("test_event")
         assert result is False
 
@@ -477,7 +458,7 @@ class TestCrossTypeNumbersAreNotDuplicates:
     """Same number, different type = two plans, not one to repair."""
 
     def test_aplan_and_fplan_sharing_a_number_are_both_left_alone(self, tmp_path):
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         aplan = _write_plan(tmp_path / "a", "APLAN-0007_branch_audit_flow_2026-08-13.md")
         fplan = _write_plan(tmp_path / "b", "FPLAN-0007_some_build_2026-08-13.md")
 
@@ -493,7 +474,7 @@ class TestCrossTypeNumbersAreNotDuplicates:
         assert fplan.exists(), "FPLAN-0007 was renamed away"
 
     def test_four_types_one_number_all_survive(self, tmp_path):
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         paths = [
             _write_plan(tmp_path / p.lower(), f"{p}-0001_topic_2026-08-13.md")
             for p in ("APLAN", "FPLAN", "DPLAN", "PPLAN")
@@ -512,7 +493,7 @@ class TestGenuineDuplicatesStillRenumber:
     """Same prefix AND same number really is a collision — behaviour preserved."""
 
     def test_two_fplans_with_one_number_still_renumber(self, tmp_path):
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         first = _write_plan(tmp_path / "one", "FPLAN-0007_first_2026-08-13.md")
         second = _write_plan(tmp_path / "two", "FPLAN-0007_second_2026-08-13.md")
 
@@ -529,7 +510,7 @@ class TestGenuineDuplicatesStillRenumber:
 
     def test_renumbering_draws_from_its_own_prefix_sequence(self, tmp_path):
         """A duplicate FPLAN must not be handed a number chosen by looking at DPLANs."""
-        mod = _import_monitor_ops()
+        mod = monitor_ops
         _write_plan(tmp_path / "d", "DPLAN-0900_unrelated_2026-08-13.md")
         _write_plan(tmp_path / "one", "FPLAN-0007_first_2026-08-13.md")
         _write_plan(tmp_path / "two", "FPLAN-0007_second_2026-08-13.md")
@@ -541,3 +522,35 @@ class TestGenuineDuplicatesStillRenumber:
         assert len(result["renumbered"]) == 1
         # 0008, not 0901 — the unrelated DPLAN must not drive the FPLAN sequence.
         assert result["renumbered"][0]["new_number"] == "0008"
+
+
+class TestDuplicateSurvivorIsDeterministic:
+    """Which file keeps the number is identity, not the order the OS walked."""
+
+    @staticmethod
+    def _survivor(mod, root: Path, reverse_walk: bool) -> str:
+        """Scan ``root`` with the walk emitted in a chosen order; name the keeper."""
+        alpha = _write_plan(root / "alpha", "FPLAN-0007_alpha_2026-08-13.md")
+        beta = _write_plan(root / "beta", "FPLAN-0007_beta_2026-08-13.md")
+        real_walk = os.walk
+
+        def ordered_walk(top, **kwargs):
+            steps = list(real_walk(top, **kwargs))
+            return reversed(steps) if reverse_walk else iter(steps)
+
+        with patch.object(mod.os, "walk", ordered_walk):
+            with patch.object(mod, "_fire_event", MagicMock(return_value=True)):
+                mod.scan_plan_files_impl(root, load_registry=lambda: {"plans": {}})
+
+        survivors = [p.name for p in (alpha, beta) if p.exists()]
+        assert len(survivors) == 1, f"expected exactly one keeper, got {survivors}"
+        return survivors[0]
+
+    def test_same_file_keeps_the_number_in_either_walk_order(self, tmp_path):
+        """Reversing the walk must not hand the number to the other file."""
+        mod = monitor_ops
+
+        forward = self._survivor(mod, tmp_path / "forward", reverse_walk=False)
+        backward = self._survivor(mod, tmp_path / "backward", reverse_walk=True)
+
+        assert forward == backward, f"walk order chose the keeper: forward kept {forward}, reversed kept {backward}"

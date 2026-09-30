@@ -21,7 +21,7 @@ from pathlib import Path
 # Sibling import
 from .base_bot import BaseBot
 
-from aipass.skills.apps.handlers.json import json_handler  # noqa: F401
+from aipass.skills.apps.handlers.json import json_handler
 
 
 # =============================================

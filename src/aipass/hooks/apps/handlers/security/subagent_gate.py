@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: subagent_gate.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Checks modified Python files against seedgo standards on SubagentStop
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-22
-# Modified: 2026-05-22
+# Modified: 2026-09-27
 # =============================================
 
 """Checks modified Python files against seedgo standards and blocks on violations."""
@@ -13,11 +13,18 @@
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 _ALLOW = {"stdout": "", "exit_code": 0}
+# The engine kills this hook at 60s (hooks.json). Two git reads may take 10s each
+# before the checklists start, so the checklists get what is left with margin:
+# 20 timeouts since 08-13, one measured at 60,002ms on 2026-09-25.
+_CHECK_BUDGET_SECONDS = 35
+_CHECKLIST_TIMEOUT_SECONDS = 15
+_MIN_USEFUL_SECONDS = 3
 
 
 def _block(reason: str) -> dict:
@@ -92,15 +99,16 @@ def _get_modified_py_files(cwd: str, repo_root: Path) -> list[str]:
     return files
 
 
-def _run_seedgo_checklist(file_path: str, repo_root: Path) -> list[str]:
+def _run_seedgo_checklist(file_path: str, repo_root: Path, timeout: float = _CHECKLIST_TIMEOUT_SECONDS) -> list[str]:
     """Run seedgo checklist on a single file, return violation strings."""
-    if "/.claude/" in file_path:
+    # The caller hands str(repo_root / filepath), which is backslashed on Windows.
+    if "/.claude/" in file_path.replace("\\", "/"):
         return []
     result = subprocess.run(
         ["drone", "@seedgo", "checklist", file_path],
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=timeout,
         cwd=str(repo_root),
     )
     if result.returncode != 0:
@@ -149,6 +157,42 @@ def _check_hook_readme_accountability(cwd: str, repo_root: Path) -> str | None:
     return None
 
 
+def _check_within_budget(modified: list[str], repo_root: Path) -> tuple[dict[str, list[str]], list[str]]:
+    """Checklist each file until the budget runs out; return (violations by name, unchecked names).
+
+    One file's checklist timing out is that file unchecked, not the gate
+    abandoned: until 2026-09-25 a TimeoutExpired fell into handle()'s outer
+    except and allowed with every later file unread. A file left unchecked is
+    said at WARNING, never passed as clean.
+    """
+    violations: dict[str, list[str]] = {}
+    unchecked: list[str] = []
+    deadline = time.monotonic() + _CHECK_BUDGET_SECONDS
+    for f in modified:
+        name = Path(f).name
+        remaining = deadline - time.monotonic()
+        if remaining < _MIN_USEFUL_SECONDS:
+            unchecked.append(name)
+            continue
+        try:
+            vs = _run_seedgo_checklist(f, repo_root, timeout=min(_CHECKLIST_TIMEOUT_SECONDS, remaining))
+        except subprocess.TimeoutExpired as exc:
+            logger.info("[HOOKS] subagent_gate: checklist timed out on %s after %.0fs", name, exc.timeout)
+            unchecked.append(name)
+            continue
+        if vs:
+            violations[name] = vs
+    if unchecked:
+        logger.warning(
+            "[HOOKS] subagent_gate: %d of %d modified file(s) unchecked inside the %ss budget: %s",
+            len(unchecked),
+            len(modified),
+            _CHECK_BUDGET_SECONDS,
+            ", ".join(unchecked),
+        )
+    return violations, unchecked
+
+
 def handle(hook_data: dict) -> dict:
     """Check modified files against seedgo standards on subagent stop."""
     try:
@@ -167,12 +211,7 @@ def handle(hook_data: dict) -> dict:
 
         readme_reminder = _check_hook_readme_accountability(cwd, repo_root)
 
-        all_violations: dict[str, list[str]] = {}
-        for f in modified:
-            vs = _run_seedgo_checklist(f, repo_root)
-            if vs:
-                name = Path(f).name
-                all_violations[name] = vs
+        all_violations, unchecked = _check_within_budget(modified, repo_root)
 
         if all_violations:
             lines = ["Standards violations found in files you modified:\n"]
@@ -181,6 +220,9 @@ def handle(hook_data: dict) -> dict:
                 for v in vs:
                     lines.append(f"    - {v}")
             lines.append("\nFix these violations before finishing.")
+            if unchecked:
+                names = ", ".join(unchecked)
+                lines.append(f"\nNot checked (time budget): {names} - run drone @seedgo checklist on them.")
             if readme_reminder:
                 lines.append(f"\n{readme_reminder}")
             return _block("\n".join(lines))

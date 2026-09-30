@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: path_resolver.py
 # Description: Kernel-safe path resolution via openat2 RESOLVE_BENEATH
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-06-09
-# Modified: 2026-09-12
+# Modified: 2026-09-27
 # =============================================
 
 """Kernel-safe path resolution via openat2 RESOLVE_BENEATH.
@@ -99,6 +99,22 @@ def resolve_beneath(base: Path, relpath: str) -> Path:
     return _resolve_via_walk(base, parts)
 
 
+def _fd_path(fd: int) -> Path:
+    """The path the kernel holds for an open fd, read out of /proc.
+
+    /proc is Linux furniture: macOS and Windows have none, so only the openat2
+    lane may ask here, and that lane is entered only when _openat2_available()
+    has said the host is Linux. The walk proves its answer by inode instead
+    (_verify_leaf); it once read this and raised FileNotFoundError on every
+    call on the hosts it exists for.
+
+    Why this is its own function is the test, said plainly: tests/test_broker.py
+    replaces it with a reader that fails, to prove the walk lane never reaches
+    for /proc. The product would read the same with the readlink inline.
+    """
+    return Path(os.readlink(f"/proc/self/fd/{fd}"))
+
+
 def _resolve_via_openat2(base: Path, cleaned: str) -> Path:
     """Resolve using the openat2 syscall with kernel-enforced containment."""
     dirfd = os.open(str(base), os.O_RDONLY | os.O_DIRECTORY)
@@ -110,7 +126,7 @@ def _resolve_via_openat2(base: Path, cleaned: str) -> Path:
             RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS,
         )
         try:
-            resolved = Path(os.readlink(f"/proc/self/fd/{fd}"))
+            resolved = _fd_path(fd)
             logger.info("resolve_beneath: openat2 resolved %s -> %s", cleaned, resolved)
             return resolved
         finally:
@@ -161,6 +177,21 @@ def _verify_leaf(resolved: Path, leaf: os.stat_result, parts: list[str]) -> None
         )
 
 
+def _real_base(base: Path) -> Path:
+    """The base named by its real path — the string the walk's answer is rebuilt from.
+
+    It is read after the walk, by name, and nothing ties it to the fds the walk
+    held: a component renamed in between makes it name something else. That gap
+    is why the assembled path must pass _verify_leaf before it is handed back.
+
+    Why this is its own function is the test, said plainly: no product reason
+    asks for it. tests/test_broker.py replaces it to stand a rename between the
+    walk and this read, which cannot be timed from outside, and so proves
+    _verify_leaf refuses the path that results.
+    """
+    return Path(os.path.realpath(base))
+
+
 def _resolve_via_walk(base: Path, parts: list[str]) -> Path:
     """Fallback: per-component walk using O_NOFOLLOW to block symlinks."""
     if not _WALK_SUPPORTED:
@@ -195,7 +226,7 @@ def _resolve_via_walk(base: Path, parts: list[str]) -> Path:
             os.close(current_fd)
             current_fd = next_fd
 
-        resolved = Path(os.path.realpath(base)).joinpath(*components)
+        resolved = _real_base(base).joinpath(*components)
         _verify_leaf(resolved, leaf, parts)
         logger.info("resolve_beneath: walk resolved %s -> %s", "/".join(parts), resolved)
         return resolved

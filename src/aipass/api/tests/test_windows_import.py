@@ -1,53 +1,57 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_windows_import.py
 # Description: Every api module must IMPORT on a platform it cannot run on
 # Version: 1.0.0
 # Created: 2026-08-18
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests that this package imports where POSIX is not
+"""Tests for apps/handlers/host/attach.py and every apps/ module, importing without POSIX."""
 
-WHY THIS FILE EXISTS. On 2026-08-18 the Windows CI lane ran to completion for
-the first time and reported 22 collection errors. All 22 came from one line:
-`_setsid: Any = os.setsid` sat in a function signature in `host/attach.py`, a
-default argument is evaluated when the module is IMPORTED, and `os.setsid` does
-not exist on win32. `server` imports `attach` and `host_api` imports `server`,
-so a single AttributeError took down eleven host test files across two workers.
+# Tests that this package imports where POSIX is not
+#
+# WHY THIS FILE EXISTS. On 2026-08-18 the Windows CI lane ran to completion for
+# the first time and reported 22 collection errors. All 22 came from one line:
+# `_setsid: Any = os.setsid` sat in a function signature in `host/attach.py`, a
+# default argument is evaluated when the module is IMPORTED, and `os.setsid` does
+# not exist on win32. `server` imports `attach` and `host_api` imports `server`,
+# so a single AttributeError took down eleven host test files across two workers.
+#
+# The module was already careful. It guards `fcntl`, `pty` and `termios` behind a
+# try/except with a PTY_AVAILABLE flag, and three of the four defaults in that
+# same signature were fetched with `getattr`. The fourth was reached for
+# directly, and the guard forty lines above it never got the chance to run.
+#
+# NOT WORKING AND NOT IMPORTING ARE DIFFERENT FAILURES. Nothing in the PTY lane
+# can work on Windows — a PTY is a Unix object and tmux does not run there. That
+# is a platform truth, guarded, tested and fine. Failing to import is not a
+# platform truth; it is a collection error that hides every unrelated test in the
+# same file.
+#
+# WHY A SUBPROCESS. Hiding `fcntl` and deleting attributes off `os` is a change
+# to the interpreter, not to a fixture. Doing it in-process would leave the
+# runner's own `os` mutilated for every test that follows, in whatever order
+# xdist happened to pick. The child is a real, disposable interpreter.
+#
+# WHY A META_PATH FINDER RATHER THAN A PATCHED __import__. Wrapping
+# `builtins.__import__` puts this file into the import stack, and the fleet's
+# cross-branch import gate reads that stack to decide who is calling. The
+# simulation would then be blocked by the gate instead of measuring anything. A
+# finder leaves the stack alone.
+#
+# THE SPECIES CAME BACK THE SAME DAY, IN A TEST FILE. The lane's second complete
+# run reported test_host_settings.py failing to COLLECT: a class-level
+# `@pytest.mark.skipif(os.geteuid() == 0, ...)` — a decorator argument is
+# evaluated when pytest imports the file, and `os.geteuid` does not exist on
+# win32 either. apps/ was already swept by this pin; tests/ was not, so the
+# defect landed in the one place the pin could not see. The child now also
+# executes every test file top to bottom, which is exactly what pytest
+# collection does — a module-level `pytest.skip` is collection working as
+# designed and is not a failure.
 
-The module was already careful. It guards `fcntl`, `pty` and `termios` behind a
-try/except with a PTY_AVAILABLE flag, and three of the four defaults in that
-same signature were fetched with `getattr`. The fourth was reached for
-directly, and the guard forty lines above it never got the chance to run.
-
-NOT WORKING AND NOT IMPORTING ARE DIFFERENT FAILURES. Nothing in the PTY lane
-can work on Windows — a PTY is a Unix object and tmux does not run there. That
-is a platform truth, guarded, tested and fine. Failing to import is not a
-platform truth; it is a collection error that hides every unrelated test in the
-same file.
-
-WHY A SUBPROCESS. Hiding `fcntl` and deleting attributes off `os` is a change
-to the interpreter, not to a fixture. Doing it in-process would leave the
-runner's own `os` mutilated for every test that follows, in whatever order
-xdist happened to pick. The child is a real, disposable interpreter.
-
-WHY A META_PATH FINDER RATHER THAN A PATCHED __import__. Wrapping
-`builtins.__import__` puts this file into the import stack, and the fleet's
-cross-branch import gate reads that stack to decide who is calling. The
-simulation would then be blocked by the gate instead of measuring anything. A
-finder leaves the stack alone.
-
-THE SPECIES CAME BACK THE SAME DAY, IN A TEST FILE. The lane's second complete
-run reported test_host_settings.py failing to COLLECT: a class-level
-`@pytest.mark.skipif(os.geteuid() == 0, ...)` — a decorator argument is
-evaluated when pytest imports the file, and `os.geteuid` does not exist on
-win32 either. apps/ was already swept by this pin; tests/ was not, so the
-defect landed in the one place the pin could not see. The child now also
-executes every test file top to bottom, which is exactly what pytest
-collection does — a module-level `pytest.skip` is collection working as
-designed and is not a failure.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — that the PTY lane works on Windows; it cannot, PTY_AVAILABLE guards it
+# seedgo: no-test-needed(duplicate_test) — the PTY lane's behaviour on POSIX, covered by tests/test_host_attach.py
 
 import json
 import subprocess
@@ -183,6 +187,7 @@ def without_posix() -> dict:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=str(BRANCH_ROOT),
         timeout=300,
     )

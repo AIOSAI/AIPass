@@ -1,3 +1,11 @@
+# =================== META ====================
+# Name: conftest.py
+# Description: Shared pytest fixtures for seedgo tests
+# Version: 2.0.2
+# Created: 2026-03-05
+# Modified: 2026-09-28
+# =============================================
+
 """Shared pytest fixtures for seedgo tests.
 
 The autouse fixture here is the load-bearing one: seedgo's json_handler binds
@@ -6,15 +14,9 @@ unless AIPASS_TEST_LOG_DIR says otherwise. mock_infrastructure sets that
 variable per test, so every test lands in its own tmp_path without knowing it.
 """
 
-# =================== META ====================
-# Name: conftest.py
-# Description: Shared pytest fixtures for seedgo tests
-# Version: 2.0.0
-# Created: 2026-03-05
-# Modified: 2026-09-03
-# =============================================
-
 import os
+import sys
+from types import ModuleType
 import tempfile
 
 # Redirect prax logs to temp directory during tests
@@ -27,8 +29,12 @@ from pathlib import Path
 from typing import Generator, List, Tuple
 
 import pytest
+from unittest.mock import MagicMock
 
+from aipass.cli.apps.modules import display
+from aipass.seedgo.apps import seedgo as seedgo_entry
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.trigger.apps.modules import core as trigger_core
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
 # handler's tests, the pre-service durability suite) that must not be collected
@@ -79,6 +85,61 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     return sandbox
 
 
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Pin the product's consoles to one width for the whole run.
+
+    Rich sizes an unpinned console on every print: 80 columns on POSIX and 79
+    on Windows under pytest's capture, the terminal's width under -s, COLUMNS
+    when it is exported. A line that wraps on one OS and not another turns a
+    substring assertion into a coin toss (DPLAN-0354, test template v1 item 20).
+    """
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+class BusRecorder:
+    """Stands where @trigger's bus stands: records every fire and sends none."""
+
+    def __init__(self) -> None:
+        self.fired: List[Tuple[str, dict]] = []
+
+    def fire(self, event: str, **data) -> dict:
+        """Record one event in call order, as the bus would have received it."""
+        self.fired.append((event, data))
+        return {}
+
+
+@pytest.fixture(autouse=True)
+def bus(monkeypatch) -> BusRecorder:
+    """No test fires a real event: a recorder stands at both homes of the bus.
+
+    Two homes, because two names reach it. The cli header keeps the trigger it
+    loaded in ``display._TRIGGER`` behind ``display._TRIGGER_LOADED``, so a
+    replacement at the trigger's own home comes too late once one header has
+    run in the session; the recorder goes into the cached name and the flag is
+    set, api's cure of 09-27. ``tests_lane._announce_bump`` imports ``trigger``
+    from ``aipass.trigger.apps.modules.core`` inside the function, so it reads
+    that module's name on every call. Leg 3's probe counted 27 fires reaching
+    the bus from this suite (seedgo, fleet green leg 4).
+
+    Returns:
+        The recorder, so a test can assert what would have fired.
+    """
+    recorder = BusRecorder()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    monkeypatch.setattr(trigger_core, "trigger", recorder)
+    return recorder
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
+
+
 @pytest.fixture
 def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
     """Capture calls made to the entry point's logger.
@@ -98,7 +159,60 @@ def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
         def error(self, *args, **kwargs):
             captured.append(("error", args))
 
-    from aipass.seedgo.apps import seedgo as seedgo_entry
-
     monkeypatch.setattr(seedgo_entry, "logger", _CapturingLogger())
     return captured
+
+
+#: The package whose modules a test's sys.modules stubs can poison. A checker
+#: imported while its infrastructure is a MagicMock binds that mock at import
+#: time, and monkeypatch cannot undo a name another module already bound.
+_CHECKER_PKG = "aipass.seedgo.apps.handlers.aipass_standards"
+
+
+@pytest.fixture(autouse=True)
+def _evict_modules_imported_under_a_stub():
+    """Drop any checker module a test imported while its infrastructure was mocked.
+
+    THE LEAK THIS CLOSES (todo 139, template v1 item 18). Twenty-five files in
+    this suite share one fixture shape: monkeypatch.setitem(sys.modules,
+    "...handlers.bypass", MagicMock()) followed by monkeypatch.delitem of the
+    checker they are about to exercise, so it re-imports against the mocks.
+    monkeypatch restores the sys.modules ENTRIES, but trigger_check does
+    `from ...bypass.utils import matching_rule` at import time -- the name is
+    bound before teardown and stays bound. delitem with raising=False records
+    nothing when the key is absent, which is the cold-run case, so the poisoned
+    module was left in sys.modules and test_bypass.py later read
+    `mock.utils.matching_rule()` out of it. Alphabetical order hid it for
+    months: test_bypass runs FIRST in a forward run and last in a reverse one.
+
+    Scoped by measurement, not by name: only modules that ARRIVED during the
+    test, and only the ones actually HOLDING a MagicMock, so a clean test pays
+    nothing and re-imports nothing. Reading the arrived module rather than the
+    stub is deliberate -- a conftest fixture tears down LAST, after monkeypatch
+    has already put sys.modules back, so the stub is gone by then and only the
+    bound name is left to see.
+    """
+    yield
+    package = sys.modules.get(_CHECKER_PKG)
+    poisoned = {
+        name
+        for name in list(sys.modules)
+        if name.startswith(_CHECKER_PKG + ".")
+        and sys.modules.get(name) is not None
+        and any(isinstance(value, MagicMock) for value in vars(sys.modules[name]).values())
+    }
+    # sys.modules is only half of it. Importing a submodule also sets it as an
+    # ATTRIBUTE on its parent package, and `from pkg import sub` reads that
+    # attribute before it ever consults sys.modules -- so a module already
+    # popped from sys.modules comes straight back through the package, still
+    # holding its mock. Both have to go.
+    if package is not None:
+        for leaf, value in list(vars(package).items()):
+            if isinstance(value, ModuleType) and any(isinstance(v, MagicMock) for v in vars(value).values()):
+                poisoned.add(f"{_CHECKER_PKG}.{leaf}")
+    for name in poisoned:
+        sys.modules.pop(name, None)
+        if package is not None:
+            leaf = name.rsplit(".", 1)[-1]
+            if isinstance(getattr(package, leaf, None), ModuleType):
+                delattr(package, leaf)

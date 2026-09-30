@@ -1,48 +1,88 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Tests for cadence module (DPLAN-0200), fail-open warnings since 1.1.0
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-09-16
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for apps/modules/cadence.py.
+"""Tests for apps/modules/cadence.py."""
 
-Cadence runs MULTI-PROCESS in production: each UserPromptSubmit hook is a
-separate OS process. Tests model that by resetting the module _turn cache
-between calls (= new process) and aging the state file past the mtime
-debounce window (= a real prior turn, not a sibling in the same turn).
-"""
+# Cadence runs MULTI-PROCESS in production: each UserPromptSubmit hook is a
+# separate OS process. Tests model that by resetting the module _turn cache
+# between calls (= new process) and aging the state file past the mtime
+# debounce window (= a real prior turn, not a sibling in the same turn).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that cadence.py parses and imports, ruff and collection cover it
+# seedgo: no-test-needed(documentation) — is_automated(), reset_counter() and should_fire() carry docstrings
+# seedgo: no-test-needed(constant) — HELP_COMMANDS' description text, pinned only as reaching print_introspection
+# seedgo: no-test-needed(stdlib) — fcntl, unavailable on Windows; the platform fallback never runs on this CI
 
 import contextlib
 import json
-import importlib
 import os
 import time
 from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps.handlers.lifecycle.compact import handle as _compact_handle
+from aipass.hooks.apps.handlers.prompt.branch_loader import handle as _branch_loader_handle
+from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle as _tier0_kernel_handle
 from aipass.hooks.apps.modules import cadence
+from aipass.hooks.apps.modules.cadence import (
+    _deep_merge,
+    _load_config,
+    consume_regroup_pending,
+    degraded_reason,
+    handle_command,
+    is_automated,
+    pop_regroup_part,
+    print_introspection,
+    queue_regroup_parts,
+    reset_counter,
+    should_fire,
+    should_fire_advisory,
+    should_fire_mail,
+)
+
+
+def _kept_redirect() -> dict[str, str]:
+    """The json redirect a clear=True wipe must hand back, or the loggers write the live <branch>_json."""
+    return {"AIPASS_TEST_LOG_DIR": os.environ["AIPASS_TEST_LOG_DIR"]}
+
 
 MODULE = "aipass.hooks.apps.modules.cadence"
 
 
+@pytest.fixture(autouse=True)
+def _restore_cadence_globals(monkeypatch):
+    """Hand cadence's module caches back as they were found, whatever a test wrote.
+
+    _reset_module_globals below writes them directly, mid-test, to model a new
+    process; monkeypatch records the originals here first and restores them at
+    teardown, so no cached turn or config leaks into the next test file.
+    """
+    monkeypatch.setattr(cadence, "_turn", None)
+    monkeypatch.setattr(cadence, "_config", None)
+    monkeypatch.setattr(cadence, "_turn_degraded", None)
+    yield
+
+
 def _reset_module_globals():
     """Reset module-level caches between tests (also = simulate a new process)."""
-    import aipass.hooks.apps.modules.cadence as mod
-
-    mod._turn = None
-    mod._config = None
-    mod._turn_degraded = None
+    cadence._turn = None
+    cadence._config = None
+    cadence._turn_degraded = None
 
 
 def _write_state(tmp_path, turn, token=-1, session="test-session", aged=True):
     """Write a cadence state file. aged=True backdates mtime past the debounce
     window so it reads as a PREVIOUS turn; aged=False = sibling in same turn."""
     state_file = tmp_path / f"aipass-cadence-{session}.json"
-    state_file.write_text(json.dumps({"turn": turn, "token": token}))
+    state_file.write_text(json.dumps({"turn": turn, "token": token}), encoding="utf-8")
     if aged:
         old = time.time() - 10
         os.utime(state_file, (old, old))
@@ -60,8 +100,6 @@ class TestShouldFire:
         _reset_module_globals()
 
     def test_turn_0_always_fires(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         state_file = tmp_path / "aipass-cadence-test-session.json"
 
         with (
@@ -70,11 +108,9 @@ class TestShouldFire:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             assert should_fire("global") is True
-            assert json.loads(state_file.read_text())["turn"] == 0
+            assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == 0
 
     def test_turn_0_fires_all_loaders(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
@@ -84,8 +120,6 @@ class TestShouldFire:
             assert should_fire("branch") is True
 
     def test_non_fire_turn_returns_false(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         _write_state(tmp_path, turn=0)
 
         with (
@@ -96,12 +130,12 @@ class TestShouldFire:
             assert should_fire("global") is False
 
     def test_fire_turn_returns_true(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         _write_state(tmp_path, turn=3)
 
         config = tmp_path / "cadence.json"
-        config.write_text(json.dumps({"enabled": True, "period": 5, "loaders": {"global": {"offset": 4}}}))
+        config.write_text(
+            json.dumps({"enabled": True, "period": 5, "loaders": {"global": {"offset": 4}}}), encoding="utf-8"
+        )
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -111,13 +145,11 @@ class TestShouldFire:
             assert should_fire("global") is True
 
     def test_cadence_disabled_always_fires(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text(json.dumps({"turn": 1}))
+        state_file.write_text(json.dumps({"turn": 1}), encoding="utf-8")
 
         config = tmp_path / "cadence.json"
-        config.write_text(json.dumps({"enabled": False}))
+        config.write_text(json.dumps({"enabled": False}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -128,8 +160,6 @@ class TestShouldFire:
 
     def test_no_session_id_withholds_all_but_the_kernel_and_the_notices(self, tmp_path):
         """The degraded fail mode (DPLAN-0347): not every loader every turn, not dark."""
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {}, clear=False),
@@ -137,7 +167,7 @@ class TestShouldFire:
         ):
             env = dict(__import__("os").environ)
             env.pop("CLAUDE_CODE_SESSION_ID", None)
-            with patch.dict("os.environ", env, clear=True):
+            with patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True):
                 assert should_fire("global") is False
                 for withheld in ("navmap", "branch", "identity"):
                     assert should_fire(withheld) is False, withheld
@@ -147,8 +177,6 @@ class TestShouldFire:
     def test_counter_increments_once_across_sibling_processes(self, tmp_path):
         """Each loader is a SEPARATE OS process. The counter must advance
         exactly once per real turn no matter how many siblings call it."""
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         state_file = _write_state(tmp_path, turn=3)
 
         with (
@@ -160,15 +188,13 @@ class TestShouldFire:
             for _ in range(4):  # 4 more siblings, each a fresh process
                 _reset_module_globals()
                 should_fire("branch")
-            data = json.loads(state_file.read_text())
+            data = json.loads(state_file.read_text(encoding="utf-8"))
             assert data["turn"] == 4
 
     def test_sibling_processes_agree_on_turn_no_leapfrog(self, tmp_path):
         """The S210 live bug: global saw turn N, branch saw N+1 — they
         leapfrogged and never both fired. Both siblings must see the SAME
         turn and make the SAME decision."""
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         _write_state(tmp_path, turn=4)  # next real turn = 5 = fire (5 % 5 == 0)
 
         with (
@@ -183,10 +209,8 @@ class TestShouldFire:
     def test_token_backstop_blocks_double_increment(self, tmp_path):
         """Even past the debounce window, an unchanged transcript token means
         no new turn happened — the counter must not advance."""
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 100)
+        transcript.write_text("x" * 100, encoding="utf-8")
         state_file = _write_state(tmp_path, turn=3, token=100)
 
         with (
@@ -195,13 +219,11 @@ class TestShouldFire:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             should_fire("global", {"transcript_path": str(transcript)})
-            assert json.loads(state_file.read_text())["turn"] == 3
+            assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == 3
 
     def test_reset_special_case_survives_debounce(self, tmp_path):
         """turn < 0 (post-compact reset) must ALWAYS increment to 0, even when
         the reset just happened (fresh mtime would normally debounce)."""
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         state_file = _write_state(tmp_path, turn=-1, aged=False)
 
         with (
@@ -210,16 +232,14 @@ class TestShouldFire:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             assert should_fire("global") is True
-            assert json.loads(state_file.read_text())["turn"] == 0
+            assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == 0
 
     def test_period_zero_always_fires(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text(json.dumps({"turn": 2}))
+        state_file.write_text(json.dumps({"turn": 2}), encoding="utf-8")
 
         config = tmp_path / "cadence.json"
-        config.write_text(json.dumps({"enabled": True, "period": 0}))
+        config.write_text(json.dumps({"enabled": True, "period": 0}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -231,12 +251,11 @@ class TestShouldFire:
     def test_stagger_offsets(self, tmp_path):
         config = tmp_path / "cadence.json"
         config.write_text(
-            json.dumps({"enabled": True, "period": 5, "loaders": {"global": {"offset": 0}, "branch": {"offset": 2}}})
+            json.dumps({"enabled": True, "period": 5, "loaders": {"global": {"offset": 0}, "branch": {"offset": 2}}}),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=4)
-
-        from aipass.hooks.apps.modules.cadence import should_fire
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -247,8 +266,6 @@ class TestShouldFire:
             assert should_fire("branch") is False
 
     def test_unknown_loader_uses_offset_zero(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         _write_state(tmp_path, turn=4)
 
         with (
@@ -262,8 +279,6 @@ class TestShouldFire:
 
     def test_is_automated_reads_the_payload_source_first(self):
         """The 2.1.273 hook schema declares `source`; a payload that carries it decides by it."""
-        from aipass.hooks.apps.modules.cadence import is_automated
-
         assert is_automated({"source": "system", "prompt": "typed words"}) is True
         assert is_automated({"source": "user", "prompt": _NOTIFICATION}) is False
         for other in ("sdk", "loop_wakeup", "schedule_wakeup", "poll_event"):
@@ -271,8 +286,6 @@ class TestShouldFire:
 
     def test_is_automated_falls_back_to_how_the_prompt_opens(self):
         """No live payload carried `source`, so the text decides, and only by how it opens."""
-        from aipass.hooks.apps.modules.cadence import is_automated
-
         assert is_automated({"prompt": _NOTIFICATION}) is True
         assert is_automated({"prompt": "\n  " + _NOTIFICATION}) is True
         assert is_automated({"prompt": "[SYSTEM NOTIFICATION] monitor expired"}) is True
@@ -285,8 +298,6 @@ class TestShouldFire:
 
     def test_is_automated_reads_a_missing_prompt_as_human(self):
         """A payload change must fail toward today's behaviour, never go dark."""
-        from aipass.hooks.apps.modules.cadence import is_automated
-
         for payload in (None, {}, {"prompt": ""}, {"prompt": None}, {"source": None}, {"source": "", "prompt": "hi"}):
             assert is_automated(payload) is False, payload
 
@@ -297,12 +308,10 @@ class TestShouldFire:
         turn's would debounce that turn away, so the human turn after the wake
         must still count.
         """
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 500)
+        transcript.write_text("x" * 500, encoding="utf-8")
         state_file = _write_state(tmp_path, turn=3, token=100)
-        before = (state_file.read_text(), state_file.stat().st_mtime)
+        before = (state_file.read_text(encoding="utf-8"), state_file.stat().st_mtime)
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -316,11 +325,11 @@ class TestShouldFire:
             # Mail is the sibling that still reads the counter on a wake, so it is the one that could write it.
             _reset_module_globals()
             cadence.should_fire_mail(1, wake)
-            assert (state_file.read_text(), state_file.stat().st_mtime) == before
+            assert (state_file.read_text(encoding="utf-8"), state_file.stat().st_mtime) == before
 
             _reset_module_globals()
             should_fire("tier0", {"transcript_path": str(transcript), "prompt": "a human turn"})
-            assert json.loads(state_file.read_text()) == {"turn": 4, "token": 500}
+            assert json.loads(state_file.read_text(encoding="utf-8")) == {"turn": 4, "token": 500}
 
     def test_an_automated_prompt_after_a_compaction_fires_no_grounding(self, tmp_path):
         """The 09:30 row: turn 0 on a harness wake delivered 20,310 chars to nobody.
@@ -329,8 +338,6 @@ class TestShouldFire:
         as it found it (regroup token included), and the next human prompt is
         still turn 0 and grounds in full.
         """
-        from aipass.hooks.apps.modules import cadence
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
@@ -338,11 +345,11 @@ class TestShouldFire:
         ):
             cadence.reset_counter()
             state_file = tmp_path / "aipass-cadence-test-session.json"
-            armed = json.loads(state_file.read_text())
+            armed = json.loads(state_file.read_text(encoding="utf-8"))
             for loader in ("tier0", "navmap", "identity", "branch"):
                 _reset_module_globals()
                 assert cadence.should_fire(loader, {"prompt": _NOTIFICATION}) is False, loader
-            assert json.loads(state_file.read_text()) == armed
+            assert json.loads(state_file.read_text(encoding="utf-8")) == armed
 
             for loader in ("tier0", "navmap", "identity", "branch"):
                 _reset_module_globals()
@@ -353,8 +360,6 @@ class TestShouldFire:
         arrival is not cadence-gated at all (persistent_alert), so should_fire('alert')
         only decides a REPEAT, and a turn that does not count is not a beat to repeat on:
         read without advancing, a stored beat would otherwise repeat on every wake."""
-        from aipass.hooks.apps.modules import cadence
-
         notification = {"prompt": _NOTIFICATION}
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -367,7 +372,7 @@ class TestShouldFire:
                 assert cadence.should_fire("alert", notification) is False, stored
             _reset_module_globals()
             assert cadence.should_fire_mail(2, notification) is True
-            assert json.loads(state_file.read_text())["turn"] == 5
+            assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == 5
 
 
 class TestResetCounter:
@@ -375,10 +380,8 @@ class TestResetCounter:
         _reset_module_globals()
 
     def test_reset_writes_minus_one(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text(json.dumps({"turn": 7}))
+        state_file.write_text(json.dumps({"turn": 7}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -386,14 +389,12 @@ class TestResetCounter:
         ):
             reset_counter()
 
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
     def test_reset_then_next_turn_is_zero(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter, should_fire
-
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text(json.dumps({"turn": 7}))
+        state_file.write_text(json.dumps({"turn": 7}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -410,23 +411,19 @@ class TestResetCounter:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             assert should_fire("global") is True
-            data = json.loads(state_file.read_text())
+            data = json.loads(state_file.read_text(encoding="utf-8"))
             assert data["turn"] == 0
 
     def test_reset_no_session_id_is_noop(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         with patch(f"{MODULE}._GUARD_DIR", tmp_path):
             env = dict(__import__("os").environ)
             env.pop("CLAUDE_CODE_SESSION_ID", None)
-            with patch.dict("os.environ", env, clear=True):
+            with patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True):
                 reset_counter()
 
         assert not list(tmp_path.glob("aipass-cadence-*"))
 
     def test_reset_creates_file_if_missing(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
@@ -435,7 +432,7 @@ class TestResetCounter:
 
         state_file = tmp_path / "aipass-cadence-test-session.json"
         assert state_file.exists()
-        assert json.loads(state_file.read_text())["turn"] == -1
+        assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == -1
 
 
 class TestConsumeRegroupPending:
@@ -445,8 +442,6 @@ class TestConsumeRegroupPending:
         _reset_module_globals()
 
     def test_returns_false_when_no_state_file(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import consume_regroup_pending
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
@@ -454,8 +449,6 @@ class TestConsumeRegroupPending:
             assert consume_regroup_pending() is False
 
     def test_returns_true_once_after_reset(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import consume_regroup_pending, reset_counter
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
@@ -468,8 +461,6 @@ class TestConsumeRegroupPending:
         """Replays the incident: several PreCompacts fire with no intervening
         UserPromptSubmit. The flag must still be pending exactly once total,
         not once per reset."""
-        from aipass.hooks.apps.modules.cadence import consume_regroup_pending, reset_counter
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
@@ -481,12 +472,10 @@ class TestConsumeRegroupPending:
             assert consume_regroup_pending() is False
 
     def test_fallback_to_hook_data_session_id(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import consume_regroup_pending, reset_counter
-
         with patch(f"{MODULE}._GUARD_DIR", tmp_path):
             env = dict(__import__("os").environ)
             env.pop("CLAUDE_CODE_SESSION_ID", None)
-            with patch.dict("os.environ", env, clear=True):
+            with patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True):
                 reset_counter(hook_data={"session_id": "fallback-id"})
                 assert consume_regroup_pending(hook_data={"session_id": "fallback-id"}) is True
                 assert consume_regroup_pending(hook_data={"session_id": "fallback-id"}) is False
@@ -495,8 +484,6 @@ class TestConsumeRegroupPending:
         """Once a real UserPromptSubmit turn fires (turn 0), _load_and_increment
         overwrites state without regroup_pending — so a late-arriving normal turn
         clears the backstop flag too, even if PostToolUse never consumed it."""
-        from aipass.hooks.apps.modules.cadence import consume_regroup_pending, reset_counter, should_fire
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
@@ -534,8 +521,6 @@ class TestRegroupPartQueue:
         )
 
     def test_nothing_queued_pops_nothing(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import pop_regroup_part, reset_counter
-
         guard, env, cfg = self._env(tmp_path)
         with guard, env, cfg:
             assert pop_regroup_part() is None
@@ -543,8 +528,6 @@ class TestRegroupPartQueue:
             assert pop_regroup_part() is None
 
     def test_each_part_is_handed_out_exactly_once_then_silence(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
-
         guard, env, cfg = self._env(tmp_path)
         with guard, env, cfg:
             reset_counter()
@@ -553,20 +536,16 @@ class TestRegroupPartQueue:
 
     def test_the_last_pop_removes_the_keys(self, tmp_path):
         """An exhausted queue must not linger as state a later reader misreads."""
-        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
-
         guard, env, cfg = self._env(tmp_path)
         with guard, env, cfg:
             reset_counter()
             queue_regroup_parts(2)
             pop_regroup_part()
-        state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text())
+        state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text(encoding="utf-8"))
         assert "regroup_next" not in state
         assert "regroup_total" not in state
 
     def test_a_single_part_regroup_queues_nothing(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
-
         guard, env, cfg = self._env(tmp_path)
         with guard, env, cfg:
             reset_counter()
@@ -575,22 +554,18 @@ class TestRegroupPartQueue:
 
     def test_queueing_keeps_the_token_state_intact(self, tmp_path):
         """The queue writes beside the token; it must not re-arm or erase it."""
-        from aipass.hooks.apps.modules.cadence import consume_regroup_pending, queue_regroup_parts, reset_counter
-
         guard, env, cfg = self._env(tmp_path)
         with guard, env, cfg:
             reset_counter()
             assert consume_regroup_pending() is True
             queue_regroup_parts(3)
             assert consume_regroup_pending() is False
-        state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text())
+        state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text(encoding="utf-8"))
         assert state["turn"] == -1
 
     def test_a_real_prompt_cancels_the_remaining_parts(self, tmp_path):
         """The cadence turn-0 path re-injects every loader on that prompt, so the
         backstop's remaining parts would only repeat it."""
-        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter, should_fire
-
         guard, env, cfg = self._env(tmp_path)
         with guard, env, cfg:
             reset_counter()
@@ -603,8 +578,6 @@ class TestRegroupPartQueue:
             assert pop_regroup_part() is None
 
     def test_a_new_compaction_drops_the_old_queue(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
-
         guard, env, cfg = self._env(tmp_path)
         with guard, env, cfg, patch(f"{MODULE}._REGROUP_DEBOUNCE_S", 0.0):
             reset_counter()
@@ -615,8 +588,6 @@ class TestRegroupPartQueue:
     def test_a_duplicate_reset_on_the_same_boundary_keeps_the_queue(self, tmp_path):
         """Two PreCompact callers reacting to one compaction (DPLAN-0278) are one
         boundary: the second must not cancel parts the first one's re-ground owes."""
-        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
-
         guard, env, cfg = self._env(tmp_path)
         with guard, env, cfg:
             reset_counter()
@@ -625,13 +596,11 @@ class TestRegroupPartQueue:
             assert pop_regroup_part() == (2, 3)
 
     def test_fallback_to_hook_data_session_id(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
-
         hook_data = {"session_id": "fallback-id"}
         with patch(f"{MODULE}._GUARD_DIR", tmp_path):
             env = dict(__import__("os").environ)
             env.pop("CLAUDE_CODE_SESSION_ID", None)
-            with patch.dict("os.environ", env, clear=True):
+            with patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True):
                 reset_counter(hook_data=hook_data)
                 queue_regroup_parts(2, hook_data=hook_data)
                 assert pop_regroup_part(hook_data=hook_data) == (2, 2)
@@ -642,8 +611,6 @@ class TestRegroupFireLog:
     """Issue #752, pin 4: one sized cadence.log line per fire — a one-grep diagnosis."""
 
     def test_the_line_names_loader_part_and_both_sizes(self):
-        from aipass.hooks.apps.modules import cadence
-
         with patch.object(cadence, "logger") as log:
             cadence.log_regroup_fire("branch,identity", 1, 3, "ab—c", 9000)
 
@@ -656,8 +623,6 @@ class TestRegroupFireLog:
         log.warning.assert_not_called()
 
     def test_an_over_budget_fire_is_a_warning_that_says_so(self):
-        from aipass.hooks.apps.modules import cadence
-
         with patch.object(cadence, "logger") as log:
             cadence.log_regroup_fire("navmap", 2, 2, "x" * 12, 10)
 
@@ -668,8 +633,6 @@ class TestRegroupFireLog:
 
     def test_chars_are_utf16_units_the_way_claude_code_counts(self):
         """A non-BMP character is ONE Python code point and TWO JS length units."""
-        from aipass.hooks.apps.modules import cadence
-
         with patch.object(cadence, "logger") as log:
             cadence.log_regroup_fire("kernel", 1, 1, "\U0001f600", 9000)
 
@@ -682,8 +645,6 @@ class TestConfig:
         _reset_module_globals()
 
     def test_defaults_used_when_no_config_file(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import _load_config
-
         with patch(f"{MODULE}._CONFIG_PATH", tmp_path / "nonexistent.json"):
             config = _load_config()
 
@@ -694,8 +655,6 @@ class TestConfig:
 
     def test_defaults_include_tiered_loaders(self, tmp_path):
         """Fresh clone with no cadence_config.json gets tiered cadence out of the box."""
-        from aipass.hooks.apps.modules.cadence import _load_config
-
         with patch(f"{MODULE}._CONFIG_PATH", tmp_path / "nonexistent.json"):
             config = _load_config()
 
@@ -704,10 +663,8 @@ class TestConfig:
         assert config["loaders"]["navmap"]["offset"] == 0
 
     def test_config_deep_merges_over_defaults(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import _load_config
-
         config_file = tmp_path / "cadence.json"
-        config_file.write_text(json.dumps({"period": 10, "loaders": {"global": {"offset": 3}}}))
+        config_file.write_text(json.dumps({"period": 10, "loaders": {"global": {"offset": 3}}}), encoding="utf-8")
 
         with patch(f"{MODULE}._CONFIG_PATH", config_file):
             config = _load_config()
@@ -718,10 +675,8 @@ class TestConfig:
         assert config["enabled"] is True
 
     def test_bad_config_falls_back_to_defaults(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import _load_config
-
         config_file = tmp_path / "cadence.json"
-        config_file.write_text("not valid json{{{")
+        config_file.write_text("not valid json{{{", encoding="utf-8")
 
         with patch(f"{MODULE}._CONFIG_PATH", config_file):
             config = _load_config()
@@ -731,8 +686,6 @@ class TestConfig:
 
 class TestDeepMerge:
     def test_nested_merge(self):
-        from aipass.hooks.apps.modules.cadence import _deep_merge
-
         base = {"a": 1, "b": {"c": 2, "d": 3}}
         updates = {"b": {"c": 99}, "e": 4}
         result = _deep_merge(base, updates)
@@ -743,8 +696,6 @@ class TestDeepMerge:
         assert result["e"] == 4
 
     def test_overwrites_non_dict(self):
-        from aipass.hooks.apps.modules.cadence import _deep_merge
-
         base = {"a": [1, 2]}
         result = _deep_merge(base, {"a": [3]})
         assert result["a"] == [3]
@@ -755,8 +706,6 @@ class TestPerSessionIsolation:
         _reset_module_globals()
 
     def test_different_sessions_use_different_files(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         state_a = _write_state(tmp_path, turn=4, session="session-a")
 
         with (
@@ -765,7 +714,7 @@ class TestPerSessionIsolation:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             should_fire("global")
-            data_a = json.loads(state_a.read_text())
+            data_a = json.loads(state_a.read_text(encoding="utf-8"))
             assert data_a["turn"] == 5
 
         _reset_module_globals()
@@ -779,7 +728,7 @@ class TestPerSessionIsolation:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             assert should_fire("global") is True
-            data_b = json.loads(state_b.read_text())
+            data_b = json.loads(state_b.read_text(encoding="utf-8"))
             assert data_b["turn"] == 0
 
 
@@ -788,14 +737,12 @@ class TestModuleInterface:
         _reset_module_globals()
 
     def test_handle_command_cadence_returns_true(self):
-        from aipass.hooks.apps.modules.cadence import handle_command
-
-        with patch(f"{MODULE}.print_introspection"):
+        """`cadence` with no args routes to print_introspection; proven by a mutant deleting the call."""
+        with patch(f"{MODULE}.print_introspection") as mock_intro:
             assert handle_command("cadence", []) is True
+        mock_intro.assert_called_once_with()
 
     def test_handle_command_unknown_returns_false(self):
-        from aipass.hooks.apps.modules.cadence import handle_command
-
         assert handle_command("other", []) is False
 
     def test_print_introspection_runs(self, tmp_path, capsys):
@@ -808,8 +755,6 @@ class TestModuleInterface:
         that is the state most likely to be wrong and least likely to be looked
         at.
         """
-        from aipass.hooks.apps.modules.cadence import print_introspection
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
@@ -830,18 +775,15 @@ class TestCompactIntegration:
 
     def test_compact_handler_resets_cadence(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text(json.dumps({"turn": 7}))
-
-        import aipass.hooks.apps.modules.cadence as cadence_mod
+        state_file.write_text(json.dumps({"turn": 7}), encoding="utf-8")
 
         with (
-            patch.object(cadence_mod, "_GUARD_DIR", tmp_path),
+            patch.object(cadence, "_GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
         ):
-            mock_cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
-            mock_cadence.reset_counter()
+            cadence.reset_counter()
 
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
 
@@ -851,8 +793,6 @@ class TestLoaderCadenceGuard:
 
     def test_tier0_kernel_fires_every_turn(self, tmp_path):
         """tier0 has period:1 — fires on every turn including non-fire turns for others."""
-        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
-
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -861,7 +801,8 @@ class TestLoaderCadenceGuard:
                     "period": 5,
                     "loaders": {"tier0": {"period": 1}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=2)
@@ -871,14 +812,12 @@ class TestLoaderCadenceGuard:
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
             patch(f"{MODULE}._CONFIG_PATH", config),
         ):
-            result = handle({})
+            result = _tier0_kernel_handle({})
 
         assert result["exit_code"] == 0
 
     def test_branch_loader_skips_on_non_fire_turn(self, tmp_path):
         """Skip = empty stdout AND no sound key — a skipped loader is SILENT."""
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
         _write_state(tmp_path, turn=0)  # next turn = 1 = skip
 
         with (
@@ -886,7 +825,7 @@ class TestLoaderCadenceGuard:
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
-            result = handle({})
+            result = _branch_loader_handle({})
 
         assert result["stdout"] == ""
         assert result["exit_code"] == 0
@@ -900,8 +839,6 @@ class TestResetCounterObservability:
         _reset_module_globals()
 
     def test_reset_logs_session_id_and_prev_turn(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         _write_state(tmp_path, turn=11)
 
         with (
@@ -920,15 +857,13 @@ class TestResetCounterObservability:
         assert "prev_turn=11" in log_line
 
     def test_reset_no_session_logs_warning(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch(f"{MODULE}.logger") as mock_logger,
         ):
             env = dict(os.environ)
             env.pop("CLAUDE_CODE_SESSION_ID", None)
-            with patch.dict("os.environ", env, clear=True):
+            with patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True):
                 reset_counter()
 
         calls = [str(c) for c in mock_logger.info.call_args_list]
@@ -936,45 +871,39 @@ class TestResetCounterObservability:
         assert len(warning_calls) == 1
 
     def test_reset_fallback_to_hook_data_session_id(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         state_file = tmp_path / "aipass-cadence-fallback-id.json"
-        state_file.write_text(json.dumps({"turn": 5}))
+        state_file.write_text(json.dumps({"turn": 5}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
         ):
             env = dict(os.environ)
             env.pop("CLAUDE_CODE_SESSION_ID", None)
-            with patch.dict("os.environ", env, clear=True):
+            with patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True):
                 reset_counter(hook_data={"session_id": "fallback-id"})
 
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
     def test_reset_fallback_creates_file_if_missing(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
         ):
             env = dict(os.environ)
             env.pop("CLAUDE_CODE_SESSION_ID", None)
-            with patch.dict("os.environ", env, clear=True):
+            with patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True):
                 reset_counter(hook_data={"session_id": "new-fallback"})
 
         state_file = tmp_path / "aipass-cadence-new-fallback.json"
         assert state_file.exists()
-        assert json.loads(state_file.read_text())["turn"] == -1
+        assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == -1
 
     def test_reset_env_takes_priority_over_hook_data(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         env_file = tmp_path / "aipass-cadence-env-session.json"
-        env_file.write_text(json.dumps({"turn": 9}))
+        env_file.write_text(json.dumps({"turn": 9}), encoding="utf-8")
 
         hook_file = tmp_path / "aipass-cadence-hook-session.json"
-        hook_file.write_text(json.dumps({"turn": 3}))
+        hook_file.write_text(json.dumps({"turn": 3}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -982,29 +911,25 @@ class TestResetCounterObservability:
         ):
             reset_counter(hook_data={"session_id": "hook-session"})
 
-        assert json.loads(env_file.read_text())["turn"] == -1
-        assert json.loads(hook_file.read_text())["turn"] == 3
+        assert json.loads(env_file.read_text(encoding="utf-8"))["turn"] == -1
+        assert json.loads(hook_file.read_text(encoding="utf-8"))["turn"] == 3
 
     def test_reset_hook_data_empty_session_id_logs_skip(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch(f"{MODULE}.logger") as mock_logger,
         ):
             env = dict(os.environ)
             env.pop("CLAUDE_CODE_SESSION_ID", None)
-            with patch.dict("os.environ", env, clear=True):
+            with patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True):
                 reset_counter(hook_data={"session_id": ""})
 
         calls = [str(c) for c in mock_logger.info.call_args_list]
         assert any("SKIPPED" in c for c in calls)
 
     def test_reset_prev_turn_from_corrupt_file(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text("not valid json{{{")
+        state_file.write_text("not valid json{{{", encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -1012,7 +937,7 @@ class TestResetCounterObservability:
         ):
             reset_counter()
 
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
 
@@ -1023,8 +948,6 @@ class TestPostCompactDeterminism:
         _reset_module_globals()
 
     def test_all_tiered_loaders_fire_after_reset(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter, should_fire
-
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -1037,7 +960,8 @@ class TestPostCompactDeterminism:
                         "branch": {"offset": 0},
                     },
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=11)
@@ -1063,8 +987,6 @@ class TestPostCompactDeterminism:
             assert should_fire("branch") is True
 
     def test_reset_at_any_turn_produces_turn_zero(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter, should_fire
-
         for prev_turn in [0, 1, 4, 5, 10, 11, 99]:
             _reset_module_globals()
             _write_state(tmp_path, turn=prev_turn)
@@ -1084,29 +1006,37 @@ class TestPostCompactDeterminism:
                 patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
             ):
                 result = should_fire("navmap")
-                state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text())
+                state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text(encoding="utf-8"))
                 assert state["turn"] == 0, f"Expected turn 0 after reset from {prev_turn}"
                 assert result is True, f"navmap should fire after reset from turn {prev_turn}"
 
-    def test_compact_handler_calls_reset_with_hook_data(self):
-        from aipass.hooks.apps.handlers.lifecycle.compact import handle
+    def test_compact_handler_calls_reset_with_hook_data(self, tmp_path):
+        """compact resets the cadence counter and files the git answer under ## Git.
 
-        import tempfile
+        _get_git_info is stood in by a recorder so no real git process starts; the
+        ## Git assert is proven by a mutant on compact.handle (see the fleet green report).
+        """
+        hook_data = {"cwd": str(tmp_path / "fake"), "session_id": "test-123"}
+        git_answer = "Git branch: recorded-branch\nUncommitted changes: 3 files"
 
-        hook_data = {"cwd": tempfile.gettempdir() + "/fake", "session_id": "test-123"}
-
+        # The recorder is entered first: patch() resolves its target through
+        # importlib.import_module, which the second patch replaces.
         with (
+            patch(
+                "aipass.hooks.apps.handlers.lifecycle.compact._get_git_info",
+                return_value=git_answer,
+            ) as git_recorder,
             patch("importlib.import_module") as mock_import,
         ):
             mock_cadence = mock_import.return_value
-            result = handle(hook_data)
+            result = _compact_handle(hook_data)
 
         mock_cadence.reset_counter.assert_called_once_with(hook_data=hook_data, caller="compact")
+        git_recorder.assert_called_once_with()
+        assert f"## Git\n{git_answer}" in result["stdout"].split("\n\n")
         assert result["exit_code"] == 0
 
     def test_double_reset_is_idempotent(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import reset_counter
-
         _write_state(tmp_path, turn=11)
 
         with (
@@ -1118,7 +1048,7 @@ class TestPostCompactDeterminism:
             reset_counter()
 
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
 
@@ -1128,8 +1058,6 @@ class TestPerLoaderPeriod:
 
     def test_loader_period_overrides_global(self, tmp_path):
         """A loader with period:1 fires every turn, even when global period is 5."""
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -1138,7 +1066,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"tier0": {"period": 1}, "global": {"offset": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=2)
@@ -1153,8 +1082,6 @@ class TestPerLoaderPeriod:
             assert should_fire("global") is False
 
     def test_loader_without_period_uses_global(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -1163,7 +1090,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"global": {"offset": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=2)
@@ -1176,8 +1104,6 @@ class TestPerLoaderPeriod:
             assert should_fire("global") is False
 
     def test_tier0_period_1_fires_every_turn(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -1186,7 +1112,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"tier0": {"period": 1}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         # The turns spelled out, not range(1, 8): "every turn" is the whole
@@ -1207,8 +1134,6 @@ class TestPerLoaderPeriod:
         assert fired == {1: True, 2: True, 3: True, 4: True, 5: True, 6: True, 7: True}
 
     def test_navmap_period_5_skips_non_fire_turns(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -1217,7 +1142,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"navmap": {"period": 5, "offset": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=2)
@@ -1230,8 +1156,6 @@ class TestPerLoaderPeriod:
             assert should_fire("navmap") is False
 
     def test_navmap_fires_on_turn_0(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -1240,7 +1164,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"navmap": {"period": 5, "offset": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         with (
@@ -1251,8 +1176,6 @@ class TestPerLoaderPeriod:
             assert should_fire("navmap") is True
 
     def test_navmap_fires_after_reset_counter(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire, reset_counter
-
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -1261,7 +1184,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"navmap": {"period": 5, "offset": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=7)
@@ -1283,8 +1207,6 @@ class TestPerLoaderPeriod:
             assert should_fire("navmap") is True
 
     def test_per_loader_period_zero_always_fires(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -1293,7 +1215,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"always": {"period": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=2)
@@ -1309,7 +1232,7 @@ class TestPerLoaderPeriod:
 def _write_mail_state(tmp_path, last_fired, session="test-session"):
     """Write the mail-loop state file (last turn the banner fired)."""
     state_file = tmp_path / f"aipass-mailcadence-{session}.json"
-    state_file.write_text(json.dumps({"last_fired_turn": last_fired}))
+    state_file.write_text(json.dumps({"last_fired_turn": last_fired}), encoding="utf-8")
     return state_file
 
 
@@ -1332,19 +1255,17 @@ class TestShouldFireMail:
 
     def _config(self, tmp_path, period=5, enabled=True):
         config = tmp_path / "cadence.json"
-        config.write_text(json.dumps({"enabled": enabled, "period": 5, "loaders": {"email": {"period": period}}}))
+        config.write_text(
+            json.dumps({"enabled": enabled, "period": 5, "loaders": {"email": {"period": period}}}), encoding="utf-8"
+        )
         return config
 
     def test_zero_mail_is_silent(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path)
         with _mail_env(tmp_path, config):
             assert should_fire_mail(0, {}) is False
 
     def test_first_sighting_fires(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path)
         _write_state(tmp_path, turn=6)
         with _mail_env(tmp_path, config):
@@ -1353,8 +1274,6 @@ class TestShouldFireMail:
     def test_fires_at_plus_period_not_plus_one(self, tmp_path):
         """The canary: over an 11-turn session with mail always present, the banner
         fires on arrival and then only every 5th turn — never on consecutive turns."""
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path, period=5)
         fired_on = []
         for turn in range(11):
@@ -1369,8 +1288,6 @@ class TestShouldFireMail:
     def test_empty_inbox_clears_state_so_next_arrival_announces(self, tmp_path):
         """Read your mail at turn 1, new mail lands at turn 2 -> announced at turn 2,
         not held until turn 5. Clearing on zero is what makes that true."""
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path)
 
         _write_state(tmp_path, turn=-1)
@@ -1390,8 +1307,6 @@ class TestShouldFireMail:
     def test_without_clearing_the_next_arrival_would_be_muted(self, tmp_path):
         """Control for the test above: same turn 2 arrival, but with stale state left
         behind (as if zero had not cleared it) the banner is suppressed."""
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path)
         _write_mail_state(tmp_path, last_fired=0)
         _write_state(tmp_path, turn=1)
@@ -1401,8 +1316,6 @@ class TestShouldFireMail:
     def test_counter_reset_re_announces(self, tmp_path):
         """After a compact the turn counter restarts at 0 while mail state says 7.
         Negative elapsed must re-announce, not go permanently silent."""
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path)
         _write_mail_state(tmp_path, last_fired=7)
         _write_state(tmp_path, turn=-1)
@@ -1410,8 +1323,6 @@ class TestShouldFireMail:
             assert should_fire_mail(1, {}) is True
 
     def test_cadence_disabled_fires_every_turn(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path, enabled=False)
         _write_mail_state(tmp_path, last_fired=3)
         _write_state(tmp_path, turn=3)
@@ -1419,8 +1330,6 @@ class TestShouldFireMail:
             assert should_fire_mail(1, {}) is True
 
     def test_period_zero_fires_every_turn(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path, period=0)
         _write_mail_state(tmp_path, last_fired=3)
         _write_state(tmp_path, turn=3)
@@ -1429,31 +1338,25 @@ class TestShouldFireMail:
 
     def test_disabled_still_silent_at_zero(self, tmp_path):
         """Disabled restores fire-every-turn, but never invents a banner for no mail."""
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path, enabled=False)
         with _mail_env(tmp_path, config):
             assert should_fire_mail(0, {}) is False
 
     def test_no_session_id_fires(self, tmp_path):
         """No session = no state to loop on; announce rather than swallow mail."""
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path)
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SESSION_ID", None)
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
-            patch.dict("os.environ", env, clear=True),
+            patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True),
             patch(f"{MODULE}._CONFIG_PATH", config),
         ):
             assert should_fire_mail(1, {}) is True
 
     def test_corrupt_mail_state_treated_as_never_fired(self, tmp_path):
-        from aipass.hooks.apps.modules.cadence import should_fire_mail
-
         config = self._config(tmp_path)
-        (tmp_path / "aipass-mailcadence-test-session.json").write_text("{not json")
+        (tmp_path / "aipass-mailcadence-test-session.json").write_text("{not json", encoding="utf-8")
         _write_state(tmp_path, turn=3)
         with _mail_env(tmp_path, config):
             assert should_fire_mail(1, {}) is True
@@ -1598,13 +1501,11 @@ class TestFailOpenIsLoud:
         return config
 
     def test_no_session_id_warns_once_and_names_the_cause(self, tmp_path, caplog):
-        from aipass.hooks.apps.modules.cadence import degraded_reason, should_fire
-
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SESSION_ID", None)
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
-            patch.dict("os.environ", env, clear=True),
+            patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True),
             patch(f"{MODULE}._CONFIG_PATH", self._config(tmp_path)),
         ):
             fired = {name: should_fire(name) for name in ("tier0", "navmap", "branch", "identity", "alert")}
@@ -1618,8 +1519,6 @@ class TestFailOpenIsLoud:
         assert "CLAUDE_CODE_SESSION_ID" in (degraded_reason() or "")
 
     def test_an_unreadable_state_file_warns_with_the_cause(self, tmp_path, caplog):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         def _boom(*_args, **_kwargs):
             raise OSError("state dir is read-only")
 
@@ -1637,8 +1536,6 @@ class TestFailOpenIsLoud:
         assert "state dir is read-only" in text
 
     def test_a_healthy_turn_says_nothing_at_warning(self, tmp_path, caplog):
-        from aipass.hooks.apps.modules.cadence import should_fire
-
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
@@ -1649,11 +1546,9 @@ class TestFailOpenIsLoud:
         assert [r for r in caplog.records if r.levelname == "WARNING"] == []
 
     def test_the_advisory_throttle_warns_when_it_cannot_throttle(self, tmp_path, caplog):
-        from aipass.hooks.apps.modules.cadence import should_fire_advisory
-
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SESSION_ID", None)
-        with patch(f"{MODULE}._GUARD_DIR", tmp_path), patch.dict("os.environ", env, clear=True):
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path), patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True):
             assert should_fire_advisory("todos_count") is True
 
         assert "FAIL-OPEN advisory=todos_count" in caplog.text

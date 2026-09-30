@@ -3,10 +3,15 @@
 # Description: Tests for devpulse.py CLI routing, introspection, and resilience
 # Version: 1.0.0
 # Created: 2026-05-15
-# Modified: 2026-05-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for devpulse.py — entry point CLI routing and module discovery."""
+"""Tests for apps/devpulse.py and the routing of apps/modules/release_notify.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in apps/modules/ parses and imports
+# seedgo: no-test-needed(constant) — the Rich colour tags print_help and print_introspection emit
+# seedgo: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
 
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
@@ -17,32 +22,32 @@ from aipass.devpulse.apps.modules import release_notify as release_notify_module
 
 
 class TestCLIRouting:
-    """CLI routing through _handle_command and main()."""
+    """CLI routing through handle_command and main()."""
 
-    def test_help_flag(self):
-        """--help flag returns True."""
-        result = devpulse_module._handle_command("--help", [])
-        assert result is True
+    def test_help_flag(self, capsys):
+        """--help prints the usage line (mutant: the print_help() call dropped)."""
+        assert devpulse_module.handle_command("--help", []) is True
+        assert "drone @devpulse <command> [args...]" in capsys.readouterr().out
 
-    def test_short_help(self):
-        """-h flag returns True."""
-        result = devpulse_module._handle_command("-h", [])
-        assert result is True
+    def test_short_help(self, capsys):
+        """-h prints the usage line (mutant: the print_help() call dropped)."""
+        assert devpulse_module.handle_command("-h", []) is True
+        assert "drone @devpulse <command> [args...]" in capsys.readouterr().out
 
-    def test_help_word(self):
-        """help word returns True."""
-        result = devpulse_module._handle_command("help", [])
-        assert result is True
+    def test_help_word(self, capsys):
+        """help prints the usage line (mutant: the print_help() call dropped)."""
+        assert devpulse_module.handle_command("help", []) is True
+        assert "drone @devpulse <command> [args...]" in capsys.readouterr().out
 
-    def test_version_flag(self):
-        """--version flag returns True."""
-        result = devpulse_module._handle_command("--version", [])
-        assert result is True
+    def test_version_flag(self, capsys):
+        """--version prints the one version string and nothing else (mutant: a hardcoded 1.0.0)."""
+        assert devpulse_module.handle_command("--version", []) is True
+        assert capsys.readouterr().out == f"devpulse {devpulse_module.VERSION}\n"
 
-    def test_version_short(self):
-        """-V flag returns True."""
-        result = devpulse_module._handle_command("-V", [])
-        assert result is True
+    def test_version_short(self, capsys):
+        """-V prints the one version string and nothing else (mutant: a hardcoded 1.0.0)."""
+        assert devpulse_module.handle_command("-V", []) is True
+        assert capsys.readouterr().out == f"devpulse {devpulse_module.VERSION}\n"
 
     def test_unknown_command_returns_false(self, capsys):
         """Unrecognized command returns False AND names the token on stderr.
@@ -51,7 +56,7 @@ class TestCLIRouting:
         non-zero and say which token was refused. Until 09-07 devpulse
         returned False with nothing printed — exit 1, empty stderr.
         """
-        result = devpulse_module._handle_command("nonexistent_unknown_command", [])
+        result = devpulse_module.handle_command("nonexistent_unknown_command", [])
         assert result is False
         err = capsys.readouterr().err
         assert "Unknown command: nonexistent_unknown_command" in err
@@ -59,13 +64,13 @@ class TestCLIRouting:
 
     def test_unknown_flag_is_refused_by_name(self, capsys):
         """An unknown flag is refused like an unknown verb — named, not swallowed."""
-        result = devpulse_module._handle_command("--definitely-not-a-flag", [])
+        result = devpulse_module.handle_command("--definitely-not-a-flag", [])
         assert result is False
         assert "Unknown command: --definitely-not-a-flag" in capsys.readouterr().err
 
     def test_unknown_command_offers_a_close_match(self, capsys):
         """A near-miss of a real module name gets a did-you-mean."""
-        result = devpulse_module._handle_command("watchdg", [])
+        result = devpulse_module.handle_command("watchdg", [])
         assert result is False
         assert "Did you mean: watchdog?" in capsys.readouterr().err
 
@@ -90,17 +95,19 @@ class TestCLIRouting:
         assert "Did you mean" not in err
 
     @patch.object(devpulse_module, "print_help")
-    def test_print_help_called_on_help_flag(self, mock_print_help):
-        """--help invokes print_help."""
-        devpulse_module._handle_command("--help", [])
-        mock_print_help.assert_called_once()
+    def test_print_help_called_on_help_flag(self, mock_print_help, capsys):
+        """--help invokes print_help once and routes nowhere else (mutant: the return after it dropped)."""
+        assert devpulse_module.handle_command("--help", []) is True
+        mock_print_help.assert_called_once_with()
+        assert capsys.readouterr() == ("", "")
 
-    @patch.object(devpulse_module, "print_introspection")
-    def test_no_args_triggers_print_introspection(self, mock_introspection):
-        """No args triggers print_introspection via main()."""
+    def test_no_args_triggers_print_introspection(self, capsys):
+        """No args prints the introspection banner via main() (mutant: the banner line dropped)."""
         with patch("sys.argv", ["devpulse"]):
             devpulse_module.main()
-        mock_introspection.assert_called_once()
+        out = capsys.readouterr().out
+        assert "DEVPULSE — Orchestration Hub" in out
+        assert "Run 'drone @devpulse --help' for usage information" in out
 
     @patch.object(devpulse_module, "print_introspection")
     def test_print_introspection_output(self, mock_introspection):
@@ -148,15 +155,10 @@ class TestErrorResilience:
     def test_empty_file_modules_dir(self, tmp_path):
         """discover_modules handles empty_file in modules directory."""
         empty = tmp_path / "empty.py"
-        empty.write_text("")
+        empty.write_text("", encoding="utf-8")
         with patch.object(devpulse_module, "MODULES_DIR", tmp_path):
             result = devpulse_module.discover_modules()
         assert result == []
-
-    def test_handle_command_with_empty_args(self):
-        """--help with empty args list succeeds."""
-        result = devpulse_module.handle_command("--help", [])
-        assert result is True
 
 
 class TestHandleCommandGuard:

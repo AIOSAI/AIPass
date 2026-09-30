@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: hardcoded_key_check.py
 # Description: Hardcoded Key Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -22,6 +22,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: a key committed in a test is leaked exactly as hard.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 # -- Key patterns -----------------------------------------------------------
@@ -243,6 +245,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
                     "name": "Hardcoded API keys",
                     "passed": True,
                     "message": "__init__.py skipped",
+                    "declined": True,
                 }
             ],
             "score": 100,
