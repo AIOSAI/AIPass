@@ -72,6 +72,17 @@ the last part. The other two post-compact prompts came after 308,557 and 587,488
 and those still ground. A second compaction opens a new window. A prompt straight after a compaction had no
 backstop, so it grounds through turn 0 as before (DPLAN-0276's dead zone stays closed).
 
+**A branch can override a loader (cadence 2.8.0, DPLAN-0355).** `cadence_config.json` takes a `branches`
+map: `{"canary": {"loaders": {"tier0": {"beat": false}}}}`. The branch is the prompt's cwd's branch root
+(`grounding_content.find_branch_root`), by name. Its entry for a loader is merged over the global entry
+for that loader only, so a loader it does not name runs the global entry, and a branch with no entry runs
+exactly as before. `"beat": false` fires a loader at turn 0 (new chat, `/clear`, post-compact) and never on
+the period; `period: 0` still means every turn. A cwd under no branch, or a payload with no cwd, runs the
+global entries and logs `under no branch`. A malformed override (a non-object, a `beat` that is not a bool,
+a `period`/`offset` that is not a whole number) logs ERROR and serves the global entry; the file is never
+rewritten. Every decision line now ends `beat=on|off session=… branch=<name>`. The post-compact backstop,
+the mail loop and the degraded mode never read the override. The shipped config names no branch.
+
 ## Persistent Alerts
 
 The `persistent_alert` handler (`prompt/persistent_alert.py`) injects advisory banners into every prompt when active alerts exist. General-purpose — any agent can raise alerts (prax for runaway logs, trigger for medic, backup for sync failures).

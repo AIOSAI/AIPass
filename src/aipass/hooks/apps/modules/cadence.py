@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.7.0
+# Version: 2.8.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-09-16
+# Modified: 2026-09-30
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -24,6 +24,7 @@ from pathlib import Path
 from aipass.cli.apps.modules import err_console
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.hooks.apps.modules.grounding_content import find_branch_root
 
 try:
     import fcntl
@@ -60,6 +61,10 @@ DEFAULTS = {
         "email": {"period": 5},
         "alert": {"period": 5},
     },
+    # Per-branch loader overrides (DPLAN-0355): {"<branch>": {"loaders": {"<loader>": {...}}}},
+    # each merged over the global entry for that loader only. A branch not named
+    # here runs the global entries. "beat": false fires a loader at turn 0 only.
+    "branches": {},
 }
 
 MAIL_LOADER = "email"
@@ -331,8 +336,56 @@ def _degraded_fire(loader_name: str) -> bool:
     return fires
 
 
+def _prompt_branch(hook_data: dict) -> str:
+    """The branch a prompt came from: its cwd's branch root, by name. "none" when there is none.
+
+    The payload's cwd only, never this process's. No branch is not a failure (the
+    repo root and an external project have none), so it is logged and the global
+    loader entries serve it.
+    """
+    cwd = hook_data.get("cwd")
+    root = find_branch_root(cwd) if isinstance(cwd, str) and cwd else None
+    if root is None:
+        logger.info("[HOOKS] cadence: cwd %r is under no branch, the global loader config applies", cwd)
+        return "none"
+    return root.name
+
+
+def _branch_loader_override(config: dict, branch: str, loader_name: str) -> dict:
+    """The branch's override for one loader (DPLAN-0355), {} when it has none.
+
+    A malformed override fails loud (ERROR) and serves {}, the global entry: the
+    file is operator-owned and is never rewritten here.
+    """
+    override = config.get("branches")
+    for key in (branch, "loaders", loader_name):
+        if not isinstance(override, dict):
+            break
+        override = override.get(key, {})
+    if not isinstance(override, dict):
+        problem = "branches, branches.<branch>, .loaders and .loaders.<loader> must each be an object"
+    elif "beat" in override and not isinstance(override["beat"], bool):
+        problem = f"beat must be true or false, got {override['beat']!r}"
+    elif any(type(override.get(key, 0)) is not int for key in ("period", "offset")):
+        problem = "period and offset must be whole numbers"
+    else:
+        return override
+    logger.error(
+        "[HOOKS] cadence: malformed override for branch=%s loader=%s in %s (%s); the global entry serves",
+        branch,
+        loader_name,
+        _CONFIG_PATH,
+        problem,
+    )
+    return {}
+
+
 def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
-    """Check if a loader should fire this turn. Always True on turn 0 or if cadence disabled."""
+    """Check if a loader should fire this turn. Always True on turn 0 or if cadence disabled.
+
+    The prompt's branch may override a loader's entry (`branches` in the config,
+    DPLAN-0355); `"beat": false` then fires it at turn 0 and never on the period.
+    """
     config = _load_config()
 
     if not config.get("enabled", True):
@@ -340,11 +393,16 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
 
     global_period = config.get("period", 5)
 
-    loader_config = config.get("loaders", {}).get(loader_name, {})
+    branch = _prompt_branch(hook_data or {})
+    loader_config = _deep_merge(
+        dict(config.get("loaders", {}).get(loader_name, {})),
+        _branch_loader_override(config, branch, loader_name),
+    )
     period = loader_config.get("period", global_period)
     offset = loader_config.get("offset", 0)
+    beat = loader_config.get("beat", True) is not False
 
-    if period <= 0:
+    if beat and period <= 0:
         return True
 
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
@@ -356,7 +414,9 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
     # an alert's arrival never asks cadence (persistent_alert); should_fire("alert")
     # only decides a repeat, and a turn that does not count is not its beat.
     if is_automated(hook_data):
-        logger.info("[HOOKS] cadence skipped loader=%s automated turn session=%s", loader_name, session_short)
+        logger.info(
+            "[HOOKS] cadence skipped loader=%s automated turn session=%s branch=%s", loader_name, session_short, branch
+        )
         return False
 
     turn = _load_and_increment(hook_data or {})
@@ -365,23 +425,27 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
 
     if turn == 0 and loader_name in GROUNDING_LOADERS and _grounded_by_regroup(hook_data or {}, config):
         logger.info(
-            "[HOOKS] cadence suppressed loader=%s turn=0: the post-compact re-ground already delivered it session=%s",
+            "[HOOKS] cadence suppressed loader=%s turn=0: the post-compact re-ground already delivered it "
+            "session=%s branch=%s",
             loader_name,
             session_short,
+            branch,
         )
         return False
 
-    fired = turn == 0 or (turn % period) == offset
+    fired = turn == 0 or (beat and (turn % period) == offset)
 
     action = "fired" if fired else "skipped"
     logger.info(
-        "[HOOKS] cadence %s loader=%s turn=%d period=%d offset=%d session=%s",
+        "[HOOKS] cadence %s loader=%s turn=%d period=%d offset=%d beat=%s session=%s branch=%s",
         action,
         loader_name,
         turn,
         period,
         offset,
+        "on" if beat else "off",
         session_short,
+        branch,
     )
 
     return fired
@@ -1005,6 +1069,8 @@ def print_introspection() -> None:
             CONSOLE.print(f"  Loader '{name}': period={lp} (elapsed-turns loop, announces on arrival)")
         else:
             CONSOLE.print(f"  Loader '{name}': period={lp} offset={lcfg.get('offset', 0)}")
+    branches = config.get("branches")
+    CONSOLE.print(f"  Branch overrides: {json.dumps(branches) if branches else 'none (every branch runs the above)'}")
     path = _state_path()
     if path and path.exists():
         try:

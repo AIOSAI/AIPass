@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.3.1
-# Description: Tests for cadence module (DPLAN-0200), fail-open warnings since 1.1.0
+# Version: 1.4.0
+# Description: Tests for cadence module (DPLAN-0200), fail-open warnings since 1.1.0, branch overrides since 1.4.0
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-09-28
+# Modified: 2026-09-30
 # =============================================
 
 """Tests for apps/modules/cadence.py."""
@@ -1552,3 +1552,82 @@ class TestFailOpenIsLoud:
             assert should_fire_advisory("todos_count") is True
 
         assert "FAIL-OPEN advisory=todos_count" in caplog.text
+
+
+class TestBranchOverride:
+    """DPLAN-0355: a per-branch loader override, resolved from the prompt's cwd."""
+
+    def _fleet(self, tmp_path, monkeypatch, config: dict) -> dict:
+        """Two branches under a repo root, the config in tmp_path, the session counted there."""
+        root = tmp_path / "repo"
+        (root / ".git").mkdir(parents=True)
+        dirs = {"root": root}
+        for name in ("canary", "devpulse"):
+            (root / name / ".trinity").mkdir(parents=True)
+            dirs[name] = root / name
+        config_file = tmp_path / "cadence.json"
+        config_file.write_text(json.dumps(config), encoding="utf-8")
+        monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+        monkeypatch.setattr(cadence, "_CONFIG_PATH", config_file)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test-session")
+        return dirs
+
+    def _decide(self, tmp_path, loader: str, cwd, turn: int) -> bool:
+        """A fresh process deciding *loader* on *turn* for a prompt from *cwd*."""
+        _reset_module_globals()
+        state = tmp_path / "aipass-cadence-test-session.json"
+        state.unlink(missing_ok=True)
+        if turn > 0:
+            _write_state(tmp_path, turn=turn - 1)
+        return should_fire(loader, {"cwd": str(cwd)})
+
+    _BEAT_FALSE = {"branches": {"canary": {"loaders": {"tier0": {"beat": False}}}}}
+
+    def test_a_beat_false_override_fires_at_turn_0_and_skips_turns_5_and_10(self, tmp_path, monkeypatch):
+        dirs = self._fleet(tmp_path, monkeypatch, self._BEAT_FALSE)
+
+        assert [self._decide(tmp_path, "tier0", dirs["canary"], turn) for turn in (0, 5, 10)] == [True, False, False]
+
+    def test_a_branch_with_no_override_still_fires_on_the_beat(self, tmp_path, monkeypatch):
+        dirs = self._fleet(tmp_path, monkeypatch, self._BEAT_FALSE)
+
+        assert [self._decide(tmp_path, "tier0", dirs["devpulse"], turn) for turn in (0, 4, 5, 10)] == [
+            True,
+            False,
+            True,
+            True,
+        ]
+
+    def test_a_loader_the_override_does_not_name_inherits_global(self, tmp_path, monkeypatch):
+        dirs = self._fleet(tmp_path, monkeypatch, self._BEAT_FALSE)
+
+        assert self._decide(tmp_path, "navmap", dirs["canary"], 5) is True
+
+    def test_an_override_merges_over_the_global_entry_not_in_place_of_it(self, tmp_path, monkeypatch):
+        config = {"loaders": {"tier0": {"period": 4}}, "branches": {"canary": {"loaders": {"tier0": {"offset": 1}}}}}
+        dirs = self._fleet(tmp_path, monkeypatch, config)
+
+        assert self._decide(tmp_path, "tier0", dirs["canary"], 5) is True
+        assert self._decide(tmp_path, "tier0", dirs["canary"], 4) is False
+
+    def test_the_decision_line_names_the_branch(self, tmp_path, monkeypatch, caplog):
+        dirs = self._fleet(tmp_path, monkeypatch, self._BEAT_FALSE)
+
+        self._decide(tmp_path, "tier0", dirs["canary"], 5)
+
+        assert "cadence skipped loader=tier0 turn=5" in caplog.text
+        assert "branch=canary" in caplog.text
+
+    def test_a_cwd_under_no_branch_uses_global_and_says_so(self, tmp_path, monkeypatch, caplog):
+        dirs = self._fleet(tmp_path, monkeypatch, {"branches": {"repo": {"loaders": {"tier0": {"beat": False}}}}})
+
+        assert self._decide(tmp_path, "tier0", dirs["root"], 5) is True
+        assert "under no branch" in caplog.text
+
+    def test_a_malformed_override_logs_error_and_serves_global(self, tmp_path, monkeypatch, caplog):
+        config = {"branches": {"canary": {"loaders": {"tier0": {"beat": "no"}}}}}
+        dirs = self._fleet(tmp_path, monkeypatch, config)
+
+        assert self._decide(tmp_path, "tier0", dirs["canary"], 5) is True
+        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+        assert errors and "beat" in errors[0]
