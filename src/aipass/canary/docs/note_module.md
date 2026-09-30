@@ -3,7 +3,9 @@
 # The note module
 
 An append-only note store: `note add` writes one line, `note list` reads them
-back. `apps/modules/note.py` routes; `apps/handlers/notes/store.py` does the
+back, and `note list --json` prints the same records as one JSON array (`[]`
+for an empty store; `--json` on anything but list is refused, exit 2).
+`apps/modules/note.py` routes; `apps/handlers/notes/store.py` does the
 reading and the appending.
 
 It exists as a test subject, not as a feature. It was built blind as an exam for

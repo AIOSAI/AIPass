@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: parser.py
 # Description: Duration text parser - "1d 2h 3m 4s" to a total in seconds, or a named refusal
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-09-30
 # =============================================
 
 """Parse a duration the way people write them: ``2d 4h``, ``90m``, ``1h30m``.
@@ -78,7 +78,7 @@ def _is_plain_integer(number: str) -> bool:
     return bool(number) and all(char in DIGITS for char in number)
 
 
-def _split_parts(compact: str) -> List[Tuple[str, str]]:
+def _split_number_unit_pairs(compact: str) -> List[Tuple[str, str]]:
     """Split whitespace-free text into (number, unit) pairs without judging them.
 
     The split is by character class, not by a pattern of what is valid: the
@@ -160,7 +160,7 @@ def parse_duration(text: str) -> int:
     seen: Set[str] = set()
     total = 0
 
-    for number, unit in _split_parts(compact):
+    for number, unit in _split_number_unit_pairs(compact):
         _validate(number, unit, seen)
         total += int(number) * SECONDS_PER_UNIT[unit]
 

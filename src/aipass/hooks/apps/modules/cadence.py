@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.8.0
+# Version: 2.9.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
@@ -15,6 +15,7 @@ Uses fcntl.flock + mtime debounce + per-turn token to ensure the counter
 advances exactly once per real user turn.
 """
 
+import hashlib
 import json
 import os
 import tempfile
@@ -211,10 +212,33 @@ def _mtime_age(fd) -> float:
         return _DEBOUNCE_S + 1
 
 
-def _should_increment(stored_turn: int, stored_token: int, token: int, fd) -> bool:
-    """Decide whether to increment the counter. Extracted for nesting depth."""
+def _prompt_key(hook_data: dict, token: int) -> str | None:
+    """One prompt's identity, shared by every sibling process of it; None when the payload has none.
+
+    sha1 of the transcript size and the prompt text (DPLAN-0355 follow-up). The
+    size alone was the guard until 09-30, and a headless first prompt runs before
+    the transcript exists: every sibling read 0, 0 switched the guard off, and a
+    sibling past the 2s debounce counted a second turn (canary 7f1a35f6). The
+    text tells that prompt apart; the size tells a repeated text apart.
+    """
+    prompt = hook_data.get("prompt")
+    if not isinstance(prompt, str) and not hook_data.get("transcript_path"):
+        return None
+    text = prompt if isinstance(prompt, str) else ""
+    return hashlib.sha1(f"{token}\0{text}".encode("utf-8")).hexdigest()[:16]
+
+
+def _should_increment(stored_turn: int, stored_token: int, token: int, fd, key=None, stored_key=None) -> bool:
+    """Decide whether to increment the counter: once per prompt key, else by the old window.
+
+    A key on both sides decides alone, however far apart the siblings run. With
+    no key (a payload with neither prompt nor transcript_path, or a state file
+    written before keys) the 2s debounce and the nonzero-token guard decide.
+    """
     if stored_turn < 0:
         return True
+    if key is not None and stored_key is not None:
+        return key != stored_key
     if _mtime_age(fd) < _DEBOUNCE_S:
         return False
     if token == stored_token and token != 0:
@@ -272,6 +296,7 @@ def _load_and_increment(hook_data: dict) -> int:
         return _turn
 
     token = _get_turn_token(hook_data)
+    key = _prompt_key(hook_data, token)
     fd = None
 
     try:
@@ -284,11 +309,11 @@ def _load_and_increment(hook_data: dict) -> int:
         stored_turn = data.get("turn", -1)
         stored_token = data.get("token", -1)
 
-        if _should_increment(stored_turn, stored_token, token, fd):
+        if _should_increment(stored_turn, stored_token, token, fd, key, data.get("key")):
             new_turn = max(stored_turn + 1, 0)
             fd.seek(0)
             fd.truncate()
-            fd.write(json.dumps({"turn": new_turn, "token": token}))
+            fd.write(json.dumps({"turn": new_turn, "token": token, "key": key}))
             fd.flush()
         else:
             new_turn = stored_turn

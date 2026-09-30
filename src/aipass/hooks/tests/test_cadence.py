@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.4.0
-# Description: Tests for cadence module (DPLAN-0200), fail-open warnings since 1.1.0, branch overrides since 1.4.0
+# Version: 1.5.0
+# Description: Tests for cadence module (DPLAN-0200), fail-open warnings since 1.1.0, branch overrides since 1.4.0, one turn per prompt key since 1.5.0
 # Branch: hooks
 # Created: 2026-06-08
 # Modified: 2026-09-30
@@ -329,7 +329,8 @@ class TestShouldFire:
 
             _reset_module_globals()
             should_fire("tier0", {"transcript_path": str(transcript), "prompt": "a human turn"})
-            assert json.loads(state_file.read_text(encoding="utf-8")) == {"turn": 4, "token": 500}
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            assert (state["turn"], state["token"]) == (4, 500)
 
     def test_an_automated_prompt_after_a_compaction_fires_no_grounding(self, tmp_path):
         """The 09:30 row: turn 0 on a harness wake delivered 20,310 chars to nobody.
@@ -1631,3 +1632,51 @@ class TestBranchOverride:
         assert self._decide(tmp_path, "tier0", dirs["canary"], 5) is True
         errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
         assert errors and "beat" in errors[0]
+
+
+class TestOneDecisionPerPrompt:
+    """DPLAN-0355 follow-up: siblings of one prompt agree on its turn however far apart they run."""
+
+    def _sibling(self, tmp_path, payload: dict, age: float | None = None) -> int:
+        """A fresh loader process reading the turn; *age* backdates the state file first."""
+        state = tmp_path / "aipass-cadence-test-session.json"
+        if age is not None:
+            old = time.time() - age
+            os.utime(state, (old, old))
+        _reset_module_globals()
+        should_fire("tier0", payload)
+        return json.loads(state.read_text(encoding="utf-8"))["turn"]
+
+    def test_a_headless_first_prompt_stays_on_turn_0_for_a_sibling_3s_late(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+        monkeypatch.setattr(cadence, "_CONFIG_PATH", tmp_path / "cadence.json")
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test-session")
+        _write_state(tmp_path, turn=-1, aged=False)
+        payload = {"prompt": "hi", "transcript_path": str(tmp_path / "not-written-yet.jsonl")}
+
+        assert [self._sibling(tmp_path, payload), self._sibling(tmp_path, payload, age=3)] == [0, 0]
+
+    def test_a_next_prompt_counts_within_2s_even_with_the_same_text(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+        monkeypatch.setattr(cadence, "_CONFIG_PATH", tmp_path / "cadence.json")
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test-session")
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 100, encoding="utf-8")
+        _write_state(tmp_path, turn=-1, aged=False)
+        payload = {"prompt": "continue", "transcript_path": str(transcript)}
+
+        first = self._sibling(tmp_path, payload)
+        transcript.write_text("x" * 200, encoding="utf-8")
+
+        assert [first, self._sibling(tmp_path, payload)] == [0, 1]
+
+    def test_siblings_with_a_real_transcript_stay_on_one_turn_past_2s(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+        monkeypatch.setattr(cadence, "_CONFIG_PATH", tmp_path / "cadence.json")
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test-session")
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 100, encoding="utf-8")
+        _write_state(tmp_path, turn=4)
+        payload = {"prompt": "go on", "transcript_path": str(transcript)}
+
+        assert [self._sibling(tmp_path, payload), self._sibling(tmp_path, payload, age=3)] == [5, 5]

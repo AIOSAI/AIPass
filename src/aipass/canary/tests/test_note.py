@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_note.py
 # Description: Tests for the note store - add, list, and refusing a store that will not parse
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-12
-# Modified: 2026-09-19
+# Modified: 2026-09-30
 # =============================================
 
 """Tests for `drone @canary note`.
@@ -240,4 +240,46 @@ def test_help_never_writes_a_note(monkeypatch, capsys, store_path, argv):
     assert _run(monkeypatch, argv) == 0
 
     assert "Usage:" in capsys.readouterr().out
+    assert not store_path.exists()
+
+
+# =============================================================================
+# LIST --JSON
+# =============================================================================
+
+
+@pytest.mark.parametrize("argv", [["list", "--json"], ["--json", "list"]], ids=["flag_after", "flag_before"])
+def test_list_json_prints_the_stored_records_as_one_array(monkeypatch, capsys, store_path, argv):
+    """--json prints exactly the records on disk, in order, as one JSON array and nothing else."""
+    assert _run(monkeypatch, ["note", "add", "first [bold]x[/bold]"]) == 0
+    assert _run(monkeypatch, ["note", "add", "second"]) == 0
+    capsys.readouterr()
+
+    assert _run(monkeypatch, ["note", *argv]) == 0
+
+    out = capsys.readouterr().out
+    assert json.loads(out) == store.read_notes(store_path)
+    assert out.count("\n") == 1
+
+
+def test_list_json_on_a_missing_store_is_an_empty_array(monkeypatch, capsys, store_path):
+    """No store is [], not the plain form's 'No notes yet' line - and no file is created."""
+    assert _run(monkeypatch, ["note", "list", "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == []
+    assert not store_path.parent.exists()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["add", "text", "--json"], ["--json", "add", "text"], ["--json"]],
+    ids=["add_flag_after", "add_flag_before", "flag_alone"],
+)
+def test_json_off_list_is_refused_and_stores_nothing(monkeypatch, capsys, store_path, argv):
+    """--json belongs to list: on add it is refused, never swallowed or stored as text."""
+    assert _run(monkeypatch, ["note", *argv]) == 2
+
+    captured = capsys.readouterr()
+    assert "only for list" in captured.err
+    assert captured.out == ""
     assert not store_path.exists()
