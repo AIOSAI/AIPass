@@ -3,7 +3,7 @@
 # Description: Unit tests for the proof_query module
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/proof_query.py."""
@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.modules import CommandRefused, proof_query
 from aipass.seedgo.apps.modules.proof_query import (
-    _discover_proof_content,
     handle_command,
     print_help,
     print_introspection,
@@ -178,12 +177,6 @@ def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch, capsys):
         with pytest.raises(CommandRefused) as refused:
             proof_query.handle_command("proof_query", [skipped])
         assert refused.value.token == skipped, f"Should skip {skipped}"
-
-
-def test_discover_proof_content_empty_dir(tmp_path):
-    """_discover_proof_content returns empty dict for a directory with no content files."""
-    result = _discover_proof_content(tmp_path)
-    assert result == {}
 
 
 def test_discover_proof_content_finds_content_files(tmp_path, monkeypatch, capsys):

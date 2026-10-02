@@ -17,7 +17,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — importlib.import_module's loading of a runner module from a path on __path__
 
-import ast
 import json
 import subprocess
 import sys
@@ -256,13 +255,6 @@ class TestIsDictKeyAccess:
     def test_subscript(self, tmp_path):
         """result['key'] is dict key access. Mutant: a subscript not read as key access in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
         assert _findings(tmp_path, 'value = result["zz_special"]\n') == []
-
-    def test_no_parent(self):
-        """Node with no parent returns False."""
-        # HELD (no public seam): scan() hands _is_dict_key_access only nodes from a
-        # parsed module, and every such constant has a parent.
-        child = ast.Constant(value="key")
-        assert plugin_integrity._is_dict_key_access(child, {}) is False
 
     def test_non_get_attribute_call(self, tmp_path):
         """result.append('key') is not dict key access. Mutant: every method call read as key access in apps/handlers/aipass_proof/plugin_integrity.py — killed."""

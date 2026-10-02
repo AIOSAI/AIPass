@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: proof_query.py
 # Description: Proof Query Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -180,18 +180,17 @@ def _list_pack_proofs(pack_name: str, pack_dir: Path) -> None:
     Args:
         pack_name: Full pack directory name (e.g., "aipass_proof")
         pack_dir: Path to the pack directory
+
+    Every caller hands it a pack from _discover_proof_packs, which admits only
+    a directory holding a *_content.py, so the list is never empty. The arm
+    that printed "No content handlers found." could not be reached and was
+    dropped (seedgo, fleet green leg 7).
     """
     proofs = _discover_proof_content(pack_dir)
 
     console.print()
     header(f"PROOFS IN {pack_name.upper()}")
     console.print()
-
-    if not proofs:
-        warning("No content handlers found.")
-        console.print(f"[dim]Add *_content.py files to handlers/{pack_name}/[/dim]")
-        console.print()
-        return
 
     console.print(f"[yellow]Available Proofs:[/yellow] ({len(proofs)})")
     console.print()
