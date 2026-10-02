@@ -3,7 +3,7 @@
 # Description: Tests for dispatch monitor lifecycle handler
 # Version: 1.1.1
 # Created: 2026-04-02
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py -- startup check, retry loop, bounce, rate limiting."""
@@ -3382,10 +3382,17 @@ class TestWakeBackDeclinedByCaller:
 
 @pytest.fixture
 def pointer_home(tmp_path, monkeypatch):
-    """Point Path.home at tmp_path so transcript paths land under the sandbox."""
+    """Point the home directory at tmp_path so transcript paths land under the sandbox.
+
+    Path.home() answers from HOME on POSIX and USERPROFILE on Windows, so the
+    environment moves it for this test without replacing pathlib for every
+    reader in the process (ai_mail, leg 6).
+    """
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    assert Path.home() == home, "this platform must answer Path.home() from the environment"
     return home
 
 

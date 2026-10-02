@@ -3,7 +3,7 @@
 # Description: Tests for email.py and email_send.py orchestrator functions
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/email.py and email_send.py."""
@@ -362,11 +362,14 @@ class TestHandleClose:
             lambda bp, ids, fn: ([("msg1", True, "Closed msg1")], 1, 0),
         )
         printed = _StdoutLines(capsys)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", lambda msg: None)
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", error_mock)
 
         result = handle_close(["msg1"])
         assert result is True
         assert any("Closed" in p for p in printed)
+        # error() raises cli's process-wide failure flag; a success path never calls it (ai_mail, leg 6)
+        error_mock.assert_not_called()
 
     def test_close_all(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """Close 'all' delegates to mark_all_read_and_archive."""
@@ -423,11 +426,13 @@ class TestHandleClose:
             "aipass.ai_mail.apps.modules.email.batch_close_post_ops",
             lambda bp, central_fn, purge_fn: post_ops_called.append(True),
         )
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", lambda msg: None)
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", error_mock)
 
         result = handle_close(["m1", "m2"])
         assert result is True
         assert len(post_ops_called) == 1
+        error_mock.assert_not_called()
 
 
 # ===========================================================================
@@ -456,10 +461,9 @@ class TestHandleReply:
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
             lambda: tmp_path,
         )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.get_email_by_id",
-            lambda inbox_file, msg_id: None,
-        )
+        # A stub that sets the world (no such message); asserted so it is also a check of the lookup (ai_mail, leg 6)
+        lookup = MagicMock(return_value=None)
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.get_email_by_id", lookup)
         errors: list[str] = []
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.error",
@@ -470,6 +474,8 @@ class TestHandleReply:
         result = handle_reply(["missing_id", "my reply"])
         assert result is True
         assert any("not found" in e.lower() for e in errors)
+        lookup.assert_called_once()
+        assert lookup.call_args.args[1] == "missing_id"
 
     def test_reply_success(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """Successful reply prints success message."""
@@ -797,10 +803,6 @@ class TestHandleSend:
             },
         )
         monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_dispatch_target",
-            lambda branch, auto, fn: None,
-        )
-        monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
             lambda fb, rr, amd, gbe, gcu: {
                 "email_address": "@ai_mail",
@@ -813,11 +815,13 @@ class TestHandleSend:
             lambda *a, **kw: (True, None),
         )
         printed = _StdoutLines(capsys)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
 
         result = handle_send(["@target", "Hello", "World"])
         assert result is True
         assert any("sent" in p.lower() and "@target" in p for p in printed)
+        error_mock.assert_not_called()
 
     def test_send_error_mode(self, monkeypatch):
         """A parse error prints usage and stays handled (exit 2, not 1)."""
@@ -854,10 +858,6 @@ class TestHandleSend:
             },
         )
         monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_dispatch_target",
-            lambda branch, auto, fn: None,
-        )
-        monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
             lambda fb, rr, amd, gbe, gcu: {
                 "email_address": "@ai_mail",
@@ -869,10 +869,9 @@ class TestHandleSend:
             "aipass.ai_mail.apps.modules.email_send.send_to_single",
             lambda *a, **kw: (False, "Branch not found"),
         )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.dispatch_send_error",
-            lambda *a, **kw: None,
-        )
+        # dispatch_send_error delivers a real error mail, so it stays patched and is asserted (ai_mail, leg 6)
+        send_error = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.dispatch_send_error", send_error)
         errors: list[str] = []
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.error",
@@ -882,6 +881,8 @@ class TestHandleSend:
         result = handle_send(["@target", "Sub", "Msg"])
         assert result is True
         assert any("Branch not found" in e for e in errors)
+        send_error.assert_called_once()
+        assert send_error.call_args.args[:3] == ("@target", "Sub", "Branch not found")
 
     def test_send_interactive_mode(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """A cancelled interactive send is still a handled command."""
@@ -899,16 +900,16 @@ class TestHandleSend:
             "aipass.ai_mail.apps.modules.email_send.get_all_branches",
             lambda: [{"name": "A", "email": "@a"}],
         )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.collect_interactive_input",
-            lambda branches: None,  # User cancelled
-        )
+        # The prompt reads the real stdin; the stub answers as a cancelling user and is asserted
+        collect = MagicMock(return_value=None)
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.collect_interactive_input", collect)
         printed = _StdoutLines(capsys)
 
         result = handle_send([])
         assert result is True
         assert any("Cancelled" in p for p in printed)
         tty.assert_called_once_with()
+        collect.assert_called_once_with([{"name": "A", "email": "@a"}])
 
     def test_send_dispatch_fires_trigger(self, monkeypatch, tmp_path):
         """With auto_execute, dispatch trigger is fired after successful send."""
@@ -951,13 +952,15 @@ class TestHandleSend:
         mock_trigger.fire = lambda event, **kw: trigger_calls.append((event, kw))
         monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.trigger", mock_trigger)
 
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
 
         result = handle_send(["@target", "Dispatch Task", "Do the thing", "--dispatch"])
         assert result is True
         assert len(trigger_calls) == 1
         assert trigger_calls[0][0] == "email_dispatched"
         assert trigger_calls[0][1]["to"] == "@target"
+        error_mock.assert_not_called()
 
     def test_send_group_multiple_recipients(self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Group send to multiple recipients calls _send_direct for each."""
@@ -973,10 +976,6 @@ class TestHandleSend:
                 "no_memory_save": False,
                 "from_branch": None,
             },
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_dispatch_target",
-            lambda branch, auto, fn: None,
         )
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
@@ -999,7 +998,8 @@ class TestHandleSend:
             mock_send_single,
         )
         printed = _StdoutLines(capsys)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
 
         result = handle_send(["@alpha", "@beta", "Group msg", "Hi all"])
         assert result is True
@@ -1007,6 +1007,7 @@ class TestHandleSend:
         assert "@alpha" in sent_to
         assert "@beta" in sent_to
         assert any("Group send complete" in p for p in printed)
+        error_mock.assert_not_called()
 
 
 # ===========================================================================
@@ -1262,10 +1263,9 @@ class TestHandleCloseExtended:
             "aipass.ai_mail.apps.modules.email.batch_close",
             lambda bp, ids, fn: (results, 2, 1),
         )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.batch_close_post_ops",
-            lambda bp, central_fn, purge_fn: None,
-        )
+        # post_ops writes the live central file and runs purge, so it stays patched and is asserted (ai_mail, leg 6)
+        post_ops = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.batch_close_post_ops", post_ops)
         printed = _StdoutLines(capsys)
         errors: list[str] = []
         monkeypatch.setattr(
@@ -1277,6 +1277,8 @@ class TestHandleCloseExtended:
         assert result is True
         assert any("Closed m1" in p for p in printed)
         assert any("Not found: m2" in e for e in errors)
+        post_ops.assert_called_once()
+        assert post_ops.call_args.args[0] == tmp_path
         assert any("Closed m3" in p for p in printed)
         assert any("Closed 2" in p and "failed 1" in p for p in printed)
 
@@ -1311,11 +1313,13 @@ class TestHandleCloseExtended:
             "aipass.ai_mail.apps.modules.email.batch_close_post_ops",
             lambda bp, central_fn, purge_fn: post_ops_called.append(True),
         )
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", lambda msg: None)
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", error_mock)
 
         result = handle_close(["m1"])
         assert result is True
         assert len(post_ops_called) == 0
+        error_mock.assert_not_called()
 
 
 # ===========================================================================
@@ -1460,10 +1464,13 @@ class TestSendDirectExtended:
             "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
             lambda fb, rr, amd, gbe, gcu: (_ for _ in ()).throw(BrokenPipeError("stdout closed")),
         )
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
 
         result = _send_direct("@target", "Sub", "Msg")
         assert result is True
+        # A closed stdout is not a failed send: nothing is reported as an error
+        error_mock.assert_not_called()
 
     def test_send_direct_generic_exception(self, monkeypatch):
         """Generic exception calls dispatch_send_error and returns False."""
@@ -1507,11 +1514,13 @@ class TestSendDirectExtended:
             lambda *a, **kw: (True, 1, 1, [("A", True, None)]),
         )
         printed = _StdoutLines(capsys)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
 
         result = _send_direct("@all", "Hello", "World")
         assert result is True
         assert any("Broadcast" in p or "OK" in p for p in printed)
+        error_mock.assert_not_called()
 
 
 # ===========================================================================
@@ -1554,7 +1563,8 @@ class TestSendBroadcast:
             lambda *a, **kw: (True, 2, 2, [("A", True, None), ("B", True, None)]),
         )
         printed = _StdoutLines(capsys)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
 
         user_info = {
             "email_address": "@ai_mail",
@@ -1565,6 +1575,7 @@ class TestSendBroadcast:
         assert result is True
         assert any("Broadcasting" in p for p in printed)
         assert any("2/2" in p for p in printed)
+        error_mock.assert_not_called()
 
     def test_send_broadcast_failure_path(self, monkeypatch, tmp_path):
         """When send_to_broadcast returns string results (error), prints error."""
@@ -1678,13 +1689,15 @@ class TestSendInteractiveExtended:
         )
         monkeypatch.setattr(email_send_mod, "send_to_single", lambda *a, **kw: (True, None))
         printed = _StdoutLines(capsys)
-        monkeypatch.setattr(email_send_mod, "error", lambda msg: None)
+        error_mock = MagicMock()
+        monkeypatch.setattr(email_send_mod, "error", error_mock)
 
         result = email_send_mod._send_interactive()
         assert result is True
         assert any("@alpha" in p for p in printed)
         assert any("sent" in p.lower() for p in printed)
         tty.assert_called_once_with()
+        error_mock.assert_not_called()
 
 
 class TestHandleReplyMultiArg:
@@ -1836,13 +1849,13 @@ class TestListingNeverHidesMail:
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
             lambda: tmp_path,
         )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.load_email_file",
-            lambda f: None,
-        )
+        # The stub stands for a file that will not load ("{}" would load); asserted on the file it was handed
+        load = MagicMock(return_value=None)
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.load_email_file", load)
         printed = _StdoutLines(capsys)
 
         assert handle_sent([]) is True
+        load.assert_called_once_with(sent_folder / "aaaa1111.json")
         blob = "\n".join(printed)
         assert "aaaa1111.json" in blob, "unreadable sent file was silently skipped"
         assert "UNREADABLE FILE" in blob

@@ -3,7 +3,7 @@
 # Description: Tests for wake dispatch handler
 # Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py and wake_dashboard.py."""
@@ -685,40 +685,42 @@ class TestFindClaudeBin:
 
     def test_uses_shutil_which_when_found(self, monkeypatch):
         """Returns shutil.which result when claude is on PATH."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.shutil.which",
-            lambda _: "/usr/local/bin/claude",
-        )
+        which = MagicMock(return_value="/usr/local/bin/claude")
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.shutil.which", which)
         result = _find_claude_bin()
         assert result == "/usr/local/bin/claude"
+        which.assert_called_once_with("claude")
 
     def test_falls_back_to_local_bin(self, monkeypatch, tmp_path):
-        """Falls back to ~/.local/bin/claude when not on PATH."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.shutil.which",
-            lambda _: None,
-        )
+        """Falls back to ~/.local/bin/claude when not on PATH.
+
+        PATH names one empty directory and HOME/USERPROFILE name tmp_path, so
+        shutil.which and Path.home answer from the environment the platform
+        reads, with nothing of shutil or pathlib replaced (ai_mail, leg 6).
+        """
+        empty_path = tmp_path / "empty_path"
+        empty_path.mkdir()
+        monkeypatch.setenv("PATH", str(empty_path))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         fake_local_bin = tmp_path / ".local" / "bin"
         fake_local_bin.mkdir(parents=True)
         fake_claude = fake_local_bin / "claude"
         fake_claude.touch()
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.Path.home",
-            lambda: tmp_path,
-        )
         result = _find_claude_bin()
         assert result == str(fake_claude)
 
     def test_falls_back_to_name_when_not_found(self, monkeypatch, tmp_path):
-        """Returns bare 'claude' when no known location has the binary."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.shutil.which",
-            lambda _: None,
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.Path.home",
-            lambda: tmp_path,
-        )
+        """Returns bare 'claude' when no known location has the binary.
+
+        The environment, not a patch of shutil or pathlib, empties PATH and
+        moves home to tmp_path (ai_mail, leg 6).
+        """
+        empty_path = tmp_path / "empty_path"
+        empty_path.mkdir()
+        monkeypatch.setenv("PATH", str(empty_path))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         result = _find_claude_bin()
         assert result == "claude"
 
@@ -825,15 +827,18 @@ class TestWakeBranchSpawnEnv:
         monkeypatch.setattr(wake_mod, "_clean_zombies", lambda: 0)
         monkeypatch.setattr(wake_mod, "_is_branch_occupied", lambda p: False)
         monkeypatch.setattr(wake_mod, "_acquire_lock", lambda p, pid: (True, "ok"))
-        monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.time.sleep", lambda _: None)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        sleep = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.time.sleep", sleep)
+        # send_notification appends to the live feed, so it stays patched and is asserted (ai_mail, leg 6)
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
 
         wake_mod.wake_branch("@testbranch", fresh=True)
 
+        sleep.assert_called_once_with(2)
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
         assert len(captured_envs) == 1, "Popen must be called exactly once"
         env = captured_envs[0]
         assert local_bin in env.get("PATH", ""), f"~/.local/bin not in spawn_env PATH: {env.get('PATH', '')}"
@@ -1140,10 +1145,12 @@ class TestWakeBranch:
             encoding="utf-8",
         )
         _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
-        monkeypatch.setattr(wake_mod.shutil, "which", lambda name: None)
+        which = MagicMock(return_value=None)
+        monkeypatch.setattr(wake_mod.shutil, "which", which)
         status, ok = wake_branch("@testbranch", sender="@daemon")
         assert ok is False
         assert any(s[0] == "fail" and s[1] == "tmux" for s in status.steps)
+        which.assert_any_call("tmux")
 
     def test_non_manager_target_continues(self, tmp_path, monkeypatch):
         """Target with non-manager citizen_class proceeds to spawn."""
@@ -1156,28 +1163,28 @@ class TestWakeBranch:
         )
         _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         assert not any(s[1] == "manager" for s in status.steps)
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     def test_missing_passport_continues(self, tmp_path, monkeypatch):
         """No passport.json — wake proceeds normally."""
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         assert not any(s[1] == "manager" for s in status.steps)
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     # --- zombie check ---
 
@@ -1186,14 +1193,14 @@ class TestWakeBranch:
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 2)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         assert any(s[0] == "warn" and "zombie" in s[2].lower() for s in status.steps)
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     # --- lock exists ---
 
@@ -1245,11 +1252,8 @@ class TestWakeBranch:
             return _FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch", fresh=True)
         assert ok is True
         # The claude subcommand is embedded after "--" in monitor_cmd
@@ -1259,6 +1263,9 @@ class TestWakeBranch:
         sep_idx = cmd.index("--")
         claude_part = cmd[sep_idx + 1 :]
         assert "-c" not in claude_part
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     def test_fresh_false_has_continue_flag(self, tmp_path, monkeypatch):
         """fresh=False -> claude_cmd includes '-c' flag."""
@@ -1272,11 +1279,8 @@ class TestWakeBranch:
             return _FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch", fresh=False)
         assert ok is True
         assert captured_cmds
@@ -1284,6 +1288,9 @@ class TestWakeBranch:
         sep_idx = cmd.index("--")
         claude_part = cmd[sep_idx + 1 :]
         assert "-c" in claude_part
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     # --- custom message ---
 
@@ -1299,11 +1306,8 @@ class TestWakeBranch:
             return _FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch", custom_message="Run the audit")
         assert ok is True
         assert captured_cmds
@@ -1314,6 +1318,8 @@ class TestWakeBranch:
         p_idx = claude_part.index("-p")
         prompt = claude_part[p_idx + 1]
         assert prompt.startswith("Hi. Run the audit")
+        # The custom message, not the default, is the feed body
+        notify.assert_called_once_with("@testbranch waking", "Run the audit", source="testbranch", kind="wake")
 
     def test_prompt_does_not_ask_agent_to_delete_lock(self, tmp_path, monkeypatch):
         """Monitor owns lock cleanup — the prompt must not also tell the agent to delete it.
@@ -1331,11 +1337,8 @@ class TestWakeBranch:
             return _FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         cmd = captured_cmds[0]
@@ -1345,6 +1348,9 @@ class TestWakeBranch:
         prompt = claude_part[p_idx + 1]
         assert "delete" not in prompt.lower()
         assert ".dispatch.lock" not in prompt
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     def test_prompt_instructs_synchronous_subagents(self, tmp_path, monkeypatch):
         """Prompt tells the agent to run sub-agents in the foreground, not background.
@@ -1362,11 +1368,8 @@ class TestWakeBranch:
             return _FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         cmd = captured_cmds[0]
@@ -1375,6 +1378,9 @@ class TestWakeBranch:
         p_idx = claude_part.index("-p")
         prompt = claude_part[p_idx + 1]
         assert "synchronously" in prompt.lower()
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     def test_prompt_puts_the_spec_before_the_build(self, tmp_path, monkeypatch):
         """Prompt sends the builder to the standards and the test template first, the checklist last.
@@ -1477,11 +1483,8 @@ class TestWakeBranch:
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         assert status.success is True
@@ -1493,6 +1496,9 @@ class TestWakeBranch:
         assert "spawn" in labels
         assert "lock-acquire" in labels
         assert "alive" in labels
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     # --- notification failure doesn't break success ---
 

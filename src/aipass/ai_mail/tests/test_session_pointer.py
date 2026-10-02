@@ -3,7 +3,7 @@
 # Description: Tests for the durable per-branch session pointer
 # Version: 1.0.2
 # Created: 2026-08-20
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
@@ -59,10 +59,17 @@ def branch(tmp_path):
 
 @pytest.fixture
 def fake_home(tmp_path, monkeypatch):
-    """Point Path.home at tmp_path so transcript paths land under the sandbox."""
+    """Point the home directory at tmp_path so transcript paths land under the sandbox.
+
+    Path.home() answers from HOME on POSIX and USERPROFILE on Windows, so the
+    environment moves it for this test without replacing pathlib for every
+    reader in the process (ai_mail, leg 6).
+    """
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    assert Path.home() == home, "this platform must answer Path.home() from the environment"
     return home
 
 
