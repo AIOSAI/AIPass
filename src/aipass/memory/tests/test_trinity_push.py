@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -397,7 +397,9 @@ class TestArchivedContentIsTheEntry:
             "reason": "extra field(s) extra",
         }
 
-        meta = tp._archive_metadata("guinea", prune, "2026-08-27T10:00:00")
+        store = FakeStore()
+        tp.archive_prunes(store, "guinea", [prune], [("global", "g")])
+        [meta] = store.store_calls[0]["metadatas"]
 
         assert meta["entry_number"] == 9
         assert meta["entry_date"] == "2026-08-27"
@@ -414,7 +416,9 @@ class TestArchivedContentIsTheEntry:
             "reason": "r",
         }
 
-        meta = tp._archive_metadata("guinea", prune, "2026-08-27T10:00:00")
+        store = FakeStore()
+        tp.archive_prunes(store, "guinea", [prune], [("global", "g")])
+        [meta] = store.store_calls[0]["metadatas"]
 
         assert all(isinstance(value, (str, int, float, bool)) for value in meta.values())
 
@@ -493,7 +497,7 @@ class TestTheMachineFrame:
 
     def test_a_missing_created_does_not_invent_a_false_history(self):
         meta = tp.build_doc_metadata({}, "local", "guinea")
-        assert meta["created"] == tp._today()
+        assert meta["created"] == meta["last_updated"]
 
     def test_managed_by_is_the_exact_branch_directory_name(self):
         """The owner's ruling, and what seedgo's checker compares against."""
@@ -524,28 +528,28 @@ class TestTheMachineFrame:
 
         frame = tp.build_frame(before, "local", "guinea", {"sessions": []}, _config())
 
-        assert list(frame) == tp._KEY_ORDER["local"]
+        template = json.loads((_MEMORY_ROOT / "templates" / "LOCAL.template.json").read_text(encoding="utf-8"))
+        assert list(frame) == list(template)
 
-    def test_the_frame_report_names_what_it_prunes(self):
+    def test_the_frame_report_names_what_it_prunes(self, tmp_path):
         before = {"document_metadata": {"status": {}, "weird": 1}, "active_tasks": {}, "sessions": []}
-        after = tp.build_frame(before, "local", "guinea", {"sessions": []}, _config())
+        root = _branch(tmp_path, "guinea", before)
 
-        changes = tp._frame_changes(before, after, "local")
+        plan = tp.plan_branch("guinea", root, _config(), backlog_path=tmp_path / "backlog.json")
+        [changes] = [item["frame_changes"] for item in plan["files"] if item["file_key"] == "local"]
 
         assert any("status" in change and "prune" in change for change in changes)
         assert any("active_tasks" in change for change in changes)
 
     def test_the_gold_templates_spell_the_branch_placeholder_as_spawn_does(self):
         """spawn renders {{BRANCH}} lowercase; gold must match or spawn-templates reverts spawn."""
-        assert sorted(path.name for path in detector._TEMPLATE_MAP.values()) == [
-            "LOCAL.template.json",
-            "OBSERVATIONS.template.json",
-        ]
-        for path in detector._TEMPLATE_MAP.values():
+        gold = {"local": "LOCAL.template.json", "observations": "OBSERVATIONS.template.json"}
+        for file_key, name in gold.items():
+            path = _MEMORY_ROOT / "templates" / name
             text = path.read_text(encoding="utf-8")
             assert "{{BRANCHNAME}}" not in text, path.name
             assert "{{BRANCH}}" in text, path.name
-            tags = tp._template_tags(json.loads(text), "guinea")
+            tags = tp.build_doc_metadata({}, file_key, "guinea")["tags"]
             assert tags[-1] == "guinea", path.name
             assert not [tag for tag in tags if "{{" in tag], path.name
 
@@ -1326,9 +1330,8 @@ class TestTodosMoveToTheBacklog:
 
         def rendered(sub: str, todos: list) -> str:
             root = _branch(tmp_path / sub, self.BRANCH, {"todos": todos})
-            plan = tp.plan_branch(self.BRANCH, root, _config(), backlog_path=tmp_path / sub / "backlog.json")
-            entry = tp._dry_entry(plan)
-            return "\n".join(push_report.render({"dry_run": True, "scope": 1, "errors": [], "branches": [entry]}, "@g"))
+            result = self._push(monkeypatch, tmp_path / sub, root, dry_run=True)
+            return "\n".join(push_report.render(result, "@g"))
 
         empty = rendered("empty", [])
         clean = rendered("clean", [self._todo(1), self._todo(2)])

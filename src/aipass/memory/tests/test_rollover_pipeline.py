@@ -3,7 +3,7 @@
 # Description: Rollover pipeline — orchestrator, extractor, rollover module, normalize, line counter
 # Version: 1.3.1
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # Category: memory/tests
 # =============================================
 
@@ -90,10 +90,12 @@ def _import_orchestrator(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.tracking", tracking_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.tracking.line_counter", mock_line_counter)
 
-    sys.modules.pop("aipass.memory.apps.handlers.rollover.orchestrator", None)
+    # Through monkeypatch, so the copy imported over these mocks leaves with the
+    # test: a bare pop left it in sys.modules for every later file (leg 5).
+    monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", raising=False)
     parent = sys.modules.get("aipass.memory.apps.handlers.rollover")
-    if parent is not None and hasattr(parent, "orchestrator"):
-        delattr(parent, "orchestrator")
+    if parent is not None:
+        monkeypatch.delattr(parent, "orchestrator", raising=False)
 
     from aipass.memory.apps.handlers.rollover import orchestrator
 

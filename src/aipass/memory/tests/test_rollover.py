@@ -3,7 +3,7 @@
 # Description: Tests for the rollover module's command routing and SUBCOMMANDS
 # Version: 1.1.3
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # Category: memory/tests
 # =============================================
 
@@ -26,6 +26,9 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# The real module, for the tests that need no mock graph (the handler walk).
+from aipass.memory.apps.modules import rollover as rollover_module
 
 
 # ---------------------------------------------------------------------------
@@ -598,22 +601,18 @@ class TestDiscoverHandlers:
 
     def test_returns_empty_dict_when_no_handlers_dir(self, monkeypatch, tmp_path, capsys):
         """Returns empty dict when handlers/ directory does not exist."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         # Point __file__ at a location with no handlers/ sibling
         fake_module = tmp_path / "modules" / "rollover.py"
         fake_module.parent.mkdir(parents=True)
         fake_module.write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result = rollover_module._discover_handlers()
 
         assert result == {}
 
     def test_discovers_py_files_in_handler_dirs(self, monkeypatch, tmp_path, capsys):
         """Discovers .py files inside handler subdirectories."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         # Build fake handler structure
         # modules/rollover.py -> parent.parent = apps -> handlers is sibling
         modules_dir = tmp_path / "apps" / "modules"
@@ -635,8 +634,8 @@ class TestDiscoverHandlers:
         rollover_dir.mkdir()
         (rollover_dir / "orchestrator.py").write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result = rollover_module._discover_handlers()
 
         assert "monitor" in result
         assert "detector.py" in result["monitor"]
@@ -649,8 +648,6 @@ class TestDiscoverHandlers:
 
     def test_excludes_pycache_directories(self, monkeypatch, tmp_path, capsys):
         """Directories starting with __ are excluded."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
         fake_module = modules_dir / "rollover.py"
@@ -663,15 +660,13 @@ class TestDiscoverHandlers:
         pycache.mkdir()
         (pycache / "something.py").write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result = rollover_module._discover_handlers()
 
         assert "__pycache__" not in result
 
     def test_excludes_empty_handler_dirs(self, monkeypatch, tmp_path, capsys):
         """Directories with no .py files (only __init__.py) are excluded."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
         fake_module = modules_dir / "rollover.py"
@@ -682,15 +677,13 @@ class TestDiscoverHandlers:
         empty_handler.mkdir(parents=True)
         (empty_handler / "__init__.py").write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result = rollover_module._discover_handlers()
 
         assert "empty_handler" not in result
 
     def test_returns_sorted_keys_and_values(self, monkeypatch, tmp_path, capsys):
         """Handler dirs and their files are sorted alphabetically."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
         fake_module = modules_dir / "rollover.py"
@@ -706,8 +699,8 @@ class TestDiscoverHandlers:
             (d / "b_file.py").write_text("", encoding="utf-8")
             (d / "a_file.py").write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result = rollover_module._discover_handlers()
 
         keys = list(result.keys())
         assert keys == sorted(keys), "Handler directory keys should be sorted"
@@ -717,8 +710,6 @@ class TestDiscoverHandlers:
 
     def test_ignores_non_py_files(self, monkeypatch, tmp_path, capsys):
         """Non-.py files in handler directories are excluded."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
         fake_module = modules_dir / "rollover.py"
@@ -731,7 +722,7 @@ class TestDiscoverHandlers:
         (mixed_dir / "README.md").write_text("", encoding="utf-8")
         (mixed_dir / "config.json").write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result = rollover_module._discover_handlers()
 
         assert result["mixed"] == ["handler.py"]

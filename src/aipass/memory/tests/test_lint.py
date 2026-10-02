@@ -3,7 +3,7 @@
 # Description: check_entry validator, the read-only lint handler and the lint module (FPLAN-0270 phase 2)
 # Version: 1.0.1
 # Created: 2026-06-13
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py check_entry, apps/handlers/json/lint_handler.py and apps/modules/lint.py."""
@@ -22,51 +22,34 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(documentation) — the wording of lint's print_help() and print_introspection() panels
 
-import importlib
 import json
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.memory.apps.handlers.json import entry_limits, lint_handler
+from aipass.memory.apps.modules import lint as lint_module
 
 
 # ---------------------------------------------------------------------------
-# Helpers: fresh-import modules under test with mocks already in place
+# Helpers: the real modules, their operation log lines kept off disk
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
-def _fresh_lint_modules(monkeypatch):
-    """Drop cached modules so each test gets a fresh import.
+def _quiet_operation_logs(monkeypatch):
+    """Each module binds json_handler at import; its log lines go to a recorder, never memory_json.
 
-    Evicted with ``monkeypatch.delitem``, not a bare ``sys.modules.pop``: a
-    bare pop is one-way and the eviction outlives the test, which is how two
-    receipt tests went red on a single xdist worker on a single run.
+    Until leg 5 of DPLAN-0354 each test evicted these modules and imported
+    them fresh under the conftest's stub; the real modules are now imported
+    once at the top and the one edge is replaced where the product looks.
     """
-    for name in (
-        "aipass.memory.apps.handlers.json",
-        "aipass.memory.apps.handlers.json.json_handler",
-        "aipass.memory.apps.handlers.json.entry_limits",
-        "aipass.memory.apps.handlers.json.lint_handler",
-        "aipass.memory.apps.modules.lint",
-    ):
-        monkeypatch.delitem(sys.modules, name, raising=False)
-    yield
-
-
-def _get_entry_limits():
-    """Import and return the entry_limits module."""
-    return importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
-
-
-def _get_lint_handler():
-    """Import and return the lint_handler module."""
-    return importlib.import_module("aipass.memory.apps.handlers.json.lint_handler")
+    for module in (entry_limits, lint_handler, lint_module):
+        monkeypatch.setattr(module, "json_handler", MagicMock())
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +81,7 @@ class TestCheckEntryAtCap:
     """length == cap is OK (not over)."""
 
     def test_at_cap_is_ok(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         limits = _make_limits()
         text = "a" * 10  # exactly at cap
 
@@ -115,7 +98,7 @@ class TestCheckEntryCapPlusOne:
     """length == cap+1 is OVER."""
 
     def test_cap_plus_one_is_over(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         limits = _make_limits()
         text = "a" * 11  # one over cap
 
@@ -131,7 +114,7 @@ class TestCheckEntryLargerOver:
     """over_by calculation correct for strings well over cap."""
 
     def test_over_by_large(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         limits = _make_limits()
         text = "a" * 25  # 15 over cap of 10
 
@@ -146,7 +129,7 @@ class TestCheckEntryCharNotByte:
     """Em-dash is 3 bytes UTF-8 but 1 character -- count chars not bytes."""
 
     def test_em_dash_counts_as_one_char(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         # "a—b" is 3 characters, not 5 bytes
         text = "a—b"
         assert len(text) == 3
@@ -159,7 +142,7 @@ class TestCheckEntryCharNotByte:
         assert result["ok"] is True
 
     def test_tree_glyph_counts_as_one_char(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         # tree glyph is multi-byte UTF-8 but one character
         text = "a└b"
         assert len(text) == 3
@@ -175,7 +158,7 @@ class TestCheckEntryUnknownType:
     """Unknown entry_type returns ok=True, cap=0."""
 
     def test_unknown_type_always_ok(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         limits = _make_limits()
 
         result = mod.check_entry("nonexistent_type", "any text", limits)
@@ -196,7 +179,7 @@ class TestDictContainerStringValue:
     """Dict container where value is a plain string (key_learnings style)."""
 
     def test_dict_string_value_measured(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
 
         # Build a branch with a dict container whose values are plain strings
         trinity = tmp_path / "branch" / ".trinity"
@@ -221,7 +204,7 @@ class TestDictContainerDictValue:
     """Dict container where value is a dict with a field key."""
 
     def test_dict_with_field_measured(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
 
         trinity = tmp_path / "branch" / ".trinity"
         trinity.mkdir(parents=True)
@@ -254,7 +237,7 @@ class TestListContainer:
     """List container (sessions/observations style)."""
 
     def test_list_items_measured(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
 
         trinity = tmp_path / "branch" / ".trinity"
         trinity.mkdir(parents=True)
@@ -298,7 +281,7 @@ class TestListContainerMissingField:
     """
 
     def test_missing_field_is_reported(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
 
         trinity = tmp_path / "branch" / ".trinity"
         trinity.mkdir(parents=True)
@@ -342,7 +325,7 @@ class TestLintHandlerFindsViolations:
     """Lint handler finds planted violations with correct counts."""
 
     def test_finds_violations(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
 
         # Create a branch with planted over-limit entries
         trinity = tmp_path / "branch_a" / ".trinity"
@@ -379,7 +362,7 @@ class TestLintHandlerReadOnly:
     """Lint handler must be strictly read-only -- files unchanged after scan."""
 
     def test_files_unchanged_after_lint(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
 
         # Create branch with violations
         trinity = tmp_path / "branch_b" / ".trinity"
@@ -445,11 +428,8 @@ class TestUnknownBranchIsAnError:
     @nosuchbrnach (0 scanned)' — a typo read as proof the branch was clean.
     """
 
-    def _lint_module(self):
-        return importlib.import_module("aipass.memory.apps.modules.lint")
-
     def test_unknown_branch_calls_error(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "read_scope", return_value=registry):
@@ -462,7 +442,7 @@ class TestUnknownBranchIsAnError:
         scanned.assert_not_called()
 
     def test_unknown_branch_does_not_report_success(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "read_scope", return_value=registry):
@@ -477,7 +457,7 @@ class TestUnknownBranchIsAnError:
 
         Mutant: _execute_lint hands run_lint branch_filter=None — killed.
         """
-        lint = self._lint_module()
+        lint = lint_module
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "read_scope", return_value=registry):
@@ -492,7 +472,7 @@ class TestUnknownBranchIsAnError:
 
         Mutant: _execute_lint hands run_lint branch_filter=None — killed.
         """
-        lint = self._lint_module()
+        lint = lint_module
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "read_scope", return_value=registry):
@@ -504,7 +484,7 @@ class TestUnknownBranchIsAnError:
 
     def test_no_filter_scans_everything(self) -> None:
         """Mutant: _execute_lint hands run_lint an empty branch list — killed."""
-        lint = self._lint_module()
+        lint = lint_module
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "read_scope", return_value=registry):
@@ -524,7 +504,7 @@ class TestUnknownBranchIsAnError:
         test — if the lane ever reaches back for ``_read_registry`` this call
         raises AttributeError rather than passing quietly.
         """
-        lint = self._lint_module()
+        lint = lint_module
         external = [{"name": "vera", "path": str(Path(tempfile.gettempdir()) / "vera")}]
 
         with patch.object(lint, "read_scope", return_value=external):
@@ -540,11 +520,8 @@ class TestUnknownBranchIsAnError:
 class TestLintHelpFlag:
     """A trailing help flag must print help, never scan."""
 
-    def _lint_module(self):
-        return importlib.import_module("aipass.memory.apps.modules.lint")
-
     def test_run_help_prints_help(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         with patch.object(lint, "print_help") as helped:
             with patch.object(lint, "_execute_lint") as scanned:
                 assert lint.handle_command("lint", ["run", "--help"]) is True
@@ -552,7 +529,7 @@ class TestLintHelpFlag:
         scanned.assert_not_called()
 
     def test_branch_help_prints_help(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         with patch.object(lint, "print_help") as helped:
             with patch.object(lint, "_execute_lint") as scanned:
                 assert lint.handle_command("lint", ["@memory", "-h"]) is True
@@ -560,7 +537,7 @@ class TestLintHelpFlag:
         scanned.assert_not_called()
 
     def test_plain_run_still_scans(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         with patch.object(lint, "_execute_lint") as scanned:
             assert lint.handle_command("lint", ["run"]) is True
         scanned.assert_called_once()
@@ -580,11 +557,8 @@ class TestTheEmptyRegistryRefusalReachesTheExitCode:
     `error()` the process failure flag is set and `resolve_exit` returns 2.
     """
 
-    def _lint_module(self):
-        return importlib.import_module("aipass.memory.apps.modules.lint")
-
     def test_an_empty_registry_exits_two(self, capsys):
-        lint = self._lint_module()
+        lint = lint_module
         reset_command_state()
         # The name the module actually binds: read_scope is imported from
         # the monitor detector into lint's own namespace, so patch it there.
@@ -665,7 +639,7 @@ class TestFieldsModeFlagsTheClosedShape:
     """A field outside the shape is named, whichever way it is outside it."""
 
     def test_unknown_field_is_flagged(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [_session(mood="great")])
 
         result = _run_fields(handler, branches)
@@ -678,7 +652,7 @@ class TestFieldsModeFlagsTheClosedShape:
         assert hits[0]["length"] == 5
 
     def test_field_over_its_cap_is_flagged(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [_session(status="s" * 60)])
 
         result = _run_fields(handler, branches)
@@ -692,7 +666,7 @@ class TestFieldsModeFlagsTheClosedShape:
         assert hits[0]["units"] == "chars"
 
     def test_list_over_max_items_is_flagged(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [_session(tags=["a", "b", "c", "d", "e"])])
 
         result = _run_fields(handler, branches)
@@ -706,7 +680,7 @@ class TestFieldsModeFlagsTheClosedShape:
     def test_missing_required_field_is_flagged(self, tmp_path: Path) -> None:
         entry = _session()
         del entry["status"]
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [entry])
 
         result = _run_fields(handler, branches)
@@ -716,7 +690,7 @@ class TestFieldsModeFlagsTheClosedShape:
         assert hits[0]["reason"] == "missing_field"
 
     def test_a_clean_branch_flags_nothing(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [_session(), _session(number=2)])
 
         result = _run_fields(handler, branches)
@@ -730,7 +704,7 @@ class TestFieldsModeIsAnInventory:
     """Every string field is LISTED by chars, not only the ones in breach."""
 
     def test_every_string_field_is_measured(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [_session()])
 
         result = _run_fields(handler, branches)
@@ -751,7 +725,7 @@ class TestFieldsModeIsAnInventory:
         assert result["total_fields"] == 5
 
     def test_summary_rows_carry_max_p95_and_flag_counts(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         sessions = [_session(status="s" * n) for n in (5, 5, 5, 5, 5, 5, 5, 5, 5, 60)]
         branches = _plant(tmp_path, "alpha", sessions)
 
@@ -766,7 +740,7 @@ class TestFieldsModeIsAnInventory:
         assert row["branch"] == "alpha"
 
     def test_worst_first_ordering_matches_the_original_mode(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [_session(status="s" * 45, tags=["t" * 200])])
 
         result = _run_fields(handler, branches)
@@ -783,7 +757,7 @@ class TestTheCanonicalFieldIsNotReportedTwice:
     """
 
     def test_over_cap_canonical_field_is_listed_but_not_flagged(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [_session(summary="x" * 500)])
 
         result = _run_fields(handler, branches)
@@ -795,7 +769,7 @@ class TestTheCanonicalFieldIsNotReportedTwice:
         assert listed["canonical"] is True
 
     def test_the_original_mode_still_owns_that_violation(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [_session(summary="x" * 500)])
 
         with patch.object(handler, "load_entry_limits", return_value=_shape_limits()):
@@ -809,7 +783,7 @@ class TestThePassportRow:
     """passport.json is measured by SIZE only — @spawn owns its schema."""
 
     def test_a_string_over_600_is_flagged(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         passport = {"identity": {"purpose": "p" * 700}}
         branches = _plant(tmp_path, "alpha", [_session()], passport=passport)
 
@@ -824,7 +798,7 @@ class TestThePassportRow:
         assert hits[0]["branch"] == "alpha"
 
     def test_a_file_over_6000_is_flagged(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         passport = {"identity": {"purpose": "p" * 7000}}
         branches = _plant(tmp_path, "alpha", [_session()], passport=passport)
 
@@ -839,7 +813,7 @@ class TestThePassportRow:
         assert row["oversized_strings"] == 1
 
     def test_a_passport_within_budget_is_reported_clean(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [_session()], passport={"identity": {"purpose": "small"}})
 
         result = _run_fields(handler, branches)
@@ -849,7 +823,7 @@ class TestThePassportRow:
         assert result["passport"][0]["length"] > 0
 
     def test_a_branch_without_a_passport_gets_no_row(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         branches = _plant(tmp_path, "alpha", [_session()])
 
         result = _run_fields(handler, branches)
@@ -861,7 +835,7 @@ class TestFieldsModeIsReadOnly:
     """The fields mode never writes, truncates or deletes — content AND mtime."""
 
     def test_nothing_on_disk_moves(self, tmp_path: Path) -> None:
-        handler = _get_lint_handler()
+        handler = lint_handler
         passport = {"identity": {"purpose": "p" * 700}}
         branches = _plant(
             tmp_path,
@@ -885,11 +859,8 @@ class TestFieldsModeIsReadOnly:
 class TestFieldsModeRouting:
     """`lint fields` is ADDITIVE — the old spellings route exactly where they did."""
 
-    def _lint_module(self):
-        return importlib.import_module("aipass.memory.apps.modules.lint")
-
     def test_fields_routes_to_the_fields_mode(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         with patch.object(lint, "_execute_lint_fields") as fields:
             with patch.object(lint, "_execute_lint") as canonical:
                 assert lint.handle_command("lint", ["fields"]) is True
@@ -897,13 +868,13 @@ class TestFieldsModeRouting:
         canonical.assert_not_called()
 
     def test_fields_takes_a_branch_filter(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         with patch.object(lint, "_execute_lint_fields") as fields:
             assert lint.handle_command("lint", ["fields", "@devpulse"]) is True
         fields.assert_called_once_with("devpulse")
 
     def test_fields_help_still_prints_help(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         with patch.object(lint, "print_help") as helped:
             with patch.object(lint, "_execute_lint_fields") as fields:
                 assert lint.handle_command("lint", ["fields", "--help"]) is True
@@ -911,7 +882,7 @@ class TestFieldsModeRouting:
         fields.assert_not_called()
 
     def test_an_unknown_fields_argument_is_refused(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         with patch.object(lint, "error") as errored:
             with patch.object(lint, "_execute_lint_fields") as fields:
                 assert lint.handle_command("lint", ["fields", "bogus"]) is True
@@ -919,7 +890,7 @@ class TestFieldsModeRouting:
         fields.assert_not_called()
 
     def test_the_old_spellings_still_reach_the_old_mode(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         for args, expected in ((["run"], None), (["@devpulse"], "devpulse"), (["run", "@devpulse"], "devpulse")):
             with patch.object(lint, "_execute_lint") as canonical:
                 with patch.object(lint, "_execute_lint_fields") as fields:
@@ -928,7 +899,7 @@ class TestFieldsModeRouting:
             fields.assert_not_called()
 
     def test_bare_lint_still_introspects(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         with patch.object(lint, "print_introspection") as introspected:
             with patch.object(lint, "_execute_lint_fields") as fields:
                 assert lint.handle_command("lint", []) is True
@@ -944,11 +915,8 @@ class TestTheOriginalOutputIsUnchanged:
     prints. This is the tripwire.
     """
 
-    def _lint_module(self):
-        return importlib.import_module("aipass.memory.apps.modules.lint")
-
     def test_violation_rendering_is_byte_for_byte(self, capsys) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         result = {
             "success": True,
             "violations": [
@@ -980,7 +948,7 @@ class TestTheOriginalOutputIsUnchanged:
         assert "1 violation(s) found" in captured.err
 
     def test_the_clean_line_is_unchanged(self, capsys) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         result = {"success": True, "violations": [], "total_violations": 0, "branches_scanned": 22}
 
         lint._display_results(result, "memory")
@@ -991,9 +959,6 @@ class TestTheOriginalOutputIsUnchanged:
 
 class TestFieldsModeDisplay:
     """A clean fleet must SAY it is clean — an empty screen proves nothing ran."""
-
-    def _lint_module(self):
-        return importlib.import_module("aipass.memory.apps.modules.lint")
 
     def _summary_row(self, **overrides: Any) -> dict[str, Any]:
         row = {
@@ -1014,7 +979,7 @@ class TestFieldsModeDisplay:
         return row
 
     def test_clean_fleet_prints_the_success_line(self, capsys) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         passport = {
             "branch": "alpha",
             "file": "passport.json",
@@ -1042,7 +1007,7 @@ class TestFieldsModeDisplay:
         assert "1797/6000 chars" in out
 
     def test_a_flagged_field_is_obvious(self, capsys) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         result = {
             "success": True,
             "summary": [self._summary_row(max=917, flagged=1, worst_over=877)],
@@ -1076,7 +1041,7 @@ class TestFieldsModeDisplay:
         assert "1 field(s) outside the shape" in captured.err
 
     def test_an_empty_scan_says_so(self, capsys) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         result = {
             "success": True,
             "summary": [],
@@ -1094,7 +1059,7 @@ class TestFieldsModeDisplay:
 
     def test_the_fields_mode_reaches_the_display(self) -> None:
         """Mutant: _execute_lint_fields drops the branch filter on its way to the display — killed."""
-        lint = self._lint_module()
+        lint = lint_module
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "read_scope", return_value=registry):
@@ -1106,7 +1071,7 @@ class TestFieldsModeDisplay:
         displayed.assert_called_once_with({"success": True}, "memory")
 
     def test_an_unknown_branch_is_refused_in_fields_mode_too(self) -> None:
-        lint = self._lint_module()
+        lint = lint_module
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "read_scope", return_value=registry):

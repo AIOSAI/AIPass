@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_watcher.py
 # Description: Memory File System Watcher
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2025-11-26
-# Modified: 2026-09-29
+# Modified: 2026-10-01
 # =============================================
 
 """
@@ -415,7 +415,11 @@ class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
 
     def __init__(self, roots: Iterable[Path]):
         super().__init__()
-        self._roots = frozenset(Path(root) for root in roots)
+        # Each root in both spellings: an observer may report the real path
+        # behind a symlinked root, and that must not turn its own files away
+        # (memory's cure, fleet green leg 5).
+        given = [Path(root) for root in roots]
+        self._roots = frozenset(given) | frozenset(root.resolve() for root in given)
         # Track recent modifications to avoid duplicate processing
         self._recent_modifications = set()
 

@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
 # Version: 1.2.2
 # Created: 2026-08-25
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py and the trinity-standard handlers around it."""
@@ -80,6 +80,18 @@ def _limits(max_chars: int = 300, field: str = "note", container: str = "observa
     }
 
 
+def _authored(entry, field: str = "note") -> list:
+    """What the write gate authors for one new observation, through classify_entries."""
+    return el.classify_entries({}, {"observations": [entry]}, _limits(field=field))["authored"]
+
+
+def _lint(monkeypatch, path: str, limits: dict) -> list:
+    """Lint one branch through run_lint, its limits handed in and its log line kept off disk."""
+    monkeypatch.setattr(lint_handler, "load_entry_limits", lambda name: limits)
+    monkeypatch.setattr(lint_handler, "json_handler", MagicMock())
+    return lint_handler.run_lint([{"name": "b", "path": path}])["violations"]
+
+
 # =============================================================================
 # B1 — entry_limits: a field the gate cannot measure is a VIOLATION
 # =============================================================================
@@ -96,11 +108,13 @@ class TestUnmeasurableFieldIsAViolation:
         mean both.
         """
         entry = {"note": [{"title": "a", "detail": "b"}], "number": 1}
-        assert el._extract_text(entry, "note") is None
+        [hit] = _authored(entry)
+        assert hit["reason"] == "unmeasurable"
 
     def test_a_measurable_field_still_returns_its_text(self):
-        assert el._extract_text({"note": "plain"}, "note") == "plain"
-        assert el._extract_text("bare string", "note") == "bare string"
+        """Measured through the write gate: the hit carries the text's length."""
+        assert [hit["length"] for hit in _authored({"note": "x" * 400})] == [400]
+        assert [hit["length"] for hit in _authored("y" * 401)] == [401]
 
     def test_check_entry_refuses_a_non_string(self):
         """check_entry() called len() on whatever it was handed."""
@@ -227,16 +241,16 @@ class TestLintRefusesWhatItCannotMeasure:
         )
         return str(tmp_path / "b")
 
-    def test_a_list_note_is_reported_not_counted_as_three_chars(self, tmp_path):
+    def test_a_list_note_is_reported_not_counted_as_three_chars(self, monkeypatch, tmp_path):
         """Three fat dicts measured as len()==3 and cleared a 300-char cap."""
         path = self._branch(tmp_path, [{"detail": "x" * 400}, {"detail": "y" * 400}, {"detail": "z"}])
-        hits = lint_handler._lint_branch("b", path, _limits())
+        hits = _lint(monkeypatch, path, _limits())
         assert len(hits) == 1
         assert hits[0]["reason"] == "unmeasurable"
 
-    def test_a_string_note_over_cap_is_still_reported_with_its_length(self, tmp_path):
+    def test_a_string_note_over_cap_is_still_reported_with_its_length(self, monkeypatch, tmp_path):
         path = self._branch(tmp_path, "x" * 400)
-        hits = lint_handler._lint_branch("b", path, _limits())
+        hits = _lint(monkeypatch, path, _limits())
         assert len(hits) == 1
         assert hits[0]["length"] == 400
         assert hits[0]["over_by"] == 100
@@ -246,9 +260,9 @@ class TestLintRefusesWhatItCannotMeasure:
         # other word, which is every hit this handler can emit.
         assert "reason" not in hits[0], hits[0]
 
-    def test_a_string_note_within_cap_is_clean(self, tmp_path):
+    def test_a_string_note_within_cap_is_clean(self, monkeypatch, tmp_path):
         path = self._branch(tmp_path, "short")
-        assert lint_handler._lint_branch("b", path, _limits()) == []
+        assert _lint(monkeypatch, path, _limits()) == []
 
 
 # =============================================================================
@@ -831,11 +845,12 @@ class TestMissingFieldIsAViolation:
     """
 
     def test_a_missing_field_says_it_cannot_be_read(self):
-        assert el._extract_text({"key": "k", "learning": "x" * 500}, "value") is None
+        [hit] = _authored({"key": "k", "learning": "x" * 500}, field="value")
+        assert hit["reason"] == "missing_field"
 
     def test_an_entry_with_the_field_empty_is_still_compliant(self):
         """ "" stays a legitimate answer when the field is genuinely there."""
-        assert el._extract_text({"key": "k", "value": ""}, "value") == ""
+        assert _authored({"key": "k", "value": ""}, field="value") == []
 
     def test_the_hooks_repro_is_refused(self):
         """The exact case @hooks proved live: 500 chars under a 200-char cap, 0 violations."""
@@ -914,7 +929,7 @@ class TestMissingFieldIsAViolation:
         assert hits[0]["found_type"] == "missing"
         assert hits[0]["field"] == "value"
 
-    def test_lint_reports_the_entry_it_cannot_find_a_field_in(self, tmp_path):
+    def test_lint_reports_the_entry_it_cannot_find_a_field_in(self, monkeypatch, tmp_path):
         """Read-only lint stayed silent while the write gate refused — the audit lied.
 
         A branch could ask "am I compliant?", be told yes, and then be blocked
@@ -926,12 +941,12 @@ class TestMissingFieldIsAViolation:
             json.dumps({"observations": [{"number": 1, "observation": "x" * 500}]}),
             encoding="utf-8",
         )
-        hits = lint_handler._lint_branch("b", str(tmp_path), _limits())
+        hits = _lint(monkeypatch, str(tmp_path), _limits())
         assert len(hits) == 1
         assert hits[0]["reason"] == "missing_field"
         assert hits[0]["field"] == "note"
 
-    def test_lint_reports_a_dict_container_missing_its_field(self, tmp_path):
+    def test_lint_reports_a_dict_container_missing_its_field(self, monkeypatch, tmp_path):
         """Both container kinds, or the audit is only half honest.
 
         key_learnings is dict-shaped on several branches; a scanner that catches
@@ -946,7 +961,7 @@ class TestMissingFieldIsAViolation:
             json.dumps({"key_learnings": {"drifted": {"learning": "x" * 500}}}),
             encoding="utf-8",
         )
-        hits = lint_handler._lint_branch("b", str(tmp_path), limits)
+        hits = _lint(monkeypatch, str(tmp_path), limits)
         assert len(hits) == 1
         assert hits[0]["reason"] == "missing_field"
         assert hits[0]["found_type"] == "missing"

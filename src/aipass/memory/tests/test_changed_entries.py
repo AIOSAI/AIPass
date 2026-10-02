@@ -3,7 +3,7 @@
 # Description: changed_entries diff helper and the write_memory_file entry-limits wiring (FPLAN-0270 phase 3)
 # Version: 1.0.1
 # Created: 2026-06-13
-# Modified: 2026-09-28
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py changed_entries and its write_memory_file wiring in memory_files.py."""
@@ -22,15 +22,15 @@
 # seedgo: no-test-needed(covered_elsewhere) — write_memory_file_simple(), read_memory_file_data(): test_memory_files.py
 # seedgo: no-test-needed(covered_elsewhere) — load_entry_limits() config merge, fed in here: tests/test_entry_limits.py
 
-import importlib
 import json
-import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from aipass.memory.apps.handlers import repo_root
+from aipass.memory.apps.handlers.json import entry_limits, memory_files
 
 # Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
 # whole path: a checkout that lives under a directory named dropbox must not hide itself.
@@ -59,32 +59,15 @@ def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path:
 
 
 @pytest.fixture(autouse=True)
-def _fresh_modules(monkeypatch):
-    """Drop cached modules so each test gets fresh imports.
+def _quiet_operation_logs(monkeypatch):
+    """Both modules bind json_handler at import; its log lines go to a recorder, never memory_json.
 
-    Evicted with ``monkeypatch.delitem``, not a bare ``sys.modules.pop``: a
-    bare pop is one-way and the eviction outlives the test, which is how two
-    receipt tests went red on a single xdist worker on a single run.
+    Until leg 5 of DPLAN-0354 each test evicted the json package and imported
+    it fresh under the conftest's stub; the real modules are now imported once
+    at the top and the one edge is replaced where the product looks.
     """
-    for name in (
-        "aipass.memory.apps.handlers.json",
-        "aipass.memory.apps.handlers.json.json_handler",
-        "aipass.memory.apps.handlers.json.entry_limits",
-        "aipass.memory.apps.handlers.json.memory_files",
-        "aipass.memory.apps.handlers.json.lint_handler",
-    ):
-        monkeypatch.delitem(sys.modules, name, raising=False)
-    yield
-
-
-def _get_entry_limits():
-    """Import and return the entry_limits module."""
-    return importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
-
-
-def _get_memory_files():
-    """Import and return the memory_files module."""
-    return importlib.import_module("aipass.memory.apps.handlers.json.memory_files")
+    monkeypatch.setattr(entry_limits, "json_handler", MagicMock())
+    monkeypatch.setattr(memory_files, "json_handler", MagicMock())
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +152,7 @@ class TestNewOverLimitEntry:
     """A new dict entry that exceeds the cap is returned as a violation."""
 
     def test_new_overlimit_key_learning(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         before = {"key_learnings": {"a": "short", "b": "also short"}}
         fat_text = "x" * 250
         after = {"key_learnings": {"a": "short", "b": "also short", "c": fat_text}}
@@ -193,7 +176,7 @@ class TestChangedEntryOverCap:
     """An existing entry whose text grew past the cap is flagged."""
 
     def test_changed_key_learning_over_cap(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         before = {"key_learnings": {"a": "short text"}}
         after = {"key_learnings": {"a": "y" * 300}}
 
@@ -223,7 +206,7 @@ class TestUnchangedLegacyFatEntry:
     """
 
     def test_unchanged_500char_key_learning_is_carried_not_flagged(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         fat_text = "z" * 500
         before = {"key_learnings": {"legacy": fat_text}}
         after = {"key_learnings": {"legacy": fat_text}}
@@ -251,7 +234,7 @@ class TestReshapeOnlyKeepsTheExemption:
     }
 
     def test_an_unchanged_over_cap_todo_is_not_flagged(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         fat = {"number": 1, "date": "2026-08-27", "task": "z" * 500, "priority": "high", "status": "open"}
 
         result = mod.changed_entries({"todos": [fat]}, {"todos": [dict(fat)]}, self._TODOS_ONLY)
@@ -259,7 +242,7 @@ class TestReshapeOnlyKeepsTheExemption:
         assert result == []
 
     def test_a_new_over_cap_todo_is_still_flagged(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         fresh = {"number": 2, "date": "2026-08-27", "task": "y" * 500, "priority": "high", "status": "open"}
 
         result = mod.changed_entries({"todos": []}, {"todos": [fresh]}, self._TODOS_ONLY)
@@ -297,7 +280,7 @@ class TestReshapeOnlyKeepsTheExemption:
         to end, because the branch is one config edit from live and a dead
         branch that is also unpinned comes back wrong.
         """
-        mod = _get_entry_limits()
+        mod = entry_limits
         on_disk = {"todos": {"a": {"task": ["chunk one", "chunk two"]}}}
         written = {"todos": {"a": {"task": ["a completely different malformed todo"]}}}
 
@@ -307,7 +290,7 @@ class TestReshapeOnlyKeepsTheExemption:
 
     def test_the_same_drifted_todo_is_still_exempt_in_the_dict_path(self) -> None:
         """The other half of the contract: identical raw value, still skipped."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         on_disk = {"todos": {"a": {"task": ["chunk one", "chunk two"]}}}
         rewritten = {"todos": {"a": {"task": ["chunk one", "chunk two"]}}}
 
@@ -325,7 +308,7 @@ class TestShrinkingEntry:
     """An entry that went from 500 chars to 100 is not flagged."""
 
     def test_shrunk_entry_not_flagged(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         before = {"key_learnings": {"item": "z" * 500}}
         after = {"key_learnings": {"item": "z" * 100}}
 
@@ -343,7 +326,7 @@ class TestDictContainerShapes:
     """Both plain-string and dict-with-field value shapes are handled."""
 
     def test_value_as_string(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         before: dict[str, Any] = {"key_learnings": {}}
         after = {"key_learnings": {"new_key": "x" * 250}}
 
@@ -353,7 +336,7 @@ class TestDictContainerShapes:
         assert result[0]["length"] == 250
 
     def test_value_as_dict_with_field(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         before: dict[str, Any] = {"key_learnings": {}}
         after = {"key_learnings": {"new_key": {"value": "x" * 250, "source": "test"}}}
 
@@ -372,7 +355,7 @@ class TestListContainer:
     """List containers detect new appended items and skip unchanged ones."""
 
     def test_appended_item_over_cap_detected(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         existing = {"session_number": 1, "summary": "short"}
         new_fat = {"session_number": 2, "summary": "s" * 400}
         before = {"sessions": [existing]}
@@ -386,7 +369,7 @@ class TestListContainer:
 
     def test_existing_unchanged_items_are_carried_not_flagged(self) -> None:
         """Reversed 2026-08-30: unchanged means "this write did not author it"."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         fat_item = {"session_number": 1, "summary": "s" * 400}
         before = {"sessions": [fat_item]}
         after = {"sessions": [fat_item]}
@@ -412,7 +395,7 @@ class TestListPrependIdentityMatch:
         entry. They are reported as carried debt instead, and the new entry is
         not among them because it is within cap.
         """
-        mod = _get_entry_limits()
+        mod = entry_limits
         legacy = [{"session_number": i, "summary": "s" * 400} for i in range(5, 0, -1)]
         before = {"sessions": legacy}
         new_entry = {"session_number": 6, "summary": "short new"}
@@ -427,7 +410,7 @@ class TestListPrependIdentityMatch:
 
     def test_edited_existing_entry_text_still_caught(self) -> None:
         """Changing an existing entry's text to over-cap is still flagged."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         before = {"sessions": [{"session_number": 1, "summary": "short"}]}
         after = {"sessions": [{"session_number": 1, "summary": "s" * 400}]}
 
@@ -438,7 +421,7 @@ class TestListPrependIdentityMatch:
 
     def test_genuinely_new_overcap_entry_still_caught(self) -> None:
         """A brand-new over-cap entry is still flagged even alongside legacy."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         legacy = [{"session_number": 1, "summary": "ok"}]
         before = {"sessions": legacy}
         new_fat = {"session_number": 2, "summary": "s" * 400}
@@ -459,7 +442,7 @@ class TestEmptyBefore:
     """When before is empty, all after entries are treated as new."""
 
     def test_all_over_limit_entries_flagged(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         before: dict[str, Any] = {}
         after = {"key_learnings": {"a": "x" * 250, "b": "ok"}}
 
@@ -469,7 +452,7 @@ class TestEmptyBefore:
         assert result[0]["key"] == "a"
 
     def test_within_limit_entries_not_flagged(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         before: dict[str, Any] = {}
         after = {"key_learnings": {"a": "short", "b": "also short"}}
 
@@ -487,8 +470,9 @@ class TestWarnModeWritesThrough:
     """In warn mode (enforce=False), over-limit entries log a warning but file is written."""
 
     def test_warn_mode_writes_and_logs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        mem_mod = _get_memory_files()
-        mock_logger = mem_mod.logger
+        mem_mod = memory_files
+        mock_logger = MagicMock()
+        monkeypatch.setattr(mem_mod, "logger", mock_logger)
 
         # Build .trinity/local.json path
         trinity = tmp_path / "test_branch" / ".trinity"
@@ -523,7 +507,7 @@ class TestEnforceModeRejects:
     """In enforce mode, a new over-limit entry is rejected and file is unchanged."""
 
     def test_enforce_rejects_new_fat_entry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        mem_mod = _get_memory_files()
+        mem_mod = memory_files
 
         trinity = tmp_path / "test_branch" / ".trinity"
         trinity.mkdir(parents=True)
@@ -566,7 +550,7 @@ class TestEnforceAllowsUnchangedLegacy:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        mem_mod = _get_memory_files()
+        mem_mod = memory_files
 
         trinity = tmp_path / "test_branch" / ".trinity"
         trinity.mkdir(parents=True)
@@ -597,7 +581,7 @@ class TestNonTrinityFileUnaffected:
     """Files outside .trinity/ bypass validation entirely."""
 
     def test_writes_normally_outside_trinity(self, tmp_path: Path) -> None:
-        mem_mod = _get_memory_files()
+        mem_mod = memory_files
 
         output_path = tmp_path / "some_output.json"
         data = {"key": "value"}
@@ -619,7 +603,7 @@ class TestPassportUnaffected:
     """Writes to .trinity/passport.json bypass validation."""
 
     def test_passport_writes_normally(self, tmp_path: Path) -> None:
-        mem_mod = _get_memory_files()
+        mem_mod = memory_files
 
         trinity = tmp_path / "test_branch" / ".trinity"
         trinity.mkdir(parents=True)
@@ -685,7 +669,7 @@ class TestShrinkWriteIsNeverRefused:
 
     def test_removing_the_tail_passes_with_a_fat_entry_in_the_head(self, tmp_path: Path, monkeypatch) -> None:
         """The live deadlock, reproduced: 3 sessions in, tail archived, 2 out."""
-        mem_mod = _get_memory_files()
+        mem_mod = memory_files
 
         trinity = tmp_path / "seedgo" / ".trinity"
         trinity.mkdir(parents=True)
@@ -711,8 +695,9 @@ class TestShrinkWriteIsNeverRefused:
 
     def test_the_carried_entry_is_reported_not_swallowed(self, tmp_path: Path, monkeypatch) -> None:
         """Passing silently is what the narrowing was right to object to."""
-        mem_mod = _get_memory_files()
-        mock_logger = mem_mod.logger
+        mem_mod = memory_files
+        mock_logger = MagicMock()
+        monkeypatch.setattr(mem_mod, "logger", mock_logger)
 
         trinity = tmp_path / "seedgo" / ".trinity"
         trinity.mkdir(parents=True)
@@ -735,7 +720,7 @@ class TestAuthoringIsStillRefused:
     """Widening the exemption must not open the door it was narrowed to close."""
 
     def test_a_new_over_cap_session_is_refused(self, tmp_path: Path, monkeypatch) -> None:
-        mem_mod = _get_memory_files()
+        mem_mod = memory_files
 
         trinity = tmp_path / "somebranch" / ".trinity"
         trinity.mkdir(parents=True)
@@ -752,7 +737,7 @@ class TestAuthoringIsStillRefused:
 
     def test_editing_a_carried_entry_and_leaving_it_over_cap_is_refused(self) -> None:
         """Touch it and you own it — the exemption covers only byte-identical text."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         before = {"sessions": [{"number": 1, "summary": "z" * 500}]}
         after = {"sessions": [{"number": 1, "summary": "y" * 400}]}
 
@@ -766,7 +751,7 @@ class TestCarriedEntries:
     """The second label: what the write is carrying, measured from the same diff."""
 
     def test_carried_reports_the_untouched_over_cap_entry(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         fat = {"number": 1, "summary": _FAT_SUMMARY}
         before = {"sessions": [fat]}
         after = {"sessions": [fat]}
@@ -780,7 +765,7 @@ class TestCarriedEntries:
 
     def test_an_authored_entry_is_never_also_carried(self) -> None:
         """The two labels partition the over-cap set — no entry wears both."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         before = {"sessions": [{"number": 1, "summary": "z" * 500}]}
         after = {
             "sessions": [
@@ -796,7 +781,7 @@ class TestCarriedEntries:
         assert [v["length"] for v in carried] == [500]
 
     def test_within_cap_entries_are_not_carried_debt(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         same = {"sessions": [{"number": 1, "summary": "well within"}]}
 
         assert mod.classify_entries(same, same, _SESSIONS_ONLY)["carried"] == []
@@ -807,7 +792,7 @@ class TestRenamedFieldEntryDoesNotBrickRollover:
 
     def test_a_legacy_renamed_field_entry_is_carried(self) -> None:
         """@ai_mail and @api carried `learning` where the config says `value`."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         legacy = {"number": 1, "learning": "z" * 500}  # canonical field absent
         before = {"sessions": [legacy]}
         after = {"sessions": [legacy]}
@@ -885,7 +870,7 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
     """
 
     def test_an_authored_entry_close_to_the_cap_is_reported(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         before = {"key_learnings": {"a": "short"}}
         after = {"key_learnings": {"a": "short", "b": "x" * 190}}
 
@@ -897,20 +882,20 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
 
     def test_a_comfortable_entry_is_not_reported(self) -> None:
         """The signal is only worth having if most writes do not trip it."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         after = {"key_learnings": {"a": "x" * 179}}
 
         assert mod.classify_entries({}, after, _KEY_LEARNINGS_ONLY)["near"] == []
 
     def test_the_boundary_is_at_the_ratio_not_past_it(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
         after = {"key_learnings": {"exact": "x" * 180}}
 
         assert len(mod.classify_entries({}, after, _KEY_LEARNINGS_ONLY)["near"]) == 1
 
     def test_an_over_cap_entry_is_a_violation_and_never_also_near(self) -> None:
         """No entry wears both labels — the same rule the authored/carried split obeys."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         after = {"key_learnings": {"fat": "x" * 250}}
 
         split = mod.classify_entries({}, after, _KEY_LEARNINGS_ONLY)
@@ -925,7 +910,7 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
         and a line on every write about text nobody touched is how a channel
         becomes noise nobody reads.
         """
-        mod = _get_entry_limits()
+        mod = entry_limits
         standing = {"key_learnings": {"old": "x" * 195}}
 
         split = mod.classify_entries(standing, standing, _KEY_LEARNINGS_ONLY)
@@ -935,7 +920,7 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
 
     def test_editing_a_near_cap_entry_at_all_reports_it_again(self) -> None:
         """Carried is about the TEXT, so touching it makes it authored again."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         before = {"key_learnings": {"old": "x" * 195}}
         after = {"key_learnings": {"old": "y" * 195}}
 
@@ -943,7 +928,7 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
 
     def test_it_works_on_list_containers_too(self) -> None:
         """Both container shapes, because a rule honoured by one is a coincidence."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         after = {"sessions": [{"summary": "x" * 275}]}
 
         near = mod.classify_entries({}, after, _SESSIONS_ONLY)["near"]
@@ -953,20 +938,18 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
 
     def test_a_type_with_no_cap_has_nothing_to_be_near(self) -> None:
         """cap 0 means "no cap configured". Reporting there would flag everything."""
-        mod = _get_entry_limits()
+        mod = entry_limits
 
         assert mod.is_near_cap({"ok": True, "length": 5000, "cap": 0}) is False
 
     def test_a_refusal_verdict_is_never_near(self) -> None:
-        mod = _get_entry_limits()
+        mod = entry_limits
 
         assert mod.is_near_cap({"ok": False, "length": 250, "cap": 200}) is False
 
     def test_the_near_line_names_the_headroom_on_a_real_write(self, tmp_path, monkeypatch) -> None:
         """End to end: the warning reaches the log with a number to act on."""
         import logging
-
-        from aipass.memory.apps.handlers.json import memory_files
 
         branch = tmp_path / "src" / "aipass" / "somebranch"
         (branch / ".trinity").mkdir(parents=True)
@@ -1018,25 +1001,25 @@ class TestTheNearCapLineIsAPerTypeKnob:
         return {"entry_types": {"notes": {"max_chars": 100, **type_extras}}}
 
     def test_the_module_default_applies_when_the_type_says_nothing(self):
-        verdict = _get_entry_limits().check_entry("notes", "x" * 90, self._limits())
-        assert verdict["near_at"] == 100 * _get_entry_limits().NEAR_CAP_RATIO
-        assert _get_entry_limits().is_near_cap(verdict) is True
+        verdict = entry_limits.check_entry("notes", "x" * 90, self._limits())
+        assert verdict["near_at"] == 100 * entry_limits.NEAR_CAP_RATIO
+        assert entry_limits.is_near_cap(verdict) is True
 
     def test_a_type_can_ask_for_a_rarer_signal(self):
         limits = self._limits(near_cap_ratio=0.97)
-        assert _get_entry_limits().is_near_cap(_get_entry_limits().check_entry("notes", "x" * 90, limits)) is False
-        assert _get_entry_limits().is_near_cap(_get_entry_limits().check_entry("notes", "x" * 97, limits)) is True
+        assert entry_limits.is_near_cap(entry_limits.check_entry("notes", "x" * 90, limits)) is False
+        assert entry_limits.is_near_cap(entry_limits.check_entry("notes", "x" * 97, limits)) is True
 
     def test_a_type_can_ask_for_an_earlier_one(self):
         limits = self._limits(near_cap_ratio=0.5)
-        assert _get_entry_limits().is_near_cap(_get_entry_limits().check_entry("notes", "x" * 50, limits)) is True
+        assert entry_limits.is_near_cap(entry_limits.check_entry("notes", "x" * 50, limits)) is True
 
     def test_over_cap_is_never_near_cap_whatever_the_ratio(self):
         """The labels partition. A refusal must not also arrive as a soft word."""
         limits = self._limits(near_cap_ratio=0.5)
-        verdict = _get_entry_limits().check_entry("notes", "x" * 101, limits)
+        verdict = entry_limits.check_entry("notes", "x" * 101, limits)
         assert verdict["ok"] is False
-        assert _get_entry_limits().is_near_cap(verdict) is False
+        assert entry_limits.is_near_cap(verdict) is False
 
     def test_a_nonsense_ratio_is_refused_rather_than_obeyed(self):
         """A ratio of 0 would silence the line; a ratio of 5 would delete it.
@@ -1046,15 +1029,15 @@ class TestTheNearCapLineIsAPerTypeKnob:
         channel goes dark without anyone deciding it should.
         """
         for bad in (0, -0.5, 5, "0.9", None):
-            verdict = _get_entry_limits().check_entry("notes", "x" * 90, self._limits(near_cap_ratio=bad))
-            assert verdict["near_at"] == 100 * _get_entry_limits().NEAR_CAP_RATIO, f"obeyed {bad!r}"
+            verdict = entry_limits.check_entry("notes", "x" * 90, self._limits(near_cap_ratio=bad))
+            assert verdict["near_at"] == 100 * entry_limits.NEAR_CAP_RATIO, f"obeyed {bad!r}"
 
     def test_a_verdict_built_before_near_at_existed_still_answers(self):
         """The published shape gained a key; a caller holding the old one is not broken."""
         legacy = {"ok": True, "length": 95, "cap": 100, "over_by": 0, "entry_type": "notes"}
-        assert _get_entry_limits().is_near_cap(legacy) is True
+        assert entry_limits.is_near_cap(legacy) is True
         legacy["length"] = 10
-        assert _get_entry_limits().is_near_cap(legacy) is False
+        assert entry_limits.is_near_cap(legacy) is False
 
 
 # =============================================================================
@@ -1101,7 +1084,7 @@ class TestTheClosedFieldShape:
         return base
 
     def _authored(self, before_entries, after_entries):
-        mod = _get_entry_limits()
+        mod = entry_limits
         return mod.classify_entries({"sessions": before_entries}, {"sessions": after_entries}, self._limits())[
             "authored"
         ]
@@ -1187,7 +1170,7 @@ class TestTheClosedFieldShape:
         assert hits[0].get("reason") is None, "the plain over-cap species, unchanged"
 
     def test_check_fields_skips_the_canonical_field_directly(self):
-        mod = _get_entry_limits()
+        mod = entry_limits
         hits = mod.check_fields("sessions", "sessions", "0", self._entry(summary="x" * 400), self._limits())
         assert hits == []
 
@@ -1195,7 +1178,7 @@ class TestTheClosedFieldShape:
 
     def test_an_untouched_fat_entry_is_carried_never_authored(self):
         fat = self._entry(status="x" * 917)
-        split = _get_entry_limits().classify_entries({"sessions": [fat]}, {"sessions": [fat]}, self._limits())
+        split = entry_limits.classify_entries({"sessions": [fat]}, {"sessions": [fat]}, self._limits())
         assert split["authored"] == []
         assert [h["reason"] for h in split["carried"]] == ["field_over_cap"]
 
@@ -1209,9 +1192,7 @@ class TestTheClosedFieldShape:
         """Rollover moves entries; membership, never index."""
         fat = self._entry(number=1, status="x" * 917)
         other = self._entry(number=2)
-        split = _get_entry_limits().classify_entries(
-            {"sessions": [fat, other]}, {"sessions": [other, fat]}, self._limits()
-        )
+        split = entry_limits.classify_entries({"sessions": [fat, other]}, {"sessions": [other, fat]}, self._limits())
         assert split["authored"] == []
 
     # -- fail open on an unconfigured type -----------------------------------
@@ -1219,29 +1200,25 @@ class TestTheClosedFieldShape:
     def test_a_type_with_no_fields_map_gets_no_field_checks(self):
         limits = self._limits()
         del limits["entry_types"]["sessions"]["fields"]
-        split = _get_entry_limits().classify_entries(
-            {}, {"sessions": [self._entry(mood="x", status="y" * 900)]}, limits
-        )
+        split = entry_limits.classify_entries({}, {"sessions": [self._entry(mood="x", status="y" * 900)]}, limits)
         assert split["authored"] == []
 
     def test_fields_for_answers_empty_rather_than_raising_on_an_unknown_type(self):
-        assert _get_entry_limits().fields_for("nope", self._limits()) == {}
+        assert entry_limits.fields_for("nope", self._limits()) == {}
 
     # -- dict containers take the same path ----------------------------------
 
     def test_a_dict_container_is_checked_the_same_way(self):
         limits = self._limits()
         limits["entry_types"]["sessions"]["kind"] = "dict"
-        split = _get_entry_limits().classify_entries(
-            {"sessions": {}}, {"sessions": {"s1": self._entry(mood="x")}}, limits
-        )
+        split = entry_limits.classify_entries({"sessions": {}}, {"sessions": {"s1": self._entry(mood="x")}}, limits)
         assert [(h["key"], h["reason"]) for h in split["authored"]] == [("s1", "unknown_field")]
 
     # -- one cap, whichever copy was edited ----------------------------------
 
     def test_the_top_level_cap_wins_over_the_fields_copy(self, tmp_path, monkeypatch):
         """The duplicate is transitional; the number the agent is SHOWN governs."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         type_def = {
             "file": "local.json",
             "container": "sessions",
@@ -1262,7 +1239,7 @@ class TestTheFileBudgets:
         return {"passport.json": {"max_chars": 200, "max_string_chars": 20}}
 
     def test_a_file_over_its_budget_is_named_whole(self):
-        mod = _get_entry_limits()
+        mod = entry_limits
         text = '{"pad": "' + "x" * 300 + '"}'
         hits = mod.check_file_budget("passport.json", text, self._budgets())
         assert hits[0]["reason"] == "file_over_budget"
@@ -1270,28 +1247,28 @@ class TestTheFileBudgets:
         assert hits[0]["cap"] == 200
 
     def test_one_oversized_string_is_named_by_its_dotted_path(self):
-        mod = _get_entry_limits()
+        mod = entry_limits
         text = json.dumps({"identity": {"purpose": "p" * 50, "role": "ok"}})
         hits = [h for h in mod.check_file_budget("passport.json", text, self._budgets()) if h["field"]]
         assert [(h["key"], h["length"], h["cap"]) for h in hits] == [("identity.purpose", 50, 20)]
 
     def test_a_list_element_carries_its_index_in_the_path(self):
-        mod = _get_entry_limits()
+        mod = entry_limits
         text = json.dumps({"identity": {"what_i_do": ["ok", "w" * 40]}})
         hits = [h for h in mod.check_file_budget("passport.json", text, self._budgets()) if h["field"]]
         assert hits[0]["key"] == "identity.what_i_do[1]"
 
     def test_a_file_with_no_budget_is_not_judged(self):
-        assert _get_entry_limits().check_file_budget("dev.local.md", "x" * 9999, self._budgets()) == []
+        assert entry_limits.check_file_budget("dev.local.md", "x" * 9999, self._budgets()) == []
 
     def test_unparseable_content_is_still_size_checked(self):
         """A file that will not parse is not silently compliant."""
-        hits = _get_entry_limits().check_file_budget("passport.json", "{broken" + "x" * 300, self._budgets())
+        hits = entry_limits.check_file_budget("passport.json", "{broken" + "x" * 300, self._budgets())
         assert [h["reason"] for h in hits] == ["file_over_budget"]
 
     def test_the_budgets_come_from_the_one_reader(self):
         """entry_limits delegates; two readers of one key is the drift load() ended."""
-        mod = _get_entry_limits()
+        mod = entry_limits
         budgets = mod.load_file_budgets()
         assert budgets["local.json"]["max_chars"] == 25000
         assert budgets["observations.json"]["max_chars"] == 15000
@@ -1303,7 +1280,7 @@ class TestTheRefusalTextTheAgentReads:
 
     @staticmethod
     def _line(violation):
-        return _get_memory_files().violation_line(violation)
+        return memory_files.violation_line(violation)
 
     def test_an_unknown_field_does_not_print_zero_over_a_zero_cap(self):
         line = self._line(

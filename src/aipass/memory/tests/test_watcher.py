@@ -3,7 +3,7 @@
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
 # Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # Category: memory/tests
 # =============================================
 
@@ -25,6 +25,7 @@
 # seedgo: no-test-needed(external) — execute_rollover itself; the orchestrator is mocked, only the call is pinned
 
 import json
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -618,6 +619,31 @@ class TestTheWatcherOwnsOnlyTheMemoryFilesOfItsRoots:
         mocks["normalize_memory_file"].assert_called_once_with(own)
         mocks["update_line_count"].assert_called_once_with(own)
         mocks["check_single_file"].assert_called_once_with(own)
+
+    def test_a_root_reached_through_a_symlink_is_heard_at_its_real_path(self, monkeypatch, tmp_path):
+        """An observer may report the real path behind a symlinked root (found by @devpulse, leg 4).
+
+        Scheduled as the link, reported as the target: before leg 5 the two
+        spellings differed and the branch's own file was turned away in silence.
+        A platform that cannot make a symlink is asked here, and the root is
+        then the real directory itself.
+        """
+        real = tmp_path / "real_branch"
+        real.mkdir()
+        branch = tmp_path / "linked_branch"
+        try:
+            branch.symlink_to(real, target_is_directory=True)
+        except OSError as exc:
+            logging.getLogger(__name__).info("No symlink on this platform (%s): the root is the real directory", exc)
+            branch = real
+        handler, mocks = self._scheduled_watcher(monkeypatch, branch)
+        reported = real / ".trinity" / "local.json"
+
+        self._modify(handler, reported)
+
+        mocks["normalize_memory_file"].assert_called_once_with(reported)
+        mocks["update_line_count"].assert_called_once_with(reported)
+        mocks["check_single_file"].assert_called_once_with(reported)
 
 
 class TestTheBranchPathWalkReadsNamesNotSpellings:

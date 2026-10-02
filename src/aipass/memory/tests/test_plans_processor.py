@@ -3,7 +3,7 @@
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
@@ -536,6 +536,43 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
 
         assert result["success"] is False
         assert str(manifest_path) in result["error"]
+        assert seen == []
+        assert manifest_path.read_bytes() == before
+
+    def test_a_manifest_whose_root_is_a_list_refuses_the_run_and_keeps_its_bytes(self, monkeypatch, tmp_path):
+        """Valid JSON with a list at the root is refused, not read as a manifest.
+
+        Green on the tree from its first run; its proof is the mutant of leg 5
+        of DPLAN-0354 that takes the isinstance guard out of _load_manifest.
+        The store records and refuses, so a run past a missing guard returns
+        to the assert instead of failing on its first write into the list.
+        """
+        mod = plans_processor
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        (plans / "FPLAN-0001_x.md").write_text("## Summary\n\n" + "some real text " * 30 + "\n", encoding="utf-8")
+        manifest_path = tmp_path / ".plans_processed.json"
+        manifest_path.write_text("[]", encoding="utf-8")
+        before = manifest_path.read_bytes()
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        self._mock_config(monkeypatch, mod, plans)
+        seen = []
+        monkeypatch.setattr(
+            mod, "_embed_texts", lambda texts, timeout=120: {"success": True, "embeddings": [[0.1]] * len(texts)}
+        )
+        monkeypatch.setattr(
+            mod,
+            "_store_vectors",
+            lambda emb, texts, metas, coll: seen.append(metas[0]["source_file"]) or {"success": False, "error": "x"},
+        )
+
+        result = mod.process_plans()
+
+        assert result == {
+            "success": False,
+            "error": f"Unreadable processed manifest {manifest_path}: root is not an object",
+        }
         assert seen == []
         assert manifest_path.read_bytes() == before
 
