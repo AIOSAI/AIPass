@@ -3,7 +3,7 @@
 # Description: Tests for the host API attach lane — a real PTY running a tmux client
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/host/attach.py and the WS /v1/room/attach route in apps/handlers/host/server.py."""
@@ -699,7 +699,10 @@ class TestTheRoomCanActuallyHearAResize:
             session = host_attach.open_attach("api")
 
         try:
-            assert os.getpgid(session.process.pid) != os.getpgid(os.getpid())
+            if hasattr(os, "getpgid"):
+                assert os.getpgid(session.process.pid) != os.getpgid(os.getpid())
+            else:
+                pytest.fail("this platform opens a PTY and has no os.getpgid to read the child's group by")
         finally:
             session.hangup()
 
@@ -807,7 +810,9 @@ class TestTheRoomCanActuallyHearAResize:
         def macos_getpgid(pid: int) -> int:
             if session.closed:
                 raise ProcessLookupError(errno.ESRCH, "No such process")
-            return os.getpgid(pid)
+            if hasattr(os, "getpgid"):
+                return os.getpgid(pid)
+            pytest.fail("this platform opens a PTY and has no os.getpgid to read the child's group by")
 
         try:
             child_group = macos_getpgid(session.process.pid)
@@ -938,7 +943,10 @@ class TestHangupDetachesAndNeverKillsTheRoom:
             session = host_attach.open_attach("api")
 
         try:
-            assert os.getpgid(session.process.pid) != os.getpgid(os.getpid())
+            if hasattr(os, "getpgid"):
+                assert os.getpgid(session.process.pid) != os.getpgid(os.getpid())
+            else:
+                pytest.fail("this platform opens a PTY and has no os.getpgid to read the child's group by")
         finally:
             session.hangup()
 
@@ -2480,11 +2488,12 @@ class TestTheDetachIsWrittenDownToo:
                     socket.close(code=1000)
                     line = wait_for_log(log, "socket detached from")
 
-        stamp = re.search(r"after (\d+\.\d+)s", line)
-        assert stamp is not None, line
-        held = float(stamp.group(1))
+        assert re.sub(r"after \d+\.\d+s", "after Ns", line) == (
+            "[host_api] socket detached from baud-api after Ns (close 1000)"
+        )
+        (held,) = re.findall(r"after (\d+\.\d+)s", line)
 
-        assert held >= 0.5, line
+        assert float(held) >= 0.5, line
 
     def test_a_room_that_ends_first_says_so_instead_of_printing_none(self, store: Any, seated: Any) -> None:
         """

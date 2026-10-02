@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-10-02
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -1495,4 +1495,4 @@ def serve(host: Optional[str] = None, port: Optional[int] = None) -> None:
 
     logger.info("[host_api] serving on %s:%s", bind_host, bind_port)
     json_handler.log_operation("host_api_serve_start", {"host": bind_host, "port": bind_port})
-    uvicorn.run(create_app(), host=bind_host, port=bind_port)
+    uvicorn.run(create_app(), host=bind_host, port=bind_port, access_log=False)

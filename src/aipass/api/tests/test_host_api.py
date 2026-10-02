@@ -3,7 +3,7 @@
 # Description: Tests for the Stage 0 host API — config, bind gate, tokens, auth
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/host_api.py and apps/handlers/host/{config,tokens,server}.py."""
@@ -721,7 +721,7 @@ class TestVerifyToken:
     def test_revoked_token_rejected_without_restart(self, store: Path) -> None:
         """THE property: revocation lands on the next verification, no restart."""
         record, raw = host_tokens.issue_token("pixel-8")
-        assert host_tokens.verify_token(raw) is not None
+        assert host_tokens.verify_token(raw) == record
 
         host_tokens.revoke_token(record["id"])
 

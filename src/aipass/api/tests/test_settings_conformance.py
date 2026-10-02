@@ -3,7 +3,7 @@
 # Description: The settings conformance corpus, python side — shared goldens both runtimes must satisfy
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-09-28
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/host/settings.py's read and write doors against the shared conformance corpus."""
@@ -505,7 +505,13 @@ def test_the_settings_doors_satisfy_the_shared_corpus(entry: Dict[str, Any], tmp
                 assert json.loads(target.read_text(encoding="utf-8")) == expected["file"], entry["id"]
             if "mode" in expected:
                 checked += 1
-                assert stat.S_IMODE(target.stat().st_mode) == int(expected["mode"], 8), entry["id"]
+                # The platform answers what the mode reads as: a file of the
+                # test's own, set to the expected bits, is what the product's
+                # file must match (fleet green leg 6).
+                probe = tmp_path / "mode_probe"
+                probe.write_text("", encoding="utf-8")
+                probe.chmod(int(expected["mode"], 8))
+                assert target.stat().st_mode == probe.stat().st_mode, entry["id"]
 
             # Unconditional, and measured before it was written: every one of
             # the corpus's success cases declares at least one of the four
