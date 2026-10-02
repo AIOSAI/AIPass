@@ -3,7 +3,7 @@
 # Description: Tests for spawn update orchestrator
 # Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.spawn.apps.handlers.update_ignore import read_ignore
+from aipass.spawn.apps.handlers.update_ignore import UpdateIgnoreUnreadable, read_ignore
 from aipass.spawn.apps.handlers.update_ops import (
     _PASSPORT_HEAL_ALLOWLIST,
     _heal_passport,
@@ -869,18 +869,53 @@ class TestUpdateIgnoreIsTheOwnersDecision:
 
         assert path.read_text(encoding="utf-8") == before
 
-    def test_an_unreadable_ignore_file_protects_nothing_and_does_not_raise(
+    @staticmethod
+    def _tree(root):
+        return {p.relative_to(root): (p.read_bytes() if p.is_file() else None) for p in root.rglob("*")}
+
+    def test_an_unreadable_ignore_file_refuses_the_update_and_writes_nothing(
         self, tmp_path, template_dir, branch_dir, mock_registry
     ):
-        """Bad bytes must not take the whole update down with them."""
+        """A claim that cannot be read protects nothing, so the update refuses whole.
+
+        Before leg 6 the bad bytes read as an empty list and README.md, named in
+        the file, was handed in (devpulse's ruling on leg 5 of DPLAN-0354).
+        """
         (branch_dir / "README.md").unlink()
         (branch_dir / ".updateignore").write_bytes(b"\xff\xfe README.md")
+        before = self._tree(branch_dir)
+        registry_before = mock_registry.read_bytes()
 
-        result = self._update(template_dir, mock_registry)
+        with pytest.raises(UpdateIgnoreUnreadable, match=r"\.updateignore"):
+            self._update(template_dir, mock_registry, dry_run=False)
 
-        assert result["success"] is True
-        assert result["owner_protected"] == 0
-        assert "README.md" in [a["template_path"] for a in result["_additions_detail"]]
+        assert self._tree(branch_dir) == before
+        assert mock_registry.read_bytes() == registry_before
+
+    def test_update_all_goes_on_past_a_branch_whose_ignore_file_is_unreadable(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        """One refused branch is a failed row; the next branch is still updated."""
+        (branch_dir / ".updateignore").write_bytes(b"\xff\xfe README.md")
+        other = tmp_path / "other_branch"
+        (other / ".trinity").mkdir(parents=True)
+        (other / ".trinity" / "passport.json").write_bytes((branch_dir / ".trinity" / "passport.json").read_bytes())
+        reg = json.loads(mock_registry.read_text(encoding="utf-8"))
+        reg["branches"].append({"name": "OTHER_BRANCH", "path": "other_branch", "status": "active"})
+        mock_registry.write_text(json.dumps(reg, indent=2) + "\n", encoding="utf-8")
+        before = self._tree(branch_dir)
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            results = {r["branch"]: r for r in update_all(dry_run=False)}
+
+        assert results["test_branch"]["success"] is False
+        assert ".updateignore" in results["test_branch"]["errors"][0]
+        assert self._tree(branch_dir) == before
+        assert results["other_branch"]["success"] is True
+        assert (other / "README.md").is_file()
 
 
 class TestUpdateNeverJudgesASandbox:

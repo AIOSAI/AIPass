@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.3.0
+# Version: 2.3.1
 # Created: 2026-03-07
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -146,6 +146,10 @@ def update_branch(
     hands in the registry it just registered into, so the update reaches the
     branch of THAT project, never a same-named branch of the CWD's project
     (spawn's decision, DPLAN-0354 leg 3).
+
+    Raises:
+        UpdateIgnoreUnreadable: the branch's .updateignore is there but cannot be
+            read; raised before any write.
     """
     errors: list[str] = []
     counts = {
@@ -188,7 +192,8 @@ def update_branch(
     # rule in both walks below — before the create-only set, before the passport
     # heal, before add/merge — because an owner-protected file is a decision already
     # made and nothing downstream is entitled to reconsider it. Absent file, empty
-    # list, nothing protected.
+    # list, nothing protected. An unreadable one raises UpdateIgnoreUnreadable
+    # here, before any write (devpulse's ruling on leg 5 of DPLAN-0354).
     ignore_patterns = read_ignore(branch_dir)
     if ignore_patterns and trace:
         logger.info("[update] %s declares %d owner-protected pattern(s)", IGNORE_NAME, len(ignore_patterns))

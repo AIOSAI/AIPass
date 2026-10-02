@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: regenerate_registry_ops.py
 # Description: Regenerate .template_registry.json for spawn template directories
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-25
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Regenerate template registry — walk template directory, hash files, build registry.
@@ -69,6 +69,9 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     Returns:
         dict with keys: metadata, files, directories, stats.
         The stats key is extra (not written to JSON) — used for CLI output.
+        On a refusal, a dict with the single key error: the directory is
+        missing, the existing manifest is there but unreadable (nothing is
+        written), or the write failed.
     """
     template_dir = Path(template_dir)
 
@@ -76,8 +79,16 @@ def regenerate_template_registry(template_dir: Path) -> dict:
         logger.error(f"Template directory does not exist: {template_dir}")
         return {"error": f"Template directory does not exist: {template_dir}"}
 
-    # Load existing registry for ID preservation
+    # Load existing registry for ID preservation. A manifest that is there but
+    # cannot be read is refused, not read as absent: absent mints fresh ids, and
+    # those written over a manifest that exists are a wrong identity (spawn's
+    # finding in leg 5 of DPLAN-0354, cured in leg 6).
+    registry_path = template_dir / _SPAWN_DIR / _TEMPLATE_REGISTRY_FILE
     existing_registry = load_template_registry(template_dir)
+    if existing_registry is None and registry_path.exists():
+        msg = f"Template registry {registry_path} is there but cannot be read; fix or remove it (nothing regenerated)"
+        logger.error(f"[regenerate-registry] {msg}")
+        return {"error": msg}
 
     # Scan and build new registry entries
     files, directories = _scan_template_directory(template_dir, existing_registry)
@@ -117,7 +128,6 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     # Write the registry
     spawn_dir = template_dir / _SPAWN_DIR
     spawn_dir.mkdir(parents=True, exist_ok=True)
-    registry_path = spawn_dir / _TEMPLATE_REGISTRY_FILE
 
     try:
         # Staged under a unique mkstemp name rather than a fixed ".tmp": two
