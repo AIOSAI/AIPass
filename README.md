@@ -92,6 +92,7 @@ Either way your agent has identity, memory, a mailbox, and access to every AIPas
 aipass init .                         # Just the scaffold, current directory (no guided setup)
 aipass init agent my_agent            # Add another agent
 aipass doctor                         # Check system health
+aipass doctor --cross-os              # Pre-flight check for Linux, macOS and Windows differences
 aipass feedback off                   # Silence the occasional how-are-we-doing ask
 ```
 
@@ -216,7 +217,7 @@ devpulse (orchestrator)
 | Quality | Automated standards, gated in CI across every agent |
 | Tests | Every agent ships its own suite; the whole fleet runs on Linux for Python 3.10–3.13, and on Windows and macOS for 3.12 |
 
-Most agents (14 of 18) document their own operational status in their branch README — what works, what doesn't, and why.
+**Test quality, in progress.** A passing suite only proves something if its tests can fail. seedgo audits every agent's tests for the ones that can't — tests that check the mock instead of the code, assertions that pass on any output, tests that touch live state — and the fleet is being worked through agent by agent, rewriting or retiring what doesn't hold up. That work lands on the [`dev` branch](https://github.com/AIOSAI/AIPass/tree/dev) first.
 
 ## Requirements
 
