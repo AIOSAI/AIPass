@@ -3,7 +3,7 @@
 # Description: Template v1 model — readme_update module, readme_generator and readme_ops
 # Version: 2.3.0
 # Created: 2026-09-20
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/readme_update.py and the handlers it drives."""
@@ -233,6 +233,18 @@ class TestUpdateRun:
         err = capsys.readouterr().err.splitlines()
         assert [line for line in err if line.endswith(f"Failed to load README generator: {broken_generator}")] != []
         assert (registered / "README.md").read_text(encoding="utf-8") == before
+
+    def test_check_names_a_generator_that_cannot_load_with_its_reason(self, capsys, registered, broken_generator):
+        """`readme check` carries its own catch, and only a run of check can see it.
+
+        Green on the code from its first run; its proof is the mutant that drops the reason
+        from _handle_check's message in apps/modules/readme_update.py — killed (seedgo, fleet
+        green leg 6).
+        """
+        readme_update.handle_command("readme", ["check", "@made_up"])
+
+        err = capsys.readouterr().err.splitlines()
+        assert [line for line in err if line.endswith(f"Failed to load README generator: {broken_generator}")] != []
 
 
 # ---------------------------------------------------------------------------

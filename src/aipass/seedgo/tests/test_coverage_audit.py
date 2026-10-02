@@ -3,7 +3,7 @@
 # Description: Unit tests for audit_display.py and branch_audit.py line coverage
 # Version: 1.3.0
 # Created: 2026-04-26
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/audit/audit_display.py and apps/handlers/audit/branch_audit.py."""
@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from rich.text import Text
 
 from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
 from aipass.seedgo.apps.handlers.audit import audit_display, branch_audit
@@ -383,12 +384,17 @@ class TestRenderInfoLines:
         out = _summary(capsys, {"naming": 100}, info_lines=[{"standard": "json_structure", "message": ""}])
         assert "ⓘ" not in out
 
-    def test_info_lines_rendered(self, capsys):
-        """Each info line renders once, through the branch summary a user reaches.
+    def test_info_lines_rendered(self, capsys, monkeypatch):
+        """Each info line renders once and dimmed, through the branch summary a user reaches.
 
         It called the private renderer on a mocked console (seedgo, fleet green
-        leg 5). Mutant: the info line printed twice — killed.
+        leg 5). The dim is read per character off the real console's own recording
+        (seedgo, fleet green leg 6). Mutants: the info line printed twice — killed;
+        the dim dropped — killed.
         """
+        console = audit_display.console
+        monkeypatch.setattr(console, "record", True)
+        console.export_text(clear=True)
         out = _summary(
             capsys,
             {"naming": 100},
@@ -399,6 +405,10 @@ class TestRenderInfoLines:
         )
         lines = out.splitlines()
         assert [line for line in lines if "ⓘ" in line] == ["  ⓘ custom_config: cadence_config.json", "  ⓘ second line"]
+        recorded = [Text.from_ansi(line) for line in console.export_text(styles=True, clear=True).splitlines()]
+        info = [line for line in recorded if "ⓘ" in line.plain]
+        dims = {line.get_style_at_offset(console, i).dim for line in info for i in range(2, len(line.plain))}
+        assert dims == {True}
 
     def test_rendered_at_full_score(self, capsys):
         """A 100% branch still shows its info lines. Mutant: info lines gated on avg < 100 in apps/handlers/audit/audit_display.py — killed."""

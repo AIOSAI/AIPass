@@ -3,7 +3,7 @@
 # Description: Line-coverage tests for plugin_integrity.py and diagnostics_check.py
 # Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/aipass_proof/plugin_integrity.py and apps/handlers/diagnostics/diagnostics_check.py."""
@@ -185,13 +185,6 @@ class TestIsDisplayString:
         """String inside f-string is display text. Mutant: the f-string acquittal dropped in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
         assert _findings(tmp_path, 'x = f"zz_special{y}"\n') == []
 
-    def test_no_parent(self):
-        """Node with no parent returns False."""
-        # HELD (no public seam): scan() hands _is_display_string only nodes from a
-        # parsed module, and every such constant has a parent.
-        child = ast.Constant(value="hello")
-        assert plugin_integrity._is_display_string(child, {}) is False
-
     def test_print_call(self, tmp_path):
         """String passed to console.print() is display text. Mutant: 'print' dropped from the display calls in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
         assert _findings(tmp_path, 'console.print("zz_special")\n') == []
@@ -313,10 +306,9 @@ class TestScanFileAst:
     def test_skips_docstrings(self, tmp_path):
         """Standard name in docstring is not flagged."""
         # HELD (pins nothing): the docstring is not equal to a standard name, so no
-        # mutant of the docstring skip reddens this, through scan() or directly.
-        f = tmp_path / "docstr.py"
-        f.write_text('"""custom_standard is great."""\nx = 1\n', encoding="utf-8")
-        result = plugin_integrity._scan_file_ast(f, ["custom_standard"])
+        # mutant of the docstring skip reddens this. Reached through scan(), the
+        # same assert as the direct call it replaced (seedgo, fleet green leg 6).
+        result = _findings(tmp_path, '"""custom_standard is great."""\nx = 1\n', ("custom_standard",))
         assert result == []
 
     def test_skips_display_strings(self, tmp_path):
@@ -372,10 +364,9 @@ class TestScanFileRegex:
     def test_skips_comment_lines(self, tmp_path):
         """Pure comment lines are skipped."""
         # HELD (pins nothing): the inline-comment strip blanks this line too, so no
-        # mutant of the comment skip reddens this, through scan() or directly.
-        f = tmp_path / "comments.py"
-        f.write_text("# check_custom_std(path)\n", encoding="utf-8")
-        result = plugin_integrity._scan_file_regex(f, ["custom_std"])
+        # mutant of the comment skip reddens this. Reached through scan(), the same
+        # assert as the direct call it replaced (seedgo, fleet green leg 6).
+        result = _findings(tmp_path, "# check_custom_std(path)\n", ("custom_std",))
         assert result == []
 
     def test_skips_docstring_content(self, tmp_path):

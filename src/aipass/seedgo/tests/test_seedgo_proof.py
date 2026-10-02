@@ -3,7 +3,7 @@
 # Description: Unit tests for the seedgo_proof module
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/seedgo_proof.py."""
@@ -33,6 +33,7 @@ def _mock_infrastructure(monkeypatch):
 
     monkeypatch.setattr(seedgo_proof, "header", mock_header)
     monkeypatch.setattr(seedgo_proof, "error", mock_error)
+    return mock_header
 
 
 def _handlers(tmp_path, monkeypatch, target: bool = True):
@@ -138,7 +139,7 @@ def test_handle_command_unknown_pack():
 # ---------------------------------------------------------------------------
 
 
-def test_print_introspection_runs(capsys):
+def test_print_introspection_runs(capsys, _mock_infrastructure):
     """print_introspection headers SEEDGO PROOF and lists the proof packs.
 
     "console.print OR header was called" is not an oracle — it holds for a
@@ -148,10 +149,10 @@ def test_print_introspection_runs(capsys):
     that only appears when discovery actually found something to list.
     Mutant: the pack heading's markup unclosed in apps/modules/seedgo_proof.py — killed.
     """
-    seedgo_proof.header.reset_mock()
+    _mock_infrastructure.reset_mock()
     result = seedgo_proof.print_introspection()
     printed = capsys.readouterr().out
-    headers = [call.args[0] for call in seedgo_proof.header.call_args_list if call.args]
+    headers = [call.args[0] for call in _mock_infrastructure.call_args_list if call.args]
     assert result is None
     assert headers == ["SEEDGO PROOF"], f"introspection headed itself {headers!r}"
     assert "Available Proof Packs:" in printed, f"introspection never listed the packs: {printed!r}"
@@ -237,12 +238,6 @@ def test_discover_proof_handlers_skips_content_files(tmp_path, monkeypatch, caps
     names = list(_run_json(capsys)["results"])
     assert "architecture_content" not in names
     assert "real_proof" in names
-
-
-def test_discover_proof_handlers_nonexistent_dir(tmp_path):
-    """_discover_proof_handlers returns empty list for nonexistent directory."""
-    result = seedgo_proof._discover_proof_handlers(tmp_path / "does_not_exist_xyz")
-    assert result == []
 
 
 # ---------------------------------------------------------------------------

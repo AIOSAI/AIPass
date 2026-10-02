@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plugin_integrity.py
 # Description: Verify core audit modules don't hardcode standard names
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-02
 # =============================================
 
 """Plugin Integrity Proof -- Verify plugin architecture stays clean.
@@ -174,10 +174,14 @@ def _is_display_string(
 
     Strings passed to console.print(), header(), logger.*, error(), warning()
     or used inside f-strings are display text, not hardcoded routing.
+
+    Raises:
+        KeyError: the node has no parent in the map. scan() builds the map from
+            the parsed module and hands over only its Constants, each with a
+            parent; the no-parent arm that answered False was dropped (seedgo,
+            fleet green leg 6).
     """
-    parent = parents.get(id(node))
-    if parent is None:
-        return False
+    parent = parents[id(node)]
 
     # Inside an f-string -> display formatting
     if isinstance(parent, ast.JoinedStr):
