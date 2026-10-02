@@ -934,19 +934,22 @@ class TestHangupDetachesAndNeverKillsTheRoom:
 
     def test_the_child_is_in_its_own_session(self, quiet: Any, tmux_preflight: Any) -> None:
         """
-        start_new_session, so a signal aimed at this server's process group
-        cannot take the operator's room down with it.
+        The child LEADS its own session, which is more than another process group.
 
-        Restarting the host API must never end somebody's attached session.
+        A group of its own keeps a signal aimed at this server's group away (the
+        isolation test pins that); leading a session of its own also keeps the
+        hangup of this server's terminal away, so a restart never ends somebody's
+        attached room. Its body read the pgid like the isolation test until
+        fleet green leg 7 (api); the session id is the claim this name makes.
         """
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
         try:
-            if hasattr(os, "getpgid"):
-                assert os.getpgid(session.process.pid) != os.getpgid(os.getpid())
+            if hasattr(os, "getsid"):
+                assert os.getsid(session.process.pid) == session.process.pid
             else:
-                pytest.fail("this platform opens a PTY and has no os.getpgid to read the child's group by")
+                pytest.fail("this platform opens a PTY and has no os.getsid to read the child's session by")
         finally:
             session.hangup()
 
@@ -1957,6 +1960,33 @@ class TestOneRoomHonoursAnOutsideSeat:
     def _row(self, has_room: bool, outside: Any) -> dict:
         return {"name": "demo", "path": "/x/demo", "has_room": has_room, "outside_room": outside}
 
+    def _attach(self, census: dict, kind: str = "") -> tuple:
+        """
+        Drive the real socket route for branch 'demo' and record the room decision.
+
+        The census and open_attach are recorders, and the session a StubSession,
+        so no PTY, tmux or network is reached (api, fleet green leg 7: the room
+        decision through the public road instead of _room_for by name).
+
+        Returns:
+            (the kwargs open_attach was handed, the rendered attach line, the census mock).
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        query = "/v1/room/attach?branch=demo" + (f"&kind={kind}" if kind else "")
+
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
+            with patch.object(host_server.host_fleet, "resolve_branch", **census) as resolved:
+                with patch.object(host_attach, "open_attach", return_value=StubSession()) as opened:
+                    client = TestClient(host_server.create_app())
+                    with client.websocket_connect(query, subprotocols=["aipass.bearer", raw]) as socket:
+                        line = wait_for_log(log, "socket attached to")
+                        socket.close(code=1000)
+                        wait_for_log(log, "socket detached from")
+
+        return opened.call_args.kwargs, line, resolved
+
     @pytest.fixture(autouse=True)
     def _seated_branch_exists(self, tmp_path: Path):
         """
@@ -1970,7 +2000,7 @@ class TestOneRoomHonoursAnOutsideSeat:
         with patch.object(host_server.host_reads, "resolve_branch_root", return_value=tmp_path):
             yield
 
-    def test_an_outside_room_is_attached_and_never_created(self) -> None:
+    def test_an_outside_room_is_attached_and_never_created(self, store: Any, seated: Any) -> None:
         """
         The whole cure in one assertion: the argv attaches, and carries nothing
         that could bring a session into being.
@@ -1979,12 +2009,11 @@ class TestOneRoomHonoursAnOutsideSeat:
         mint an empty room under a name the desktop believes it owns — which is
         the m12 defect one level down from where it was first found.
         """
-        with patch.object(host_server.host_fleet, "resolve_branch", return_value=self._row(False, "aipass-42")):
-            target, cwd, scope, room, attach_only = host_server._room_for("demo", "", False, False, "AIPass")
+        opened, line, _ = self._attach({"return_value": self._row(False, "aipass-42")})
 
-        assert room == "aipass-42", "the snapshot's own name must be used verbatim"
-        assert attach_only is True
-        assert target == "@demo", "the citizen address the real gate composed"
+        assert opened["room"] == "aipass-42", "the snapshot's own name must be used verbatim"
+        assert opened["attach_only"] is True
+        assert line == "[host_api] socket attached to baud-api for @demo", "the citizen address the real gate composed"
 
     def test_the_attach_only_flag_actually_reaches_the_spawned_argv(self, monkeypatch) -> None:
         """
@@ -2039,56 +2068,45 @@ class TestOneRoomHonoursAnOutsideSeat:
         assert "new-session" in argv
         assert "-A" in argv
 
-    def test_an_own_room_still_wins_and_the_snapshot_does_not_override_it(self) -> None:
+    def test_an_own_room_still_wins_and_the_snapshot_does_not_override_it(self, store: Any, seated: Any) -> None:
         """
         has_room true keeps today's behaviour EXACTLY. This lane may only ever
         rescue a branch that has no room of its own; it must never take one
         away from a branch that does.
         """
-        with patch.object(host_server.host_fleet, "resolve_branch", return_value=self._row(True, "aipass-42")):
-            _, _, _, room, attach_only = host_server._room_for("demo", "", False, False, "AIPass")
+        opened, _, _ = self._attach({"return_value": self._row(True, "aipass-42")})
 
-        assert room == "", "an empty room name is what lets the agent naming rule decide"
-        assert attach_only is False
+        assert opened["room"] == "", "an empty room name is what lets the agent naming rule decide"
+        assert opened["attach_only"] is False
 
-    def test_no_outside_room_falls_through_to_the_naming_rule(self) -> None:
+    def test_no_outside_room_falls_through_to_the_naming_rule(self, store: Any, seated: Any) -> None:
         """A branch with neither a room nor an outside seat is unchanged."""
-        with patch.object(host_server.host_fleet, "resolve_branch", return_value=self._row(False, None)):
-            _, _, _, room, attach_only = host_server._room_for("demo", "", False, False, "AIPass")
+        opened, _, _ = self._attach({"return_value": self._row(False, None)})
 
-        assert room == ""
-        assert attach_only is False
+        assert opened["room"] == ""
+        assert opened["attach_only"] is False
 
-    def test_a_census_that_cannot_answer_does_not_refuse_the_attach(self) -> None:
+    def test_a_census_that_cannot_answer_does_not_refuse_the_attach(self, store: Any, seated: Any) -> None:
         """
         A read failure leaves the caller on the behaviour that shipped for
         months. Refusing an attach because an IMPROVEMENT to it could not be
         computed would make the phone worse the moment @baud's binary hiccups.
         """
-        with patch(PATCH_SERVER_LOGGER):
-            with patch.object(
-                host_server.host_fleet,
-                "resolve_branch",
-                side_effect=host_server.host_fleet.FleetUnavailable("census down"),
-            ):
-                _, _, _, room, attach_only = host_server._room_for("demo", "", False, False, "AIPass")
+        opened, _, _ = self._attach({"side_effect": host_server.host_fleet.FleetUnavailable("census down")})
 
-        assert room == ""
-        assert attach_only is False
+        assert opened["room"] == ""
+        assert opened["attach_only"] is False
 
-    def test_a_shell_is_never_diverted_to_an_outside_room(self) -> None:
+    def test_a_shell_is_never_diverted_to_an_outside_room(self, store: Any, seated: Any) -> None:
         """
         A shell asks for its OWN room by name. `outside_room` is where an agent
         sits, and dropping an operator's shell into the agent's session is the
         opposite of what they typed.
         """
-        with patch.object(
-            host_server.host_fleet, "resolve_branch", return_value=self._row(False, "aipass-42")
-        ) as census:
-            _, _, _, room, attach_only = host_server._room_for("demo", "", False, True, "AIPass")
+        opened, _, census = self._attach({"return_value": self._row(False, "aipass-42")}, kind="shell")
 
-        assert room != "aipass-42"
-        assert attach_only is False
+        assert opened["room"] != "aipass-42"
+        assert opened["attach_only"] is False
         # A shell resolves its own room by name, so the census is never
         # consulted at all — the cheapest possible proof it cannot be diverted.
         census.assert_not_called()
