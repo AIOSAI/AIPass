@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_filesystem_handler.py
 # Description: Unit tests for filesystem_handler.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py."""
@@ -1700,6 +1700,16 @@ class TestHandleEvent:
         handler._handle_event("modified", str(tmp_path / "src" / "aipass" / "prax" / "test.py"))
         call_kwargs = mock_eq.MonitoringEvent.call_args
         assert "error" in str(call_kwargs)
+
+    def test_the_sandbox_root_reaches_should_monitor(self, tmp_path):
+        """should_monitor is judged against the root the handler was given (prax, leg 4)."""
+        mod, _eq, _bd, mock_filters, queue = _import_filesystem_handler()
+        handler = mod.MonitoringFileHandler(event_queue=queue, sandbox_root=tmp_path)
+        mock_filters.should_monitor.return_value = False
+        event_path = tmp_path / "branch" / "dropbox" / "handed.py"
+        handler._handle_event("modified", str(event_path))
+        mock_filters.should_monitor.assert_called_once_with(event_path, tmp_path)
+        queue.enqueue.assert_not_called()
 
     def test_unknown_priority_defaults_to_info(self, tmp_path):
         """Should default to info for unknown priority levels."""

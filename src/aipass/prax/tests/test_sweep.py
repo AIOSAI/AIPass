@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_sweep.py
 # Description: Tests for stale log sweep in log_audit
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-07-10
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/logging/log_watchdog.py's sweep_stale_logs and apps/modules/log_audit.py's sweep route."""
@@ -19,9 +19,13 @@
 # seedgo: no-test-needed(json_structure) — sweep_stale_logs' log_sweep log_operation record, covered by that row
 
 import os
+import sys
 import time
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 from aipass.prax.apps.handlers.logging import log_watchdog as lw
 from aipass.prax.apps.modules import log_audit
@@ -48,7 +52,33 @@ def _stub_sweep(monkeypatch):
         }
     )
     monkeypatch.setattr(lw, "sweep_stale_logs", sweep)
+    _stood_where_log_audit_looks(lw)
     return sweep
+
+
+def _stood_where_log_audit_looks(module, modules=sys.modules):
+    """Fail before the route runs when the stubbed module is not the one log_audit will find.
+
+    _run_sweep imports the watchdog at call time, by name, through sys.modules. A raw
+    pop of that entry in any earlier test would leave the stub on an orphan and send
+    the sweep to the real function, which deletes live logs.
+    """
+    if modules.get(module.__name__) is not module:
+        pytest.fail(f"{module.__name__} in sys.modules is not the module the stub stands on")
+
+
+def test_the_guard_fails_when_sys_modules_holds_another_watchdog():
+    """A different object under the watchdog's name stops the test before the route.
+
+    Proven on the test side only, in a modules mapping of its own: no product
+    mutant is run here, because the far side deletes real logs.
+    """
+    name = lw.__name__
+    with pytest.raises(pytest.fail.Exception, match="not the module the stub stands on"):
+        _stood_where_log_audit_looks(lw, {name: ModuleType(name)})
+    with pytest.raises(pytest.fail.Exception, match="not the module the stub stands on"):
+        _stood_where_log_audit_looks(lw, {})
+    _stood_where_log_audit_looks(lw, {name: lw})
 
 
 class TestSweepIntegration:

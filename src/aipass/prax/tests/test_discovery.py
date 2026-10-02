@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Unit tests for discovery handlers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/discovery/filtering.py, scanner.py, scan.py and apps/modules/discover.py."""
@@ -14,7 +14,7 @@
 # and scanner.discover_python_modules.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — start_file_watcher and stop_file_watcher, covered by tests/test_watcher.py
+# seedgo: no-test-needed(through_the_command) — start_file_watcher, stop_file_watcher, covered by tests/test_watcher.py
 
 import importlib
 import sys
@@ -334,7 +334,13 @@ class TestDiscoverPythonModules:
 
 
 @pytest.fixture()
-def scan_module(monkeypatch):
+def saved_registry() -> dict:
+    """What run_scan handed save_module_registry, recorded by scan_module's double."""
+    return {}
+
+
+@pytest.fixture()
+def scan_module(monkeypatch, saved_registry):
     """Import scan.py with its three collaborators replaced by doubles.
 
     run_scan is orchestration: walk, diff, save. Doubling the walk and the
@@ -343,16 +349,14 @@ def scan_module(monkeypatch):
     import aipass.prax.apps.handlers.discovery.scan as scan_mod
 
     scan_mod = importlib.reload(scan_mod)
-    saved = {}
 
     def fake_save(modules, scan_stats=None):
-        saved["modules"] = modules
-        saved["scan_stats"] = scan_stats
+        saved_registry["modules"] = modules
+        saved_registry["scan_stats"] = scan_stats
         return True
 
     monkeypatch.setattr(scan_mod, "save_module_registry", fake_save)
     monkeypatch.setattr(scan_mod, "json_handler", MagicMock())
-    scan_mod._saved = saved
     return scan_mod
 
 
@@ -380,17 +384,17 @@ class TestRunScan:
         assert result["unchanged"] == 1
         assert result["total"] == 2
 
-    def test_saved_registry_is_the_walk_not_a_merge(self, scan_module, monkeypatch):
+    def test_saved_registry_is_the_walk_not_a_merge(self, scan_module, saved_registry, monkeypatch):
         """The defect this cures: a module whose file is gone stayed on record
         forever, because the incremental path only ever added."""
         _walk(scan_module, monkeypatch, before={"gone": {"file_path": "/dead.py"}}, found={"live": {}})
 
         scan_module.run_scan()
 
-        assert "gone" not in scan_module._saved["modules"]
-        assert sorted(scan_module._saved["modules"]) == ["live"]
+        assert "gone" not in saved_registry["modules"]
+        assert sorted(saved_registry["modules"]) == ["live"]
 
-    def test_discovered_time_is_carried_over_for_a_known_module(self, scan_module, monkeypatch):
+    def test_discovered_time_is_carried_over_for_a_known_module(self, scan_module, saved_registry, monkeypatch):
         """discovered_time means FIRST seen. A scan is not a rediscovery, so a
         module already on record keeps its original stamp."""
         _walk(
@@ -402,15 +406,15 @@ class TestRunScan:
 
         scan_module.run_scan()
 
-        assert scan_module._saved["modules"]["old"]["discovered_time"] == "2026-07-28T02:39:24+00:00"
+        assert saved_registry["modules"]["old"]["discovered_time"] == "2026-07-28T02:39:24+00:00"
 
-    def test_a_new_module_keeps_the_stamp_the_walk_gave_it(self, scan_module, monkeypatch):
+    def test_a_new_module_keeps_the_stamp_the_walk_gave_it(self, scan_module, saved_registry, monkeypatch):
         """Nothing to carry over means the walk's own value stands."""
         _walk(scan_module, monkeypatch, before={}, found={"fresh": {"discovered_time": "2026-09-12T00:00:00+00:00"}})
 
         scan_module.run_scan()
 
-        assert scan_module._saved["modules"]["fresh"]["discovered_time"] == "2026-09-12T00:00:00+00:00"
+        assert saved_registry["modules"]["fresh"]["discovered_time"] == "2026-09-12T00:00:00+00:00"
 
     def test_second_scan_of_an_unchanged_tree_reports_nothing(self, scan_module, monkeypatch):
         """Idempotence is what makes this safe to schedule daily."""
@@ -423,12 +427,12 @@ class TestRunScan:
         assert result["removed"] == []
         assert result["unchanged"] == 2
 
-    def test_scan_stats_go_to_the_registry_for_the_status_line(self, scan_module, monkeypatch):
+    def test_scan_stats_go_to_the_registry_for_the_status_line(self, scan_module, saved_registry, monkeypatch):
         """`drone @prax status` reads these; they are counts, never name lists."""
         _walk(scan_module, monkeypatch, before={"gone": {}}, found={"fresh": {}})
 
         scan_module.run_scan()
-        stats = scan_module._saved["scan_stats"]
+        stats = saved_registry["scan_stats"]
 
         assert stats["added"] == 1
         assert stats["removed"] == 1
@@ -438,9 +442,15 @@ class TestRunScan:
     def test_a_failed_write_is_reported_not_swallowed(self, scan_module, monkeypatch):
         """The counts describe the walk; `saved` is the only word on the file."""
         _walk(scan_module, monkeypatch, before={}, found={"a": {}})
-        monkeypatch.setattr(scan_module, "save_module_registry", lambda modules, scan_stats=None: False)
+        handed: list = []
+        monkeypatch.setattr(
+            scan_module,
+            "save_module_registry",
+            lambda modules, scan_stats=None: handed.append(sorted(modules)) or False,
+        )
 
         assert scan_module.run_scan()["saved"] is False
+        assert handed == [["a"]]
 
 
 # =============================================
@@ -450,13 +460,10 @@ class TestRunScan:
 
 @pytest.fixture()
 def discover_module(monkeypatch):
-    """Import discover.py with the scan and the console doubled."""
+    """Import discover.py with the json service and the logger doubled; the console prints for capsys."""
     import aipass.prax.apps.modules.discover as discover_mod
 
     discover_mod = importlib.reload(discover_mod)
-    monkeypatch.setattr(discover_mod, "console", MagicMock())
-    monkeypatch.setattr(discover_mod, "success", MagicMock())
-    monkeypatch.setattr(discover_mod, "error", MagicMock())
     monkeypatch.setattr(discover_mod, "json_handler", MagicMock())
     monkeypatch.setattr(discover_mod, "logger", MagicMock())
     return discover_mod
@@ -485,14 +492,18 @@ class TestDiscoverCommandGate:
         assert discover_module.handle_command("discover", []) is True
         scanned.assert_not_called()
 
-    def test_run_performs_the_scan(self, discover_module, monkeypatch):
+    def test_run_performs_the_scan(self, discover_module, monkeypatch, mock_prax_infrastructure):
+        """The conftest's cli stand-in is the console discover prints on; read what reached it."""
         monkeypatch.setattr(
             discover_module,
             "run_scan",
-            lambda: {"added": [], "removed": [], "unchanged": 3, "total": 3, "saved": True},
+            lambda: {"added": ["fresh"], "removed": [], "unchanged": 3, "total": 4, "saved": True},
         )
 
         assert discover_module.handle_command("discover", ["run"]) is True
+        printed = [c.args[0] for c in mock_prax_infrastructure.console.print.call_args_list if c.args]
+        assert "  [dim]added: fresh[/dim]" in printed
+        mock_prax_infrastructure.cli.success.assert_called_once_with("Registry updated — 4 modules")
 
     def test_an_unknown_subcommand_is_refused(self, discover_module, monkeypatch):
         """`discover scna` must not be indistinguishable from `discover`."""
@@ -503,3 +514,55 @@ class TestDiscoverCommandGate:
         with pytest.raises(RuntimeError):
             discover_module.handle_command("discover", ["scna"])
         refused.assert_called_once()
+
+
+# =============================================
+# SANDBOXES (the owner's ruling of 09-27: nothing looks into a dropbox, a sandbox like .archive)
+# =============================================
+
+
+def _tree(root: Path, *relative: str) -> None:
+    """Write one .py file at each relative path under root."""
+    for rel in relative:
+        path = root.joinpath(*rel.split("/"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# module\n", encoding="utf-8")
+
+
+class TestSandboxesAreNotDiscovered:
+    """discover_python_modules never walks into a dropbox or an .archive below its root."""
+
+    def test_a_dropbox_and_an_archive_are_not_discovered_and_the_live_module_is(
+        self, scanner_module, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(scanner_module, "ECOSYSTEM_ROOT", tmp_path)
+        _tree(tmp_path, "branch/apps/live.py", "branch/dropbox/handed.py", "branch/.archive/old.py")
+
+        result = scanner_module.discover_python_modules()
+
+        assert set(result) == {"live"}
+
+    def test_an_archived_copy_does_not_take_the_live_modules_entry(self, scanner_module, tmp_path, monkeypatch):
+        """Keyed by stem, an archived scanner.py walked after the live one used to overwrite it."""
+        monkeypatch.setattr(scanner_module, "ECOSYSTEM_ROOT", tmp_path)
+        _tree(tmp_path, "branch/apps/scanner.py", "branch/.archive/snapshots/apps/scanner.py")
+
+        result = scanner_module.discover_python_modules()
+
+        assert Path(result["scanner"]["file_path"]) == tmp_path / "branch" / "apps" / "scanner.py"
+
+    def test_a_root_inside_a_directory_named_dropbox_still_finds_its_own_module(
+        self, scanner_module, tmp_path, monkeypatch
+    ):
+        """The names are compared below the root of the walk, never on the whole path.
+
+        Green on the tree before the cure (nothing was skipped then); its proof is the
+        mutant that compares the whole path.
+        """
+        root = tmp_path / "dropbox" / "eco"
+        monkeypatch.setattr(scanner_module, "ECOSYSTEM_ROOT", root)
+        _tree(root, "branch/apps/live.py")
+
+        result = scanner_module.discover_python_modules()
+
+        assert set(result) == {"live"}

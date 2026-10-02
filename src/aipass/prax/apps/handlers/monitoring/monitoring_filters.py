@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitoring_filters.py
 # Description: Monitoring Filter Patterns
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-23
-# Modified: 2026-03-09
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -21,6 +21,7 @@ Based on backup/config_handler.py's excellent pattern organization.
 from pathlib import Path
 from typing import Dict, Optional, Any
 
+from aipass.prax.apps.handlers.discovery.filtering import in_sandbox
 from aipass.prax.apps.handlers.json import json_handler
 
 # =============================================
@@ -250,14 +251,18 @@ DEFAULT_EVENT_TYPES = EVENT_TYPES["all"]
 # =============================================
 
 
-def should_monitor(path: Path) -> bool:
+def should_monitor(path: Path, root: Optional[Path] = None) -> bool:
     """Check if path should be monitored
 
-    Checks ALWAYS patterns first (exceptions that override ignores),
-    then checks IGNORE patterns. Default is to monitor if no match.
+    A path in a dropbox, an .archive or a __pycache__ below root is never
+    monitored (the owner's ruling of 09-27: nothing looks into a dropbox, a
+    sandbox like .archive); only the parts below root are compared. Then
+    ALWAYS patterns (exceptions that override ignores), then IGNORE patterns.
+    Default is to monitor if no match.
 
     Args:
         path: Path object to check
+        root: The root being watched; None keeps the judgement it always had
 
     Returns:
         True if path should be monitored, False otherwise
@@ -269,6 +274,9 @@ def should_monitor(path: Path) -> bool:
     """
     json_handler.log_operation("monitoring_started", {"path": str(path)})
     import os
+
+    if root is not None and in_sandbox(path, root):
+        return False
 
     path_str = str(path)
     parts = set(path_str.split(os.sep))

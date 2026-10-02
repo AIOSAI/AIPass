@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pid_cache.py
 # Description: Tests for the PID cache handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/pid_cache.py"""
@@ -14,6 +14,7 @@
 import json
 import sys
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 _HANDLER_MOCKS = {
@@ -58,9 +59,14 @@ class TestParseLockPid:
         new_cache: dict[str, int] = {}
         entry = {"path": str(branch_dir), "name": "flow"}
 
+        real_exists = Path.exists
         with (
             patch("sys.platform", "linux"),
-            patch("pathlib.Path.exists", side_effect=lambda self=None: True),
+            patch(
+                "pathlib.Path.exists",
+                autospec=True,
+                side_effect=lambda self, **kw: self.name == "12345" or real_exists(self, **kw),
+            ),
         ):
             mod.parse_lock_pid(entry, new_cache)
 

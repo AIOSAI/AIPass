@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watcher.py
 # Description: File System Watching
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2025-11-26
-# Modified: 2026-09-24
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -16,9 +16,6 @@ No console output - follows 3-tier handler pattern.
 """
 
 import logging
-
-logger = logging.getLogger(__name__)
-
 import threading
 import time
 from pathlib import Path
@@ -37,8 +34,10 @@ from aipass.prax.apps.handlers.registry.load import load_module_registry
 from aipass.prax.apps.handlers.registry.save import save_module_registry
 
 # Import filtering
-from aipass.prax.apps.handlers.discovery.filtering import should_ignore_path
+from aipass.prax.apps.handlers.discovery.filtering import in_sandbox, should_ignore_path
 from aipass.prax.apps.handlers.json import json_handler
+
+logger = logging.getLogger(__name__)
 
 # =============================================
 # TRIGGER — OPTIONAL, AND FETCHED AT THE FIRE SITE
@@ -171,8 +170,8 @@ class PythonFileWatcher(FileSystemEventHandler):
 
         py_file = Path(str(event.src_path))
 
-        # Skip ignored paths
-        if should_ignore_path(py_file):
+        # Skip ignored paths, and anything in a dropbox or an .archive below the root
+        if should_ignore_path(py_file) or in_sandbox(py_file, ECOSYSTEM_ROOT):
             return
 
         module_name = py_file.stem

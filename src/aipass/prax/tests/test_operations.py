@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations.py
 # Description: Unit tests for dashboard operations handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/dashboard/operations.py."""
@@ -1690,7 +1690,7 @@ class TestHandleRefresh:
             lambda: {"status": "success", "branches_updated": 3},
         )
 
-        mod._handle_refresh(["--all"])
+        mod.handle_command("dashboard", ["refresh", "--all"])
 
         printed = _printed_lines(mod)
         assert "[dim]Refreshing all branch dashboards...[/dim]" in printed
@@ -1711,7 +1711,7 @@ class TestHandleRefresh:
             },
         )
 
-        mod._handle_refresh(["--all"])
+        mod.handle_command("dashboard", ["refresh", "--all"])
 
         assert "[dim]Refreshing all branch dashboards...[/dim]" in _printed_lines(mod)
         # error(), not warning(): only error() sets the failure flag main() reads
@@ -1736,7 +1736,7 @@ class TestHandleRefresh:
             },
         )
 
-        mod._handle_refresh(["--all"])
+        mod.handle_command("dashboard", ["refresh", "--all"])
 
         assert "[dim]Refreshing all branch dashboards...[/dim]" in _printed_lines(mod)
         assert [call.args[0] for call in mod.error.call_args_list] == ["Refresh failed", "total failure"]
@@ -1751,7 +1751,7 @@ class TestHandleRefresh:
             lambda bp: {"status": "success", "branch": "FLOW"},
         )
 
-        mod._handle_refresh(["@flow"])
+        mod.handle_command("dashboard", ["refresh", "@flow"])
 
         printed = _printed_lines(mod)
         assert "[dim]Refreshing FLOW dashboard...[/dim]" in printed
@@ -1768,7 +1768,7 @@ class TestHandleRefresh:
             lambda bp: {"status": "error", "error": "disk full"},
         )
 
-        mod._handle_refresh(["@flow"])
+        mod.handle_command("dashboard", ["refresh", "@flow"])
 
         assert "[dim]Refreshing FLOW dashboard...[/dim]" in _printed_lines(mod)
         mod.error.assert_called_once_with("Failed: disk full")
@@ -1783,7 +1783,7 @@ class TestHandleRefresh:
 
         monkeypatch.setattr(mod, "_resolve_branch_path", _raise)
 
-        mod._handle_refresh(["@ghost"])
+        mod.handle_command("dashboard", ["refresh", "@ghost"])
 
         mod.error.assert_called_once_with("not found in registry")
         assert _printed_lines(mod) == []
@@ -1807,7 +1807,7 @@ class TestHandleRefresh:
             lambda bp: {"status": "success", "branch": "PRAX"},
         )
         with _patch("pathlib.Path.cwd", return_value=tmp_path):
-            mod._handle_refresh([])
+            mod.handle_command("dashboard", ["refresh"])
 
         printed = _printed_lines(mod)
         assert f"[dim]Refreshing {tmp_path.name.upper()} dashboard...[/dim]" in printed
@@ -1829,7 +1829,7 @@ class TestHandleRefresh:
             lambda bp: {"status": "error", "error": "no dashboard"},
         )
         with _patch("pathlib.Path.cwd", return_value=tmp_path):
-            mod._handle_refresh([])
+            mod.handle_command("dashboard", ["refresh"])
 
         assert f"[dim]Refreshing {tmp_path.name.upper()} dashboard...[/dim]" in _printed_lines(mod)
         mod.error.assert_called_once_with("Failed: no dashboard")
@@ -1857,7 +1857,7 @@ class TestHandleRefresh:
         )
 
         with _patch("pathlib.Path.cwd", return_value=prax):
-            mod._handle_refresh([])
+            mod.handle_command("dashboard", ["refresh"])
 
         assert refreshed == [flow]
         assert "[green]Refreshed FLOW[/green]" in _printed_lines(mod)
@@ -1872,7 +1872,7 @@ class TestHandleRefresh:
         monkeypatch.setattr(mod, "refresh_single_dashboard", lambda bp: refreshed.append(bp))
 
         with _patch("pathlib.Path.cwd", side_effect=FileNotFoundError("deleted")):
-            mod._handle_refresh([])
+            mod.handle_command("dashboard", ["refresh"])
 
         assert refreshed == []
         mod.error.assert_called_once_with(
@@ -1909,7 +1909,7 @@ class TestHandlePushTemplate:
             },
         )
 
-        mod._handle_push_template([])
+        mod.handle_command("dashboard", ["push-template"])
 
         printed = _printed_lines(mod)
         assert "[bold]Dashboard Template PUSH Results[/bold]" in printed
@@ -1941,7 +1941,7 @@ class TestHandlePushTemplate:
             }
 
         monkeypatch.setattr(mod, "push_dashboard_template", _mock_push)
-        mod._handle_push_template(["--dry-run"])
+        mod.handle_command("dashboard", ["push-template", "--dry-run"])
         assert captured["dry_run"] is True
 
     def test_push_template_with_errors(self, monkeypatch):
@@ -1960,7 +1960,7 @@ class TestHandlePushTemplate:
             },
         )
 
-        mod._handle_push_template([])
+        mod.handle_command("dashboard", ["push-template"])
 
         printed = _printed_lines(mod)
         assert "  Branches scanned:  3" in printed
@@ -1987,7 +1987,7 @@ class TestHandlePushTemplate:
             },
         )
 
-        mod._handle_push_template([])
+        mod.handle_command("dashboard", ["push-template"])
 
         printed = _printed_lines(mod)
         assert "  Branches scanned:  3" in printed
@@ -2014,7 +2014,7 @@ class TestHandleDiffTemplate:
             lambda branch_name=None: {"error": "template not found"},
         )
 
-        mod._handle_diff_template([])
+        mod.handle_command("dashboard", ["diff-template"])
 
         mod.error.assert_called_once_with("template not found")
         assert _printed_lines(mod) == []
@@ -2037,14 +2037,14 @@ class TestHandleDiffTemplate:
             }
 
         monkeypatch.setattr(mod, "diff_dashboard_template", _mock_diff)
-        mod._handle_diff_template(["--branch", "FLOW"])
+        mod.handle_command("dashboard", ["diff-template", "--branch", "FLOW"])
         assert captured["branch_name"] == "FLOW"
 
     def test_diff_template_branch_flag_missing_name(self):
         """--branch without name prints error."""
         mod = _load_dashboard_module()
-        mod._handle_diff_template(["--branch"])
-        mod.error.assert_called()
+        mod.handle_command("dashboard", ["diff-template", "--branch"])
+        mod.error.assert_called_once_with("--branch requires a branch name")
 
     def test_diff_template_with_changes(self, monkeypatch):
         """Summary counters, per-branch additions/removals/modifications; up-to-date branches are skipped."""
@@ -2073,7 +2073,7 @@ class TestHandleDiffTemplate:
             },
         )
 
-        mod._handle_diff_template([])
+        mod.handle_command("dashboard", ["diff-template"])
 
         printed = _printed_lines(mod)
         assert "  Needs update: 1" in printed
@@ -2121,7 +2121,7 @@ class TestHandleTemplateStatus:
             },
         )
 
-        mod._handle_template_status()
+        mod.handle_command("dashboard", ["template-status"])
 
         printed = _printed_lines(mod)
         assert any("Schema version:  3.0.0" in line for line in printed)
@@ -2145,7 +2145,7 @@ class TestHandleTemplateStatus:
             },
         )
 
-        mod._handle_template_status()
+        mod.handle_command("dashboard", ["template-status"])
 
         printed = _printed_lines(mod)
         assert "  Templates dir:   /path/to/templates" in printed
@@ -2172,7 +2172,7 @@ class TestHandleTemplateStatus:
             },
         )
 
-        mod._handle_template_status()
+        mod.handle_command("dashboard", ["template-status"])
 
         printed = _printed_lines(mod)
         assert "  Template file:   found" in printed

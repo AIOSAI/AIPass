@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_audit.py
 # Description: Unit tests for PRAX log_audit module
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/log_audit.py."""
@@ -18,7 +18,8 @@
 # seedgo: no-test-needed(help_flag_safety) — -h skipping _run_enforce(), covered by tests/test_help_flag_safety.py
 # seedgo: no-test-needed(json_structure) — the log_audit_executed record written through json_handler.log_operation
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -120,7 +121,33 @@ def _ensure_watchdog_mock(monkeypatch):
     )
     for name in _WATCHDOG_NAMES:
         monkeypatch.setattr(log_watchdog, name, getattr(mock_watchdog, name))
+    _stood_where_log_audit_looks(log_watchdog)
     return mock_watchdog
+
+
+def _stood_where_log_audit_looks(module, modules=sys.modules):
+    """Fail before the route runs when the stubbed module is not the one log_audit will find.
+
+    log_audit imports the watchdog at call time, by name, through sys.modules. A raw
+    pop of that entry in any earlier test would leave the stub on an orphan and send
+    enforce or sweep to the real functions over the live system_logs.
+    """
+    if modules.get(module.__name__) is not module:
+        pytest.fail(f"{module.__name__} in sys.modules is not the module the stub stands on")
+
+
+def test_the_guard_fails_when_sys_modules_holds_another_watchdog():
+    """A different object under the watchdog's name stops the test before any route.
+
+    Proven on the test side only, in a modules mapping of its own: no product
+    mutant is run here, because the far side truncates and deletes real logs.
+    """
+    name = log_watchdog.__name__
+    with pytest.raises(pytest.fail.Exception, match="not the module the stub stands on"):
+        _stood_where_log_audit_looks(log_watchdog, {name: ModuleType(name)})
+    with pytest.raises(pytest.fail.Exception, match="not the module the stub stands on"):
+        _stood_where_log_audit_looks(log_watchdog, {})
+    _stood_where_log_audit_looks(log_watchdog, {name: log_watchdog})
 
 
 # =============================================

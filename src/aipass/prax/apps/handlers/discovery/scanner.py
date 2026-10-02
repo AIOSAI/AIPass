@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scanner.py
 # Description: Directory Scanning
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-10
-# Modified: 2026-03-09
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -19,21 +19,23 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any
 
-logger = logging.getLogger(__name__)
-
 # Import from prax config
 from aipass.prax.apps.handlers.config.load import ECOSYSTEM_ROOT, get_system_logs_dir, get_module_logs_dir
 
 # Import filtering
-from aipass.prax.apps.handlers.discovery.filtering import should_ignore_path
+from aipass.prax.apps.handlers.discovery.filtering import in_sandbox, should_ignore_path
 from aipass.prax.apps.handlers.json import json_handler
+
+logger = logging.getLogger(__name__)
 
 
 def scan_directory_safely(directory: Path, modules: Dict, max_depth: int = 10):
     """Safely scan directory with depth limit
 
     Recursively scans directory for Python files, respecting ignore patterns
-    and depth limits to prevent infinite loops.
+    and depth limits to prevent infinite loops. A dropbox, an .archive or a
+    __pycache__ below the directory is never entered (filtering.in_sandbox), so
+    an archived copy cannot take a live module's entry, which is keyed by stem.
 
     Args:
         directory: Directory to scan
@@ -45,7 +47,7 @@ def scan_directory_safely(directory: Path, modules: Dict, max_depth: int = 10):
 
     try:
         for item in directory.iterdir():
-            if should_ignore_path(item):
+            if should_ignore_path(item) or in_sandbox(item, directory):
                 continue
 
             if item.is_file() and item.suffix == ".py":

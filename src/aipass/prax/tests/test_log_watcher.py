@@ -3,7 +3,7 @@
 # Description: Tests for log file monitoring handler
 # Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/log_watcher.py."""
@@ -156,8 +156,19 @@ class TestExtractCommandInfo:
         watcher, _ = _make_watcher(mod)
         line = "[drone] Drone started with args: ['close', 'plan', '0098']"
         result = watcher._extract_command_info(line)
-        # The args list is joined with its commas kept: this pins what the monitor shows today.
-        assert result == {"command": "drone close, plan, 0098", "caller": None, "target": None}
+        # The command as it was typed, the form _match_executing_command already shows (prax, leg 4).
+        assert result == {"command": "drone close plan 0098", "caller": None, "target": None}
+
+    def test_drone_started_args_keep_a_comma_inside_an_argument(self):
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        line = "[drone] Drone started with args: ['dispatch', '@devpulse', 'Subject, with a comma']"
+        result = watcher._extract_command_info(line)
+        assert result == {
+            "command": "drone dispatch @devpulse Subject, with a comma",
+            "caller": None,
+            "target": "DEVPULSE",
+        }
 
     def test_flow_creating_plan(self):
         mod = _import_log_watcher()
@@ -725,8 +736,8 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "Drone started with args: ['audit', '@prax']"
         result = watcher._extract_command_info(line)
-        # Pins today's output: args joined with commas, and the @prax in them is not read as a target.
-        assert result == {"command": "drone audit, @prax", "caller": None, "target": None}
+        # The @prax in the args is the target, read as _extract_target_from_cmd reads it (prax, leg 4).
+        assert result == {"command": "drone audit @prax", "caller": None, "target": "PRAX"}
 
 
 class TestMatchExecutingCommand:

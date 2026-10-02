@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_event_queue.py
 # Description: Unit tests for MonitoringEvent and MonitoringQueue
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/event_queue.py and the branch_scope.py filter it drives."""
@@ -95,9 +95,14 @@ class TestMonitoringEvent:
         assert event.priority == 3
 
     def test_explicit_priority_not_overridden(self, monitoring_event_cls):
-        """When priority is non-zero, __post_init__ leaves it alone."""
-        event = monitoring_event_cls(priority=5, level="error")
-        assert event.priority == 5
+        """When priority is non-zero, __post_init__ leaves it alone: it queues behind an auto-mapped error."""
+        explicit = monitoring_event_cls(priority=5, level="error")
+        auto = monitoring_event_cls(priority=0, level="error")
+
+        ordered = sorted([explicit, auto])
+
+        assert ordered[0] is auto
+        assert ordered[1] is explicit
 
     def test_ordering_lower_priority_comes_first(self, monitoring_event_cls):
         """Lower priority number sorts before higher (error < warning < info)."""

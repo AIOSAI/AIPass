@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rate_tracker.py
 # Description: Tests for the rate tracker runaway-log detector
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-14
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/rate_tracker.py"""
@@ -27,7 +27,6 @@
 # seedgo: no-test-needed(log_level) — _fire_event's warning line naming a runaway, covered by that row
 
 import time
-from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -332,8 +331,8 @@ class TestRotationDuringRunaway:
         # Three intervals, the last one a rotation - the counter must keep climbing.
         self._run_rotating_flood(mod, log_file, bytes_per_interval, 3)
 
-        state = mod._tracked[str(log_file)]
-        assert state.critical_sustained >= 3
+        [row] = mod.get_snapshot()
+        assert row["critical_sustained"] >= 3
 
 
 class TestBurstDetection:
@@ -477,7 +476,7 @@ class TestSuppression:
         mod.scan_rates()
         mod.scan_rates()
 
-        assert "noisy_module.log" not in {Path(k).name for k in mod._tracked}
+        assert mod.get_snapshot() == []
 
     def test_non_suppressed_file_tracked(self, tmp_path, monkeypatch):
         """Non-suppressed files are tracked normally."""
@@ -490,7 +489,7 @@ class TestSuppression:
 
         mod.scan_rates()
 
-        assert any("normal_module.log" in k for k in mod._tracked)
+        assert [row["file"] for row in mod.get_snapshot()] == ["normal_module.log"]
 
 
 class TestEventPayload:
@@ -541,13 +540,13 @@ class TestFileDisappearance:
         _reset_tracker(monkeypatch, logs_dir=logs_dir)
         mod.scan_rates()
 
-        assert any("ephemeral.log" in k for k in mod._tracked)
+        assert [row["file"] for row in mod.get_snapshot()] == ["ephemeral.log"]
 
         log_file.unlink()
 
         mod.scan_rates()
 
-        assert not any("ephemeral.log" in k for k in mod._tracked)
+        assert mod.get_snapshot() == []
 
 
 class TestSnapshot:
@@ -574,20 +573,6 @@ class TestSnapshot:
 
 class TestConfigure:
     """configure() sets module-level dependencies."""
-
-    def test_configure_clears_tracked_on_reimport(self, tmp_path, monkeypatch):
-        """Fresh import via _import_tracker starts with empty tracked dict."""
-        logs_dir = tmp_path / "system"
-        logs_dir.mkdir(parents=True)
-        (logs_dir / "test_module.log").write_text("x" * 100, encoding="utf-8")
-
-        _reset_tracker(monkeypatch, logs_dir=logs_dir)
-        mod.scan_rates()
-
-        assert len(mod._tracked) > 0
-
-        mod._tracked.clear()
-        assert len(mod._tracked) == 0
 
 
 class TestNoTrigger:
@@ -677,17 +662,8 @@ class TestPersistence:
         _reset_tracker(monkeypatch)
         _jh().load_json.return_value = None
 
-        mod._load_state()
-        assert len(mod._tracked) == 0
-
-    def test_reimport_clears_state_loaded_flag(self, monkeypatch):
-        """Fresh _reset_tracker resets _state_loaded so next scan reloads from disk."""
-        _reset_tracker(monkeypatch)
-        monkeypatch.setattr(mod, "_state_loaded", True)
-        assert mod._state_loaded is True
-
-        _reset_tracker(monkeypatch)
-        assert mod._state_loaded is False
+        assert mod.get_snapshot() == []
+        _jh().load_json.assert_called_once_with("rate_tracker", "data")
 
 
 class TestRateHistoryPersistence:

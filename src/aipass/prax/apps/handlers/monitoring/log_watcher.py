@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Log File Monitor
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-23
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -21,6 +21,7 @@ Features:
 Based on: apps/handlers/discovery/watcher.py (production-ready log tailing)
 """
 
+import ast
 import os
 import sys
 from pathlib import Path
@@ -248,8 +249,16 @@ class LogFileWatcher(FileSystemEventHandler):
         if "Drone started with args:" in log_line or "[drone] Drone started with args:" in log_line:
             match = re.search(r"args:\s*\[([^\]]+)\]", log_line)
             if match:
-                args = match.group(1).replace("'", "").replace('"', "")
-                return {"command": f"drone {args}", "caller": None, "target": None}
+                # The command as typed, its @branch read as the target - the form
+                # _match_executing_command already shows (prax, leg 4).
+                try:
+                    args = [str(arg) for arg in ast.literal_eval(f"[{match.group(1)}]")]
+                except (ValueError, SyntaxError) as exc:
+                    # The phrase this branch matches is kept out of the line, so it is not parsed again
+                    logger.info("[log_watcher] drone args not a literal list (%s), shown as raw text", exc)
+                    args = [match.group(1).replace("'", "").replace('"', "")]
+                command = " ".join(args)
+                return {"command": f"drone {command}", "caller": None, "target": self._extract_target_from_cmd(command)}
 
         # Pattern 2: Flow plan commands
         if "[FLOW]" in log_line or "FLOW_PLAN]" in log_line:

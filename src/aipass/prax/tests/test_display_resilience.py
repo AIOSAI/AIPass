@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display_resilience.py
 # Description: The display consumer must survive an unrenderable event
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""
@@ -141,13 +141,6 @@ class TestEventTextIsUntrustedMarkup:
         console = Console(file=buffer, width=200, no_color=True, highlight=False, markup=True)
         with pytest.raises(Exception):
             console.print(f"[white]{CRASHING_MESSAGE}[/white]")
-
-    def test_canary_unescaped_lowercase_tag_is_eaten(self):
-        """Proof the [event_queue] assertion can fail: raw interpolation swallows it."""
-        buffer = io.StringIO()
-        console = Console(file=buffer, width=200, no_color=True, highlight=False, markup=True)
-        console.print(f"[white]{EATEN_MESSAGE}[/white]")
-        assert "[event_queue]" not in buffer.getvalue()
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watcher.py
 # Description: Tests for file system watcher handlers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/watcher/monitor.py and apps/handlers/discovery/watcher.py."""
@@ -669,6 +669,33 @@ class TestDispatcherSurvivesHandlerFailure:
         bus.fire.assert_called_once_with(
             "module_discovered", module_name="keeper", file_path=str(real_file), relative_path="keeper.py"
         )
+
+    def test_a_file_created_in_a_dropbox_or_an_archive_is_not_registered(self, tmp_path, monkeypatch):
+        """The owner's ruling of 09-27: nothing looks into a dropbox, a sandbox like .archive.
+
+        The live file created beside them is the control: it is registered as before.
+        Written after the cure; its proof is the mutant that drops in_sandbox.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: p.suffix != ".py")
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        monkeypatch.setattr(mod, "_get_trigger", lambda: MagicMock())
+        saved = {}
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
+
+        handler = mod.PythonFileWatcher()
+        for rel in ("dropbox/handed.py", ".archive/old.py", "apps/live.py"):
+            created = tmp_path.joinpath("branch", *rel.split("/"))
+            created.parent.mkdir(parents=True, exist_ok=True)
+            created.write_bytes(b"x = 1\n")
+            event = MagicMock()
+            event.event_type = "created"
+            event.is_directory = False
+            event.src_path = str(created)
+            handler.dispatch(event)
+
+        assert set(saved) == {"live"}
 
     def test_the_recorded_size_is_the_real_size_under_crlf(self, tmp_path, monkeypatch):
         """The Windows half of the size pin, run on Linux.

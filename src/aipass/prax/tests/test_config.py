@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config.py
 # Description: Tests for prax config handlers (load + ignore_patterns)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
@@ -58,8 +58,11 @@ def _patch_load_world(monkeypatch, tmp_path):
     # Clear test log redirects so tests exercise real path resolution
     monkeypatch.delenv("AIPASS_TEST_LOG_DIR", raising=False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    # Suppress sys.modules-based pytest detection so tests can verify prod paths
-    monkeypatch.setattr(load_mod, "_is_pytest_session", lambda: False)
+    # Suppress sys.modules-based pytest detection so tests can verify prod paths;
+    # every consultation is recorded, so a test can show the product asked.
+    consulted: list = []
+    monkeypatch.setattr(load_mod, "_is_pytest_session", lambda: consulted.append(True) or False)
+    return consulted
 
 
 def _patch_ignore_world(monkeypatch, tmp_path):
@@ -92,10 +95,12 @@ class TestGetSystemLogsDir:
         assert result.name == "system_logs"
 
     def test_returns_system_logs_subdir(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        _patch_load_world(monkeypatch, tmp_path)
+        consulted = _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         result = load_mod.get_system_logs_dir()
         assert result == tmp_path / "system_logs"
+        # The session detector was asked before the repo's own system_logs was chosen
+        assert consulted == [True]
 
     def test_creates_directory(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_load_world(monkeypatch, tmp_path)

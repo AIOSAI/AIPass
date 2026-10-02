@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers.py
 # Description: Unit tests for monitoring handler modules
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py and the three sibling handlers listed below."""
@@ -1057,6 +1057,9 @@ class TestExactCaseRegistries:
     Linux — where the real glob is case-sensitive and could never produce the
     input that breaks it. A live-directory test here would be green on the only
     platform I can run and silent on the one that has the defect.
+
+    The positive control that ran the stand-in glob alone is retired (prax, leg 4):
+    the mutant that drops the filter reddens the first pin at its assert.
     """
 
     def test_a_lowercase_registry_is_rejected_even_when_the_glob_returns_it(self, tmp_path, monkeypatch):
@@ -1079,21 +1082,6 @@ class TestExactCaseRegistries:
         (tmp_path / "notes.json").write_text("{}", encoding="utf-8")
 
         assert mod._exact_case_registries(tmp_path) == [real]
-
-    def test_the_stand_in_really_would_have_passed_the_bad_name_through(self, tmp_path, monkeypatch):
-        """Positive control: without the filter the lowercase file gets in.
-
-        Otherwise a stand-in that quietly returned one path would make the pin
-        vacuous and it would read as proof.
-        """
-        real = tmp_path / "PROJECT_REGISTRY.json"
-        windows_only = tmp_path / "project_registry.json"
-        for path in (real, windows_only):
-            path.write_text("{}", encoding="utf-8")
-        monkeypatch.setattr(type(tmp_path), "glob", lambda self, _pattern: iter([real, windows_only]))
-
-        unfiltered = sorted(tmp_path.glob("*_REGISTRY.json"))
-        assert windows_only in unfiltered
 
 
 class TestFindRepoRoot:
