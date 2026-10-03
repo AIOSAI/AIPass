@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-05
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
@@ -30,6 +30,37 @@ from aipass.spawn.apps.handlers.registry import (
     save_registry,
     get_next_citizen_number,
 )
+from aipass.spawn.apps.modules.core import handle_command
+
+
+class TestCreateFlags:
+    """core.handle_command('create', ...) passes --role, --traits and --purpose through to the passport."""
+
+    def test_role_traits_purpose_land_in_the_passport(self, tmp_agent, tmp_registry):
+        """Each flag's value lands in the minted passport's identity block, under its own key.
+
+        Green from its first run on this tree: its proof is its mutants (a flag's
+        value dropped or routed to another key in handle_command -> red).
+        """
+
+        args = [
+            str(tmp_agent),
+            "--role",
+            "Flag Role",
+            "--traits",
+            "curious",
+            "--purpose",
+            "Flag Purpose",
+            "--registry",
+            str(tmp_registry),
+        ]
+
+        assert handle_command("create", args) is True
+
+        identity = json.loads((tmp_agent / ".trinity" / "passport.json").read_text(encoding="utf-8"))["identity"]
+        assert identity["role"] == "Flag Role"
+        assert identity["traits"] == ["curious"]
+        assert identity["purpose"] == "Flag Purpose"
 
 
 @pytest.fixture

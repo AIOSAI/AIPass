@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-05
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -43,10 +43,9 @@ from aipass.spawn.apps.handlers.metadata import (
     get_branch_name as get_branch_name,
     normalize_branch_name as normalize_branch_name,
 )
-from aipass.spawn.apps.handlers.seed_ops import find_seed
 from aipass.spawn.apps.handlers.adoption_ops import adopt_existing, birth_from_seed, error_result
 from aipass.spawn.apps.handlers.class_registry import (
-    get_template_dir as _get_template_dir,
+    get_template_dir as get_template_dir,
     validate_class as validate_class,
     get_default_class as get_default_class,
     get_available_classes as get_available_classes,
@@ -54,8 +53,7 @@ from aipass.spawn.apps.handlers.class_registry import (
     refuse_retired_or_forbidden as refuse_retired_or_forbidden,
     class_for_citizen_number as class_for_citizen_number,
 )
-from aipass.spawn.apps.handlers.json import json_handler
-from aipass.spawn.apps.handlers.mint_ops import mint_citizen
+from aipass.spawn.apps.handlers.mint_ops import spawn_at
 
 # Default template location (relative to spawn package root). One template for
 # every citizen — the class no longer picks a scaffold (DPLAN-0319 R3).
@@ -91,7 +89,9 @@ def print_introspection():
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/[/cyan]")
-    console.print("    [dim]- mint_ops.py (mint_citizen — the mint body, step by step, called by spawn_agent)[/dim]")
+    console.print(
+        "    [dim]- mint_ops.py (spawn_at, mint_citizen — the lane and the mint body, called by spawn_agent)[/dim]"
+    )
     console.print(
         "    [dim]- metadata.py (get_branch_name, normalize_branch_name, detect_profile — branch identity)[/dim]"
     )
@@ -193,104 +193,20 @@ def spawn_agent(
     registry_path=None,
     citizen_class=None,
 ):
+    """Create a new AIPass agent from template — the public door (aipass.spawn exports it).
+
+    The lane (refusals, adopt, birth from seed, mint) lives in handlers/mint_ops.py
+    spawn_at, which documents every argument and the result dict (DPLAN-0354 leg 9).
+    This module keeps the routing and hands in its @memory meta-tab importer.
     """
-    Create a new AIPass agent from template.
-
-    Args:
-        target_path: Where to create the agent (must not exist)
-        role: Agent's role description
-        traits: Agent's personality traits. A bare string becomes a one-element
-            list; a list/tuple is stored as given. identity.traits is a LIST in
-            the 2.0 schema (DPLAN-0319 R7), and the annotation says so — the
-            list branch below has always been reachable from the Python API, it
-            was just invisible to a type checker reading the ``""`` default.
-        purpose: Agent's purpose (brief description)
-        profile: AIPass profile override (default: auto-detect)
-        template_dir: Custom template directory (default: the citizen template)
-        registry_path: Path to AIPASS_REGISTRY.json (default: auto-discover)
-        citizen_class: Explicit citizen class ("manager" or "specialist").
-            Default None means DECIDE AT MINT from the citizen number — the
-            project's first citizen is its manager, everyone after is a
-            specialist (DPLAN-0319 R3). An explicit value still wins; a retired
-            name ("aipass_framework", "project_agent", "builder") is refused by
-            name, never quietly translated.
-
-    Returns:
-        Dict with creation results:
-            - success: bool
-            - branch_name: str (uppercase)
-            - path: str
-            - files_copied: int
-            - registry_updated: bool
-            - validation_issues: list
-            - error: str (only if success=False)
-    """
-    # Forbidden and RETIRED values refuse before any filesystem work — "admin" is
-    # a devpulse-only registry privilege, never a class and never a template
-    # directory (DPLAN-0288); "aipass_framework"/"project_agent"/"builder" are
-    # renamed classes that spawn refuses to translate silently (DPLAN-0319 R4).
-    # Both doors are checked, including the API — @aipass's new_project still
-    # passes citizen_class="project_agent" today, and a loud refusal is the
-    # correct answer until its parallel fix lands.
-    for candidate in (citizen_class, Path(template_dir).name if template_dir else ""):
-        refusal = refuse_retired_or_forbidden(candidate)
-        if refusal:
-            json_handler.log_operation("mint_refused", data={"class": candidate, "reason": refusal})
-            return _error(refusal)
-
-    target = Path(target_path).resolve()
-    if template_dir:
-        template = Path(template_dir)
-    else:
-        # Both classes share one template dir, so this lookup is class-independent
-        # — the real class decision happens at mint, once citizen_number is known.
-        template = _get_template_dir(citizen_class or get_default_class())
-
-    # Guard: block creating agent inside another agent's directory
-    for parent in target.parents:
-        if (parent / ".trinity" / "passport.json").is_file():
-            return _error(
-                f"BLOCKED: Cannot create agent inside existing agent '{parent.name}' "
-                f"(found .trinity/passport.json at {parent})"
-            )
-        if parent == parent.parent:
-            break
-
-    # Validate
-    if target.exists():
-        # If target has a passport, adopt it (register without re-creating)
-        passport_path = target / ".trinity" / "passport.json"
-        if passport_path.exists():
-            return _adopt_existing(target, purpose, profile, registry_path)
-
-        # A directory with no live passport but WITH a tracked seed is the
-        # fresh-clone shape (TDPLAN-0017): the branch's code came down with the
-        # repo, its passport did not — .trinity/ is gitignored. That citizen is
-        # not "already existing", it is waiting to be born, and its identity is
-        # sitting right there in .aipass/passport.seed.json.
-        #
-        # This is also the ONLY door a seed can ever be found at. A seed lives
-        # inside the branch directory it describes, so a mint into a target that
-        # does not exist yet has no seed to prefer — the template path below is
-        # correct there by construction, not by omission.
-        seed_file = find_seed(target)
-        if seed_file:
-            return _birth_from_seed(target, seed_file, purpose, profile, registry_path)
-
-        return _error(f"Target already exists: {target}")
-    if not template.exists():
-        return _error(f"Template not found: {template}")
-
-    # The mint itself lives in handlers/mint_ops.py (DPLAN-0354 leg 4); the
-    # meta-tab importer stays here and is handed in.
-    return mint_citizen(
-        target,
-        template,
+    return spawn_at(
+        target_path,
         _load_meta_tabs,
         role=role,
         traits=traits,
         purpose=purpose,
         profile=profile,
+        template_dir=template_dir,
         registry_path=registry_path,
         citizen_class=citizen_class,
     )

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_admin_fence.py
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-12
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/registry.py and apps/handlers/class_registry.py, the two halves of the admin fence."""
@@ -286,7 +286,8 @@ class TestAdminClassRefusal:
     def test_spawn_agent_refuses_admin_class(self, tmp_path, _isolate_spawn_json):
         """The Python API refuses the class, creates nothing, and logs the refusal.
 
-        Mutant: the mint_refused log_operation in core removed -> red.
+        Mutant: the mint_refused log_operation in mint_ops.spawn_at removed -> red
+        (it lived in core.spawn_agent until fleet green leg 9 moved the lane).
         """
 
         target = tmp_path / "would_be_admin"

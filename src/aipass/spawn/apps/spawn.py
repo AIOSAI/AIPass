@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -300,14 +300,14 @@ def _dry_run_create(target_path, citizen_class, parsed):
     """
     from pathlib import Path
     from aipass.spawn.apps.modules.core import (
-        _get_template_dir,
+        get_template_dir,
         get_branch_name,
         get_default_class,
         normalize_branch_name,
     )
 
     target = Path(target_path).resolve()
-    template = _get_template_dir(citizen_class or get_default_class())
+    template = get_template_dir(citizen_class or get_default_class())
     class_display = citizen_class or "decided at mint (manager if first citizen in the project, else specialist)"
     branch_name = get_branch_name(target)
     branch_upper = normalize_branch_name(branch_name, "upper")

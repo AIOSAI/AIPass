@@ -96,6 +96,11 @@
       "reason": "Pure read-only predicate \u2014 reads the template's manifest and walks its tree to return the list of files a mint failed to deliver. Same species as placeholders.py/class_registry.py above: no mutation, no operation of its own to log. The operational event IS logged, at the decision point where it belongs: core._spawn_agent emits json_handler.log_operation('mint_refused', ...) on the refusal, beside the existing 'branch_created' record. Verified load-bearing in BOTH lanes 2026-08-17 (checklist [FAIL] json_structure; audit Json_Structure 97% / overall 99% with it lifted)."
     },
     {
+      "file": "apps/modules/core.py",
+      "standard": "json_structure",
+      "reason": "Routing only since fleet green leg 9 (spawn's decision): the mint lane moved whole to handlers/mint_ops.py spawn_at, and its operations are logged there at the decision points (mint_refused for a retired or forbidden class, mint_refused for a missing file, branch_created). core now parses create's flags and hands in its meta-tab importer; it performs no operation of its own to log. File-wide because json_structure passes no line."
+    },
+    {
       "file": "apps/__init__.py",
       "standard": "cli_flags",
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): cli_flags takes every file directly in apps/ as an entry point, and its own scope comment says apps/{name}.py. This file is the package marker, one line (from . import handlers), never run; the entry point is apps/spawn.py, which passes cli_flags. File-wide because cli_flags passes no line."

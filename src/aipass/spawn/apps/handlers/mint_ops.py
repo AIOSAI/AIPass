@@ -1,17 +1,18 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-28
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen.
 
-apps/modules/core.py decides the lane (refusals, adopt, birth from seed) and
-hands a fresh target here. Moved out of core whole, step order unchanged
-(spawn's decision, DPLAN-0354 leg 4); core keeps the meta-tab importer and hands
-it in, so @memory's optional import stays where it was.
+spawn_at decides the lane (refusals, adopt, birth from seed) and hands a fresh
+target to mint_citizen. Both moved out of apps/modules/core.py whole, step order
+unchanged (spawn's decisions, DPLAN-0354 legs 4 and 9); core keeps the routing
+and the meta-tab importer and hands it in, so @memory's optional import stays
+where it was.
 """
 
 import uuid
@@ -38,11 +39,130 @@ from aipass.spawn.apps.handlers.registry import (
     get_next_citizen_number,
     ensure_project_has_owner,
 )
-from aipass.spawn.apps.handlers.adoption_ops import error_result
-from aipass.spawn.apps.handlers.class_registry import class_for_citizen_number
+from aipass.spawn.apps.handlers.adoption_ops import adopt_existing, birth_from_seed, error_result
+from aipass.spawn.apps.handlers.class_registry import (
+    class_for_citizen_number,
+    get_default_class,
+    get_template_dir,
+    refuse_retired_or_forbidden,
+)
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.seed_ops import find_seed
 
 _PROJECT_MARKERS = (".git", "pyproject.toml", "setup.py", "setup.cfg")
+
+
+def spawn_at(
+    target_path,
+    load_meta_tabs: Callable[[], dict],
+    role="",
+    traits: str | list[str] | tuple[str, ...] = "",
+    purpose="",
+    profile=None,
+    template_dir=None,
+    registry_path=None,
+    citizen_class=None,
+) -> dict:
+    """Decide the lane for a target and run it: refuse, adopt, birth from seed, or mint.
+
+    Moved whole from spawn_agent in apps/modules/core.py (spawn's decision,
+    DPLAN-0354 leg 9); core keeps the routing and hands in its meta-tab importer.
+
+    Args:
+        target_path: Where to create the agent (must not exist)
+        load_meta_tabs: Answers @memory's meta-tab values, handed to mint_citizen
+        role: Agent's role description
+        traits: Agent's personality traits. A bare string becomes a one-element
+            list; a list/tuple is stored as given. identity.traits is a LIST in
+            the 2.0 schema (DPLAN-0319 R7).
+        purpose: Agent's purpose (brief description)
+        profile: AIPass profile override (default: auto-detect)
+        template_dir: Custom template directory (default: the citizen template)
+        registry_path: Path to AIPASS_REGISTRY.json (default: auto-discover)
+        citizen_class: Explicit citizen class ("manager" or "specialist").
+            Default None means DECIDE AT MINT from the citizen number — the
+            project's first citizen is its manager, everyone after is a
+            specialist (DPLAN-0319 R3). An explicit value still wins; a retired
+            name ("aipass_framework", "project_agent", "builder") is refused by
+            name, never quietly translated.
+
+    Returns:
+        Dict with creation results:
+            - success: bool
+            - branch_name: str (uppercase)
+            - path: str
+            - files_copied: int
+            - registry_updated: bool
+            - validation_issues: list
+            - error: str (only if success=False)
+    """
+    # Forbidden and RETIRED values refuse before any filesystem work — "admin" is
+    # a devpulse-only registry privilege, never a class and never a template
+    # directory (DPLAN-0288); "aipass_framework"/"project_agent"/"builder" are
+    # renamed classes that spawn refuses to translate silently (DPLAN-0319 R4).
+    # Both doors are checked, including the API — @aipass's new_project still
+    # passes citizen_class="project_agent" today, and a loud refusal is the
+    # correct answer until its parallel fix lands.
+    for candidate in (citizen_class, Path(template_dir).name if template_dir else ""):
+        refusal = refuse_retired_or_forbidden(candidate)
+        if refusal:
+            json_handler.log_operation("mint_refused", data={"class": candidate, "reason": refusal})
+            return error_result(refusal)
+
+    target = Path(target_path).resolve()
+    if template_dir:
+        template = Path(template_dir)
+    else:
+        # Both classes share one template dir, so this lookup is class-independent
+        # — the real class decision happens at mint, once citizen_number is known.
+        template = get_template_dir(citizen_class or get_default_class())
+
+    # Guard: block creating agent inside another agent's directory
+    for parent in target.parents:
+        if (parent / ".trinity" / "passport.json").is_file():
+            return error_result(
+                f"BLOCKED: Cannot create agent inside existing agent '{parent.name}' "
+                f"(found .trinity/passport.json at {parent})"
+            )
+        if parent == parent.parent:
+            break
+
+    # Validate
+    if target.exists():
+        # If target has a passport, adopt it (register without re-creating)
+        passport_path = target / ".trinity" / "passport.json"
+        if passport_path.exists():
+            return adopt_existing(target, purpose, profile, registry_path)
+
+        # A directory with no live passport but WITH a tracked seed is the
+        # fresh-clone shape (TDPLAN-0017): the branch's code came down with the
+        # repo, its passport did not — .trinity/ is gitignored. That citizen is
+        # not "already existing", it is waiting to be born, and its identity is
+        # sitting right there in .aipass/passport.seed.json.
+        #
+        # This is also the ONLY door a seed can ever be found at. A seed lives
+        # inside the branch directory it describes, so a mint into a target that
+        # does not exist yet has no seed to prefer — the template path below is
+        # correct there by construction, not by omission.
+        seed_file = find_seed(target)
+        if seed_file:
+            return birth_from_seed(target, seed_file, purpose, profile, registry_path)
+
+        return error_result(f"Target already exists: {target}")
+    if not template.exists():
+        return error_result(f"Template not found: {template}")
+
+    return mint_citizen(
+        target,
+        template,
+        load_meta_tabs,
+        role=role,
+        traits=traits,
+        purpose=purpose,
+        profile=profile,
+        registry_path=registry_path,
+        citizen_class=citizen_class,
+    )
 
 
 def _find_project_registry(target: Path) -> Path:
