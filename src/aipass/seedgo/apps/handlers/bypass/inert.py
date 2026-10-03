@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: inert.py
 # Description: Detects bypass rules that can never match, for the audit info channel and the checklist
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-09
 # Modified: 2026-10-03
 # =============================================
@@ -124,6 +124,39 @@ def _binds_shared_matcher(tree: ast.AST) -> bool:
     return False
 
 
+def _module_strings(tree: ast.Module) -> Dict[str, str]:
+    """Top-level ``NAME = "text"`` bindings, so ``STANDARD_KEY`` reads as its value."""
+    strings: Dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            value, targets = node.value, node.targets
+        elif isinstance(node, ast.AnnAssign):
+            value, targets = node.value, [node.target]
+        else:
+            continue
+        if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                strings[target.id] = value.value
+    return strings
+
+
+def _standard_named(node: ast.expr | None, strings: Dict[str, str]) -> str | None:
+    """The standard a call passes: a string literal, or a module constant holding one.
+
+    Literals only, before 2026-10-03: every checker that passes ``STANDARD_KEY``
+    (most of the v5-era pack, sleep_in_test among them) was missing from the map,
+    and a missing standard is left alone, so its inert rules went unreported
+    (spawn leg 8, relayed by @devpulse).
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return strings.get(node.id)
+    return None
+
+
 @lru_cache(maxsize=1)
 def scope_support() -> Dict[str, Set[str]]:
     """Map each standard to the scope kinds its checker can actually evaluate.
@@ -147,13 +180,14 @@ def scope_support() -> Dict[str, Set[str]]:
             continue
         if not _binds_shared_matcher(tree):
             continue
+        strings = _module_strings(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or getattr(node.func, "id", None) not in _SHARED_NAMES:
                 continue
-            standard = _argument(node, "standard")
-            if not (isinstance(standard, ast.Constant) and isinstance(standard.value, str)):
+            standard = _standard_named(_argument(node, "standard"), strings)
+            if standard is None:
                 continue
-            kinds = support.setdefault(standard.value, set())
+            kinds = support.setdefault(standard, set())
             for param, scope in _SCOPE_ARG.items():
                 if _is_supplied(_argument(node, param)):
                     kinds.add(scope)

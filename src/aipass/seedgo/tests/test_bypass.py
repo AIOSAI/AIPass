@@ -697,6 +697,34 @@ def test_inert_scope_support_skips_modules_that_shadow_the_matcher(tmp_path, mon
     assert support["shared_std"] == {"lines"}
 
 
+def test_inert_scope_support_reads_a_standard_passed_as_a_module_constant(tmp_path, monkeypatch):
+    """STANDARD_KEY resolves to its string; before, such a standard was unknown and silent."""
+    shared = "from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed\n\n"
+    blind = 'STANDARD_KEY = "blind_std"\n\n\ndef check(p, r):\n    return is_bypassed(p, STANDARD_KEY, None, r)\n'
+    (tmp_path / "blind_check.py").write_text(shared + blind, encoding="utf-8")
+    (tmp_path / "lined_check.py").write_text(
+        shared + 'KEY: str = "lined_std"\n\n\ndef check(p, ln, r):\n    return is_bypassed(p, KEY, ln, r)\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(inert, "HANDLERS_ROOT", tmp_path)
+    inert.scope_support.cache_clear()
+    try:
+        support = inert.scope_support()
+    finally:
+        inert.scope_support.cache_clear()
+
+    assert support == {"blind_std": set(), "lined_std": {"lines"}}
+
+
+def test_a_lines_rule_on_sleep_in_test_is_named_inert():
+    """The spawn leg 8 case: sleep_in_test gates file-wide, so a lines rule closes nothing."""
+    rule = {"file": "tests/test_x.py", "standard": "sleep_in_test", "lines": [3], "reason": "r"}
+
+    assert inert.inert_notes("tests/test_x.py", "sleep_in_test", [rule]) == [
+        "bypass rule 'lines' [3] closes nothing: this checker passes no line, so only a file-wide rule bypasses it"
+    ]
+
+
 # The trigger standard's third matcher, folded back into the shared one (FPLAN-0384)
 
 

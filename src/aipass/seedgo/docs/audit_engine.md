@@ -192,12 +192,21 @@ green leg 13). For a rule that names the file and standard being checked, with a
 verdicts, fenced off by a blank line. The note never changes a verdict. Without it, a rule
 like this sits in `bypass.json` and closes nothing, and nothing says so: trigger measured a
 line-scoped `introspection` rule at 85 and the same rule file-wide at 100. The map is read
-from the checker sources, so a checker that starts passing a line drops off it. On
-2026-10-03 the checkers that pass no line were: architecture, cli_flags, cli_ux,
-commented_logger, dead_code, deep_nesting, documentation, error_handling, handler_import,
-handlers, imports, introspection, json_handler, json_structure, log_structure, meta,
-modules, naming, readme, readme_quality, ruff_check, shebang, silent_catch,
-subcommand_help, template, test_quality, todo and trigger.
+from the checker sources, so a checker that starts passing a line drops off it. A standard
+passed as a module constant (`STANDARD_KEY = "..."`) is read as its value. Until the evening
+of 2026-10-03 only a string literal was read, so every checker using `STANDARD_KEY` was
+missing from the map, and its inert rules went unreported. Spawn met it with `sleep_in_test`
+in its leg 8. At that fix the checkers that pass no line were:
+accepted_and_never_used_parameter, architecture, cli_flags, cli_ux, commented_logger,
+conftest_fixtures, constant_predicate, dead_code, declared_pass_contradiction,
+declared_pass_symbol_resolves, deep_nesting, discarded_patch, docs_page, documentation,
+duplicate_test, error_handling, file_top, flag_never_passed, handler_import, handlers,
+help_flag_safety, imports, introspection, json_handler, json_structure, log_structure, meta,
+module_scope_side_effect, modules, naming, no_product_call, oversize_test_file, readme,
+readme_quality, retired_token_docstring, ruff_check, self_set_assert, shebang, silent_catch,
+sleep_in_test, stale_header_date, stdlib_patch, subcommand_help, template, test_quality,
+todo, trigger, uncalled_public_function, unconsumed_side_effect, unused_conftest_fixture
+and weak_oracle. `inert.scope_support()` is the live answer.
 
 A score of 100 with documented exceptions under it is a real score, not a clean sheet — read
 the rules with it.
