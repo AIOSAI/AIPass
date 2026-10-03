@@ -94,6 +94,69 @@
       "file": "apps/handlers/mint_verify.py",
       "standard": "json_structure",
       "reason": "Pure read-only predicate \u2014 reads the template's manifest and walks its tree to return the list of files a mint failed to deliver. Same species as placeholders.py/class_registry.py above: no mutation, no operation of its own to log. The operational event IS logged, at the decision point where it belongs: core._spawn_agent emits json_handler.log_operation('mint_refused', ...) on the refusal, beside the existing 'branch_created' record. Verified load-bearing in BOTH lanes 2026-08-17 (checklist [FAIL] json_structure; audit Json_Structure 97% / overall 99% with it lifted)."
+    },
+    {
+      "file": "apps/__init__.py",
+      "standard": "cli_flags",
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): cli_flags takes every file directly in apps/ as an entry point, and its own scope comment says apps/{name}.py. This file is the package marker, one line (from . import handlers), never run; the entry point is apps/spawn.py, which passes cli_flags. File-wide because cli_flags passes no line."
+    },
+    {
+      "file": "tests/__init__.py",
+      "standard": "file_top",
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): tests/__init__.py is the package marker of the suite, not a test module. It carries the META header (item 5, cured in leg 8), but items 6 and 7 ask for the module it tests and a declared pass, and it tests nothing; the checker already judges conftest.py on item 5 only for the same reason (a conftest has no subject)."
+    },
+    {
+      "file": "apps/handlers/meta_ops.py",
+      "standard": "logged_fallback",
+      "lines": [93],
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): '' is never an answer here. The success path returns sha256 hexdigest()[:12], twelve hex characters; the only other '' (line 83) is the not-a-file refusal, itself a failure. The docstring names '' as the failure value and the except logs the OSError. The caller can tell failure from an answer: '' is failure on both lines."
+    },
+    {
+      "file": "tests/test_json_durability.py",
+      "standard": "sleep_in_test",
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision; HELD in leg 7). File-wide because sleep_in_test passes no line (is_bypassed without a line, sleep_in_test_check.py 146); it covers exactly the three sleeps at 143, 168 and 228. 143 and 168 are the 1ms yields between turns of the racer's writer and readers. The yield is the subject: Windows share-mode refuses os.replace on an open without FILE_SHARE_DELETE, and zero-delay loops starved CI to reads == 0 (08-18, 08-28). 228 is the timed race window, whose length is the exposure. The start already waits on the real condition (the _saw_read and _saw_write Events); no event marks enough interleavings, so there is nothing to poll."
+    },
+    {
+      "file": "tests/test_template_import_guard.py",
+      "standard": "import_site",
+      "lines": [3124],
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision; HELD in leg 7): importlib.import_module in test_the_denier_actually_denies is the negative control. Its subject is the import attempt under the denier; a top-level import would succeed before the denier exists and prove nothing. The sys.modules delitems only drop cached aipass.memory modules so the finder is consulted, and monkeypatch restores them."
+    },
+    {
+      "file": "apps/handlers/meta_ops.py",
+      "standard": "logged_fallback",
+      "lines": [122],
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): None is never a registry here. The other None (line 115) is the not-found refusal, logged by logger.warning; it is a failure. The docstring names None as missing/unreadable, and every caller (update_ops 337, mint_ops 190, sync_registry_ops 401, mint_verify 94, regenerate_registry_ops 87) reads None as no registry."
+    },
+    {
+      "file": "apps/modules/delete.py",
+      "standard": "logged_fallback",
+      "lines": [119],
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): handle_command answers an exit code, 0 success and 1 failure (docstring). The other return 1 the checker counts as success (line 96) is the no-argument refusal, reported by warning('Usage: ...') and the usage lines; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
+    },
+    {
+      "file": "apps/modules/grant_admin.py",
+      "standard": "logged_fallback",
+      "lines": [129],
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): the function answers an exit code, 0 success and 1 failure. The other return 1 (line 139) follows error(reason) on a refused ceremony with a console.print() between; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
+    },
+    {
+      "file": "apps/modules/repair.py",
+      "standard": "logged_fallback",
+      "lines": [129],
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): _handle_relocate answers an exit code, 0 success and 1 failure. The other return 1 (line 112) follows error('--relocate requires @branch and new_path') and the warning with its usage line; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
+    },
+    {
+      "file": "apps/modules/sync_registry.py",
+      "standard": "logged_fallback",
+      "lines": [153],
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): _handle_check answers an exit code, 0 clean and 1 not clean. The other return 1 (line 171) is the not-clean verdict, reported by error('Owner/identity check: N issue(s)') and the issue lines; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
+    },
+    {
+      "file": "apps/modules/update.py",
+      "standard": "logged_fallback",
+      "lines": [175],
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): handle_update answers an exit code, 0 success and 1 failure. The other return 1 the checker counts as success (line 118) is the no-argument refusal, reported by warning('Usage: ...') and the usage lines; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     }
   ],
   "notes": {

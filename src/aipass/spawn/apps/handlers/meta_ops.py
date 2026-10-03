@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: meta_ops.py
 # Description: Branch metadata operations for update tracking
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 
 """Branch metadata operations — manages .spawn/.branch_meta.json for per-branch tracking.
@@ -134,8 +134,12 @@ def load_branch_meta(branch_dir: Path) -> Optional[dict]:
         branch_dir: Path to the branch directory.
 
     Returns:
-        Parsed dict of the branch metadata, or None if missing/unreadable.
+        Parsed dict of the branch metadata, or None if the file is missing.
         None is normal for branches that predate the tracking system.
+
+    Raises:
+        ValueError: The file is not valid JSON (json.JSONDecodeError), logged first.
+        OSError: The file exists but cannot be read, logged first.
     """
     branch_dir = Path(branch_dir)
     meta_path = branch_dir / _BRANCH_META_DIR / _BRANCH_META_FILE
@@ -148,7 +152,7 @@ def load_branch_meta(branch_dir: Path) -> Optional[dict]:
         return data
     except (json.JSONDecodeError, IOError) as exc:
         logger.error(f"Failed to load branch metadata: {exc}")
-        return None
+        raise
 
 
 def save_branch_meta(branch_dir: Path, meta: dict) -> bool:

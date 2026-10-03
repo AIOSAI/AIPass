@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_handlers.py
 # Description: Tests for spawn update handler modules
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-07
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/meta_ops.py and apps/handlers/json_ops.py."""
@@ -243,6 +243,16 @@ class TestLoadSaveBranchMeta:
 
         result = load_branch_meta(tmp_path)
         assert result is None
+
+    def test_load_corrupt_raises_not_none(self, tmp_path):
+        """A corrupt .branch_meta.json raises: None is the answer for a branch with no meta yet."""
+
+        meta_dir = tmp_path / ".spawn"
+        meta_dir.mkdir()
+        (meta_dir / ".branch_meta.json").write_text("{not json", encoding="utf-8")
+
+        with pytest.raises(ValueError):
+            load_branch_meta(tmp_path)
 
 
 class TestGetTemplateDir:
