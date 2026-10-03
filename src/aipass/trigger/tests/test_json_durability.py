@@ -3,7 +3,7 @@
 # Description: Cross-platform durability pins for config.py's write + lock helpers
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/config.py's durability helpers: atomic_write_json, json_file_lock and the retry reads."""
@@ -15,7 +15,6 @@
 import os
 import sys
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -381,7 +380,9 @@ class TestThePosixLockArmIsRealToo:
                         state["peak"] = max(state["peak"], state["inside"])
                         if state["inside"] > 1:
                             state["overlaps"] += 1
-                    time.sleep(0.0002)
+                    # Hand the CPU over while holding it: a no-op lock lets
+                    # another worker in right here.
+                    os.sched_yield()
                     with guard:
                         state["inside"] -= 1
 

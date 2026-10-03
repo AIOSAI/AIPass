@@ -3,7 +3,7 @@
 # Description: Tests for memory_pool_auto_processed event handler
 # Version: 1.0.0
 # Created: 2026-06-06
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/events/memory_pool.py."""
@@ -15,6 +15,7 @@ import pytest
 from unittest.mock import MagicMock
 from pathlib import Path
 
+from aipass.ai_mail.apps.modules import email_send
 from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers.events import memory_pool, registry
 from aipass.trigger.apps.modules import core
@@ -228,7 +229,6 @@ class TestEventRegistration:
 
     def test_event_registered_and_discoverable(self, monkeypatch) -> None:
         """memory_pool_auto_processed is registered in the handler registry."""
-        import sys
         from unittest.mock import MagicMock
 
         mock_trigger = MagicMock()
@@ -239,11 +239,9 @@ class TestEventRegistration:
         # setup_handlers wires nothing onto the live bus.
         monkeypatch.setattr(core, "trigger", mock_trigger)
 
-        # HELD: ai_mail's email_send is another branch's live delivery; the stub
-        # keeps the adapter setup_handlers builds off real mail.
-        mock_mail = MagicMock()
-        mock_mail.deliver_email_to_branch = MagicMock(return_value=(True, None))
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", mock_mail)
+        # ai_mail's email_send is another branch's live delivery; the stub on the
+        # real module keeps the adapter setup_handlers builds off real mail.
+        monkeypatch.setattr(email_send, "deliver_email_to_branch", MagicMock(return_value=(True, None)))
 
         registry.setup_handlers()
 

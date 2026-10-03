@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-08-08
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -66,7 +66,6 @@ import json
 import re
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aipass.trigger.apps.config import (
@@ -1254,23 +1253,3 @@ def get_stats() -> Dict[str, Any]:
         # it is counted here instead of vanishing.
         "trail_writes_dropped": logger.dropped,
     }
-
-
-def clear_state() -> bool:
-    """Archive the escalation state file and start fresh.
-
-    Never deletes — the old counts move to trigger_json/.archive/.
-
-    Returns:
-        True if state was cleared
-    """
-    try:
-        if not STATE_FILE.exists():
-            return True
-        from aipass.trigger.apps.config import _archive_legacy_file
-
-        with json_file_lock(STATE_FILE):
-            return _archive_legacy_file(Path(STATE_FILE))
-    except Exception as exc:
-        logger.warning(f"clear_state failed: {exc}")
-        return False

@@ -3,7 +3,7 @@
 # Description: Tests for the runaway_log_detected event handler
 # Version: 1.0.1
 # Created: 2026-08-09
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/events/runaway_handler.py."""
@@ -12,6 +12,7 @@
 # seedgo: no-test-needed(behaviour) — the detection in apps/handlers/log_watcher.py; the log watcher tests cover it
 import json
 import tempfile
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -143,8 +144,8 @@ class TestCooldownExpired:
     def test_dispatches_again_after_cooldown_expires(self) -> None:
         """Dispatch succeeds again once the 1800s cooldown has elapsed.
 
-        The recorded dispatch is aged past the window instead of patching the
-        clock process-wide.
+        The clock stub stands at the handler's own time binding, so the
+        process clock is never patched.
         Mutant run: a cooldown ten times as long reddens this.
         """
         send = _setup_happy_path()
@@ -158,15 +159,16 @@ class TestCooldownExpired:
         )
         assert send.call_count == 1
 
-        # Age the recorded dispatch past the 1800s cooldown
-        mod._file_cooldowns[RUNAWAY_LOG] -= mod.COOLDOWN_SECONDS + 1
-        mod.handle_runaway_log_detected(
-            file_path=RUNAWAY_LOG,
-            branch="flow",
-            rate_lines_per_min=5000,
-            sustained_duration_sec=120,
-            severity="critical",
-        )
+        # The handler's clock reads past the 1800s cooldown
+        later = time.time() + mod.COOLDOWN_SECONDS + 1
+        with patch.object(mod, "time", MagicMock(time=MagicMock(return_value=later))):
+            mod.handle_runaway_log_detected(
+                file_path=RUNAWAY_LOG,
+                branch="flow",
+                rate_lines_per_min=5000,
+                sustained_duration_sec=120,
+                severity="critical",
+            )
         assert send.call_count == 2
 
 

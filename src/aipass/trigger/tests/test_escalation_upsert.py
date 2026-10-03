@@ -3,7 +3,7 @@
 # Description: Tests that escalation digests upsert in place instead of stacking
 # Version: 1.0.0
 # Created: 2026-08-10
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/escalation.py digest upsert keys and the send adapter in handlers/events/registry.py."""
@@ -27,12 +27,12 @@
 # seedgo: no-test-needed(external) — ai_mail storing and upserting the message; AIPass tests only its own files
 
 import json
-import sys
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
+from aipass.ai_mail.apps.modules import email_send
 from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers import escalation
 from aipass.trigger.apps.handlers.events import error_detected, runaway_handler
@@ -83,8 +83,8 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
 def mailbox(monkeypatch: pytest.MonkeyPatch) -> List[Dict[str, Any]]:
     """A fake ai_mail that records every (to_branch, email_data, upsert_key) call.
 
-    This stands in for the real deliver_email_to_branch at the sys.modules level,
-    which is where setup_handlers resolves it — so the adapter under test is the
+    This stands in for the real deliver_email_to_branch on the real email_send
+    module, which is where setup_handlers resolves it — so the adapter under test is the
     real closure, not a re-implementation of it.
     """
     calls: List[Dict[str, Any]] = []
@@ -95,9 +95,7 @@ def mailbox(monkeypatch: pytest.MonkeyPatch) -> List[Dict[str, Any]]:
         email_data["upsert_action"] = "updated" if upsert_key else "created"
         return True, "delivered"
 
-    mock_mail = MagicMock()
-    mock_mail.deliver_email_to_branch = _deliver
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", mock_mail)
+    monkeypatch.setattr(email_send, "deliver_email_to_branch", _deliver)
     return calls
 
 

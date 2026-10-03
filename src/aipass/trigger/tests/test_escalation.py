@@ -3,7 +3,7 @@
 # Description: Tests for the escalation digest lane and its CLI module
 # Version: 1.1.0
 # Created: 2026-08-08
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for handlers/escalation.py — repeat-signature counting, digest gating, and modules/escalation.py."""
@@ -1377,37 +1377,6 @@ class TestReporting:
         stats = lane.get_stats()
         assert stats["tracked_signatures"] == 0
         assert stats["digests_sent"] == 0
-
-
-# ---------------------------------------------------------------------------
-# clear_state
-# ---------------------------------------------------------------------------
-
-
-class TestClearState:
-    """Counts are archived, never deleted."""
-
-    def test_clear_archives_the_state_file(self, lane) -> None:
-        """The file moves into .archive/ and the lane starts fresh."""
-        _fire_warning(lane, times=2)
-
-        assert lane.clear_state() is True
-        assert not lane.STATE_FILE.exists()
-        archived = list((lane.STATE_FILE.parent / ".archive").glob("escalation_state*.json"))
-        assert len(archived) == 1
-        assert json.loads(archived[0].read_text(encoding="utf-8"))["signatures"]
-
-    def test_clear_with_no_state_is_a_no_op(self, lane) -> None:
-        """Clearing an empty lane succeeds without creating anything."""
-        assert lane.clear_state() is True
-        assert not lane.STATE_FILE.exists()
-
-    def test_counting_resumes_after_a_clear(self, lane) -> None:
-        """A cleared lane counts from one again."""
-        _fire_warning(lane, times=2)
-        lane.clear_state()
-
-        assert _fire_warning(lane, times=1)["count"] == 1
 
 
 # ---------------------------------------------------------------------------
