@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_branch_audit_scoring.py
 # Description: audit_branch's all_files row — which files the average counts
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-09-25
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py, the all_files row's average."""
@@ -299,3 +299,26 @@ class TestADeadBypassRuleOrCommentIsNamed:
         entry = artifact.build_artifact([out])["branches"][0]
         assert [(d["index"], d["file"], d["standard"]) for d in entry["bypass_dead"]] == [(0, "apps/gone.py", "cli")]
         assert entry["bypass_markers"] == ["apps/main.py:1"]
+
+
+class TestADiagnosticsCheckerThatCannotLoadIsACrash:
+    def test_the_load_error_scores_0_with_its_reason(self, audit, monkeypatch):
+        """A diagnostics checker that fails to load is a crashed checker, never an absent
+        one (fleet green leg 14). Red first: the loader answered None, and the audit
+        carried no diagnostics result at all."""
+
+        def broken():
+            raise ImportError("diagnostics_check is broken")
+
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", broken)
+        crashed = audit({}, {})["results"].get("diagnostics")
+
+        assert crashed is not None and crashed["score"] == 0
+        assert crashed["checks"][0]["message"] == (
+            "diagnostics checker crashed (ImportError: diagnostics_check is broken) - "
+            "score 0 is a failure to run, not a measured result"
+        )
+
+    def test_an_absent_checker_leaves_no_result(self, audit):
+        """Control: no diagnostics checker to load (the fixture's None) is no result, not a crash."""
+        assert "diagnostics" not in audit({}, {})["results"]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: interface_content.py
 # Description: Queryable content for the interface proof
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -63,8 +63,6 @@ def get_interface_proof() -> str:
         "  [red]\u2717[/red] [dim]def check_module(file_path)[/dim]  (missing module_name, branch_path)",
         "  [green]\u2713[/green] [dim]def check_module(file_path, module_name, branch_path)[/dim]",
         "",
-        # TODO: Expand with actual validation logic details once the
-        # interface scanner is fully implemented.
         "",
         f"[dim]{sep}[/dim]",
         "[bold cyan]HOW TO FIX:[/bold cyan]",

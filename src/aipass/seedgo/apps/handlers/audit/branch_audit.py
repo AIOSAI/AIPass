@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.7.0
+# Version: 2.7.1
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 """Branch Audit Handler — auto-discovers checkers from handlers/*_standards/ packs via glob."""
 
@@ -538,8 +538,36 @@ def _run_all_files(
     return violations, scores, declined
 
 
+def _crashed_result(name: str, error: Exception) -> Dict[str, Any]:
+    """The result of a checker that failed to run: score 0, with the reason attached.
+
+    A crashed checker scores 0, which is indistinguishable from an honest 0
+    unless the result says so, so the error rides in checks[].
+    """
+    return {
+        "passed": False,
+        "score": 0,
+        "error": str(error),
+        "checks": [
+            {
+                "name": "Checker ran",
+                "passed": False,
+                "message": (
+                    f"{name} checker crashed ({type(error).__name__}: {error}) - "
+                    "score 0 is a failure to run, not a measured result"
+                ),
+            }
+        ],
+    }
+
+
 def _load_diagnostics_checker():
-    """Load diagnostics checker from handlers/diagnostics/ (shared infrastructure)."""
+    """Load diagnostics checker from handlers/diagnostics/ (shared infrastructure).
+
+    None only when there is no checker to load (no file, no loader). A checker
+    that fails while loading raises: the audit records it as a crashed checker,
+    never as an absent one (seedgo fleet green leg 14).
+    """
     diag_path = Path(__file__).resolve().parent.parent / "diagnostics" / "diagnostics_check.py"
     if not diag_path.exists():
         return None
@@ -547,11 +575,7 @@ def _load_diagnostics_checker():
     if spec is None or spec.loader is None:
         return None
     mod = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(mod)
-    except Exception:
-        logger.info("Failed to load diagnostics checker from %s", diag_path)
-        return None
+    spec.loader.exec_module(mod)
     return mod
 
 
@@ -660,12 +684,18 @@ def audit_branch(
     ignored_paths = sorted(rel for rels in ignored.values() for rel in rels)
     files_with_init: List[Dict[str, str]] | None = None
 
-    # Discover diagnostics checker from handlers/diagnostics/ (outside pack dirs)
-    diag_mod = _load_diagnostics_checker()
+    results, scores, all_violations, declined_files = {}, {}, {}, {}
+
+    # Discover diagnostics checker from handlers/diagnostics/ (outside pack dirs).
+    # One that fails to load is a crashed checker, scored 0 with its error.
+    try:
+        diag_mod = _load_diagnostics_checker()
+    except Exception as e:
+        logger.info("Diagnostics checker failed to load: %s", e)
+        results["diagnostics"], scores["diagnostics"] = _crashed_result("diagnostics", e), 0
+        diag_mod = None
     if diag_mod and hasattr(diag_mod, "check_branch") and "diagnostics" not in checkers:
         checkers["diagnostics"] = diag_mod
-
-    results, scores, all_violations, declined_files = {}, {}, {}, {}
 
     for name, checker in checkers.items():
         scope = getattr(checker, "AUDIT_SCOPE", "entry_point")
@@ -687,25 +717,8 @@ def audit_branch(
                     scores[name] = r.get("score", 0)
                 all_violations[name] = _extract_branch_level_violations(r)
             except Exception as e:
-                # A crashed checker scores 0, which is indistinguishable from an honest
-                # 0 unless the result says so. Carry the error into checks[] so the
-                # number always arrives with its reason attached.
                 logger.info("Branch-level checker %s failed: %s", name, e)
-                results[name] = {
-                    "passed": False,
-                    "score": 0,
-                    "error": str(e),
-                    "checks": [
-                        {
-                            "name": "Checker ran",
-                            "passed": False,
-                            "message": (
-                                f"{name} checker crashed ({type(e).__name__}: {e}) - "
-                                "score 0 is a failure to run, not a measured result"
-                            ),
-                        }
-                    ],
-                }
+                results[name] = _crashed_result(name, e)
                 scores[name] = 0
             continue
         # Per-file lanes only check files the standard applies to. Branch-level

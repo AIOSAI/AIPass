@@ -111,11 +111,6 @@
       "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (Console(stderr=True) as the anti-pattern). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard)."
     },
     {
-      "file": "apps/handlers/aipass_standards/todo_content.py",
-      "standard": "todo",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (TODO/FIXME/HACK/XXX markers as the anti-pattern). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: this checker passes no line= to is_bypassed."
-    },
-    {
       "file": "apps/handlers/aipass_standards/stderr_routing_check.py",
       "standard": "stderr_routing",
       "reason": "Console(stderr=True) appears only in documentation strings and comments, not executable code. False positive from text-matching checker."
@@ -394,6 +389,60 @@
       "file": "apps/handlers/tests_pytest_standards/gutting.py",
       "standard": "unused_function",
       "reason": "TRUE FINDING, RECORDED NOT DENIED. discover_functions(), run_campaign() and summarize() are the pseudo_tested engine's public surface and nothing calls them, because the group is declared not_applicable: the adapter's nominate(spec) seam carries no options channel to opt a campaign in per run, and the campaign costs one suite execution per function (projected 35.6h on seedgo, 58.8h ceiling) so it may not run by default. The engine is built and proven on .seedgo/fixtures/canary_6500dce9. Tracked as seedgo todo 120; the bypass goes when the run loop lands, and until then the audit is right and this entry is the record of why."
+    },
+    {
+      "file": "apps/handlers/audit/incremental_cache.py",
+      "standard": "logged_fallback",
+      "lines": [388, 419, 430],
+      "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable legacy doc migrates 0 entries (388), and an unreadable or corrupt entry is a cache miss (419, 430). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
+    },
+    {
+      "file": "apps/handlers/audit_tests/artifact.py",
+      "standard": "logged_fallback",
+      "lines": [79],
+      "reason": "The checker is wrong on this line (fleet green leg 14). An unreadable previous artifact is no baseline, the same as an absent one, and load_previous's docstring says so: the caller records a missing baseline and skips the S3 diff, never 'nothing vanished'. The failure is logged as a warning and as the json op previous_artifact_unreadable."
+    },
+    {
+      "file": "apps/handlers/bypass/ignore_handler.py",
+      "standard": "logged_fallback",
+      "lines": [262],
+      "reason": "The checker is wrong on this line (fleet green leg 14). relative_to raises ValueError only when the file is not under the branch root, and such a file is truly not ignored: a branch's .seedgoignore governs its own tree only. False here is the answer, not a failure, and the case is logged."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/cli_check.py",
+      "standard": "logged_fallback",
+      "lines": [86, 317],
+      "reason": "The checker is wrong on these lines (fleet green leg 14): each failure answer is the STRICT answer. An unparseable file gets no console-import window (86) and no stderr-directed print lines (317), so it keeps every finding; ignorance never buys an exemption, as the comment at 86 says."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/handlers_check.py",
+      "standard": "logged_fallback",
+      "lines": [407],
+      "reason": "The checker is wrong on this line (fleet green leg 14): an unparseable file answers 'walks no caller frame', which is the strict answer. It buys no exemption, so every finding stands; the case is logged."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/json_structure_check.py",
+      "standard": "logged_fallback",
+      "lines": [441, 459],
+      "reason": "The checker is wrong on these lines (fleet green leg 14): each failure answer is the STRICT answer. An unparseable file is not eligible for the bootstrap exemption (441, logged). A path outside the source root has no branch root (459): that is the true answer, and its one caller, _seam_logging, then finds no seam and grants nothing."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/ruff_check.py",
+      "standard": "logged_fallback",
+      "lines": [59, 111],
+      "reason": "The checker is wrong on these lines (fleet green leg 14): an unreadable ruff_bypass.json answers 'no ruff bypass', the STRICT answer. Every ruff finding is reported and none is waived on a file nothing could read, and the failure is logged as a warning naming the file."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/trinity_check.py",
+      "standard": "logged_fallback",
+      "lines": [356],
+      "reason": "The checker is wrong on this line (fleet green leg 14): an unlistable fleet dir answers 'not a clean checkout', the STRICT answer, which keeps a missing .trinity a violation. The comment above it gives the reason, and the case is logged as a warning."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/trinity_groups.py",
+      "standard": "logged_fallback",
+      "lines": [1301],
+      "reason": "The checker is wrong on this line (fleet green leg 14): an impossible date is no date, and both callers make None a violation. _newest_entry_date lists the entry as bad, and the last_updated check fails by name with the value found. The value is logged as a warning."
     }
   ],
   "notes": {

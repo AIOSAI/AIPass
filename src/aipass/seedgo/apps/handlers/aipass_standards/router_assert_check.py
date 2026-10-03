@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_assert_check.py
 # Description: Router Assert Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-20
-# Modified: 2026-09-21
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -41,7 +41,7 @@ and the scored row is the record now.
 
 import ast
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
@@ -52,6 +52,8 @@ AUDIT_SCOPE = "all_files"
 
 STANDARD = "ROUTER_ASSERT"
 STANDARD_KEY = "router_assert"
+# A file nothing could read or parse: judged by nobody here, and said so (ruff convicts a parse error).
+NOT_JUDGED = "Not judged: the file cannot be read or does not parse (ruff convicts that)"
 
 # The callees whose return value is a routing verdict rather than a result.
 # Deliberately a short closed list: every one of these is the "did any module
@@ -160,18 +162,22 @@ def _test_functions(tree: ast.AST) -> List[ast.FunctionDef | ast.AsyncFunctionDe
     return found
 
 
-def find_violations(source: str) -> List[Tuple[int, str]]:
+def find_violations(source: str) -> Optional[List[Tuple[int, str]]]:
     """Every convicted unit in this source, as (line of the unit, its name).
 
     A unit is convicted when it HAS assertions and every one of them is a
     router's ``is True`` -- one honest assertion anywhere else acquits the
     whole unit, because the test then proves something the router's return
     value does not.
+
+    None when the source does not parse: nothing was judged, which is not the
+    [] of a file with no violation (seedgo fleet green leg 14).
     """
     try:
         tree = ast.parse(source)
-    except SyntaxError:
-        return []
+    except SyntaxError as exc:
+        logger.info("[router_assert] Unparseable source: %s", exc)
+        return None
 
     violations: List[Tuple[int, str]] = []
     for func in _test_functions(tree):
@@ -186,13 +192,13 @@ def find_violations(source: str) -> List[Tuple[int, str]]:
     return violations
 
 
-def _scan_path(path: Path) -> List[Tuple[int, str]]:
-    """Violations in one file, or none if it cannot be read."""
+def _scan_path(path: Path) -> Optional[List[Tuple[int, str]]]:
+    """Violations in one file, or None if it cannot be read or parsed."""
     try:
         return find_violations(path.read_text(encoding="utf-8", errors="ignore"))
     except OSError as exc:
         logger.info("[router_assert] Cannot read %s: %s", path, exc)
-        return []
+        return None
 
 
 def _result(passed: bool, message: str, score: int) -> Dict:
@@ -222,7 +228,10 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not path.exists():
         return _result(False, f"File not found: {module_path}", 0)
 
-    hits = [(ln, name) for ln, name in _scan_path(path) if not is_bypassed(module_path, STANDARD_KEY, ln, bypass_rules)]
+    scanned = _scan_path(path)
+    if scanned is None:
+        return _result(True, NOT_JUDGED, 100)
+    hits = [(ln, name) for ln, name in scanned if not is_bypassed(module_path, STANDARD_KEY, ln, bypass_rules)]
 
     if not hits:
         return _result(True, "No test asserts only a router's True", 100)

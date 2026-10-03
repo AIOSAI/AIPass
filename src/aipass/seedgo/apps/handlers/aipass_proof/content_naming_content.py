@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: content_naming_content.py
 # Description: Queryable content for the content naming proof
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -62,12 +62,11 @@ def get_content_naming_proof() -> str:
         "[yellow]Missing function entirely:[/yellow]",
         "  [red]\u2717[/red] File exists but has no function matching the convention",
         "",
-        # TODO: Expand with details on how standards_query resolves
-        # function names and what happens on resolution failure.
         "",
         f"[dim]{sep}[/dim]",
         "[bold cyan]HOW TO FIX:[/bold cyan]",
-        "  [yellow]1.[/yellow] Extract the standard name from the filename: [dim]{name}_content.py[/dim] \u2192 [dim]{name}[/dim]",
+        "  [yellow]1.[/yellow] Extract the standard name from the filename: "
+        "[dim]{name}_content.py[/dim] \u2192 [dim]{name}[/dim]",
         "  [yellow]2.[/yellow] Ensure the file contains: [dim]def get_{name}_standards() -> str:[/dim]",
         "  [yellow]3.[/yellow] Verify the function returns a string of formatted content",
         "",

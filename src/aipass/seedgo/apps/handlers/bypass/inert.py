@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: inert.py
 # Description: Detects bypass rules that can never match, for the audit info channel and the checklist
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-09
 # Modified: 2026-10-03
 # =============================================
@@ -86,6 +86,8 @@ ADVISORY_CAVEAT = (
 # audit_display), so the doubt travels on each conclusion as well as at the head
 # of the block: a line quoted or read on its own must still arrive marked.
 _UNVERIFIED = "unverified: "
+# A bypass.json nothing could read: no rule in it was judged, and that is said.
+UNREADABLE = "bypass.json unreadable, so none of its rules was judged: "
 
 
 def _argument(call: ast.Call, param: str) -> ast.expr | None:
@@ -286,6 +288,9 @@ def check_branch_info(branch_path: str) -> list[str]:
 
     Kept off the violation channel on purpose: bypass hygiene is the branch's own
     housekeeping, not a standards failure.
+
+    A bypass.json that cannot be read or parsed answers one line naming it, never
+    the empty list a branch with nothing to report gets (seedgo fleet green leg 14).
     """
     bypass_file = Path(branch_path) / ".seedgo" / "bypass.json"
     if not bypass_file.exists():
@@ -295,7 +300,7 @@ def check_branch_info(branch_path: str) -> list[str]:
         rules = json.loads(bypass_file.read_text(encoding="utf-8")).get("bypass", [])
     except (OSError, ValueError) as e:
         logger.info("Cannot read %s for inert-rule info: %s", bypass_file, e)
-        return []
+        return [f"{UNREADABLE}{bypass_file} ({e})"]
 
     lines = []
     out_of_scope: Dict[str, list[str]] = {}

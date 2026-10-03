@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane.py
 # Description: tests for the pytest pack, the payload gate and the verb
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-29
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/audit_tests.py, apps/handlers/audit_tests/runner.py and the pytest pack it drives."""
@@ -1187,7 +1187,23 @@ class TestM10Proof:
         assert proof["real_tree_unchanged"] is None
 
     def test_a_skipped_proof_still_says_why(self, tmp_path, monkeypatch):
-        assert _measured(tmp_path, monkeypatch, _proven_run(), options={"no_m10_proof": True})["m10_proof"]["note"]
+        """The skip's own reason, never the failure's (fleet green leg 14). Red first: a
+        skipped run's note read "the before-fingerprint could not be taken"."""
+        proof = _measured(tmp_path, monkeypatch, _proven_run(), options={"no_m10_proof": True})["m10_proof"]
+        assert proof["note"] == (
+            "skipped: this run was asked not to prove M10 (no_m10_proof), so nothing was fingerprinted"
+        )
+
+    def test_a_fingerprint_that_cannot_be_taken_says_so(self, tmp_path, monkeypatch):
+        """Control: an unasked run whose before-fingerprint fails names the failure, not a skip."""
+
+        def unreadable(*args, **kwargs):
+            raise OSError("tree unreadable")
+
+        monkeypatch.setattr(runner.m10, "snapshot_tree", unreadable)
+        proof = _measured(tmp_path, monkeypatch, _proven_run(), options={})["m10_proof"]
+        assert proof["probed"] is False
+        assert proof["note"] == "the before-fingerprint could not be taken, so no comparison is possible"
 
     def test_the_proof_is_skipped_only_when_explicitly_asked(self, tmp_path, monkeypatch):
         """Mutant: an unasked run fingerprints nothing in apps/handlers/audit_tests/runner.py — killed."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runner.py
 # Description: audit-tests orchestration - the nine-step pipeline
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -48,6 +48,9 @@ DEFAULT_BUDGET_SECONDS = 900
 
 #: Prefix for the scratch env, so a stray directory is identifiable at a glance.
 SCRATCH_PREFIX = "audit_tests_"
+
+#: The M10 note of a run asked not to prove it - a skip, never a failure to fingerprint.
+SKIPPED_NOTE = "skipped: this run was asked not to prove M10 (no_m10_proof), so nothing was fingerprinted"
 
 #: The cache lane is not built. S5 requires the artifact to say what it cannot
 #: see rather than leave a reader to assume a check ran and passed.
@@ -245,7 +248,7 @@ def _measure(
     clock = time.monotonic()
     spec = None
     m10.start_carrier_recording(target.path)
-    before = _fingerprint_target(target, options)
+    before = None if options.get("no_m10_proof") else _fingerprint_target(target)
     _probe_live_writers(target, options)
 
     try:
@@ -426,10 +429,12 @@ def _unproven_refusal(gate: dict, run: dict, elapsed: float) -> refusal.Refusal:
     )
 
 
-def _fingerprint_target(target: target_module.Target, options: dict) -> Optional[Dict[str, tuple]]:
-    """The real tree's fingerprint before anything runs, or None if skipped."""
-    if options.get("no_m10_proof"):
-        return None
+def _fingerprint_target(target: target_module.Target) -> Optional[Dict[str, tuple]]:
+    """The real tree's fingerprint before anything runs, or None if it could not be taken.
+
+    None means a failure and only that: a run asked not to prove M10 never calls
+    this, so _m10_proof cannot read a skip as a failure (seedgo fleet green leg 14).
+    """
     try:
         return m10.snapshot_tree(target.path)
     except OSError as exc:
@@ -489,6 +494,8 @@ def _m10_proof(
     account for, and an ERROR that fires on the audit's own logs teaches
     everyone to ignore Law M10.
     """
+    if options.get("no_m10_proof"):
+        return _m10_not_probed(SKIPPED_NOTE)
     if before is None:
         return _m10_not_probed("the before-fingerprint could not be taken, so no comparison is possible")
 

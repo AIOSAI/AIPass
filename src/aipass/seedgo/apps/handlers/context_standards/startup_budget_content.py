@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup_budget_content.py
 # Description: Startup Budget Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -12,6 +12,8 @@ Startup Budget Standards Content Handler
 Provides formatted startup_budget standards content.
 Module orchestrates, handler implements.
 """
+
+from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_startup_budget_standards() -> str:
@@ -101,4 +103,5 @@ def get_startup_budget_standards() -> str:
         "  [dim]README cap: context_standards/pack.json, caps[README.md] (seedgo owns it)[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "startup_budget"})
     return "\n".join(lines)

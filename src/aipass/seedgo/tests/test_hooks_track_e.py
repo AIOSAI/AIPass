@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_hooks_track_e.py
 # Description: DPLAN-0139 Track E — single-path enforcement tests
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-21
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 """Tests for apps/modules/permissions.py and apps/modules/inbox_audit.py, DPLAN-0139 Track E single-path enforcement."""
 
@@ -105,6 +105,18 @@ def test_identify_caller_falls_back_to_identity_name(tmp_path):
     passport.write_text(json.dumps({"identity": {"name": "fallback_branch"}}), encoding="utf-8")
     result = identify_caller(str(tmp_path))
     assert result == "fallback_branch"
+
+
+def test_identify_caller_raises_on_a_passport_it_cannot_parse(tmp_path):
+    """A found passport that does not parse names itself; it is never the "" of no
+    passport (fleet green leg 14). Red first: identify_caller returned ""."""
+    trinity = tmp_path / ".trinity"
+    trinity.mkdir()
+    passport = trinity / "passport.json"
+    passport.write_text("{not json", encoding="utf-8")
+    with pytest.raises(ValueError) as caught:
+        identify_caller(str(tmp_path))
+    assert str(caught.value).startswith(f"passport at {passport} cannot be parsed: ")
 
 
 def test_handle_command_prints_nothing_for_another_modules_command(capsys):

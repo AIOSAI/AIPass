@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_coverage_audit.py
 # Description: Unit tests for audit_display.py and branch_audit.py line coverage
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-26
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/audit/audit_display.py and apps/handlers/audit/branch_audit.py."""
@@ -1329,7 +1329,7 @@ class TestLoadDiagnosticsChecker:
         assert result is None
 
     def test_exec_module_raises(self):
-        """Returns None when exec_module raises."""
+        """A checker that fails while loading raises, never the None of an absent one (fleet green leg 14)."""
         mock_spec = MagicMock()
         mock_spec.loader.exec_module.side_effect = RuntimeError("fail")
         with (
@@ -1342,9 +1342,9 @@ class TestLoadDiagnosticsChecker:
                 "importlib.util.module_from_spec",
                 return_value=MagicMock(),
             ),
+            pytest.raises(RuntimeError, match="^fail$"),
         ):
-            result = branch_audit._load_diagnostics_checker()
-        assert result is None
+            branch_audit._load_diagnostics_checker()
 
     def test_successful_load(self):
         """Returns module when loading succeeds."""

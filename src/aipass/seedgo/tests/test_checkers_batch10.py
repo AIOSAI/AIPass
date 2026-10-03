@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch10.py
 # Description: Unit tests for hardcoded_path_check, startup_budget_check, the two ratchets, router_assert, oversize_test_file
-# Version: 1.4.3
+# Version: 1.4.4
 # Created: 2026-06-18
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/hardcoded_path_check.py and batch-10 checkers."""
@@ -1424,6 +1424,21 @@ class TestRouterAssertLanes:
         assert result["passed"] is False and result["score"] == 0
         assert "test_x:1" in result["checks"][0]["message"]
         assert "assert the effect" in result["checks"][0]["message"]
+
+    def test_an_unparseable_file_is_not_judged_and_says_so(self, tmp_path):
+        """A file that does not parse is named as not judged, never the clean "no test asserts"
+        of a judged file (fleet green leg 14). Red first: find_violations answered [] and the
+        file read as clean. The control above still convicts a parseable file."""
+        f = tmp_path / "test_thing.py"
+        f.write_text("def test_x(:\n    assert handle_command('x', []) is True\n", encoding="utf-8")
+
+        result = router_assert.check_module(str(f))
+
+        assert router_assert.find_violations(f.read_text(encoding="utf-8")) is None
+        assert result["score"] == 100
+        assert result["checks"][0]["message"] == (
+            "Not judged: the file cannot be read or does not parse (ruff convicts that)"
+        )
 
     def test_a_line_bypass_silences_one_unit_and_not_the_file(self, tmp_path):
         """The declared deviation is cheap; the silent one stays impossible.

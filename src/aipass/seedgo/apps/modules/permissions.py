@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: permissions.py
 # Description: Shared trust list for hook layer and drone authorization
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-21
-# Modified: 2026-04-21
+# Modified: 2026-10-03
 # =============================================
 
 """Shared permission definitions for cross-branch write authorization.
@@ -34,8 +34,10 @@ def is_trusted_caller(name: str) -> bool:
 def identify_caller(cwd: str | None = None) -> str:
     """Walk up from *cwd* (default: CWD) to find passport.json, return branch_name.
 
-    Returns the branch name string, or empty string if no passport is found
-    or the file cannot be parsed.
+    Returns the branch name string, or empty string if no passport is found.
+    A passport that is found and cannot be parsed raises ValueError naming it:
+    an unreadable identity is not "no identity" (seedgo fleet green leg 14;
+    nothing in the product calls this today, so no caller stands behind a write).
     """
     start = Path(cwd).resolve() if cwd else Path.cwd().resolve()
     current = start
@@ -50,7 +52,7 @@ def identify_caller(cwd: str | None = None) -> str:
                 return name or ""
             except Exception as exc:
                 logger.warning("[permissions] identify_caller: failed to parse passport at %s: %s", passport, exc)
-                return ""
+                raise ValueError(f"passport at {passport} cannot be parsed: {exc}") from exc
         parent = current.parent
         if parent == current:
             break

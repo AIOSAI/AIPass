@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plugin_integrity_content.py
 # Description: Queryable content for the plugin integrity proof
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -60,8 +60,6 @@ def get_plugin_integrity_proof() -> str:
         "  [dim]branch_audit.py[/dim] has 3 legitimate special cases (architecture, meta, testing)",
         "  that require branch-level handling distinct from file-level standards.",
         "",
-        # TODO: Expand with AMBIGUOUS_NAMES list, detection regex patterns,
-        # and full accounting of known special cases once scanner is built.
         "",
         f"[dim]{sep}[/dim]",
         "[bold cyan]HOW TO FIX:[/bold cyan]",

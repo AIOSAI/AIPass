@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_content_functions.py
 # Description: Unit tests for all 37 content handler functions
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_content.py and 36 sibling content functions."""
@@ -74,6 +74,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.stderr_routing_content import 
 from aipass.seedgo.apps.handlers.aipass_standards.todo_content import get_todo_standards
 from aipass.seedgo.apps.handlers.aipass_standards.trigger_content import get_trigger_standards
 from aipass.seedgo.apps.handlers.aipass_standards.unused_function_content import get_unused_function_standards
+from aipass.seedgo.apps.handlers.context_standards import startup_budget_content
 
 
 # ===========================================================================
@@ -628,3 +629,22 @@ def test_get_unused_function_standards_has_expected_content():
     _assert_content_str(result, "unused_function_standards")
     assert "Dead code is maintenance burden." in result
     assert "Phase 1 -- Collect files:" in result
+
+
+# ---------------------------------------------------------------------------
+# 38. startup_budget_standards (context pack)
+# ---------------------------------------------------------------------------
+
+
+def test_get_startup_budget_standards_records_the_query(monkeypatch):
+    """The page is returned and its query recorded like every sibling page (fleet green leg 14).
+    Red first: the content module logged no operation, and json_structure convicted it."""
+    recorded = []
+    monkeypatch.setattr(
+        startup_budget_content.json_handler, "log_operation", lambda name, payload: recorded.append((name, payload))
+    )
+
+    result = startup_budget_content.get_startup_budget_standards()
+
+    assert "Checker: startup_budget_check.py" in result
+    assert recorded == [("standard_content_queried", {"standard": "startup_budget"})]

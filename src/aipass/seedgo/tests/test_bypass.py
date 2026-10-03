@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/bypass/bypass_handler.py, ignore_handler.py, utils.py and inert.py."""
@@ -580,6 +580,19 @@ def test_inert_branch_info_names_the_file_and_standard(tmp_path):
 
 def test_inert_branch_info_empty_without_a_bypass_file(tmp_path):
     assert inert.check_branch_info(str(tmp_path)) == []
+
+
+def test_inert_branch_info_names_an_unreadable_bypass_file(tmp_path):
+    """A bypass.json that does not parse is named, never the [] of a branch with nothing
+    to report (fleet green leg 14). Red first: the handler returned []."""
+    (tmp_path / ".seedgo").mkdir()
+    bypass_file = tmp_path / ".seedgo" / "bypass.json"
+    bypass_file.write_text("{not json", encoding="utf-8")
+
+    lines = inert.check_branch_info(str(tmp_path))
+
+    assert len(lines) == 1
+    assert lines[0].startswith(f"bypass.json unreadable, so none of its rules was judged: {bypass_file} (")
 
 
 # Out-of-scope rules must be NAMED, not only counted (@prax, mail 83190864):
