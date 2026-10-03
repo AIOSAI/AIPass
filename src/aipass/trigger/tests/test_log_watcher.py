@@ -3,7 +3,7 @@
 # Description: Unit tests for branch log watcher event producer
 # Version: 1.4.0
 # Created: 2026-04-03
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for the branch log watcher handler (apps/handlers/log_watcher.py)."""
@@ -1163,6 +1163,21 @@ class TestLoadSeenHashes:
         return lw.get_watcher_status()["seen_hashes_count"]
 
 
+def _a_branch_log() -> Path:
+    """A 200-byte branch log under the patched package root, where initialize_positions looks."""
+    log_file = lw.AIPASS_PKG_ROOT / "flow" / "logs" / "core.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text("x" * 199 + "\n", encoding="utf-8")
+    return log_file
+
+
+def _restarted() -> Any:
+    """A fresh watcher initialized the way a restart does: persisted positions first, end of file otherwise."""
+    watcher = lw.BranchLogWatcher()
+    watcher.initialize_positions()
+    return watcher
+
+
 # ---------------------------------------------------------------------------
 # Tests -- _load_log_positions
 # ---------------------------------------------------------------------------
@@ -1219,18 +1234,26 @@ class TestLogInodesPersistence:
     """Tests for the 'log_inodes' key alongside 'log_positions'."""
 
     def test_flush_and_load_round_trip(self, tmp_path, monkeypatch):
-        """Positions and inodes round-trip through trigger_data.json."""
+        """Positions and inodes round-trip through trigger_data.json.
+
+        Read back by a restarted watcher since leg 7 (it called _load_log_positions
+        directly): a position the restart did not restore would snap to the
+        log's end, 200. Mutant run (leg 7): _load_log_positions answering {}
+        reddens this at the position assert.
+        """
         data_file = tmp_path / "trigger_data.json"
         monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        log = _a_branch_log()
         monkeypatch.setattr(
-            lw, "_active_watcher", SimpleNamespace(log_positions={"/a.log": 50}, log_inodes={"/a.log": 4242})
+            lw, "_active_watcher", SimpleNamespace(log_positions={str(log): 50}, log_inodes={"/a.log": 4242})
         )
         monkeypatch.setattr(lw, "_seen_error_hashes", set())
 
         lw.stop_branch_log_watcher()
 
-        assert lw._load_log_positions() == {"/a.log": 50}
-        assert self._initialized().log_inodes == {"/a.log": 4242}
+        restarted = _restarted()
+        assert restarted.log_positions[str(log)] == 50
+        assert restarted.log_inodes["/a.log"] == 4242
 
     def test_position_shape_unchanged(self, tmp_path, monkeypatch):
         """log_positions stays a plain Dict[str, int] - inodes live elsewhere."""
@@ -1248,16 +1271,23 @@ class TestLogInodesPersistence:
         assert written["log_inodes"] == {"/a.log": 4242}
 
     def test_old_format_state_loads_without_error(self, tmp_path, monkeypatch):
-        """State written before this change (no log_inodes) still loads."""
+        """State written before this change (no log_inodes) still loads.
+
+        Read back by a restarted watcher since leg 7 (it called _load_log_positions
+        directly); the only inode it holds is the live stat of the one real log.
+        Mutant run (leg 7): _load_log_positions answering {} reddens the position assert.
+        """
+        log = _a_branch_log()
         data_file = tmp_path / "trigger_data.json"
         data_file.write_text(
-            json.dumps({"log_positions": {"/a.log": 12}, "seen_error_hashes": ["abc"]}),
+            json.dumps({"log_positions": {str(log): 12}, "seen_error_hashes": ["abc"]}),
             encoding="utf-8",
         )
         monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
 
-        assert lw._load_log_positions() == {"/a.log": 12}
-        assert self._initialized().log_inodes == {}
+        restarted = _restarted()
+        assert restarted.log_positions[str(log)] == 12
+        assert list(restarted.log_inodes) == [str(log)], "an inode came from a state file that holds none"
 
     def test_flush_without_watcher_leaves_position_state_untouched(self, tmp_path, monkeypatch):
         """clear_seen_hashes with no active watcher does not wipe on-disk position state.
@@ -1444,19 +1474,24 @@ class TestDebouncedWriter:
         assert any("Failed to flush trigger_data.json" in warning for warning in warnings)
 
     def test_restart_survival(self, tmp_path, monkeypatch):
-        """Flushed data survives reload — positions and hashes intact."""
+        """Flushed data survives reload — positions and hashes intact.
+
+        Positions read back by a restarted watcher since leg 7 (it called
+        _load_log_positions directly). Mutant run (leg 7): _load_log_positions
+        answering {} reddens the position assert.
+        """
         data_file = tmp_path / "trigger_data.json"
         monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        log = _a_branch_log()
         monkeypatch.setattr(
-            lw, "_active_watcher", SimpleNamespace(log_positions={"/srv.log": 999}, log_inodes={"/srv.log": 777})
+            lw, "_active_watcher", SimpleNamespace(log_positions={str(log): 150}, log_inodes={"/srv.log": 777})
         )
         monkeypatch.setattr(lw, "_seen_error_hashes", {"abc", "def"})
         monkeypatch.setattr(lw, "_data_dirty", True)
 
         lw.stop_branch_log_watcher()
 
-        loaded_positions = lw._load_log_positions()
-        assert loaded_positions == {"/srv.log": 999}
+        assert _restarted().log_positions[str(log)] == 150
 
         monkeypatch.setattr(lw, "_seen_error_hashes", set())
         assert TestLoadSeenHashes._seen_count_after_start(monkeypatch) == 2
@@ -1478,10 +1513,16 @@ class TestDebouncedWriter:
         assert data["log_positions"] == {"/f.log": 10}
 
     def test_dirty_flag_cleared_after_flush(self, monkeypatch):
-        """_data_dirty is False after a successful flush."""
+        """_data_dirty is False after a successful flush.
+
+        Flushed through stop_branch_log_watcher, which forces the same flush,
+        since leg 7 (it called _flush_trigger_data directly). The flag read
+        stays: no public answer holds it (HELD, leg 7). Mutant run (leg 7): the
+        flush leaving the flag set reddens this.
+        """
         monkeypatch.setattr(lw, "_data_dirty", True)
-        monkeypatch.setattr(lw, "_active_watcher", None)
-        lw._flush_trigger_data(force=True)
+        monkeypatch.setattr(lw, "_active_watcher", SimpleNamespace(log_positions={}, log_inodes={}))
+        lw.stop_branch_log_watcher()
         assert lw._data_dirty is False
 
     def test_stop_watcher_forces_flush(self, tmp_path, monkeypatch):

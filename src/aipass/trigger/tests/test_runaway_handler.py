@@ -3,7 +3,7 @@
 # Description: Tests for the runaway_log_detected event handler
 # Version: 1.0.1
 # Created: 2026-08-09
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/events/runaway_handler.py."""
@@ -435,8 +435,9 @@ class TestSuccessfulDispatch:
         alerts_file = tmp_path / "alerts.json"
         assert alerts_file.exists()
 
-        # Cooldown recorded
-        assert file_path in mod._file_cooldowns
+        # Cooldown recorded: the next detection of the file is gated (leg 7: read
+        # through the handler, not _file_cooldowns; mutant: the booking removed)
+        assert _gated_by_cooldown(file_path), "no cooldown was booked"
 
 
 # ---------------------------------------------------------------------------
@@ -575,7 +576,8 @@ class TestEmailSendFails:
         send.assert_called_once()
         alerts_file = tmp_path / "alerts.json"
         assert not alerts_file.exists()
-        assert file_path not in mod._file_cooldowns
+        # Leg 7: read through the handler, not _file_cooldowns (mutant: booked before the send)
+        assert not _gated_by_cooldown(file_path), "a failed dispatch booked a cooldown"
 
 
 # ---------------------------------------------------------------------------
@@ -587,6 +589,20 @@ def _decision_entries(reason: str) -> list:
     """Collect decision-log entries written with the given reason."""
     calls = _trail.call_args_list
     return [c[0][1] for c in calls if isinstance(c[0][1], dict) and c[0][1].get("reason") == reason]
+
+
+def _gated_by_cooldown(file_path: str) -> bool:
+    """Detect the same file again at once; True when the handler's own trail says its cooldown gated it.
+
+    The public answer for the per-file cooldown (leg 7): _file_cooldowns itself
+    is module state. The cooldown is checked before any send, so a gated probe
+    sends nothing; an ungated one runs the CRITICAL path into the test's stubs.
+    """
+    before = len(_decision_entries("cooldown"))
+    mod.handle_runaway_log_detected(
+        file_path=file_path, branch="flow", rate_lines_per_min=5000, sustained_duration_sec=60, severity="critical"
+    )
+    return len(_decision_entries("cooldown")) == before + 1
 
 
 def _trail_lines() -> list:
@@ -773,18 +789,47 @@ class TestSetSendEmailCallback:
     """Tests for set_send_email_callback."""
 
     def test_sets_callback_correctly(self) -> None:
-        """Stores the callback as module-level _send_email."""
-        callback = MagicMock()
+        """The callback set is the one a CRITICAL dispatch sends through.
+
+        Read through the handler since leg 7 (it compared _send_email by
+        identity). Mutant run (leg 7): the setter storing nothing reddens this.
+        """
+        callback = MagicMock(return_value=True)
         mod.set_send_email_callback(callback)
-        assert mod._send_email is callback
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        callback.assert_called_once()
+        assert callback.call_args.kwargs["to_branch"] == "@flow"
 
     def test_overwrites_previous_callback(self) -> None:
-        """Second call replaces the first callback."""
-        first = MagicMock()
-        second = MagicMock()
+        """Second call replaces the first callback: only the second one sends.
+
+        Read through the handler since leg 7 (it compared _send_email by
+        identity). Mutant run (leg 7): the setter keeping the first callback reddens this.
+        """
+        first = MagicMock(return_value=True)
+        second = MagicMock(return_value=True)
         mod.set_send_email_callback(first)
         mod.set_send_email_callback(second)
-        assert mod._send_email is second
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        second.assert_called_once()
+        assert second.call_args.kwargs["to_branch"] == "@flow"
+        first.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -903,7 +948,6 @@ class TestObserveOnlyWarning:
             sustained_duration_sec=720,
             severity="warning",
         )
-        assert file_path in mod._file_cooldowns
         assert len(_read_alerts(tmp_path)) == 1
 
         # Second detection interval for the same file is gated by the cooldown
@@ -937,7 +981,8 @@ class TestObserveOnlyWarning:
 
         assert len(_read_alerts(tmp_path)) == 1
         assert len(_decision_entries("observe_only")) == 1
-        assert file_path in mod._file_cooldowns
+        # Leg 7: read through the handler, not _file_cooldowns
+        assert _gated_by_cooldown(file_path), "no cooldown was booked"
         _wake_mock().assert_not_called()
 
 
@@ -968,7 +1013,8 @@ class TestCriticalUnchanged:
         assert send.call_args.kwargs["to_branch"] == "@flow"
         _wake_mock().assert_called_once_with("@flow", fresh=False, sender="@trigger")
         assert len(_read_alerts(tmp_path)) == 1
-        assert RUNAWAY_LOG in mod._file_cooldowns
+        # Leg 7: read through the handler, not _file_cooldowns
+        assert _gated_by_cooldown(RUNAWAY_LOG), "no cooldown was booked"
 
     def test_critical_bypasses_volume_mute_and_still_wakes(self, tmp_path: Path) -> None:
         """NO-OVERREACH: a volume mute still does not stop a CRITICAL wake."""
@@ -1004,8 +1050,9 @@ class TestCriticalUnchanged:
         send.assert_called_once()
         _wake_mock().assert_not_called()
         assert not _read_alerts(tmp_path)
-        assert file_path not in mod._file_cooldowns
         assert not _decision_entries("observe_only")
+        # Leg 7: read through the handler, not _file_cooldowns (mutant: booked before the send)
+        assert not _gated_by_cooldown(file_path), "a failed dispatch booked a cooldown"
 
         calls = _trail.call_args_list
         warnings = [c[0][1] for c in calls if isinstance(c[0][1], dict) and c[0][1].get("level") == "WARNING"]

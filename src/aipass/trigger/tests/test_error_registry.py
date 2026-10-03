@@ -3,7 +3,7 @@
 # Description: Unit tests for the error_registry handler
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -943,38 +943,44 @@ def test_non_user_error_not_suppressed(tmp_path: Path) -> None:
 
 
 def test_load_registry_creates_default_when_file_missing(tmp_path: Path) -> None:
-    """_load_registry returns a default structure when the file does not exist."""
+    """A missing registry reads as the empty default: the first report starts it with version 1.0.0.
+
+    Through report(), the loader's caller, since leg 7 (it called _load_registry
+    directly). The default's own last_updated is not asserted: every save
+    restamps it, so no caller can see it. report's failure dict carries no
+    fingerprint, so a loader that broke on a missing file reddens the first assert.
+    Mutant run (leg 7): the default's version "1.0.0" -> "0.0.0", and its errors
+    {} -> {"stale": {}}, each redden this.
+    """
     er = _import_registry()
+    assert not er.REGISTRY_FILE.exists()
 
-    registry = er._load_registry()
-    assert "errors" in registry
-    assert "metadata" in registry
-    assert registry["errors"] == {}
-    assert registry["metadata"]["version"] == "1.0.0"
-    assert "last_updated" in registry["metadata"]
-    assert registry["metadata"]["last_updated"] != ""
+    result = er.report(error_type="TestError", message="the first error ever", component="TRIGGER")
 
-
-def test_save_registry_creates_parent_dirs(tmp_path: Path) -> None:
-    """_save_registry creates parent directories if they do not exist."""
-    er = _import_registry()
-
-    data = {
-        "errors": {},
-        "metadata": {"version": "1.0.0", "last_updated": ""},
-    }
-    result = er._save_registry(data)
-    assert result is True
-    assert er.REGISTRY_FILE.parent.exists()
-
-    # Verify the saved file contains valid JSON with expected structure
+    assert "fingerprint" in result, "report fell to its failure dict"
     saved = json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))
-    assert "errors" in saved
-    assert "metadata" in saved
-    assert saved["errors"] == {}
+    assert list(saved["errors"]) == [result["fingerprint"]]
     assert saved["metadata"]["version"] == "1.0.0"
-    # last_updated is overwritten by _save_registry to current time
-    assert saved["metadata"]["last_updated"] != ""
+
+
+def test_a_status_change_is_saved_with_a_fresh_stamp(tmp_path: Path) -> None:
+    """update_status answers with the save's own result, and the save restamps last_updated.
+
+    Through update_status, which returns what the save returns, since leg 7 (it
+    called _save_registry directly, and asserted the parent directory, which
+    json_file_lock and atomic_write_json in config.py both create before any save).
+    Mutant run (leg 7): the save's restamp line removed, and the save answering
+    False on success, each redden this.
+    """
+    _seed_registry(tmp_path, {"fp_saved": {"fingerprint": "fp_saved", "status": "new"}})
+    er = _import_registry()
+
+    assert er.update_status("fp_saved", "investigating") is True
+
+    saved = json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))
+    assert saved["errors"]["fp_saved"]["status"] == "investigating"
+    assert saved["metadata"]["version"] == "1.0.0"
+    assert saved["metadata"]["last_updated"] != "2026-01-01T00:00:00", "the save did not restamp the document"
 
 
 # ===========================================================================
@@ -1044,26 +1050,43 @@ class TestEmptyJsonResilience:
     """Verify no crashes when JSON files are empty or corrupt."""
 
     def test_load_registry_empty_file(self, tmp_path: Path) -> None:
-        """_load_registry returns default structure when registry file is empty."""
+        """An empty registry file reads as the empty default: the report lands as its only entry.
+
+        Through report() since leg 7 (it called _load_registry directly).
+        Mutant run (leg 7): the loader's empty-file arm answering {} reddens
+        this at the fingerprint assert (report falls to its failure dict).
+        """
         registry_dir = tmp_path / "trigger_json"
         registry_dir.mkdir(parents=True, exist_ok=True)
         registry_file = registry_dir / "error_registry.json"
         registry_file.write_text("", encoding="utf-8")
 
         er = _import_registry()
-        result = er._load_registry()
-        assert result["errors"] == {}
+        result = er.report(error_type="TestError", message="onto an empty file", component="TRIGGER")
+
+        assert "fingerprint" in result, "report fell to its failure dict"
+        saved = json.loads(registry_file.read_text(encoding="utf-8"))
+        assert list(saved["errors"]) == [result["fingerprint"]]
 
     def test_load_registry_corrupt_json(self, tmp_path: Path) -> None:
-        """_load_registry returns default on corrupt JSON content."""
+        """A corrupt registry reads as the empty default, and the report writes a valid one in its place.
+
+        Through report() since leg 7 (it called _load_registry directly). The
+        loader's docstring names the residual: the blank is written straight back.
+        Mutant run (leg 7): the loader catching KeyError only (so the decode
+        error escapes) reddens this at the fingerprint assert.
+        """
         registry_dir = tmp_path / "trigger_json"
         registry_dir.mkdir(parents=True, exist_ok=True)
         registry_file = registry_dir / "error_registry.json"
         registry_file.write_text("{invalid json", encoding="utf-8")
 
         er = _import_registry()
-        result = er._load_registry()
-        assert result["errors"] == {}
+        result = er.report(error_type="TestError", message="onto a corrupt file", component="TRIGGER")
+
+        assert "fingerprint" in result, "report fell to its failure dict"
+        saved = json.loads(registry_file.read_text(encoding="utf-8"))
+        assert list(saved["errors"]) == [result["fingerprint"]]
 
     def test_load_circuit_breaker_empty_config(self, tmp_path: Path) -> None:
         """_load_circuit_breaker_state returns default when its state file is empty."""
