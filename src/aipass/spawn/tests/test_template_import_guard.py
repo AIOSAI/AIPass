@@ -3,7 +3,7 @@
 # Description: What the newborn's handler guard must survive on its very first import
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
@@ -3078,6 +3078,12 @@ class TestOptionalPeerImportsAreWideEnough:
 
         return _Denier
 
+    @staticmethod
+    def _todos_meta_line(branch_root):
+        """The local.json line carrying todos_meta, whole, as it stands on disk."""
+        text = (branch_root / ".trinity" / "local.json").read_text(encoding="utf-8")
+        return next(line for line in text.splitlines() if '"todos_meta"' in line)
+
     @pytest.mark.parametrize(
         "exc",
         [
@@ -3087,15 +3093,25 @@ class TestOptionalPeerImportsAreWideEnough:
         ],
         ids=["dead-cwd", "unreadable", "absent"],
     )
-    def test_meta_tabs_fall_back_when_memory_is_broken_or_absent(self, exc, monkeypatch):
+    def test_meta_tabs_fall_back_when_memory_is_broken_or_absent(self, exc, monkeypatch, tmp_path):
+        """Through the public mint (fleet green leg 7: this pin used to call core._load_meta_tabs).
+
+        The fallback is an empty tab set, so the newborn's todos_meta line is the
+        template's own line, its {{TODOS_META}} left for @memory to render later.
+        """
         denier = self._deny("aipass.memory", exc)
         monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
         for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
             monkeypatch.delitem(sys.modules, name, raising=False)
 
-        assert core._load_meta_tabs() == {}, (
-            f"a peer raising {type(exc).__name__} took spawn's meta-tab lookup down instead of falling back"
-        )
+        try:
+            result = core.spawn_agent(str(tmp_path / "newbie"), role="Test", purpose="meta-tab fallback")
+        except (ImportError, OSError) as err:
+            pytest.fail(f"a peer raising {type(exc).__name__} took spawn's mint down instead of falling back: {err}")
+
+        assert result["success"] is True
+        template_root = get_template_dir(get_available_classes()[0])
+        assert self._todos_meta_line(tmp_path / "newbie") == self._todos_meta_line(template_root)
 
     def test_the_denier_actually_denies(self, monkeypatch):
         """Negative control: an inert finder would make the pins above vacuous."""
@@ -3107,15 +3123,17 @@ class TestOptionalPeerImportsAreWideEnough:
         with pytest.raises(FileNotFoundError):
             importlib.import_module("aipass.memory.apps.handlers.tracking.tab_renderer")
 
-    def test_a_real_programming_error_is_still_fatal(self, monkeypatch):
+    def test_a_real_programming_error_is_still_fatal(self, monkeypatch, tmp_path):
         """The width is OSError, not Exception — a broken peer must stay loud."""
         denier = self._deny("aipass.memory", ValueError("peer has a bug"))
         monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
         for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
             monkeypatch.delitem(sys.modules, name, raising=False)
 
-        with pytest.raises(ValueError):
-            core._load_meta_tabs()
+        with pytest.raises(ValueError, match="peer has a bug"):
+            core.spawn_agent(str(tmp_path / "newbie"), role="Test", purpose="meta-tab fatal")
+
+        assert not (tmp_path / "newbie").exists(), "the lookup runs before the copy: nothing is minted"
 
 
 # =============================================================================
@@ -3145,17 +3163,10 @@ def _inspect_stack_calls(source: str) -> list:
     """
     tree = ast.parse(source)
 
-    module_aliases = {"inspect"}
-    direct_names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "inspect":
-                    module_aliases.add(alias.asname or alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.module == "inspect":
-            for alias in node.names:
-                if alias.name == "stack":
-                    direct_names.add(alias.asname or alias.name)
+    imports = [node for node in ast.walk(tree) if isinstance(node, ast.Import)]
+    module_aliases = {"inspect"} | {a.asname or a.name for node in imports for a in node.names if a.name == "inspect"}
+    from_inspect = [node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module == "inspect"]
+    direct_names = {a.asname or a.name for node in from_inspect for a in node.names if a.name == "stack"}
 
     found = []
     for node in ast.walk(tree):

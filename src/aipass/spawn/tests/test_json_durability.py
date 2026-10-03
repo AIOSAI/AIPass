@@ -3,7 +3,7 @@
 # Description: Torn-write durability tests for spawn's JSON/text write paths
 # Version: 1.1.3
 # Created: 2026-08-16
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/atomic_write.py and the write paths it makes durable."""
@@ -27,17 +27,29 @@ from types import SimpleNamespace
 
 import pytest
 
-from aipass.spawn.apps.handlers import file_ops, regenerate_registry_ops
+from aipass.spawn.apps.handlers import file_ops, regenerate_registry_ops, update_ops
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 from aipass.spawn.apps.handlers.registry import save_registry
 from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
-from aipass.spawn.apps.handlers.update_ops import _merge_json
 import aipass.spawn.apps.handlers.atomic_write as aw
 import aipass.spawn.apps.handlers.registry as registry_mod
 
 logger = logging.getLogger(__name__)
+
+
+def _update_merge(world) -> str:
+    """Run the public update once over merge_world; answer what it did to config.json.
+
+    "updated", "unchanged" or "error", read off update_branch's own report (fleet
+    green leg 7: these pins used to call the private update_ops._merge_json).
+    """
+    result = update_ops.update_branch("branch", dry_run=False, registry_path=world["registry"])
+    if result["errors"]:
+        return "error"
+    return "updated" if "config.json" in [d["branch_path"] for d in result["_updates_detail"]] else "unchanged"
+
 
 # The defect these pin: ``open(path, 'w')`` / ``Path.write_text(...)`` truncate the
 # target in place, so a concurrent reader can land between the truncate and the
@@ -410,18 +422,34 @@ def passport_world(tmp_path):
 
 
 @pytest.fixture
-def merge_world(tmp_path):
-    """A template JSON and a live branch copy for update_ops._merge_json."""
-    template = tmp_path / "template.json"
-    dest_dir = tmp_path / "branch"
-    dest_dir.mkdir()
-    dest = dest_dir / "config.json"
+def merge_world(tmp_path, monkeypatch):
+    """A one-branch project the public update merges ONE JSON file into.
+
+    The template holds config.json; the branch holds its copy and a passport for
+    its class; the registry is handed in by registry_path, and get_template_dir
+    answers the tmp template. Nothing here reaches a living branch.
+    """
+    tpl = tmp_path / "template"
+    tpl.mkdir()
+    template = tpl / "config.json"
+    branch = tmp_path / "branch"
+    (branch / ".trinity").mkdir(parents=True)
+    passport = {"identity": {"citizen_class": "specialist"}}
+    (branch / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    dest = branch / "config.json"
     template.write_text(json.dumps({"section": {"from_template": True}}), encoding="utf-8")
     dest.write_text(
         json.dumps({"section": {"existing": "value"}, "pad": ["x" * 40] * 20}, indent=2) + "\n",
         encoding="utf-8",
     )
-    return {"template": template, "dest": dest, "backup": tmp_path / ".recovery"}
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text(json.dumps({"branches": [{"name": "BRANCH", "path": "branch"}]}), encoding="utf-8")
+
+    def template_for(citizen_class):
+        return tpl
+
+    monkeypatch.setattr(update_ops, "get_template_dir", template_for)
+    return {"template": template, "dest": dest, "registry": registry}
 
 
 @pytest.fixture
@@ -491,7 +519,7 @@ class TestConcurrentReaderNeverSeesTornFile:
             json_handler.write_json(dest, {"section": {"existing": "value"}, "pad": ["x" * 40] * 20})
             template = merge_world["template"]
             template.write_text(json.dumps({"section": {"from_template": True, f"round_{n}": n}}), encoding="utf-8")
-            return _merge_json(template, dest, {}, False, False, merge_world["backup"]) == "updated"
+            return _update_merge(merge_world) == "updated"
 
         _Racer(dest, write_once).run().assert_clean()
 
@@ -660,9 +688,9 @@ class TestFailedWriteKeepsOldContent:
         before = json.loads(dest.read_text(encoding="utf-8"))
 
         with write_fails_midway(monkeypatch):
-            result = _merge_json(merge_world["template"], dest, {}, False, False, merge_world["backup"])
+            result = _update_merge(merge_world)
 
-        assert result == "error", "_merge_json must keep reporting 'error' on failure"
+        assert result == "error", "the update must keep reporting the merge as an error on failure"
         assert dest.read_text(encoding="utf-8") != ""
         assert json.loads(dest.read_text(encoding="utf-8")) == before
 
@@ -714,7 +742,7 @@ class TestTempStagedBesideTarget:
 
     def test_json_merge_stages_beside_target(self, merge_world, mkstemp_spy):
 
-        _merge_json(merge_world["template"], merge_world["dest"], {}, False, False, merge_world["backup"])
+        _update_merge(merge_world)
 
         self._assert_staged_in(mkstemp_spy, merge_world["dest"].parent)
 
@@ -1291,6 +1319,28 @@ class TestNoRawTruncatingWritesInSource:
 # =============================================================================
 
 
+class _Turns:
+    """A write_once stand-in that records the turn numbers the racer hands it.
+
+    The verdict is fixed (wrote / did not write) because the test is about the
+    racer's report, not a write; what the test can assert is that the racer
+    consulted it, turn after turn, from 0 (fleet green leg 7, spawn's decision).
+    """
+
+    def __init__(self, wrote: bool):
+        self.wrote = wrote
+        self.seen: list[int] = []
+
+    def __call__(self, n: int) -> bool:
+        self.seen.append(n)
+        return self.wrote
+
+
+def _never_called(n: int) -> bool:
+    """write_once for a racer whose counters are set by hand: the race never runs."""
+    raise AssertionError(f"write_once called with turn {n}; this pin never starts the race")
+
+
 class TestRacerReportsWeatherHonestly:
     """The guard "the race proves nothing" is right; failing for it is not.
 
@@ -1316,7 +1366,8 @@ class TestRacerReportsWeatherHonestly:
 
     def test_a_race_that_never_read_skips_rather_than_fails(self, tmp_path):
         """reads == 0 is a result, not a defect."""
-        racer = _Racer(tmp_path / "never_created.json", lambda n: True)
+        turns = _Turns(wrote=True)
+        racer = _Racer(tmp_path / "never_created.json", turns)
         racer.run(seconds=0.05, warmup=0.05)
 
         assert racer.reads == 0, "fixture assumption broken — the target must never appear"
@@ -1324,23 +1375,29 @@ class TestRacerReportsWeatherHonestly:
             racer.assert_clean()
 
         assert "never read" in str(exc.value)
+        assert turns.seen[:1] == [0] and turns.seen == list(range(len(turns.seen)))
+        assert racer.writes == len(turns.seen)
 
     def test_a_race_that_never_wrote_skips_rather_than_fails(self, tmp_path):
         """writes == 0 is the same result seen from the other side."""
         target = tmp_path / "static.json"
         target.write_text('{"a": 1}\n', encoding="utf-8")
 
-        racer = _Racer(target, lambda n: False)
+        turns = _Turns(wrote=False)
+        racer = _Racer(target, turns)
         racer.run(seconds=0.05, warmup=0.05)
 
         with pytest.raises(pytest.skip.Exception) as exc:
             racer.assert_clean()
 
         assert "never rewrote" in str(exc.value)
+        assert turns.seen[:1] == [0] and turns.seen == list(range(len(turns.seen)))
+        assert racer.writes == 0
 
     def test_the_skip_reason_carries_the_counters(self, tmp_path):
         """A skip nobody can diagnose is only a quieter silence."""
-        racer = _Racer(tmp_path / "never_created.json", lambda n: True)
+        turns = _Turns(wrote=True)
+        racer = _Racer(tmp_path / "never_created.json", turns)
         racer.run(seconds=0.05, warmup=0.05)
 
         with pytest.raises(pytest.skip.Exception) as exc:
@@ -1348,7 +1405,7 @@ class TestRacerReportsWeatherHonestly:
 
         reason = str(exc.value)
         assert "reads=0" in reason
-        assert "writes=" in reason
+        assert f"writes={len(turns.seen)}" in reason
 
     def test_an_observed_tear_still_fails_even_with_one_read(self, tmp_path):
         """ORDERING PIN — the tear check must run BEFORE the skip.
@@ -1357,7 +1414,7 @@ class TestRacerReportsWeatherHonestly:
         torn read and call the day green. This is the pin that makes the skip
         safe to add.
         """
-        racer = _Racer(tmp_path / "irrelevant.json", lambda n: True)
+        racer = _Racer(tmp_path / "irrelevant.json", _never_called)
         racer.reads = 1
         racer.empty = 1
         racer.writes = 0
@@ -1414,7 +1471,7 @@ def _target(tmp_path: Path, content):
     target = tmp_path / "final_state.json"
     if content is not None:
         target.write_text(content, encoding="utf-8")
-    racer = _Racer(target, lambda n: True)
+    racer = _Racer(target, _never_called)
     racer.reads = 0
     racer.writes = 0
     yield racer

@@ -20,8 +20,6 @@ import pytest
 from aipass.spawn.apps.handlers.update_ignore import UpdateIgnoreUnreadable, read_ignore
 from aipass.spawn.apps.handlers.update_ops import (
     _PASSPORT_HEAL_ALLOWLIST,
-    _heal_passport,
-    _merge_json,
     update_all,
     update_branch,
 )
@@ -1121,6 +1119,37 @@ class TestHandleUpdate:
         assert result == 0
 
 
+def _one_file_world(tmp_path, rel, template_text, existing_text):
+    """A template holding ONE file at *rel*, and a branch holding its own copy.
+
+    The branch gets a minimal passport when *rel* is not the passport, because
+    update reads its class first. Answers the registry to hand to update_branch
+    and the branch copy (fleet green leg 7: these tests used to call the private
+    _merge_json and _heal_passport; they now go through the public update).
+    """
+    (tmp_path / "template" / rel).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "template" / rel).write_text(template_text, encoding="utf-8")
+    dest = tmp_path / "test_branch" / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(existing_text, encoding="utf-8")
+    passport = tmp_path / "test_branch" / ".trinity" / "passport.json"
+    if not passport.exists():
+        passport.parent.mkdir(parents=True, exist_ok=True)
+        passport.write_text(json.dumps({"identity": {"citizen_class": "specialist"}}), encoding="utf-8")
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text(json.dumps({"branches": [{"name": "TEST_BRANCH", "path": "test_branch"}]}), encoding="utf-8")
+    return registry, dest
+
+
+def _update_verdict(tmp_path, registry, rel):
+    """Run the public update once; answer what it did to *rel*: updated, unchanged or error."""
+    with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=tmp_path / "template"):
+        result = update_branch("test_branch", dry_run=False, registry_path=registry)
+    if result["errors"]:
+        return "error"
+    return "updated" if rel in [d["branch_path"] for d in result["_updates_detail"]] else "unchanged"
+
+
 class TestPassportHealIsNotAMigration:
     """FPLAN-0492: the heal repairs three derived fields; it never changes schema.
 
@@ -1149,12 +1178,11 @@ class TestPassportHealIsNotAMigration:
     }
 
     def _heal(self, tmp_path, template_passport, existing_passport):
-        template_file = tmp_path / "template_passport.json"
-        template_file.write_text(json.dumps(template_passport, indent=2), encoding="utf-8")
-        dest = tmp_path / "branch" / ".trinity" / "passport.json"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(existing_passport, indent=2) + "\n", encoding="utf-8")
-        result = _heal_passport(template_file, dest, {}, dry_run=False, trace=False)
+        rel = ".trinity/passport.json"
+        registry, dest = _one_file_world(
+            tmp_path, rel, json.dumps(template_passport, indent=2), json.dumps(existing_passport, indent=2) + "\n"
+        )
+        result = _update_verdict(tmp_path, registry, rel)
         return result, json.loads(dest.read_text(encoding="utf-8"))
 
     def test_a_schema_1_passport_gains_no_2_0_fields_and_no_bump(self, tmp_path):
@@ -1196,23 +1224,20 @@ class TestPassportHealIsNotAMigration:
         difference, zero fields). Comparing documents instead of text answers the
         question that was actually being asked.
         """
-        template_file = tmp_path / "template_passport.json"
-        template_file.write_text(
-            json.dumps({"branch_info": {"email": "@t", "git_branch": "dev"}, "identity": {"traits": []}}, indent=2),
-            encoding="utf-8",
-        )
+        rel = ".trinity/passport.json"
+        template = {"branch_info": {"email": "@t", "git_branch": "dev"}, "identity": {"traits": []}}
         existing = {
             "document_metadata": {"schema_version": "2.0.0"},
             "branch_info": {"email": "@legacy", "git_branch": "main"},
-            "identity": {"traits": ["Radical specificity — exact numbers"]},
+            "identity": {"citizen_class": "specialist", "traits": ["Radical specificity — exact numbers"]},
         }
-        dest = tmp_path / "branch" / ".trinity" / "passport.json"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(existing, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+        registry, dest = _one_file_world(
+            tmp_path, rel, json.dumps(template, indent=2), json.dumps(existing, indent=2, ensure_ascii=True) + "\n"
+        )
         before = dest.read_bytes()
         assert b"\\u2014" in before, "fixture must carry an escaped character for this to mean anything"
 
-        result = _heal_passport(template_file, dest, {}, dry_run=False, trace=False)
+        result = _update_verdict(tmp_path, registry, rel)
 
         assert result == "unchanged"
         assert dest.read_bytes() == before
@@ -1238,13 +1263,11 @@ class TestTemplateOwnedListsGrow:
         "ignore_patterns": ["__pycache__", "*.pyc"],
     }
 
-    def _merge(self, tmp_path, resolved_path, template_data, existing_data, name="file.json"):
-        template_file = tmp_path / f"template_{name}"
-        template_file.write_text(json.dumps(template_data, indent=2), encoding="utf-8")
-        dest = tmp_path / "branch" / name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(existing_data, indent=2) + "\n", encoding="utf-8")
-        result = _merge_json(template_file, dest, {}, False, False, tmp_path / ".recovery", resolved_path)
+    def _merge(self, tmp_path, resolved_path, template_data, existing_data):
+        registry, dest = _one_file_world(
+            tmp_path, resolved_path, json.dumps(template_data, indent=2), json.dumps(existing_data, indent=2) + "\n"
+        )
+        result = _update_verdict(tmp_path, registry, resolved_path)
         return result, json.loads(dest.read_text(encoding="utf-8"))
 
     def test_a_declared_list_receives_the_templates_additions(self, tmp_path):
@@ -1267,14 +1290,13 @@ class TestTemplateOwnedListsGrow:
         assert len(merged["ignore_files"]) == len(set(merged["ignore_files"])), "no duplicates"
 
     def test_a_second_pass_changes_nothing(self, tmp_path):
-        template_file = tmp_path / "template.json"
-        template_file.write_text(json.dumps(self.TEMPLATE_IGNORE, indent=2), encoding="utf-8")
-        dest = tmp_path / "branch" / ".registry_ignore.json"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(self.BRANCH_IGNORE, indent=2) + "\n", encoding="utf-8")
+        rel = ".spawn/.registry_ignore.json"
+        registry, _dest = _one_file_world(
+            tmp_path, rel, json.dumps(self.TEMPLATE_IGNORE, indent=2), json.dumps(self.BRANCH_IGNORE, indent=2) + "\n"
+        )
 
-        first = _merge_json(template_file, dest, {}, False, False, tmp_path / ".rec", ".spawn/.registry_ignore.json")
-        second = _merge_json(template_file, dest, {}, False, False, tmp_path / ".rec", ".spawn/.registry_ignore.json")
+        first = _update_verdict(tmp_path, registry, rel)
+        second = _update_verdict(tmp_path, registry, rel)
 
         assert (first, second) == ("updated", "unchanged")
 
@@ -1285,7 +1307,7 @@ class TestTemplateOwnedListsGrow:
         template = {"permissions": {"deny": ["Bash(rm -rf*)", "Bash(commit-ish*)"], "allow": []}}
         existing = {"permissions": {"deny": ["Bash(rm -rf*)"], "allow": ["Bash(ls*)"]}}
 
-        result, merged = self._merge(tmp_path, ".claude/settings.local.json", template, existing, "settings.json")
+        result, merged = self._merge(tmp_path, ".claude/settings.local.json", template, existing)
 
         assert result == "unchanged"
         assert merged["permissions"]["deny"] == ["Bash(rm -rf*)"]

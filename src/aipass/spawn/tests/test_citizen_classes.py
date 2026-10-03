@@ -3,7 +3,7 @@
 # Description: Integration tests for citizen class system
 # Version: 1.3.3
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""
@@ -16,6 +16,7 @@
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -35,7 +36,7 @@ from aipass.spawn.apps.handlers.class_registry import (
 from aipass.spawn.apps.handlers.metadata import detect_profile
 from aipass.spawn.apps.handlers.placeholders import replace_placeholders
 from aipass.spawn.apps.handlers.registry import ensure_project_has_owner, pick_owner_branch
-from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
+from aipass.spawn.apps.handlers.update_ops import update_branch
 from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create
@@ -369,55 +370,85 @@ class TestClassAwareCreate:
 
 
 class TestClassAwareUpdate:
-    """Tests for class-aware update behavior."""
+    """Tests for class-aware update behavior.
+
+    The class a passport claims is read through the public update_branch on a
+    one-branch project under tmp_path, its registry handed in by registry_path
+    (fleet green leg 7: the tests used to call the private _read_citizen_class).
+    """
+
+    @staticmethod
+    def _project(tmp_path, passport=None, text=None):
+        """A registry and one branch; the passport from a dict, raw text, or absent."""
+        trinity = tmp_path / "test_branch" / ".trinity"
+        trinity.mkdir(parents=True)
+        if passport is not None:
+            text = json.dumps(passport)
+        if text is not None:
+            (trinity / "passport.json").write_text(text, encoding="utf-8")
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        rows = [{"name": "TEST_BRANCH", "path": "test_branch"}]
+        registry.write_text(json.dumps({"branches": rows}), encoding="utf-8")
+        return registry
+
+    @staticmethod
+    def _update(registry):
+        """The public update; answers the classes it asked a template for, and its result.
+
+        The recorder hands back a template dir that does not exist, so the update
+        returns at "Template directory not found", before any walk or write.
+        """
+        asked = []
+
+        def template_for(citizen_class):
+            asked.append(citizen_class)
+            return registry.parent / "no_template"
+
+        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", template_for):
+            result = update_branch("test_branch", dry_run=True, registry_path=registry)
+        return asked, result
 
     @pytest.mark.parametrize("citizen_class", LIVE_CLASSES)
     def test_read_citizen_class_returns_what_the_passport_claims(self, tmp_path, citizen_class):
         """Both live classes read back unchanged."""
-        passport_dir = tmp_path / ".trinity"
-        passport_dir.mkdir()
-        passport = {"identity": {"citizen_class": citizen_class, "role": "test"}}
-        (passport_dir / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        registry = self._project(tmp_path, {"identity": {"citizen_class": citizen_class, "role": "test"}})
 
-        assert _read_citizen_class(tmp_path) == citizen_class
+        asked, result = self._update(registry)
+
+        assert asked == [citizen_class]
+        assert result["success"] is False and "Template directory not found" in result["errors"][0]
 
     @pytest.mark.parametrize("retired,replacement", sorted(RETIRED_CLASSES.items()))
     def test_read_citizen_class_refuses_an_unmigrated_passport(self, tmp_path, retired, replacement):
         """An un-migrated passport surfaces as "migrate this", not a silent update
         against a class it no longer claims."""
-        passport_dir = tmp_path / ".trinity"
-        passport_dir.mkdir()
-        passport = {"identity": {"citizen_class": retired, "role": "test"}}
-        (passport_dir / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        registry = self._project(tmp_path, {"identity": {"citizen_class": retired, "role": "test"}})
 
         with pytest.raises(ValueError) as exc:
-            _read_citizen_class(tmp_path)
+            self._update(registry)
 
         assert replacement in str(exc.value)
 
     def test_read_citizen_class_missing_passport_raises(self, tmp_path):
         """Missing passport is a loud hard error, not a silent default class (DPLAN-0262)."""
+        registry = self._project(tmp_path)
+
         with pytest.raises(FileNotFoundError, match="No passport.json"):
-            _read_citizen_class(tmp_path)
+            self._update(registry)
 
     def test_read_citizen_class_no_field_raises(self, tmp_path):
         """Passport without citizen_class field is a loud hard error, not a silent default."""
-        passport_dir = tmp_path / ".trinity"
-        passport_dir.mkdir()
-        passport = {"identity": {"role": "test"}}
-        (passport_dir / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        registry = self._project(tmp_path, {"identity": {"role": "test"}})
 
         with pytest.raises(ValueError, match="Unknown citizen_class"):
-            _read_citizen_class(tmp_path)
+            self._update(registry)
 
     def test_read_citizen_class_corrupt_passport_raises(self, tmp_path):
         """Corrupt passport JSON is a loud hard error naming the passport path."""
-        passport_dir = tmp_path / ".trinity"
-        passport_dir.mkdir()
-        (passport_dir / "passport.json").write_text("{not valid json", encoding="utf-8")
+        registry = self._project(tmp_path, text="{not valid json")
 
         with pytest.raises(ValueError, match="Corrupt or unreadable passport.json"):
-            _read_citizen_class(tmp_path)
+            self._update(registry)
 
     @pytest.mark.parametrize("role", ["orchestration_hub", "project_agent", ""])
     def test_read_citizen_class_never_reads_the_role(self, tmp_path, role):
@@ -428,12 +459,11 @@ class TestClassAwareUpdate:
         one template shape, so the role is not consulted at all — a manager is a
         manager whatever it wrote in its own role field.
         """
-        passport_dir = tmp_path / ".trinity"
-        passport_dir.mkdir()
-        passport = {"identity": {"citizen_class": "manager", "role": role}}
-        (passport_dir / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        registry = self._project(tmp_path, {"identity": {"citizen_class": "manager", "role": role}})
 
-        assert _read_citizen_class(tmp_path) == "manager"
+        asked, _ = self._update(registry)
+
+        assert asked == ["manager"]
 
     def test_update_all_requires_class_via_cli(self):
         """update --all without class should return error code."""
