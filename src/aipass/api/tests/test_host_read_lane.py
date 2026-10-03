@@ -3,7 +3,7 @@
 # Description: Tests for the host API read lane — feed cursor, file fence, diff
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/host/feed.py, reads.py and git_reads.py, and their /v1 routes."""
@@ -763,21 +763,6 @@ class TestGitChangesMatchesTheDesktopCard:
 
         assert "brand_new.py" not in result["files"]
         assert result["count"] == 3
-
-    def test_the_untracked_ones_are_counted_separately_rather_than_dropped(self, fake_repo: dict) -> None:
-        """
-        Matching the desktop must not mean hiding what was measured.
-
-        @baud's OWN reasoning for the whole-project total is that a brand-new
-        module is the most interesting change in a tree and a count that hid it
-        reads as false calm. That reasoning does not stop being true because
-        this route answers the card's narrower question, so the number is
-        reported beside the contract rather than thrown away.
-        """
-        with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_git.read_git_changes("demo")
-
-        assert result["untracked"] == 1
 
     def test_paths_are_branch_local_not_repo_relative(self, fake_repo: dict) -> None:
         """
@@ -2153,6 +2138,12 @@ class TestStatusPerRow:
         THE ADDITIVE PROMISE, pinned. @baud's desktop consumer parses `files`
         and `count`; untracked must stay OUT of them however many rows exist,
         or the phone starts disagreeing with the desktop again.
+
+        And matching the desktop must not mean hiding what was measured: a
+        brand-new module is the most interesting change in a tree (@baud's own
+        reasoning), so untracked is reported beside the contract rather than
+        dropped (its own test retired as a duplicate of this one, api, fleet
+        green leg 8).
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_git_changes("demo")
@@ -3097,7 +3088,9 @@ class TestCommitDetail:
     def test_the_files_carry_plus_and_minus_counts(self, fake_repo: dict) -> None:
         """
         The stat line every git surface shows. Counted from the patch's own
-        plus and minus line starts, which is structure.
+        plus and minus line starts, which is structure: a space-prefixed context
+        line counts as neither, which the exact counts here hold (its own test
+        retired as a duplicate of this one, api, fleet green leg 8).
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
             result = host_git.read_commit("demo", ref="7edf8c2d")
@@ -3119,14 +3112,6 @@ class TestCommitDetail:
 
         total = sum(row["additions"] + row["deletions"] for row in result["files"])
         assert total == 5
-
-    def test_context_lines_count_as_neither(self, fake_repo: dict) -> None:
-        """A space-prefixed line is unchanged context, not a change."""
-        with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_git.read_commit("demo", ref="7edf8c2d")
-
-        rows = {row["path"]: row for row in result["files"]}
-        assert rows["src/aipass/other/thing.py"]["additions"] == 2
 
     def test_count_agrees_with_the_file_list(self, fake_repo: dict) -> None:
         """One number, derived."""

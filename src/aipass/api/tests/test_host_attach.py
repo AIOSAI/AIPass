@@ -47,7 +47,8 @@ import signal
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -149,6 +150,25 @@ def _forced_tmux_which(host_which: Any) -> Any:
         return TMUX_STANDIN if binary == host_attach.TMUX_BINARY else host_which(binary)
 
     return _which
+
+
+@pytest.fixture
+def handed_hook(quiet: Any, tmux_preflight: Any, monkeypatch: Any) -> Iterator[Any]:
+    """
+    The preexec_fn open_attach hands Popen, read off a recorder (api, fleet green leg 8).
+
+    The pty is a pipe this fixture owns and Popen records its kwargs, so no PTY,
+    terminal or process exists. _spawn_pty closes the slave end itself; the
+    master belongs to the session and is closed here.
+    """
+    master, slave = os.pipe()
+    handed: dict = {}
+    monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: (master, slave)))
+    monkeypatch.setattr(host_attach, "set_winsize", lambda *a: None)
+    monkeypatch.setattr(host_attach.subprocess, "Popen", lambda *a, **k: handed.update(k) or MagicMock(pid=1))
+    session = host_attach.open_attach("", room="baud-hook")
+    yield handed["preexec_fn"]
+    os.close(session.descriptor)
 
 
 @pytest.fixture
@@ -345,6 +365,11 @@ class TestTheCommandIsTheDesktopsCommand:
         `monitor_targets_are_branch_lists_or_commons` and
         `monitor_target_fence_refuses_command_shapes` in @baud's pty.rs. Two
         implementations of one charset stay honest by sharing examples.
+
+        The fence still refuses the empty string after the bare watch form landed:
+        absence is asked ABOUT in open_monitor, and folding "" into the fence would
+        have broken the mirror this lane's safety rests on (its own test retired as
+        a duplicate of this one, api, fleet green leg 8).
         """
         assert host_attach.valid_monitor_target("commons")
         assert host_attach.valid_monitor_target("seedgo")
@@ -361,6 +386,10 @@ class TestTheCommandIsTheDesktopsCommand:
         `drone @prax monitor run <target>` — pty.rs `monitor_create`'s exact
         command, minus its login shell: this server was started BY drone, so
         drone resolves from its own PATH and no shell ever sees the target.
+
+        Also the other half of the bare form in TestGlobalMissionControlIsReachable:
+        a named target still rides last, so that change did not cost the form that
+        worked (its own test retired as a duplicate of this one, api, fleet green leg 8).
         """
         assert host_attach.monitor_command("seedgo") == ["drone", "@prax", "monitor", "run", "seedgo"]
 
@@ -706,7 +735,7 @@ class TestTheRoomCanActuallyHearAResize:
         finally:
             session.hangup()
 
-    def test_the_preexec_hook_does_no_lookups_in_the_forked_child(self) -> None:
+    def test_the_preexec_hook_does_no_lookups_in_the_forked_child(self, handed_hook: Any) -> None:
         """
         It runs after fork in a process that HAS threads, where only
         async-signal-safe work is really allowed.
@@ -719,13 +748,13 @@ class TestTheRoomCanActuallyHearAResize:
         """
         import inspect
 
-        signature = inspect.signature(host_attach._acquire_controlling_tty)
+        signature = inspect.signature(handed_hook)
 
         assert signature.parameters, "nothing is bound — the child would look it all up"
         for parameter in signature.parameters.values():
             assert parameter.default is not inspect.Parameter.empty
 
-    def test_the_pre_3_11_fallback_does_setsid_then_tiocsctty(self) -> None:
+    def test_the_pre_3_11_fallback_does_setsid_then_tiocsctty(self, handed_hook: Any) -> None:
         """
         The branch that never runs on this interpreter, and would ship untested.
 
@@ -744,7 +773,7 @@ class TestTheRoomCanActuallyHearAResize:
         setsid = MagicMock(side_effect=lambda: order.append("setsid"))
         ioctl = MagicMock(side_effect=lambda *a: order.append("ioctl"))
 
-        host_attach._acquire_controlling_tty(
+        handed_hook(
             _setsid=setsid,
             _login_tty=None,
             _ioctl=ioctl,
@@ -754,7 +783,7 @@ class TestTheRoomCanActuallyHearAResize:
         assert order == ["setsid", "ioctl"]
         ioctl.assert_called_once_with(0, 1234, 0)
 
-    def test_the_hook_claims_the_descriptor_subprocess_actually_hands_it(self) -> None:
+    def test_the_hook_claims_the_descriptor_subprocess_actually_hands_it(self, handed_hook: Any) -> None:
         """
         fd 0, and it has to be 0.
 
@@ -765,7 +794,7 @@ class TestTheRoomCanActuallyHearAResize:
         """
         ioctl = MagicMock()
 
-        host_attach._acquire_controlling_tty(
+        handed_hook(
             _setsid=MagicMock(),
             _login_tty=None,
             _ioctl=ioctl,
@@ -774,11 +803,11 @@ class TestTheRoomCanActuallyHearAResize:
 
         assert ioctl.call_args.args[0] == 0
 
-    def test_the_login_tty_path_claims_the_same_descriptor(self) -> None:
+    def test_the_login_tty_path_claims_the_same_descriptor(self, handed_hook: Any) -> None:
         """The 3.11+ path targets fd 0 too — one behaviour, two implementations."""
         login_tty = MagicMock()
 
-        host_attach._acquire_controlling_tty(_login_tty=login_tty)
+        handed_hook(_login_tty=login_tty)
 
         login_tty.assert_called_once_with(0)
 
@@ -1435,10 +1464,7 @@ def detach_and_wait(socket: Any, session: Any, timeout: float = 10.0) -> None:
     server's real teardown rather than the moment the client stopped caring.
     """
     socket.close()
-
-    deadline = time.monotonic() + timeout
-    while session.hangups == 0 and time.monotonic() < deadline:
-        time.sleep(0.01)
+    session.wait_until(lambda: session.hangups > 0, timeout)
 
 
 class StubSession:
@@ -1448,6 +1474,10 @@ class StubSession:
     `resize` delegates to the module's own `_require_dimension`, so a bad frame
     driven through the live socket hits the same validation a real PTY would.
     Only the syscall is absent; the decision is the production one.
+
+    Every record is taken under one Condition and announced on it, so a test
+    waits on the record it needs (`wait_until`) instead of sleeping in a loop
+    and looking again (api, fleet green leg 8).
     """
 
     def __init__(self) -> None:
@@ -1456,6 +1486,12 @@ class StubSession:
         self.resizes: list = []
         self.hangups = 0
         self._release = threading.Event()
+        self._recorded = threading.Condition()
+
+    def wait_until(self, done: Any, timeout: float = 10.0) -> None:
+        """Block until `done()` holds or `timeout` passes; the caller asserts on what it then sees."""
+        with self._recorded:
+            self._recorded.wait_for(done, timeout)
 
     def read(self, size: int = 0) -> bytes:
         """Block like a quiet room, until the pump is torn down."""
@@ -1464,17 +1500,22 @@ class StubSession:
 
     def write(self, data: bytes) -> None:
         """Record what was typed into the room."""
-        self.writes.append(data)
+        with self._recorded:
+            self.writes.append(data)
+            self._recorded.notify_all()
 
     def resize(self, cols: object, rows: object) -> None:
         """Validate for real, then record."""
-        self.resizes.append(
-            (host_attach._require_dimension(cols, "cols"), host_attach._require_dimension(rows, "rows"))
-        )
+        size = (host_attach._require_dimension(cols, "cols"), host_attach._require_dimension(rows, "rows"))
+        with self._recorded:
+            self.resizes.append(size)
+            self._recorded.notify_all()
 
     def hangup(self) -> None:
         """Release the blocked reader so the pump can finish."""
-        self.hangups += 1
+        with self._recorded:
+            self.hangups += 1
+            self._recorded.notify_all()
         self._release.set()
 
 
@@ -1538,10 +1579,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
                     # A good one last: the socket has to still be carrying
                     # traffic after all of that, not merely still be open.
                     socket.send_text('{"type": "resize", "cols": 72, "rows": 44}')
-
-                    deadline = time.monotonic() + 10
-                    while not session.resizes and time.monotonic() < deadline:
-                        time.sleep(0.01)
+                    session.wait_until(lambda: bool(session.resizes))
 
                     detach_and_wait(socket, session)
 
@@ -1571,10 +1609,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
                     socket.send_text('{"type": "resize", "cols": 0, "rows": 0}')
                     socket.send_bytes(b"echo still-listening")
                     socket.send_bytes(b"\r")
-
-                    deadline = time.monotonic() + 10
-                    while len(session.writes) < 2 and time.monotonic() < deadline:
-                        time.sleep(0.01)
+                    session.wait_until(lambda: len(session.writes) >= 2)
 
                     detach_and_wait(socket, session)
 
@@ -1747,10 +1782,6 @@ class TestGlobalMissionControlIsReachable:
         """The desktop's argv, character for character — nothing trailing."""
         assert host_attach.monitor_command("") == ["drone", "@prax", "monitor", "run"]
 
-    def test_a_named_target_still_rides_last(self) -> None:
-        """The other half. One change must not cost the form that worked."""
-        assert host_attach.monitor_command("seedgo") == ["drone", "@prax", "monitor", "run", "seedgo"]
-
     def test_the_synonym_is_deliberately_not_used(self) -> None:
         """
         @prax documents `run all` for the same thing. This lane mirrors the
@@ -1758,15 +1789,6 @@ class TestGlobalMissionControlIsReachable:
         @prax's side, the phone must diverge with the desk.
         """
         assert "all" not in host_attach.monitor_command("")
-
-    def test_the_charset_fence_is_still_a_faithful_mirror(self) -> None:
-        """
-        `valid_monitor_target` is mirrored from @baud's pty.rs character for
-        character, so it still refuses the empty string. Absence is asked ABOUT
-        somewhere else — folding "" into the fence would have been the shorter
-        diff and would have broken the mirror this lane's safety rests on.
-        """
-        assert not host_attach.valid_monitor_target("")
 
     @pty_required
     def test_the_global_watch_actually_opens(self, quiet: Any, tmp_path: Path) -> None:
@@ -2281,17 +2303,32 @@ def wait_for_log(log: Any, needle: str, timeout: float = 10.0) -> str:
 
     Raises:
         AssertionError: No such line arrived in time.
-    """
-    deadline = time.monotonic() + timeout
 
-    while time.monotonic() < deadline:
+    Woken by each info call rather than polled on a sleep (api, fleet green leg
+    8). The mock records a call before it runs the side effect, and the side
+    effect needs the lock `wait_for` holds while it looks, so no line lands
+    between a look and the wait that follows it.
+    """
+    logged = threading.Condition()
+
+    def rendered_line() -> str | None:
         for call in list(log.info.call_args_list):
             rendered = call.args[0] % call.args[1:] if len(call.args) > 1 else call.args[0]
             if needle in rendered:
                 return rendered
-        time.sleep(0.01)
+        return None
 
-    raise AssertionError(f"no info line containing {needle!r}: {log.info.call_args_list}")
+    def announce(*args: Any, **kwargs: Any) -> None:
+        with logged:
+            logged.notify_all()
+
+    log.info.side_effect = announce
+    with logged:
+        line = logged.wait_for(rendered_line, timeout)
+
+    if line is None:
+        raise AssertionError(f"no info line containing {needle!r}: {log.info.call_args_list}")
+    return line
 
 
 class SilentRoom(StubSession):
@@ -2398,10 +2435,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
                     # A real keystroke after it, to prove the channel is still
                     # carrying what it is FOR.
                     socket.send_bytes(b"echo alive")
-
-                    deadline = time.monotonic() + 10
-                    while not session.writes and time.monotonic() < deadline:
-                        time.sleep(0.01)
+                    session.wait_until(lambda: bool(session.writes))
 
                     detach_and_wait(socket, session)
 
@@ -2612,10 +2646,7 @@ class TestTypingIntoAWatchLeavesARecord:
             client = TestClient(host_server.create_app())
             with client.websocket_connect("/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]) as socket:
                 socket.send_bytes(b"rm -rf /")
-
-                deadline = time.monotonic() + 10
-                while session.hangups == 0 and time.monotonic() < deadline:
-                    time.sleep(0.01)
+                session.wait_until(lambda: session.hangups > 0)
 
         recorded = [call for call in audit.log_operation.call_args_list if call.args[0] == "host_api_input_refused"]
 

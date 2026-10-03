@@ -3,7 +3,7 @@
 # Description: Tests for Google API service factory handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/google/service_factory.py, the Google API service object factory."""
@@ -33,11 +33,18 @@ _SF = "aipass.api.apps.handlers.google.service_factory"
 class TestBuildService:
     """Tests for service_factory.build_service()."""
 
+    @patch(f"{_SF}.build")
+    @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", False)
-    def test_google_libs_not_available_returns_none(self) -> None:
-        """When google libs are not installed, returns None."""
+    def test_google_libs_not_available_returns_none(self, mock_auth: MagicMock, mock_build: MagicMock) -> None:
+        """Absent libs alone refuse: auth and build would both succeed here."""
+        mock_auth.is_available.return_value = True
+        mock_auth.authenticate.return_value = MagicMock()
+
         result = build_service("drive", "v3")
+
         assert result is None
+        mock_build.assert_not_called()
 
     @patch(f"{_SF}.build")
     @patch(f"{_SF}.auth", autospec=True)
@@ -111,11 +118,18 @@ class TestBuildService:
 class TestBuildThreadSafeService:
     """Tests for service_factory.build_thread_safe_service()."""
 
+    @patch(f"{_SF}.build")
+    @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", False)
-    def test_not_available_returns_none(self) -> None:
-        """When google libs unavailable, returns None."""
+    def test_not_available_returns_none(self, mock_auth: MagicMock, mock_build: MagicMock) -> None:
+        """Absent libs alone refuse: credentials and build would both succeed here."""
+        mock_auth.is_available.return_value = True
+        mock_auth.load_credentials.return_value = MagicMock(expired=False)
+
         result = build_thread_safe_service("drive", "v3")
+
         assert result is None
+        mock_build.assert_not_called()
 
     @patch(f"{_SF}.build")
     @patch(f"{_SF}.auth", autospec=True)

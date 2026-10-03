@@ -3,7 +3,7 @@
 # Description: Tests for the host API memory-config lane — @memory's rollover limits
 # Version: 2.0.0
 # Created: 2026-08-16
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/host/memory_config.py and its routes in apps/handlers/host/server.py."""
@@ -428,12 +428,13 @@ class TestTheArgumentsAreCheckedBeforeAnythingIsRouted:
 
     @pytest.mark.parametrize("value", [0, 101, -5, 1000])
     def test_a_count_outside_the_bounds_is_refused_here(self, value: int) -> None:
-        """Their documented bounds are 1-100 inclusive."""
+        """Their documented bounds are 1-100 inclusive, and the refusal names the count it got."""
         with patch.object(host_memory_config.drone, "route_command") as route:
-            with pytest.raises(host_memory_config.MemoryConfigRefused):
+            with pytest.raises(host_memory_config.MemoryConfigRefused) as refusal:
                 host_memory_config.set_branch_limit("api", "sessions", value)
 
         route.assert_not_called()
+        assert str(refusal.value).startswith(f"Count must be between 1 and 100 (got {value}) — ")
 
     @pytest.mark.parametrize("value", [1, 100])
     def test_both_bounds_are_inclusive(self, value: int) -> None:
@@ -456,13 +457,15 @@ class TestTheArgumentsAreCheckedBeforeAnythingIsRouted:
         True is refused explicitly.
 
         Python calls a bool an int, so 'sessions True' would otherwise route as
-        'sessions 1' — a limit nobody asked for, applied silently.
+        'sessions 1' — a limit nobody asked for, applied silently. Refused as not
+        a whole number, which is a different sentence from the bounds refusal.
         """
         with patch.object(host_memory_config.drone, "route_command") as route:
-            with pytest.raises(host_memory_config.MemoryConfigRefused):
+            with pytest.raises(host_memory_config.MemoryConfigRefused) as refusal:
                 host_memory_config.set_branch_limit("api", "sessions", value)
 
         route.assert_not_called()
+        assert str(refusal.value) == "Count must be a whole number between 1 and 100"
 
     def test_an_unknown_entry_type_is_refused_with_the_list(self) -> None:
         """A client guessing at a fourth type deserves the three that exist."""

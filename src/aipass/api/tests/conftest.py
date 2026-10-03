@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for api tests
 # Version: 2.1.0
 # Created: 2026-03-05
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -59,23 +59,14 @@ if _HANDLER_PKG not in sys.modules:
 
 _json_mod = importlib.import_module(_JSON_MOD_PATH)
 
-# The [host] extra's handlers, imported once at module level. Each is None when
-# the extra is absent: the autouse fixtures below are suite-wide, so a missing
-# extra must never be the reason a run cannot collect.
-try:
-    from aipass.api.apps.handlers.host import fleet as _fleet
-except Exception:  # pragma: no cover - only when the extra is missing
-    _fleet = None
-
-try:
-    from aipass.api.apps.handlers.host import refusals as _refusals
-except Exception:  # pragma: no cover - only when the extra is missing
-    _refusals = None
-
-try:
-    from aipass.api.apps.handlers.host import attach as _attach
-except Exception:  # pragma: no cover - only when the extra is missing
-    _attach = None
+# The host handlers the autouse fixtures below reset, imported plainly. None of
+# the three imports the [host] extra (fastapi, starlette, uvicorn live in
+# server.py and statics.py only), so the old catch-all around each guarded no
+# missing extra: all it could swallow was a real import break, which then
+# switched off its reset fixture without a word (api, fleet green leg 8).
+from aipass.api.apps.handlers.host import attach as _attach
+from aipass.api.apps.handlers.host import fleet as _fleet
+from aipass.api.apps.handlers.host import refusals as _refusals
 
 
 # Never discover out of .archive/: it holds verbatim disposal copies of the
@@ -221,14 +212,7 @@ def _no_fleet_cache_between_tests() -> Generator[None, None, None]:
     case that patches subprocess and counts execs would count the previous
     case's cached answer instead, and pass while measuring nothing. Cleared
     both sides so neither the test nor its neighbour can inherit one.
-
-    Silently skipped when the [host] extra is absent — this fixture is autouse
-    for the whole suite, so it must never be the reason a run cannot collect.
     """
-    if _fleet is None:  # pragma: no cover - only when the extra is missing
-        yield
-        return
-
     _fleet.reset_snapshot_cache()
     yield
     _fleet.reset_snapshot_cache()
@@ -246,14 +230,7 @@ def _no_remembered_git_refusals_between_tests() -> Generator[None, None, None]:
     provokes a refusal would silence every later test on that lane — and they
     would pass, because a remembered refusal raises exactly what a fresh one
     does. Cleared both sides.
-
-    Silently skipped when the [host] extra is absent — this fixture is autouse
-    for the whole suite, so it must never be the reason a run cannot collect.
     """
-    if _refusals is None:  # pragma: no cover - only when the extra is missing
-        yield
-        return
-
     _refusals._reset_refusals()
     yield
     _refusals._reset_refusals()
@@ -275,9 +252,5 @@ def _no_leaked_pump_reservations() -> Generator[None, None, None]:
     hangup always releases, and a failed spawn releases too, each proven by a
     mutation. This only stops one test's leftovers from being another's cap.
     """
-    if _attach is None:  # pragma: no cover - only when the extra is missing
-        yield
-        return
-
     yield
     _attach._PUMP_SLOTS = threading.BoundedSemaphore(_attach.PUMP_WORKERS)

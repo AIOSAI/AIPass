@@ -3,7 +3,7 @@
 # Description: Tests for the supervisor seam — a server that comes back on its own
 # Version: 1.0.0
 # Created: 2026-08-27
-# Modified: 2026-09-28
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/host/autostart.py and the host-api autostart verb that drives it."""
@@ -38,7 +38,7 @@
 # seedgo: no-test-needed(external) — linger_enabled's real loginctl query; it is patched where it is read
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -60,7 +60,7 @@ def quiet(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def has_systemd(quiet: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def has_systemd(quiet: None, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """
     A machine that HAS a user-level systemd, whatever machine this really is.
 
@@ -79,8 +79,15 @@ def has_systemd(quiet: None, monkeypatch: pytest.MonkeyPatch) -> None:
     These tests are about what the probe DOES WITH an answer. Whether the
     platform can be asked at all is a separate question with its own tests
     below, which patch the gate in the other direction.
+
+    The gate is a recorder, and the teardown asserts it was asked: a test that
+    takes this fixture and never reaches the gate is measuring something else
+    (api, fleet green leg 8).
     """
-    monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
+    asked: list = []
+    monkeypatch.setattr(host_autostart, "is_supported", lambda: asked.append("is_supported") or True)
+    yield
+    assert asked, "the product never asked is_supported, so this fixture stood in for nothing"
 
 
 @pytest.fixture
@@ -88,18 +95,16 @@ def quiet_serve(monkeypatch: pytest.MonkeyPatch) -> dict:
     """
     Silence the CLI module and hand back what it tried to say.
 
-    The verb tests below assert on the operator-facing output, so the console
-    and the error reporter are captured rather than merely muted — a fixture
-    that only silenced them would leave those tests with nothing to read.
+    The verb tests below assert on the operator-facing output. The error
+    reporter is captured; the console is the real one, read through capsys
+    (api, fleet green leg 8: it was a MagicMock read by its call list).
     """
-    console = MagicMock()
     reporter = MagicMock()
-    monkeypatch.setattr(host_serve_module, "console", console)
     monkeypatch.setattr(host_serve_module, "header", MagicMock())
     monkeypatch.setattr(host_serve_module, "error", reporter)
     monkeypatch.setattr(host_serve_module, "logger", MagicMock())
     monkeypatch.setattr(host_serve_module, "json_handler", MagicMock())
-    return {"console": console, "error": reporter}
+    return {"error": reporter}
 
 
 def _completed(stdout: str = "", returncode: int = 0) -> MagicMock:
@@ -409,7 +414,9 @@ class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
             "conflict": conflict,
         }
 
-    def test_the_verb_routes_and_prints_the_installation_steps(self, quiet_serve: dict, tmp_path: Path) -> None:
+    def test_the_verb_routes_and_prints_the_installation_steps(
+        self, quiet_serve: dict, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
         """The ordinary success path: every step reaches the operator's screen."""
         report = self._report(tmp_path)
 
@@ -417,7 +424,7 @@ class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
             assert handle_command("host-api", ["autostart"]) is True
 
         reporter.assert_called_once_with(None, None)
-        printed = " ".join(str(call) for call in quiet_serve["console"].print.call_args_list)
+        printed, _ = capsys.readouterr()
         for step in report["steps"]:
             assert step in printed, f"the operator was not shown the step they have to run: {step}"
 
