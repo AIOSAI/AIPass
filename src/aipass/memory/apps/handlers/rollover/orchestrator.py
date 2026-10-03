@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: orchestrator.py
 # Description: Rollover Orchestration Handler
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -196,28 +196,37 @@ def encode_batch_subprocess(texts: list) -> dict:
 # =============================================================================
 
 
-def get_branch_local_chroma_path(branch_name: str) -> Path | None:
+# Why a lookup found no local store. The push report names it, so a push that
+# reached the global store only says which of the two it was (leg 6 of DPLAN-0354).
+LOCAL_STORE_REGISTRY_UNREADABLE = "registry unreadable"
+LOCAL_STORE_ABSENT = "no local store"
+
+
+def local_store_lookup(branch_name: str) -> tuple[Path | None, str | None]:
     """
-    Get local .chroma path for branch
+    Find a branch's local .chroma, and say why when there is none
 
     Args:
         branch_name: Branch name (e.g., "SEEDGO", "AIPASS")
 
     Returns:
-        Path to branch's local .chroma directory, or None if branch not found,
-        or None with an error logged when the registry cannot be read. The
-        local store is the second store: execute_rollover calls this after the
-        file is trimmed, and a raise here left the entries in neither store
-        (DPLAN-0354 leg 3b). The global store still takes them.
+        ``(path, None)`` for the branch's local .chroma directory, or
+        ``(None, reason)``: LOCAL_STORE_REGISTRY_UNREADABLE with an error logged
+        when the registry cannot be read, else LOCAL_STORE_ABSENT (no name, not
+        listed, no directory, or the fence refused the store). Never raises on
+        an unreadable registry: the local store is the second store,
+        execute_rollover reaches it after the file is trimmed, and a raise here
+        left the entries in neither store (DPLAN-0354 leg 3b). The global store
+        still takes them.
     """
     if not branch_name:
-        return None
+        return None, LOCAL_STORE_ABSENT
 
     try:
         registry = detector._read_registry()
     except RegistryUnreadable as e:
         logger.error(f"[rollover] No local store for {branch_name}: {e}")
-        return None
+        return None, LOCAL_STORE_REGISTRY_UNREADABLE
 
     for branch in registry:
         if branch.get("name", "").upper() == branch_name.upper():
@@ -226,15 +235,29 @@ def get_branch_local_chroma_path(branch_name: str) -> Path | None:
                 chroma_path = branch_path / ".chroma"
                 # Existing is not permission: the local store writes into whatever is handed out
                 if write_fence.fence_write(chroma_path, lane="local_chroma") is not None:
-                    return None
+                    return None, LOCAL_STORE_ABSENT
                 # Auto-create .chroma directory if missing
                 if not chroma_path.exists():
                     chroma_path.mkdir(parents=True, exist_ok=True)
                     logger.info(f"[rollover] Created local .chroma directory for {branch_name}")
-                return chroma_path
+                return chroma_path, None
 
     logger.warning(f"[rollover] Branch {branch_name} not found in registry")
-    return None
+    return None, LOCAL_STORE_ABSENT
+
+
+def get_branch_local_chroma_path(branch_name: str) -> Path | None:
+    """
+    Get local .chroma path for branch
+
+    Args:
+        branch_name: Branch name (e.g., "SEEDGO", "AIPASS")
+
+    Returns:
+        The path local_store_lookup finds, or None for every reason it gives
+        (logged there). For a caller that needs the path alone.
+    """
+    return local_store_lookup(branch_name)[0]
 
 
 # =============================================================================

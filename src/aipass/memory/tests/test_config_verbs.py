@@ -3,7 +3,7 @@
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default) and the todo verbs
 # Version: 1.6.1
 # Created: 2026-08-16
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/rollover_config.py — the config verbs and the todo verbs, through apps/modules/rollover.py."""
@@ -2093,15 +2093,27 @@ class TestTheConfigContentHandlerReturnsLinesAndNeverPrints:
 
         assert "unset" in line and " 0" not in line
 
-    def test_the_module_prints_exactly_what_the_handler_returns(self, monkeypatch):
+    def test_the_module_prints_exactly_what_the_handler_returns(self, verbs, monkeypatch):
+        """`config get` prints the defaults block the handler builds, line for line, after its banner.
+
+        Through the command since leg 6 of DPLAN-0354: the handler is a recorder
+        that answers two known lines, so the assert needs no private name.
+        """
         from aipass.memory.apps.handlers.cli import config_content as cc
         from aipass.memory.apps.modules import rollover_config
 
         printed = []
         monkeypatch.setattr(rollover_config, "console", SimpleNamespace(print=lambda *a, **k: printed.append(a)))
-        defaults = {"sessions": {"count": 15, "auto_compact_cap": 3}, "todos": {"count": 10}}
+        handed = []
 
-        rollover_config._show_defaults(defaults)
+        def defaults_lines(defaults, display_types, read_only_types):
+            handed.append(defaults)
+            return ["DEFAULTS LINE ONE", "DEFAULTS LINE TWO"]
 
-        expected = cc.defaults_lines(defaults, rollover_config._DISPLAY_TYPES, rollover_config._READ_ONLY_TYPES)
-        assert [args[0] for args in printed] == expected
+        monkeypatch.setattr(cc, "defaults_lines", defaults_lines)
+
+        _run(verbs, "get")
+
+        texts = [args[0] for args in printed if args and isinstance(args[0], str)]
+        assert texts[:2] == ["DEFAULTS LINE ONE", "DEFAULTS LINE TWO"]
+        assert handed == [verbs.loader.get_default_limits()]

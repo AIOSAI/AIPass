@@ -1030,7 +1030,7 @@ class TestTodosMoveToTheBacklog:
     def _push(self, monkeypatch, tmp_path, root, dry_run, todos_count=10, store=None):
         monkeypatch.setattr(tp, "resolve_scope", lambda branch=None: _scope(root))
         monkeypatch.setattr(tp.config_loader, "load", lambda: _config(todos_count=todos_count))
-        monkeypatch.setattr(tp, "_destinations", lambda name: [("global", None)])
+        monkeypatch.setattr(tp, "_destinations", lambda name: ([("global", None)], None))
         return tp.push(
             branch=self.BRANCH,
             dry_run=dry_run,
@@ -1420,6 +1420,52 @@ class TestThePushLoopOverARegistryThatTurnsUnreadable:
         assert list(store.shelves) == [str(None)]
         errors = [call.args[0] for call in log.error.call_args_list]
         assert any(str(registry) in text for text in errors)
+
+
+class TestThePushReportSaysWhyThereIsNoLocalStore:
+    """The report tells an unreadable registry from a branch with no local store (leg 6 of DPLAN-0354).
+
+    Until leg 6 both answered None from the lookup and the report said nothing:
+    a push that reached the global store only read the same either way. The
+    lookup is the real one over a registry under tmp_path; the store is a fake.
+    """
+
+    def _push_over(self, monkeypatch, tmp_path, registry_text: str) -> tuple:
+        repo = tmp_path / "repo"
+        root = _branch(repo, "guinea", {"sessions": [_entry(2), _entry(1, extra="drift")]})
+        (repo / "AIPASS_REGISTRY.json").write_text(registry_text, encoding="utf-8")
+        monkeypatch.setattr(detector, "_REPO_ROOT", repo)
+        monkeypatch.setattr(write_fence, "ROOT", repo)
+        monkeypatch.setattr(tp, "resolve_scope", lambda branch=None: _scope(root))
+        monkeypatch.setattr(tp.config_loader, "load", lambda: _config())
+        monkeypatch.setattr(orchestrator, "logger", MagicMock())
+        # The push resolves the lookup lazily, through sys.modules: the real module patched here is registered there.
+        monkeypatch.setitem(sys.modules, orchestrator.__name__, orchestrator)
+        store = FakeStore("honest")
+        result = tp.push(branch="guinea", dry_run=False, store_client=store, backup_root=tmp_path / ".backup")
+        return result, push_report.render(result, "@guinea"), store, root
+
+    def test_an_unreadable_registry_is_named_in_the_report(self, monkeypatch, tmp_path):
+        result, rendered, store, _root = self._push_over(monkeypatch, tmp_path, "NOT JSON {{{")
+
+        assert [entry["local_store"] for entry in result["branches"]] == ["registry unreadable"]
+        assert "   local store: none (registry unreadable) — global store only" in rendered
+        assert list(store.shelves) == [str(None)]
+
+    def test_a_branch_with_no_local_store_says_so(self, monkeypatch, tmp_path):
+        result, rendered, store, _root = self._push_over(monkeypatch, tmp_path, json.dumps({"branches": []}))
+
+        assert [entry["local_store"] for entry in result["branches"]] == ["no local store"]
+        assert "   local store: none (no local store) — global store only" in rendered
+        assert list(store.shelves) == [str(None)]
+
+    def test_a_readable_registry_with_a_store_renders_as_before(self, monkeypatch, tmp_path):
+        registry_text = json.dumps({"branches": [{"name": "guinea", "path": "guinea"}]})
+        result, rendered, store, root = self._push_over(monkeypatch, tmp_path, registry_text)
+
+        assert [entry["local_store"] for entry in result["branches"]] == [None]
+        assert not [line for line in rendered if line.startswith("   local store")]
+        assert sorted(store.shelves) == sorted([str(root / ".chroma"), str(None)])
 
 
 # =============================================================================
