@@ -3,7 +3,7 @@
 # Description: Registry globs must not widen on a case-insensitive filesystem
 # Version: 1.0.2
 # Created: 2026-08-31
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/paths.py's registry glob readers on a case-insensitive filesystem."""
@@ -576,8 +576,11 @@ class TestCallerRegistryNeverResolvesToACounter:
     a decoy does not merely add a candidate — it ends the walk."""
 
     def test_the_impostor_registry_is_never_returned(self, tmp_path, monkeypatch, case_insensitive_fs):
+        """Through get_branch_info_from_registry (ai_mail, leg 7): the genuine seat
+        resolves, which it can only do from the real registry — the decoy names no
+        such seat, so a walk that stopped at it would answer None."""
         project = tmp_path / "project"
-        real = _real_registry(project)
+        _real_registry(project)
         caller = project / "src" / "seat"
         caller.mkdir(parents=True)
         _decoy(caller)
@@ -585,7 +588,8 @@ class TestCallerRegistryNeverResolvesToACounter:
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
         monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", tmp_path / "AIPASS_REGISTRY.json")
 
-        assert bd._find_caller_registry() == real
+        found = bd.get_branch_info_from_registry(project / "genuine")
+        assert found is not None and found["email"] == "@genuine"
 
     def test_a_caller_identity_lookup_does_not_seat_the_impostor(self, tmp_path, monkeypatch, case_insensitive_fs):
         """The assertion that is about WHO, not about which file. Both registries

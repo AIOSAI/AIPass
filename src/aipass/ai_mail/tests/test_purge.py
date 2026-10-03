@@ -3,7 +3,7 @@
 # Description: Tests for sent/deleted auto-purge handler
 # Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/email/purge.py."""
@@ -291,23 +291,30 @@ class TestVectorizationFailureIsNotSuccess:
         assert result["success"] is False
         assert len(list(folder.glob("*.json"))) == before, "purge deleted originals it never archived"
 
-    def test_unparseable_stdout_is_not_treated_as_success(self, monkeypatch):
+    def test_unparseable_stdout_is_not_treated_as_success(self, tmp_path, monkeypatch):
         """A handler that returns garbage has not stored anything either.
 
         Guessing "probably fine" from unreadable output is how the original
-        defect would come back wearing a different hat.
+        defect would come back wearing a different hat. Through purge_sent_folder
+        on a tmp_path mailbox (ai_mail, leg 7): the originals are the oracle.
         """
+        folder = tmp_path / "sent"
+        _populate_folder(folder, 15)
         monkeypatch.setattr(purge_mod.subprocess, "run", self._handler_reply("not json at all"))
 
-        result = purge_mod._vectorize_emails([{"subject": "s", "message": "m"}], "sent")
+        result = purge_sent_folder(tmp_path)
 
         assert result["success"] is False
+        assert len(list(folder.glob("*.json"))) == 15, "purge deleted originals on an unreadable reply"
 
-    def test_a_real_success_still_succeeds(self, monkeypatch):
-        """The fix must not make a working store look broken."""
-        monkeypatch.setattr(purge_mod.subprocess, "run", self._handler_reply('{"success": true, "stored": 1}'))
+    def test_a_real_success_still_succeeds(self, tmp_path, monkeypatch):
+        """The fix must not make a working store look broken: the 5 oldest go, 10 stay."""
+        folder = tmp_path / "sent"
+        _populate_folder(folder, 15)
+        monkeypatch.setattr(purge_mod.subprocess, "run", self._handler_reply('{"success": true, "stored": 5}'))
 
-        result = purge_mod._vectorize_emails([{"subject": "s", "message": "m"}], "sent")
+        result = purge_sent_folder(tmp_path)
 
         assert result["success"] is True
-        assert result["count"] == 1
+        assert result["purged_count"] == 5
+        assert sorted(f.name for f in folder.glob("*.json")) == [f"email_{i:03d}.json" for i in range(5, 15)]

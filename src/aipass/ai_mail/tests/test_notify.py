@@ -3,7 +3,7 @@
 # Description: Tests for the notification feed writer
 # Version: 2.0.2
 # Created: 2026-04-03
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/notify.py -- JSONL notification feed writer."""
@@ -228,11 +228,19 @@ def test_trim_leaves_no_temp_file_behind(feed, monkeypatch):
     assert not (feed.parent / f"{feed.name}.trim").exists()
 
 
-def test_trim_reports_false_when_feed_is_within_cap(feed):
-    """_trim_jsonl returns False when there is nothing to do."""
-    mod.send_notification("T", "B")
+def test_a_feed_exactly_at_cap_is_not_trimmed(feed, monkeypatch):
+    """A feed holding FEED_MAX_LINES lines is within cap: every line stays.
 
-    assert mod._trim_jsonl(feed, mod.FEED_MAX_LINES, mod.FEED_KEEP_LINES) is False
+    Through send_notification (ai_mail, leg 7): the trim's False went to no
+    caller, so the claim is what the feed holds at the boundary.
+    """
+    monkeypatch.setattr(mod, "FEED_MAX_LINES", 3)
+    monkeypatch.setattr(mod, "FEED_KEEP_LINES", 1)
+
+    for i in range(3):
+        mod.send_notification(f"Title {i}", "B")
+
+    assert [event["title"] for event in _lines(feed)] == ["Title 0", "Title 1", "Title 2"]
 
 
 def test_trim_reports_false_and_logs_when_feed_is_unreadable(tmp_path, _capture_logger):

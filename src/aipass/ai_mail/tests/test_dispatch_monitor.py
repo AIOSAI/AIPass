@@ -273,10 +273,15 @@ def test_run_startup_check_process_exits_during_startup_with_output(tmp_path, mo
     monkeypatch.setattr(mod.subprocess, "Popen", lambda *a, **kw: mock_proc)
     # Simulate JSONL activity so started=True
     monkeypatch.setattr(mod, "_get_jsonl_projects_dir", lambda cwd: tmp_path / "projects")
-    monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: {})
-    monkeypatch.setattr(mod, "_check_jsonl_activity", lambda d, s: True)
+    sizes = {"seen.jsonl": 7}
+    monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: sizes)
+    # The activity probe is asserted on what it was asked: the projects dir and the
+    # snapshot taken before the spawn (ai_mail, leg 7)
+    activity = MagicMock(return_value=True)
+    monkeypatch.setattr(mod, "_check_jsonl_activity", activity)
 
     exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
+    activity.assert_called_with(tmp_path / "projects", sizes)
     assert exit_code == 1
     assert startup_failed is False  # Had JSONL activity = normal failure, not startup
 
@@ -309,10 +314,13 @@ def test_run_startup_check_hard_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "_kill_process", mock_kill)
     # Simulate JSONL activity so startup succeeds and we reach the hard timeout
     monkeypatch.setattr(mod, "_get_jsonl_projects_dir", lambda cwd: tmp_path / "projects")
-    monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: {})
-    monkeypatch.setattr(mod, "_check_jsonl_activity", lambda d, s: True)
+    sizes = {"seen.jsonl": 7}
+    monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: sizes)
+    activity = MagicMock(return_value=True)
+    monkeypatch.setattr(mod, "_check_jsonl_activity", activity)
 
     exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
+    activity.assert_called_with(tmp_path / "projects", sizes)
     assert exit_code == -1
     assert startup_failed is False
     mock_kill.assert_called_once()
@@ -3620,13 +3628,16 @@ def test_attempt_3_still_spawns_when_the_pointer_cannot_be_written(tmp_path, poi
     """A pointer write is never worth losing the last attempt over."""
     branch = tmp_path / "branch"
     branch.mkdir()
-    monkeypatch.setattr(mod.session_pointer, "write_pointer", lambda *a, **kw: False)
+    write_pointer = MagicMock(return_value=False)
+    monkeypatch.setattr(mod.session_pointer, "write_pointer", write_pointer)
 
     built, mode = _cmd_for_attempt(["claude", "-c", "-p", "hi"], 3, branch)
 
     assert mode == "fresh"
     assert "-c" not in built
     assert "--session-id" in built
+    new_id = built[built.index("--session-id") + 1]
+    write_pointer.assert_called_once_with(branch, new_id, "monitor-retry-fresh")
 
 
 def test_attempt_3_of_an_unbound_command_is_unchanged(tmp_path, pointer_home):
@@ -3741,7 +3752,8 @@ def test_reconcile_survives_a_failing_pointer_write(tmp_path, pointer_home, monk
     """Reconciliation is bookkeeping — it must never raise into the exit path."""
     branch = tmp_path / "branch"
     branch.mkdir()
-    monkeypatch.setattr(mod.session_pointer, "write_pointer", lambda *a, **kw: False)
+    write_pointer = MagicMock(return_value=False)
+    monkeypatch.setattr(mod.session_pointer, "write_pointer", write_pointer)
     stdout_log = tmp_path / "stdout.log"
     stdout_log.write_text(json.dumps({"session_id": "actual-id"}), encoding="utf-8")
 
@@ -3751,6 +3763,7 @@ def test_reconcile_survives_a_failing_pointer_write(tmp_path, pointer_home, monk
     # it, which is the failure mode a swallowed exception would hide.
     _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
 
+    write_pointer.assert_called_once_with(branch, "actual-id", "monitor-reconciled")
     assert mod.session_pointer.read_pointer(branch) is None
 
 

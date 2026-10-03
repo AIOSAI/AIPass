@@ -823,9 +823,13 @@ class TestWakeBranchSpawnEnv:
             return FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(wake_mod, "_check_pid_alive", lambda pid: True)
+        # The liveness probe and the occupancy scan stay walls in front of host pids and
+        # live sessions; each is asserted on what it was asked (ai_mail, leg 7)
+        pid_alive = MagicMock(return_value=True)
+        monkeypatch.setattr(wake_mod, "_check_pid_alive", pid_alive)
         monkeypatch.setattr(wake_mod, "_clean_zombies", lambda: 0)
-        monkeypatch.setattr(wake_mod, "_is_branch_occupied", lambda p: False)
+        occupied = MagicMock(return_value=False)
+        monkeypatch.setattr(wake_mod, "_is_branch_occupied", occupied)
         monkeypatch.setattr(wake_mod, "_acquire_lock", lambda p, pid: (True, "ok"))
         sleep = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.time.sleep", sleep)
@@ -840,6 +844,8 @@ class TestWakeBranchSpawnEnv:
             "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
         )
         assert len(captured_envs) == 1, "Popen must be called exactly once"
+        pid_alive.assert_called_once_with(99999)
+        occupied.assert_called_once_with(branch_path)
         env = captured_envs[0]
         assert local_bin in env.get("PATH", ""), f"~/.local/bin not in spawn_env PATH: {env.get('PATH', '')}"
 
@@ -1232,9 +1238,11 @@ class TestWakeBranch:
 
     def test_branch_occupied_blocks(self, tmp_path, monkeypatch):
         """Interactive session running -> blocked."""
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _is_branch_occupied=lambda p: True)
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        occupied = MagicMock(return_value=True)
+        _patch_wake_deps(monkeypatch, _is_branch_occupied=occupied)
         status, ok = wake_branch("@testbranch")
+        occupied.assert_called_once_with(branch_path)
         assert ok is False
         assert any(s[0] == "fail" and "blocked" in s[1] for s in status.steps)
 
@@ -1463,7 +1471,8 @@ class TestWakeBranch:
     def test_alive_check_fails_cleans_up_lock(self, tmp_path, monkeypatch):
         """Agent dies immediately -> cleans up lock, returns False."""
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _check_pid_alive=lambda pid: False)
+        pid_alive = MagicMock(return_value=False)
+        _patch_wake_deps(monkeypatch, _check_pid_alive=pid_alive)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
         # Create the lock file so we can verify it gets cleaned up
         lock_dir = branch_path / ".ai_mail.local"
@@ -1471,6 +1480,7 @@ class TestWakeBranch:
         lock_file = lock_dir / ".dispatch.lock"
         lock_file.write_text("{}", encoding="utf-8")
         status, ok = wake_branch("@testbranch")
+        pid_alive.assert_called_once_with(_FakeProc().pid)
         assert ok is False
         assert any(s[0] == "fail" and "alive" in s[1] for s in status.steps)
         # Lock file should be cleaned up
@@ -2011,10 +2021,11 @@ class TestWakeSessionPointer:
 
     def test_a_failing_pointer_write_still_spawns(self, tmp_path, monkeypatch, fake_home):
         """A read-only .ai_mail.local must cost precision, never the wake itself."""
-        _make_wake_fixtures(tmp_path, monkeypatch)
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
-        monkeypatch.setattr(wake_mod.session_pointer, "write_pointer", lambda *a, **kw: False)
+        write_pointer = MagicMock(return_value=False)
+        monkeypatch.setattr(wake_mod.session_pointer, "write_pointer", write_pointer)
 
         status, ok = wake_branch("@testbranch", fresh=True)
 
@@ -2023,6 +2034,8 @@ class TestWakeSessionPointer:
         args = _claude_args(calls["popen"][0]["cmd"])
         # The id still goes to the CLI — only the record of it was lost.
         assert "--session-id" in args
+        session_id = args[args.index("--session-id") + 1]
+        write_pointer.assert_called_once_with(branch_path, session_id, "wake-fresh")
         assert status.find_step("session") is not None
 
     def test_the_rest_of_the_command_is_untouched(self, tmp_path, monkeypatch, fake_home):
@@ -2621,11 +2634,13 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
         assert self._kind(status, "lock") == "fail"
 
     def test_occupancy_is_the_blocked_step(self, tmp_path, monkeypatch):
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _is_branch_occupied=lambda p: True)
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        occupied = MagicMock(return_value=True)
+        _patch_wake_deps(monkeypatch, _is_branch_occupied=occupied)
 
         status, ok = wake_branch("@testbranch", auto=True)
 
+        occupied.assert_called_once_with(branch_path)
         assert ok is False
         assert self._kind(status, "blocked") == "fail"
 

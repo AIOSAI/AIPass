@@ -1954,34 +1954,13 @@ class TestBodyRendersWhateverTheSenderTyped:
         assert "[dim]note kept[/dim]" in out
         assert "[skills] tag kept" in out
 
-    def test_body_renders_with_markup_disabled(self, monkeypatch, tmp_path):
-        """The body print explicitly passes markup=False rather than escaping."""
-        printed: list[tuple] = []
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email._resolve_branch_path",
-            lambda: tmp_path,
-        )
-        email_data = {
-            "id": "body0002",
-            "subject": "s",
-            "message": "raw [/rc] body",
-            "from_name": "X",
-            "from": "@x",
-            "timestamp": "t",
-        }
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.mark_as_opened",
-            lambda bp, mid: (True, "Opened", email_data),
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.format_email_header",
-            lambda ed: "HEADER",
-        )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append((str(msg), kw))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
+    def test_body_renders_with_markup_disabled(self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """A body's style tags reach stdout as written, never consumed as markup.
 
-        assert handle_view(["body0002"]) is True
-        body_calls = [(m, kw) for m, kw in printed if "raw [/rc] body" in m]
-        assert body_calls, "body was never printed"
-        assert body_calls[0][1].get("markup") is False, "body printed as markup — it can raise"
+        Read through the product's own console (ai_mail, leg 7). What the console
+        stand-in could see and stdout cannot: the markup=False keyword itself. A
+        body escaped by hand prints the same text, so this pins what the reader
+        sees, not which of the two routes produced it.
+        """
+        out = self._view_message(monkeypatch, tmp_path, "raw [bold]body[/bold] kept", capsys)
+        assert "raw [bold]body[/bold] kept" in out, "body printed as markup — its tags were consumed"
