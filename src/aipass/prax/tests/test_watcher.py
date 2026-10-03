@@ -3,7 +3,7 @@
 # Description: Tests for file system watcher handlers
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/watcher/monitor.py and apps/handlers/discovery/watcher.py."""
@@ -231,9 +231,9 @@ class TestStartStopMonitoring:
         observer_inst.schedule.assert_not_called()
         observer_inst.start.assert_called_once()
 
-    def test_start_monitoring_returns_none_when_watchdog_unavailable(self):
+    def test_start_monitoring_returns_none_when_watchdog_unavailable(self, monkeypatch):
         mod, _inst, _cls = self._import_watcher_monitor()
-        setattr(mod, "WATCHDOG_AVAILABLE", False)
+        monkeypatch.setattr(mod, "WATCHDOG_AVAILABLE", False)
         result = mod.start_monitoring([], MagicMock())
         assert result is None
 
@@ -330,30 +330,30 @@ class TestDiscoveryWatcher:
         assert not hasattr(mod, "_HAS_TRIGGER")
         assert not hasattr(mod, "trigger")
 
-    def test_start_file_watcher_creates_and_starts_observer(self, tmp_path):
+    def test_start_file_watcher_creates_and_starts_observer(self, tmp_path, monkeypatch):
         mod, observer_inst, _cls = self._import_discovery_watcher(tmp_path)
-        setattr(mod, "_observer", None)  # Ensure clean state
+        monkeypatch.setattr(mod, "_observer", None)  # Ensure clean state
         mod.start_file_watcher()
         observer_inst.schedule.assert_called_once()
         observer_inst.start.assert_called_once()
         assert getattr(mod, "_observer") is observer_inst
 
-    def test_start_file_watcher_skips_if_already_running(self, tmp_path):
+    def test_start_file_watcher_skips_if_already_running(self, tmp_path, monkeypatch):
         mod, observer_inst, obs_cls = self._import_discovery_watcher(tmp_path)
         existing_observer = MagicMock()
         existing_observer.is_alive.return_value = True
-        setattr(mod, "_observer", existing_observer)
+        monkeypatch.setattr(mod, "_observer", existing_observer)
 
         mod.start_file_watcher()
 
         # Should not create a new observer
         observer_inst.start.assert_not_called()
 
-    def test_stop_file_watcher_stops_and_clears(self, tmp_path):
+    def test_stop_file_watcher_stops_and_clears(self, tmp_path, monkeypatch):
         mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = True
-        setattr(mod, "_observer", mock_obs)
+        monkeypatch.setattr(mod, "_observer", mock_obs)
 
         mod.stop_file_watcher()
 
@@ -361,7 +361,7 @@ class TestDiscoveryWatcher:
         mock_obs.join.assert_called_once_with()
         assert getattr(mod, "_observer") is None
 
-    def test_stop_file_watcher_noop_when_not_running(self, tmp_path):
+    def test_stop_file_watcher_noop_when_not_running(self, tmp_path, monkeypatch):
         """Nothing is running, so no teardown is attempted.
 
         Two ways to be "not running", both no-ops: no observer at all, and an
@@ -372,13 +372,13 @@ class TestDiscoveryWatcher:
         """
         mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
 
-        setattr(mod, "_observer", None)
+        monkeypatch.setattr(mod, "_observer", None)
         assert mod.stop_file_watcher() is None
         assert getattr(mod, "_observer") is None
 
         dead = MagicMock()
         dead.is_alive.return_value = False
-        setattr(mod, "_observer", dead)
+        monkeypatch.setattr(mod, "_observer", dead)
 
         mod.stop_file_watcher()
 
@@ -386,23 +386,23 @@ class TestDiscoveryWatcher:
         dead.join.assert_not_called()
         assert getattr(mod, "_observer") is dead
 
-    def test_is_file_watcher_active_true_when_alive(self, tmp_path):
+    def test_is_file_watcher_active_true_when_alive(self, tmp_path, monkeypatch):
         mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = True
-        setattr(mod, "_observer", mock_obs)
+        monkeypatch.setattr(mod, "_observer", mock_obs)
         assert mod.is_file_watcher_active() is True
 
-    def test_is_file_watcher_active_false_when_none(self, tmp_path):
+    def test_is_file_watcher_active_false_when_none(self, tmp_path, monkeypatch):
         mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
-        setattr(mod, "_observer", None)
+        monkeypatch.setattr(mod, "_observer", None)
         assert mod.is_file_watcher_active() is False
 
-    def test_is_file_watcher_active_false_when_dead(self, tmp_path):
+    def test_is_file_watcher_active_false_when_dead(self, tmp_path, monkeypatch):
         mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = False
-        setattr(mod, "_observer", mock_obs)
+        monkeypatch.setattr(mod, "_observer", mock_obs)
         assert mod.is_file_watcher_active() is False
 
 
@@ -1351,7 +1351,7 @@ class TestTheBackgroundStartDoesNotMakeTheCallerWait:
         finally:
             gate.set()
 
-    def test_an_inotify_limit_is_logged_not_raised(self, tmp_path):
+    def test_an_inotify_limit_is_logged_not_raised(self, tmp_path, monkeypatch):
         """There is no caller left to hand the OSError to.
 
         _ensure_watcher used to catch it and warn; on a thread nobody joins an
@@ -1359,8 +1359,8 @@ class TestTheBackgroundStartDoesNotMakeTheCallerWait:
         the same words.
         """
         mod, observer_inst, _cls = TestDiscoveryWatcher()._import_discovery_watcher(tmp_path)
-        setattr(mod, "_observer", None)
-        setattr(mod, "_start_thread", None)
+        monkeypatch.setattr(mod, "_observer", None)
+        monkeypatch.setattr(mod, "_start_thread", None)
         observer_inst.schedule.side_effect = OSError("inotify watch limit reached")
 
         with patch.object(mod, "logger") as mock_logger:

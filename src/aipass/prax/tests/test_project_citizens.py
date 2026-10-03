@@ -3,7 +3,7 @@
 # Description: projects/* citizens resolve by registry and passport, not path shape
 # Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py."""
@@ -47,6 +47,7 @@ from pathlib import Path
 
 import pytest
 
+from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
 
 DETECTOR_PATH = "aipass.prax.apps.handlers.monitoring.branch_detector"
 
@@ -135,16 +136,12 @@ class TestProjectCitizensAreKnown:
 
     def test_scope_no_longer_calls_a_project_citizen_unknown(self, tmp_path, monkeypatch):
         """The exact live symptom: the launch-time typo warning fired on a real citizen."""
-        from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
-
         repo = _build_repo(tmp_path, projects={"baud": [BAUD_ENTRY]})
         detector = _detector_for(repo, monkeypatch)
         assert BranchScope(["BAUD"]).unknown_names(set(detector.known_branches)) == []
 
     def test_a_genuine_typo_is_still_reported(self, tmp_path, monkeypatch):
         """Widening the known set must not silence the typo warning."""
-        from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
-
         repo = _build_repo(tmp_path, projects={"baud": [BAUD_ENTRY]})
         detector = _detector_for(repo, monkeypatch)
         assert BranchScope(["BAUUD"]).unknown_names(set(detector.known_branches)) == ["BAUUD"]

@@ -26,6 +26,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+from aipass.prax.apps.handlers.status import sync as status_sync
 
 
 # =============================================
@@ -273,11 +274,9 @@ class TestSyncDoesNotResurrectTheRootFile:
     """
 
     def _sync_module(self, monkeypatch, repo_root):
-        import aipass.prax.apps.handlers.status.sync as sync
-
-        monkeypatch.setattr(sync, "_find_repo_root", lambda: repo_root)
-        monkeypatch.setattr(sync, "json_handler", MagicMock())
-        return sync
+        monkeypatch.setattr(status_sync, "_find_repo_root", lambda: repo_root)
+        monkeypatch.setattr(status_sync, "json_handler", MagicMock())
+        return status_sync
 
     def _repo(self, tmp_path):
         """A repo root with one registered branch carrying a STATUS.local.md."""

@@ -3,7 +3,7 @@
 # Description: The display consumer must survive an unrenderable event
 # Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""
@@ -46,6 +46,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.console import Console
 
+from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
 
 # ---------------------------------------------------------------------------
 # Real-console rendering helper
@@ -312,16 +313,12 @@ class TestStandaloneRunArgs:
 
     def test_run_token_does_not_reach_the_scope(self):
         """End to end: the parsed scope of `monitor run` is unscoped."""
-        from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
-
         mod = _import_monitor()
         cmd_args = mod._standalone_run_args(["run"], [])
         assert parse_scope(cmd_args[1:]).is_scoped is False
 
     def test_canary_old_parsing_scoped_to_run(self):
         """Proof this test can fail: the old form asked for a branch called RUN."""
-        from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
-
         legacy_scope = parse_scope(["run"])
         assert legacy_scope.is_scoped is True
         assert list(legacy_scope.names) == ["RUN"]

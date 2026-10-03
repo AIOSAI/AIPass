@@ -3,7 +3,7 @@
 # Description: Tests for the fleet json service through prax's own shim
 # Version: 2.2.0
 # Created: 2026-03-28
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -33,6 +33,7 @@ from datetime import date
 
 import pytest
 
+import aipass.prax
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.json import json_service
 
@@ -899,12 +900,8 @@ class TestTheEntryPoint:
     """from aipass.prax import json_handler — the one sanctioned import."""
 
     def test_the_lazy_package_attribute_is_the_service(self):
-        import aipass.prax
-
         assert aipass.prax.json_handler is json_service
 
     def test_the_exception_types_are_reachable_from_the_entry_point(self):
-        import aipass.prax
-
         assert issubclass(aipass.prax.json_handler.InvalidDocument, ValueError)
         assert issubclass(aipass.prax.json_handler.WriteFailed, OSError)

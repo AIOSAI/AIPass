@@ -3,7 +3,7 @@
 # Description: Tests for the PID cache handler
 # Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/monitoring/pid_cache.py"""
@@ -122,17 +122,17 @@ class TestParseLockPid:
 class TestRefresh:
     """Test PID cache refresh from registry."""
 
-    def test_skips_when_within_ttl(self):
+    def test_skips_when_within_ttl(self, monkeypatch):
         """Cache refresh is skipped if within TTL window."""
         mod = _import_pid_cache()
         with mod._pid_cache_lock:
-            setattr(mod, "_pid_cache_last_refresh", time.time())
+            monkeypatch.setattr(mod, "_pid_cache_last_refresh", time.time())
 
         with patch.object(mod, "parse_lock_pid") as mock_parse:
             mod.refresh()
             mock_parse.assert_not_called()
 
-    def test_handles_missing_registry(self, tmp_path):
+    def test_handles_missing_registry(self, tmp_path, monkeypatch):
         """No registry means refresh returns early — quietly, and without scanning.
 
         Absent is not broken: no lock file is parsed, the cache the monitor is
@@ -142,7 +142,7 @@ class TestRefresh:
         """
         mod = _import_pid_cache()
         with mod._pid_cache_lock:
-            setattr(mod, "_pid_cache_last_refresh", 0.0)
+            monkeypatch.setattr(mod, "_pid_cache_last_refresh", 0.0)
             mod._pid_cache.clear()
             mod._pid_cache["FLOW"] = 4242
 
@@ -153,7 +153,7 @@ class TestRefresh:
         log.info.assert_not_called()
         assert mod._pid_cache == {"FLOW": 4242}
 
-    def test_handles_exception_in_refresh(self, tmp_path):
+    def test_handles_exception_in_refresh(self, tmp_path, monkeypatch):
         """A corrupt registry is caught, reported, and costs no cached PID.
 
         The scan is abandoned mid-flight, so the guarantee that matters is that
@@ -162,7 +162,7 @@ class TestRefresh:
         """
         mod = _import_pid_cache()
         with mod._pid_cache_lock:
-            setattr(mod, "_pid_cache_last_refresh", 0.0)
+            monkeypatch.setattr(mod, "_pid_cache_last_refresh", 0.0)
             mod._pid_cache.clear()
             mod._pid_cache["FLOW"] = 4242
 

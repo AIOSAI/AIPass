@@ -3,13 +3,14 @@
 # Description: Tests for prax logging subsystem
 # Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
 
 # Tests for prax logging subsystem — covers introspection, config helpers,
-# and template placeholder replacement.
+# and template placeholder replacement. lines_to_bytes is pinned in
+# tests/test_config.py; the copy here called no product code (prax, leg 8).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — get_calling_module_path, covered by tests/test_logging_handlers.py
@@ -19,13 +20,19 @@
 # seedgo: no-test-needed(stdlib) — get_captured_loggers_count, the size of _captured_loggers
 
 import copy
-import sys
 import threading
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from aipass.prax.apps.handlers.logging import introspection
 from aipass.prax.apps.handlers.logging import setup as setup_handler
+from aipass.prax.apps.handlers.logging.introspection import (
+    detect_branch_from_path,
+    detect_external_project,
+    get_caller_info,
+)
+from aipass.prax.apps.handlers.repo_root import resolved_file
 
 
 # =============================================
@@ -45,8 +52,6 @@ def _caller_seen_from(module_file: str):
     this test file; any other path is the answer. So _is_prax_internal's verdict
     is read through its one public reader, on a real stack, with nothing replaced.
     """
-    from aipass.prax.apps.handlers.logging import introspection
-
     globals_of_the_frame = {"__file__": module_file, "__builtins__": __builtins__}
     caller = types.FunctionType(_ask_for_the_caller.__code__, globals_of_the_frame)
     return caller(introspection.get_calling_module_path)
@@ -117,9 +122,6 @@ def _aipass_package_root() -> Path:
     An input to the branch tests below, not their subject: the package the
     product lives in, so a path under it is a path inside the fleet.
     """
-    from aipass.prax.apps.handlers.logging import introspection
-    from aipass.prax.apps.handlers.repo_root import resolved_file
-
     return resolved_file(Path(introspection.__file__)).parents[4]
 
 
@@ -128,48 +130,34 @@ class TestDetectBranchFromPath:
 
     def test_cli_branch(self, mock_prax_infrastructure):
         """CLI branch is detected from aipass/cli/apps/cli.py."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
-
         cli_path = str(_aipass_package_root() / "cli" / "apps" / "cli.py")
         assert detect_branch_from_path(cli_path) == "cli"
 
     def test_flow_branch(self, mock_prax_infrastructure):
         """Flow branch is detected from aipass/flow/apps/flow.py."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
-
         flow_path = str(_aipass_package_root() / "flow" / "apps" / "flow.py")
         assert detect_branch_from_path(flow_path) == "flow"
 
     def test_prax_branch(self, mock_prax_infrastructure):
         """Prax branch is detected from aipass/prax/apps/module.py."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
-
         prax_path = str(_aipass_package_root() / "prax" / "apps" / "module.py")
         assert detect_branch_from_path(prax_path) == "prax"
 
     def test_drone_branch(self, mock_prax_infrastructure):
         """Drone branch is detected from aipass/drone/apps/branch.py."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
-
         drone_path = str(_aipass_package_root() / "drone" / "apps" / "branch.py")
         assert detect_branch_from_path(drone_path) == "drone"
 
     def test_random_path_returns_none(self, mock_prax_infrastructure, tmp_path):
         """Random path outside the project returns None."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
-
         assert detect_branch_from_path(str(tmp_path / "random_script.py")) is None
 
     def test_empty_string_returns_none(self, mock_prax_infrastructure):
         """Empty string returns None."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
-
         assert detect_branch_from_path("") is None
 
     def test_nested_module_still_resolves(self, mock_prax_infrastructure):
         """Deeply nested module path still resolves to the branch."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
-
         deep_path = str(_aipass_package_root() / "flow" / "apps" / "handlers" / "deep" / "module.py")
         assert detect_branch_from_path(deep_path) == "flow"
 
@@ -184,22 +172,16 @@ class TestDetectExternalProject:
 
     def test_none_for_empty_path(self, mock_prax_infrastructure):
         """Returns None for empty string input."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_external_project
-
         assert detect_external_project("") is None
 
     def test_none_for_internal_aipass_path(self, mock_prax_infrastructure):
         """Returns None for paths inside the AIPass repo."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_external_project
-
         repo_root = _aipass_package_root().parent.parent
         internal_path = str(repo_root / "src" / "aipass" / "flow" / "apps" / "handler.py")
         assert detect_external_project(internal_path) is None
 
     def test_detects_external_project_with_git(self, mock_prax_infrastructure, tmp_path):
         """Detects project root via .git directory for external paths."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_external_project
-
         # Create a fake external project with .git
         project_dir = tmp_path / "MyProject"
         project_dir.mkdir()
@@ -216,8 +198,6 @@ class TestDetectExternalProject:
 
     def test_detects_external_project_with_pyproject(self, mock_prax_infrastructure, tmp_path):
         """Detects project root via pyproject.toml for external paths."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_external_project
-
         project_dir = tmp_path / "Compass"
         project_dir.mkdir()
         (project_dir / "pyproject.toml").touch()
@@ -233,8 +213,6 @@ class TestDetectExternalProject:
 
     def test_normalizes_project_name(self, mock_prax_infrastructure, tmp_path):
         """Project names are lowercased with hyphens/spaces converted to underscores."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_external_project
-
         project_dir = tmp_path / "Backup-System"
         project_dir.mkdir()
         (project_dir / ".git").mkdir()
@@ -247,8 +225,6 @@ class TestDetectExternalProject:
 
     def test_none_when_no_project_root_found(self, mock_prax_infrastructure, tmp_path):
         """Returns None when no .git or pyproject.toml found walking up."""
-        from aipass.prax.apps.handlers.logging.introspection import detect_external_project
-
         # Create a file in tmp_path without .git or pyproject.toml
         # tmp_path itself might have parents with .git — use a nested isolated dir
         isolated = tmp_path / "no_project" / "deep" / "nested"
@@ -277,18 +253,16 @@ class TestSetupExternalRouting:
 
     def test_external_project_routes_to_project_system_logs(self, mock_prax_infrastructure, tmp_path):
         """External callers get logs routed to their project's system_logs/ dir."""
-        from aipass.prax.apps.handlers.logging import setup
-
         project_dir = tmp_path / "AIPL"
         project_dir.mkdir()
         (project_dir / ".git").mkdir()
         fake_module = str(project_dir / "src" / "polyglot.py")
         env_patch = {"AIPASS_BRANCH_NAME": "", "AIPASS_CALLER_CWD": ""}
 
-        with patch.object(setup, "detect_external_project", return_value=("aipl", project_dir)):
-            with patch.object(setup, "detect_branch_from_path", return_value=None):
-                with patch.dict("os.environ", env_patch), patch.object(setup, "_captured_loggers", {}):
-                    result = setup.setup_individual_logger("polyglot", caller_path=fake_module)
+        with patch.object(setup_handler, "detect_external_project", return_value=("aipl", project_dir)):
+            with patch.object(setup_handler, "detect_branch_from_path", return_value=None):
+                with patch.dict("os.environ", env_patch), patch.object(setup_handler, "_captured_loggers", {}):
+                    result = setup_handler.setup_individual_logger("polyglot", caller_path=fake_module)
 
         assert result is not None
         assert (project_dir / "system_logs").exists()
@@ -296,8 +270,6 @@ class TestSetupExternalRouting:
 
     def test_external_project_does_not_write_to_aipass_system_logs(self, mock_prax_infrastructure, tmp_path):
         """External routing must NOT create files in AIPass system_logs."""
-        from aipass.prax.apps.handlers.logging import setup
-
         project_dir = tmp_path / "Compass"
         project_dir.mkdir()
         (project_dir / ".git").mkdir()
@@ -305,14 +277,14 @@ class TestSetupExternalRouting:
         get_calls = []
         env_patch = {"AIPASS_BRANCH_NAME": "", "AIPASS_CALLER_CWD": ""}
 
-        with patch.object(setup, "detect_external_project", return_value=("compass", project_dir)):
-            with patch.object(setup, "detect_branch_from_path", return_value=None):
+        with patch.object(setup_handler, "detect_external_project", return_value=("compass", project_dir)):
+            with patch.object(setup_handler, "detect_branch_from_path", return_value=None):
                 with patch.dict("os.environ", env_patch):
                     with (
-                        patch.object(setup, "get_system_logs_dir", side_effect=lambda: get_calls.append(1)),
-                        patch.object(setup, "_captured_loggers", {}),
+                        patch.object(setup_handler, "get_system_logs_dir", side_effect=lambda: get_calls.append(1)),
+                        patch.object(setup_handler, "_captured_loggers", {}),
                     ):
-                        setup.setup_individual_logger("navigator", caller_path=fake_module)
+                        setup_handler.setup_individual_logger("navigator", caller_path=fake_module)
 
         assert len(get_calls) == 0
 
@@ -397,8 +369,6 @@ class TestGetCallerInfo:
 
     def test_returns_tuple_of_three(self, mock_prax_infrastructure, monkeypatch):
         """get_caller_info returns the 3-tuple (name, path, branch) of its caller, this file."""
-        from aipass.prax.apps.handlers.logging.introspection import get_caller_info
-
         monkeypatch.delenv("AIPASS_LOG_NAME", raising=False)
         monkeypatch.delenv("AIPASS_BOT_ID", raising=False)
 
@@ -412,8 +382,6 @@ class TestGetCallerInfo:
         answer here would be that variable and the stack walk would prove
         nothing.
         """
-        from aipass.prax.apps.handlers.logging.introspection import get_caller_info
-
         monkeypatch.delenv("AIPASS_LOG_NAME", raising=False)
         monkeypatch.delenv("AIPASS_BOT_ID", raising=False)
 
@@ -425,8 +393,6 @@ class TestGetCallerInfo:
 
     def test_called_from_test_file(self, mock_prax_infrastructure):
         """When called from a test file, path should reference this file."""
-        from aipass.prax.apps.handlers.logging.introspection import get_caller_info
-
         module_name, caller_path, branch = get_caller_info()
         # Called from this test file, so module_name should be "test_logging"
         # or the stack walk may land on pytest internals; either way it is a string
@@ -435,79 +401,9 @@ class TestGetCallerInfo:
 
     def test_no_external_caller_returns_defaults(self, mock_prax_infrastructure):
         """When _find_external_caller_path returns None, defaults are returned."""
-        from aipass.prax.apps.handlers.logging import introspection
-
         with patch.object(introspection, "_find_external_caller_path", return_value=None):
             result = introspection.get_caller_info()
             assert result == ("unknown_module", None, None)
-
-
-# =============================================
-# lines_to_bytes
-# =============================================
-
-
-class TestLinesToBytes:
-    """Tests for lines_to_bytes() — converts line counts to byte estimates."""
-
-    def test_default_avg_line_length(self, mock_prax_infrastructure):
-        """Default avg_line_length of 200 produces correct result."""
-        # Mock the config module to avoid heavy imports
-        mock_config = MagicMock()
-        mock_config.lines_to_bytes = lambda num_lines, avg=200: num_lines * avg
-        mock_config.get_system_logs_dir = MagicMock()
-        mock_config.get_module_logs_dir = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = "DEBUG"
-        mock_config.load_log_config = MagicMock()
-        mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-            },
-        ):
-            # Direct computation test — mirrors the function logic
-            result = 1000 * 200
-            assert result == 200_000
-
-    def test_custom_avg_line_length(self, mock_prax_infrastructure):
-        """Custom avg_line_length produces correct result."""
-        result = 500 * 100
-        assert result == 50_000
-
-    def test_zero_lines(self, mock_prax_infrastructure):
-        """Zero lines returns zero bytes."""
-        result = 0 * 200
-        assert result == 0
-
-    def test_one_line(self, mock_prax_infrastructure):
-        """Single line returns avg_line_length bytes."""
-        result = 1 * 200
-        assert result == 200
-
-    def test_lines_to_bytes_function_directly(self, mock_prax_infrastructure):
-        """Import and call lines_to_bytes directly from config.load."""
-        # We need to mock the full chain that config/load.py uses
-        mock_config_mod = MagicMock()
-
-        def real_lines_to_bytes(num_lines: int, avg_line_length: int = 200) -> int:
-            """Convert line count to byte estimate for test assertions."""
-            return num_lines * avg_line_length
-
-        mock_config_mod.lines_to_bytes = real_lines_to_bytes
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config_mod,
-            },
-        ):
-            fn = sys.modules["aipass.prax.apps.handlers.config.load"].lines_to_bytes
-            assert fn(1000) == 200_000
-            assert fn(1000, 100) == 100_000
-            assert fn(0) == 0
-            assert fn(1) == 200
 
 
 # =============================================
@@ -681,10 +577,8 @@ class TestDebugLevelGating:
 
     def test_debug_is_silent_at_default_level(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Default INFO: debug() reaches no file, while info() reaches both."""
-        from aipass.prax.apps.handlers.logging import setup
-
         monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
-        logger, sys_log, local_log = _external_logger(setup, tmp_path, "quiet_mod")
+        logger, sys_log, local_log = _external_logger(setup_handler, tmp_path, "quiet_mod")
 
         logger.debug("DEBUGMARK_quiet")
         logger.info("INFOMARK_quiet")
@@ -696,9 +590,9 @@ class TestDebugLevelGating:
 
     def test_env_var_lets_debug_reach_both_tiers(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """AIPASS_LOG_LEVEL=DEBUG is the on-demand verbose trail."""
-        from aipass.prax.apps.handlers.logging import setup
-
-        logger, sys_log, local_log = _external_logger(setup, tmp_path, "loud_mod", env={"AIPASS_LOG_LEVEL": "DEBUG"})
+        logger, sys_log, local_log = _external_logger(
+            setup_handler, tmp_path, "loud_mod", env={"AIPASS_LOG_LEVEL": "DEBUG"}
+        )
 
         logger.debug("DEBUGMARK_loud")
         logger.info("INFOMARK_loud")
@@ -709,10 +603,10 @@ class TestDebugLevelGating:
 
     def test_config_log_level_is_read(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """The log_level config key reaches a handler — it was dead before."""
-        from aipass.prax.apps.handlers.logging import setup
-
         monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
-        logger, sys_log, _local = _external_logger(setup, tmp_path, "cfg_mod", config=_tiered_config("DEBUG", "DEBUG"))
+        logger, sys_log, _local = _external_logger(
+            setup_handler, tmp_path, "cfg_mod", config=_tiered_config("DEBUG", "DEBUG")
+        )
 
         logger.debug("DEBUGMARK_cfg")
 
@@ -720,11 +614,9 @@ class TestDebugLevelGating:
 
     def test_tiers_gate_independently(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Verbose branch-local file, quiet central aggregation."""
-        from aipass.prax.apps.handlers.logging import setup
-
         monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
         logger, sys_log, local_log = _external_logger(
-            setup, tmp_path, "split_mod", config=_tiered_config("INFO", "DEBUG")
+            setup_handler, tmp_path, "split_mod", config=_tiered_config("INFO", "DEBUG")
         )
 
         logger.debug("DEBUGMARK_split")
@@ -741,22 +633,18 @@ class TestDebugLevelGating:
         The logger gate runs before any handler gate, so a logger left at INFO
         would drop DEBUG records before the DEBUG-level handler ever saw them.
         """
-        from aipass.prax.apps.handlers.logging import setup
-
         monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
         logger, _sys_log, _local_log = _external_logger(
-            setup, tmp_path, "gate_mod", config=_tiered_config("ERROR", "DEBUG")
+            setup_handler, tmp_path, "gate_mod", config=_tiered_config("ERROR", "DEBUG")
         )
 
         assert logger.level == 10
 
     def test_invalid_level_still_logs_at_info(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """A typo in the config must not silence the logs."""
-        from aipass.prax.apps.handlers.logging import setup
-
         monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
         logger, sys_log, _local = _external_logger(
-            setup, tmp_path, "typo_mod", config=_tiered_config("VERBOSE", "VERBOSE")
+            setup_handler, tmp_path, "typo_mod", config=_tiered_config("VERBOSE", "VERBOSE")
         )
 
         logger.info("INFOMARK_typo")

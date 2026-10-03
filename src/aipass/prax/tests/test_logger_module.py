@@ -3,7 +3,7 @@
 # Description: Unit tests for PRAX logger module (public API)
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/logger.py."""
@@ -353,45 +353,62 @@ class TestGetSystemStatus:
 class TestHandleCommand:
     """Tests for handle_command() — introspection gate and routing."""
 
+    @staticmethod
+    def _introspections(monkeypatch, mod):
+        """Record each print_introspection call handle_command makes (prax, leg 8: the effect, not the True)."""
+        seen = []
+        monkeypatch.setattr(mod, "print_introspection", lambda: seen.append("introspection"))
+        return seen
+
     def test_no_args_calls_introspection_returns_true(self, monkeypatch, tmp_path):
         """Empty args list prints introspection and returns True."""
         mod, mocks = _inject_and_import(monkeypatch, tmp_path)
+        seen = self._introspections(monkeypatch, mod)
 
         result = mod.handle_command("logger", [])
 
         assert result is True
+        assert seen == ["introspection"]
 
     def test_help_flag_returns_true(self, monkeypatch, tmp_path):
         """--help flag prints introspection and returns True."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
+        seen = self._introspections(monkeypatch, mod)
 
         result = mod.handle_command("logger", ["--help"])
 
         assert result is True
+        assert seen == ["introspection"]
 
     def test_h_flag_returns_true(self, monkeypatch, tmp_path):
         """-h flag prints introspection and returns True."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
+        seen = self._introspections(monkeypatch, mod)
 
         result = mod.handle_command("logger", ["-h"])
 
         assert result is True
+        assert seen == ["introspection"]
 
     def test_help_word_returns_true(self, monkeypatch, tmp_path):
         """'help' subcommand prints introspection and returns True."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
+        seen = self._introspections(monkeypatch, mod)
 
         result = mod.handle_command("logger", ["help"])
 
         assert result is True
+        assert seen == ["introspection"]
 
     def test_unknown_arg_returns_false(self, monkeypatch, tmp_path):
-        """Unknown argument returns False (unhandled)."""
+        """Unknown argument returns False (unhandled) and prints nothing."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
+        seen = self._introspections(monkeypatch, mod)
 
         result = mod.handle_command("logger", ["unknown-subcommand"])
 
         assert result is False
+        assert seen == []
 
     def test_logs_operation_via_json_handler(self, monkeypatch, tmp_path):
         """handle_command logs the operation through json_handler."""

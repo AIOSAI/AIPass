@@ -33,6 +33,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
 
 
 # ---------------------------------------------------------------------------
@@ -402,18 +403,18 @@ class TestThreadManagement:
         assert mock_cls.call_count == 4
         assert mock_thread.start.call_count == 4
 
-    def test_stop_threads_sets_stop_event(self):
+    def test_stop_threads_sets_stop_event(self, monkeypatch):
         """_stop_threads sets the stop event and stops the queue."""
         mod = _import_monitor()
         mock_queue = MagicMock()
-        setattr(mod, "_event_queue", mock_queue)
+        monkeypatch.setattr(mod, "_event_queue", mock_queue)
         mod._stop_event.clear()
 
         mock_thread = MagicMock()
         mock_thread.is_alive.return_value = True
-        setattr(mod, "_display_thread", mock_thread)
-        setattr(mod, "_file_watcher_thread", mock_thread)
-        setattr(mod, "_log_watcher_thread", mock_thread)
+        monkeypatch.setattr(mod, "_display_thread", mock_thread)
+        monkeypatch.setattr(mod, "_file_watcher_thread", mock_thread)
+        monkeypatch.setattr(mod, "_log_watcher_thread", mock_thread)
 
         mod._stop_threads()
 
@@ -421,28 +422,28 @@ class TestThreadManagement:
         mock_queue.stop.assert_called_once()
         assert mock_thread.join.call_count == 3
 
-    def test_stop_threads_handles_none_queue(self):
+    def test_stop_threads_handles_none_queue(self, monkeypatch):
         """_stop_threads works when event queue is None."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
-        setattr(mod, "_display_thread", None)
-        setattr(mod, "_file_watcher_thread", None)
-        setattr(mod, "_log_watcher_thread", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_display_thread", None)
+        monkeypatch.setattr(mod, "_file_watcher_thread", None)
+        monkeypatch.setattr(mod, "_log_watcher_thread", None)
 
         # Should not raise
         mod._stop_threads()
         assert mod._stop_event.is_set()
 
-    def test_stop_threads_skips_dead_threads(self):
+    def test_stop_threads_skips_dead_threads(self, monkeypatch):
         """_stop_threads skips threads that are not alive."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
 
         mock_thread = MagicMock()
         mock_thread.is_alive.return_value = False
-        setattr(mod, "_display_thread", mock_thread)
-        setattr(mod, "_file_watcher_thread", mock_thread)
-        setattr(mod, "_log_watcher_thread", mock_thread)
+        monkeypatch.setattr(mod, "_display_thread", mock_thread)
+        monkeypatch.setattr(mod, "_file_watcher_thread", mock_thread)
+        monkeypatch.setattr(mod, "_log_watcher_thread", mock_thread)
 
         mod._stop_threads()
         mock_thread.join.assert_not_called()
@@ -456,7 +457,7 @@ class TestThreadManagement:
 class TestDisplayWorker:
     """Test the display worker loop."""
 
-    def test_display_worker_processes_event(self):
+    def test_display_worker_processes_event(self, monkeypatch):
         """Display worker dequeues and renders events."""
         mod = _import_monitor()
         mock_event = MagicMock()
@@ -478,17 +479,17 @@ class TestDisplayWorker:
             return None
 
         mock_queue.dequeue = _dequeue
-        setattr(mod, "_event_queue", mock_queue)
+        monkeypatch.setattr(mod, "_event_queue", mock_queue)
         mod._stop_event.clear()
 
         with patch.object(mod, "_render_event") as mock_render:
             mod._display_worker()
         mock_render.assert_called_once_with(mock_event)
 
-    def test_display_worker_handles_none_queue(self):
+    def test_display_worker_handles_none_queue(self, monkeypatch):
         """Display worker sleeps when event queue is None, then stops."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
         mod._stop_event.clear()
 
         call_count = 0
@@ -513,10 +514,10 @@ class TestDisplayWorker:
 class TestEmitWatcherEvent:
     """Test watcher event emission."""
 
-    def test_emit_returns_early_when_no_queue(self):
+    def test_emit_returns_early_when_no_queue(self, monkeypatch):
         """No queue means no event is ever built — the early return is visible, not silent."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
 
         assert mod._emit_watcher_event("error", "test error") is None
 
@@ -524,11 +525,11 @@ class TestEmitWatcherEvent:
         # so nothing was handed to a queue that does not exist.
         mod.MonitoringEvent.assert_not_called()
 
-    def test_emit_error_level_has_priority_1(self):
+    def test_emit_error_level_has_priority_1(self, monkeypatch):
         """Error level events get priority 1."""
         mod = _import_monitor()
         mock_queue = MagicMock()
-        setattr(mod, "_event_queue", mock_queue)
+        monkeypatch.setattr(mod, "_event_queue", mock_queue)
 
         mod._emit_watcher_event("error", "bad stuff happened")
         mock_queue.enqueue.assert_called_once()
@@ -538,11 +539,11 @@ class TestEmitWatcherEvent:
         call_kwargs = me_cls.call_args[1]
         assert call_kwargs["priority"] == 1
 
-    def test_emit_warning_level_has_priority_2(self):
+    def test_emit_warning_level_has_priority_2(self, monkeypatch):
         """Non-error level events get priority 2."""
         mod = _import_monitor()
         mock_queue = MagicMock()
-        setattr(mod, "_event_queue", mock_queue)
+        monkeypatch.setattr(mod, "_event_queue", mock_queue)
 
         mod._emit_watcher_event("warning", "something happened")
         mock_queue.enqueue.assert_called_once()
@@ -627,12 +628,12 @@ class TestStartObserverWithFallback:
         assert result is mock_observer
         mock_observer.start.assert_called_once()
 
-    def test_fallback_to_polling(self, tmp_path):
+    def test_fallback_to_polling(self, tmp_path, monkeypatch):
         """Falls back to PollingObserver when inotify fails."""
         mod = self._import_with_watchdog()
         handler = MagicMock()
         watch_dirs = [(tmp_path, True)]
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         import errno
 
@@ -658,12 +659,12 @@ class TestStartObserverWithFallback:
         assert result is mock_polling_observer
         mock_polling_observer.start.assert_called_once()
 
-    def test_both_fail_returns_none(self, tmp_path):
+    def test_both_fail_returns_none(self, tmp_path, monkeypatch):
         """Returns None when both inotify and polling fail."""
         mod = self._import_with_watchdog()
         handler = MagicMock()
         watch_dirs = [(tmp_path, True)]
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         import errno
 
@@ -696,10 +697,10 @@ class TestStartObserverWithFallback:
 class TestFileWatcherWorker:
     """Test file watcher worker thread."""
 
-    def test_no_watch_dirs_returns_early(self):
+    def test_no_watch_dirs_returns_early(self, monkeypatch):
         """Worker returns early when no watch directories found."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         mock_config = MagicMock()
         mock_config._find_repo_root.return_value = MagicMock()
@@ -719,10 +720,10 @@ class TestFileWatcherWorker:
             mod._file_watcher_worker()
         mock_emit.assert_called_once_with("warning", "File watcher: no watch directories found — file events disabled")
 
-    def test_observer_none_returns_early(self):
+    def test_observer_none_returns_early(self, monkeypatch):
         """A failed observer startup ends the worker before the watch loop is ever entered."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         mock_config = MagicMock()
         mock_config._find_repo_root.return_value = MagicMock()
@@ -749,10 +750,10 @@ class TestFileWatcherWorker:
         mock_sleep.assert_not_called()
         mock_emit.assert_not_called()
 
-    def test_worker_runs_loop_and_stops_observer(self, tmp_path):
+    def test_worker_runs_loop_and_stops_observer(self, tmp_path, monkeypatch):
         """Worker runs sleep loop and stops observer on stop_event."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
         mod._stop_event.clear()
 
         mock_config = MagicMock()
@@ -819,11 +820,11 @@ class TestStartLogWatcherWithFallback:
             result = mod._start_log_watcher_with_fallback(mock_queue)
         assert result is True
 
-    def test_fallback_to_polling(self):
+    def test_fallback_to_polling(self, monkeypatch):
         """Falls back to polling when inotify fails."""
         mod = _import_monitor()
         mock_queue = MagicMock()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         import errno
 
@@ -846,11 +847,11 @@ class TestStartLogWatcherWithFallback:
             result = mod._start_log_watcher_with_fallback(mock_queue)
         assert result is True
 
-    def test_both_fail_returns_false(self):
+    def test_both_fail_returns_false(self, monkeypatch):
         """Returns False when both inotify and polling fail."""
         mod = _import_monitor()
         mock_queue = MagicMock()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         import errno
 
@@ -883,10 +884,10 @@ class TestStartLogWatcherWithFallback:
 class TestLogWatcherWorker:
     """Test log watcher worker thread."""
 
-    def test_returns_early_when_no_queue(self):
+    def test_returns_early_when_no_queue(self, monkeypatch):
         """Worker returns early when event queue is None."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
 
         mock_lw = MagicMock()
         with patch.dict(
@@ -896,11 +897,11 @@ class TestLogWatcherWorker:
             mod._log_watcher_worker()
         mock_lw.start_log_watcher.assert_not_called()
 
-    def test_returns_early_on_watcher_failure(self):
+    def test_returns_early_on_watcher_failure(self, monkeypatch):
         """A refused startup returns before the try/finally, so nothing is torn down."""
         mod = _import_monitor()
         queue = MagicMock()
-        setattr(mod, "_event_queue", queue)
+        monkeypatch.setattr(mod, "_event_queue", queue)
 
         with patch.object(mod, "_start_log_watcher_with_fallback", return_value=False) as mock_start:
             mock_lw = MagicMock()
@@ -919,10 +920,10 @@ class TestLogWatcherWorker:
         mock_lw.stop_log_watcher.assert_not_called()
         mock_sleep.assert_not_called()
 
-    def test_worker_runs_loop_and_stops(self):
+    def test_worker_runs_loop_and_stops(self, monkeypatch):
         """Worker runs sleep loop and calls stop_log_watcher on stop_event."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
         mod._stop_event.clear()
 
         mock_lw = MagicMock()
@@ -1154,20 +1155,20 @@ class TestInteractiveLoop:
 class TestPrintStatusMonitor:
     """Test status display function."""
 
-    def test_print_status_with_queue(self):
+    def test_print_status_with_queue(self, monkeypatch):
         """Status display includes queue size when queue exists."""
         mod = _import_monitor()
         mock_queue = MagicMock()
         mock_queue.size.return_value = 5
-        setattr(mod, "_event_queue", mock_queue)
+        monkeypatch.setattr(mod, "_event_queue", mock_queue)
 
         mod._print_status()
         assert mod.console.print.call_count >= 3
 
-    def test_print_status_without_queue(self):
+    def test_print_status_without_queue(self, monkeypatch):
         """Status display works when event queue is None."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
         mod._print_status()
         assert mod.console.print.call_count >= 2
 
@@ -1349,23 +1350,21 @@ class TestBannerTruth:
             assert "all branches" not in line, f"scoped run still claims all branches: {line}"
             assert "no filters" not in line, f"scoped run still claims no filters: {line}"
 
-    def test_status_unscoped_unchanged(self):
+    def test_status_unscoped_unchanged(self, monkeypatch):
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
-        setattr(mod, "_active_scope", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_active_scope", None)
         mod._print_status()
         assert any("all branches, all levels, no filters" in line for line in _printed(mod))
 
-    def test_status_names_the_scope(self):
+    def test_status_names_the_scope(self, monkeypatch):
         """`status` inside a scoped monitor reports the scope, not 'no filters'."""
-        from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
-
         mod = _import_monitor()
         queue = MagicMock()
         queue.size.return_value = 2
         queue.suppressed_count.return_value = 41
-        setattr(mod, "_event_queue", queue)
-        setattr(mod, "_active_scope", BranchScope(["SEEDGO"]))
+        monkeypatch.setattr(mod, "_event_queue", queue)
+        monkeypatch.setattr(mod, "_active_scope", BranchScope(["SEEDGO"]))
 
         mod._print_status()
         lines = _printed(mod)
@@ -1409,10 +1408,10 @@ class TestUnknownScopeWarning:
 class TestWatcherEventsBypassScope:
     """'File watcher unavailable' must not be filtered out by a branch scope."""
 
-    def test_emit_watcher_event_bypasses_scope(self):
+    def test_emit_watcher_event_bypasses_scope(self, monkeypatch):
         mod = _import_monitor()
         queue = MagicMock()
-        setattr(mod, "_event_queue", queue)
+        monkeypatch.setattr(mod, "_event_queue", queue)
         mod._emit_watcher_event("error", "File watcher: completely unavailable")
         assert queue.enqueue.call_args.kwargs.get("bypass_scope") is True
 

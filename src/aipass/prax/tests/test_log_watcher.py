@@ -3,7 +3,7 @@
 # Description: Tests for log file monitoring handler
 # Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/monitoring/log_watcher.py."""
@@ -337,12 +337,12 @@ class TestParseLogMessage:
 class TestLogWatcherLifecycle:
     """Test start_log_watcher, stop_log_watcher, is_log_watcher_active."""
 
-    def test_start_creates_and_starts_observer(self, tmp_path):
+    def test_start_creates_and_starts_observer(self, tmp_path, monkeypatch):
         mod = _import_log_watcher()
         mock_queue = MagicMock()
         mock_observer = MagicMock()
 
-        setattr(mod, "_log_observer", None)
+        monkeypatch.setattr(mod, "_log_observer", None)
 
         with patch.object(mod, "WatchdogObserver", return_value=mock_observer):
             with patch.object(mod, "get_system_logs_dir", return_value=tmp_path / "logs"):
@@ -352,13 +352,13 @@ class TestLogWatcherLifecycle:
         mock_observer.schedule.assert_called_once()
         mock_observer.start.assert_called_once()
 
-    def test_start_with_polling_mode(self, tmp_path):
+    def test_start_with_polling_mode(self, tmp_path, monkeypatch):
         mod = _import_log_watcher()
         mock_queue = MagicMock()
         mock_observer = MagicMock()
         mock_polling_cls = MagicMock(return_value=mock_observer)
 
-        setattr(mod, "_log_observer", None)
+        monkeypatch.setattr(mod, "_log_observer", None)
 
         with patch.dict(
             sys.modules,
@@ -372,11 +372,11 @@ class TestLogWatcherLifecycle:
         assert result is mock_observer
         mock_observer.start.assert_called_once()
 
-    def test_stop_stops_and_clears(self):
+    def test_stop_stops_and_clears(self, monkeypatch):
         mod = _import_log_watcher()
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = True
-        setattr(mod, "_log_observer", mock_obs)
+        monkeypatch.setattr(mod, "_log_observer", mock_obs)
 
         mod.stop_log_watcher()
 
@@ -384,7 +384,7 @@ class TestLogWatcherLifecycle:
         mock_obs.join.assert_called_once_with(timeout=5.0)
         assert getattr(mod, "_log_observer") is None
 
-    def test_stop_noop_when_not_running(self):
+    def test_stop_noop_when_not_running(self, monkeypatch):
         """Nothing is running, so no teardown is attempted.
 
         Two ways to be "not running", both no-ops: no observer at all, and an
@@ -394,13 +394,13 @@ class TestLogWatcherLifecycle:
         """
         mod = _import_log_watcher()
 
-        setattr(mod, "_log_observer", None)
+        monkeypatch.setattr(mod, "_log_observer", None)
         assert mod.stop_log_watcher() is None
         assert getattr(mod, "_log_observer") is None
 
         dead = MagicMock()
         dead.is_alive.return_value = False
-        setattr(mod, "_log_observer", dead)
+        monkeypatch.setattr(mod, "_log_observer", dead)
 
         mod.stop_log_watcher()
 
@@ -408,23 +408,23 @@ class TestLogWatcherLifecycle:
         dead.join.assert_not_called()
         assert getattr(mod, "_log_observer") is dead
 
-    def test_is_active_true_when_alive(self):
+    def test_is_active_true_when_alive(self, monkeypatch):
         mod = _import_log_watcher()
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = True
-        setattr(mod, "_log_observer", mock_obs)
+        monkeypatch.setattr(mod, "_log_observer", mock_obs)
         assert mod.is_log_watcher_active() is True
 
-    def test_is_active_false_when_none(self):
+    def test_is_active_false_when_none(self, monkeypatch):
         mod = _import_log_watcher()
-        setattr(mod, "_log_observer", None)
+        monkeypatch.setattr(mod, "_log_observer", None)
         assert mod.is_log_watcher_active() is False
 
-    def test_is_active_false_when_dead(self):
+    def test_is_active_false_when_dead(self, monkeypatch):
         mod = _import_log_watcher()
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = False
-        setattr(mod, "_log_observer", mock_obs)
+        monkeypatch.setattr(mod, "_log_observer", mock_obs)
         assert mod.is_log_watcher_active() is False
 
 
@@ -884,13 +884,13 @@ class TestEmitLogEvent:
 class TestStartLogWatcherAdditional:
     """Additional tests for start_log_watcher."""
 
-    def test_stops_existing_observer_before_starting(self, tmp_path):
+    def test_stops_existing_observer_before_starting(self, tmp_path, monkeypatch):
         """Should stop existing observer if already running."""
         mod = _import_log_watcher()
         mock_queue = MagicMock()
         mock_old_observer = MagicMock()
         mock_old_observer.is_alive.return_value = True
-        setattr(mod, "_log_observer", mock_old_observer)
+        monkeypatch.setattr(mod, "_log_observer", mock_old_observer)
 
         mock_new_observer = MagicMock()
 

@@ -3,7 +3,7 @@
 # Description: Unit tests for monitoring handler modules
 # Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py and the three sibling handlers listed below."""
@@ -25,6 +25,8 @@ import json
 import sys
 from pathlib import Path, PurePosixPath
 from unittest.mock import MagicMock, mock_open as _mock_file_open, patch
+
+from aipass.prax.apps.handlers import repo_root as repo_root_mod
 
 # The detector is fed POSIX-spelled strings through a mocked Path, so none of
 # these reach a disk. Built from parts under a root with no home directory in
@@ -1115,8 +1117,6 @@ class TestFindRepoRoot:
         into handlers/repo_root.py while the ANSWER stayed identical. This drives
         the real resolver over a real directory instead.
         """
-        from aipass.prax.apps.handlers import repo_root as repo_root_mod
-
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
         detector._repo_root = None
@@ -1139,8 +1139,6 @@ class TestFindRepoRoot:
         the marker is gitignored. The old pin is not weakened here, it is
         INVERTED: the cwd answer is now the wrong one, so the assertion says so.
         """
-        from aipass.prax.apps.handlers import repo_root as repo_root_mod
-
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
         detector._repo_root = None

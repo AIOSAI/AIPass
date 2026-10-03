@@ -3,7 +3,7 @@
 # Description: Canary tests that literal [placeholders] survive Rich rendering
 # Version: 1.1.0
 # Created: 2026-08-10
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/monitor.py, apps/prax.py and apps/modules/log_health.py's bracket rendering."""
@@ -33,6 +33,8 @@ from pathlib import Path
 
 import pytest
 from rich.console import Console
+
+from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
 
 
 def _render(module_path: str, call):
@@ -89,8 +91,6 @@ class TestScopedBannerRenders:
     """The scope names must reach the terminal, not just console.print."""
 
     def _banner(self, scope_args):
-        from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
-
         scope = parse_scope(scope_args)
         return _render(
             "aipass.prax.apps.modules.monitor",
