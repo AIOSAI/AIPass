@@ -276,6 +276,12 @@
       "standard": "cli_ux",
       "pattern": "config.py read as an entry point",
       "reason": "config.py is not an entry point (fleet green leg 10 ruling). It holds constants and shared helpers imported by every trigger module; the entry point is apps/trigger.py. FILE-WIDE: the rule judges the file as a whole."
+    },
+    {
+      "file": "apps/log_watcher_service.py",
+      "standard": "introspection",
+      "pattern": "--help check in main() with no no-args check before it",
+      "reason": "A systemd daemon must start on no arguments (fleet green leg 11 ruling): the unit runs the module bare, so no-args IS the start and must never print introspection instead. The --help guard (leg 10) is the only argument branch; a daemon with no subcommands has nothing else to gate. FILE-WIDE, not line-scoped: introspection_check calls is_bypassed() only at its top gate with no line, so a rule carrying lines is inert there (bypass/utils._scope_matches) - measured leg 11: line-scoped 85, file-wide 100."
     }
   ],
   "notes": {
