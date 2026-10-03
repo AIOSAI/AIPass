@@ -3,7 +3,7 @@
 # Description: Tests for the log watcher service entry point
 # Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/log_watcher_service.py — the persistent service entry point."""
@@ -81,6 +81,59 @@ class TestPrintIntrospection:
         mod.print_introspection()
         captured = capsys.readouterr()
         assert "systemd" in captured.out and "service" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Tests -- the help flag
+# ---------------------------------------------------------------------------
+
+
+class TestHelpFlag:
+    """A help flag explains the service and starts nothing (leg 10).
+
+    Until leg 10 main() read no arguments, so `python -m ... --help` started
+    both watchers and the catch-up. The event is pre-set in each test, so a
+    guard that lets the start through still returns, and the start stubs count
+    what ran.
+    """
+
+    @pytest.mark.parametrize("flag", ["--help", "-h"])
+    def test_a_help_flag_prints_usage_and_starts_nothing(
+        self, flag: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The usage text goes out and no watcher or catch-up runs (mutant: the guard dropped)."""
+        mod = _import_module()
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+        monkeypatch.setattr(mod.reload_sentinel, "start", lambda _stop: lambda: False)
+        branch, system, catchup = MagicMock(return_value=True), MagicMock(return_value=True), MagicMock()
+        monkeypatch.setattr(mod, "start_branch_watcher", branch)
+        monkeypatch.setattr(mod, "start_system_watcher", system)
+        monkeypatch.setattr(mod, "run_error_catchup", catchup)
+
+        mod.main([flag])
+
+        assert "Usage" in capsys.readouterr().out
+        branch.assert_not_called()
+        system.assert_not_called()
+        catchup.assert_not_called()
+
+    def test_no_arguments_still_starts_the_watchers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The control: the plain start the unit makes still starts both watchers (mutant: every start refused)."""
+        mod = _import_module()
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+        monkeypatch.setattr(mod.reload_sentinel, "start", lambda _stop: lambda: False)
+        branch, system = MagicMock(return_value=True), MagicMock(return_value=True)
+        monkeypatch.setattr(mod, "start_branch_watcher", branch)
+        monkeypatch.setattr(mod, "start_system_watcher", system)
+
+        mod.main([])
+
+        branch.assert_called_once_with()
+        system.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +483,8 @@ class TestStartupCatchup:
 
         mod.main()
 
-        mock_stop_branch.assert_called_once(), "the service still ran and shut down cleanly"
+        # The service still ran and shut down cleanly.
+        mock_stop_branch.assert_called_once()
         assert any("catch-up failed" in e for e in errors), "and the failure is reported, not swallowed"
 
     def test_no_catchup_when_both_watchers_fail(self, monkeypatch: pytest.MonkeyPatch) -> None:

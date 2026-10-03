@@ -3,7 +3,7 @@
 # Description: Unit tests for branch_log_events module
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for the branch_log_events module (apps/modules/branch_log_events.py)."""
@@ -58,6 +58,7 @@ def _mock_infrastructure(monkeypatch, tmp_path):
             "active": True,
             "watchdog_available": True,
             "seen_hashes_count": 0,
+            "pending_flush": False,
             "aipass_root": "/fake/path",
         }
     )
@@ -371,13 +372,14 @@ def test_print_help_outputs_commands(capsys):
 
 
 def test_handle_command_status_prints_all_fields(capsys):
-    """handle_command('status', []) prints active, watchdog, hashes, root."""
+    """handle_command('status', []) prints active, watchdog, hashes, pending flush, root."""
     mod = _import_module()
     mod.handle_command("status", [])
     output = capsys.readouterr().out
     assert "Active:" in output
     assert "Watchdog available:" in output
     assert "Seen error hashes:" in output
+    assert "Pending flush: False" in output
     assert "AIPASS root:" in output
 
 

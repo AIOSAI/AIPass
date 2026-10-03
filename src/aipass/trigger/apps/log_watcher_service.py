@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher_service.py
 # Description: Persistent log watcher process for Medic error detection
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-09-12
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -44,8 +44,8 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 
-def print_introspection():
-    """Display module introspection info."""
+def _console():
+    """Return the shared CLI console, or a plain rich Console when cli is absent."""
     try:
         from aipass.cli.apps.modules.display import console
     # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
@@ -54,10 +54,31 @@ def print_introspection():
         from rich.console import Console
 
         console = Console()
+    return console
 
+
+def print_introspection():
+    """Display module introspection info."""
+    console = _console()
     console.print()
     console.print("[bold cyan]log_watcher_service Module[/bold cyan]")
     console.print("[dim]Persistent log watcher process — starts branch and system watchers as systemd service[/dim]")
+    console.print("Run with --help for usage.")
+    console.print()
+
+
+def print_help():
+    """Display usage. The service takes no subcommands: it runs until signalled."""
+    console = _console()
+    console.print()
+    console.print("[bold cyan]Usage[/bold cyan]")
+    console.print("  log_watcher_service              start the watchers and run until SIGTERM (the systemd unit)")
+    console.print("  log_watcher_service --help, -h   this text; starts nothing")
+    console.print("  log_watcher_service --version, -V")
+    console.print()
+    console.print("[bold cyan]Examples[/bold cyan]")
+    console.print("  systemctl --user start trigger-log-watcher.service")
+    console.print("  drone @trigger medic status")
     console.print()
 
 
@@ -84,8 +105,22 @@ def print_introspection():
 # The `--version` print at the bottom stays: it sits inside
 # `if __name__ == "__main__"`, which the standard excludes, and a version query
 # answering on stdout is what a caller parsing it expects.
-def main() -> None:
-    """Start watchers and block until signaled."""
+def main(argv: list[str] | None = None) -> None:
+    """Start watchers and block until signaled.
+
+    A help flag anywhere in argv prints usage and returns before anything
+    starts. Until leg 10 main() read no arguments, so `--help` started both
+    watchers and the catch-up.
+
+    Args:
+        argv: Command-line arguments; None is no arguments, which is what the
+            systemd unit passes.
+    """
+    # The dashed flags only: with no subcommands, a bare word is no request.
+    if any(flag in ("--help", "-h") for flag in argv or []):
+        print_help()
+        return
+
     stop_event = threading.Event()
 
     def shutdown(signum: int, _frame: object) -> None:
@@ -168,4 +203,4 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] in ("--version", "-V"):
         print("log_watcher_service 1.0.0")
         sys.exit(0)
-    main()
+    main(sys.argv[1:])

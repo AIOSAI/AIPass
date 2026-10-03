@@ -3,7 +3,7 @@
 # Description: Unit tests for branch log watcher event producer
 # Version: 1.4.0
 # Created: 2026-04-03
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for the branch log watcher handler (apps/handlers/log_watcher.py)."""
@@ -954,6 +954,7 @@ class TestStartStopStatus:
             "watchdog_available",
             "seen_hashes_count",
             "tracked_log_files",
+            "pending_flush",
             "excluded_files",
             "stale_threshold_seconds",
             "aipass_root",
@@ -1513,17 +1514,17 @@ class TestDebouncedWriter:
         assert data["log_positions"] == {"/f.log": 10}
 
     def test_dirty_flag_cleared_after_flush(self, monkeypatch):
-        """_data_dirty is False after a successful flush.
+        """pending_flush reads False after a successful flush.
 
         Flushed through stop_branch_log_watcher, which forces the same flush,
-        since leg 7 (it called _flush_trigger_data directly). The flag read
-        stays: no public answer holds it (HELD, leg 7). Mutant run (leg 7): the
+        since leg 7 (it called _flush_trigger_data directly). Read through the
+        status answer since leg 10, which added pending_flush. Mutant run: the
         flush leaving the flag set reddens this.
         """
         monkeypatch.setattr(lw, "_data_dirty", True)
         monkeypatch.setattr(lw, "_active_watcher", SimpleNamespace(log_positions={}, log_inodes={}))
         lw.stop_branch_log_watcher()
-        assert lw._data_dirty is False
+        assert lw.get_watcher_status()["pending_flush"] is False
 
     def test_stop_watcher_forces_flush(self, tmp_path, monkeypatch):
         """stop_branch_log_watcher calls _flush_trigger_data(force=True) (mutant: the observer left unjoined)."""
@@ -1729,7 +1730,7 @@ class TestReadNewLinesDeeper:
 
         flushed = json.loads(lw.TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
         assert flushed["log_positions"] == {file_path: log_file.stat().st_size}
-        assert lw._data_dirty is False
+        assert lw.get_watcher_status()["pending_flush"] is False
 
     def test_debounce_skips_flush_within_interval(self, tmp_path, monkeypatch):
         """_flush_trigger_data is NOT called when within flush interval."""
@@ -1746,7 +1747,7 @@ class TestReadNewLinesDeeper:
         with patch.object(lw, "_flush_trigger_data") as mock_flush:
             watcher._read_new_lines(file_path)
             mock_flush.assert_not_called()
-        assert lw._data_dirty is True
+        assert lw.get_watcher_status()["pending_flush"] is True
 
     def test_blank_lines_are_skipped(self, tmp_path):
         """Blank lines in new content do not trigger _process_log_line."""

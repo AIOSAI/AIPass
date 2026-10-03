@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_log_events.py
 # Description: Branch log events module for log watcher public API
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-02-02
-# Modified: 2026-02-02
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -215,6 +215,7 @@ def handle_command(command: str, args: list) -> bool:
         console.print(f"  Active: {info['active']}")
         console.print(f"  Watchdog available: {info['watchdog_available']}")
         console.print(f"  Seen error hashes: {info['seen_hashes_count']}")
+        console.print(f"  Pending flush: {info['pending_flush']}")
         console.print(f"  AIPASS root: {info['aipass_root']}")
     elif command == "reset":
         reset_hashes()

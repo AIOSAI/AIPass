@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.7.0
+# Version: 2.8.0
 # Created: 2026-02-02
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -1079,6 +1079,9 @@ def get_watcher_status() -> Dict[str, Any]:
     """
     Get current watcher status.
 
+    pending_flush is True while positions or hashes wait unsaved for the next
+    flush, so an operator can see state a crash now would lose (leg 10).
+
     Returns:
         Dict with status information
     """
@@ -1090,6 +1093,7 @@ def get_watcher_status() -> Dict[str, Any]:
         "watchdog_available": WATCHDOG_AVAILABLE,
         "seen_hashes_count": len(_seen_error_hashes),
         "tracked_log_files": tracked_files,
+        "pending_flush": _data_dirty,
         "excluded_files": list(EXCLUDED_LOG_FILES),
         "stale_threshold_seconds": STALE_ENTRY_THRESHOLD_SECONDS,
         "aipass_root": str(AIPASS_PKG_ROOT),
