@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_audit.py
 # Description: Standards Audit Module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-09-21
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -17,7 +17,6 @@ import sys
 import time
 from pathlib import Path
 from typing import List, NoReturn
-from collections import defaultdict
 
 # IMPORTS — prax logger first, system-wide
 from aipass.prax import logger
@@ -459,20 +458,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print(f"[dim]Audit complete — {total_branches} branches in {total_elapsed:.1f}s[/dim]")
     console.print()
 
-    # Calculate system-wide averages for each standard
-    standard_scores = defaultdict(list)
-    for result in audit_results:
-        for standard, score in result["scores"].items():
-            standard_scores[standard].append(score)
-
-    system_averages = {standard: int(sum(scores) / len(scores)) for standard, scores in standard_scores.items()}
-
-    overall_system_avg = int(sum(r["average"] for r in audit_results) / len(audit_results)) if audit_results else 0
-
-    # Print results — detailed for single branch, skip for full audit
+    # Print results — detailed for single branch, skip for full audit. The
+    # system averages computed here fed two parameters print_branch_summary
+    # never read; both went (seedgo, fleet green leg 8).
     if not is_compact:
         for result in audit_results:
-            print_branch_summary(result, system_averages, overall_system_avg, no_bypass=no_bypass)
+            print_branch_summary(result, no_bypass=no_bypass)
 
     # Print system summary (full audit only)
     if is_compact:

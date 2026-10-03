@@ -3,7 +3,7 @@
 # Description: Pins seedgo imports against a working directory the OS cannot read
 # Version: 1.1.2
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests that every module under apps/, apps/handlers/__init__.py first, imports with a dead cwd."""
@@ -1949,7 +1949,7 @@ class TestTheInstrumentsCanFire:
             f"the world took the child down instead of reporting: {result.stdout}\n{result.stderr}"
         )
 
-    def test_the_stand_down_reads_the_concrete_class_not_PurePath(self, tmp_path):
+    def test_the_stand_down_reads_the_concrete_class_not_the_pure_path(self, tmp_path):
         """Round 12's red 2, as the exact shape that defeated the guard.
 
         3.10 and 3.11 do not define _flavour on PurePath - the concrete

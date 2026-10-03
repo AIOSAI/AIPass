@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: uncalled_public_function_check.py
 # Description: Uncalled Public Function Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -166,17 +166,24 @@ def _read_tests(tests_dir: Path, branch_root: Path) -> Tuple[Set[str], Set[str],
         if tree is None:
             continue
         subjects.extend(subjects_of(tree, branch_root))
-        skip = _patch_targets(tree, replaced)
-        for node in ast.walk(tree):
-            if id(node) in skip:
-                continue
-            if isinstance(node, ast.Call):
-                called.add(_tail_name(node.func))
-            elif isinstance(node, ast.Name):
-                elsewhere.add(node.id)
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                elsewhere.add(node.value.rsplit(".", 1)[-1])
+        _tally(tree, _patch_targets(tree, replaced), called, elsewhere)
     return called, replaced, elsewhere, subjects
+
+
+def _tally(tree: ast.Module, skip: Set[int], called: Set[str], elsewhere: Set[str]) -> None:
+    """Add one test file's calls and other mentions, patch arguments skipped.
+
+    Lifted out of ``_read_tests`` for depth (seedgo, fleet green leg 8).
+    """
+    for node in ast.walk(tree):
+        if id(node) in skip:
+            continue
+        if isinstance(node, ast.Call):
+            called.add(_tail_name(node.func))
+        elif isinstance(node, ast.Name):
+            elsewhere.add(node.id)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            elsewhere.add(node.value.rsplit(".", 1)[-1])
 
 
 def _patch_targets(tree: ast.Module, replaced: Set[str]) -> Set[int]:

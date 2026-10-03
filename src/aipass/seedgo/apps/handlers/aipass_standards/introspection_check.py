@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection_check.py
 # Description: Introspection Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-08
-# Modified: 2026-09-25
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -169,7 +169,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     # Check 2: Execution order (entry points only)
     if is_entry_point:
-        order_check = check_execution_order(tree, content, path.name)
+        order_check = check_execution_order(tree, path.name)
         if order_check:
             checks.append(order_check)
 
@@ -445,10 +445,11 @@ def _build_helpers_map(tree: ast.Module) -> dict:
     return result
 
 
-def check_execution_order(tree: ast.Module, content: str, filename: str) -> Optional[Dict]:
+def check_execution_order(tree: ast.Module, filename: str) -> Optional[Dict]:
     """
     In the main() function (or if __name__ block), verify that no-args check
-    comes BEFORE --help check.
+    comes BEFORE --help check. It reads the tree alone; the `content` it also
+    took was never read and was dropped (seedgo, fleet green leg 8).
 
     The standard execution order is:
     1. No args → print introspection info

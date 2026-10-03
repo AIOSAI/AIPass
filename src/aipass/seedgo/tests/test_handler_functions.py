@@ -3,7 +3,7 @@
 # Description: Unit tests for handler-level functions across multiple handler packages
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/ functions: audit/audit_display.py, diagnostics_check.py, readme/readme_ops.py."""
@@ -84,15 +84,12 @@ def test_print_branch_summary_with_violations(capsys: pytest.CaptureFixture[str]
     assert "      • Missing META block" in lines
 
 
-def test_print_branch_summary_with_system_averages(capsys: pytest.CaptureFixture[str]) -> None:
-    """The optional system-average arguments are accepted and never rendered.
+def test_print_branch_summary_single_standard_at_full_marks(capsys: pytest.CaptureFixture[str]) -> None:
+    """One standard at 100 renders its row and an Overall of 100.
 
-    Was a bare call that asserted nothing (no_oracle). Measured 2026-09-07:
-    print_branch_summary takes `system_averages` and `overall_system_avg` but
-    reads neither — the only mentions of them in audit_display.py are the
-    signature and the introspection blurb. The 90 passed in below reaches no
-    line of output, so that is what this pins. If the comparison is ever wired
-    up, this test goes red and should be rewritten to pin the new line.
+    It pinned that `system_averages` and `overall_system_avg` were accepted and
+    never rendered; both parameters were dropped (seedgo, fleet green leg 8),
+    and the call now passes the result alone.
     Mutant: Overall's `{avg:3}%` to `{avg:4}%` in audit_display.py — killed.
     """
     audit_result: Dict = {
@@ -102,8 +99,7 @@ def test_print_branch_summary_with_system_averages(capsys: pytest.CaptureFixture
         "files_checked": 1,
         "results": {},
     }
-    system_averages: Dict[str, int] = {"meta": 90}
-    audit_display.print_branch_summary(audit_result, system_averages, 90)
+    audit_display.print_branch_summary(audit_result)
 
     lines = capsys.readouterr().out.splitlines()
     assert "  Meta            100% ✅" in lines

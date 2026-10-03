@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: report.py
 # Description: assemble every row, declare the blind spots, publish the artifact
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -194,7 +194,7 @@ def _summary(
     return {
         "artifact_version": ARTIFACT_VERSION,
         "run_identity": _run_identity(root, now, len(rows)),
-        "corpus_definition": _corpus_definition(found, statuses, len(running)),
+        "corpus_definition": _corpus_definition(found, len(running)),
         "blind_spots": list(BLIND_SPOTS),
         "ranking": {
             "weights": dict(ranking.WEIGHTS),
@@ -242,7 +242,7 @@ def _head_commit(root: Path) -> str:
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
 
 
-def _corpus_definition(found: collection.Collection, statuses: Dict[str, str], running: int) -> dict:
+def _corpus_definition(found: collection.Collection, running: int) -> dict:
     """What was counted, under which rules, and how it was cross-checked."""
     definition = dict(found.rules.as_dict())
     definition.update(

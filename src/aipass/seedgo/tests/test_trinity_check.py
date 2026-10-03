@@ -3,7 +3,7 @@
 # Description: Unit tests for trinity_check - trinity memory file standards checker
 # Version: 1.5.1
 # Created: 2026-08-25
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -1374,25 +1374,26 @@ class TestVersionedBackupsAreLegalResidents:
             "local.json.orig",
             "observations.json.lock",
             "tmp2ay2d070.tmp",
-        ],
-    )
-    def test_machine_artifacts_are_still_strays(self, trinity, tmp_path, name):
-        """A backup rule that swallows temp files hides torn writes."""
-        branch = _write_branch(tmp_path)
-        (branch / ".trinity" / name).write_text("x\n", encoding="utf-8")
-
-        _assert_failed(_group(trinity.check_branch(str(branch)), "File set"), f"stray {name}")
-
-    @pytest.mark.parametrize(
-        "name",
-        [
             "STATUS.local.md",  # seedgo's own, still mine to relocate or defend
             "watchdog_active.json",  # devpulse's, banked as their todo
             "watchdog_active.json.lock",
+            "local.json.pre",  # no separator, no token -- ambiguous
+            "local.json.pre_",  # token must start alphanumeric
+            "local.json.pre-",
+            "local.json.pre_v3_backup.tmp",  # a temp file wearing a backup's name
+            "local.jsonpre_v3",  # no dot before the marker
+            "local.json.post_v3",  # 'pre' is the anchor the convention uses
         ],
     )
-    def test_the_deliberately_flagged_operational_files_still_flag(self, trinity, tmp_path, name):
-        """The ruling kept these violations on purpose -- owners relocate."""
+    def test_machine_artifacts_are_still_strays(self, trinity, tmp_path, name):
+        """A backup rule that swallows temp files hides torn writes.
+
+        The same body held two more claims, folded in here with every case
+        (compass 443; seedgo, fleet green leg 8): the deliberately flagged
+        operational files still flag, because the ruling kept them on purpose
+        and their owners relocate; and the near misses of the backup pattern
+        are still strays.
+        """
         branch = _write_branch(tmp_path)
         (branch / ".trinity" / name).write_text("x\n", encoding="utf-8")
 
@@ -1404,23 +1405,6 @@ class TestVersionedBackupsAreLegalResidents:
         (branch / ".trinity" / "STATUS.local.md.pre_v3_backup").write_text("x\n", encoding="utf-8")
 
         _assert_failed(_group(trinity.check_branch(str(branch)), "File set"), "stray STATUS.local.md.pre_v3_backup")
-
-    @pytest.mark.parametrize(
-        "name",
-        [
-            "local.json.pre",  # no separator, no token -- ambiguous
-            "local.json.pre_",  # token must start alphanumeric
-            "local.json.pre-",
-            "local.json.pre_v3_backup.tmp",  # a temp file wearing a backup's name
-            "local.jsonpre_v3",  # no dot before the marker
-            "local.json.post_v3",  # 'pre' is the anchor the convention uses
-        ],
-    )
-    def test_near_misses_of_the_pattern_are_still_strays(self, trinity, tmp_path, name):
-        branch = _write_branch(tmp_path)
-        (branch / ".trinity" / name).write_text("x\n", encoding="utf-8")
-
-        _assert_failed(_group(trinity.check_branch(str(branch)), "File set"), f"stray {name}")
 
     def test_a_directory_named_like_a_backup_is_still_a_stray(self, trinity, tmp_path):
         """The convention renames a FILE. A directory of junk is not a version."""

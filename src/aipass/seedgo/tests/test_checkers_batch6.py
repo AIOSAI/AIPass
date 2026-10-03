@@ -3,7 +3,7 @@
 # Description: Unit tests for checker sub-functions in architecture, cli, cli_flags, documentation
 # Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for the sub-functions of apps/handlers/aipass_standards/architecture_check.py and 3 siblings."""
@@ -68,35 +68,27 @@ def _pin_bypass_log(monkeypatch):
 class TestCheckLayerLocation:
     """Tests for check_layer_location."""
 
-    def test_entry_point_passes(self, tmp_path):
-        """Entry point path is recognised as the entry-point layer."""
-        result = architecture_check.check_layer_location(
-            str(tmp_path / "branch" / "apps" / "branch.py"), True, False, False
-        )
+    def test_entry_point_passes(self):
+        """An entry point is named the entry-point layer."""
+        result = architecture_check.check_layer_location(True, False, False)
         assert result["passed"] is True
         assert "Entry point" in result["message"]
 
-    def test_module_layer_passes(self, tmp_path):
-        """Module path is recognised as the module layer."""
-        result = architecture_check.check_layer_location(
-            str(tmp_path / "branch" / "apps" / "modules" / "foo.py"), False, True, False
-        )
+    def test_module_layer_passes(self):
+        """A module is named the module layer."""
+        result = architecture_check.check_layer_location(False, True, False)
         assert result["passed"] is True
         assert "Module layer" in result["message"]
 
-    def test_handler_layer_passes(self, tmp_path):
-        """Handler path is recognised as the handler layer."""
-        result = architecture_check.check_layer_location(
-            str(tmp_path / "branch" / "apps" / "handlers" / "json" / "j.py"), False, False, True
-        )
+    def test_handler_layer_passes(self):
+        """A handler is named the handler layer."""
+        result = architecture_check.check_layer_location(False, False, True)
         assert result["passed"] is True
         assert "Handler layer" in result["message"]
 
-    def test_outside_3_layer_fails(self, tmp_path):
-        """Path outside the 3-layer structure fails."""
-        result = architecture_check.check_layer_location(
-            str(tmp_path / "branch" / "random" / "foo.py"), False, False, False
-        )
+    def test_outside_3_layer_fails(self):
+        """A file in none of the three layers fails."""
+        result = architecture_check.check_layer_location(False, False, False)
         assert result["passed"] is False
         assert "not in standard 3-layer" in result["message"]
 

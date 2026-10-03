@@ -743,17 +743,16 @@ class TestPrintBranchSummary:
 
         assert "Rename to docs/" in rendered, "the deprecated-pattern message was not rendered"
 
-    def test_system_averages_and_overall(self, capsys):
-        """system_averages and overall_system_avg args accepted. Mutant: the branch name dropped from the header in apps/handlers/audit/audit_display.py — killed."""
+    def test_the_branch_name_heads_the_summary(self, capsys):
+        """The summary names its branch.
+
+        It also passed system_averages and overall_system_avg, which the product
+        never read; both were dropped (seedgo, fleet green leg 8).
+        Mutant: the branch name dropped from the header in audit_display.py — killed.
+        """
         result = self._make_audit_result()
 
-        rendered = _rendered(
-            capsys,
-            audit_display.print_branch_summary,
-            result,
-            system_averages={"naming": 85},
-            overall_system_avg=87,
-        )
+        rendered = _rendered(capsys, audit_display.print_branch_summary, result)
 
         assert "test_branch" in rendered, "the branch summary rendered nothing at all"
 
@@ -1303,7 +1302,13 @@ class TestRunAllFiles:
 
 
 class TestLoadDiagnosticsChecker:
-    """Tests for _load_diagnostics_checker."""
+    """Tests for _load_diagnostics_checker.
+
+    HELD (seedgo, fleet green leg 8): the loader is the unit. audit_branch shows
+    its None arms only as a missing "diagnostics" result, and reaching them from
+    there takes a seam for the module path (a product question), not the
+    process-wide patches these tests carry today.
+    """
 
     def test_path_not_exists(self):
         """Returns None when diagnostics file does not exist."""

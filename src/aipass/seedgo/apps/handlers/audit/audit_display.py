@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_display.py
 # Description: Audit Display Module
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -50,7 +50,7 @@ def print_introspection() -> None:
     console.print()
 
     console.print("[yellow]Public API:[/yellow]")
-    console.print("  [dim]- print_branch_summary(audit_result, system_averages, overall_system_avg, no_bypass)[/dim]")
+    console.print("  [dim]- print_branch_summary(audit_result, no_bypass)[/dim]")
     console.print("  [dim]- print_system_summary(audit_results, no_bypass)[/dim]")
     console.print()
 
@@ -370,8 +370,6 @@ def cache_tag(audit_result: dict) -> str:
 
 def print_branch_summary(
     audit_result: Dict,
-    system_averages: Dict[str, int] | None = None,
-    overall_system_avg: int = 0,
     no_bypass: bool = False,
 ):
     """Print summary for a single branch - always shows full details (audit = comprehensive)
@@ -379,6 +377,9 @@ def print_branch_summary(
     no_bypass tags the branch line and the Overall line, so the label travels
     with the number. A --no-bypass score copied out of an unlabelled summary is
     indistinguishable from a branch that just regressed.
+
+    It took system_averages and overall_system_avg and read neither; both were
+    dropped with the computation that fed them (seedgo, fleet green leg 8).
     """
     json_handler.log_operation("audit_display_rendered", {"branch": audit_result["branch"]["name"]})
     branch = audit_result["branch"]

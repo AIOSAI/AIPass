@@ -3,7 +3,7 @@
 # Description: Unit tests for checker sub-functions in encapsulation, imports, introspection, modules
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -685,7 +685,7 @@ class TestCheckExecutionOrder:
             "        print_help()\n"
         )
         tree = ast.parse(content)
-        result = check_execution_order(tree, content, "test.py")
+        result = check_execution_order(tree, "test.py")
         assert result is not None
         assert result["passed"] is True
 
@@ -699,7 +699,7 @@ class TestCheckExecutionOrder:
             "        print_introspection()\n"
         )
         tree = ast.parse(content)
-        result = check_execution_order(tree, content, "test.py")
+        result = check_execution_order(tree, "test.py")
         assert result is not None
         assert result["passed"] is False
 
@@ -707,7 +707,7 @@ class TestCheckExecutionOrder:
         """File without main() or __name__ block is skipped."""
         content = "def compute():\n    return 42\n"
         tree = ast.parse(content)
-        result = check_execution_order(tree, content, "test.py")
+        result = check_execution_order(tree, "test.py")
         assert result is not None
         assert result["passed"] is True
         assert "skipped" in result["message"].lower()
@@ -1114,7 +1114,7 @@ class TestCheckNoDirectFileOps:
         """Module without direct file operations passes."""
         content = "def do_work():\n    return handler.load_data()\n"
         lines = _lines(content)
-        result = check_no_direct_file_ops(content, lines)
+        result = check_no_direct_file_ops(lines)
         assert result is not None
         assert result["passed"] is True
 
@@ -1122,7 +1122,7 @@ class TestCheckNoDirectFileOps:
         """Module with bare open() call fails."""
         content = 'def do_work():\n    f = open("data.json")\n'
         lines = _lines(content)
-        result = check_no_direct_file_ops(content, lines)
+        result = check_no_direct_file_ops(lines)
         assert result is not None
         assert result["passed"] is False
         assert "open" in result["message"]
@@ -1131,7 +1131,7 @@ class TestCheckNoDirectFileOps:
         """Module with json.dump() call fails."""
         content = "def save():\n    json.dump(data, fp)\n"
         lines = _lines(content)
-        result = check_no_direct_file_ops(content, lines)
+        result = check_no_direct_file_ops(lines)
         assert result is not None
         assert result["passed"] is False
 
@@ -1139,7 +1139,7 @@ class TestCheckNoDirectFileOps:
         """Import lines containing 'open' are not flagged."""
         content = "from pathlib import Path\nimport os\n"
         lines = _lines(content)
-        result = check_no_direct_file_ops(content, lines)
+        result = check_no_direct_file_ops(lines)
         assert result is not None
         assert result["passed"] is True
 
@@ -2216,8 +2216,20 @@ class TestErrorHandlingSharesTheDiagnosticGuardClause:
         assert self._passed(tmp_path, source) is True
 
     def test_a_pass_over_real_work_is_still_a_silent_failure(self, tmp_path):
+        """error_handling's own finding names the file and the handler's line.
+
+        It was the same body as silent_catch's
+        test_a_pass_guarding_real_work_keeps_its_finding; the property this
+        checker adds is where it points (seedgo, fleet green leg 8).
+        """
         source = "def f(path):\n    try:\n        path.unlink()\n    except OSError:\n        pass\n"
-        assert self._passed(tmp_path, source) is False
+        target = tmp_path / "probe.py"
+        target.write_text(source, encoding="utf-8")
+        check = error_handling_check.check_module(str(target))["checks"][0]
+        assert check["passed"] is False
+        assert check["message"] == (
+            f"Silent failure detected (except: pass) in {target.name} at line 4 - errors should log/return"
+        )
 
 
 class TestTheBootstrapChainSeesRelativeImports:
@@ -2235,6 +2247,9 @@ class TestTheBootstrapChainSeesRelativeImports:
     """
 
     def _resolve(self, module, level, package):
+        # HELD (seedgo, fleet green leg 8): the private resolver is the unit, pure
+        # name arithmetic; check_module reaches it only through a whole src/aipass
+        # tree, which the end-to-end test below already walks.
         return json_structure_check._resolve_relative(module, level, package)
 
     def test_a_sibling_import_resolves(self):
@@ -2605,14 +2620,24 @@ class TestTheEmptyAnswerIsAConstantWhateverItsType:
     @pytest.mark.parametrize("body", ["return [1, 2]", "return {'a': 1}", "return {'x'}"])
     def test_a_non_empty_literal_keeps_its_finding(self, tmp_path, body):
         """The boundary, and the reason the clause is not just "any literal": a
-        handler that invents content is not reporting an absence."""
+        handler that invents content is not reporting an absence. The same
+        container emptied passes, so the content alone decides (seedgo, fleet
+        green leg 8)."""
+        emptied = {"return [1, 2]": "return []", "return {'a': 1}": "return {}", "return {'x'}": "return set()"}
         assert self._judge(tmp_path, body) is True, body
+        assert self._judge(tmp_path, emptied[body]) is False, body
 
     @pytest.mark.parametrize("body", ["return list(c)", "return dict(a=1)", "return set(c)"])
     def test_a_builtin_called_with_arguments_keeps_its_finding(self, tmp_path, body):
         """Negative control for the call form. ``set()`` is the empty set;
-        ``set(c)`` is a computed answer wearing the same name."""
+        ``set(c)`` is a computed answer wearing the same name.
+
+        The same builtin with its arguments taken away passes, so the arguments
+        alone decide (seedgo, fleet green leg 8: it was the same body as
+        test_a_non_empty_literal_keeps_its_finding).
+        """
         assert self._judge(tmp_path, body) is True, body
+        assert self._judge(tmp_path, body.split("(")[0] + "()") is False, body
 
     def test_a_computed_return_still_keeps_its_finding(self, tmp_path):
         assert self._judge(tmp_path, "return compute(c)") is True
@@ -2622,8 +2647,13 @@ class TestTheEmptyAnswerIsAConstantWhateverItsType:
         """Mutation control (M4, survived the first run). Dropping the builtin
         name check exempted every no-argument call — a computed fallback that
         happens to take no arguments is still computed, and ``Path()`` is not an
-        absence. The clause is the NAME and the emptiness together."""
+        absence. The clause is the NAME and the emptiness together.
+
+        The control beside it: a zero-argument builtin container passes, so the
+        name decides (seedgo, fleet green leg 8: it was the same body as
+        test_a_non_empty_literal_keeps_its_finding)."""
         assert self._judge(tmp_path, body) is True, body
+        assert self._judge(tmp_path, "return list()") is False
 
     def test_a_broad_except_gains_nothing_from_this(self, tmp_path):
         """The specific-exception clause is what makes the returned value

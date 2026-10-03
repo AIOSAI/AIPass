@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_check.py
 # Description: README Standards Checker Handler
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -153,7 +153,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks.append(sections_check)
 
     # Check 3: Last Updated freshness
-    freshness_check = check_last_updated_freshness(lines, branch_root, module_path, bypass_rules)
+    freshness_check = check_last_updated_freshness(lines, module_path, bypass_rules)
     checks.append(freshness_check)
 
     # Check 4: Directory tree accuracy
@@ -233,11 +233,12 @@ def check_required_sections(lines: List[str], file_path: str, bypass_rules: list
     return {"name": "Required sections", "passed": False, "message": f"Missing sections: {', '.join(missing)}"}
 
 
-def check_last_updated_freshness(
-    lines: List[str], branch_root: Path, file_path: str, bypass_rules: list | None = None
-) -> Dict:
+def check_last_updated_freshness(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
     """
     Check that the README declares a well-formed "Last Updated" date.
+
+    It took branch_root like its sibling checks and never read it: the date is
+    judged from the README's lines alone. Dropped (seedgo, fleet green leg 8).
 
     Local-file only: verifies the field is present and parseable. Does NOT
     compare against code history — recency is not a property of the files on

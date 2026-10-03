@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: architecture_check.py
 # Description: Architecture Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-08-28
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -122,7 +122,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     # Check 1: 3-Layer Pattern - File location
     if not is_init:
-        layer_check = check_layer_location(module_path, is_entry_point, is_module, is_handler)
+        layer_check = check_layer_location(is_entry_point, is_module, is_handler)
         checks.append(layer_check)
 
     # Check 2: File size
@@ -164,9 +164,11 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "ARCHITECTURE"}
 
 
-def check_layer_location(module_path: str, is_entry_point: bool, is_module: bool, is_handler: bool) -> Dict:
+def check_layer_location(is_entry_point: bool, is_module: bool, is_handler: bool) -> Dict:
     """
-    Check if file is in correct architectural layer
+    Check if file is in correct architectural layer. The caller decides the
+    layer from the path; the `module_path` this also took was never read and
+    was dropped (seedgo, fleet green leg 8).
 
     3-Layer Pattern:
     - apps/branch.py (entry point)

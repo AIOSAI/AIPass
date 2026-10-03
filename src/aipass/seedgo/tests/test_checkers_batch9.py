@@ -3,7 +3,7 @@
 # Description: Unit tests for readme_check and trigger_check
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/readme_check.py and apps/handlers/aipass_standards/trigger_check.py."""
@@ -142,7 +142,7 @@ def test_last_updated_freshness_date_present(tmp_path):
     branch_root.mkdir()
     (branch_root / "apps").mkdir()
 
-    result = check_last_updated_freshness(lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
+    result = check_last_updated_freshness(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
     assert "present" in result["message"]
 
@@ -158,7 +158,7 @@ def test_last_updated_freshness_bold_format(tmp_path):
     branch_root.mkdir()
     (branch_root / "apps").mkdir()
 
-    result = check_last_updated_freshness(lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
+    result = check_last_updated_freshness(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
     assert "2026-05-18" in result["message"]
 
@@ -174,7 +174,7 @@ def test_last_updated_freshness_malformed_date(tmp_path):
     branch_root.mkdir()
     (branch_root / "apps").mkdir()
 
-    result = check_last_updated_freshness(lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
+    result = check_last_updated_freshness(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is False
     assert "Malformed" in result["message"]
 
@@ -187,9 +187,7 @@ def test_last_updated_freshness_missing(tmp_path):
         "",
     ]
 
-    result = check_last_updated_freshness(
-        lines, tmp_path / "missing", (tmp_path / "fake" / "apps" / "entry.py").as_posix()
-    )
+    result = check_last_updated_freshness(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is False
     assert "Last Updated" in result["message"]
 
@@ -197,13 +195,9 @@ def test_last_updated_freshness_missing(tmp_path):
 def test_last_updated_freshness_bypassed(tmp_path):
     """Bypassed freshness check passes immediately."""
     lines: List[str] = ["# Branch", "No date.", ""]
-    branch_root = tmp_path / "mybranch"
-    branch_root.mkdir()
 
     bypass = [{"file": (tmp_path / "fake" / "apps" / "entry.py").as_posix(), "standard": "readme"}]
-    result = check_last_updated_freshness(
-        lines, branch_root, (tmp_path / "fake" / "apps" / "entry.py").as_posix(), bypass
-    )
+    result = check_last_updated_freshness(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix(), bypass)
     assert result["passed"] is True
 
 

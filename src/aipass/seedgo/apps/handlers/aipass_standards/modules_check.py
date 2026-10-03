@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -111,7 +111,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks.append(size_check)
 
     # Check 3: No direct file operations (should use handlers)
-    file_ops_check = check_no_direct_file_ops(content, lines)
+    file_ops_check = check_no_direct_file_ops(lines)
     if file_ops_check:
         checks.append(file_ops_check)
 
@@ -246,11 +246,13 @@ def check_file_size(lines: List[str], module_path: str) -> Dict:
         }
 
 
-def check_no_direct_file_ops(content: str, lines: List[str]) -> Optional[Dict]:
+def check_no_direct_file_ops(lines: List[str]) -> Optional[Dict]:
     """
     Check that module doesn't do direct file operations
 
     Modules should use handlers (like json_handler) not open(), Path.write_text(), etc.
+    It reads the lines alone; the `content` it also took was never read and
+    was dropped (seedgo, fleet green leg 8).
     """
     file_operations = []
 

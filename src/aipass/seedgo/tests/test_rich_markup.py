@@ -3,7 +3,7 @@
 # Description: Unit tests for rich_markup_check and rich_markup_content
 # Version: 1.1.1
 # Created: 2026-08-11
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/rich_markup_check.py, asserted on rendered output."""
@@ -133,19 +133,6 @@ SURVIVING_CASES: List[Tuple[str, str]] = [
 ]
 
 
-@pytest.mark.parametrize("text,expected", SURVIVING_CASES)
-def test_surviving_family_reaches_the_terminal_intact(text, expected):
-    """The premise: nothing is lost, so there is nothing to report."""
-    assert _render(text) == expected
-
-
-@pytest.mark.parametrize("text,expected", SURVIVING_CASES)
-def test_surviving_family_is_not_flagged(tmp_path, text, expected):
-    """No token was lost, so the checker must stay silent."""
-    result = check_module(_write_module(tmp_path, [text]))
-    assert result["score"] == 100, f"{text!r} must not be flagged: {result}"
-
-
 LEGITIMATE_MARKUP: List[Tuple[str, str]] = [
     ("a [dim]x[/dim] b", "a x b"),
     ("a [bold cyan]x[/] b", "a x b"),
@@ -155,15 +142,25 @@ LEGITIMATE_MARKUP: List[Tuple[str, str]] = [
 ]
 
 
-@pytest.mark.parametrize("text,expected", LEGITIMATE_MARKUP)
-def test_intentional_markup_keeps_its_content(text, expected):
-    """The premise: a real style tag consumes itself, never the content."""
+@pytest.mark.parametrize("text,expected", SURVIVING_CASES + LEGITIMATE_MARKUP)
+def test_surviving_family_reaches_the_terminal_intact(text, expected):
+    """The premise: nothing is lost, so there is nothing to report.
+
+    It holds the intentional markup too, whose claim was a test of the same
+    body (compass 443; seedgo, fleet green leg 8): a real style tag consumes
+    itself, never the content.
+    """
     assert _render(text) == expected
 
 
-@pytest.mark.parametrize("text,expected", LEGITIMATE_MARKUP)
-def test_intentional_markup_is_not_flagged(tmp_path, text, expected):
-    """Deliberate styling is the feature, not the defect."""
+@pytest.mark.parametrize("text,expected", SURVIVING_CASES + LEGITIMATE_MARKUP)
+def test_surviving_family_is_not_flagged(tmp_path, text, expected):
+    """No token was lost, so the checker must stay silent.
+
+    It holds the intentional markup too, whose claim was a test of the same
+    body (compass 443; seedgo, fleet green leg 8): deliberate styling is the
+    feature, not the defect.
+    """
     result = check_module(_write_module(tmp_path, [text]))
     assert result["score"] == 100, f"{text!r} must not be flagged: {result}"
 

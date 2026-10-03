@@ -3,7 +3,7 @@
 # Description: Unit tests for hardcoded_path_check, startup_budget_check, the two ratchets, router_assert, oversize_test_file
 # Version: 1.4.3
 # Created: 2026-06-18
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/hardcoded_path_check.py and batch-10 checkers."""
@@ -196,10 +196,16 @@ class TestCheckModule:
 class TestInDocstring:
     """Tests for docstring detection."""
 
-    def test_single_line_docstring(self):
-        lines = ['"""This is a docstring."""', 'x = "/home/pat/y"']
-        assert hardcoded_path_check._in_docstring(lines, 0) is False
-        assert hardcoded_path_check._in_docstring(lines, 1) is False
+    def test_single_line_docstring(self, tmp_path):
+        """A one-line docstring opens no block: neither it nor the line after is inside.
+
+        Reached through check_module, not _in_docstring (seedgo, fleet green
+        leg 8): a path on either line is still reported.
+        """
+        lines = ['"""Docstring at /home/pat/a."""', 'x = "/home/pat/y"']
+        said = _scanned(tmp_path, "\n".join(lines) + "\n")
+        assert said.startswith("2 hardcoded path(s): L1: POSIX home path ("), said
+        assert "L2: POSIX home path (" in said, said
 
     def test_multiline_docstring(self, tmp_path):
         lines = ['"""', "/home/patrick/inside", '"""', "/home/patrick/outside"]
@@ -1068,10 +1074,23 @@ class TestRatchetScope:
             assert gated.rel in measured, f"{gated.rel} is gated but the advisory row never measures it"
         assert {gated.rel for gated in ratchet.GATED_FILES} == {sb.README_REL, sb.PROMPT_REL}
 
-    def test_the_states_match_the_advisory_checkers_vocabulary(self):
-        """One table vocabulary across both rules, or two readers of one report."""
-        assert (ratchet.STATE_UNDER, ratchet.STATE_OVER) == (sb._STATE_UNDER, sb._STATE_OVER)
-        assert (ratchet.STATE_ABSENT, ratchet.STATE_ERROR) == (sb._STATE_ABSENT, sb._STATE_ERROR)
+    def test_the_states_match_the_advisory_checkers_vocabulary(self, monkeypatch, tmp_path):
+        """One table vocabulary across both rules, or two readers of one report.
+
+        Read off the cells check_branch writes, not its private constants
+        (seedgo, fleet green leg 8): one branch carries all four states.
+        """
+        manifest = tmp_path / "pack.json"
+        manifest.write_text(json.dumps({"caps": {"README.md": {"max_chars": 5}}}), encoding="utf-8")
+        config = _memory_config(tmp_path, **{"local.json": {}})
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: manifest)
+        monkeypatch.setattr(sb, "memory_config_path", lambda: config)
+        root = _branch(tmp_path / "b", **{"README.md": "0123456789", ".aipass/aipass_local_prompt.md": "y"})
+
+        cells = _cells(sb.check_branch(str(root)))
+
+        assert (cells["PROMPT"]["state"], cells["README"]["state"]) == (ratchet.STATE_UNDER, ratchet.STATE_OVER)
+        assert (cells["DASH"]["state"], cells["LOCAL"]["state"]) == (ratchet.STATE_ABSENT, ratchet.STATE_ERROR)
         assert ratchet.FAILING_STATES == (ratchet.STATE_OVER, ratchet.STATE_ERROR), "absent never fails the gate"
 
     def test_the_owners_history_and_open_calls_are_never_opened(self, tmp_path):

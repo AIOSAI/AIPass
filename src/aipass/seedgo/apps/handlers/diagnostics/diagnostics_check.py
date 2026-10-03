@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: diagnostics_check.py
 # Description: Diagnostics Orchestrator
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -156,13 +156,13 @@ def check_file(file_path: str) -> Dict:
         }
 
 
-def check_directory(directory: str, pattern: str = "**/*.py") -> Dict:
+def check_directory(directory: str) -> Dict:
     """
     Run pyright on all Python files in a directory
 
     Args:
-        directory: Directory to scan
-        pattern: Glob pattern for files (default: all .py files)
+        directory: Directory to scan. Its glob `pattern` parameter was never
+            read and no caller passed it; dropped (seedgo, fleet green leg 8).
 
     Returns:
         dict: {
