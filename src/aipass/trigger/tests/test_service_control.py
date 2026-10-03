@@ -3,13 +3,13 @@
 # Description: Tests for the systemd unit lifecycle of the log watcher
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/service_control.py, the systemd control surface extracted from medic.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — medic's start/stop decisions on top of _systemctl, in test_medic.py
+# seedgo: no-test-needed(covered_elsewhere) — medic's start/stop decisions on top of systemctl, in test_medic.py
 # seedgo: no-test-needed(external) — what systemctl itself does with SERVICE_NAME; AIPass tests only its own files
 
 import subprocess
@@ -74,7 +74,7 @@ def recorded_log(monkeypatch: pytest.MonkeyPatch) -> RecordingLogger:
 
 
 class TestSystemctl:
-    """_systemctl reports whether the command succeeded, and never raises."""
+    """systemctl reports whether the command succeeded, and never raises."""
 
     def test_zero_exit_is_success(self, monkeypatch: pytest.MonkeyPatch, systemd_present) -> None:
         calls: list[list[str]] = []
@@ -85,7 +85,7 @@ class TestSystemctl:
 
         monkeypatch.setattr(service_control.subprocess, "run", fake_run)
 
-        assert service_control._systemctl("start") is True
+        assert service_control.systemctl("start") is True
         assert calls == [["systemctl", "--user", "start", service_control.SERVICE_NAME]]
 
     def test_non_zero_exit_is_failure(self, monkeypatch: pytest.MonkeyPatch, systemd_present) -> None:
@@ -96,7 +96,7 @@ class TestSystemctl:
             lambda cmd, **kw: subprocess.CompletedProcess(cmd, 3, "", "unit not found"),
         )
 
-        assert service_control._systemctl("start") is False
+        assert service_control.systemctl("start") is False
 
     def test_a_hung_systemctl_is_unanswered_not_a_failure(
         self, monkeypatch: pytest.MonkeyPatch, systemd_present
@@ -113,17 +113,17 @@ class TestSystemctl:
 
         monkeypatch.setattr(service_control.subprocess, "run", boom)
 
-        assert service_control._systemctl("is-active") is None
+        assert service_control.systemctl("is-active") is None
 
 
 class TestIsServiceActive:
-    """_is_service_active asks systemctl exactly one question."""
+    """is_service_active asks systemctl exactly one question."""
 
     def test_delegates_to_is_active(self, monkeypatch: pytest.MonkeyPatch) -> None:
         asked: list[str] = []
-        monkeypatch.setattr(service_control, "_systemctl", lambda action: asked.append(action) or True)
+        monkeypatch.setattr(service_control, "systemctl", lambda action: asked.append(action) or True)
 
-        assert service_control._is_service_active() is True
+        assert service_control.is_service_active() is True
         assert asked == ["is-active"]
 
 
@@ -139,7 +139,7 @@ class TestGetAipassHome:
 
         monkeypatch.setattr(service_control.subprocess, "run", must_not_run)
 
-        assert service_control._get_aipass_home() == home
+        assert service_control.get_aipass_home() == home
 
     def test_git_toplevel_is_used_when_no_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         toplevel = str(Path(tempfile.gettempdir()) / "repo_from_git")
@@ -150,7 +150,7 @@ class TestGetAipassHome:
             lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, toplevel + "\n", ""),
         )
 
-        assert service_control._get_aipass_home() == Path(toplevel)
+        assert service_control.get_aipass_home() == Path(toplevel)
 
     def test_falls_back_to_the_marker_walk_when_git_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Never Path.cwd(): the round-4 ruling, still holding after the move."""
@@ -163,7 +163,7 @@ class TestGetAipassHome:
         sentinel = Path(tempfile.gettempdir()) / "walked_root"
         monkeypatch.setattr(service_control, "find_repo_root", lambda **kw: sentinel)
 
-        assert service_control._get_aipass_home() == sentinel
+        assert service_control.get_aipass_home() == sentinel
 
 
 class TestEnsureServiceInstalled:
@@ -181,7 +181,7 @@ class TestEnsureServiceInstalled:
 
         monkeypatch.setattr(service_control.subprocess, "run", must_not_run)
 
-        assert service_control._ensure_service_installed() is True
+        assert service_control.ensure_service_installed() is True
 
     def test_a_missing_template_refuses_rather_than_writing_a_broken_unit(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path, systemd_present
@@ -189,7 +189,7 @@ class TestEnsureServiceInstalled:
         monkeypatch.setattr(service_control, "_SERVICE_UNIT_PATH", tmp_path / "absent.service")
         monkeypatch.setattr(service_control, "_TEMPLATE_PATH", tmp_path / "absent.template")
 
-        assert service_control._ensure_service_installed() is False
+        assert service_control.ensure_service_installed() is False
 
 
 class TestNoSystemdHost:
@@ -209,7 +209,7 @@ class TestNoSystemdHost:
 
         monkeypatch.setattr(service_control.subprocess, "run", must_not_run)
 
-        assert service_control._systemctl("start") is None
+        assert service_control.systemctl("start") is None
         assert any("no systemctl" in line and "systemd" in line for line in recorded_log.warnings), (
             f"the refusal must name the missing host fact, got {recorded_log.warnings}"
         )
@@ -221,7 +221,7 @@ class TestNoSystemdHost:
         ran: list[tuple] = []
         monkeypatch.setattr(service_control.subprocess, "run", lambda *a, **kw: ran.append(a))
 
-        service_control._systemctl("is-active")
+        service_control.systemctl("is-active")
 
         assert any("is-active" in line for line in recorded_log.warnings), recorded_log.warnings
         assert ran == [], "the refusal must come before exec"
@@ -241,7 +241,7 @@ class TestNoSystemdHost:
         monkeypatch.setattr(service_control, "_SERVICE_UNIT_PATH", unit)
         monkeypatch.setattr(service_control, "_TEMPLATE_PATH", template)
 
-        assert service_control._ensure_service_installed() is False
+        assert service_control.ensure_service_installed() is False
         assert not unit.exists(), "a unit file was installed on a host with no systemd"
 
     def test_a_unit_file_from_another_host_is_not_a_ready_service(
@@ -252,7 +252,7 @@ class TestNoSystemdHost:
         unit.write_text("[Unit]\n", encoding="utf-8")
         monkeypatch.setattr(service_control, "_SERVICE_UNIT_PATH", unit)
 
-        assert service_control._ensure_service_installed() is False
+        assert service_control.ensure_service_installed() is False
 
     def test_a_binary_that_vanishes_between_probe_and_exec_is_still_a_refusal(
         self, monkeypatch: pytest.MonkeyPatch, systemd_present, recorded_log: RecordingLogger
@@ -264,7 +264,7 @@ class TestNoSystemdHost:
 
         monkeypatch.setattr(service_control.subprocess, "run", gone)
 
-        assert service_control._systemctl("stop") is None
+        assert service_control.systemctl("stop") is None
         assert any("no systemctl" in line for line in recorded_log.warnings), recorded_log.warnings
 
 
@@ -292,7 +292,7 @@ class TestInstallArgv:
 
         monkeypatch.setattr(service_control.subprocess, "run", fake_run)
 
-        assert service_control._ensure_service_installed() is True
+        assert service_control.ensure_service_installed() is True
         assert calls == [
             ["systemctl", "--user", "daemon-reload"],
             ["systemctl", "--user", "enable", service_control.SERVICE_NAME],
@@ -313,7 +313,7 @@ class TestInstallArgv:
             service_control.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", "")
         )
 
-        assert service_control._ensure_service_installed() is True
+        assert service_control.ensure_service_installed() is True
         assert unit.read_text(encoding="utf-8") == f"ExecStart={tmp_path}/run\n"
         assert recorded_ops == [
             (

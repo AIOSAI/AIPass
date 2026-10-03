@@ -3,7 +3,7 @@
 # Description: Unit tests for medic module handle_command
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for the medic toggle module (apps/modules/medic.py)."""
@@ -101,7 +101,7 @@ def _mock_infrastructure(monkeypatch):
     # -- the installer: on reaches it on an answered "not running", and the real
     # one writes a systemd unit; every test here gets a recorder in its place.
     installer = MagicMock(return_value=True)
-    monkeypatch.setattr(medic, "_ensure_service_installed", installer)
+    monkeypatch.setattr(medic, "ensure_service_installed", installer)
     _RECORDERS["installer"] = installer
 
     # The CLI console and rich are real (2026-09-27): output is read with
@@ -142,8 +142,8 @@ def test_handle_command_on_enables_medic(capsys):
     """handle_command('on', []) calls set_enabled(True), prints Panel, returns True."""
     medic = _import_medic()
 
-    with patch.object(medic, "_systemctl", return_value=True):
-        with patch.object(medic, "_is_service_active", return_value=True):
+    with patch.object(medic, "systemctl", return_value=True):
+        with patch.object(medic, "is_service_active", return_value=True):
             result = medic.handle_command("on", [])
 
     assert result is True
@@ -157,8 +157,8 @@ def test_handle_command_on_starts_service_when_inactive():
     """handle_command('on', []) installs, then starts the service when it is not running."""
     medic = _import_medic()
 
-    with patch.object(medic, "_systemctl", return_value=True) as mock_ctl:
-        with patch.object(medic, "_is_service_active", side_effect=[False, True]):
+    with patch.object(medic, "systemctl", return_value=True) as mock_ctl:
+        with patch.object(medic, "is_service_active", side_effect=[False, True]):
             medic.handle_command("on", [])
 
     _RECORDERS["installer"].assert_called_once_with()
@@ -169,8 +169,8 @@ def test_handle_command_on_logs_operation():
     """handle_command('on', []) logs the medic_toggled operation."""
     medic = _import_medic()
 
-    with patch.object(medic, "_systemctl", return_value=True):
-        with patch.object(medic, "_is_service_active", return_value=True):
+    with patch.object(medic, "systemctl", return_value=True):
+        with patch.object(medic, "is_service_active", return_value=True):
             medic.handle_command("on", [])
 
     jh = _get_json_handler()
@@ -186,8 +186,8 @@ def test_handle_command_on_failure_prints_error(capsys):
     state = _get_medic_state()
     state.set_enabled.return_value = False
 
-    with patch.object(medic, "_systemctl", return_value=True):
-        with patch.object(medic, "_is_service_active", return_value=False):
+    with patch.object(medic, "systemctl", return_value=True):
+        with patch.object(medic, "is_service_active", return_value=False):
             result = medic.handle_command("on", [])
 
     assert result is True
@@ -205,8 +205,8 @@ def test_handle_command_off_disables_medic(capsys):
     """handle_command('off', []) calls set_enabled with 24h TTL, prints Panel, returns True."""
     medic = _import_medic()
 
-    with patch.object(medic, "_systemctl", return_value=True):
-        with patch.object(medic, "_is_service_active", return_value=False):
+    with patch.object(medic, "systemctl", return_value=True):
+        with patch.object(medic, "is_service_active", return_value=False):
             result = medic.handle_command("off", [])
 
     assert result is True
@@ -219,8 +219,8 @@ def test_handle_command_off_forever_stops_service():
     """handle_command('off', ['--forever']) stops the service and disables permanently."""
     medic = _import_medic()
 
-    with patch.object(medic, "_systemctl", return_value=True) as mock_ctl:
-        with patch.object(medic, "_is_service_active", return_value=True):
+    with patch.object(medic, "systemctl", return_value=True) as mock_ctl:
+        with patch.object(medic, "is_service_active", return_value=True):
             result = medic.handle_command("off", ["--forever"])
 
     assert result is True
@@ -233,8 +233,8 @@ def test_handle_command_off_ttl_keeps_watcher():
     """handle_command('off', []) with default TTL does NOT stop the log watcher."""
     medic = _import_medic()
 
-    with patch.object(medic, "_systemctl", return_value=True) as mock_ctl:
-        with patch.object(medic, "_is_service_active", return_value=True):
+    with patch.object(medic, "systemctl", return_value=True) as mock_ctl:
+        with patch.object(medic, "is_service_active", return_value=True):
             medic.handle_command("off", [])
 
     mock_ctl.assert_not_called()
@@ -249,8 +249,8 @@ def test_handle_command_off_failure_prints_error(capsys):
     state = _get_medic_state()
     state.set_enabled.return_value = False
 
-    with patch.object(medic, "_systemctl", return_value=True):
-        with patch.object(medic, "_is_service_active", return_value=False):
+    with patch.object(medic, "systemctl", return_value=True):
+        with patch.object(medic, "is_service_active", return_value=False):
             result = medic.handle_command("off", [])
 
     assert result is True
@@ -270,7 +270,7 @@ def test_handle_command_status_returns_current_state():
     """handle_command('status', []) displays state info and returns True."""
     medic = _import_medic()
 
-    with patch.object(medic, "_is_service_active", return_value=True):
+    with patch.object(medic, "is_service_active", return_value=True):
         result = medic.handle_command("status", [])
 
     assert result is True
@@ -285,7 +285,7 @@ def test_handle_command_status_shows_enabled(capsys):
     """When medic is enabled, status output includes the ENABLED state line."""
     medic = _import_medic()
 
-    with patch.object(medic, "_is_service_active", return_value=True):
+    with patch.object(medic, "is_service_active", return_value=True):
         medic.handle_command("status", [])
 
     printed = _printed(capsys)
@@ -299,7 +299,7 @@ def test_handle_command_status_shows_disabled(capsys):
     state = _get_medic_state()
     state.is_enabled.return_value = False
 
-    with patch.object(medic, "_is_service_active", return_value=False):
+    with patch.object(medic, "is_service_active", return_value=False):
         medic.handle_command("status", [])
 
     printed = _printed(capsys)
@@ -316,7 +316,7 @@ def test_handle_command_status_shows_muted_branches(capsys):
         {"name": "api", "expires_at": None},
     ]
 
-    with patch.object(medic, "_is_service_active", return_value=True):
+    with patch.object(medic, "is_service_active", return_value=True):
         medic.handle_command("status", [])
 
     printed = _printed(capsys)
@@ -331,7 +331,7 @@ def test_handle_command_status_suppression_hint_when_disabled(capsys):
     state = _get_medic_state()
     state.is_enabled.return_value = False
 
-    with patch.object(medic, "_is_service_active", return_value=False):
+    with patch.object(medic, "is_service_active", return_value=False):
         medic.handle_command("status", [])
 
     printed = _printed(capsys)
@@ -545,7 +545,7 @@ def test_handle_command_medic_routes_to_subcommand():
     medic = _import_medic()
     state = _get_medic_state()
 
-    with patch.object(medic, "_is_service_active", return_value=True):
+    with patch.object(medic, "is_service_active", return_value=True):
         result = medic.handle_command("medic", ["status"])
 
     assert result is True
@@ -607,8 +607,8 @@ def test_handle_command_on_extra_args_ignored():
     """handle_command('on', ['extra', 'args']) -- extra args are ignored, medic enables."""
     medic = _import_medic()
 
-    with patch.object(medic, "_systemctl", return_value=True):
-        with patch.object(medic, "_is_service_active", return_value=True):
+    with patch.object(medic, "systemctl", return_value=True):
+        with patch.object(medic, "is_service_active", return_value=True):
             result = medic.handle_command("on", ["extra", "args"])
 
     assert result is True
@@ -656,7 +656,7 @@ def test_output_capture_status_contains_all_fields(capsys):
     state.get_suppression_stats.return_value = {"suppressed_count": 0, "last_suppressed": "never"}
     state.get_rate_limit_stats.return_value = {"rate_limited_count": 0, "last_rate_limited": "never"}
 
-    with patch.object(medic, "_is_service_active", return_value=True):
+    with patch.object(medic, "is_service_active", return_value=True):
         medic.handle_command("status", [])
 
     printed = _printed(capsys)
@@ -787,7 +787,7 @@ def test_status_on_a_host_without_systemd_says_so_instead_of_offering_medic_on(c
     state.is_enabled.return_value = True
 
     # None is what is-active answers on such a host since 2026-09-28: the probe refuses.
-    with patch.object(medic, "_is_service_active", return_value=None):
+    with patch.object(medic, "is_service_active", return_value=None):
         with patch.object(medic, "systemd_available", return_value=False):
             medic.handle_command("status", [])
 
@@ -806,7 +806,7 @@ def test_status_names_a_watcher_systemctl_never_answered_for(capsys):
     state = _get_medic_state()
     state.is_enabled.return_value = True
 
-    with patch.object(medic, "_is_service_active", return_value=None):
+    with patch.object(medic, "is_service_active", return_value=None):
         with patch.object(medic, "systemd_available", return_value=True):
             medic.handle_command("status", [])
 
@@ -819,8 +819,8 @@ def test_medic_on_reports_unavailable_rather_than_failed_to_start_without_system
     """ "failed to start" reads as a broken unit; the truth is a hostless door."""
     medic = _import_medic()
 
-    with patch.object(medic, "_systemctl", return_value=None):
-        with patch.object(medic, "_is_service_active", return_value=None):
+    with patch.object(medic, "systemctl", return_value=None):
+        with patch.object(medic, "is_service_active", return_value=None):
             with patch.object(medic, "systemd_available", return_value=False):
                 medic.handle_command("on", [])
 

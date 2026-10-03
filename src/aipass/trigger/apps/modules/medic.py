@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-02-12
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -35,9 +35,9 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 from aipass.trigger.apps.handlers.events.startup import run_startup_catchup
 from aipass.trigger.apps.handlers.service_control import (
-    _ensure_service_installed,
-    _is_service_active,
-    _systemctl,
+    ensure_service_installed,
+    is_service_active,
+    systemctl,
     systemd_available,
 )
 from aipass.trigger.apps.handlers.json import json_handler
@@ -374,7 +374,7 @@ def _fmt_mute_list(detail: list) -> str:
 def _handle_status(console) -> None:
     """Handle 'medic status' — display current medic state."""
     enabled = is_enabled()
-    watcher_active = _is_service_active()
+    watcher_active = is_service_active()
 
     suppression = get_suppression_stats()
     rate_limits = get_rate_limit_stats()
@@ -429,17 +429,17 @@ def _handle_on(console) -> None:
         return
 
     logger.info("[MEDIC] Medic ENABLED - error dispatch active")
-    active = _is_service_active()
+    active = is_service_active()
     # Only an answered "not running" is started. None means systemctl never
     # answered, and a start sent after a hung is-active is a guess.
     if active is False:
-        _ensure_service_installed()
-        started = _systemctl("start")
+        ensure_service_installed()
+        started = systemctl("start")
         if started:
             logger.info("[MEDIC] Log watcher service started")
         else:
             logger.warning("[MEDIC] Could not start log watcher service")
-        active = _is_service_active()
+        active = is_service_active()
 
     if active:
         watcher_status = "running"
@@ -471,12 +471,12 @@ def _stop_watcher() -> str:
     Returns:
         The watcher sentence for the off panel
     """
-    active = _is_service_active()
+    active = is_service_active()
     if active is False:
         return "Log watcher was not running."
     if active is None and not systemd_available():
         return "Log watcher: unavailable — no systemd on this host."
-    stopped = _systemctl("stop")
+    stopped = systemctl("stop")
     if stopped:
         logger.info("[MEDIC] Log watcher service stopped")
         return "Log watcher stopped."

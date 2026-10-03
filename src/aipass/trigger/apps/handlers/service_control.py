@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: service_control.py
 # Description: systemd unit lifecycle for the trigger log watcher
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-02
 # =============================================
 
 """The systemd user unit behind the log watcher, and nothing else.
@@ -15,9 +15,12 @@ management of a systemd unit. This is the second one. It is a handler because
 installing a unit file and shelling out to systemctl is an implementation
 detail; which branch is muted is not.
 
-Every name here is imported back into medic under its original spelling, so
-``patch.object(medic, "_systemctl", ...)`` in the suite still binds the symbol
+medic imports systemctl, is_service_active and ensure_service_installed by
+name, so ``patch.object(medic, "systemctl", ...)`` in the suite binds the symbol
 medic's own code resolves. The move is a move: no behaviour changed with it.
+The four were private until fleet green leg 8 (2026-10-02, trigger's
+proposal, devpulse's approval): medic, another module, is their real caller.
+The rename changed no answer, argument or side effect.
 
 SYSTEMD IS A HOST FACT, NOT A GIVEN (2026-09-12, seedgo host_portability).
 ``systemctl`` exists only where systemd runs: macOS has none, Windows has none,
@@ -60,7 +63,7 @@ def systemd_available() -> bool:
     return shutil.which("systemctl") is not None
 
 
-def _get_aipass_home() -> Path:
+def get_aipass_home() -> Path:
     """Resolve AIPASS_HOME from env var or git repo root."""
     env = os.environ.get("AIPASS_HOME")
     if env:
@@ -79,7 +82,7 @@ def _get_aipass_home() -> Path:
     return find_repo_root(caller="medic")
 
 
-def _ensure_service_installed() -> bool:
+def ensure_service_installed() -> bool:
     """Install systemd unit from template if missing. Returns True if ready.
 
     The systemd probe comes before the ``exists`` short-circuit: a unit file
@@ -97,7 +100,7 @@ def _ensure_service_installed() -> bool:
         logger.warning("[MEDIC] Service template not found: %s", _TEMPLATE_PATH)
         return False
 
-    aipass_home = _get_aipass_home()
+    aipass_home = get_aipass_home()
     from aipass.trigger.apps.config import read_text_file, write_text_file
 
     template = read_text_file(_TEMPLATE_PATH)
@@ -156,7 +159,7 @@ def _run_systemctl(*args: str) -> Optional[bool]:
         return None
 
 
-def _systemctl(action: str) -> Optional[bool]:
+def systemctl(action: str) -> Optional[bool]:
     """Run a systemctl --user action against the log watcher unit.
 
     Args:
@@ -169,10 +172,10 @@ def _systemctl(action: str) -> Optional[bool]:
     return _run_systemctl(action, SERVICE_NAME)
 
 
-def _is_service_active() -> Optional[bool]:
+def is_service_active() -> Optional[bool]:
     """Check if the log watcher systemd service is running.
 
     Returns:
         True running, False not running, None when systemctl never answered
     """
-    return _systemctl("is-active")
+    return systemctl("is-active")
