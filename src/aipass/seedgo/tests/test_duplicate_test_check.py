@@ -3,7 +3,7 @@
 # Description: duplicate_test_check — crack class B, a test another test already covers
 # Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/duplicate_test_check.py."""
@@ -179,6 +179,40 @@ class TestConstantsAreKept:
     def test_a_different_identifier_is_a_different_claim(self):
         """Two tests calling two product functions are two tests."""
         source = "def test_a():\n    assert load_spec(p)\ndef test_b():\n    assert filter_paths(p)\n"
+        assert duplicate_test_check.scan(source) == []
+
+
+class TestTheDecoratorsArePartOfTheTest:
+    """A parametrized test is one test, and its decorators make it differ (seedgo, fleet green leg 9)."""
+
+    @pytest.mark.parametrize(
+        "first,second",
+        [
+            ("@pytest.mark.parametrize('c', [1, 2])", "@pytest.mark.parametrize('c', [3])"),
+            ("@patch('aipass.x.load', return_value=True)", "@patch('aipass.x.load', return_value=False)"),
+        ],
+    )
+    def test_one_body_under_different_cases_is_two_tests(self, first, second):
+        """flow's help_flag_safety:75 / close_plan:291 and devpulse's git_gate shape.
+
+        Red first: the scan compared bodies alone and convicted the second.
+        """
+        body = "    assert run(c) is True\n"
+        source = f"{first}\ndef test_a(c):\n{body}{second}\ndef test_b(c):\n{body}"
+        assert duplicate_test_check.scan(source) == []
+
+    def test_one_body_under_the_same_cases_is_still_a_clone(self):
+        """The control: the same decorator and the same body are still one test written twice."""
+        deco = "@pytest.mark.parametrize('c', [1, 2])\n"
+        body = "    assert run(c) is True\n"
+        assert _names(f"{deco}def test_a(c):\n{body}{deco}def test_b(c):\n{body}") == ["test_b"]
+
+    def test_a_decorated_body_is_not_subsumed_by_an_undecorated_one(self):
+        """A decorator is never a harmless extra: the cases it adds change the world."""
+        source = (
+            "def test_a():\n    assert run(1) is True\n"
+            "@pytest.mark.parametrize('c', [2])\ndef test_b(c):\n    assert run(1) is True\n    assert c\n"
+        )
         assert duplicate_test_check.scan(source) == []
 
 

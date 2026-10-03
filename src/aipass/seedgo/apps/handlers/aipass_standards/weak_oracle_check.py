@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: weak_oracle_check.py
 # Description: Weak Oracle Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -252,8 +252,48 @@ def _compare_verdict(test: ast.Compare, bare: Set[str], modules: Dict[str, str])
     return _STRONG, ""
 
 
-def _verdict(node: ast.AST, bare: Set[str], modules: Dict[str, str]) -> Tuple[str, str]:
-    """(strength, form) for one oracle: an assert statement or a mock assertion."""
+_CONTAINERS = (ast.List, ast.ListComp, ast.Set, ast.SetComp, ast.Dict, ast.DictComp)
+
+
+def _built(function_nodes: List[ast.AST]) -> Set[str]:
+    """Names the test bound only to a container it built itself, a display or a comprehension.
+
+    Such a name cannot be None, 0 or "", so ``assert not offenders`` is exactly
+    ``assert offenders == []``: one oracle, not a weak one (seedgo, fleet green
+    leg 9; skills, memory, prax and seedgo reported it). A name bound any other
+    way, or also bound by a loop, a ``with`` or a parameter, is not in the set.
+    """
+    built: Set[str] = set()
+    other: Set[str] = set()
+    plain: Set[int] = set()
+    for node in function_nodes:
+        target, value = _binding(node)
+        if isinstance(target, ast.Name):
+            plain.add(id(target))
+            (built if isinstance(value, _CONTAINERS) else other).add(target.id)
+    for node in function_nodes:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and id(node) not in plain:
+            other.add(node.id)
+        elif isinstance(node, ast.arg):
+            other.add(node.arg)
+    return built - other
+
+
+def _binding(node: ast.AST) -> Tuple[ast.AST | None, ast.AST | None]:
+    """(target, value) of a plain one-target assignment, or (None, None) for anything else."""
+    if isinstance(node, ast.Assign) and len(node.targets) == 1:
+        return node.targets[0], node.value
+    if isinstance(node, ast.AnnAssign):
+        return node.target, node.value
+    return None, None
+
+
+def _verdict(node: ast.AST, bare: Set[str], modules: Dict[str, str], built: Set[str] | None = None) -> Tuple[str, str]:
+    """(strength, form) for one oracle: an assert statement or a mock assertion.
+
+    ``built`` names the containers the test made itself (see ``_built``); a
+    bare truthiness test of one of them is the emptiness claim, not D2.
+    """
     if isinstance(node, ast.Call):
         blind = _tail_name(node.func) in _BLIND_CALLS and not node.args and not node.keywords
         return (_SCORED, D5) if blind else (_STRONG, "")
@@ -261,10 +301,10 @@ def _verdict(node: ast.AST, bare: Set[str], modules: Dict[str, str]) -> Tuple[st
     test = node.test if isinstance(node, ast.Assert) else node
     if isinstance(test, ast.Constant):
         return _SCORED, D1
-    if isinstance(test, ast.Name):
-        return _SCORED, D2
     if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not) and isinstance(test.operand, ast.Name):
-        return _SCORED, D2
+        test = test.operand
+    if isinstance(test, ast.Name):
+        return (_STRONG, "") if test.id in (built or set()) else (_SCORED, D2)
     if isinstance(test, ast.Call):
         # A CALL's truthiness is the claim: `assert is_ignored(p, spec)` and
         # `assert hasattr(generator, "update_readme_auto_sections")` both ask
@@ -356,7 +396,8 @@ def scan(source: str) -> Tuple[List[Tuple[int, str, str]], List[str]]:
         found, raises = _oracles(nodes)
         if not found or raises:
             continue
-        verdicts = [_verdict(node, bare, modules) for node in found]
+        built = _built(nodes)
+        verdicts = [_verdict(node, bare, modules, built) for node in found]
         if any(strength == _STRONG for strength, _form in verdicts):
             continue
         forms = [form for strength, form in verdicts if strength == _SCORED]

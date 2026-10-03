@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stdlib_patch_check.py
 # Description: Stdlib Patch Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-22
-# Modified: 2026-09-23
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -32,7 +32,7 @@ sanctioned, and why. The line is not "stdlib versus product", it is:
   be better:
       subprocess, socket, urllib, http, smtplib, ssl, ftplib, asyncio, select
       sys.argv  sys.stdout  sys.stderr  sys.stdin  sys.path  sys.modules
-      os.environ
+      sys.meta_path (the import tables are one rule, leg 9)  os.environ
   819 hits acquitted, 662 of them ``subprocess``. Running a real subprocess in
   a unit test is the defect; patching it is the cure.
 
@@ -121,7 +121,7 @@ _EDGE_MODULES: frozenset[str] = frozenset(
 
 #: The interpreter's own I/O and module table, and the environment.
 _EDGE_ATTRIBUTES: frozenset[str] = frozenset(
-    {"sys.argv", "sys.stdout", "sys.stderr", "sys.stdin", "sys.path", "sys.modules", "os.environ"}
+    {"sys.argv", "sys.stdout", "sys.stderr", "sys.stdin", "sys.path", "sys.modules", "sys.meta_path", "os.environ"}
 )
 
 CURE = "give the product a seam and patch that, or assert the effect on disk"
@@ -263,6 +263,27 @@ def _resolve(target: ast.AST, imports: Dict[str, str]) -> str:
     return f"{imports[head]}.{rest}" if rest else imports[head]
 
 
+def _target(node: ast.Call, imports: Dict[str, str]) -> Tuple[str, str]:
+    """(as written, fully dotted) for a patch call's target, its attribute included.
+
+    ``patch.object(sys, "argv", ...)`` and ``monkeypatch.setattr(sys, "argv",
+    ...)`` name the object first and the attribute second, and reading the
+    first alone judged them as a patch of all of ``sys`` while the string form
+    ``"sys.argv"`` was acquitted (cli and daemon, seedgo fleet green leg 9). The
+    attribute is joined only onto a stdlib object: a product module's binding
+    keeps the verdict it had.
+    """
+    first = node.args[0]
+    written = str(_dotted(first) or getattr(first, "value", ""))
+    chain = _resolve(first, imports)
+    second = node.args[1] if len(node.args) > 1 else None
+    attribute = second.value if isinstance(second, ast.Constant) and isinstance(second.value, str) else ""
+    if attribute and _tail_name(node.func) in ("object", "setattr") and not isinstance(first, ast.Constant):
+        if chain and chain.split(".")[0] != PRODUCT:
+            return written, f"{chain}.{attribute}"
+    return written, chain
+
+
 def _sanctioned(chain: str, module: str) -> bool:
     """Whether this target is an edge the test is right to seal."""
     return module in _EDGE_MODULES or any(seam in chain for seam in _EDGE_ATTRIBUTES)
@@ -301,8 +322,7 @@ def scan(source: str) -> Tuple[List[Tuple[int, str, str]], int]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or _tail_name(node.func) not in _PATCH_VERBS or not node.args:
             continue
-        written = _dotted(node.args[0]) or getattr(node.args[0], "value", "")
-        chain = _resolve(node.args[0], imports)
+        written, chain = _target(node, imports)
         if not chain:
             unresolved += 1
             continue

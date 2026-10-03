@@ -3,7 +3,7 @@
 # Description: stdlib_patch_check — crack class Q, a patch that replaces work the product owns
 # Version: 1.1.2
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/stdlib_patch_check.py."""
@@ -102,10 +102,36 @@ class TestTheAcquittedSeams:
         source = f"import {module}\ndef test_it():\n    patch.object({module}, 'run')\n"
         assert _scored(source) == []
 
-    @pytest.mark.parametrize("target", ["sys.argv", "sys.stdout", "os.environ", "sys.modules"])
+    @pytest.mark.parametrize("target", ["sys.argv", "sys.stdout", "os.environ", "sys.modules", "sys.meta_path"])
     def test_the_interpreters_own_tables_are_seams(self, target):
-        """argv, the streams, the module table and the environment are process state."""
+        """argv, the streams, the import tables and the environment are process state.
+
+        sys.meta_path joins sys.path and sys.modules: the import system's tables
+        are one rule (seedgo, fleet green leg 9; spawn's 3103/3119/3129).
+        """
         assert _scored(f"def test_it():\n    patch('{target}')\n") == []
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            'patch.object(sys, "argv", ["x"])',
+            'monkeypatch.setattr(sys, "argv", ["x"])',
+            "patch.object(sys, 'meta_path', [])",
+        ],
+    )
+    def test_the_object_spellings_of_a_table_are_the_same_seam(self, call):
+        """The object and its attribute named apart are judged as the string form.
+
+        Red first: the scan read the first argument alone and convicted these
+        as a patch of all of sys (cli test_cli_routing:68, daemon 17 lines;
+        seedgo, fleet green leg 9).
+        """
+        assert _scored(f"import sys\ndef test_it(monkeypatch):\n    {call}\n") == []
+
+    @pytest.mark.parametrize("call", ['patch.object(sys, "exit")', 'monkeypatch.setattr(sys, "platform", "win32")'])
+    def test_the_rest_of_sys_is_still_convicted_in_the_object_spelling(self, call):
+        """The control: an attribute outside the tables still scores, so the cure did not open sys."""
+        assert _scored(f"import sys\ndef test_it(monkeypatch):\n    {call}\n") == [(3, "sys", "sys")]
 
     def test_product_code_is_not_this_rules_business(self):
         """A seam in aipass is exactly what the cure asks for."""

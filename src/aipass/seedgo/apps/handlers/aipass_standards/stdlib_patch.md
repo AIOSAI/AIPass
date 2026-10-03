@@ -1,6 +1,6 @@
 # Stdlib Patch Standards
 **Status:** v1
-**Date:** 2026-09-22
+**Date:** 2026-10-03
 
 ---
 
@@ -34,7 +34,9 @@ better.
 | | |
 |---|---|
 | modules | `subprocess` `socket` `urllib` `http` `smtplib` `ssl` `ftplib` `asyncio` `select` |
-| attributes | `sys.argv` `sys.stdout` `sys.stderr` `sys.stdin` `sys.path` `sys.modules` `os.environ` |
+| attributes | `sys.argv` `sys.stdout` `sys.stderr` `sys.stdin` `sys.path` `sys.modules` `sys.meta_path` `os.environ` |
+
+The import system's tables (`sys.path`, `sys.modules`, `sys.meta_path`) are one rule. An attribute is the same seam however the patch spells it: `patch("sys.argv")`, `patch.object(sys, "argv", ...)` and `monkeypatch.setattr(sys, "argv", ...)` are one target (2026-10-03, seedgo fleet green leg 9).
 
 **819 hits acquitted, 662 of them `subprocess`.** Running a real subprocess in a unit test is
 the defect; patching it is the cure.

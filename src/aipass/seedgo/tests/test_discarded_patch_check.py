@@ -3,7 +3,7 @@
 # Description: discarded_patch_check — crack class R, a mock nothing ever observes
 # Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/discarded_patch_check.py."""
@@ -103,6 +103,39 @@ class TestThePlantedSpecimens:
             "    assert run() is None\n"
         )
         assert _lines(source) == [3]
+
+
+class TestReadingAMockIsNotObservingIt:
+    """A bound mock clears the row only if it reaches an oracle (seedgo, fleet green leg 9)."""
+
+    @pytest.mark.parametrize("touch", ["_ = snap", "print(snap)", "keep = [snap]", "@decorated"])
+    def test_a_binding_that_reaches_no_oracle_is_still_convicted(self, touch):
+        """ai_mail's report: binding the mock and reading it proved nothing and cleared the row.
+
+        Red first on the first three: any read of the name acquitted. The
+        fourth reads nothing at all, convicted before and after.
+        """
+        line = "" if touch.startswith("@") else f"    {touch}\n"
+        source = f"def test_it():\n    with patch({OWN_TARGET!r}) as snap:\n        run_all()\n{line}"
+        assert _lines(source) == [2]
+
+    @pytest.mark.parametrize(
+        "observe",
+        [
+            "calls = snap.call_args_list\n    assert calls == [()]",
+            "for call in snap.mock_calls:\n        assert call",
+            "snap.return_value = 3\n    assert run_all() == 3",
+        ],
+    )
+    def test_a_binding_that_reaches_an_oracle_through_a_name_is_acquitted(self, observe):
+        """The control: an oracle on a name bound from the mock still observes it, and an answer handed over counts."""
+        source = f"def test_it():\n    with patch({OWN_TARGET!r}) as snap:\n        run_all()\n    {observe}\n"
+        assert _lines(source) == []
+
+    def test_an_unused_decorator_parameter_read_without_an_oracle_is_convicted(self):
+        """The decorator form is judged the same way: reading the parameter is not asking it."""
+        source = f"@patch({OWN_TARGET!r})\ndef test_it(snap):\n    run_all(snap)\n"
+        assert _lines(source) == [1]
 
 
 class TestWhatStaysLegal:

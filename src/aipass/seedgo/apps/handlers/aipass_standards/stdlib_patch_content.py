@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stdlib_patch_content.py
 # Description: Stdlib Patch Standards Content Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-22
-# Modified: 2026-09-23
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -45,7 +45,9 @@ def get_stdlib_patch_standards() -> str:
         "  what a test is supposed to do, and no product-local seam would be better:",
         "    subprocess · socket · urllib · http · smtplib · ssl · ftplib · asyncio",
         "    sys.argv · sys.stdout · sys.stderr · sys.stdin · sys.path · sys.modules",
-        "    os.environ",
+        "    sys.meta_path · os.environ",
+        "  The import tables are one rule, and patch.object(sys, 'argv', ...) or",
+        "  monkeypatch.setattr(sys, 'argv', ...) is the same seam as 'sys.argv'.",
         "  [green]819 hits acquitted, 662 of them subprocess.[/green] Running a real subprocess in a",
         "  unit test is the defect; patching it is the cure.",
         "",

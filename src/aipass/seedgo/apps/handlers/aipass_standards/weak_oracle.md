@@ -1,6 +1,6 @@
 # Weak Oracle Standards
 **Status:** v1
-**Date:** 2026-09-22
+**Date:** 2026-10-03
 
 ---
 
@@ -47,6 +47,21 @@ A predicate CALL's truthiness is the claim: it asks the product a specific quest
 asserts its answer. Scoring it cost **1,356 false hits** in the first cut and failed the
 model file, whose second assertion is
 `assert hasattr(generator, "update_readme_auto_sections")`.
+
+### D2 on a container the test built is the emptiness claim
+
+```python
+offenders = [p for p in paths if bad(p)]
+assert not offenders                    # strong — the same oracle as offenders == []
+offenders = scan(tree)
+assert not offenders                    # D2   — None passes `not`, it fails == []
+```
+
+When every binding of the name in the test is a list, set or dict display or a
+comprehension, the name cannot be None, 0 or "", so `not` and `== []` are one oracle and
+neither is weak. A name the product answered, or one also bound by a loop, a `with` or a
+parameter, stays D2: there `not` passes for None, which `== []` would not (2026-10-03,
+seedgo fleet green leg 9; reported by skills, memory, prax and seedgo).
 
 ### D6 is the rarest form that exists at all — **two** in the fleet
 

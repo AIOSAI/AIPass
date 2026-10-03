@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: duplicate_test_check.py
 # Description: Duplicate Test Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -89,6 +89,9 @@ STANDARD_KEY = "duplicate_test"
 #: Prefix that makes a function a test, which is the only unit this rule judges.
 TEST_PREFIX = "test_"
 
+#: Marks a decorator among a test's statement shapes, so no statement can equal it.
+DECORATOR = "@"
+
 CLONE = "is the same test as"
 SUBSUMED = "asserts nothing that is not already asserted by"
 
@@ -108,7 +111,7 @@ def _body(function: ast.FunctionDef | ast.AsyncFunctionDef) -> List[ast.stmt]:
     return statements
 
 
-def _shape(statement: ast.stmt) -> str:
+def _shape(statement: ast.AST) -> str:
     """One statement as position-free text: formatting drops out, meaning does not.
 
     ``ast.dump`` omits ``lineno`` and ``col_offset`` unless asked for them, so
@@ -122,7 +125,7 @@ def _shape(statement: ast.stmt) -> str:
     return ast.dump(statement)
 
 
-def _harmless(statement: ast.stmt) -> bool:
+def _harmless(statement: ast.AST) -> bool:
     """Whether a statement Y adds beyond X leaves the world exactly as it was.
 
     An assert reads. A binding whose value calls nothing reads. Anything else
@@ -137,21 +140,26 @@ def _harmless(statement: ast.stmt) -> bool:
     return False
 
 
-def _tests(tree: ast.Module) -> List[Tuple[int, str, Dict[str, ast.stmt]]]:
+def _tests(tree: ast.Module) -> List[Tuple[int, str, Dict[str, ast.AST]]]:
     """(line, name, statements by shape) for every test with a body in this file."""
-    found: List[Tuple[int, str, Dict[str, ast.stmt]]] = []
+    found: List[Tuple[int, str, Dict[str, ast.AST]]] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if not node.name.startswith(TEST_PREFIX):
             continue
-        statements = {_shape(s): s for s in _body(node)}
+        statements: Dict[str, ast.AST] = {_shape(s): s for s in _body(node)}
         if statements:
+            # The decorators are part of the test (seedgo, fleet green leg 9): two
+            # bodies under different parametrize cases or patch answers are two
+            # tests, as the page said all along. Each decorator is a member that
+            # is never harmless, so it can neither be shared away nor subsumed.
+            statements.update({DECORATOR + _shape(d): d for d in node.decorator_list})
             found.append((node.lineno, node.name, statements))
     return found
 
 
-def _clones(tests: List[Tuple[int, str, Dict[str, ast.stmt]]]) -> List[Tuple[int, str, str, str]]:
+def _clones(tests: List[Tuple[int, str, Dict[str, ast.AST]]]) -> List[Tuple[int, str, str, str]]:
     """B1: tests whose statement sets are equal. The later copy is the finding."""
     groups: Dict[Tuple[str, ...], List[Tuple[int, str]]] = {}
     for line, name, statements in tests:
@@ -167,7 +175,7 @@ def _clones(tests: List[Tuple[int, str, Dict[str, ast.stmt]]]) -> List[Tuple[int
     return findings
 
 
-def _subsumed(tests: List[Tuple[int, str, Dict[str, ast.stmt]]], claimed: Set[str]) -> List[Tuple[int, str, str, str]]:
+def _subsumed(tests: List[Tuple[int, str, Dict[str, ast.AST]]], claimed: Set[str]) -> List[Tuple[int, str, str, str]]:
     """B2: tests wholly contained in another whose extras change no world."""
     findings: List[Tuple[int, str, str, str]] = []
     for line, name, statements in tests:

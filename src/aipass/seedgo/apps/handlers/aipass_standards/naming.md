@@ -1,6 +1,6 @@
 # Naming Conventions
 **Status:** Active v3
-**Date:** 2026-03-08
+**Date:** 2026-10-03
 
 ---
 
@@ -175,3 +175,8 @@ These are patterns observed across the codebase. They are not prescriptive rules
 3. **`json_handler.py` is the standard** -- every branch uses it at `handlers/json/json_handler.py`
 4. **Module and handler names describe what they do** -- no rigid verb system, just clarity
 5. **Short names win** -- less typing, easier scanning, cleaner imports
+6. **Functions are snake_case, except where a protocol spells the name** -- dunders,
+   `ast.NodeVisitor`'s `visit_<Node>` (only a real `ast` node class after `visit_`), and
+   unittest's `setUp`/`tearDown`/`setUpClass`/`tearDownClass`/`setUpModule`/`tearDownModule`/
+   `asyncSetUp`/`asyncTearDown`. Renaming them means they are never called, so they are not
+   the author's choice (2026-10-03, seedgo fleet green leg 9; spawn's report)

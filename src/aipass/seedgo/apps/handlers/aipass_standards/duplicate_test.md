@@ -1,6 +1,6 @@
 # Duplicate Test Standards
 **Status:** v1
-**Date:** 2026-09-22
+**Date:** 2026-10-03
 
 ---
 
@@ -160,9 +160,12 @@ other does not already exclude. **There is no threshold and nothing to tune.**
 
 **Cross-file is out**, by the one-file boundary above.
 
-**A parametrized test is one test.** Two `@pytest.mark.parametrize` decorators with
-different argvalues are different statements, so the bodies never match — correct, and it
-means a genuinely duplicated parametrized pair is missed.
+**A parametrized test is one test, and its decorators are part of it.** Two tests with one
+body under different `@pytest.mark.parametrize` cases, or a `@patch` with a different
+`return_value`, are two tests and are never convicted. The same decorators over the same
+body are still a clone. A decorator is never a harmless extra, so a decorated test is never
+subsumed by an undecorated one (2026-10-03, seedgo fleet green leg 9: the code used to
+compare bodies alone; flow, devpulse and seedgo reported the gap).
 
 **A file Python cannot parse yields no findings.** `ruff` already convicts the syntax error.
 

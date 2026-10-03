@@ -1,6 +1,6 @@
 # Unused Function Standards
 **Status:** Draft v1
-**Date:** 2026-03-22
+**Date:** 2026-10-03
 
 ---
 
@@ -29,7 +29,8 @@ Gathers all `.py` files in the branch, skipping irrelevant directories:
 ### Phase 2: Build Corpus
 
 Reads all collected files and strips non-code content to prevent false positives:
-- **Triple-quoted strings** (docstrings, multiline literals) -- removed
+- **String literals** (docstrings, multiline and single-line literals) -- removed
+- **f-strings** (2026-10-03, seedgo fleet green leg 9) -- the literal text is removed like any string; the names inside a replacement field (`f"{helper()}"`) are code and count as references. One verdict on every interpreter: 3.12+ tokenizes an f-string into parts and 3.10/3.11 as one string, and both are read as the whole literal
 - **Comment lines** (`# ...`) -- removed
 - **`if __name__ == "__main__":` blocks** -- removed (demo invocations, not real references)
 

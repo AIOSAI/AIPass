@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: naming_content.py
 # Description: Naming Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -66,6 +66,10 @@ def get_naming_standards() -> str:
         "  • No lies when refactoring - path defines context, not name",
         "",
         "─" * 70,
+        "",
+        "[bold cyan]FUNCTIONS:[/bold cyan] snake_case, except names a protocol spells:",
+        "  dunders, ast.NodeVisitor's visit_<Node> (a real ast class), unittest's",
+        "  setUp/tearDown family. Renamed, they are never called.",
         "",
         "[bold cyan]KEY WARNINGS:[/bold cyan]",
         "  [yellow]⚠[/yellow]  This is aspirational - codebase has legacy violations",

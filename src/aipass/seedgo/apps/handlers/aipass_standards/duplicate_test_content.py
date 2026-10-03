@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: duplicate_test_content.py
 # Description: Duplicate Test Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -36,6 +36,9 @@ def get_duplicate_test_standards() -> str:
         "  [red]B2 SUBSUMED[/red]  Every statement of X also appears in Y, AND the statements",
         "               Y adds beyond X are only asserts or bindings that call",
         "               nothing.",
+        "",
+        "  The decorators are part of the test: one body under different parametrize",
+        "  cases or patch answers is two tests; a decorator is never a harmless extra.",
         "",
         "[bold cyan]THE RESTRICTION ON Y'S EXTRAS IS THE WHOLE RULE:[/bold cyan]",
         "  Without it, test_floor_applies_with_no_backupignore (no .backupignore at",

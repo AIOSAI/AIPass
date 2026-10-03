@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
 # Version: 1.0.4
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
@@ -974,6 +974,27 @@ def test_function_naming_dunder_skipped():
     # __init__ is found but skipped from violation checks, so it passes
     assert result is not None
     assert result["passed"] is True
+
+
+@pytest.mark.parametrize("name", ["visit_Call", "visit_ImportFrom", "setUp", "tearDownClass", "asyncSetUp"])
+def test_function_naming_a_name_an_inherited_protocol_requires_passes(name):
+    """ast.NodeVisitor dispatches on visit_<Node>; unittest calls setUp by that spelling (seedgo, fleet green leg 9).
+
+    Red first: spawn's test_json_durability visit_Call was convicted as non-snake_case.
+    """
+    result = check_function_naming(f"class V(ast.NodeVisitor):\n    def {name}(self, node):\n        pass\n")
+
+    assert result is not None
+    assert result["message"] == "1 functions checked - all snake_case"
+
+
+@pytest.mark.parametrize("name", ["visit_NotANode", "visit_Thing", "SetUp", "setup_Data"])
+def test_function_naming_a_lookalike_of_a_protocol_name_still_fails(name):
+    """The control: only a real ast node class after visit_, and only unittest's own spellings."""
+    result = check_function_naming(f"def {name}(self):\n    pass\n")
+
+    assert result is not None
+    assert result["message"] == f"Non-snake_case functions: {name}"
 
 
 # ===========================================================================

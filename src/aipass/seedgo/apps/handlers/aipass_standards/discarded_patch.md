@@ -1,6 +1,6 @@
 # Discarded Patch Standards
 **Status:** v1
-**Date:** 2026-09-22
+**Date:** 2026-10-03
 
 ---
 
@@ -109,6 +109,14 @@ clean.
 The last row is the correction that matters. Searching only the `with` node's own body
 convicted **51 files and 331 hits that are perfectly sound** — more than the surviving count.
 The read-name set has to be the whole test's, not the block's.
+
+**Reading a mock is not observing it** (2026-10-03, seedgo fleet green leg 9; ai_mail's
+report). A bound mock, or an injected `@patch` parameter, clears the row only when it
+reaches an oracle anywhere in the test: an `assert` that reads it, an `assert_*` call on it
+or with it, or an answer handed to it (`m.return_value = ...`, `m.side_effect = ...`). A
+name bound from it carries the witness back (`calls = m.call_args_list` then
+`assert calls == [...]`, or `for call in m.mock_calls: assert ...`). `_ = m`, `print(m)` or
+passing it along unasked pins nothing, so they convict.
 
 ---
 

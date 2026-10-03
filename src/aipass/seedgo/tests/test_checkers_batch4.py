@@ -3,7 +3,7 @@
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
 # Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
@@ -17,9 +17,14 @@
 # seedgo: no-test-needed(retired) — the v4 test_quality checker, retired with its standard in FPLAN-0491
 # seedgo: no-test-needed(stdlib) — tokenize's own error classes; the fallback they trigger is pinned via check_branch
 
+import tokenize
 from pathlib import Path
+
+import pytest
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from aipass.seedgo.apps.handlers.aipass_standards import unused_function_check
 
 from aipass.seedgo.apps.handlers.aipass_standards.stderr_routing_check import (
     check_module as stderr_check_module,
@@ -479,3 +484,84 @@ def test_unused_function_counts_a_call_made_from_a_file_that_cannot_be_tokenized
 
     assert result["score"] == 100
     assert result["checks"][0]["message"] == "All 1 functions are referenced"
+
+
+def _fstring_branch(tmp_path: Path, use: str) -> dict:
+    """A branch whose one function, helper, is named only by the line *use*."""
+    branch = tmp_path / "victim"
+    _write_file(branch / "apps" / "lib.py", f"def helper():\n    return 1\n\n\nMESSAGE = {use}\n")
+    return unused_function_check_branch(str(branch))
+
+
+def _one_string_per_fstring(readline):
+    """The 3.10/3.11 token shape on any interpreter: an f-string as ONE STRING token.
+
+    3.12+ tokenizes an f-string as FSTRING_START/MIDDLE/END around real tokens;
+    this folds each such run back into the single STRING the older tokenizer
+    hands over. On 3.10/3.11 there is nothing to fold. Single-line specimens only.
+    """
+    start, end = getattr(tokenize, "FSTRING_START", None), getattr(tokenize, "FSTRING_END", None)
+    depth, opened = 0, (0, 0)
+    for tok in tokenize.generate_tokens(readline):
+        if start is not None and tok.type == start:
+            opened = tok.start if depth == 0 else opened
+            depth += 1
+        elif end is not None and tok.type == end:
+            depth -= 1
+            if depth == 0:
+                text = tok.line[opened[1] : tok.end[1]]
+                yield tokenize.TokenInfo(tokenize.STRING, text, opened, tok.end, tok.line)
+        elif depth == 0:
+            yield tok
+
+
+@pytest.fixture
+def older_tokenizer(monkeypatch):
+    """Hand the checker the 3.10/3.11 tokenizer where the checker looks for it (compass 493)."""
+    older = SimpleNamespace(
+        generate_tokens=_one_string_per_fstring,
+        STRING=tokenize.STRING,
+        COMMENT=tokenize.COMMENT,
+        TokenError=tokenize.TokenError,
+    )
+    monkeypatch.setattr(unused_function_check, "tokenize", older)
+
+
+FSTRING_FIELD_USES = ['f"{helper()}"', 'f"total {helper() + 1:>{helper()}}"', "f'{obj.helper}'"]
+
+
+@pytest.mark.parametrize("tokenizer", ["host", "older"])
+@pytest.mark.parametrize("use", FSTRING_FIELD_USES)
+def test_a_name_in_an_fstring_field_is_a_reference(tmp_path, request, tokenizer, use):
+    """A replacement field is code, so the name in it is a caller (seedgo, fleet green leg 9).
+
+    Asked of the host's tokenizer and of the 3.10/3.11 token shape, so the
+    verdict is one across the CI matrix. Red first on the older shape: before
+    leg 9 the single STRING was blanked whole and helper had no caller.
+    """
+    if tokenizer == "older":
+        request.getfixturevalue("older_tokenizer")
+
+    result = _fstring_branch(tmp_path, use)
+
+    assert result["checks"][0]["message"] == "All 1 functions are referenced", result
+
+
+FSTRING_TEXT_USES = ['f"call helper later {1}"', "f'helper'", 'f"{1:helper}"']
+
+
+@pytest.mark.parametrize("tokenizer", ["host", "older"])
+@pytest.mark.parametrize("use", FSTRING_TEXT_USES)
+def test_a_name_in_fstring_text_is_not_a_reference(tmp_path, request, tokenizer, use):
+    """The literal text of an f-string is prose, as in any string: helper still has no caller.
+
+    Red first on 3.12+, where FSTRING_MIDDLE was kept as code. Asked of both
+    token shapes, so the verdict is one on every interpreter.
+    """
+    if tokenizer == "older":
+        request.getfixturevalue("older_tokenizer")
+
+    result = _fstring_branch(tmp_path, use)
+
+    assert result["score"] == 0, result
+    assert [row["name"] for row in result["checks"][0]["unused"]] == ["helper"], result

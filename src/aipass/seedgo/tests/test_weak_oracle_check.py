@@ -3,7 +3,7 @@
 # Description: weak_oracle_check — crack class D, a test whose whole oracle cannot fail
 # Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/weak_oracle_check.py."""
@@ -75,6 +75,36 @@ class TestTheSixScoredForms:
     def test_d2_a_bare_names_truthiness(self):
         """A local's truthiness says nothing about what produced it."""
         source = "def test_it():\n    result = run()\n    assert result\n"
+        assert _forms(source) == [weak_oracle_check.D2]
+
+    @pytest.mark.parametrize(
+        "built",
+        ["offenders = []", "offenders = [p for p in run() if p]", "offenders: list = []", "offenders = {}"],
+    )
+    def test_not_on_a_container_the_test_built_is_the_emptiness_claim(self, built):
+        """assert not offenders over a list the test made is offenders == [] (seedgo, fleet green leg 9).
+
+        It cannot be None, 0 or "", so not and == [] are one oracle. Red first:
+        D2 convicted it (json_handler_contract :887, skills test_dead_cwd_imports).
+        """
+        source = f"def test_it():\n    {built}\n    offenders.extend(run())\n    assert not offenders\n"
+        assert _forms(source) == []
+
+    @pytest.mark.parametrize(
+        "bound",
+        [
+            "    offenders = run()\n",
+            "    offenders = []\n    offenders = run()\n",
+            "    offenders = []\n    for offenders in run():\n        pass\n",
+        ],
+    )
+    def test_not_on_a_name_the_product_answered_is_still_d2(self, bound):
+        """The control: a product's answer may be None, which not passes and == [] would not."""
+        assert _forms(f"def test_it():\n{bound}    assert not offenders\n") == [weak_oracle_check.D2]
+
+    def test_a_parameter_is_never_a_container_the_test_built(self):
+        """A parametrize argument arrives from outside the body, so D2 stands."""
+        source = "def test_it(offenders):\n    offenders = []\n    assert not offenders\n"
         assert _forms(source) == [weak_oracle_check.D2]
 
     def test_d3_is_not_none_alone(self):

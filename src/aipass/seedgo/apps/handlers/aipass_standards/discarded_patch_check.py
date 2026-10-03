@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discarded_patch_check.py
 # Description: Discarded Patch Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -288,6 +288,64 @@ def _target_of(call: ast.Call) -> str:
     return ast.unparse(target)
 
 
+def _loaded(node: ast.AST) -> Set[str]:
+    """Every name read anywhere under a node."""
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+
+
+def _seeds(node: ast.AST) -> Set[str]:
+    """Names this one node puts in front of an oracle, or configures as an answer.
+
+    An ``assert`` reads them; an ``assert_*`` call asks its mock and its
+    arguments; ``m.return_value = ...`` / ``m.side_effect = ...`` hands the
+    mock an answer, which is what a patch that is not discarded does.
+    """
+    if isinstance(node, ast.Assert):
+        return _loaded(node.test)
+    if isinstance(node, ast.Call) and _tail_name(node.func).startswith("assert"):
+        return _loaded(node)
+    if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+        return _loaded(node.value)
+    return set()
+
+
+def _binding(node: ast.AST) -> Tuple[List[ast.AST], ast.AST | None]:
+    """(targets, value) for an assignment or a ``for`` loop; ([], None) for anything else."""
+    if isinstance(node, ast.Assign):
+        return list(node.targets), node.value
+    if isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+        return [node.target], node.value
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        return [node.target], node.iter
+    return [], None
+
+
+def _witnessed(nodes: List[ast.AST]) -> Set[str]:
+    """Names that reach an oracle, directly or through a name bound from them.
+
+    Reading a mock is not observing it (seedgo, fleet green leg 9; ai_mail's
+    report): ``with patch(...) as m`` followed by ``_ = m`` or ``print(m)``
+    cleared the row while it pinned nothing. ``calls = m.call_args_list`` then
+    ``assert calls == [...]`` still observes m, so a binding carries the
+    witness back to every name its value read.
+    """
+    witnessed: Set[str] = set()
+    sources: Dict[str, Set[str]] = {}
+    for node in nodes:
+        witnessed |= _seeds(node)
+        targets, value = _binding(node)
+        read = _loaded(value) if value is not None else set()
+        for name in (n.id for target in targets for n in ast.walk(target) if isinstance(n, ast.Name)):
+            sources.setdefault(name, set()).update(read)
+    grown = True
+    while grown:
+        before = len(witnessed)
+        for name in [n for n in sources if n in witnessed]:
+            witnessed |= sources[name]
+        grown = len(witnessed) > before
+    return witnessed
+
+
 def _discarded_in_with(nodes: List[ast.AST], branch: str, own: Set[str], body: Set[str]) -> List[Tuple[int, str]]:
     """Every ``with patch(...)`` in this test whose mock nothing ever touches.
 
@@ -359,9 +417,10 @@ def scan(source: str, branch: str) -> List[Tuple[int, str]]:
 
     own = _own_names(tree, branch)
     findings: List[Tuple[int, str]] = []
-    for function, nodes, names in _tests(tree):
-        findings.extend(_discarded_in_with(nodes, branch, own, names))
-        findings.extend(_discarded_in_decorators(function, branch, own, names))
+    for function, nodes, _names in _tests(tree):
+        witnessed = _witnessed(nodes)
+        findings.extend(_discarded_in_with(nodes, branch, own, witnessed))
+        findings.extend(_discarded_in_decorators(function, branch, own, witnessed))
         findings.extend(_discarded_monkeypatches(nodes, branch, own))
     return sorted(findings)
 

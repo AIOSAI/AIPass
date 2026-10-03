@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_function_check.py
 # Description: Unused Function Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -111,21 +111,91 @@ def _strip_non_code(source: str) -> str:
     lines = source.split("\n")
     chars = [list(line) for line in lines]
 
-    for tok in tokens:
-        if tok.type not in (tokenize.STRING, tokenize.COMMENT):
-            continue
-        sr, sc = tok.start[0] - 1, tok.start[1]
-        er, ec = tok.end[0] - 1, tok.end[1]
-        for row in range(sr, er + 1):
-            if row >= len(chars):
-                break
-            col_start = sc if row == sr else 0
-            col_end = ec if row == er else len(chars[row])
-            for col in range(col_start, min(col_end, len(chars[row]))):
-                chars[row][col] = " "
+    for start, end, names in _non_code_spans(tokens, lines):
+        _blank_span(chars, start, end, " ".join(names))
 
     result = "\n".join("".join(line) for line in chars)
     return _MAIN_BLOCK_RE.sub("", result)
+
+
+def _non_code_spans(tokens: list, lines: list[str]):
+    """Yield (start, end, kept names) for every string and comment, an f-string whole.
+
+    One verdict on every interpreter (seedgo, fleet green leg 9). 3.12+ splits an
+    f-string into FSTRING_START/MIDDLE/END with its replacement fields as real
+    tokens, so the literal text read as code; 3.10/3.11 hand it over as one
+    STRING, so the fields were blanked with the text. The rule both now say: a
+    replacement field is code and its names are references, the literal text is
+    not. The tokenizer module is read at call time, so either shape is measured.
+    """
+    fstring_start = getattr(tokenize, "FSTRING_START", None)
+    fstring_end = getattr(tokenize, "FSTRING_END", None)
+    depth, opened = 0, (0, 0)
+    for tok in tokens:
+        if fstring_start is not None and tok.type == fstring_start:
+            opened = tok.start if depth == 0 else opened
+            depth += 1
+        elif fstring_end is not None and tok.type == fstring_end:
+            depth -= 1
+            if depth == 0:
+                yield opened, tok.end, _field_names(_segment(lines, opened, tok.end)) or []
+        elif depth == 0 and tok.type in (tokenize.STRING, tokenize.COMMENT):
+            fields = tok.type == tokenize.STRING and _is_fstring(tok.string)
+            yield tok.start, tok.end, (_field_names(tok.string) or []) if fields else []
+
+
+def _is_fstring(literal: str) -> bool:
+    """True when a string token's prefix carries f, in any case and order."""
+    prefix = literal[: len(literal) - len(literal.lstrip("rRbBuUfF"))]
+    return "f" in prefix.lower()
+
+
+def _segment(lines: list[str], start: tuple[int, int], end: tuple[int, int]) -> str:
+    """The source text between two tokenizer positions (rows count from 1)."""
+    (sr, sc), (er, ec) = start, end
+    if sr == er:
+        return lines[sr - 1][sc:ec]
+    return "\n".join([lines[sr - 1][sc:], *lines[sr : er - 1], lines[er - 1][:ec]])
+
+
+def _field_names(literal: str) -> list[str] | None:
+    """Every identifier an f-string's replacement fields name; its text names none.
+
+    None when the literal does not parse (a file caught mid-save): the caller
+    then blanks the span whole, as every string was blanked before leg 9.
+    """
+    try:
+        tree = ast.parse(literal, mode="eval")
+    except SyntaxError as exc:
+        logger.info("Could not parse an f-string for its fields, blanked whole: %s", exc)
+        return None
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.append(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.append(node.attr)
+        elif isinstance(node, ast.keyword) and node.arg:
+            names.append(node.arg)
+    return names
+
+
+def _blank_span(chars: list[list[str]], start: tuple[int, int], end: tuple[int, int], kept: str) -> None:
+    """Blank a token span, then write what it keeps at its first column."""
+    sr, sc = start[0] - 1, start[1]
+    er, ec = end[0] - 1, end[1]
+    for row in range(sr, min(er, len(chars) - 1) + 1):
+        col_start = sc if row == sr else 0
+        col_end = ec if row == er else len(chars[row])
+        for col in range(col_start, min(col_end, len(chars[row]))):
+            chars[row][col] = " "
+    if kept and sr < len(chars):
+        row = chars[sr]
+        for offset, char in enumerate(kept):
+            if sc + offset < len(row):
+                row[sc + offset] = char
+            else:
+                row.append(char)
 
 
 # -- AST function extraction --------------------------------------------------

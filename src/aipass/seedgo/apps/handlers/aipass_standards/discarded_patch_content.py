@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discarded_patch_content.py
 # Description: Discarded Patch Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -28,6 +28,8 @@ def get_discarded_patch_standards() -> str:
         "  nothing, binds it to nothing, and asserts nothing about it. The",
         "  replacement is pure silence. The product's call to that function is then",
         "  unpinned, and the call can be deleted with the suite green.",
+        "  Binding it is not asking it: the name must reach an assert, an assert_* call",
+        "  or a handed answer (m.return_value = ...); _ = m or print(m) pins nothing.",
         "",
         "[bold cyan]THE SHAPE IN ONE FILE:[/bold cyan]",
         "  @backup's test_ceiling_guard.py wraps every check_ceiling call in",

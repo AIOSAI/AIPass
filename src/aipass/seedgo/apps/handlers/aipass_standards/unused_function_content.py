@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_function_content.py
 # Description: Unused Function Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -37,7 +37,9 @@ def get_unused_function_standards() -> str:
         "",
         "  [yellow]Phase 2 -- Build corpus:[/yellow]",
         "  Reads all files and strips non-code content:",
-        "  - Triple-quoted strings (docstrings, multiline literals)",
+        "  - String literals (docstrings, multiline and single-line)",
+        '  - f-string text; a name in a replacement field ([dim]f"{helper()}"[/dim])',
+        "    is code and counts, on every Python version",
         "  - Comment lines",
         '  - [dim]if __name__ == "__main__":[/dim] blocks',
         "",
