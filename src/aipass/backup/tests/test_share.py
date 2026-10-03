@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_share.py
 # Description: Tests for the share module and the drive/share handler it drives
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-07-01
-# Modified: 2026-09-25
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/share.py and apps/handlers/drive/share.py."""
@@ -19,14 +19,15 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from aipass.backup.apps.handlers.drive import client as client_mod
 from aipass.backup.apps.handlers.drive import share as share_handler
 from aipass.backup.apps.handlers.drive import upload as upload_mod
 from aipass.backup.apps.modules import share as share_module
 
-# `share` publishes to a REAL Google account: run_share() builds a DriveClient and
-# calls authenticate() before anything validates the path it was handed — the
-# is_file() check lives further down, inside share_file. So one
-# handle_command("share", ["anything"]) is live OAuth. Two rules follow:
+# `share` publishes to a REAL Google account: run_share() refuses a path that is
+# not a file first, but any real file is then handed to a DriveClient that calls
+# authenticate(). So one handle_command("share", ["<a real file>"]) is live OAuth.
+# Two rules follow:
 #   * a routing test either stops inside print_introspection / print_help, or it
 #     replaces run_share with a recorder and asserts what it was (or was not) handed,
 #     or it names a command that is not ours, declined before either branch;
@@ -94,7 +95,7 @@ class TestShareModuleRouting:
         assert err == ""
 
     def test_a_help_flag_explains_the_upload_instead_of_performing_it(self, capsys, monkeypatch) -> None:
-        """run_share authenticates before it validates, so help must never reach it."""
+        """run_share authenticates for any real file, so help must never reach it."""
         ran: list = []
         monkeypatch.setattr(share_module, "run_share", lambda path, **kwargs: ran.append((path, kwargs)))
 
@@ -157,6 +158,19 @@ class TestShareModuleRouting:
         assert "share needs a file path" in err
         assert "drone @backup share <file_path> [--public]" in err
         assert out == ""
+
+    def test_a_path_that_is_not_there_is_refused_before_drive_is_dialled(self, tmp_path, capsys, monkeypatch) -> None:
+        """A missing file is a local answer; no DriveClient is built to learn it."""
+        built: list = []
+        monkeypatch.setattr(client_mod, "DriveClient", lambda *a, **kw: built.append(a) or MagicMock())
+        missing = tmp_path / "not_there.pdf"
+
+        result = share_module.run_share(str(missing))
+
+        _, err = capsys.readouterr()
+        assert built == []
+        assert result == {"success": False, "link": None, "file_id": None, "error": f"Not a file: {missing}"}
+        assert f"Not a file: {missing}" in err
 
 
 # ---------------------------------------------------------------------------

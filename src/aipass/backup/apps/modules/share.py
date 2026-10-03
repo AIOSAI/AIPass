@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: share.py
 # Description: Share module — single-file Drive upload with shareable link
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-01
-# Modified: 2026-08-08
+# Modified: 2026-10-02
 # =============================================
 
 """Share Module — upload a single file to Drive and return a shareable link."""
 
 import os
 import sys
+from pathlib import Path
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -73,6 +74,13 @@ def run_share(file_path: str, *, public: bool = False) -> dict:
     # Backup runs as an installed entry point, so a relative path would resolve
     # against backup's own branch dir. Re-anchor it to where the user actually is.
     resolved_path = str(resolve_caller_path(file_path))
+
+    # A missing path is a local answer: refuse it before authenticating to Drive.
+    if not Path(resolved_path).is_file():
+        err_msg = f"Not a file: {resolved_path}"
+        cli_error(f"Share failed: {err_msg}")
+        logger.warning(f"[backup] Share failed: {err_msg}")
+        return {"success": False, "link": None, "file_id": None, "error": err_msg}
 
     client = DriveClient()
     if not client.authenticate():

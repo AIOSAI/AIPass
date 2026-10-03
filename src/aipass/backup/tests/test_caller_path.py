@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_caller_path.py
 # Description: Tests for caller-CWD path resolution across user-facing commands
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-08-08
-# Modified: 2026-09-25
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/path/caller.py and caller-CWD resolution."""
@@ -100,6 +100,7 @@ class TestShareUsesCallerCwd:
         caller = tmp_path / "project"
         (caller / "docs").mkdir(parents=True)
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
+        (caller / "docs" / "file.md").write_text("x", encoding="utf-8")
         expected = str((caller / "docs" / "file.md").resolve())
 
         seen = self._run("docs/file.md")
@@ -115,6 +116,7 @@ class TestShareUsesCallerCwd:
         """Absolute input reaches the handler unchanged — no behaviour drift."""
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path / "irrelevant"))
         target = tmp_path / "real.md"
+        target.write_text("x", encoding="utf-8")
 
         seen = self._run(str(target))
 
