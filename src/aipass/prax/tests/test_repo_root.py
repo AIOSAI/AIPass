@@ -722,7 +722,7 @@ class TestNoPrivateCwdFallback:
         offenders = {
             module: lines for module, lines in _modules_reading_the_cwd(APPS_DIR).items() if module not in CWD_ALLOWLIST
         }
-        assert not offenders, (
+        assert offenders == {}, (
             "these modules resolve against the process working directory — derive "
             f"from __file__ via handlers/repo_root.py instead: {offenders}"
         )
@@ -805,7 +805,7 @@ class TestEveryLaneUsesTheSharedResolver:
                 )
                 if not delegates:
                     private.setdefault(_module_key(path.relative_to(APPS_DIR.parent)), []).append(node.lineno)
-        assert not private, (
+        assert private == {}, (
             f"these modules walk for the repo root themselves instead of calling handlers/repo_root.py: {private}"
         )
 
@@ -827,7 +827,7 @@ class TestEveryLaneUsesTheSharedResolver:
                 for inner in ast.walk(node)
             )
         ]
-        assert offenders, "the sweep would not have seen a planted private walk"
+        assert offenders == [4], "the sweep would not have seen the planted private walk on its line"
 
     def test_the_lanes_agree_with_the_shared_answer(self):
         """Behavioural, not just structural: same question, one answer."""
@@ -915,7 +915,7 @@ class TestNothingCallsInspectStack:
             lines = _inspect_stack_calls(tree)
             if lines:
                 offenders[_module_key(path.relative_to(APPS_DIR.parent))] = lines
-        assert not offenders, (
+        assert offenders == {}, (
             "inspect.stack() needs a readable working directory on Windows and dies at import "
             f"in a process that has none. Use sys._getframe(n).f_code.co_filename: {offenders}"
         )

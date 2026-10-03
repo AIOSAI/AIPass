@@ -153,7 +153,8 @@ class TestReloadRegistry:
         assert len(detector.log_map) == 0
         assert len(detector.module_map) == 0
         assert len(detector.known_branches) == 0
-        mock_load.assert_called_once()
+        # _load_registry takes no arguments: the claim is one reload, nothing handed on.
+        mock_load.assert_called_once_with()
 
     def test_reload_restores_branches(self):
         """reload_registry() should restore branches after clearing."""
@@ -593,10 +594,13 @@ class TestFileEventCallback:
         """Should create and enqueue a MonitoringEvent."""
         mod, _, mock_eq, _ = _import_file_watcher_integration()
 
-        mod.file_event_callback("PRAX", "MODIFIED", str(tmp_path / "some" / "file.py"))
+        changed_file = str(tmp_path / "some" / "file.py")
+        mod.file_event_callback("PRAX", "MODIFIED", changed_file)
 
-        mod.MonitoringEvent.assert_called_once()
-        mod.global_queue.enqueue.assert_called_once()
+        assert mod.MonitoringEvent.call_count == 1
+        kwargs = mod.MonitoringEvent.call_args.kwargs
+        assert (kwargs["branch"], kwargs["action"], kwargs["message"]) == ("PRAX", "modified", changed_file)
+        mod.global_queue.enqueue.assert_called_once_with(mod.MonitoringEvent.return_value)
 
     def test_maps_event_types_correctly(self, tmp_path):
         """A known event type gets its mapped action and the priority that goes with it."""
@@ -692,9 +696,12 @@ class TestGetFileWatcherStats:
         mod, _, _, _ = _import_file_watcher_integration()
         setattr(mod, "_file_watcher", None)
         stats = mod.get_file_watcher_stats()
-        assert isinstance(stats, dict)
-        assert "running" in stats
-        assert "watchdog_available" in stats
+        assert stats == {
+            "running": False,
+            "branches_watched": 0,
+            "branch_names": [],
+            "watchdog_available": mod.WATCHDOG_AVAILABLE,
+        }
 
     def test_reflects_manager_state(self, tmp_path):
         """Stats should reflect current manager state."""
@@ -835,8 +842,9 @@ class TestParseCommand:
     def test_logs_operation(self):
         """Should call json_handler.log_operation."""
         mod = _import_interactive_filter()
-        mod.parse_command("status")
-        mod.json_handler.log_operation.assert_called()
+        with patch.object(mod, "json_handler") as recorder:
+            mod.parse_command("status")
+        recorder.log_operation.assert_called_once_with("filter_applied", {"command": "status", "args": []})
 
 
 class TestGetHelpText:
@@ -889,9 +897,11 @@ class TestPrintEvent:
         """One line reaches the console and it carries the branch name."""
         mod = _import_unified_stream()
         mod.print_event("log", "SEEDGO", "audit complete")
-        mod.console.print.assert_called_once()
-        call_args = mod.console.print.call_args[0][0]
-        assert "SEEDGO" in call_args
+        # The line carries a host clock, so the count and the label are the claim.
+        assert mod.console.print.call_count == 1
+        (line,), kwargs = mod.console.print.call_args
+        assert kwargs == {}
+        assert "SEEDGO" in line
 
     def test_includes_message(self):
         """Output should include the event message."""
@@ -1460,8 +1470,7 @@ class TestDetectFromClaudeProject:
 
         path = str(_FAKE_HOME) + "/.claude/projects/" + "-fakehome-user-Projects-AIPass-src-aipass-prax/session.jsonl"
         result = detector._detect_from_claude_project(path)
-        assert result is not None
-        assert "AIPASS" in result
+        assert result == "AIPASS/PRAX"
 
     def test_internal_aipass_fallback_to_segment_scan(self):
         """Should fall back to known branch name scanning for internal AIPass."""
@@ -1471,8 +1480,7 @@ class TestDetectFromClaudeProject:
 
         path = str(_FAKE_HOME) + "/.claude/projects/" + "-fakehome-user-Projects-AIPass-src-aipass-prax/something.jsonl"
         result = detector._detect_from_claude_project(path)
-        assert result is not None
-        assert "PRAX" in result
+        assert result == "AIPASS/PRAX"
 
     def test_internal_aipass_subagent_suffix(self):
         """Should append SUB for subagent paths."""
@@ -1487,8 +1495,7 @@ class TestDetectFromClaudeProject:
             + "/subagents/abc123/session.jsonl"
         )
         result = detector._detect_from_claude_project(path)
-        assert result is not None
-        assert "SUB" in result
+        assert result == "AIPASS/PRAX SUB"
 
     def test_external_project_detection(self):
         """Should detect external project from Claude project path."""
@@ -1609,8 +1616,7 @@ class TestDetectFromClaudeProject:
 
         path = str(_FAKE_HOME) + "/.claude/projects/" + "-fakehome-user-Projects-AIPass-src-aipass-newmod/file.jsonl"
         result = detector._detect_from_claude_project(path)
-        assert result is not None
-        assert "NEWMOD" in result
+        assert result == "AIPASS/NEWMOD"
 
 
 class TestDetectFromCompoundParts:
@@ -2080,4 +2086,4 @@ class TestPublicAPIFunctions:
         setattr(mod, "_detector_instance", mock_detector)
 
         mod.reload_registry()
-        mock_detector.reload_registry.assert_called_once()
+        mock_detector.reload_registry.assert_called_once_with()

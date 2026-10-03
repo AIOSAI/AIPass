@@ -3,7 +3,7 @@
 # Description: Unit tests for PRAX logger module (public API)
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/logger.py."""
@@ -193,9 +193,10 @@ class TestGetSystemLogger:
 
         result = mod.get_system_logger()
 
-        assert result is not None
         setup = mocks["aipass.prax.apps.handlers.logging.setup"]
-        setup.setup_individual_logger.assert_called_once()
+        assert result is setup.setup_individual_logger.return_value
+        name, path, branch = mocks["aipass.prax.apps.handlers.logging.introspection"].get_caller_info.return_value
+        setup.setup_individual_logger.assert_called_once_with(name, caller_path=path, caller_branch=branch)
 
     def test_returned_logger_has_info_method(self, monkeypatch, tmp_path):
         """The returned logger has an info() method."""
@@ -341,7 +342,7 @@ class TestGetSystemStatus:
         mod.get_system_status()
 
         registry = mocks["aipass.prax.apps.handlers.registry.load"]
-        registry.load_module_registry.assert_called_once()
+        registry.load_module_registry.assert_called_once_with()
 
 
 # =============================================
@@ -578,7 +579,9 @@ class TestTerminalOutputControl:
         mod.enable_terminal_output()
 
         setup = mocks["aipass.prax.apps.handlers.logging.setup"]
-        setup.enable_terminal_output.assert_called_once()
+        # Neither door takes an argument: the claim is one delegation and nothing else.
+        setup.enable_terminal_output.assert_called_once_with()
+        setup.disable_terminal_output.assert_not_called()
 
     def test_disable_delegates_to_setup_handler(self, monkeypatch, tmp_path):
         """disable_terminal_output calls the setup handler's disable function."""
@@ -587,7 +590,8 @@ class TestTerminalOutputControl:
         mod.disable_terminal_output()
 
         setup = mocks["aipass.prax.apps.handlers.logging.setup"]
-        setup.disable_terminal_output.assert_called_once()
+        setup.disable_terminal_output.assert_called_once_with()
+        setup.enable_terminal_output.assert_not_called()
 
 
 # =============================================
@@ -738,8 +742,9 @@ class TestPrintIntrospection:
 
             fresh_mod.print_introspection()
 
-            mock_rich.assert_called_once()
-            mock_rich_instance.print.assert_called()
+            mock_rich.assert_called_once_with()
+            # The menu reaches the fallback console: its title line is the second print.
+            assert mock_rich_instance.print.call_args_list[1].args == ("[bold cyan]logger Module[/bold cyan]",)
 
 
 # =============================================
@@ -1063,7 +1068,7 @@ class TestEnsureWatcherStartsNothing:
 
         mod.SystemLogger()._ensure_watcher()
 
-        liveness.assert_called_once()
+        liveness.assert_called_once_with()
 
     def test_the_first_line_does_not_pay_for_the_liveness_check(self, monkeypatch, tmp_path):
         """`_watcher_started` now means "past the first log line", which is the

@@ -3,7 +3,7 @@
 # Description: Tests for the unified monitoring module
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/monitor.py."""
@@ -308,8 +308,9 @@ class TestPrintIntrospection:
     def test_print_introspection_runs(self):
         """print_introspection runs without error and calls console.print."""
         mod = _import_monitor()
-        mod.print_introspection()
-        mod.json_handler.log_operation.assert_called()
+        with patch.object(mod, "json_handler") as recorder:
+            mod.print_introspection()
+        recorder.log_operation.assert_called_once_with("print_introspection", {"module": "monitor"})
         assert mod.console.print.call_count > 10
 
 
@@ -716,7 +717,7 @@ class TestFileWatcherWorker:
             patch.object(mod, "_emit_watcher_event") as mock_emit,
         ):
             mod._file_watcher_worker()
-        mock_emit.assert_called_once()
+        mock_emit.assert_called_once_with("warning", "File watcher: no watch directories found — file events disabled")
 
     def test_observer_none_returns_early(self):
         """A failed observer startup ends the worker before the watch loop is ever entered."""
@@ -790,8 +791,9 @@ class TestFileWatcherWorker:
         ):
             mod._file_watcher_worker()
 
-        mock_observer.stop.assert_called_once()
-        mock_observer.join.assert_called_once()
+        # stop() and join() take nothing here: the claim is each ran once, with no timeout handed on.
+        mock_observer.stop.assert_called_once_with()
+        mock_observer.join.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -942,7 +944,7 @@ class TestLogWatcherWorker:
             patch("time.sleep", side_effect=_sleep),
         ):
             mod._log_watcher_worker()
-        mock_lw.stop_log_watcher.assert_called_once()
+        mock_lw.stop_log_watcher.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -958,21 +960,23 @@ class TestHandleInteractiveCmd:
         mod = _import_monitor()
         mock_help = MagicMock(return_value="help text here")
         mod._handle_interactive_cmd("help", mock_help)
-        mock_help.assert_called_once()
-        mod.console.print.assert_called()
+        mock_help.assert_called_once_with()
+        # The console is the conftest's stand-in, shared across tests: its last call is this one.
+        mod.console.print.assert_called_with("help text here")
 
     def test_status_command(self):
         """Status command calls _print_status."""
         mod = _import_monitor()
         with patch.object(mod, "_print_status") as mock_status:
             mod._handle_interactive_cmd("status", MagicMock())
-        mock_status.assert_called_once()
+        mock_status.assert_called_once_with()
 
     def test_unknown_command(self):
         """Unknown command prints error."""
         mod = _import_monitor()
-        mod._handle_interactive_cmd("bogus", MagicMock())
-        mod.error.assert_called()
+        with patch.object(mod, "error") as recorder:
+            mod._handle_interactive_cmd("bogus", MagicMock())
+        recorder.assert_called_once_with("Unknown command: bogus")
 
 
 # ---------------------------------------------------------------------------
@@ -1139,7 +1143,7 @@ class TestInteractiveLoop:
             patch.object(mod, "_handle_interactive_cmd") as mock_handler,
         ):
             mod._interactive_loop()
-        mock_handler.assert_called_once()
+        mock_handler.assert_called_once_with("status", mock_filter.get_help_text)
 
 
 # ---------------------------------------------------------------------------

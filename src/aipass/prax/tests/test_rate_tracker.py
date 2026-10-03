@@ -45,12 +45,13 @@ def _reset_tracker(monkeypatch, logs_dir=None):
     monkeypatch.setattr(mod, "json_handler", MagicMock())
     monkeypatch.setattr(mod, "logger", MagicMock())
     event_mock = MagicMock()
-    mod._tracked.clear()
-    mod._suppressed_files.clear()
+    # A fresh tracked map, restored at teardown; no suppressions, handed through
+    # configure's own door (prax, leg 6).
+    monkeypatch.setattr(mod, "_tracked", {})
     monkeypatch.setattr(mod, "_state_loaded", False)
     monkeypatch.setattr(mod, "_logs_dir", None)
     monkeypatch.setattr(mod, "_EVENT_CALLBACK", None)
-    mod.configure(logs_dir=logs_dir, event_callback=event_mock)
+    mod.configure(logs_dir=logs_dir, event_callback=event_mock, suppressed_files=set())
     return event_mock
 
 
@@ -455,10 +456,11 @@ class TestBurstDetection:
             ):
                 mod.scan_rates()
 
-        file_key = str(log_file)
-        state = mod._tracked[file_key]
-        assert state.warning_sustained == 0
-        assert state.fired_warning is False
+        # Read through the snapshot (prax, leg 6): severity None means neither
+        # fired flag is set and nothing is rising.
+        (entry,) = [row for row in mod.get_snapshot() if row["path"] == str(log_file)]
+        assert entry["warning_sustained"] == 0
+        assert entry["severity"] is None
 
 
 class TestSuppression:

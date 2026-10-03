@@ -148,13 +148,14 @@ class TestInit:
         assert handler._last_agent_action == {}
         assert handler._session_models == {}
         assert handler._session_branches == {}
-        assert isinstance(handler._branch_warn_logged, set)
+        assert handler._branch_warn_logged == set()
 
     def test_init_logs_operation(self):
         """Constructor should call json_handler.log_operation."""
-        mod, _, _, _, _ = _import_filesystem_handler()
-        _make_handler(mod)
-        mod.json_handler.log_operation.assert_called()
+        mod, _, _, _, queue = _import_filesystem_handler()
+        with patch.object(mod, "json_handler") as recorder:
+            _make_handler(mod, queue=queue)
+        recorder.log_operation.assert_called_once_with("file_change_handled", {"has_queue": True})
 
 
 # =============================================
@@ -1040,8 +1041,7 @@ class TestReadNewJsonlLines:
         data = '{"type": "test"}\n'
         with patch("builtins.open", _mopen(read_data=data)):
             result = handler._read_new_jsonl_lines(mock_path, "pk")
-        assert result is not None
-        assert len(result) == 1
+        assert result == ['{"type": "test"}']
 
     def test_no_new_data(self):
         """Should return None when no new data."""
@@ -1063,7 +1063,7 @@ class TestReadNewJsonlLines:
         data = '{"type": "new"}\n'
         with patch("builtins.open", _mopen(read_data=data)):
             result = handler._read_new_jsonl_lines(mock_path, "pk")
-        assert result is not None
+        assert result == ['{"type": "new"}']
 
     def test_empty_new_data(self):
         """Should return None when new data is all whitespace."""
@@ -1501,7 +1501,9 @@ class TestCheckCommandIndicator:
         file_path = MagicMock()
         file_path.name = "status.json"
         handler._check_command_indicator("modified", file_path, "PRAX")
-        queue.enqueue.assert_called_once()
+        kwargs = mod.MonitoringEvent.call_args.kwargs
+        assert (kwargs["event_type"], kwargs["branch"], kwargs["message"]) == ("command", "PRAX", "status command")
+        queue.enqueue.assert_called_once_with(mod.MonitoringEvent.return_value)
 
     def test_skips_non_modified(self):
         """Should skip non-modified events."""
@@ -1564,7 +1566,9 @@ class TestHandleEvent:
             "modified",
             str(tmp_path / "src" / "aipass" / "prax" / "apps" / "test.py"),
         )
-        queue.enqueue.assert_called()
+        kwargs = mod.MonitoringEvent.call_args.kwargs
+        assert (kwargs["event_type"], kwargs["branch"], kwargs["action"]) == ("file", "PRAX", "modified")
+        queue.enqueue.assert_called_once_with(mod.MonitoringEvent.return_value)
 
     def test_skips_unmonitored_files(self, tmp_path):
         """Should skip files that should_monitor returns False for."""
@@ -1580,12 +1584,10 @@ class TestHandleEvent:
         handler = _make_handler(mod, queue=queue)
         mock_filters.should_monitor.return_value = True
         mock_bd.detect_branch_from_path.return_value = "PRAX"
+        session = tmp_path / ".claude" / "projects" / "abc" / "session.jsonl"
         with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
-            handler._handle_event(
-                "modified",
-                str(tmp_path / ".claude" / "projects" / "abc" / "session.jsonl"),
-            )
-            mock_parse.assert_called_once()
+            handler._handle_event("modified", str(session))
+            mock_parse.assert_called_once_with(session, "PRAX")
 
     def test_claude_code_subagent(self, tmp_path):
         """Should tag subagent JSONL files with agent suffix."""
@@ -1613,11 +1615,9 @@ class TestHandleEvent:
                 "_parse_codex_activity",
                 return_value=True,
             ) as mock_parse:
-                handler._handle_event(
-                    "modified",
-                    str(tmp_path / ".codex" / "sessions" / "session.jsonl"),
-                )
-                mock_parse.assert_called_once()
+                session = tmp_path / ".codex" / "sessions" / "session.jsonl"
+                handler._handle_event("modified", str(session))
+                mock_parse.assert_called_once_with(session, "PRAX")
 
     def test_claude_code_jsonl_windows_form(self):
         """A Windows-form Claude Code JSONL path is still parsed as agent activity.
@@ -1629,8 +1629,9 @@ class TestHandleEvent:
         mock_filters.should_monitor.return_value = True
         mock_bd.detect_branch_from_path.return_value = "PRAX"
         with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
-            handler._handle_event("modified", "D:\\dev\\.claude\\projects\\abc\\session.jsonl")
-            mock_parse.assert_called_once()
+            windows_form = "D:\\dev\\.claude\\projects\\abc\\session.jsonl"
+            handler._handle_event("modified", windows_form)
+            mock_parse.assert_called_once_with(Path(windows_form), "PRAX")
 
     def test_claude_code_subagent_windows_form(self):
         """A Windows-form subagent JSONL path is still tagged with the agent suffix.

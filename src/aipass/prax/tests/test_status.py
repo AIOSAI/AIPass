@@ -3,7 +3,7 @@
 # Description: Unit tests for PRAX status module
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/status.py and apps/handlers/status/sync.py."""
@@ -182,20 +182,40 @@ def test_handle_command_sync_routes_to_handler(mock_prax_infrastructure, monkeyp
 # =============================================
 
 
-def _format_last_scan():
-    """The formatter, freshly imported like every other symbol in this file."""
-    mod_name = "aipass.prax.apps.modules.status"
-    sys.modules.pop(mod_name, None)
-    from aipass.prax.apps.modules.status import _format_last_scan as fn
+def _last_scan_line(monkeypatch, console, last_scan):
+    """The Last Scan line as bare `status` prints it (prax, leg 6: through the command).
 
-    return fn
+    get_system_status is stubbed where status looks, carrying the given block.
+    """
+    handle_command, _, _ = _fresh_import()
+    status_mod = sys.modules["aipass.prax.apps.modules.status"]
+    monkeypatch.setattr(
+        status_mod,
+        "get_system_status",
+        lambda: {
+            "total_modules": 0,
+            "individual_loggers": 0,
+            "system_logs_dir": "system",
+            "module_logs_dir": "module",
+            "registry_file": "registry",
+            "last_scan": last_scan,
+            "logger_override_active": False,
+        },
+    )
+    before = len(console.print.call_args_list)
+
+    assert handle_command("status", []) is True
+
+    printed = [c.args[0] for c in console.print.call_args_list[before:] if c.args]
+    (line,) = [p for p in printed if p.startswith("  Last Scan:")]
+    return line.removeprefix("  Last Scan:       ")
 
 
 def test_last_scan_never_run_says_how_to_run_it(mock_prax_infrastructure, monkeypatch):
     """An empty block is a real answer: this registry has never been scanned."""
     _ensure_sync_mock(monkeypatch)
 
-    assert _format_last_scan()({}) == "never — run: drone @prax discover run"
+    assert _last_scan_line(monkeypatch, mock_prax_infrastructure.console, {}) == "never — run: drone @prax discover run"
 
 
 def test_last_scan_shows_the_stamp_and_both_deltas(mock_prax_infrastructure, monkeypatch):
@@ -204,7 +224,11 @@ def test_last_scan_shows_the_stamp_and_both_deltas(mock_prax_infrastructure, mon
     healthy."""
     _ensure_sync_mock(monkeypatch)
 
-    line = _format_last_scan()({"timestamp": "2026-09-12T07:57:47+00:00", "added": 1245, "removed": 55})
+    line = _last_scan_line(
+        monkeypatch,
+        mock_prax_infrastructure.console,
+        {"timestamp": "2026-09-12T07:57:47+00:00", "added": 1245, "removed": 55},
+    )
 
     assert line == "2026-09-12T07:57:47+00:00 (+1245 / -55)"
 
@@ -214,7 +238,9 @@ def test_last_scan_survives_a_block_missing_its_counts(mock_prax_infrastructure,
     status command must still print a line rather than raise."""
     _ensure_sync_mock(monkeypatch)
 
-    assert _format_last_scan()({"timestamp": "2026-09-12T07:57:47+00:00"}) == "2026-09-12T07:57:47+00:00 (+? / -?)"
+    line = _last_scan_line(monkeypatch, mock_prax_infrastructure.console, {"timestamp": "2026-09-12T07:57:47+00:00"})
+
+    assert line == "2026-09-12T07:57:47+00:00 (+? / -?)"
 
 
 # =============================================

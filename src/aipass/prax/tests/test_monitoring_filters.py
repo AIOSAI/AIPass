@@ -257,11 +257,7 @@ class TestFilterLogContent:
 
         content = "INFO: starting up\nERROR: connection failed\nINFO: retrying\nWARNING: timeout"
         result = filter_log_content(content, show_errors=True, show_warnings=True, show_info=False)
-        assert result is not None
-        lines = result.split("\n")
-        assert len(lines) == 2
-        assert "ERROR: connection failed" in lines
-        assert "WARNING: timeout" in lines
+        assert result == "ERROR: connection failed\nWARNING: timeout"
 
     def test_empty_content_returns_none(self):
         """Empty content should return None."""
@@ -311,9 +307,7 @@ class TestApplyContentFilter:
 
         content = "INFO: booting\nERROR: disk full\nINFO: shutting down"
         result = apply_content_filter(Path("app.log"), content)
-        assert result is not None
-        assert "ERROR: disk full" in result
-        assert "INFO: booting" not in result
+        assert result == "ERROR: disk full"
 
     def test_log_file_all_info_returns_none(self):
         """Log files with only INFO lines should return None after filtering."""

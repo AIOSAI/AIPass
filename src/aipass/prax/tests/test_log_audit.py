@@ -203,8 +203,49 @@ def test_print_introspection_runs(audit_world, monkeypatch, capsys):
     assert any("Connected Handlers" in c for c in calls)
 
 
+_QUIET_SYSTEM = {
+    "total_files": 0,
+    "total_lines": 0,
+    "largest_file": "",
+    "largest_lines": 0,
+    "healthy": True,
+    "oversized_count": 0,
+    "critical_count": 0,
+}
+_QUIET_BRANCH = {
+    "total_files": 0,
+    "oversized_count": 0,
+    "critical_count": 0,
+    "total_size_mb": 0,
+    "largest_file": "",
+    "largest_size_mb": 0,
+    "healthy": True,
+}
+
+
+def _audit_through_command(monkeypatch, capsys, files=(), summary=None, branch_files=(), branch_summary=None):
+    """Both displays through `log-audit audit`, the read-only route (prax, leg 6).
+
+    enforce sits stubbed by _ensure_watchdog_mock and must stay uncalled; sweep is
+    reachable only from its own subcommand. The side not under test is given a
+    quiet, healthy world, so every line and every error() belongs to the other.
+    """
+    watchdog = _ensure_watchdog_mock(monkeypatch)
+    watchdog.scan_log_files.return_value = list(files)
+    watchdog.log_health_summary.return_value = summary or _QUIET_SYSTEM
+    watchdog.scan_branch_log_files.return_value = list(branch_files)
+    watchdog.branch_log_health_summary.return_value = branch_summary or _QUIET_BRANCH
+    capsys.readouterr()
+
+    assert log_audit.handle_command("log-audit", ["audit"]) is True
+
+    watchdog.enforce_log_limits.assert_not_called()
+    watchdog.enforce_branch_log_limits.assert_not_called()
+    return capsys.readouterr().out.splitlines()
+
+
 def test_display_audit_healthy(audit_world, monkeypatch, capsys):
-    """_display_audit formats healthy summary correctly."""
+    """The system display formats a healthy summary correctly."""
     files = [{"name": "system.log", "lines": 200, "size_kb": 10, "status": "ok"}]
     summary = {
         "total_files": 1,
@@ -216,14 +257,15 @@ def test_display_audit_healthy(audit_world, monkeypatch, capsys):
         "critical_count": 0,
     }
 
-    log_audit._display_audit(files, summary)
-    calls = capsys.readouterr().out.splitlines()
-    assert any("HEALTHY" in c for c in calls)
-    assert any("system.log" in c for c in calls)
+    calls = _audit_through_command(monkeypatch, capsys, files=files, summary=summary)
+
+    assert "  Status: HEALTHY — all logs within limits" in calls
+    assert "  Largest: system.log (200 lines)" in calls
+    audit_world.error.assert_not_called()
 
 
 def test_display_audit_oversized(audit_world, monkeypatch, capsys):
-    """_display_audit shows oversized files when present."""
+    """The system display shows oversized files when present."""
     files = [
         {"name": "system.log", "lines": 500, "size_kb": 45, "status": "ok"},
         {"name": "error.log", "lines": 2500, "size_kb": 200, "status": "oversized"},
@@ -239,15 +281,12 @@ def test_display_audit_oversized(audit_world, monkeypatch, capsys):
         "critical_count": 1,
     }
 
-    log_audit._display_audit(files, summary)
-    calls = capsys.readouterr().out.splitlines()
-    # Should show oversized section
-    assert any("Oversized files" in c for c in calls)
-    # File names appear in output
-    assert any("error.log" in c for c in calls)
-    assert any("crash.log" in c for c in calls)
-    # error() called for unhealthy status
-    audit_world.error.assert_called()
+    calls = _audit_through_command(monkeypatch, capsys, files=files, summary=summary)
+
+    assert "Oversized files:" in calls
+    assert "  OVERSIZED error.log: 2,500 lines (200 KB)" in calls
+    assert "  CRITICAL crash.log: 5,000 lines (400 KB)" in calls
+    audit_world.error.assert_called_once_with("Status: 1 oversized, 1 critical")
 
 
 def test_handle_command_unknown_subcommand(audit_world, monkeypatch, capsys):
@@ -290,7 +329,7 @@ def test_handle_command_enforce_calls_branch_enforce(audit_world, monkeypatch, c
 
 
 def test_display_branch_audit_healthy(audit_world, monkeypatch, capsys):
-    """_display_branch_audit shows healthy status when no unbounded files."""
+    """The branch display shows healthy status when no unbounded files."""
     files = [
         {
             "name": "client.log",
@@ -312,13 +351,14 @@ def test_display_branch_audit_healthy(audit_world, monkeypatch, capsys):
         "healthy": True,
     }
 
-    log_audit._display_branch_audit(files, summary)
-    calls = capsys.readouterr().out.splitlines()
-    assert any("HEALTHY" in c for c in calls)
+    calls = _audit_through_command(monkeypatch, capsys, branch_files=files, branch_summary=summary)
+
+    assert "  Status: HEALTHY — no unbounded files" in calls
+    audit_world.error.assert_not_called()
 
 
 def test_display_branch_audit_critical(audit_world, monkeypatch, capsys):
-    """_display_branch_audit shows critical unbounded .jsonl files."""
+    """The branch display shows critical unbounded .jsonl files."""
     files = [
         {
             "name": "engine.jsonl",
@@ -341,9 +381,11 @@ def test_display_branch_audit_critical(audit_world, monkeypatch, capsys):
         "healthy": False,
     }
 
-    log_audit._display_branch_audit(files, summary)
-    calls = capsys.readouterr().out.splitlines()
-    assert any("engine.jsonl" in c for c in calls)
-    assert any("hooks" in c for c in calls)
-    assert any("unrotated" in c for c in calls)
-    audit_world.error.assert_called()
+    calls = _audit_through_command(monkeypatch, capsys, branch_files=files, branch_summary=summary)
+
+    # The row is the branch, then the file; asserted as its two ends (no path string).
+    rows = [c for c in calls if c.startswith("  CRITICAL ")]
+    assert len(rows) == 1
+    assert rows[0].startswith("  CRITICAL hooks")
+    assert rows[0].endswith("engine.jsonl: 63.0 MB, 200,000 lines, unrotated")
+    audit_world.error.assert_called_once_with("Status: 1 unbounded, 1 critical")

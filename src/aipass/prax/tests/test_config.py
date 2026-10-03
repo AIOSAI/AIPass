@@ -511,7 +511,7 @@ class TestLoadIgnorePatternsFromConfig:
     def test_returns_set(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_ignore_world(monkeypatch, tmp_path)
         result = ip_mod.load_ignore_patterns_from_config()
-        assert isinstance(result, set)
+        assert type(result) is set
         # Which set: the defaults, and "archive.local" is one of them --
         # the branch-local archive directory prax must never walk into.
         assert "archive.local" in result
@@ -643,7 +643,6 @@ class TestResolveLogLevel:
     def test_invalid_value_warns(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
-        load_mod._bad_level_warned.clear()
         warnings = []
         monkeypatch.setattr(load_mod.logger, "warning", lambda msg, *a: warnings.append(msg % a))
 
@@ -656,7 +655,6 @@ class TestResolveLogLevel:
         """Level resolution runs on every logger init fleet-wide — one typo, one warning."""
         _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
-        load_mod._bad_level_warned.clear()
         warnings = []
         monkeypatch.setattr(load_mod.logger, "warning", lambda msg, *a: warnings.append(msg % a))
 
@@ -668,7 +666,6 @@ class TestResolveLogLevel:
     def test_bad_env_still_falls_through_to_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setenv(load_mod.LOG_LEVEL_ENV, "NOPE")
-        load_mod._bad_level_warned.clear()
 
         assert load_mod.resolve_log_level("DEBUG") == "DEBUG"
 

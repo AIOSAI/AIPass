@@ -3,7 +3,7 @@
 # Description: Canary tests that literal [placeholders] survive Rich rendering
 # Version: 1.1.0
 # Created: 2026-08-10
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/modules/monitor.py, apps/prax.py and apps/modules/log_health.py's bracket rendering."""
@@ -177,7 +177,7 @@ class TestHelpCoversEveryCommand:
         output = _render("aipass.prax.apps.prax", lambda m: m.print_help())
 
         missing = [c for c in self._routable_commands() if c not in output]
-        assert not missing, f"commands missing from --help: {missing}"
+        assert missing == [], f"commands missing from --help: {missing}"
 
     def test_discovery_finds_the_modules_we_think_it_does(self):
         """The guard above is only as good as the list it checks."""

@@ -2193,17 +2193,23 @@ class TestResolveBranchPathWrapper:
     """Tests for _resolve_branch_path -- dashboard module wrapper."""
 
     def test_delegates_to_handler(self, monkeypatch, tmp_path):
-        """Wrapper delegates to resolve_branch_path handler."""
+        """The handler's answer is the branch refresh @branch refreshes (prax, leg 6: through the command)."""
         mod = _load_dashboard_module()
         fake_path = tmp_path / "flow"
+        refreshed: list = []
 
         monkeypatch.setattr(
             mod,
             "resolve_branch_path",
             lambda ref, caller=None: fake_path,
         )
-        result = mod._resolve_branch_path("@flow")
-        assert result == fake_path
+        monkeypatch.setattr(
+            mod, "refresh_single_dashboard", lambda bp: refreshed.append(bp) or {"status": "success", "branch": "FLOW"}
+        )
+
+        mod.handle_command("dashboard", ["refresh", "@flow"])
+
+        assert refreshed == [fake_path]
 
     def test_hands_the_handler_the_callers_directory(self, tmp_path, monkeypatch):
         """The project walk starts where the CALLER stands, so the wrapper must pass AIPASS_CALLER_CWD on.
@@ -2214,9 +2220,15 @@ class TestResolveBranchPathWrapper:
         mod = _load_dashboard_module()
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
         seen: list = []
-        monkeypatch.setattr(mod, "resolve_branch_path", lambda ref, caller=None: seen.append((ref, caller)))
 
-        mod._resolve_branch_path("@verify")
+        def _record(ref, caller=None):
+            seen.append((ref, caller))
+            return tmp_path / "verify"
+
+        monkeypatch.setattr(mod, "resolve_branch_path", _record)
+        monkeypatch.setattr(mod, "refresh_single_dashboard", lambda bp: {"status": "success", "branch": "VERIFY"})
+
+        mod.handle_command("dashboard", ["refresh", "@verify"])
 
         assert seen == [("@verify", tmp_path)]
 
@@ -2235,8 +2247,20 @@ class TestCallerDir:
         else:
             monkeypatch.setenv("AIPASS_CALLER_CWD", value)
 
+        seen: list = []
+
+        def _record(ref, caller=None):
+            seen.append(caller)
+            return tmp_path / "flow"
+
+        # Through the command (prax, leg 6): the caller directory is what refresh hands the resolver.
+        monkeypatch.setattr(mod, "resolve_branch_path", _record)
+        monkeypatch.setattr(mod, "refresh_single_dashboard", lambda bp: {"status": "success", "branch": "FLOW"})
+
         with _patch("pathlib.Path.cwd", return_value=tmp_path):
-            assert mod._caller_dir() == tmp_path
+            mod.handle_command("dashboard", ["refresh", "@flow"])
+
+        assert seen == [tmp_path]
 
 
 # =============================================
@@ -2255,7 +2279,7 @@ class TestDashboardMain:
         monkeypatch.setattr("sys.argv", ["dashboard"])
         with _patch.object(mod, "print_introspection") as mock_intro:
             mod.main()
-        mock_intro.assert_called_once()
+        mock_intro.assert_called_once_with()
 
     @pytest.mark.parametrize("flag", ["--help", "-h"])
     def test_main_help_flag(self, monkeypatch, flag):
@@ -2292,7 +2316,8 @@ class TestDashboardMain:
         with (
             _patch.object(mod, "handle_command", return_value=False),
             _patch.object(mod, "print_help") as mock_help,
+            _patch.object(mod, "error") as mock_error,
         ):
             mod.main()
-        mock_help.assert_called_once()
-        mod.error.assert_called()
+        mock_help.assert_called_once_with()
+        mock_error.assert_called_once_with("Unknown command: bogus")

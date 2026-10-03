@@ -3,7 +3,7 @@
 # Description: Tests for the Telegram relay handler
 # Version: 1.3.0
 # Created: 2026-06-24
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/telegram_relay.py."""
@@ -560,7 +560,10 @@ class TestReadControl:
         setattr(relay, "CONTROL_FILE", ctrl)
         result = relay._read_control()
         assert result == {}
-        relay.logger.warning.assert_called_once()
+        assert relay.logger.warning.call_count == 1
+        assert relay.logger.warning.call_args.args[0].startswith(
+            "[telegram_relay] The Telegram relay could not read its control file (%s)"
+        )
 
     def test_non_dict_json_returns_empty_and_warns(self, tmp_path):
         """JSON that isn't a dict returns empty and logs warning."""
@@ -570,7 +573,10 @@ class TestReadControl:
         setattr(relay, "CONTROL_FILE", ctrl)
         result = relay._read_control()
         assert result == {}
-        relay.logger.warning.assert_called_once()
+        assert relay.logger.warning.call_count == 1
+        assert relay.logger.warning.call_args.args[0].startswith(
+            "[telegram_relay] The Telegram relay could not read its control file (%s)"
+        )
 
 
 # ---------------------------------------------------------------------------

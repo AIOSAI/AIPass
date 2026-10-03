@@ -3,7 +3,7 @@
 # Description: Tests for prax logging handler modules
 # Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
@@ -152,18 +152,19 @@ class TestDirectRotatingFileHandlerDoRollover:
             log_file = tmp_path / "test_os.log"
             log_file.write_text("data\n", encoding="utf-8")
             handler = direct_mod.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
+            # The stand-in's own error, so naming it is ours to do: the very object is handed on.
+            failure = OSError("disk error")
 
             with (
                 patch(
                     "logging.handlers.RotatingFileHandler.doRollover",
-                    side_effect=OSError("disk error"),
+                    side_effect=failure,
                 ),
                 patch.object(direct_mod, "logger") as mock_logger,
             ):
                 handler.doRollover()
 
-            mock_logger.warning.assert_called_once()
-            assert "disk error" in str(mock_logger.warning.call_args)
+            mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", failure)
             handler.close()
 
 
@@ -830,7 +831,8 @@ class TestEnhancedGetLogger:
             # The same stdlib logger the caller asked for, handed back
             # untouched: no handlers copied onto it, propagation left alone.
             assert result.name == "prax.test.unknown"
-            assert result is ov._original_getLogger("prax.test.unknown")
+            # The stdlib's own registry entry for the name (prax, leg 6: no private name).
+            assert result is logging.root.manager.getLogger("prax.test.unknown")
             assert result.handlers == []
             assert result.propagate is True
             mock_setup.setup_individual_logger.assert_not_called()
@@ -859,7 +861,10 @@ class TestEnhancedGetLogger:
 
             with patch("sys.stderr") as mock_stderr:
                 ov.enhanced_getLogger("debug_test")
-                mock_stderr.write.assert_called()
+                assert [c.args for c in mock_stderr.write.call_args_list] == [
+                    ("[DEBUG] enhanced_getLogger called with name: debug_test\n",),
+                    ("[DEBUG] Detected calling module: unknown_module\n",),
+                ]
 
 
 # =============================================
@@ -922,7 +927,8 @@ class TestInstallRestoreLoggerOverride:
                 ov.install_logger_override()
                 assert logging.getLogger is ov.enhanced_getLogger
                 ov.restore_original_logger()
-                assert logging.getLogger is ov._original_getLogger
+                # What stood there before install (prax, leg 6: no private name).
+                assert logging.getLogger is original_fn
             finally:
                 logging.getLogger = original_fn
 
@@ -1022,7 +1028,6 @@ class TestSetupSystemLogger:
             import aipass.prax.apps.handlers.logging.setup as setup_mod
 
             setup_mod._system_logger = None
-            setup_mod._captured_loggers.clear()
 
             result = setup_mod.setup_system_logger()
             assert isinstance(result, logging.Logger)
@@ -1046,7 +1051,6 @@ class TestSetupSystemLogger:
             import aipass.prax.apps.handlers.logging.setup as setup_mod
 
             setup_mod._system_logger = None
-            setup_mod._captured_loggers.clear()
 
             first = setup_mod.setup_system_logger()
             second = setup_mod.setup_system_logger()

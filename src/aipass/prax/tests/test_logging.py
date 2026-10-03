@@ -395,13 +395,15 @@ class TestConcurrentFirstCallsBuildOneLogger:
 class TestGetCallerInfo:
     """Tests for get_caller_info() — returns (module_name, path, branch) tuple."""
 
-    def test_returns_tuple_of_three(self, mock_prax_infrastructure):
-        """get_caller_info always returns a 3-tuple."""
+    def test_returns_tuple_of_three(self, mock_prax_infrastructure, monkeypatch):
+        """get_caller_info returns the 3-tuple (name, path, branch) of its caller, this file."""
         from aipass.prax.apps.handlers.logging.introspection import get_caller_info
 
+        monkeypatch.delenv("AIPASS_LOG_NAME", raising=False)
+        monkeypatch.delenv("AIPASS_BOT_ID", raising=False)
+
         result = get_caller_info()
-        assert isinstance(result, tuple)
-        assert len(result) == 3
+        assert result == ("test_logging", __file__, "prax")
 
     def test_module_name_is_string(self, mock_prax_infrastructure, monkeypatch):
         """The caller is this file, so the name is this file's stem — not merely a str.

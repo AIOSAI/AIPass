@@ -164,9 +164,10 @@ class TestBranchFileHandler:
 
     def test_does_not_ignore_normal_python_file(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event(str(tmp_path / "src" / "aipass" / "prax" / "apps" / "modules" / "status.py"))
+        changed = str(tmp_path / "src" / "aipass" / "prax" / "apps" / "modules" / "status.py")
+        event = self._make_event(changed)
         handler.on_modified(event)
-        callback.assert_called_once()
+        callback.assert_called_once_with(handler.branch_name, "MODIFIED", changed)
 
 
 # ============================================================================
@@ -239,8 +240,9 @@ class TestStartStopMonitoring:
     def test_stop_monitoring_stops_and_joins(self):
         mod, observer_inst, _cls = self._import_watcher_monitor()
         mod.stop_monitoring(observer_inst)
-        observer_inst.stop.assert_called_once()
-        observer_inst.join.assert_called_once()
+        # stop() and join() take nothing: the claim is each ran once, with no timeout handed on.
+        observer_inst.stop.assert_called_once_with()
+        observer_inst.join.assert_called_once_with()
 
     def test_stop_monitoring_handles_none(self):
         """No observer means no teardown: nothing is stopped, nothing is joined."""
@@ -355,8 +357,8 @@ class TestDiscoveryWatcher:
 
         mod.stop_file_watcher()
 
-        mock_obs.stop.assert_called_once()
-        mock_obs.join.assert_called_once()
+        mock_obs.stop.assert_called_once_with()
+        mock_obs.join.assert_called_once_with()
         assert getattr(mod, "_observer") is None
 
     def test_stop_file_watcher_noop_when_not_running(self, tmp_path):
@@ -1038,7 +1040,8 @@ class TestWatcherLiveness:
         monkeypatch.setattr(mod, "_get_trigger", lambda: broken)
 
         mod.check_file_watcher_liveness(force=True)
-        assert errors, "a broken trigger swallowed the death report"
+        assert len(errors) == 1, "a broken trigger swallowed the death report"
+        assert errors[0].startswith("[watcher] DISCOVERY WATCHER IS DEAD")
 
     def test_the_death_actually_reaches_the_bus(self, monkeypatch):
         """FPLAN-0556. Until 2026-09-12 this fire was unreachable: the trigger
@@ -1324,8 +1327,10 @@ class TestTheBackgroundStartDoesNotMakeTheCallerWait:
             gate.set()
             getattr(mod, "_start_thread").join(timeout=10)
 
-            observer_inst.schedule.assert_called_once()
-            observer_inst.start.assert_called_once()
+            assert observer_inst.schedule.call_count == 1
+            _handler, root = observer_inst.schedule.call_args.args
+            assert (root, observer_inst.schedule.call_args.kwargs) == (str(mod.ECOSYSTEM_ROOT), {"recursive": True})
+            observer_inst.start.assert_called_once_with()
         finally:
             gate.set()
 
@@ -1340,7 +1345,9 @@ class TestTheBackgroundStartDoesNotMakeTheCallerWait:
 
             mod.start_file_watcher()
 
-            observer_inst.schedule.assert_called_once()
+            assert observer_inst.schedule.call_count == 1
+            assert observer_inst.schedule.call_args.args[1] == str(mod.ECOSYSTEM_ROOT)
+            observer_inst.start.assert_called_once_with()
         finally:
             gate.set()
 

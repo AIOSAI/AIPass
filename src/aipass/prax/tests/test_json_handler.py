@@ -3,7 +3,7 @@
 # Description: Tests for the fleet json service through prax's own shim
 # Version: 2.2.0
 # Created: 2026-03-28
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -343,7 +343,8 @@ class TestTheWriteNeverChoosesTheDocumentsMode:
 class TestTheBoundedReplaceRetry:
     """os.replace on Windows fails while any reader holds the target open."""
 
-    def test_a_transient_sharing_violation_is_survived(self, monkeypatch, tmp_path):
+    def test_a_transient_sharing_violation_is_survived(self, handle, monkeypatch, tmp_path):
+        """Through write_json, the door every writer uses (prax, leg 6)."""
         attempts = {"count": 0}
         real_replace = os.replace
 
@@ -354,17 +355,16 @@ class TestTheBoundedReplaceRetry:
             real_replace(source, destination)
 
         monkeypatch.setattr(json_service.os, "replace", flaky)
-        source = tmp_path / "staged"
-        source.write_text("payload", encoding="utf-8")
+        target = tmp_path / "live.json"
 
-        json_service._replace_with_retry(str(source), str(tmp_path / "live"))
+        assert handle.write_json(target, {"payload": 1}) is True
 
         assert attempts["count"] == 3
-        assert (tmp_path / "live").read_text(encoding="utf-8") == "payload"
+        assert json.loads(target.read_text(encoding="utf-8")) == {"payload": 1}
 
-    def test_the_retry_is_bounded_and_then_raises(self, monkeypatch, tmp_path):
+    def test_the_retry_is_bounded_and_then_fails_honestly(self, handle, monkeypatch, tmp_path):
         """Bounded, then honest: a permanent permission problem is not retried
-        forever, it surfaces."""
+        forever; write_json answers False and the document never lands."""
         attempts = {"count": 0}
 
         def always_blocked(source, destination):
@@ -373,13 +373,14 @@ class TestTheBoundedReplaceRetry:
 
         monkeypatch.setattr(json_service.os, "replace", always_blocked)
         monkeypatch.setattr(json_service, "_REPLACE_BACKOFF_SECONDS", 0)
+        target = tmp_path / "live.json"
 
-        with pytest.raises(PermissionError):
-            json_service._replace_with_retry("source", "destination")
+        assert handle.write_json(target, {"payload": 1}) is False
 
         assert attempts["count"] == json_service._REPLACE_ATTEMPTS
+        assert target.exists() is False
 
-    def test_a_non_sharing_oserror_is_not_retried(self, monkeypatch):
+    def test_a_non_sharing_oserror_is_not_retried(self, handle, monkeypatch, tmp_path):
         """Only the Windows sharing violation is transient. Retrying a genuine
         failure 40 times buys nothing and hides it for 200ms."""
         attempts = {"count": 0}
@@ -390,8 +391,7 @@ class TestTheBoundedReplaceRetry:
 
         monkeypatch.setattr(json_service.os, "replace", wrong_kind)
 
-        with pytest.raises(FileNotFoundError):
-            json_service._replace_with_retry("source", "destination")
+        assert handle.write_json(tmp_path / "live.json", {"payload": 1}) is False
 
         assert attempts["count"] == 1
 
@@ -453,8 +453,11 @@ class TestEnsureJsonExists:
         """
         assert json_service.JSON_TYPES == ("config", "data", "log")
 
+        # The default is reached through ensure_json_exists on a missing
+        # document, the door that writes it (prax, leg 6).
         for json_type in json_service.JSON_TYPES:
-            document = json_service._default_document(json_type, "any")
+            assert handle.ensure_json_exists("any", json_type) is True
+            document = handle.read_json(handle.get_json_path("any", json_type))
 
             assert handle.validate_json_structure(document, json_type) is True
 
@@ -673,7 +676,9 @@ class TestTheDataLegIsHealedNotReplaced:
     def test_the_config_leg_is_still_regenerated_not_merged(self, handle, sandbox):
         """The heal is the data leg's alone: an invalid config comes back as the
         default, with nothing of the invalid one carried over."""
-        sandbox.mkdir(parents=True, exist_ok=True)
+        # The default, as the same door writes it for a missing document (prax, leg 6).
+        assert handle.ensure_json_exists("stray", "config") is True
+        default = json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8"))
         (sandbox / "stray_config.json").write_text(
             json.dumps({"module_name": "stray", "stray": True}), encoding="utf-8"
         )
@@ -681,7 +686,7 @@ class TestTheDataLegIsHealedNotReplaced:
         assert handle.ensure_json_exists("stray", "config") is True
 
         written = json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8"))
-        assert written == json_service._default_document("config", "stray")
+        assert written == default
 
     def test_a_data_document_that_cannot_be_written_back_is_left_as_it_was(self, handle, sandbox):
         """json.load reads NaN; the writer refuses it. Healing such a document

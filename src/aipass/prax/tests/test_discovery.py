@@ -148,9 +148,10 @@ class TestShouldIgnorePath:
 
     def test_logs_filtered_path(self, filtering_module, mock_prax_infrastructure, tmp_path):
         """When a path is ignored, json_handler.log_operation should be called."""
-        filtering_module.should_ignore_path(tmp_path / "repo" / ".git" / "config")
+        ignored = tmp_path / "repo" / ".git" / "config"
+        filtering_module.should_ignore_path(ignored)
         mocks = mock_prax_infrastructure
-        mocks.json_handler.log_operation.assert_called()
+        mocks.json_handler.log_operation.assert_called_once_with("discovery_filtered", {"ignored_path": str(ignored)})
 
 
 # =============================================
@@ -168,8 +169,8 @@ class TestScanDirectorySafely:
 
         modules: dict = {}
         scanner_module.scan_directory_safely(tmp_path, modules)
-        assert "example" in modules
-        assert isinstance(modules["example"], dict)
+        assert list(modules) == ["example"]
+        assert (modules["example"]["file_path"], modules["example"]["enabled"]) == (str(py_file), True)
 
     def test_ignores_non_python_files(self, scanner_module, tmp_path):
         """Non-.py files should not appear in results."""
@@ -325,7 +326,8 @@ class TestDiscoverPythonModules:
 
         scanner_module.discover_python_modules()
         mocks = mock_prax_infrastructure
-        mocks.json_handler.log_operation.assert_called()
+        # An empty root: the count handed on is the count found, nought.
+        mocks.json_handler.log_operation.assert_any_call("modules_scanned", {"modules_found": 0})
 
 
 # =============================================

@@ -3,7 +3,7 @@
 # Description: Tests for registry load and save handlers
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/registry/load.py and apps/handlers/registry/save.py."""
@@ -17,6 +17,8 @@
 # seedgo: no-test-needed(error_handling) — load_last_scan answering {} on an unreadable registry, covered by that row
 
 import json
+from datetime import timedelta
+from typing import cast
 from unittest.mock import MagicMock
 
 from aipass.prax.apps.handlers.registry import load as load_mod
@@ -117,8 +119,10 @@ class TestLoadModuleRegistry:
         result = load_mod.load_module_registry()
 
         assert result == {}
-        load_mod.logger.warning.assert_called_once()  # type: ignore[union-attr]
-        assert "failed to load module registry" in load_mod.logger.warning.call_args[0][0]  # type: ignore[union-attr]
+        warning = cast(MagicMock, load_mod.logger).warning
+        assert warning.call_count == 1
+        form, where, _why = warning.call_args.args
+        assert (form, where) == ("load: failed to load module registry from '%s': %s", load_mod.REGISTRY_FILE)
 
     def test_empty_dict_when_modules_key_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Registry without 'modules' key should return empty dict."""
@@ -238,9 +242,9 @@ class TestSaveModuleRegistry:
         save_mod.save_module_registry({"x": {"p": "q"}})
 
         data = json.loads(save_mod.REGISTRY_FILE.read_text(encoding="utf-8"))
-        # Should not raise on valid ISO format
+        # Should not raise on valid ISO format, and it carries UTC's offset
         parsed = datetime.fromisoformat(data["timestamp"])
-        assert parsed is not None
+        assert parsed.utcoffset() == timedelta(0)
 
     def test_save_empty_modules(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Saving empty modules dict should succeed with total_modules=0."""
