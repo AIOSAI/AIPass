@@ -258,18 +258,24 @@ class TestVectorizationFailureIsNotSuccess:
 
         return lambda *a, **k: _Result()
 
-    def test_an_unknown_operation_is_a_failure_even_though_exit_is_zero(self, monkeypatch):
-        """The exact live response, byte for byte."""
+    def test_an_unknown_operation_is_a_failure_even_though_exit_is_zero(self, tmp_path, monkeypatch):
+        """The exact live response, byte for byte, and its reason reaches the caller.
+
+        Through purge_sent_folder on a tmp_path mailbox (ai_mail, leg 8): the
+        failure dict carries @memory's own reason under "error". Red first: before
+        leg 8 the dict dropped it and the reason lived only in the log warning.
+        """
+        _populate_folder(tmp_path / "sent", 15)
         monkeypatch.setattr(
             purge_mod.subprocess,
             "run",
             self._handler_reply('{"success": false, "error": "Unknown operation: vectorize_and_store"}'),
         )
 
-        result = purge_mod._vectorize_emails([{"subject": "s", "message": "m"}], "sent")
+        result = purge_sent_folder(tmp_path)
 
         assert result["success"] is False, "exit 0 with success:false is a REFUSAL, not a store"
-        assert "Unknown operation" in str(result.get("error", "")), (
+        assert result.get("error") == "Unknown operation: vectorize_and_store", (
             f"the handler's own reason must survive to the caller. Got: {result}"
         )
 

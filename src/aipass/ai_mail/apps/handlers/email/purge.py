@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: purge.py
 # Description: Sent/Deleted Auto-Purge Handler
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-02-04
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -159,12 +159,15 @@ def _purge_email_files(files: List[Path], folder_type: str) -> Dict[str, Any]:
     # Only delete originals if vectorization succeeded — no data loss
     if not vectorize_result.get("success", False):
         logger.warning("[purge] Vectorization failed for %s — keeping %d files", folder_type, len(files))
+        # "error" carries @memory's own reason to whoever holds the dict; before
+        # 2026-10-02 it reached only the log warning (ai_mail, leg 8)
         return {
             "success": False,
             "purged_count": 0,
             "vectorized": False,
             "message": f"Vectorization failed, {len(files)} files preserved",
             "load_errors": load_errors if load_errors else None,
+            "error": vectorize_result.get("error"),
         }
 
     # Delete original files (data is safely in @memory)

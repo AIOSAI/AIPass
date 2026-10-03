@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.4.1
+# Version: 3.4.2
 # Created: 2025-12-02
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -798,9 +798,9 @@ def deliver_email_to_branch(
                 # Prepend message to inbox (newest first)
                 inbox_data["messages"].insert(0, message)
 
-            from aipass.ai_mail.apps.handlers.email.inbox_cleanup import _sweep_closed
+            from aipass.ai_mail.apps.handlers.email.inbox_cleanup import sweep_closed
 
-            _sweep_closed(inbox_data, inbox_file.parent)
+            sweep_closed(inbox_data, inbox_file.parent)
 
             inbox_data["total_messages"] = len(inbox_data["messages"])
             messages = inbox_data["messages"]
@@ -892,9 +892,9 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
 
             inbox_data.setdefault("messages", []).insert(0, email_data)
 
-            from aipass.ai_mail.apps.handlers.email.inbox_cleanup import _sweep_closed
+            from aipass.ai_mail.apps.handlers.email.inbox_cleanup import sweep_closed
 
-            _sweep_closed(inbox_data, inbox_file.parent)
+            sweep_closed(inbox_data, inbox_file.parent)
 
             inbox_data["total_messages"] = len(inbox_data["messages"])
             inbox_data["unread_count"] = sum(
