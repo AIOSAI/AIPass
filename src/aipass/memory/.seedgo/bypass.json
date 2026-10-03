@@ -586,6 +586,117 @@
       "file": "apps/modules/todo.py",
       "standard": "introspection",
       "reason": "Bare `todo` IS the verb, by ruling (DPLAN-0345 @memory review section 4, FPLAN-0590 row 5): `drone @memory todo` prints ONE line - pad N of COUNT and the backlog count - so handle_command() deliberately has no no-args gate calling print_introspection(); a gate there would replace that line with the module page. The module still defines print_introspection() (printed after a refused argument) and print_help() (--help/-h/help in any slot). The bare behaviour is pinned by tests/test_config_verbs.py::TestTodoVerbs::test_bare_is_one_line_the_pad_of_the_configured_count_and_the_backlog. Same class as @ai_mail's apps/modules/email.py introspection rule (inbox works without args). Added 2026-09-15; DELETE this rule if bare `todo` ever becomes the introspection page."
+    },
+    {
+      "file": "apps/__init__.py",
+      "standard": "cli_flags",
+      "reason": "File-wide because the checker names no line. apps/__init__.py is the package marker (one line: from . import handlers), not an entry point; the entry point is apps/memory.py, which answers --version / -V (line 315). Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/__init__.py",
+      "standard": "file_top",
+      "reason": "File-wide because the checker names no line. An empty package marker: it tests no module, so it has no subject line or declared pass to state, and a header on an empty file would be the only content. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/dead_cwd.py",
+      "standard": "file_top",
+      "reason": "File-wide because the checker names no line. Not a test file: the shared definition of the dead-cwd world that the subprocess pins import (it collects no tests). Its long docstring is why the world exists, and items 6 and 7 of the test template describe a file that tests a module. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_auto_process_background.py",
+      "standard": "import_site",
+      "lines": [261],
+      "reason": "The import route is the subject: the helper returns the trigger object through the same import the product makes, because on 3.10 a split worker held two objects and a patch on the other one let a real completion fire (CI run 34088947108). A top-of-file binding is the route that failed. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_repo_root.py",
+      "standard": "stdlib_patch",
+      "lines": [659],
+      "reason": "The only way to make a real directory unlistable for one call without root or platform ACLs. A scandir parameter on exists_exactly would be a door for the test alone (no caller passes it), so the patch stays: monkeypatch scopes it to this test and restores it, and the test asserts the denied listing was the parent. Leg 8 of DPLAN-0354, @devpulse's landing ruling."
+    },
+    {
+      "file": "tests/test_symbolic_parked.py",
+      "standard": "import_site",
+      "lines": [112, 120],
+      "reason": "The import is what is under test: the parked symbolic package (the owner's ruling of 2026-08-14) must refuse every import, the package and each submodule, naming the ruling. A top-of-file import would raise at collection and pin nothing. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_import_isolation.py",
+      "standard": "import_site",
+      "lines": [157],
+      "reason": "The test is about the import itself: it proves conftest's mock still shadows json_handler through `from X import y` at call time. A top-of-file import would bind before the autouse fixture runs and test nothing. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_marker7_memory_lane.py",
+      "standard": "import_site",
+      "lines": [1008],
+      "reason": "The trigger bus package is stood in through sys.modules because the test pins the event _announce_bump fires through its own `from aipass.trigger.apps.modules.core import trigger`; the next line asserts that import reaches the stand-in. It is the only edge between @memory and @trigger's bus that keeps a real event from firing. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_trinity_standard.py",
+      "standard": "import_site",
+      "lines": [462],
+      "reason": "The subject is import time: memory_files is evicted and imported fresh to prove a removed attribute is not re-created by a fresh import. A top-of-file binding is the already-imported module and could not see that. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/intake/auto_process.py",
+      "standard": "logged_fallback",
+      "lines": [124],
+      "reason": "_reclaim_stale_lock answers 'is the lane free now'. False after a failed unlink means the lane is NOT free, which is true; the caller's decision (do not run) is the same as for a live lock, and the failure is logged at error. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/intake/plans_processor.py",
+      "standard": "logged_fallback",
+      "lines": [283],
+      "reason": "_is_stale answers 'process this plan again?'. True when the mtime cannot be compared is the decision, not a failure value: re-vectorizing is the safe answer when the manifest cannot vouch for the file. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/detector.py",
+      "standard": "logged_fallback",
+      "lines": [382, 413],
+      "reason": "_recreate_trinity_file returns the Path it wrote or None; every None (fence refusal, no template, unreadable template, failed write) means 'not recreated', and the success path never returns None: the checker reads the other refusals as success. Each is logged. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "logged_fallback",
+      "lines": [104],
+      "reason": "_check_vector_deps answers 'are chromadb and numpy confirmed importable'. A check that could not run has not confirmed them, so False is the true answer; the self-report reads it as degraded either way. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/registry_scope.py",
+      "standard": "logged_fallback",
+      "lines": [198, 438],
+      "reason": "Both lines are FileNotFoundError: an absent passport declares nothing (None), and an absent declared-roots file declares no roots ([]). That is the answer for an absent file, not a failure value; the unreadable branches (201, 308, 441) are not covered here. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/templates/receipt.py",
+      "standard": "logged_fallback",
+      "lines": [117],
+      "reason": "_write answers 'written'. False on every path that did not write (fence refusal, failed write); the success path returns True only. The checker reads the fence refusal as success. Logged at error. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/templates/spawn_pusher.py",
+      "standard": "logged_fallback",
+      "lines": [131],
+      "reason": "_write_json answers 'written'. False on every path that did not write (fence refusal, failed write); the success path returns True only. The checker reads the fence refusal as success. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/templates/template_bump.py",
+      "standard": "logged_fallback",
+      "lines": [96],
+      "reason": "_read_ledger merges absent and unreadable on purpose: bump_pending counts both as PENDING ('a missing record of a push is not a record of a push') and its reason names both ('never pushed, or lost'). The unreadable case is logged at error. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/modules/rollover_config.py",
+      "standard": "logged_fallback",
+      "lines": [175, 239],
+      "reason": "_resolve_branch and _validate_count return None only after _refuse(ctx, ...) has recorded the refusal and its reason; every None is a refusal and no success returns None. The checker reads the other refusals as success. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/modules/search.py",
+      "standard": "logged_fallback",
+      "lines": [113],
+      "reason": "handle_command answers 'was this command routed here', not 'did it succeed'. An invalid --n is handled: the error is printed to the user and logged, so True is correct and False would send the router looking for another handler. Leg 8 of DPLAN-0354, @memory's decision."
     }
   ],
   "notes": {

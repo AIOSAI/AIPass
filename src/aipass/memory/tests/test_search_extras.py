@@ -3,7 +3,7 @@
 # Description: Tests for search query_executor subprocess encoding and vector search
 # Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # Category: memory/tests
 # =============================================
 
@@ -214,3 +214,49 @@ class TestSearchVectorsSubprocess:
 
         assert result["success"] is False
         assert "Cannot execute" in result["error"]
+
+
+# ===========================================================================
+# Tests: the exact plan-ID pin when its store answer fails (leg 8)
+# ===========================================================================
+
+
+class TestAFailedPlanFetchIsSaidNotReadAsNoMatch:
+    """A store that fails is not a store with no match: the search says so.
+
+    Before leg 8 a non-zero exit of the plan fetch answered [] without a word,
+    the same answer as "no chunk carries this plan ID", so the exact-ID pin
+    vanished silently. The one test here that starts a process runs a stand-in
+    script under tmp_path that exits 3; the store is never opened.
+    """
+
+    def _search(self, monkeypatch, tmp_path, script_text):
+        script = tmp_path / "stand_in_store.py"
+        script.write_text(script_text, encoding="utf-8")
+        monkeypatch.setattr(query_executor, "CHROMA_SUBPROCESS_SCRIPT", script)
+        monkeypatch.setattr(
+            query_executor, "encode_query_subprocess", lambda query: {"success": True, "embedding": [0.0]}
+        )
+        found = {"success": True, "results": [], "collections_searched": 1, "total_results": 0}
+        monkeypatch.setattr(query_executor, "search_vectors_subprocess", lambda **kwargs: found)
+        operations = []
+        monkeypatch.setattr(query_executor.json_handler, "log_operation", lambda name, *a, **k: operations.append(name))
+        said = []
+        monkeypatch.setattr(query_executor.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
+        result = query_executor.execute_search("DPLAN-0012 hooks")
+        assert operations == ["search_execute"]
+        return result, said
+
+    def test_a_store_that_exits_non_zero_is_named(self, monkeypatch, tmp_path):
+        result, said = self._search(monkeypatch, tmp_path, "import sys\nsys.exit(3)\n")
+
+        assert result["results"] == []
+        assert said == ["[search] Plan metadata fetch failed for DPLAN-0012: store exited 3 — exact-ID pin skipped"]
+
+    def test_a_store_that_answers_no_match_says_nothing(self, monkeypatch, tmp_path):
+        """The control: an honest empty answer is not a failure."""
+        answer = '{"success": true, "results": []}'
+        result, said = self._search(monkeypatch, tmp_path, f"print({answer!r})\n")
+
+        assert result["results"] == []
+        assert said == []

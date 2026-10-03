@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # Category: memory/tests
 # =============================================
 
@@ -37,6 +37,8 @@ from aipass.prax import json_handler as _prax_json_service
 # The write fence, captured once at collection so its logger is the real one and
 # no test's sys.modules stand-in can shadow it (see the fixture below).
 from aipass.memory.apps.handlers import write_fence as _write_fence
+from aipass.memory.apps.handlers.monitor import registry_scope
+from aipass.memory.apps.handlers.templates import trinity_push
 from aipass.cli.apps.modules import display
 
 # The branch shim's own file, so the service can resolve memory's json directory
@@ -213,9 +215,6 @@ def live_fleet():
     Returns:
         The repo root holding the core registry.
     """
-    from aipass.memory.apps.handlers.monitor import registry_scope
-    from aipass.memory.apps.handlers.templates import trinity_push
-
     for root in (registry_scope.REPO_ROOT, trinity_push._REPO_ROOT):
         registry = root / registry_scope.CORE_REGISTRY
         if not registry.is_file():
@@ -304,8 +303,6 @@ def live_all_tiers(live_residents):
     Returns:
         The repo root carrying all three tiers.
     """
-    from aipass.memory.apps.handlers.monitor import registry_scope
-
     anchor = live_residents / registry_scope.DECLARED_ROOTS
     if not anchor.is_file():
         pytest.skip(

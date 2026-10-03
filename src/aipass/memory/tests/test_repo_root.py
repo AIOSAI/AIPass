@@ -3,7 +3,7 @@
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
 # Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/repo_root.py."""
@@ -650,12 +650,16 @@ class TestAFilenameIsNotAnExistsCall:
         target = tmp_path / "AIPASS_REGISTRY.json"
         target.write_text("{}", encoding="utf-8")
 
-        def _denied(*args, **kwargs):
+        denied = []
+
+        def _denied(directory):
+            denied.append(directory)
             raise PermissionError(13, "Permission denied")
 
         monkeypatch.setattr(rr.os, "scandir", _denied)
 
         assert rr.exists_exactly(target) is True
+        assert denied == [tmp_path]
 
     def test_the_repo_root_walk_does_not_anchor_on_a_folded_bait_file(self, tmp_path, case_insensitive_exists):
         """The whole reason this guard is in THIS module.
