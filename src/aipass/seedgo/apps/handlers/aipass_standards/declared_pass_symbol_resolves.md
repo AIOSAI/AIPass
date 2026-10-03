@@ -1,6 +1,6 @@
 # Declared Pass Symbol Resolves Standards
 **Status:** v1
-**Date:** 2026-09-25
+**Date:** 2026-10-03
 
 ---
 
@@ -56,6 +56,16 @@ covers it and is never judged.
   source text — the text, not the AST, for the reason H2 records: env-var strings, dataclass
   fields and path segments are real uses the AST's names miss.
 - **A path** resolves when `apps/` has that directory or module, matched as a suffix.
+
+**A real chain is read, never run** (2026-10-03, seedgo fleet green leg 11). The checker used
+to import every declared stdlib head, and a marker naming `this` printed the Zen into a probe
+(`antigravity` would open a browser). Now a module the process already holds is read as it
+stands; a module with Python source is read from that source as names alone (classes with
+their same-file bases, `from x import *` followed); a module with no Python of its own
+(built-in, compiled extension) is imported, because nothing of Python's runs. A source that
+builds its names when it runs (`globals()`, a module `__getattr__`: hashlib's `sha256`) cannot
+be read and is never a conviction. Fleet sweep, the import reader against this one: 0 lines
+flipped.
 
 ## A line that names nothing
 

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_declared_pass_symbol_resolves_check.py
 # Description: declared_pass_symbol_resolves_check — a declared-pass name that resolves nowhere
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/declared_pass_symbol_resolves_check.py."""
@@ -12,6 +12,7 @@
 # seedgo: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
 # seedgo: no-test-needed(shared) — H1 and H2 on the same lines; tests/test_declared_pass_contradiction_check.py
 
+import sys
 from pathlib import Path
 
 from aipass.seedgo.apps.handlers.aipass_standards import declared_pass_symbol_resolves_check as checker
@@ -119,6 +120,54 @@ class TestWhatResolves:
         assert score == 0
         assert "declares handlers/nowhere/ needs no test, but it is no directory or module in apps/" in message
         assert "ceiling" not in message
+
+
+class TestNothingDeclaredIsRun:
+    """The checker judges a declared module by reading it, never by importing it (seedgo, fleet green leg 11)."""
+
+    def test_a_declared_module_is_read_not_imported(self, tmp_path, capsys, monkeypatch):
+        """``this`` prints the Zen when imported, and the leg 10 probe printed it.
+
+        Red first: every declared stdlib head went through import_module.
+        """
+        monkeypatch.delitem(sys.modules, "this", raising=False)
+        product = "import this\n\n\ndef s():\n    return this.s\n"
+        path = _branch(tmp_path, "# seedgo: no-test-needed(stdlib) — this.s behaviour", product=product)
+        assert _verdict(path)[0] == 100
+        assert capsys.readouterr().out == ""
+        assert "this" not in sys.modules
+
+    def test_a_member_read_off_disk_resolves_through_a_base_in_the_same_file(self, tmp_path, monkeypatch):
+        """The control: add_argument lives on ArgumentParser's base, read from argparse's source."""
+        monkeypatch.delitem(sys.modules, "argparse", raising=False)
+        product = "import argparse\n\n\ndef build(parser: argparse.ArgumentParser):\n    parser.add_argument('--x')\n"
+        declared = "# seedgo: no-test-needed(stdlib) — argparse.ArgumentParser.add_argument"
+        assert _verdict(_branch(tmp_path, declared, product=product))[0] == 100
+
+    def test_a_name_a_star_import_brings_in_resolves(self, tmp_path, monkeypatch):
+        """asyncio's Queue arrives by ``from .queues import *``. Its proof is its mutant (star read dropped)."""
+        monkeypatch.delitem(sys.modules, "asyncio", raising=False)
+        product = "import asyncio\n\n\ndef put(queue: asyncio.Queue, item):\n    queue.put_nowait(item)\n"
+        declared = "# seedgo: no-test-needed(stdlib) — asyncio.Queue.put_nowait behaviour"
+        assert _verdict(_branch(tmp_path, declared, product=product))[0] == 100
+
+    def test_a_module_that_builds_its_names_when_it_runs_is_never_a_conviction(self, tmp_path, monkeypatch):
+        """hashlib makes sha256 through globals() at import; reading its source cannot see it.
+
+        Its proof is its mutant: a reader that trusts the source alone convicts api's real line.
+        """
+        monkeypatch.delitem(sys.modules, "hashlib", raising=False)
+        product = "import hashlib\n\n\ndef digest(data):\n    return hashlib.sha256(data)\n"
+        declared = "# seedgo: no-test-needed(stdlib) — hashlib.sha256 behaviour"
+        assert _verdict(_branch(tmp_path, declared, product=product))[0] == 100
+
+    def test_a_member_the_source_lacks_is_still_not_a_real_stdlib_name(self, tmp_path, monkeypatch):
+        """The control: reading off disk still convicts a misspelt member."""
+        monkeypatch.delitem(sys.modules, "argparse", raising=False)
+        declared = "# seedgo: no-test-needed(stdlib) — argparse.ArgumentParser.add_argumentz"
+        message = _verdict(_branch(tmp_path, declared))[1]
+        wanted = "declares argparse.ArgumentParser.add_argumentz needs no test, but it is not a real stdlib name"
+        assert wanted in message
 
 
 class TestWhatIsNeverJudgedHere:

@@ -173,9 +173,30 @@ class TestAReportedFailureIsNotTheSuccessPath:
         body = _function("1", "1").replace("    if value is None:\n        return 1\n", self.SHOWN)
         assert _verdict(tmp_path, body)[0] == 100
 
-    @pytest.mark.parametrize("before", ["logger.error('no value')", "console.error('no value')", "error_count += 1"])
+    def test_a_shown_failure_inside_an_else_is_read_too(self, tmp_path):
+        """error() then return inside an else block is the same shown failure (seedgo, fleet green leg 11).
+
+        Its proof is its mutant: reading only body and not orelse convicts this.
+        """
+        shown = (
+            "    if value is not None:\n        log(value)\n    else:\n        error('no value')\n        return 1\n"
+        )
+        body = _function("1", "1").replace("    if value is None:\n        return 1\n", shown)
+        assert _verdict(tmp_path, body)[0] == 100
+
+    @pytest.mark.parametrize(
+        "before",
+        [
+            "logger.error('no value')",
+            "console.error('no value')",
+            "error_count += 1",
+            "warn('no value')",
+            "print('no value')",
+        ],
+    )
     def test_anything_but_a_bare_error_call_still_convicts(self, tmp_path, before):
-        """The control: a log line, a method named error, or a statement is not a shown failure."""
+        """The control: a log line, a method named error, a statement, or a bare call to
+        another name (warn, print) is not a shown failure."""
         shown = self.SHOWN.replace("error('no value')", before)
         body = _function("1", "1").replace("    if value is None:\n        return 1\n", shown)
         assert _verdict(tmp_path, body)[0] == 0

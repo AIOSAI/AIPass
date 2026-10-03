@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: unused_function_check.py
 # Description: Unused Function Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-22
 # Modified: 2026-10-03
 # =============================================
@@ -62,6 +62,13 @@ _MAIN_BLOCK_RE = re.compile(
 
 
 # -- File collection ----------------------------------------------------------
+
+
+#: A string literal that is a whole dotted path: names or f-string fields, two or more, a name last.
+DOTTED_PATH = re.compile(
+    r"[rRbBuUfF]*(?P<q>['\"])(?:\{[^{}]*\}|[A-Za-z_]\w*)(?:\.(?:\{[^{}]*\}|[A-Za-z_]\w*))*"
+    r"\.(?P<name>[A-Za-z_]\w*)(?P=q)"
+)
 
 
 def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
@@ -139,10 +146,23 @@ def _non_code_spans(tokens: list, lines: list[str]):
         elif fstring_end is not None and tok.type == fstring_end:
             depth -= 1
             if depth == 0:
-                yield opened, tok.end, _field_names(_segment(lines, opened, tok.end)) or []
+                literal = _segment(lines, opened, tok.end)
+                yield opened, tok.end, (_field_names(literal) or []) + _path_target(literal)
         elif depth == 0 and tok.type in (tokenize.STRING, tokenize.COMMENT):
             fields = tok.type == tokenize.STRING and _is_fstring(tok.string)
-            yield tok.start, tok.end, (_field_names(tok.string) or []) if fields else []
+            named = (_field_names(tok.string) or []) if fields else []
+            yield tok.start, tok.end, named + (_path_target(tok.string) if tok.type == tokenize.STRING else [])
+
+
+def _path_target(literal: str) -> list[str]:
+    """The last segment of a string that is a dotted import path and nothing else.
+
+    A registry names a handler by its path and a loader calls it by that name:
+    hooks config/gates.py holds f"{_SECURITY}.edit_gate.tripwire" (seedgo,
+    fleet green leg 11). Prose that mentions a path is not one.
+    """
+    match = DOTTED_PATH.fullmatch(literal)
+    return [match.group("name")] if match else []
 
 
 def _is_fstring(literal: str) -> bool:

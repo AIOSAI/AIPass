@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: unused_function_content.py
 # Description: Unused Function Standards Content Handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-22
 # Modified: 2026-10-03
 # =============================================
@@ -40,6 +40,7 @@ def get_unused_function_standards() -> str:
         "  - String literals (docstrings, multiline and single-line)",
         '  - f-string text; a name in a replacement field ([dim]f"{helper()}"[/dim])',
         "    is code and counts, on every Python version",
+        '  - a string that is a whole dotted path keeps its last name ([dim]f"{ROOT}.gate.handle"[/dim])',
         "  - Comment lines",
         '  - [dim]if __name__ == "__main__":[/dim] blocks',
         "",

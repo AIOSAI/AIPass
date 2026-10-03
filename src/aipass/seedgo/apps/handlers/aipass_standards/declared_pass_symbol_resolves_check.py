@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: declared_pass_symbol_resolves_check.py
 # Description: Declared Pass Symbol Resolves Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -41,6 +41,9 @@ WHAT RESOLVES.
     records: env-var strings, dataclass fields and path segments are real uses.
   * A slash path resolves when ``apps/`` has that directory or module.
 
+A REAL CHAIN IS READ, NEVER RUN (leg 11): no declared module is imported for
+its Python; ``_module`` says how each kind is read.
+
 A LINE THAT NAMES NOTHING is its own finding -- unless its category is itself
 a standard in this pack (``ruff``, ``documentation``, ``cli``). Then the line
 points at the checker that covers it, which is the declaration resolving, and
@@ -53,12 +56,13 @@ does the covering and is never judged.
 """
 
 import ast
-import importlib
 import importlib.util
 import re
 import sys
 from functools import lru_cache
 from pathlib import Path
+from importlib.machinery import ModuleSpec
+from types import ModuleType
 from typing import Dict, FrozenSet, List, Set, Tuple
 
 from aipass.prax import logger
@@ -100,6 +104,26 @@ ELSEWHERE = ("test_", "tests/")
 PACK_DIR = Path(__file__).parent
 
 CURE = "name the symbol the product has, or drop the line"
+
+#: What a name read off a module's source is bound to: it exists, and it is never run.
+STAND_IN = object()
+
+#: A module whose names a reader cannot see: it builds them when it runs. Never a conviction.
+UNKNOWN = object()
+
+#: The source text and the module hook that make a namespace UNKNOWN.
+DYNAMIC_NAMES = "globals()"
+MODULE_HOOK = "__getattr__"
+
+#: The origins of a module that has no Python of its own to run.
+BUILT_IN = "built-in"
+EXTENSIONS = {".so", ".pyd"}
+
+#: A frozen module's origin; its source path is in the spec's loader state.
+FROZEN = "frozen"
+
+#: The try statements a module's top level can branch in (``try``/``except*`` is 3.11+).
+TRY_NODES: Tuple[type, ...] = tuple(node for node in (ast.Try, getattr(ast, "TryStar", None)) if isinstance(node, type))
 
 
 def declarations(source: str) -> List[Tuple[int, str, str]]:
@@ -239,12 +263,147 @@ def _mentions(name: str, text: str) -> bool:
 
 @lru_cache(maxsize=256)
 def _module(name: str) -> object | None:
-    """A stdlib module, imported, or None when it will not import."""
-    try:
-        return importlib.import_module(name)
-    except ImportError as exc:
-        logger.info("[declared_pass_symbol_resolves] Cannot import %s: %s", name, exc)
+    """A stdlib module to judge by, never imported here, or None.
+
+    A checker must not run the code it judges: importing a declared word ran
+    it (``this`` printed the Zen into the leg 10 probe; ``antigravity`` opens a
+    browser). So (seedgo, fleet green leg 11):
+
+      * a module the process already holds is read as it stands;
+      * a module with Python source is read from that source as names alone,
+        and one whose source builds its names at run time (``globals()``, a
+        module ``__getattr__``: hashlib's sha256) answers UNKNOWN;
+      * a module with no Python at all (built into the interpreter, or a
+        compiled extension) has nothing of Python's to run and is imported.
+    """
+    loaded = sys.modules.get(name)
+    if loaded is not None:
+        return loaded
+    spec = importlib.util.find_spec(name.split(".")[0])
+    if spec is None:
         return None
+    source = _source_file(name, spec)
+    if source is not None:
+        return _names_module(name, source)
+    if "." not in name and (spec.origin == BUILT_IN or Path(spec.origin or "").suffix in EXTENSIONS):
+        return importlib.import_module(name)
+    logger.info("[declared_pass_symbol_resolves] No source to read for %s", name)
+    return None
+
+
+def _source_file(name: str, spec: ModuleSpec) -> Path | None:
+    """A module's .py source, found WITHOUT importing it.
+
+    ``spec`` is the top-level name's, from find_spec (a submodule's find_spec
+    would import its package); the rest of the dotted path is walked on disk.
+    A frozen module names its source in the spec's loader state. Every name
+    that reaches here is a stdlib name, so find_spec is not guarded: if it
+    raises, the checker is wrong and says so.
+    """
+    parts = name.split(".")
+    origin = getattr(spec.loader_state, "filename", None) if spec.origin == FROZEN else spec.origin
+    if not origin:
+        return None
+    path: Path | None = Path(origin)
+    locations = list(spec.submodule_search_locations or [])
+    for part in parts[1:]:
+        candidates = [Path(loc) / part / "__init__.py" for loc in locations]
+        candidates += [Path(loc) / f"{part}.py" for loc in locations]
+        path = next((c for c in candidates if c.is_file()), None)
+        if path is None:
+            return None
+        locations = [str(path.parent)] if path.name == "__init__.py" else []
+    return path if path is not None and path.suffix == ".py" else None
+
+
+def _names_module(name: str, path: Path) -> object | None:
+    """A stand-in module built from one source file's top-level names; nothing in it runs.
+
+    A class becomes an empty type holding its own members, with its bases from
+    the same file, so a member a base defines walks. ``from x import *`` brings
+    x's public names the same way (pathlib is built so on 3.13).
+    """
+    source = _read(path)
+    tree = _parse(source, path) if source is not None else None
+    if source is None or tree is None:
+        return None
+    statements = _statements(tree.body)
+    if DYNAMIC_NAMES in source or any(MODULE_HOOK in _bound_names(node) for node in statements):
+        return UNKNOWN
+    module = ModuleType(name)
+    for node in statements:
+        if isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
+            other = _module(_star_target(name, path, node))
+            if other is UNKNOWN:
+                return UNKNOWN
+            _star_into(module, other)
+            continue
+        for bound in _bound_names(node):
+            setattr(module, bound, STAND_IN)
+        if isinstance(node, ast.ClassDef):
+            setattr(module, node.name, _stand_in_class(module, node))
+    return module
+
+
+def _statements(body: List[ast.stmt]) -> List[ast.stmt]:
+    """A body's statements, the branches of an ``if`` or a ``try`` flattened in."""
+    flat: List[ast.stmt] = []
+    for node in body:
+        if isinstance(node, (ast.If, *TRY_NODES)):
+            handlers = [stmt for handler in getattr(node, "handlers", []) for stmt in handler.body]
+            branches = getattr(node, "body", []) + getattr(node, "orelse", []) + handlers
+            branches += getattr(node, "finalbody", [])
+            flat += _statements(branches)
+        else:
+            flat.append(node)
+    return flat
+
+
+def _bound_names(node: ast.stmt) -> List[str]:
+    """The names one statement binds: a def, a class, an assignment, an import."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return [node.name]
+    if isinstance(node, ast.Assign):
+        targets = [elt for target in node.targets for elt in getattr(target, "elts", [target])]
+        return [target.id for target in targets if isinstance(target, ast.Name)]
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return [node.target.id]
+    if isinstance(node, ast.Import):
+        return [alias.asname or alias.name.split(".")[0] for alias in node.names]
+    if isinstance(node, ast.ImportFrom):
+        return [alias.asname or alias.name for alias in node.names]
+    return []
+
+
+def _stand_in_class(module: ModuleType, node: ast.ClassDef) -> type:
+    """An empty type named for the class, carrying its members and its same-file bases."""
+    bases = [getattr(module, base.id, None) for base in node.bases if isinstance(base, ast.Name)]
+    try:
+        cls = type(node.name, tuple(base for base in bases if isinstance(base, type)), {})
+    except TypeError as exc:
+        logger.info("[declared_pass_symbol_resolves] Bases of %s read as none: %s", node.name, exc)
+        cls = type(node.name, (), {})
+    for member in (bound for stmt in _statements(node.body) for bound in _bound_names(stmt)):
+        if not hasattr(cls, member):
+            setattr(cls, member, STAND_IN)
+    return cls
+
+
+def _star_target(name: str, path: Path, node: ast.ImportFrom) -> str:
+    """The dotted module a ``from ... import *`` in module ``name`` reads."""
+    if not node.level:
+        return node.module or ""
+    package = name if path.name == "__init__.py" else name.rpartition(".")[0]
+    for _ in range(node.level - 1):
+        package = package.rpartition(".")[0]
+    return f"{package}.{node.module}" if node.module else package
+
+
+def _star_into(module: ModuleType, other: object | None) -> None:
+    """Copy the public names of a star-imported module (as _module read it) into the stand-in."""
+    for attr in dir(other) if other is not None else []:
+        if not attr.startswith("_"):
+            setattr(module, attr, getattr(other, attr))
 
 
 def _walk(obj: object, parts: List[str]) -> bool:
@@ -273,6 +432,8 @@ def _stdlib_chain(token: str, anchors: Dict[str, Tuple[str, bool]]) -> bool | No
         return None
     for module_name, head_is_module in readings:
         module = _module(module_name)
+        if module is UNKNOWN:
+            return True
         if module is not None and _walk(module, parts[1:] if head_is_module else parts):
             return True
     return False
@@ -284,7 +445,7 @@ def _member_of(module_name: str, name: str) -> bool:
     module = _module(module_name)
     if module is None:
         return False
-    if hasattr(module, name):
+    if module is UNKNOWN or hasattr(module, name):
         return True
     classes = (getattr(module, attr) for attr in dir(module) if attr[:1].isupper())
     return any(isinstance(cls, type) and hasattr(cls, name) for cls in classes)

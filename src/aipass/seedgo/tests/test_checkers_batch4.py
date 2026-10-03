@@ -580,7 +580,34 @@ def test_a_name_in_an_fstring_field_is_a_reference(tmp_path, request, tokenizer,
     assert result["checks"][0]["message"] == "All 1 functions are referenced", result
 
 
-FSTRING_TEXT_USES = ['f"call helper later {1}"', "f'helper'", 'f"{1:helper}"']
+DOTTED_PATH_USES = ['f"{ROOT}.lib.helper"', '"aipass.victim.lib.helper"']
+
+
+@pytest.mark.parametrize("tokenizer", ["host", "older"])
+@pytest.mark.parametrize("use", DOTTED_PATH_USES)
+def test_a_string_that_is_a_dotted_path_names_its_last_segment(tmp_path, request, tokenizer, use):
+    """A registry names a handler by its import path, and a loader calls it (seedgo, fleet green leg 11).
+
+    hooks config/gates.py: f"{_SECURITY}.edit_gate.tripwire". Red first: the
+    string was blanked as prose and tripwire had no caller.
+    """
+    if tokenizer == "older":
+        request.getfixturevalue("older_tokenizer")
+
+    result = _fstring_branch(tmp_path, use)
+
+    assert result["checks"][0]["message"] == "All 1 functions are referenced", result
+
+
+FSTRING_TEXT_USES = [
+    'f"call helper later {1}"',
+    "f'helper'",
+    'f"{1:helper}"',
+    '"see lib.helper for details"',
+    '"lib.helper.txt"',
+    'f"{ROOT}.lib.helper()"',
+    '".helper"',
+]
 
 
 @pytest.mark.parametrize("tokenizer", ["host", "older"])

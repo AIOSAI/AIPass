@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: declared_pass_symbol_resolves_content.py
 # Description: Declared Pass Symbol Resolves Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -39,6 +39,8 @@ def get_declared_pass_symbol_resolves_standards() -> str:
         "  A stdlib name: the chain is real AND the product uses it ([red]os.scandir[/red]: @backup",
         "  never calls it). Anything else: its last segment is a word in apps/ source text.",
         "  A path: apps/ has that directory or module.",
+        "  A chain is [green]read, never run[/green]: no declared module is imported (leg 11).",
+        "  A module that builds its names when it runs (hashlib) is never a conviction.",
         "",
         "[bold cyan]A LINE THAT NAMES NOTHING:[/bold cyan]",
         "  Its own finding -- unless its category is a standard in this pack (ruff,",
