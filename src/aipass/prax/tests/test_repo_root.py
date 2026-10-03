@@ -1,12 +1,14 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Repo-Root Resolution Pins
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.2.0 (2026-10-02): The caller-path guard asked through detect_external_project;
+#     the refresh/status lanes read through AIPASS_REGISTRY (prax, leg 5)
 #   - v1.0.0 (2026-08-31): Initial creation — @memory's dead-cwd report, plus the
 #     second crash site the sweep found in introspection
 #
@@ -48,11 +50,16 @@ import sys
 import textwrap
 from datetime import datetime
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
+from unittest.mock import MagicMock
 
 import pytest
 
 from aipass.prax.apps.handlers import repo_root as repo_root_mod
+from aipass.prax.apps.handlers.config import load as load_mod
 from aipass.prax.apps.handlers.dashboard import agent_status_writer
+from aipass.prax.apps.handlers.dashboard import refresh as refresh_mod
+from aipass.prax.apps.handlers.dashboard import status as status_mod
+from aipass.prax.apps.handlers.logging import introspection
 
 
 def _answer(result) -> str:
@@ -511,19 +518,37 @@ class TestDeadCwd:
         assert "LOGS" in result.stdout, result.stderr
 
 
+def _a_project_around(root: Path, monkeypatch) -> None:
+    """Make ``root`` an external project an unguarded resolve would find.
+
+    A pyproject.toml marks it, and AIPASS_CALLER_CWD points at it, so a caller
+    path that slips past the guard is answered as a project instead of None.
+    The introspection logger is replaced where introspection looks it up, so the
+    "external to AIPass" line goes nowhere.
+    """
+    (root / "pyproject.toml").write_text("", encoding="utf-8")
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(root))
+    monkeypatch.setattr(introspection, "logger", MagicMock())
+
+
 class TestCallerPathResolution:
-    """introspection._resolve_caller_path — the second crash site.
+    """The caller-path guard in introspection — the second crash site.
 
     @memory's traceback stopped at config/load.py because their caller was a real
     absolute file. Run the same probe from a heredoc and detect_branch_from_path
     dies ONE FRAME EARLIER, resolving a relative pseudo-filename.
+
+    Asked through detect_external_project, a public reader of the guard that
+    writes nothing (prax, leg 5): a refused caller is None, and a caller let
+    through inside a marked project outside the checkout is that project.
     """
 
-    def test_a_pseudo_filename_is_not_a_path(self):
-        from aipass.prax.apps.handlers.logging import introspection
+    def test_a_pseudo_filename_is_not_a_path(self, tmp_path, monkeypatch):
+        _a_project_around(tmp_path, monkeypatch)
+        monkeypatch.chdir(tmp_path)
 
-        assert introspection._resolve_caller_path("<stdin>") is None
-        assert introspection._resolve_caller_path("<string>") is None
+        assert introspection.detect_external_project("<stdin>") is None
+        assert introspection.detect_external_project("<string>") is None
 
     def test_a_relative_caller_is_refused_even_when_the_cwd_is_alive(self, tmp_path, monkeypatch):
         """The half the dead-cwd pin cannot see, and the reason this guard exists
@@ -535,33 +560,34 @@ class TestCallerPathResolution:
         guard survives the dead-cwd pin (the try/except catches that) and is
         killed only here.
         """
-        from aipass.prax.apps.handlers.logging import introspection
-
+        _a_project_around(tmp_path, monkeypatch)
         branch_dir = tmp_path / "src" / "aipass" / "someoneelse" / "apps"
         branch_dir.mkdir(parents=True)
         (branch_dir / "mod.py").write_text("", encoding="utf-8")
         monkeypatch.chdir(branch_dir)
 
-        assert introspection._resolve_caller_path("mod.py") is None
+        assert introspection.detect_external_project("mod.py") is None
 
-    def test_an_absolute_caller_still_resolves(self, tmp_path):
-        from aipass.prax.apps.handlers.logging import introspection
-
+    def test_an_absolute_caller_still_resolves(self, tmp_path, monkeypatch):
+        _a_project_around(tmp_path, monkeypatch)
         real = tmp_path / "mod.py"
         real.write_text("", encoding="utf-8")
-        assert introspection._resolve_caller_path(str(real)) == real.resolve()
+
+        found = introspection.detect_external_project(str(real))
+        assert found is not None
+        assert found[1] == real.resolve().parent
 
     def test_an_unresolvable_absolute_path_is_an_answer_not_a_crash(self, monkeypatch, tmp_path):
         """Branch detection is a routing hint. Not knowing where the caller lives
         must never take down the caller's import."""
-        from aipass.prax.apps.handlers.logging import introspection
+        _a_project_around(tmp_path, monkeypatch)
 
         def boom(self, *_args, **_kwargs):
             raise OSError("no cwd")
 
         monkeypatch.setattr(Path, "resolve", boom)
         unresolvable = str(tmp_path / "unresolvable.py")
-        assert introspection._resolve_caller_path(unresolvable) is None
+        assert introspection.detect_external_project(unresolvable) is None
 
 
 class TestBothConstructionsAgree:
@@ -805,14 +831,14 @@ class TestEveryLaneUsesTheSharedResolver:
 
     def test_the_lanes_agree_with_the_shared_answer(self):
         """Behavioural, not just structural: same question, one answer."""
-        from aipass.prax.apps.handlers.config import load as load_mod
-        from aipass.prax.apps.handlers.dashboard import refresh as refresh_mod
-        from aipass.prax.apps.handlers.dashboard import status as status_mod
-
         expected = repo_root_mod.find_repo_root()
+        # refresh and status publish their answer as AIPASS_REGISTRY, built from
+        # it at import. load's one public reader is get_system_logs_dir outside a
+        # pytest session, whose far side is a mkdir in the live system_logs, so
+        # load's lane is still asked by name (prax, leg 5: HELD, no door for a test).
         assert load_mod._find_repo_root() == expected
-        assert refresh_mod._find_repo_root() == expected
-        assert status_mod._find_repo_root() == expected
+        assert refresh_mod.AIPASS_REGISTRY == expected / "AIPASS_REGISTRY.json"
+        assert status_mod.AIPASS_REGISTRY == expected / "AIPASS_REGISTRY.json"
 
 
 # =============================================================================

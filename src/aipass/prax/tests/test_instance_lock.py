@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_instance_lock.py
 # Description: Tests for the monitor single-instance lock
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-07-10
-# Modified: 2026-09-29
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/instance_lock.py."""
@@ -44,53 +44,70 @@ def lock_world(monkeypatch, tmp_path):
     monkeypatch.setattr(mod, "_held_lock", None)
 
 
+def _held_by(tmp_path, pid: int) -> None:
+    """A lock file from an earlier relay, with no boot id: try_acquire decides by liveness alone."""
+    (tmp_path / "relay.pid").write_text(json.dumps({"pid": pid}), encoding="utf-8")
+
+
 class TestIsPidAlive:
-    """Test cross-platform PID liveness check."""
+    """Test cross-platform PID liveness check, read through try_acquire (prax, leg 5).
 
-    def test_live_pid_returns_true_posix(self):
+    The liveness verdict has one reader, try_acquire: a live holder refuses the
+    lock (False), a dead one is reclaimed (True). Each verdict is asserted there.
+    """
+
+    def test_live_pid_returns_true_posix(self, tmp_path):
         """os.kill(pid, 0) success means alive on POSIX."""
-        with patch("sys.platform", "linux"), patch("os.kill"):
-            assert mod._is_pid_alive(os.getpid()) is True
+        _held_by(tmp_path, 4242)
+        with patch("sys.platform", "linux"), patch("os.kill") as kill:
+            assert mod.try_acquire() is False
+        kill.assert_called_once_with(4242, 0)
 
-    def test_dead_pid_returns_false(self):
+    def test_dead_pid_returns_false(self, tmp_path):
         """Non-existent PID returns False on POSIX."""
+        _held_by(tmp_path, 99999999)
         with patch("sys.platform", "linux"), patch("os.kill", side_effect=ProcessLookupError):
-            assert mod._is_pid_alive(99999999) is False
+            assert mod.try_acquire() is True
 
-    def test_permission_error_means_alive(self):
+    def test_permission_error_means_alive(self, tmp_path):
         """PermissionError means the process exists but is owned by another user."""
+        _held_by(tmp_path, 1)
         with patch("sys.platform", "linux"), patch("os.kill", side_effect=PermissionError):
-            assert mod._is_pid_alive(1) is True
+            assert mod.try_acquire() is False
 
-    def test_generic_oserror_returns_false(self):
+    def test_generic_oserror_returns_false(self, tmp_path):
         """Other OSError returns False."""
+        _held_by(tmp_path, 12345)
         with patch("sys.platform", "linux"), patch("os.kill", side_effect=OSError(99, "Unknown")):
-            assert mod._is_pid_alive(12345) is False
+            assert mod.try_acquire() is True
 
-    def test_windows_delegates_to_pid_alive_windows(self):
+    def test_windows_delegates_to_pid_alive_windows(self, tmp_path):
         """On win32, _is_pid_alive delegates to _pid_alive_windows."""
+        _held_by(tmp_path, 1234)
         with (
             patch("sys.platform", "win32"),
             patch.object(mod, "_pid_alive_windows", return_value=True) as mock_win,
         ):
-            assert mod._is_pid_alive(1234) is True
+            assert mod.try_acquire() is False
             mock_win.assert_called_once_with(1234)
 
-    def test_windows_dead_pid(self):
+    def test_windows_dead_pid(self, tmp_path):
         """On win32, dead PID returns False via _pid_alive_windows."""
+        _held_by(tmp_path, 99999999)
         with (
             patch("sys.platform", "win32"),
             patch.object(mod, "_pid_alive_windows", return_value=False),
         ):
-            assert mod._is_pid_alive(99999999) is False
+            assert mod.try_acquire() is True
 
-    def test_windows_ctypes_failure_assumes_alive(self):
+    def test_windows_ctypes_failure_assumes_alive(self, tmp_path):
         """On win32, if ctypes fails, assume the process is alive (safe default)."""
+        _held_by(tmp_path, 1234)
         with (
             patch("sys.platform", "win32"),
             patch.object(mod, "_pid_alive_windows", side_effect=OSError("ctypes failed")),
         ):
-            assert mod._is_pid_alive(1234) is True
+            assert mod.try_acquire() is False
 
 
 class TestTryAcquire:
@@ -149,10 +166,13 @@ class TestTryAcquire:
 class TestBootIdentity:
     """Test cross-boot staleness detection (relay.pid outliving a reboot)."""
 
-    def test_current_boot_id_returns_none_when_unreadable(self):
-        """Platforms without /proc get None rather than an exception."""
+    def test_current_boot_id_returns_none_when_unreadable(self, tmp_path):
+        """Platforms without /proc get None rather than an exception: the lock is taken with no boot id."""
         with patch("pathlib.Path.read_text", side_effect=OSError("no /proc")):
-            assert mod._current_boot_id() is None
+            assert mod.try_acquire() is True
+
+        data = json.loads((tmp_path / "relay.pid").read_text(encoding="utf-8"))
+        assert "boot_id" not in data
 
     # The guard names the platform that HAS the recipe, not one platform that
     # lacks it. It used to read `sys.platform == "win32"`, which let this run on
@@ -163,13 +183,23 @@ class TestBootIdentity:
     # patches the read and so runs on every OS.
     @pytest.mark.skipif(
         sys.platform != "linux",
-        reason="reads /proc/sys/kernel/random/boot_id - no procfs on this host; the recipe is unavailable, not the state",
+        reason="reads /proc/sys/kernel/random/boot_id - no procfs here; the recipe is unavailable, not the state",
     )
-    def test_current_boot_id_reads_proc_on_linux(self):
-        """Linux exposes a non-empty boot id that is stable within a boot."""
-        boot_id = mod._current_boot_id()
-        assert boot_id
-        assert boot_id == mod._current_boot_id()
+    def test_current_boot_id_reads_proc_on_linux(self, tmp_path):
+        """Linux exposes a non-empty boot id that is stable within a boot.
+
+        Read through the lock it is written into: two acquisitions in one boot
+        record the same, non-empty id.
+        """
+        lock_path = tmp_path / "relay.pid"
+        assert mod.try_acquire() is True
+        first = json.loads(lock_path.read_text(encoding="utf-8")).get("boot_id")
+        mod.release()
+        assert mod.try_acquire() is True
+        second = json.loads(lock_path.read_text(encoding="utf-8")).get("boot_id")
+
+        assert first
+        assert first == second
 
     def test_lock_file_records_boot_id(self, tmp_path):
         """A freshly acquired lock carries the current boot id."""
@@ -265,6 +295,17 @@ class TestBootIdentity:
         assert "boot_id" not in data
 
 
+def _a_later_holder_survives_release(tmp_path) -> bool:
+    """The hold is cleared when a lock written after the release outlives another release() (prax, leg 5).
+
+    release() deletes only the file it holds, so this is the cleared hold seen from outside.
+    """
+    lock_path = tmp_path / "relay.pid"
+    lock_path.write_text("held by someone else", encoding="utf-8")
+    mod.release()
+    return lock_path.exists()
+
+
 class TestRelease:
     """Test relay lock release."""
 
@@ -279,10 +320,10 @@ class TestRelease:
         assert not lock_path.exists()
 
     def test_clears_held_lock_state(self, tmp_path):
-        """release() clears the _held_lock global."""
+        """release() clears the hold: a second release leaves a lock someone else has since written."""
         mod.try_acquire()
         mod.release()
-        assert mod._held_lock is None
+        assert _a_later_holder_survives_release(tmp_path)
 
     def test_release_without_acquire_is_safe(self, tmp_path):
         """release() is a no-op when no lock is held.
@@ -300,7 +341,6 @@ class TestRelease:
         log.info.assert_not_called()
         log.warning.assert_not_called()
         assert lock_path.exists()
-        assert mod._held_lock is None
 
     def test_release_handles_already_deleted_file(self, tmp_path):
         """release() handles the case where the lock file was already deleted."""
@@ -309,7 +349,7 @@ class TestRelease:
         mod.try_acquire()
         lock_path.unlink()
         mod.release()
-        assert mod._held_lock is None
+        assert _a_later_holder_survives_release(tmp_path)
 
 
 class TestConcurrentViewers:

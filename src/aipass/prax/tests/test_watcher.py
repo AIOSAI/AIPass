@@ -20,8 +20,11 @@
 import subprocess
 import sys
 import threading
+import time as _time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 # ============================================================================
@@ -419,10 +422,6 @@ class TestDiscoveryWatcher:
 # against the broken code. The thread has to be real for the assertion to mean
 # anything (prax observation, 2026-08-10: "a mocked output surface cannot fail").
 
-import time as _time
-
-import pytest
-
 
 class TestDispatcherSurvivesHandlerFailure:
     """The discovery handler must never be able to kill its own dispatcher."""
@@ -449,6 +448,20 @@ class TestDispatcherSurvivesHandlerFailure:
             pytest.skip(f"cannot start a real observer here: {e}")
         return observer
 
+    def _close_the_far_side(self, mod, monkeypatch, tmp_path: Path) -> MagicMock:
+        """Stub what a registering on_created reaches past the registry and the bus (prax, leg 5).
+
+        The two log-dir resolvers answer from the AIPASS_TEST_LOG_DIR temp dir and make
+        it when asked, and the module logger writes wherever this process routes it;
+        each is replaced at the name the watcher looks it up by, so nothing leaves tmp_path.
+        Returns the logger recorder.
+        """
+        monkeypatch.setattr(mod, "get_system_logs_dir", lambda: tmp_path / "system_logs")
+        monkeypatch.setattr(mod, "get_module_logs_dir", lambda name: tmp_path / name / "logs")
+        recorder = MagicMock()
+        monkeypatch.setattr(mod, "logger", recorder)
+        return recorder
+
     def test_a_vanishing_file_does_not_kill_the_dispatcher(self, tmp_path, monkeypatch):
         """THE regression pin: the exact 02:19 event, end to end, real threads.
 
@@ -463,6 +476,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "should_ignore_path", lambda p: p.parent != tmp_path)
         # A stat that wins the race registers the file; its fire must not reach the real bus.
         monkeypatch.setattr(mod, "_get_trigger", lambda: None)
+        self._close_the_far_side(mod, monkeypatch, tmp_path)
 
         observer = self._start_real_observer(mod, tmp_path)
         try:
@@ -495,6 +509,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "should_ignore_path", lambda p: p.parent != tmp_path)
         # A stat that wins the race registers the file; its fire must not reach the real bus.
         monkeypatch.setattr(mod, "_get_trigger", lambda: None)
+        self._close_the_far_side(mod, monkeypatch, tmp_path)
 
         observer = self._start_real_observer(mod, tmp_path)
         try:
@@ -651,6 +666,7 @@ class TestDispatcherSurvivesHandlerFailure:
 
         saved = {}
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
+        self._close_the_far_side(mod, monkeypatch, tmp_path)
 
         real_file = tmp_path / "keeper.py"
         real_file.write_bytes(b"y = 2\n")  # binary: exactly 6 bytes on every platform
@@ -665,6 +681,9 @@ class TestDispatcherSurvivesHandlerFailure:
         assert "keeper" in saved, "a perfectly good new module was not registered"
         assert saved["keeper"]["size"] == real_file.stat().st_size
         assert saved["keeper"]["size"] == 6, "binary write should be 6 bytes on every platform"
+        # The log paths come from the resolvers the watcher looks up, stubbed onto tmp_path
+        assert saved["keeper"]["system_log_file"] == str(tmp_path / "system_logs" / "prax_keeper.log")
+        assert saved["keeper"]["log_file"] == str(tmp_path / "prax" / "logs" / "keeper.log")
         assert asked == [real_file], "the ignore filter was never consulted"
         bus.fire.assert_called_once_with(
             "module_discovered", module_name="keeper", file_path=str(real_file), relative_path="keeper.py"
@@ -683,6 +702,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "_get_trigger", lambda: MagicMock())
         saved = {}
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
+        self._close_the_far_side(mod, monkeypatch, tmp_path)
 
         handler = mod.PythonFileWatcher()
         for rel in ("dropbox/handed.py", ".archive/old.py", "apps/live.py"):
