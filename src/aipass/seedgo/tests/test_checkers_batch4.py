@@ -140,6 +140,34 @@ class TestTodoCheck:
         assert result["score"] == 0
         assert any("TODO" in c["message"] for c in result["checks"])
 
+    def test_todo_tag_inside_a_string_is_not_a_comment(self, mock_json, tmp_path: Path) -> None:
+        """A hash-TODO inside a string literal is text, not a comment (fleet green leg 13).
+
+        Red first: the line scan read the string on one line and the second line of
+        an assigned triple-quoted string as comments and scored 0.
+        """
+        py_file = tmp_path / "specimen.py"
+        _write_file(py_file, ('text = "# TODO: a specimen"\nblock = """\n# FIXME: also text\n"""\n'))
+        result = todo_check_module(str(py_file))
+        assert result["score"] == 100
+        assert result["checks"][0]["message"] == "No TODO/FIXME/HACK/XXX comments found"
+
+    def test_todo_real_comment_beside_a_string_still_convicts(self, mock_json, tmp_path: Path) -> None:
+        """Control: a real hash-TODO comment after a string on the same line is still one."""
+        py_file = tmp_path / "beside.py"
+        _write_file(py_file, ('text = "# fine"  # TODO: real\n'))
+        result = todo_check_module(str(py_file))
+        assert result["score"] == 0
+        assert result["checks"][0]["message"] == "Found 1 TODO-type comment (TODO: 1)"
+
+    def test_todo_untokenizable_file_fails_by_name(self, mock_json, tmp_path: Path) -> None:
+        """A file Python cannot tokenize has unknown comments: it fails by name, never reads clean."""
+        py_file = tmp_path / "unclosed.py"
+        _write_file(py_file, ('text = """never closed\n'))
+        result = todo_check_module(str(py_file))
+        assert result["score"] == 0
+        assert result["checks"][0]["name"] == "File tokenizable"
+
     def test_todo_bypass_respected(self, mock_json, tmp_path: Path) -> None:
         """Bypass rules produce score=100."""
         py_file = tmp_path / "bypassed.py"

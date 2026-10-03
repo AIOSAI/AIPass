@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-15
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -50,6 +50,9 @@ from aipass.seedgo.apps.handlers.aipass_standards import applicability
 
 # .seedgoignore — gitignore-style per-directory + global default (tools/)
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
+
+# Bypass rules whose scope the checker cannot honour (a lines rule on a checker that passes no line)
+from aipass.seedgo.apps.handlers.bypass import inert
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -176,7 +179,10 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
         prototype: If True, skip all standards (disposable code).
 
     Returns:
-        List of result dicts: [{"standard": str, "passed": bool, "detail": str|None}]
+        List of result dicts: [{"standard": str, "passed": bool, "detail": str|None}].
+        A result also carries "bypass_notes" (list of str) when a bypass rule for
+        this file and standard has a scope the checker cannot honour; the notes
+        never change "passed".
     """
     resolved = str(Path(file_path).resolve())
 
@@ -235,7 +241,11 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
             # Extract concise failure detail from checks
             detail = _format_failure(r)
 
-        results.append({"standard": name, "passed": passed, "detail": detail})
+        result = {"standard": name, "passed": passed, "detail": detail}
+        notes = inert.inert_notes(resolved, name, bypass_rules)
+        if notes:
+            result["bypass_notes"] = notes
+        results.append(result)
 
     if not results:
         return [{"standard": "(skip)", "passed": True, "detail": "No applicable checkers for this file"}]
@@ -340,6 +350,15 @@ def _print_results(results: List[Dict], file_path: str) -> None:
 
     if all_passed:
         console.print(f"[green]All {len(results)} standards passed[/green]")
+
+    # Notes, never the finding marker: each verdict above is the checker's. Fenced
+    # off by a blank line because hooks' auto_fix rejoins a finding's wrapped
+    # detail until one, and a note is no part of any finding.
+    notes = [(r["standard"], note) for r in results for note in r.get("bypass_notes", [])]
+    if notes:
+        console.print()
+    for std, note in notes:
+        console.print(f"  [yellow]inert bypass[/yellow] \u2014 {std}: {note}")
 
 
 def _is_skip_or_error(results: List[Dict]) -> bool:

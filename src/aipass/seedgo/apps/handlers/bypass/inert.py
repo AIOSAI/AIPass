@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inert.py
-# Description: Detects bypass rules that can never match, for the audit info channel
-# Version: 1.0.0
+# Description: Detects bypass rules that can never match, for the audit info channel and the checklist
+# Version: 1.1.0
 # Created: 2026-08-09
-# Modified: 2026-08-09
+# Modified: 2026-10-03
 # =============================================
 
 """Detects bypass rules whose declared scope can never be evaluated.
@@ -181,6 +181,33 @@ def inert_scopes(rule: dict) -> Tuple[str, ...]:
         evaluable = set().union(*support.values()) if support else set()
 
     return tuple(key for key in declared if key not in evaluable)
+
+
+def inert_notes(file_path: str, standard: str, bypass_rules: list | None) -> list[str]:
+    """One line per rule naming this file and standard whose scope can never match.
+
+    The checklist prints these beside the standard's verdict (seedgo fleet green
+    leg 13): a ``lines`` rule against a checker that passes no line closes
+    nothing, and before this nothing said so in the lane the edit hook runs. The
+    file and standard are matched as :func:`bypass.utils.matching_rule` matches
+    them; only the scope is judged here, by :func:`inert_scopes`. A note, not a
+    finding: the verdict is the checker's and stays as it was.
+    """
+    file_posix = Path(file_path).as_posix()
+    notes = []
+    for rule in bypass_rules or []:
+        if not isinstance(rule, dict) or rule.get("standard") != standard:
+            continue
+        rule_file = rule.get("file") or ""
+        if not rule_file or Path(rule_file).as_posix() not in file_posix:
+            continue
+        for key in inert_scopes(rule):
+            passed = "line" if key == "lines" else "name"
+            notes.append(
+                f"bypass rule '{key}' {rule[key]} closes nothing: this checker passes no {passed}, "
+                f"so only a file-wide rule bypasses it"
+            )
+    return notes
 
 
 @lru_cache(maxsize=1)

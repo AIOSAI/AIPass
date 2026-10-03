@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checklist.py
 # Description: Unit tests for the checklist module
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/checklist.py."""
@@ -590,3 +590,75 @@ def test_the_not_judged_line_is_fenced_off_from_the_last_finding(tmp_path, monke
     at = next(i for i, line in enumerate(lines) if line.startswith("Not judged here"))
     assert lines[at - 1] == ""
     assert rendered.count("[FAIL]") == 1
+
+
+# ---------------------------------------------------------------------------
+# Inert bypass rules (fleet green leg 13): a lines rule against a checker that
+# passes no line closes nothing; the checklist names it, and changes no verdict.
+# The scope map is the real one, read from the checker sources: todo passes no
+# line, cli does.
+# ---------------------------------------------------------------------------
+
+
+def _with_rules(tmp_path, monkeypatch, capsys, rules, passing=True):
+    """handle_command's output and run_checklist's results on thing.py, one todo row and one cli row."""
+    verdict = {"passed": True} if passing else {"passed": False, "checks": [{"passed": False, "message": "bad"}]}
+    row = SimpleNamespace(AUDIT_SCOPE="all_files", check_module=lambda path, bypass_rules=None: verdict)
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path=None: {"todo": row, "cli": row})
+    monkeypatch.setattr(checklist, "get_branch_from_path", lambda file_path: {"path": str(tmp_path)})
+    monkeypatch.setattr(checklist, "load_bypass_rules", lambda branch_path: rules)
+    target = tmp_path / "thing.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    results = checklist.run_checklist(str(target))
+    assert checklist.handle_command("checklist", [str(target)]) is True
+    return capsys.readouterr().out, {r["standard"]: r for r in results}
+
+
+def test_a_lines_rule_on_a_checker_that_passes_no_line_is_named(tmp_path, monkeypatch, capsys):
+    """Red first: the rule sat in bypass.json and the checklist said nothing at all.
+
+    Mutants in apps/handlers/bypass/inert.py and apps/modules/checklist.py, each
+    killed at an assert here or below: inert_notes returns []; the standard match
+    is dropped; the result never carries the notes.
+    """
+    rules = [{"file": "thing.py", "standard": "todo", "lines": [3], "reason": "r"}]
+    rendered, results = _with_rules(tmp_path, monkeypatch, capsys, rules)
+
+    note = "bypass rule 'lines' [3] closes nothing: this checker passes no line, so only a file-wide rule bypasses it"
+    assert results["todo"].get("bypass_notes") == [note]
+    assert results["todo"]["passed"] is True
+    assert results["cli"].get("bypass_notes") is None, "the todo rule is no note on the cli row"
+    assert f"inert bypass — todo: {note}" in rendered
+    assert "All 2 standards passed" in rendered
+    assert "[FAIL]" not in rendered
+
+
+def test_a_rule_the_checker_can_honour_is_not_named(tmp_path, monkeypatch, capsys):
+    """Controls: a lines rule on cli (which passes a line), a file-wide todo rule, and
+    a lines todo rule for another file each draw no note."""
+    rules = [
+        {"file": "thing.py", "standard": "cli", "lines": [3], "reason": "r"},
+        {"file": "thing.py", "standard": "todo", "reason": "r"},
+        {"file": "other.py", "standard": "todo", "lines": [3], "reason": "r"},
+    ]
+    rendered, results = _with_rules(tmp_path, monkeypatch, capsys, rules)
+
+    assert "bypass_notes" not in results["todo"]
+    assert "bypass_notes" not in results["cli"]
+    assert "inert bypass" not in rendered
+
+
+def test_the_inert_note_is_fenced_off_from_the_last_finding(tmp_path, monkeypatch, capsys):
+    """hooks' auto_fix rejoins a finding's wrapped detail until a blank line, so a note
+    after a finding is fenced by one and never read as part of it."""
+    rules = [{"file": "thing.py", "standard": "todo", "lines": [3], "reason": "r"}]
+    rendered, _ = _with_rules(tmp_path, monkeypatch, capsys, rules, passing=False)
+    lines = rendered.splitlines()
+
+    found = [i for i, line in enumerate(lines) if "inert bypass" in line]
+    assert len(found) == 1, rendered
+    at = found[0]
+    assert lines[at - 1] == ""
+    assert lines[at - 2].endswith("[FAIL] — todo: bad")
+    assert rendered.count("[FAIL]") == 2

@@ -185,7 +185,19 @@ and a **required reason**. Checkers call `is_bypassed()` per violation;
 documented deviation — not a way to ignore a rule.
 
 `bypass/inert.py` derives inert (unreachable) rules from the checker ASTs: a rule that could
-never match anything the checker can produce is noise, and it says so.
+never match anything the checker can produce is noise, and it says so. The audit says it on
+its info channel, under its caveat. The checklist says it too (2026-10-03, seedgo fleet
+green leg 13). For a rule that names the file and standard being checked, with a `lines` or
+`functions` scope that checker never passes, it prints an `inert bypass` note after the
+verdicts, fenced off by a blank line. The note never changes a verdict. Without it, a rule
+like this sits in `bypass.json` and closes nothing, and nothing says so: trigger measured a
+line-scoped `introspection` rule at 85 and the same rule file-wide at 100. The map is read
+from the checker sources, so a checker that starts passing a line drops off it. On
+2026-10-03 the checkers that pass no line were: architecture, cli_flags, cli_ux,
+commented_logger, dead_code, deep_nesting, documentation, error_handling, handler_import,
+handlers, imports, introspection, json_handler, json_structure, log_structure, meta,
+modules, naming, readme, readme_quality, ruff_check, shebang, silent_catch,
+subcommand_help, template, test_quality, todo and trigger.
 
 A score of 100 with documented exceptions under it is a real score, not a clean sheet — read
 the rules with it.
