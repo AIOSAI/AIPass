@@ -14,6 +14,7 @@
 
 import sys
 from pathlib import Path
+from types import ModuleType
 
 from aipass.seedgo.apps.handlers.aipass_standards import declared_pass_symbol_resolves_check as checker
 
@@ -120,6 +121,49 @@ class TestWhatResolves:
         assert score == 0
         assert "declares handlers/nowhere/ needs no test, but it is no directory or module in apps/" in message
         assert "ceiling" not in message
+
+
+class TestAWordInProseIsNotAModule:
+    """A bare stdlib word is a module only where code imports it (seedgo, fleet green leg 12)."""
+
+    def test_english_that_spells_a_module_is_prose(self, tmp_path):
+        """hooks tests/test_cadence.py:21: 'this' and 'platform' are English on that line.
+
+        Red first: both were read as modules the product never uses.
+        """
+        product = "import fcntl\n\n\ndef lock(f):\n    fcntl.flock(f, fcntl.LOCK_EX)\n"
+        prose = "fcntl, unavailable on Windows; the platform fallback never runs on this CI"
+        declared = f"# seedgo: no-test-needed(stdlib) — {prose}"
+        assert _verdict(_branch(tmp_path, declared, product=product)) == (
+            100,
+            "Every name the declared pass mentions resolves",
+        )
+
+    def test_a_module_written_as_an_owner_is_a_module(self, tmp_path):
+        """seedgo tests/test_checklist.py:13: "argparse's own parsing", imported by no code here.
+
+        Its proof is its mutant: read by imports alone, the line names nothing at all.
+        """
+        product = "def build(parser):\n    return parser.parse_args()  # an argparse parser\n"
+        declared = "# seedgo: no-test-needed(stdlib) — argparse's own parsing of the flag list"
+        assert _verdict(_branch(tmp_path, declared, product=product))[0] == 100
+
+    def test_a_stand_in_module_with_no_spec_is_no_library(self, tmp_path, monkeypatch):
+        """A test's sys.modules stand-in has no __spec__; it is read as no library (seedgo, fleet green leg 12).
+
+        Green before the leg too (an except answered False); its mutant dies only by an escaping ValueError.
+        """
+        monkeypatch.setitem(sys.modules, "fakelib", ModuleType("fakelib"))
+        score, message = _verdict(_branch(tmp_path, "# seedgo: no-test-needed(stdlib) — fakelib usage"))
+        assert score == 0
+        assert "declares (stdlib) needs no test, but it names nothing at all" in message
+
+    def test_a_bare_module_the_test_imports_is_still_judged(self, tmp_path):
+        """The control: shutil is imported by the test file and never used by the product."""
+        declared = "# seedgo: no-test-needed(stdlib) — shutil usage"
+        score, message = _verdict(_branch(tmp_path, declared, imports="import shutil"))
+        assert score == 0
+        assert "declares shutil needs no test, but it is stdlib, but the product never uses it" in message
 
 
 class TestNothingDeclaredIsRun:

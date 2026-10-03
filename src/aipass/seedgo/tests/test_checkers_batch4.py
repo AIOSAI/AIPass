@@ -487,6 +487,8 @@ def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_log, tmp_
 
     assert result["score"] > 0
     assert "error" not in result
+    # A file Python cannot parse is named, not counted as a file with no functions (seedgo, fleet green leg 12).
+    assert result.get("unparsed") == ["apps/midsave.py"]
     # The completed scan is logged last, with what it measured: alpha has no caller, beta has one.
     # (json_handler is the fleet's shared shim, so the .seedgoignore load logs through it first.)
     mock_log.assert_called_with(
@@ -607,6 +609,8 @@ FSTRING_TEXT_USES = [
     '"lib.helper.txt"',
     'f"{ROOT}.lib.helper()"',
     '".helper"',
+    "\"use 'lib.helper' here\"",
+    "f\"use '{ROOT}.lib.helper' here\"",
 ]
 
 

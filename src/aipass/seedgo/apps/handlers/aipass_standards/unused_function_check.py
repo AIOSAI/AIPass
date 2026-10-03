@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: unused_function_check.py
 # Description: Unused Function Standards Checker Handler
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-22
 # Modified: 2026-10-03
 # =============================================
@@ -331,18 +331,22 @@ def _overrides(tree: ast.AST) -> set[int]:
     return found
 
 
-def _extract_functions(py_file: Path) -> list[tuple[str, int]]:
+def _extract_functions(py_file: Path) -> list[tuple[str, int]] | None:
     """
     Parse a .py file with AST and return (function_name, line_number) for each
     FunctionDef / AsyncFunctionDef that is not excluded, has no decorators and
     does not override a method of an imported base class.
+
+    None when Python cannot parse the file (a file caught mid-save): nothing in
+    it was judged, which is not the same answer as a file with no functions, so
+    check_branch names it under ``unparsed`` (seedgo, fleet green leg 12).
     """
     try:
         source = py_file.read_text(encoding="utf-8", errors="ignore")
         tree = ast.parse(source, filename=str(py_file))
     except SyntaxError:
         logger.info("Skipped %s: SyntaxError during parse", py_file)
-        return []
+        return None
 
     overrides = _overrides(tree)
     results: list[tuple[str, int]] = []
@@ -453,8 +457,13 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     # Phase 3: Extract function definitions from all files
     all_functions: list[tuple[str, int, Path]] = []
+    unparsed: list[str] = []
     for py_file in py_files:
-        for func_name, lineno in _extract_functions(py_file):
+        functions = _extract_functions(py_file)
+        if functions is None:
+            unparsed.append(py_file.relative_to(branch).as_posix())
+            continue
+        for func_name, lineno in functions:
             all_functions.append((func_name, lineno, py_file))
 
     total_functions = len(all_functions)
@@ -475,6 +484,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
                 }
             ],
             "standard": "UNUSED_FUNCTION",
+            "unparsed": unparsed,
         }
 
     # Phase 4: For each function, check if it has references beyond its definition
@@ -561,4 +571,5 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         "score": score,
         "checks": checks,
         "standard": "UNUSED_FUNCTION",
+        "unparsed": unparsed,
     }

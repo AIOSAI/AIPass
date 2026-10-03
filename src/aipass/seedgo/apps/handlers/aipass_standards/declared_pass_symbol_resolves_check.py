@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: declared_pass_symbol_resolves_check.py
 # Description: Declared Pass Symbol Resolves Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-25
 # Modified: 2026-10-03
 # =============================================
@@ -27,7 +27,8 @@ out of the prose: a dotted name (``os.path.getsize``), a name ending in ``()``,
 an ``_``-prefixed name, a CamelCase name, and a slash path (``handlers/readme/``,
 a module path). On a ``(stdlib)`` line a bare word that is an importable module
 (``shutil``, ``pathspec``) is one too, because that line's whole claim is "this
-module". A bare UPPER or snake_case name is H2's and is not judged twice here.
+module" -- a stdlib word only where code imports it or the prose writes it as
+an owner (``_imported_modules``, leg 12). A bare UPPER or snake_case name is H2's and is not judged twice here.
 
 WHAT RESOLVES.
   * A name whose head is a stdlib module, or a name the branch imports from
@@ -90,6 +91,9 @@ SLASHED = re.compile(r"(?<![\w./])([\w.-]+/(?:[\w.-]+/?)*)")
 
 #: A bare word, read as a module name on a (stdlib) line only.
 WORD = re.compile(r"(?<![\w./])([a-z][a-z0-9_]*)\b")
+
+#: A bare word written as an owner (``argparse's``, ``mimetypes'``): prose naming a module.
+POSSESSIVE = re.compile(r"(?<![\w./])([a-z][a-z0-9_]*)'(?:s\b|(?!\w))")
 
 #: H2's two shapes (declared_pass_contradiction): a bare name in either is judged there.
 H2_UPPER = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[A-Z]{3,}")
@@ -453,14 +457,18 @@ def _member_of(module_name: str, name: str) -> bool:
 
 @lru_cache(maxsize=512)
 def _is_library(word: str) -> bool:
-    """Whether a bare word is an installed third-party top-level module."""
+    """Whether a bare word is an installed third-party top-level module.
+
+    A module the process already holds answers from its own spec, so a test's
+    stand-in (``sys.modules[word] = ModuleType(word)``, no ``__spec__``) is no
+    library -- find_spec raised ValueError on exactly that, and the old except
+    hid it behind the same False a real answer gives (seedgo, fleet green leg
+    12). find_spec on a bare top-level word imports nothing.
+    """
     if _is_stdlib(word):
         return False
-    try:
-        spec = importlib.util.find_spec(word)
-    except (ImportError, ValueError) as exc:
-        logger.info("[declared_pass_symbol_resolves] No spec for %s: %s", word, exc)
-        return False
+    loaded = sys.modules.get(word)
+    spec = getattr(loaded, "__spec__", None) if loaded is not None else importlib.util.find_spec(word)
     origin = str(getattr(spec, "origin", "") or "") if spec else ""
     return "site-packages" in origin or "dist-packages" in origin
 
@@ -501,6 +509,18 @@ def judge(
     return None if _mentions(last, text) else "names nothing in apps/"
 
 
+def _imported_modules(anchors: Dict[str, Tuple[str, bool]]) -> Set[str]:
+    """The top-level stdlib modules the test file or the product imports.
+
+    A bare word on a ``(stdlib)`` line is a module only where code imports it
+    or the prose writes it as an owner (``argparse's own parsing``): hooks
+    tests/test_cadence.py:21 says "never runs on this CI", and ``this`` there
+    is English (seedgo, fleet green leg 12). A library word is judged whether
+    imported or not, because a library on a stdlib line is the finding.
+    """
+    return {module.split(".")[0] for module, _ in anchors.values()}
+
+
 def scan(source: str, branch_root: Path | None) -> List[Tuple[int, str, str]]:
     """(line, name, what is wrong) for every declared name that resolves nowhere."""
     declared = declarations(source)
@@ -516,10 +536,11 @@ def scan(source: str, branch_root: Path | None) -> List[Tuple[int, str, str]]:
         tokens, named = identifiers(prose)
         modules: List[str] = []
         if category == STDLIB:
+            imported = _imported_modules(anchors) | set(POSSESSIVE.findall(prose))
             for word in WORD.findall(prose):
                 if _is_stdlib(word):
                     modules.append(word)
-                if (_is_stdlib(word) or _is_library(word)) and word not in tokens:
+                if (_is_library(word) or (_is_stdlib(word) and word in imported)) and word not in tokens:
                     tokens.append(word)
         if not named and not tokens:
             if category.replace("-", "_") not in pack_standards():

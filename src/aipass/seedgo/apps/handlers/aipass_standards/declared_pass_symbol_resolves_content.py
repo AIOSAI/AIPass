@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: declared_pass_symbol_resolves_content.py
 # Description: Declared Pass Symbol Resolves Standards Content Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-25
 # Modified: 2026-10-03
 # =============================================
@@ -33,7 +33,9 @@ def get_declared_pass_symbol_resolves_standards() -> str:
         "  dotted [green]os.path.getsize[/green], called [green]resolve()[/green], private [green]_project[/green],",
         "  CamelCase [green]MagicMock[/green], a path [green]handlers/readme/[/green]. Plain words are not;",
         "  [yellow]production/tests[/yellow] is prose for 'production or tests'. On a (stdlib) line an",
-        "  importable module word ([green]shutil[/green], [red]pathspec[/red]) is a name too.",
+        "  importable module word ([green]shutil[/green], [red]pathspec[/red]) is a name too; a stdlib",
+        "  word only where code imports it or the prose says [green]argparse's[/green]",
+        "  ([dim]'on this CI'[/dim] is English).",
         "",
         "[bold cyan]WHAT RESOLVES:[/bold cyan]",
         "  A stdlib name: the chain is real AND the product uses it ([red]os.scandir[/red]: @backup",

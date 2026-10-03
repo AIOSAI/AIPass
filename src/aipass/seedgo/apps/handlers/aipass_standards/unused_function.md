@@ -36,7 +36,7 @@ Reads all collected files and strips non-code content to prevent false positives
 
 ### Phase 3: Extract Functions
 
-AST-parses each file to find `def` and `async def` definitions. The following are **excluded from analysis** and will never be flagged:
+AST-parses each file to find `def` and `async def` definitions. A file Python cannot parse (caught mid-save) judges nothing and is named in the result's `unparsed` list, never counted as a file with no functions (2026-10-03, seedgo fleet green leg 12; its names still count as callers through the raw-text fallback). The following are **excluded from analysis** and will never be flagged:
 
 - **Dunder methods:** `__init__`, `__str__`, `__repr__`, `__enter__`, `__exit__`, etc.
 - **Framework conventions:** `main()` and `handle_command()`

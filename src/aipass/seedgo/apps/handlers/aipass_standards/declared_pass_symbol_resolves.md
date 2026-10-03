@@ -40,7 +40,11 @@ Plain English words are not names. Five shapes are:
 A single `a/b` with no trailing slash and no `.py` is prose for "a or b": 22 seedgo lines say
 `production/tests` and mean exactly that. On a `(stdlib)` line a bare word that is an
 importable module (`shutil`, `pathspec`) is a name too, because that line's whole claim is
-"this module". A covered-elsewhere reference (`tests/test_bypass.py`) names the file that
+"this module" -- but a stdlib word only where code imports it (the test file or the product)
+or the prose writes it as an owner (`argparse's own parsing`, `mimetypes' table`). A word in
+prose is not a module: hooks `tests/test_cadence.py:21` says "never runs on this CI", and
+`this` there is English (2026-10-03, seedgo fleet green leg 12; fleet sweep 0 lines flipped).
+A library word is always a name, because a library on a stdlib line is the finding. A covered-elsewhere reference (`tests/test_bypass.py`) names the file that
 covers it and is never judged.
 
 ## What resolves
