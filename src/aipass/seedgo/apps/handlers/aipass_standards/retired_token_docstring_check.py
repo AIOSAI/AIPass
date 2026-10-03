@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: retired_token_docstring_check.py
 # Description: Retired Token Docstring Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -84,7 +84,7 @@ in backticks -- the QUOTED CODE rule, which changes none of the other hits.
 import ast
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
@@ -95,6 +95,8 @@ AUDIT_SCOPE = "all_files"
 
 STANDARD = "RETIRED_TOKEN_DOCSTRING"
 STANDARD_KEY = "retired_token_docstring"
+# A file that does not parse: judged by nobody here, and said so (ruff convicts a parse error).
+NOT_JUDGED = "Not judged: the file does not parse (ruff convicts that)"
 
 #: Provenance (1 of 2): STANDARD_CATEGORIES of apps/handlers/aipass_standards/test_quality_check.py
 #: as of c1e0eeed^ (the commit that removed it), kept in
@@ -343,13 +345,17 @@ def docstrings(tree: ast.Module) -> List[Tuple[int, str]]:
     return sorted(found)
 
 
-def scan(source: str) -> List[Tuple[int, str, List[str]]]:
-    """(line, shape, terms) for every docstring in the file that carries v4 cargo."""
+def scan(source: str) -> Optional[List[Tuple[int, str, List[str]]]]:
+    """(line, shape, terms) for every docstring in the file that carries v4 cargo.
+
+    None when the source does not parse: nothing was judged, which is not the
+    [] of a file with no cargo (seedgo fleet green leg 15).
+    """
     try:
         tree = ast.parse(source)
     except SyntaxError as exc:
         logger.info("[retired_token_docstring] Unparseable test file: %s", exc)
-        return []
+        return None
     found: List[Tuple[int, str, List[str]]] = []
     for line, text in docstrings(tree):
         verdict = judge(text)
@@ -399,6 +405,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
 
     findings = scan(source)
+    if findings is None:
+        return _result(True, _one_check(True, NOT_JUDGED), 100)
     if not findings:
         return _result(True, _one_check(True, "No docstring carries the retired v4 keywords"), 100)
 

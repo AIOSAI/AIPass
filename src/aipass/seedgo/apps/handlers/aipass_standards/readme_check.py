@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_check.py
 # Description: README Standards Checker Handler
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-03-05
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -687,6 +687,10 @@ BRANCH_INPUTS = ("docs/*.md",)
 
 _DOCS_DIRNAME = "docs"
 
+#: An advisory that could not read what it reads says so in one line, never the
+#: [] of a branch with nothing to report (seedgo fleet green leg 15).
+UNREAD = "readme advisory not run: cannot read "
+
 #: Nouns whose count in a README rots the moment code lands. Deliberately NOT
 #: a duplicate of check 7: that check scores whether a TEST count is accurate
 #: today; this one says the number should not live in the face at all, because
@@ -783,7 +787,7 @@ def check_branch_info(branch_path: str) -> List[str]:
         content = readme_path.read_text(encoding="utf-8")
     except OSError as e:
         logger.info("[readme] cannot read README for advisory lines at %s: %s", readme_path, e)
-        return []
+        return [f"{UNREAD}{readme_path} ({e})"]
 
     readme_lines = content.split("\n")
     lines: List[str] = []
@@ -855,7 +859,7 @@ def _docs_index_lines(branch_root: Path, content: str) -> List[str]:
         docs_files = sorted(docs_dir.glob("*.md"))
     except OSError as e:
         logger.info("[readme] cannot list %s: %s", docs_dir, e)
-        return []
+        return [f"{UNREAD}{docs_dir} ({e})"]
     if not docs_files:
         return []
 
@@ -905,7 +909,7 @@ def _named_path_lines(branch_root: Path, content: str) -> List[str]:
         tops = {entry.name for entry in branch_root.iterdir()}
     except OSError as e:
         logger.info("[readme] cannot list branch root %s: %s", branch_root, e)
-        return []
+        return [f"{UNREAD}{branch_root} ({e})"]
 
     link_spans = [(m.start(2), m.end(2)) for m in _MARKDOWN_LINK_RE.finditer(content)]
     missing: List[str] = []

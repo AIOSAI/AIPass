@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bypass_handler.py
 # Description: Bypass Configuration Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -64,6 +64,21 @@ def _find_registry() -> Path:
     return registry_scan.find_registry()
 
 
+#: Registries this process could not read, path -> why. get_branch_from_path
+#: still answers None (devpulse's ruling, seedgo fleet green leg 15: no raise,
+#: the verdict path stays); the checklist and the audit each print one note
+#: from registry_notes() so the failure is said where the verdicts are read.
+UNREADABLE_REGISTRIES: Dict[str, str] = {}
+
+
+def registry_notes() -> List[str]:
+    """One line per registry this process failed to read, naming it and why."""
+    return [
+        f"registry unreadable, so no file was placed in its branch and no branch bypass rule was read: {path} ({why})"
+        for path, why in UNREADABLE_REGISTRIES.items()
+    ]
+
+
 # =============================================================================
 # PUBLIC API
 # =============================================================================
@@ -77,8 +92,11 @@ def get_branch_from_path(file_path: str) -> Optional[Dict[str, Any]]:
         file_path: Absolute path to file being checked
 
     Returns:
-        Branch dict with name, path, etc. or None if not in a branch
+        Branch dict with name, path, etc. or None if not in a branch. None
+        too when the registry cannot be read; that failure is recorded in
+        UNREADABLE_REGISTRIES for registry_notes().
     """
+    registry_path: Optional[Path] = None
     try:
         registry_path = _find_registry()
         if not registry_path.exists():
@@ -113,6 +131,7 @@ def get_branch_from_path(file_path: str) -> Optional[Dict[str, Any]]:
         return None
     except Exception as e:
         logger.error(f"[bypass_handler] Error reading AIPASS_REGISTRY: {e}")
+        UNREADABLE_REGISTRIES[str(registry_path or "AIPASS_REGISTRY.json")] = str(e)
         return None
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_coverage_arch_checklist.py
 # Description: Line-coverage tests for architecture_check.py and checklist.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and apps/modules/checklist.py."""
@@ -32,11 +32,10 @@ from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
 )
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.handlers.bypass import bypass_handler
+from aipass.seedgo.apps.handlers.checklist import verdicts
+from aipass.seedgo.apps.handlers.checklist.verdicts import is_applicable as _is_applicable
+from aipass.seedgo.apps.handlers.checklist.verdicts import is_entry_point as _is_entry_point
 from aipass.seedgo.apps.modules import CommandRefused, checklist
-from aipass.seedgo.apps.modules.checklist import (
-    _is_applicable,
-    _is_entry_point,
-)
 
 
 def _lines(text: str) -> List[str]:
@@ -878,8 +877,8 @@ class TestIsApplicable:
 
         Mutant: _is_entry_point's `file_path.replace("\\", "/")` back to `file_path` — killed.
         """
-        # checklist's Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
-        monkeypatch.setattr(checklist, "Path", PureWindowsPath)
+        # verdicts' Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
+        monkeypatch.setattr(verdicts, "Path", PureWindowsPath)
         checker = MagicMock()
         checker.AUDIT_SCOPE = "entry_point"
         checker.check_module = MagicMock()
@@ -1385,7 +1384,7 @@ class TestIsEntryPointEdgeCases:
 
         Mutant: _is_entry_point's `file_path.replace("\\", "/")` back to `file_path` — killed.
         """
-        # checklist's Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
-        monkeypatch.setattr(checklist, "Path", PureWindowsPath)
+        # verdicts' Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
+        monkeypatch.setattr(verdicts, "Path", PureWindowsPath)
         assert _is_entry_point(_windows_form(tmp_path, "branch", "apps", "branch.py")) is True
         assert _is_entry_point(_windows_form(tmp_path, "branch", "apps", "handlers", "thing.py")) is False

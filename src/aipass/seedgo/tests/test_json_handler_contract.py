@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_json_handler_contract.py
 # Description: Fleet-wide contract suite over every branch json_handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-01
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for every branch's apps/handlers/json/json_handler.py, one contract over the fleet."""
@@ -1125,7 +1125,7 @@ def test_the_divergence_tables_only_name_branches_that_still_exist():
         | set(UNKNOWN_TYPE_NOT_REFUSED)
     )
     stale = sorted(tables - set(BRANCHES))
-    assert not stale, f"divergence tables name branches that no longer exist: {json.dumps(stale)}"
+    assert stale == [], f"divergence tables name branches that no longer exist: {json.dumps(stale)}"
 
 
 # ---------------------------------------------------------------------------

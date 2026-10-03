@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_retired_token_docstring_check.py
 # Description: retired_token_docstring_check — the retired v4 auditor's keywords left in test docstrings
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/retired_token_docstring_check.py."""
@@ -72,6 +72,15 @@ def _verdict(path):
     """(score, the one check's message) for a planted file."""
     result = checker.check_module(str(path))
     return result["score"], result["checks"][0]["message"]
+
+
+class TestAFileThatDoesNotParse:
+    def test_is_not_judged_and_says_so(self, tmp_path):
+        """Named as not judged, never the clean verdict of a judged file (fleet green leg 15).
+        Red first: scan answered [] and the file read as clean."""
+        path = tmp_path / "test_specimen.py"
+        path.write_text('def test_x(:\n    """Verifies the flow, with edge cases."""\n', encoding="utf-8")
+        assert _verdict(path) == (100, "Not judged: the file does not parse (ruff convicts that)")
 
 
 class TestTheModelFilePasses:

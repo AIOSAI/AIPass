@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: stdlib_patch_check.py
 # Description: Stdlib Patch Standards Checker Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-09-22
 # Modified: 2026-10-03
 # =============================================
@@ -177,13 +177,16 @@ def is_product_module(dotted: str) -> bool:
 
 
 @lru_cache(maxsize=2048)
-def bound_to(dotted: str, name: str) -> str:
+def bound_to(dotted: str, name: str) -> str | None:
     """What ``name`` inside product module ``dotted`` was imported from.
 
     ``upload.Path`` is ``pathlib.Path`` because ``upload.py`` says
     ``from pathlib import Path``. Reading the product module's own imports is
     what lets the rule judge a target by what it IS rather than by which name
     reached it; a class the module DEFINES has no import and answers "".
+    None when the module cannot be read or parsed: an unread import list is
+    not an acquittal, and the scan counts the target as not judged (seedgo
+    fleet green leg 15).
     """
     source = _module_file(dotted)
     if source is None:
@@ -192,7 +195,7 @@ def bound_to(dotted: str, name: str) -> str:
         tree = ast.parse(source.read_text(encoding="utf-8", errors="ignore"))
     except (SyntaxError, OSError) as exc:
         logger.info("[stdlib_patch] Cannot read %s: %s", source, exc)
-        return ""
+        return None
     return _imports(tree).get(name, "")
 
 
@@ -219,8 +222,8 @@ def _imports(tree: ast.Module) -> Dict[str, str]:
     return found
 
 
-def _through_product(segments: List[str]) -> str:
-    """The stdlib module reached THROUGH an aipass path, or "" if none is.
+def _through_product(segments: List[str]) -> str | None:
+    """The stdlib module reached THROUGH an aipass path, "" if none is, None if unread.
 
     ``ceiling.os.path`` resolves to ``aipass.backup...ceiling.os.path``: walk
     the chain while it is still a real product module, and the first segment
@@ -245,6 +248,8 @@ def _through_product(segments: List[str]) -> str:
         if name in sys.stdlib_module_names:
             return name
         origin = bound_to(".".join(segments[:index]), name)
+        if origin is None:
+            return None
         root = origin.split(".")[0]
         return root if root in sys.stdlib_module_names and not is_product_module(root) else ""
     return ""
@@ -289,8 +294,8 @@ def _sanctioned(chain: str, module: str) -> bool:
     return module in _EDGE_MODULES or any(seam in chain for seam in _EDGE_ATTRIBUTES)
 
 
-def _module_of(chain: str) -> str:
-    """The stdlib module this target lands in, or "" when it is product code."""
+def _module_of(chain: str) -> str | None:
+    """The stdlib module this target lands in, "" when it is product code, None if unread."""
     segments = chain.split(".")
     if segments[0] == PRODUCT:
         return _through_product(segments)
@@ -327,6 +332,9 @@ def scan(source: str) -> Tuple[List[Tuple[int, str, str]], int]:
             unresolved += 1
             continue
         module = _module_of(chain)
+        if module is None:
+            unresolved += 1
+            continue
         if not module or _sanctioned(chain, module):
             continue
         scored.append((node.lineno, str(written), module))

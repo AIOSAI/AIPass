@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flags.py
 # Description: Tests for the wants_help predicate and the call sites without a module test file
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the gates in apps/modules/test_map.py and apps/seedgo.py."""
@@ -30,6 +30,7 @@ from aipass.seedgo.apps import seedgo
 from aipass.seedgo.apps.handlers.cli import help_flags
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.modules import test_map
+from aipass.seedgo.apps.handlers.test_map import function_scanner
 
 
 # ---------------------------------------------------------------------------
@@ -157,12 +158,44 @@ def test_test_map_still_scans_without_a_help_flag(monkeypatch):
         MagicMock(return_value=[{"name": "flow", "path": "/nowhere/flow"}]),
     )
     scan = MagicMock(
-        return_value={"branch": "flow", "total_functions": 0, "tested_functions": 0, "coverage_pct": 0, "files": []}
+        return_value={
+            "branch": "flow",
+            "total_functions": 0,
+            "tested_functions": 0,
+            "coverage_pct": 0,
+            "files": [],
+            "unparsed": [],
+        }
     )
     monkeypatch.setattr(test_map, "scan_branch", scan)
 
     assert test_map.handle_command("test_map", ["@flow"]) is True
     assert scan.call_count == 1
+
+
+def test_test_map_names_a_source_file_that_does_not_parse(tmp_path, monkeypatch, capsys):
+    """Red first: a file with a syntax error read as a file with no functions, unsaid.
+
+    The real scan runs over a branch on disk; only the operation logs are
+    silenced (seedgo fleet green leg 15).
+    """
+    _silence_side_effects(monkeypatch, test_map)
+    _silence_side_effects(monkeypatch, function_scanner)
+    handlers = tmp_path / "flow" / "apps" / "handlers"
+    handlers.mkdir(parents=True)
+    (handlers / "broken.py").write_text("def mapped(:\n", encoding="utf-8")
+    (handlers / "fine.py").write_text("def mapped():\n    return 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        test_map,
+        "discover_branches",
+        MagicMock(return_value=[{"name": "flow", "path": str(tmp_path / "flow")}]),
+    )
+
+    assert test_map.handle_command("test_map", ["@flow"]) is True
+    said = capsys.readouterr()
+    lines = [line for line in (said.out + said.err).splitlines() if "does not parse" in line]
+    assert len(lines) == 1
+    assert "broken.py" in lines[0]
 
 
 def test_test_map_does_not_answer_for_another_command(monkeypatch):

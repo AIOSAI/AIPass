@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch2.py
 # Description: Tests for checker handlers batch 2
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/error_handling_check.py and seven batch-2 sibling checkers."""
@@ -275,6 +275,15 @@ API_KEY = "sk-or-v1-9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"
         bypass = [{"file": "bypass_keys.py", "standard": "hardcoded_key"}]
         result = check_hardcoded_key(fp, bypass_rules=bypass)
         assert result["score"] == 100
+
+    def test_an_unreadable_file_fails_by_name(self, tmp_path: Path) -> None:
+        # A directory named like a module: it exists, and no read of it
+        # succeeds. Unread is not "no key" (seedgo fleet green leg 15).
+        target = tmp_path / "keys.py"
+        target.mkdir()
+        result = check_hardcoded_key(str(target))
+        assert result["score"] == 0
+        assert [c["message"] for c in result["checks"]] == ["Cannot read the file, so it was not scanned for keys"]
 
 
 # ===================================================================

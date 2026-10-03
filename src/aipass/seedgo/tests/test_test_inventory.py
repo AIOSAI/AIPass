@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_test_inventory.py
 # Description: behavioural pins for the test-inventory verb
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-09-01
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/inventory.py and the handlers under apps/handlers/test_inventory/."""
@@ -626,6 +626,25 @@ def _run_twins_verb(tmp_path: Path, monkeypatch, argument: str) -> list:
     monkeypatch.setattr(twins, "build", recording_build)
     assert inventory.handle_command("test-inventory", [argument, "--twins"]) is True
     return seen
+
+
+class TestTheTopSwitch:
+    """`--top N` on the test-inventory verb."""
+
+    def test_top_one_prints_one_queue_row_not_the_default_fifteen(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        tree = tmp_path / "tree"
+        _write(tree, "tests/test_a.py", "def test_a():\n    assert 1\n\ndef test_b():\n    assert 2\n")
+        monkeypatch.setattr(report, "ARTIFACT_DIR", tmp_path / "out")
+        for module in (inventory, report):
+            monkeypatch.setattr(module, "json_handler", MagicMock())
+
+        assert inventory.handle_command("test-inventory", [str(tree), "--top", "1"]) is True
+
+        out, err = capsys.readouterr()
+        assert "does not know the option" not in err
+        queue = out.split("Read these first", 1)[1]
+        assert "  1. " in queue
+        assert "  2. " not in queue
 
 
 class TestTheTwinsSwitch:

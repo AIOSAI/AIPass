@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_passport_seeds.py
 # Description: Repo pins for tracked passport seeds - shape, leak-guard, naming
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-28
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for the passport seeds that spawn/apps/modules/export_seeds.py writes (TDPLAN-0017)."""
@@ -318,7 +318,7 @@ class TestEverySeedInTheRepo:
 
         violations = _shape_violations(data)
 
-        assert not violations, f"{seed}: {'; '.join(violations)}"
+        assert violations == [], f"{seed}: {'; '.join(violations)}"
 
     @pytest.mark.parametrize("seed", _seed_params())
     def test_the_seed_carries_no_machine_local_field(self, seed):
@@ -329,7 +329,7 @@ class TestEverySeedInTheRepo:
 
         leaks = _leaks(data)
 
-        assert not leaks, (
+        assert leaks == [], (
             f"{seed}: machine-local field(s) {', '.join(leaks)} must never appear in a tracked seed -- "
             f"re-export with drone @spawn export-seeds rather than editing the file by hand"
         )
@@ -340,7 +340,7 @@ class TestEverySeedInTheRepo:
 
         violation = _name_violation(data, _branch_of(seed))
 
-        assert not violation, f"{seed}: {violation}"
+        assert violation == "", f"{seed}: {violation}"
 
 
 # ===========================================================================

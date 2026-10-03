@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_gateway_boundary.py
 # Description: Tests for the gateway boundary standards checker
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-18
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/gateway_boundary_check.py."""
@@ -92,6 +92,16 @@ class TestFiresOnRealViolations:
         )
         result = _check(tmp_path, source)
         assert result["score"] == 50
+
+
+class TestAFileThatDoesNotParse:
+    def test_is_not_judged_and_says_so(self, tmp_path: Path):
+        """Named as not judged, never the clean "no cross-branch storage writes" of a
+        judged file (fleet green leg 15). Red first: _scan answered [] and the file read
+        as clean. The control is TestFiresOnRealViolations above."""
+        result = _check(tmp_path, "def mute(:\n    FLAG.touch()\n")
+        assert result["score"] == 100
+        assert result["checks"][0]["message"] == "Not judged: the file does not parse (ruff convicts that)"
 
 
 class TestDoesNotFireOnLegitimateCode:

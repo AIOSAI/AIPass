@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: function_scanner.py
 # Description: AST-based public function scanner for branch test coverage mapping
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -77,11 +77,13 @@ def _read_file_safe(path: Path) -> str:
         return ""
 
 
-def _extract_public_functions(file_path: Path) -> list[dict]:
+def _extract_public_functions(file_path: Path) -> list[dict] | None:
     """Extract public function definitions from a Python file via AST.
 
     Returns list of dicts: {name, line, file}
     Only top-level and class-level defs. Skips _private and excluded names.
+    None when the file does not parse: a file nobody could read is not a file
+    with no functions, and scan_branch names it (seedgo fleet green leg 15).
     """
     source = _read_file_safe(file_path)
     if not source:
@@ -91,7 +93,7 @@ def _extract_public_functions(file_path: Path) -> list[dict]:
         tree = ast.parse(source, filename=str(file_path))
     except SyntaxError:
         logger.info("Syntax error parsing %s — skipped", file_path)
-        return []
+        return None
 
     functions = []
     for node in ast.walk(tree):
@@ -132,10 +134,11 @@ def _get_relative_path(file_path: Path, branch_path: Path) -> str:
         return str(file_path)
 
 
-def _scan_source_files(branch_path: Path) -> list[dict]:
+def _scan_source_files(branch_path: Path, unparsed: list[str] | None = None) -> list[dict]:
     """Scan apps/modules/ and apps/handlers/ for public functions.
 
     Returns list of dicts: {name, line, file, relative_path}
+    A file that does not parse adds its relative path to ``unparsed``.
     """
     all_functions = []
     apps_dir = branch_path / "apps"
@@ -153,6 +156,10 @@ def _scan_source_files(branch_path: Path) -> list[dict]:
                 continue
             funcs = _extract_public_functions(py_file)
             rel = _get_relative_path(py_file, branch_path)
+            if funcs is None:
+                if unparsed is not None:
+                    unparsed.append(rel)
+                continue
             for func in funcs:
                 func["relative_path"] = rel
             all_functions.extend(funcs)
@@ -193,12 +200,14 @@ def scan_branch(branch_path: str) -> dict:
             tested_functions: count of functions referenced in tests
             coverage_pct: percentage
             files: list of {relative_path, functions: [{name, line, tested, test_file}]}
+            unparsed: relative paths of source files that did not parse, so were not mapped
     """
     bp = Path(branch_path)
     branch_name = bp.name
 
     # Scan source for public functions
-    all_functions = _scan_source_files(bp)
+    unparsed: list[str] = []
+    all_functions = _scan_source_files(bp, unparsed)
 
     # Get concatenated test source for matching
     test_source = _test_files_source(bp)
@@ -270,4 +279,5 @@ def scan_branch(branch_path: str) -> dict:
             }
             for rel_path, funcs in sorted(files_map.items())
         ],
+        "unparsed": unparsed,
     }

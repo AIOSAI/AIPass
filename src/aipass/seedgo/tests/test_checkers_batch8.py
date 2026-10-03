@@ -241,6 +241,18 @@ def test_auto_detection_missing():
     assert "NOT inspect.stack()" in result["message"]
 
 
+def test_auto_detection_judges_an_unparseable_file_strictly():
+    """An unparseable file that names module_name is CONVICTED, never acquitted (fleet green
+    leg 15). The parse failure answers "optional" (handlers_check 353) and "walks no frame"
+    (407), the strict answers; "required" would return None and acquit the file. Green from
+    its first run: its proof is the mutant that makes 353 answer False, which it kills."""
+    content = "def do_work(module_name=None:\n    return True\n"
+
+    result = check_auto_detection(content)
+    assert result is not None
+    assert result["passed"] is False
+
+
 def test_auto_detection_with_get_caller():
     """Handler with _get_caller_module_name passes auto-detection."""
     content = "def _get_caller_module_name():\n    pass\ndef do_work(module_name=None):\n    return True\n"

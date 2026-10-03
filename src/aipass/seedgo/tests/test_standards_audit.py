@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_standards_audit.py
 # Description: Unit tests for the standards_audit module and the seedgo-audit CI gate
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/standards_audit.py and the seedgo-audit CI gate."""
@@ -31,6 +31,8 @@ from typing import cast
 #: replaced per-test below (see `_mock_infrastructure`), so this stays the
 #: genuine module for the tests that exercise discovery's own rules directly.
 from aipass.seedgo.apps.handlers.audit import discovery as real_discovery
+from aipass.seedgo.apps.handlers.bypass import bypass_handler
+from aipass.cli.apps.modules import warning as real_warning
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.handlers.context_standards import startup_budget_check
 from aipass.seedgo.apps.modules import CommandRefused, standards_audit
@@ -317,6 +319,42 @@ def test_normal_run_makes_no_bypass_claim(monkeypatch, capsys: pytest.CaptureFix
     _wire_branches(monkeypatch, "FLOW")
     standards_audit.handle_command("audit", ["aipass", "@flow", "--no-artifact"])
     assert "BYPASSES DISABLED" not in _console_text(capsys).upper()
+
+
+def _audit_reading_the_registry(tmp_path, monkeypatch, content):
+    """An audit whose branch run reads the registry through the real get_branch_from_path."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(bypass_handler, "_find_registry", lambda: registry)
+    monkeypatch.setattr(bypass_handler, "UNREADABLE_REGISTRIES", {})
+    # The module's autouse stand-in swallows warning(); the note is read off the real one.
+    monkeypatch.setattr(standards_audit, "warning", real_warning)
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    answer = audit_mock.return_value
+
+    def _audit(*args, **kwargs):
+        bypass_handler.get_branch_from_path(str(tmp_path / "flow" / "apps" / "flow.py"))
+        return answer
+
+    audit_mock.side_effect = _audit
+    assert standards_audit.handle_command("audit", ["aipass", "@flow", "--no-artifact"]) is True
+    return registry
+
+
+def test_an_unreadable_registry_is_named_once_by_the_audit(tmp_path, monkeypatch, capsys) -> None:
+    """Red first: a checker's registry read failed and the audit said nothing (fleet green leg 15)."""
+    registry = _audit_reading_the_registry(tmp_path, monkeypatch, "{not json")
+    said = capsys.readouterr()
+    found = [line for line in (said.out + said.err).splitlines() if "registry unreadable" in line]
+    assert len(found) == 1
+    assert registry.name in found[0]
+
+
+def test_a_readable_registry_draws_no_audit_note(tmp_path, monkeypatch, capsys) -> None:
+    """Control: the same audit over a registry that parses says nothing about it."""
+    _audit_reading_the_registry(tmp_path, monkeypatch, '{"branches": []}')
+    said = capsys.readouterr()
+    assert "registry unreadable" not in said.out + said.err
 
 
 def test_help_documents_the_no_bypass_flag(capsys: pytest.CaptureFixture[str]) -> None:

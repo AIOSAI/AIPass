@@ -84,6 +84,8 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | Doc | What it covers |
 |---|---|
 | [docs/aipass_standards.md](docs/aipass_standards.md) | The scored checker pack: the standards table, how a rule is added, the `ruff`/`ruff_check` split |
+| [docs/aipass_standards_tests_1.md](docs/aipass_standards_tests_1.md) | The pack's test-file rows, calendar_bound to literal_path |
+| [docs/aipass_standards_tests_2.md](docs/aipass_standards_tests_2.md) | The pack's test-file rows, module_scope_side_effect to weak_oracle |
 | [docs/pytest_quality.md](docs/pytest_quality.md) | The v5 test-quality rules, and why they score without gating |
 | [docs/context_standards.md](docs/context_standards.md) | The startup budget: which files, which caps, which owner publishes each |
 | [docs/audit_engine.md](docs/audit_engine.md) | Discovery, scoring, the incremental cache, the info channel, bypass and `.seedgoignore` |

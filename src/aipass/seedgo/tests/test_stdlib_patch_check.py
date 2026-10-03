@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_stdlib_patch_check.py
 # Description: stdlib_patch_check — crack class Q, a patch that replaces work the product owns
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-09-22
 # Modified: 2026-10-03
 # =============================================
@@ -216,6 +216,22 @@ class TestWhatItRefusesToJudge:
     def test_an_unparseable_file_yields_nothing(self):
         """ruff already convicts the syntax error; a second verdict misdirects."""
         assert stdlib_patch_check.scan("def test_it(:\n") == ([], 0)
+
+    def test_a_product_module_that_does_not_parse_is_not_judged_not_acquitted(self, tmp_path, monkeypatch):
+        """An import list nobody could read says nothing about what Path is.
+
+        Red first: the parse failure answered "" and the target was acquitted
+        uncounted (seedgo fleet green leg 15). Now it is counted as not judged.
+        """
+        package = tmp_path / "aipass" / "zz_leg15_specimen"
+        package.mkdir(parents=True)
+        (tmp_path / "aipass" / "__init__.py").write_text("", encoding="utf-8")
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "broken.py").write_text("from pathlib import Path\ndef x(:\n", encoding="utf-8")
+        monkeypatch.setattr(stdlib_patch_check, "_source_root", lambda: tmp_path)
+        body = "def test_it(monkeypatch):\n    monkeypatch.setattr(broken.Path, 'resolve', fake)\n"
+        source = f"from aipass.zz_leg15_specimen import broken\n{body}"
+        assert stdlib_patch_check.scan(source) == ([], 1)
 
 
 class TestTheEntryPoint:

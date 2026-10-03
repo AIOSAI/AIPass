@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_audit.py
 # Description: Standards Audit Module
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -41,7 +41,7 @@ from aipass.seedgo.apps.handlers.audit.audit_display import (
 from aipass.seedgo.apps.handlers.audit.artifact import write_audit_artifact
 
 # Bypass system
-from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
+from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules, registry_notes
 
 # The audit-tests lane's refusal vocabulary, reused rather than re-invented:
 # Law ARGV, its exit code and its did-you-mean live in one place so the two
@@ -468,6 +468,11 @@ def handle_command(command: str, args: List[str]) -> bool:
     # Print system summary (full audit only)
     if is_compact:
         print_system_summary(audit_results, no_bypass=no_bypass)
+
+    # A registry nobody could read changes no verdict; it is said once, here
+    # (devpulse's ruling, seedgo fleet green leg 15).
+    for note in registry_notes():
+        warning(note)
 
     # Machine-readable complete result set (no display budget)
     if write_artifact:

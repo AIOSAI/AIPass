@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack.py
 # Description: behavioural pins for the pytest_quality standards pack
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-09-01
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/corpus.py and the pack's checkers beside it."""
@@ -4698,17 +4698,22 @@ class TestCoverageSlotDetection:
         assert len(result["violations"]) == 1
         assert result["violations"][0]["where"] == "docstring"
 
-    def test_a_file_that_cannot_be_read_a_second_time_yields_no_comments(self, tmp_path):
+    def test_a_file_that_cannot_be_read_a_second_time_is_named_not_silent(self, tmp_path):
         """The corpus keeps the tree, not the source, so comments cost a re-read.
 
         A file that moved, was rewritten or turned unreadable between the parse
         and the read must produce fewer findings, never an exception: a static
         reader that raises does not report a finding, it takes the whole
-        branch's score down with it.
+        branch's score down with it. Red first: the failed read answered {},
+        the answer a file with no comments gives, and nothing said so (seedgo
+        fleet green leg 15). Now the file is named as judged without comments.
         """
         parsed = corpus.TestFile(relpath="tests/test_gone.py", tree=ast.parse("x = 1"))
+        unread = []
 
-        assert coverage_slot_check.comments_in(tmp_path, parsed) == {}
+        assert coverage_slot_check.comments_in(tmp_path, parsed) is None
+        assert coverage_slot_check.find_confessions(corpus.Corpus(root=tmp_path, files=[parsed]), unread) == []
+        assert unread == ["tests/test_gone.py"]
 
 
 class TestCoverageSlotScoring:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: coverage_slot_check.py
 # Description: v5 - the test that says out loud why it exists
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-03
 # =============================================
 
 """Does this test admit, in writing, that it exists for the checker?
@@ -80,7 +80,7 @@ That constraint is the reason the pack exists and can be lifted onto any project
 import ast
 import re
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
@@ -223,7 +223,7 @@ def _multiline_string_lines(tree: ast.Module) -> Set[int]:
     return covered
 
 
-def comments_in(root: Path, parsed: corpus.TestFile) -> Dict[int, str]:
+def comments_in(root: Path, parsed: corpus.TestFile) -> Optional[Dict[int, str]]:
     """Line number -> comment text for every full-line comment in one file.
 
     Args:
@@ -231,12 +231,14 @@ def comments_in(root: Path, parsed: corpus.TestFile) -> Dict[int, str]:
         parsed: One parsed test file.
 
     Returns:
-        A mapping, empty when the file could not be read a second time.
+        A mapping, or None when the file could not be read a second time: a
+        file whose comments were never read is not a file with no comments,
+        and check_branch names it (seedgo fleet green leg 15).
     """
     try:
         source = (root / parsed.relpath).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError, ValueError):
-        return {}
+        return None
     inside_string = _multiline_string_lines(parsed.tree)
     comments: Dict[int, str] = {}
     for index, line in enumerate(source.splitlines(), start=1):
@@ -290,11 +292,19 @@ def _finding(unit: corpus.TestUnit, line: int, where: str, reason: str) -> Dict:
     return {"nodeid": unit.nodeid, "line": line, "species": "COVERAGE-SLOT", "where": where, "reason": reason}
 
 
-def find_confessions(scanned: corpus.Corpus) -> List[Dict]:
-    """Every unit that states a purpose other than the behaviour it tests."""
+def find_confessions(scanned: corpus.Corpus, unread: Optional[List[str]] = None) -> List[Dict]:
+    """Every unit that states a purpose other than the behaviour it tests.
+
+    A file whose comments could not be re-read is judged on its docstrings
+    alone, and its relpath goes into ``unread`` so the caller can say so.
+    """
     rows: List[Dict] = []
     for parsed in scanned.files:
         comments = comments_in(scanned.root, parsed)
+        if comments is None:
+            if unread is not None:
+                unread.append(parsed.relpath)
+            comments = {}
         for unit in parsed.units:
             row = unit_confession(unit, comments)
             if row:
@@ -380,7 +390,18 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             "advisory": True,
         }
 
-    flagged = find_confessions(scanned)
+    unread: List[str] = []
+    flagged = find_confessions(scanned, unread)
+    if unread:
+        unreadable.append(
+            {
+                "name": "Comments readable",
+                "passed": True,
+                "message": (
+                    f"{len(unread)} test file(s) were judged without their comments: {', '.join(unread[:MAX_REPORTED])}"
+                ),
+            }
+        )
     units = flagged_nodeids(flagged)
     score = int(((total - len(units)) / total) * 100)
     checks: List[Dict] = [

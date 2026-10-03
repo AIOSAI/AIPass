@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
+from aipass.seedgo.apps.handlers.bypass import bypass_handler
 from aipass.seedgo.apps.modules import checklist
 
 
@@ -662,3 +663,44 @@ def test_the_inert_note_is_fenced_off_from_the_last_finding(tmp_path, monkeypatc
     assert lines[at - 1] == ""
     assert lines[at - 2].endswith("[FAIL] — todo: bad")
     assert rendered.count("[FAIL]") == 2
+
+
+# ---------------------------------------------------------------------------
+# An unreadable registry (fleet green leg 15, devpulse's ruling): no raise, the
+# verdicts stay as they are, and the checklist says it once after them.
+# ---------------------------------------------------------------------------
+
+
+def _unreadable_registry(tmp_path, monkeypatch):
+    """A registry file that is not JSON, found by the real get_branch_from_path."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(bypass_handler, "_find_registry", lambda: registry)
+    monkeypatch.setattr(bypass_handler, "UNREADABLE_REGISTRIES", {})
+    # The module's autouse stand-in answers None without reading; this lane needs the real read.
+    monkeypatch.setattr(checklist, "get_branch_from_path", bypass_handler.get_branch_from_path)
+    return registry
+
+
+def test_an_unreadable_registry_is_named_once_after_the_verdicts(tmp_path, monkeypatch, capsys):
+    """Red first: the registry failed, every bypass rule went unread, and the checklist said nothing."""
+    registry = _unreadable_registry(tmp_path, monkeypatch)
+    rendered = _rendered_command(monkeypatch, capsys, _write(tmp_path, "branch/tests/conftest.py"))
+    lines = rendered.splitlines()
+
+    found = [i for i, line in enumerate(lines) if "registry unreadable" in line]
+    assert len(found) == 1, rendered
+    assert registry.name in lines[found[0]]
+    assert lines[found[0] - 1] == ""
+    assert found[0] > lines.index("All 2 standards passed")
+    assert "[FAIL]" not in rendered
+
+
+def test_a_readable_registry_draws_no_note(tmp_path, monkeypatch, capsys):
+    """Control: the same run over a registry that parses says nothing about it."""
+    registry = _unreadable_registry(tmp_path, monkeypatch)
+    registry.write_text('{"branches": []}', encoding="utf-8")
+    rendered = _rendered_command(monkeypatch, capsys, _write(tmp_path, "branch/tests/conftest.py"))
+
+    assert "registry unreadable" not in rendered
+    assert "All 2 standards passed" in rendered.splitlines()
