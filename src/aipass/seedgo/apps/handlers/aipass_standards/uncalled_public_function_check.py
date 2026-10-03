@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: uncalled_public_function_check.py
 # Description: Uncalled Public Function Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -186,7 +186,7 @@ def _tally(tree: ast.Module, skip: Set[int], called: Set[str], elsewhere: Set[st
             elsewhere.add(node.value.rsplit(".", 1)[-1])
 
 
-def _patch_targets(tree: ast.Module, replaced: Set[str]) -> Set[int]:
+def _patch_targets(tree: ast.AST, replaced: Set[str]) -> Set[int]:
     """Record every patched name and return the nodes that naming occupies.
 
     The target of a patch is not a mention of the function anywhere else, so
@@ -202,6 +202,32 @@ def _patch_targets(tree: ast.Module, replaced: Set[str]) -> Set[int]:
     return skip
 
 
+def _aliases(tree: ast.AST) -> Dict[str, str]:
+    """asname -> the name it imports, for every ``from x import f as g`` in a file."""
+    return {
+        alias.asname: alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.asname
+    }
+
+
+def _calls(function: ast.AST, aliases: Dict[str, str]) -> Set[str]:
+    """The names a function calls, an imported alias also read as the name it imports.
+
+    devpulse's dispatches.py calls ``_owner_address``, which is guard's
+    ``owner_address`` imported under another name (seedgo, fleet green leg 10).
+    """
+    edges = {_tail_name(n.func) for n in ast.walk(function) if isinstance(n, ast.Call)}
+    return edges | {aliases[e] for e in edges if e in aliases}
+
+
+def _functions(tree: ast.AST) -> List[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Every function definition in a tree, nested ones included."""
+    return [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
 def product_graph(branch_root: Path) -> Dict[str, Set[str]]:
     """Function name -> the names it calls, over the branch's whole ``apps/``."""
     graph: Dict[str, Set[str]] = {}
@@ -209,11 +235,9 @@ def product_graph(branch_root: Path) -> Dict[str, Set[str]]:
         tree = _parse(path)
         if tree is None:
             continue
-        for function in ast.walk(tree):
-            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            edges = {_tail_name(n.func) for n in ast.walk(function) if isinstance(n, ast.Call)}
-            graph.setdefault(function.name, set()).update(edges)
+        aliases = _aliases(tree)
+        for function in _functions(tree):
+            graph.setdefault(function.name, set()).update(_calls(function, aliases))
     return graph
 
 
@@ -242,9 +266,64 @@ def _publics(path: Path) -> List[Tuple[str, int]]:
     ]
 
 
-def _verdict(name: str, replaced: Set[str], elsewhere: Set[str], live: Set[str]) -> str:
-    """Which shape this uncalled public function is, or "" when it is acquitted."""
-    if name in replaced and name not in elsewhere:
+def _patched(node: ast.AST) -> Set[str]:
+    """The names the patch calls inside one node replace."""
+    found: Set[str] = set()
+    _patch_targets(node, found)
+    return found
+
+
+def _autouse(function: ast.AST) -> bool:
+    """Whether a function is a ``fixture(autouse=True)``, which patches every test it sees."""
+    calls = [d for d in getattr(function, "decorator_list", []) if isinstance(d, ast.Call)]
+    return any(k.arg == "autouse" and getattr(k.value, "value", False) is True for d in calls for k in d.keywords)
+
+
+def run_unpatched(tests_dir: Path, graph: Dict[str, Set[str]]) -> Set[str]:
+    """Every name some test reaches with nothing in THAT test replacing it.
+
+    A patch in one test does not stop another test running the real function:
+    cli's print_introspection test runs the discover_modules its stub_module
+    fixture replaces elsewhere (seedgo, fleet green leg 10). What replaces a
+    name for a test: its body and decorators, its class's decorators, the
+    fixtures it names, and every autouse fixture under tests/.
+    """
+    trees = [tree for tree in (_parse(p) for p in sorted(tests_dir.rglob("*.py"))) if tree is not None]
+    helpers: Dict[str, Set[str]] = {}
+    patches: Dict[str, Set[str]] = {}
+    autouse: Set[str] = set()
+    for tree in trees:
+        aliases = _aliases(tree)
+        for function in _functions(tree):
+            helpers.setdefault(function.name, set()).update(_calls(function, aliases))
+            patches.setdefault(function.name, set()).update(_patched(function))
+            if _autouse(function):
+                autouse |= _patched(function)
+    combined = {name: graph.get(name, set()) | helpers.get(name, set()) for name in {*graph, *helpers}}
+    run: Set[str] = set()
+    for tree in trees:
+        owners = {
+            id(item): set().union(*(_patched(d) for d in node.decorator_list))
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef)
+            for item in node.body
+        }
+        for test in _functions(tree):
+            if not test.name.startswith("test"):
+                continue
+            replaced = autouse | _patched(test) | owners.get(id(test), set())
+            for argument in test.args.args:
+                replaced |= patches.get(argument.arg, set())
+            run |= reachable(combined, helpers.get(test.name, set())) - replaced
+    return run
+
+
+def _verdict(name: str, replaced: Set[str], elsewhere: Set[str], live: Set[str], run: Set[str]) -> str:
+    """Which shape this uncalled public function is, or "" when it is acquitted.
+
+    A replaced name some test runs unpatched is not "never run" (leg 10).
+    """
+    if name in replaced and name not in elsewhere and name not in run:
         return REPLACED
     if name in replaced or name in live or name in elsewhere:
         return ""
@@ -261,14 +340,16 @@ def scan(branch_root: Path) -> Tuple[List[Tuple[Path, int, str, str]], int]:
     if not subjects:
         return [], 0
 
-    live = reachable(product_graph(branch_root), called)
+    graph = product_graph(branch_root)
+    live = reachable(graph, called)
+    run = run_unpatched(tests_dir, graph)
     findings: List[Tuple[Path, int, str, str]] = []
     acquitted = 0
     for subject in dict.fromkeys(subjects):
         for name, line in _publics(subject):
             if name in called:
                 continue
-            shape = _verdict(name, replaced, elsewhere, live)
+            shape = _verdict(name, replaced, elsewhere, live, run)
             if shape:
                 findings.append((subject, line, name, shape))
             else:

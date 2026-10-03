@@ -988,7 +988,9 @@ def test_function_naming_a_name_an_inherited_protocol_requires_passes(name):
     assert result["message"] == "1 functions checked - all snake_case"
 
 
-@pytest.mark.parametrize("name", ["visit_NotANode", "visit_Thing", "SetUp", "setup_Data"])
+@pytest.mark.parametrize(
+    "name", ["visit_NotANode", "visit_Thing", "visit_NodeVisitor", "visit_NodeTransformer", "SetUp", "setup_Data"]
+)
 def test_function_naming_a_lookalike_of_a_protocol_name_still_fails(name):
     """The control: only a real ast node class after visit_, and only unittest's own spellings."""
     result = check_function_naming(f"def {name}(self):\n    pass\n")

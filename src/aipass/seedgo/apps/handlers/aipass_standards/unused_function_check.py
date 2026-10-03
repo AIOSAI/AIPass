@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_function_check.py
 # Description: Unused Function Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-22
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -24,6 +24,7 @@ Excluded from flagging:
 """
 
 import ast
+import importlib.util
 import io
 import re
 import tokenize
@@ -215,10 +216,106 @@ def _has_decorator(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return len(node.decorator_list) > 0
 
 
+def _imported_names(tree: ast.AST) -> dict[str, str]:
+    """Map each name an absolute import binds to the dotted path it names."""
+    names: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                names[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                names[alias.asname or top] = alias.name if alias.asname else top
+    return names
+
+
+def _dotted_base(base: ast.expr, imports: dict[str, str]) -> str | None:
+    """Resolve a class base (Name or attribute chain) through the imports, or None."""
+    attrs: list[str] = []
+    while isinstance(base, ast.Attribute):
+        attrs.insert(0, base.attr)
+        base = base.value
+    if not isinstance(base, ast.Name) or base.id not in imports:
+        return None
+    return ".".join([imports[base.id], *attrs])
+
+
+def _module_file(module: str) -> Path | None:
+    """Locate a module's .py source WITHOUT importing it.
+
+    find_spec runs only on the top-level name (a submodule's find_spec would
+    execute its parent package); the rest of the path is walked on disk.
+    """
+    parts = module.split(".")
+    spec = importlib.util.find_spec(parts[0])
+    if spec is None or not spec.origin:
+        return None
+    path = Path(spec.origin)
+    locations = list(spec.submodule_search_locations or [])
+    for part in parts[1:]:
+        candidates = [Path(loc) / part / "__init__.py" for loc in locations]
+        candidates += [Path(loc) / f"{part}.py" for loc in locations]
+        found = next((c for c in candidates if c.is_file()), None)
+        if found is None:
+            return None
+        path = found
+        locations = [str(found.parent)] if found.name == "__init__.py" else []
+    return path if path.suffix == ".py" else None
+
+
+_BASE_METHODS: dict[str, set[str]] = {}
+
+
+def _base_methods(dotted: str) -> set[str]:
+    """Names of the methods an imported class defines in its own body (read, never run)."""
+    if dotted not in _BASE_METHODS:
+        module, _, class_name = dotted.rpartition(".")
+        source_file = _module_file(module) if module else None
+        methods: set[str] = set()
+        if source_file is not None:
+            try:
+                tree = ast.parse(source_file.read_text(encoding="utf-8", errors="ignore"))
+            except SyntaxError:
+                logger.info("Skipped base %s: SyntaxError in %s", dotted, source_file)
+                tree = ast.Module(body=[], type_ignores=[])
+            for node in tree.body:
+                if isinstance(node, ast.ClassDef) and node.name == class_name:
+                    methods = {
+                        item.name for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    }
+        _BASE_METHODS[dotted] = methods
+    return _BASE_METHODS[dotted]
+
+
+def _overrides(tree: ast.AST) -> set[int]:
+    """ids of methods that override a method their imported base class defines.
+
+    A base class calls its own method by name, so the override is used though
+    nothing in the branch names it (seedgo, fleet green leg 10: prax's watchdog
+    on_created handlers).
+    """
+    imports = _imported_names(tree)
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        inherited: set[str] = set()
+        for base in node.bases:
+            dotted = _dotted_base(base, imports)
+            if dotted is not None:
+                inherited |= _base_methods(dotted)
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name in inherited:
+                found.add(id(item))
+    return found
+
+
 def _extract_functions(py_file: Path) -> list[tuple[str, int]]:
     """
     Parse a .py file with AST and return (function_name, line_number) for each
-    FunctionDef / AsyncFunctionDef that is not excluded and has no decorators.
+    FunctionDef / AsyncFunctionDef that is not excluded, has no decorators and
+    does not override a method of an imported base class.
     """
     try:
         source = py_file.read_text(encoding="utf-8", errors="ignore")
@@ -227,12 +324,15 @@ def _extract_functions(py_file: Path) -> list[tuple[str, int]]:
         logger.info("Skipped %s: SyntaxError during parse", py_file)
         return []
 
+    overrides = _overrides(tree)
     results: list[tuple[str, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if _is_excluded(node.name):
                 continue
             if _has_decorator(node):
+                continue
+            if id(node) in overrides:
                 continue
             results.append((node.name, node.lineno))
     return results

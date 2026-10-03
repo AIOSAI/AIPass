@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: unused_function_content.py
 # Description: Unused Function Standards Content Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-22
 # Modified: 2026-10-03
 # =============================================
@@ -49,6 +49,8 @@ def get_unused_function_standards() -> str:
         "  - Dunder methods ([dim]__init__[/dim], [dim]__str__[/dim], [dim]__repr__[/dim], etc.)",
         "  - [dim]main()[/dim] and [dim]handle_command()[/dim] (framework conventions)",
         "  - Any function with a decorator ([dim]@property[/dim], [dim]@staticmethod[/dim], etc.)",
+        "  - A method overriding one its imported base class defines (the base calls",
+        "    it by name). The base's source is read, never run; one level only.",
         "",
         "  [yellow]Phase 4 -- Reference counting:[/yellow]",
         "  For each function name, counts word-bounded occurrences in the",

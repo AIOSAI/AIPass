@@ -1,6 +1,6 @@
 # Uncalled Public Function Standards
 **Status:** v1
-**Date:** 2026-09-22
+**Date:** 2026-10-03
 
 ---
 
@@ -29,6 +29,14 @@ patch.object(entry, "discover_modules", return_value=[fake_module])   # ×4 in o
 
 `apps/backup.py:125 discover_modules` is exactly this. Nothing anywhere runs the real
 importlib discovery.
+
+**Replaced in one test is not replaced in all** (2026-10-03, seedgo fleet green leg 10). O1
+holds only when every test that reaches the name replaces it. A test replaces a name through
+its body, its decorators, its class's decorators, a fixture it names, or any autouse fixture
+under `tests/`; a test that reaches it with none of those runs the real one and acquits it.
+cli's `print_introspection` test runs the `discover_modules` that `stub_module` replaces
+elsewhere. An import alias is the name it imports: devpulse's `seat_email` calls
+`owner_address` as `_owner_address`, and that edge now reaches it.
 
 **Reached through the product** — the false conviction to avoid, and the dispatch asked how
 the rule decides it. A **name-level call graph** over the branch's whole `apps/`, seeded

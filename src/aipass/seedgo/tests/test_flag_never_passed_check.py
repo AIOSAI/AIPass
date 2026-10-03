@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_flag_never_passed_check.py
 # Description: flag_never_passed_check — crack class P, a parsed flag no test passes
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/flag_never_passed_check.py."""
@@ -54,6 +54,37 @@ class TestThePlantedSpecimen:
         findings, _counted = flag_never_passed_check.scan(_branch(tmp_path))
         path, line, flag = findings[0]
         assert (path.name, line, flag) == ("thing.py", 2, "--loud")
+
+
+class TestAnArchiveIsNotRead:
+    """A disposal copy under .archive/ is neither a parser nor a test (seedgo, fleet green leg 10)."""
+
+    PASSES = "def test_it():\n    handle_command('thing', ['--loud'])\n"
+
+    def _plant(self, tmp_path, relative, source):
+        """Write one more file under the branch root."""
+        path = tmp_path.joinpath(*relative)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+
+    def test_an_archived_test_passing_the_flag_does_not_acquit_it(self, tmp_path):
+        """Red first: the rglob read tests/.archive/ and the old copy acquitted --loud."""
+        branch = _branch(tmp_path)
+        self._plant(branch, ("tests", ".archive", "test_old.py"), self.PASSES)
+        assert [flag for _p, _l, flag in flag_never_passed_check.scan(branch)[0]] == ["--loud"]
+
+    def test_an_archived_parser_declares_nothing(self, tmp_path):
+        """Red first: an old parser's --quiet was charged to the live branch."""
+        branch = _branch(tmp_path, tests=self.PASSES)
+        old = "def handle_command(command, args):\n    return '--quiet' in args\n"
+        self._plant(branch, ("apps", ".archive", "old.py"), old)
+        assert flag_never_passed_check.scan(branch)[0] == []
+
+    def test_a_live_test_in_a_subdirectory_still_acquits(self, tmp_path):
+        """The control: only .archive/ is left out, not every nested directory."""
+        branch = _branch(tmp_path)
+        self._plant(branch, ("tests", "integration", "test_new.py"), self.PASSES)
+        assert flag_never_passed_check.scan(branch)[0] == []
 
 
 class TestWhatCountsAsPassingIt:

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_through_the_command_check.py
 # Description: through_the_command_check — test template v1 item 10, no underscore helper called from a test
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-21
-# Modified: 2026-09-22
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/through_the_command_check.py."""
@@ -110,6 +110,33 @@ class TestAPrivateReachThroughAProductBaseIsConvicted:
         )
 
         assert len(_names(source)) == 2
+
+    def test_a_getattr_by_string_is_the_same_reach(self):
+        """getattr(cs, "_source_matches") reads the same private name (seedgo, fleet green leg 10).
+
+        Red first: only an Attribute node was read, so the string spelling walked past.
+        """
+        source = f'import {_PRODUCT} as cs\n\ndef test_x():\n    assert getattr(cs, "_source_matches")()\n'
+
+        assert _names(source) == ["reaches the private name cs._source_matches"]
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            'getattr(cs, "public")',
+            'getattr(result, "_x")',
+            "getattr(cs, name)",
+            'getattr(cs, "__doc__")',
+            'setattr(cs, "_x", 1)',
+            'getattr(cs, b"_x")',
+        ],
+    )
+    def test_a_getattr_of_anything_else_is_not_a_hit(self, call):
+        """The control: a public name, a non-product base, a computed name, a dunder,
+        a setattr (a write, item 15's shape) and a name that is not a str."""
+        source = f"import {_PRODUCT} as cs\n\ndef test_x(result, name):\n    assert {call}\n"
+
+        assert _names(source) == []
 
 
 class TestWhatIsNeverConvicted:

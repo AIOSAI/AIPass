@@ -107,6 +107,14 @@ class TestTheSixScoredForms:
         source = "def test_it(offenders):\n    offenders = []\n    assert not offenders\n"
         assert _forms(source) == [weak_oracle_check.D2]
 
+    def test_a_positive_assert_on_a_built_container_is_still_d2(self):
+        """Only `not` is the emptiness claim; `assert found` says "at least one" (seedgo, fleet green leg 10).
+
+        Red first: the leg 9 cure acquitted the positive form too (devpulse's surviving mutant).
+        """
+        source = "def test_it():\n    found = [p for p in run() if p]\n    assert found\n"
+        assert _forms(source) == [weak_oracle_check.D2]
+
     def test_d3_is_not_none_alone(self):
         """test_module_isolation.py:48 — every object is not None."""
         source = "def test_it():\n    twin = run()\n    assert twin is not None\n"

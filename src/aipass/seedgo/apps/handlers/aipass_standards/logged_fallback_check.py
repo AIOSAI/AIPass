@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logged_fallback_check.py
 # Description: Logged Fallback Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -85,6 +85,9 @@ BINDERS = (ast.AugAssign, ast.For, ast.AsyncFor, ast.With, ast.AsyncWith, ast.Na
 
 #: The key every string built from an exception compares under.
 EXCEPTION_TEXT = ("str", "*")
+
+#: The display call that shows the user a failure; a return right after it is a failure path.
+REPORTED_BY = "error"
 
 CURE = "re-raise, or return a value the success path cannot return and name it in the docstring"
 WHY = "the success path can return the same value, so the caller cannot tell failure from an answer"
@@ -175,9 +178,28 @@ def first_bindings(function: ast.AST, nodes: List[ast.AST]) -> Dict[str, Optiona
     return first
 
 
+def _reported_failures(function: ast.AST, nodes: List[ast.AST]) -> Set[int]:
+    """ids of the statements that directly follow a bare ``error(...)`` call (only a return's is read).
+
+    The caller was already shown the failure, so that return is a failure path,
+    not an answer: ai_mail's main() returns 1 after error("Unknown command")
+    and 1 from its handler, and both say "failed" (seedgo, fleet green leg 10).
+    """
+    blocks = [getattr(node, field, None) for node in [function, *nodes] for field in ("body", "orelse")]
+    pairs = [pair for block in blocks if isinstance(block, list) for pair in zip(block, block[1:])]
+    return {id(after) for before, after in pairs if _is_reported(before)}
+
+
+def _is_reported(statement: ast.AST) -> bool:
+    """Whether a statement's value is a bare ``error(...)`` call, kept or not."""
+    call = getattr(statement, "value", None)
+    return isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == REPORTED_BY
+
+
 def _success_keys(function: ast.AST, nodes: List[ast.AST], excluded: Set[int]) -> Set[Tuple[str, str]]:
-    """The literal keys the success path can return."""
+    """The literal keys the success path can return; a reported failure is not on it."""
     first = first_bindings(function, nodes)
+    excluded = excluded | _reported_failures(function, nodes)
     keys: Set[Tuple[str, str]] = set()
     for node in nodes:
         if not isinstance(node, ast.Return) or id(node) in excluded or node.value is None:

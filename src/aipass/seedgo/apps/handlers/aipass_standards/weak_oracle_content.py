@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: weak_oracle_content.py
 # Description: Weak Oracle Standards Content Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
 # Modified: 2026-10-03
 # =============================================
@@ -53,6 +53,7 @@ def get_weak_oracle_standards() -> str:
         "  [green]NOT D2: assert not offenders[/green] where the test built offenders itself",
         "  (a display or a comprehension): it cannot be None, so it IS offenders == [].",
         "  A name the product answered stays D2 — None passes not, it fails == [].",
+        "  Only the not form: assert found (no not) on a built list is still D2.",
         "",
         "[bold cyan]REPORTED WITH A COUNT, NEVER SCORED:[/bold cyan]",
         "  is None alone (not a -> None function) · len and count compares ·",

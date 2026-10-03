@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_uncalled_public_function_check.py
 # Description: uncalled_public_function_check — crack class O, a subject's untested export
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/uncalled_public_function_check.py."""
@@ -100,6 +100,42 @@ class TestWhatCountsAsCalled:
         """Named ONLY as a patch target is the rule; named twice is not that."""
         tests = DECLARES + "def test_it():\n    patch.object(entry, 'discover')\n    assert discover.__doc__\n"
         assert _names(tmp_path, tests) == []
+
+
+class TestReplacedInOneTestRunInAnother:
+    """O1 is "never run": a test that runs it unpatched acquits it (seedgo, fleet green leg 10)."""
+
+    SUBJECT = "def run():\n    return discover()\ndef discover():\n    return []\n"
+    FIXTURE = "@pytest.fixture\ndef stub(monkeypatch):\n    monkeypatch.setattr(entry, 'discover', list)\n"
+
+    def test_a_test_with_no_stub_runs_the_real_function(self, tmp_path):
+        """cli's print_introspection test runs discover_modules; stub_module replaces it elsewhere.
+
+        Red first: the patch in one test convicted it as O1 for the whole suite.
+        """
+        tests = DECLARES + self.FIXTURE + "def test_stubbed(stub):\n    run()\ndef test_real():\n    run()\n"
+        assert _names(tmp_path, tests, subject=self.SUBJECT) == []
+
+    def test_a_call_through_an_import_alias_runs_it(self, tmp_path):
+        """devpulse's seat_email calls guard.owner_address as _owner_address."""
+        seat = "from apps.modules.thing import discover as _discover\ndef seat():\n    return _discover()\n"
+        tests = DECLARES + "def test_patched():\n    patch.object(guard, 'discover')\ndef test_seat():\n    seat()\n"
+        assert _names(tmp_path, tests, extra={"seat.py": seat}) == []
+
+    @pytest.mark.parametrize(
+        "replacer",
+        [
+            "def test_stubbed(stub):\n    run()\n",
+            "@patch('apps.modules.thing.discover')\ndef test_stubbed(fake):\n    run()\n",
+            "@patch('apps.modules.thing.discover')\nclass TestIt:\n    def test_stubbed(self, fake):\n        run()\n",
+            "@pytest.fixture(autouse=True)\ndef always(monkeypatch):\n"
+            "    monkeypatch.setattr(entry, 'discover', list)\ndef test_plain():\n    run()\n",
+        ],
+    )
+    def test_every_test_that_reaches_it_replaces_it_is_still_o1(self, tmp_path, replacer):
+        """The control: a fixture, a decorator, a class decorator and an autouse fixture each replace it."""
+        tests = DECLARES + self.FIXTURE + replacer
+        assert _shapes(tmp_path, tests, subject=self.SUBJECT) == [uncalled_public_function_check.REPLACED]
 
 
 class TestTheSubjectLine:

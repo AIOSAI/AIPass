@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_top_content.py
 # Description: Test File Top Standards Content Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -66,6 +66,8 @@ def get_file_top_standards() -> str:
         "  [red]item 6 subject docstring:[/red] missing / 3 lines, not 1 / names no path",
         "  [red]item 7 declared pass:[/red] missing / line N is not a marker /",
         "  the block is above the docstring",
+        "  The header is read to its footer, however long; a comment under the",
+        "  declared pass that is not a marker is line N's finding.",
         "",
         "[bold cyan]WHY IT EXISTS:[/bold cyan]",
         "  Measured 2026-09-22 over 579 fleet test files: 367 open with the block,",

@@ -1,6 +1,6 @@
 # Logged Fallback Standards
 **Status:** v1
-**Date:** 2026-09-25
+**Date:** 2026-10-03
 
 ---
 
@@ -60,6 +60,13 @@ Each edge case was decided from the 40-hit sample, not from taste.
 | a `return` inside `finally` | it runs on both paths, so it is not the success path |
 | a success `return` of a call, an attribute, or a name first bound to a parameter, a call or a loop target | what it returns cannot be read from the statement |
 | a nested function | judged on its own returns, never its parent's. The first measurement credited a nested def with its parent's returns; that bug is why this is written down |
+| a success-path `return` straight after a bare `error(...)` call (2026-10-03, seedgo fleet green leg 10) | it is a failure the user was already shown, not an answer: ai_mail's `main()` returns 1 after `error("Unknown command")` and 1 from its handler, and both say "failed". A `logger.error` or a `console.error` line is not shown to the caller and does not count |
+
+### Classes the rule convicts on purpose (leg 10)
+
+- **The exception is the answer**: `return str(e)` beside success-path reason strings (ai_mail `caller_refusal`). The caller reads a refusal and cannot tell "refused" from "the check broke". Convicted.
+- **Guard-failure returns**: `if not path.exists(): return None` beside a handler's `return None`. The caller cannot tell "missing" from "unreadable", which is the rule's own specimen (`get_or_create_backup_folder`). Convicted.
+- **Per-file weighing**: one hit scores the file 0, like every per-file checker in the pack. Intended.
 
 ---
 

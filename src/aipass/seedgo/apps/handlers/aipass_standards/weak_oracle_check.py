@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: weak_oracle_check.py
 # Description: Weak Oracle Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
 # Modified: 2026-10-03
 # =============================================
@@ -302,9 +302,11 @@ def _verdict(node: ast.AST, bare: Set[str], modules: Dict[str, str], built: Set[
     if isinstance(test, ast.Constant):
         return _SCORED, D1
     if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not) and isinstance(test.operand, ast.Name):
-        test = test.operand
+        # Only the NOT form is the emptiness claim (seedgo, fleet green leg 10):
+        # `assert found` on a built list says "at least one", which is D2's weakness.
+        return (_STRONG, "") if test.operand.id in (built or set()) else (_SCORED, D2)
     if isinstance(test, ast.Name):
-        return (_STRONG, "") if test.id in (built or set()) else (_SCORED, D2)
+        return _SCORED, D2
     if isinstance(test, ast.Call):
         # A CALL's truthiness is the claim: `assert is_ignored(p, spec)` and
         # `assert hasattr(generator, "update_readme_auto_sections")` both ask

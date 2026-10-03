@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_file_top_check.py
 # Description: file_top_check — test template v1 items 5, 6 and 7, the top of a test file
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/file_top_check.py."""
@@ -115,6 +115,26 @@ class TestItemFiveTheHeaderComesFirst:
 
         assert file_top_check.scan(thin + DOCSTRING + DECLARED_PASS + BODY) == [
             "item 5 META header: missing Description, Created, Modified"
+        ]
+
+    def test_a_header_longer_than_twenty_lines_is_read_to_its_footer(self):
+        """Red first: the footer was looked for in 20 lines only, so every field read as missing.
+
+        seedgo, fleet green leg 10.
+        """
+        notes = "".join(f"# Note {n}: a line of the description\n" for n in range(20))
+        long_header = HEADER.replace("# Version:", notes + "# Version:")
+
+        assert file_top_check.scan(long_header + DOCSTRING + DECLARED_PASS + BODY) == []
+
+    def test_a_block_with_no_footer_still_reads_as_missing_fields(self):
+        """The control: the block ends at its first code line, so a section divider below is no footer."""
+        unclosed = HEADER.rsplit("# ====", 1)[0]
+        divider = "# =============================================\n"
+        source = unclosed + DOCSTRING.lstrip("\n") + divider + DECLARED_PASS + BODY
+
+        assert file_top_check.scan(source) == [
+            "item 5 META header: missing Name, Description, Version, Created, Modified"
         ]
 
 

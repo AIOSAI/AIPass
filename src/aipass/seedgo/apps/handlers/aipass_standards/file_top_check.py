@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_top_check.py
 # Description: Test File Top Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -123,8 +123,14 @@ def _header_span(lines: List[str]) -> Tuple[int, int]:
         return (0, 0)
     if not _BANNER.match(lines[start].strip()):
         return (0, 0)
-    for index in range(start + 1, min(len(lines), start + 20)):
-        if _FOOTER.match(lines[index].strip()) and not _BANNER.match(lines[index].strip()):
+    # The block ends at its footer or at its first non-comment line, however
+    # long it runs: a 20-line window read a long header's fields as missing
+    # (seedgo, fleet green leg 10).
+    for index in range(start + 1, len(lines)):
+        stripped = lines[index].strip()
+        if not stripped.startswith("#"):
+            break
+        if _FOOTER.match(stripped) and not _BANNER.match(stripped):
             return (start + 1, index + 1)
     return (start + 1, start + 1)
 

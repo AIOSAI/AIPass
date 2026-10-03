@@ -215,6 +215,24 @@ class TestTheDecoratorsArePartOfTheTest:
         )
         assert duplicate_test_check.scan(source) == []
 
+    @pytest.mark.parametrize(
+        "mark",
+        ["@pytest.mark.timeout(60)", "@pytest.mark.skipif(sys.platform == 'win32', reason='x')", "@mark.slow"],
+    )
+    def test_twins_that_differ_only_by_a_scheduling_mark_are_still_a_clone(self, mark):
+        """A timeout or a skipif runs the same case; only parametrize, usefixtures and patch change it.
+
+        Red first: leg 9 counted every decorator, so the mark made two tests (seedgo, fleet green leg 10).
+        """
+        body = "    assert run(1) is True\n"
+        assert _names(f"def test_a():\n{body}{mark}\ndef test_b():\n{body}") == ["test_b"]
+
+    def test_usefixtures_still_makes_two_tests(self):
+        """The control: a mark that changes the case keeps the twins apart."""
+        body = "    assert run(1) is True\n"
+        source = f"def test_a():\n{body}@pytest.mark.usefixtures('clean_home')\ndef test_b():\n{body}"
+        assert duplicate_test_check.scan(source) == []
+
 
 class TestTheDocstringIsDropped:
     """Two tests that differ only in their prose are the same test."""

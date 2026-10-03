@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -673,6 +673,7 @@ def _capability(root, content, branch_name):
     handler.parent.mkdir(parents=True)
     handler.write_text(content, encoding="utf-8")
     check = _named_check(branch, "Handler capability")
+    assert check is not None, "check_branch reported no Handler capability check"
     return check["passed"], check["message"]
 
 
@@ -1118,6 +1119,38 @@ def test_a_filenotfounderror_handler_acquits_the_binary(tmp_path):
 
     assert violations == []
     assert acquitted == 1
+
+
+#: A test that runs tmux inside a pytest.raises of the given exception (seedgo, fleet green leg 10).
+_RAISES_TMUX = (
+    "import subprocess\n"
+    "import pytest\n"
+    "\n"
+    "\n"
+    "def test_no_tmux():\n"
+    "    with pytest.raises({expected}):\n"
+    '        subprocess.run(["tmux", "kill-session", "-t", "x"])\n'
+)
+
+
+@pytest.mark.parametrize("expected", ["FileNotFoundError", "OSError", "(FileNotFoundError, PermissionError)"])
+def test_a_missing_file_raises_around_the_binary_acquits_it(tmp_path, expected):
+    """Where tmux is absent the call raises exactly what the test expects, so it passes on every host.
+
+    Red first: only a try/except counted as the guard, and this line was convicted.
+    """
+    violations, acquitted = _scan_source(tmp_path, _RAISES_TMUX.format(expected=expected))
+
+    assert violations == []
+    assert acquitted == 1
+
+
+@pytest.mark.parametrize("expected", ["ValueError", "subprocess.CalledProcessError"])
+def test_a_raises_of_another_error_still_convicts_the_binary(tmp_path, expected):
+    """The control: a host without tmux raises FileNotFoundError, which this test does not expect."""
+    violations, _acquitted = _scan_source(tmp_path, _RAISES_TMUX.format(expected=expected))
+
+    assert _lines(violations) == [7]
 
 
 def test_platform_dispatch_into_a_variable_argv0_is_not_convicted(tmp_path):

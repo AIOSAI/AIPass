@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_logged_fallback_check.py
 # Description: logged_fallback_check — an except returning a default the success path can also return
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/logged_fallback_check.py."""
@@ -157,6 +157,27 @@ class TestTheSameValue:
 
     def test_logging_does_not_acquit(self, tmp_path):
         body = _function("None", "None").replace("logger.warning(exc)", "logger.error(exc)\n        logger.info(exc)")
+        assert _verdict(tmp_path, body)[0] == 0
+
+
+class TestAReportedFailureIsNotTheSuccessPath:
+    """A return right after error(...) is a failure the caller was shown (seedgo, fleet green leg 10)."""
+
+    SHOWN = "    if value is None:\n        error('no value')\n        return 1\n"
+
+    def test_exit_one_after_error_and_from_the_handler_passes(self, tmp_path):
+        """ai_mail's main(): error("Unknown command"); return 1, and its handler returns 1.
+
+        Red first: the shown failure was read as an answer the handler's 1 imitates.
+        """
+        body = _function("1", "1").replace("    if value is None:\n        return 1\n", self.SHOWN)
+        assert _verdict(tmp_path, body)[0] == 100
+
+    @pytest.mark.parametrize("before", ["logger.error('no value')", "console.error('no value')", "error_count += 1"])
+    def test_anything_but_a_bare_error_call_still_convicts(self, tmp_path, before):
+        """The control: a log line, a method named error, or a statement is not a shown failure."""
+        shown = self.SHOWN.replace("error('no value')", before)
+        body = _function("1", "1").replace("    if value is None:\n        return 1\n", shown)
         assert _verdict(tmp_path, body)[0] == 0
 
 

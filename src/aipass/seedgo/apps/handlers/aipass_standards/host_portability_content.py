@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_content.py
 # Description: Host Portability Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-12
-# Modified: 2026-09-12
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -70,6 +70,8 @@ def get_host_portability_standards() -> str:
         "  - [dim]if sys.platform == 'linux':[/dim] / [dim]os.name[/dim] /",
         "    [dim]platform.system()[/dim] anywhere in the enclosing function",
         "  - [dim]try: ... except OSError / FileNotFoundError / Exception:[/dim]",
+        "  - [dim]with pytest.raises(FileNotFoundError):[/dim] (or OSError) -- the",
+        "    missing host raises what the test expects",
         "  - [dim]if not path.exists(): return[/dim] -- an existence early-out",
         "  - a skipif whose predicate names the host that HAS the recipe --",
         "    [dim]sys.platform != 'linux'[/dim], a path probe or [dim]shutil.which[/dim] --",

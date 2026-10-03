@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: duplicate_test_content.py
 # Description: Duplicate Test Standards Content Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
 # Modified: 2026-10-03
 # =============================================
@@ -39,6 +39,8 @@ def get_duplicate_test_standards() -> str:
         "",
         "  The decorators are part of the test: one body under different parametrize",
         "  cases or patch answers is two tests; a decorator is never a harmless extra.",
+        "  Only the ones that change the case count: a timeout, skipif or other",
+        "  scheduling mark leaves twins a clone (parametrize and usefixtures count).",
         "",
         "[bold cyan]THE RESTRICTION ON Y'S EXTRAS IS THE WHOLE RULE:[/bold cyan]",
         "  Without it, test_floor_applies_with_no_backupignore (no .backupignore at",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: flag_never_passed_check.py
 # Description: Flag Never Passed Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -98,6 +98,14 @@ _HELP_ROW = "help"
 
 CURE = "pass it to the parser in a test, or delete the branch nothing reaches"
 
+#: A disposal copy is neither a parser nor a test (seedgo, fleet green leg 10).
+ARCHIVE = ".archive"
+
+
+def _live_files(root: Path) -> List[Path]:
+    """Every .py under root, sorted, with anything under an .archive/ left out."""
+    return [path for path in sorted(root.rglob("*.py")) if ARCHIVE not in path.relative_to(root).parts]
+
 
 def _tail_name(node: ast.AST) -> str:
     """The last name in a call target: ``a.b.c`` -> ``c``, ``f`` -> ``f``."""
@@ -130,7 +138,7 @@ def declared_flags(branch_root: Path) -> Dict[str, Tuple[Path, int]]:
     in the module docstring.
     """
     found: Dict[str, Tuple[Path, int]] = {}
-    for path in sorted((branch_root / "apps").rglob("*.py")):
+    for path in _live_files(branch_root / "apps"):
         tree = _parse(path)
         if tree is None:
             continue
@@ -240,7 +248,7 @@ def exercised_flags(branch_root: Path) -> Tuple[Set[str], Set[str]]:
     tests_dir = branch_root / "tests"
     if not tests_dir.is_dir():
         return exercised, shadowed
-    for path in sorted(tests_dir.rglob("*.py")):
+    for path in _live_files(tests_dir):
         tree = _parse(path)
         if tree is None:
             continue

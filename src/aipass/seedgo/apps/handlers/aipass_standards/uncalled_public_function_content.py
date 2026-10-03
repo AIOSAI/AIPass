@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: uncalled_public_function_content.py
 # Description: Uncalled Public Function Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -39,6 +39,9 @@ def get_uncalled_public_function_standards() -> str:
         "              discover_modules is it exactly: four sites in",
         "              test_cli_routing.py replace it with return_value=[fake_module]",
         "              and nothing anywhere runs the real importlib discovery.",
+        "              Only when EVERY test that reaches it replaces it (body,",
+        "              decorators, class decorators, named or autouse fixtures);",
+        "              an import alias counts as the name it imports.",
         "",
         "  [green]REACHED[/green]     Through the product — the false conviction to avoid.",
         "              A name-level call graph over the branch's whole apps/, seeded",

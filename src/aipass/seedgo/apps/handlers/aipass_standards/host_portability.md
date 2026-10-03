@@ -1,6 +1,6 @@
 # Host Portability
 **Status:** Draft v1.1 (arm C, lib/ corpus — FPLAN-0554 round three)
-**Date:** 2026-09-12
+**Date:** 2026-10-03
 
 ---
 
@@ -109,6 +109,10 @@ module's `Path`, `read_text`). Its gate is not what makes it portable.
 - a platform test anywhere in the enclosing function: `sys.platform`, `os.name`,
   `platform.system()`
 - `try: ... except OSError / FileNotFoundError / Exception:`
+- `with pytest.raises(FileNotFoundError / OSError / ...):` (2026-10-03, seedgo fleet green
+  leg 10): a host without `/proc` or the binary raises exactly what the test expects, so it
+  passes everywhere. skills' `tests/test_runner.py:276` is the fleet's one site. A
+  `pytest.raises` of any other error is no guard.
 - an existence early-out: `if not path.exists(): return` — kept after measuring:
   skills' pre-cure handler refused by name with `success: False` on a host with
   no `/proc`; its red was in the tests. 1 live fleet site acquits only this way.

@@ -398,6 +398,39 @@ class TestUnusedFunctionCheck:
         assert len(unused_checks) > 0
         assert any("never_called_delta" in u["name"] for c in unused_checks for u in c["unused"])
 
+    def test_a_method_overriding_an_imported_base_is_used_by_the_base(self, mock_json, tmp_path: Path) -> None:
+        """socketserver calls handle() by name; the override is used though the branch never names it.
+
+        The controls stay convicted: a method the base does not define, and an
+        override of a base the imports cannot resolve (seedgo, fleet green leg 10).
+        """
+        branch = _make_branch(tmp_path)
+        _write_file(
+            branch / "apps" / "handlers" / "server.py",
+            (
+                "import socketserver\n"
+                "from socketserver import BaseRequestHandler\n"
+                "\n"
+                "class Echo(BaseRequestHandler):\n"
+                "    def handle(self):\n"
+                "        return 1\n"
+                "\n"
+                "    def never_overridden(self):\n"
+                "        return 2\n"
+                "\n"
+                "class Dotted(socketserver.BaseRequestHandler):\n"
+                "    def finish(self):\n"
+                "        return 3\n"
+                "\n"
+                "class Unresolved(Unknown):\n"
+                "    def setup(self):\n"
+                "        return 4\n"
+            ),
+        )
+        result = unused_function_check_branch(str(branch))
+        names = {u["name"] for c in result["checks"] for u in c.get("unused", [])}
+        assert names == {"never_overridden", "setup"}
+
     def test_unused_function_bypass_respected(self, mock_json, tmp_path: Path) -> None:
         """Bypass rules produce score=100."""
         branch = _make_branch(tmp_path)

@@ -61,7 +61,9 @@ When every binding of the name in the test is a list, set or dict display or a
 comprehension, the name cannot be None, 0 or "", so `not` and `== []` are one oracle and
 neither is weak. A name the product answered, or one also bound by a loop, a `with` or a
 parameter, stays D2: there `not` passes for None, which `== []` would not (2026-10-03,
-seedgo fleet green leg 9; reported by skills, memory, prax and seedgo).
+seedgo fleet green leg 9; reported by skills, memory, prax and seedgo). Only the `not` form
+is the emptiness claim: `assert found` on a built list says "at least one" and stays D2
+(2026-10-03, leg 10).
 
 ### D6 is the rarest form that exists at all — **two** in the fleet
 

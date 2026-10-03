@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: through_the_command_check.py
 # Description: Through The Command Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-21
-# Modified: 2026-09-21
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -29,6 +29,7 @@ Two shapes, both convicted:
   * A call or attribute READ of an underscore name on a base this file bound
     from a product import: ``m._helper(...)`` or ``m._TABLE`` where ``m`` came
     from ``import aipass.a.b as m`` or ``from aipass.a import b``.
+    ``getattr(m, "_helper")`` with a str literal is the same read.
 
 The base is resolved from the file's own import bindings and nothing deeper.
 A name this file never imported from the product is not the product.
@@ -48,7 +49,8 @@ Never convicted, each for its own reason:
     "_cache", ...)``, or a ``patch("aipass.x._helper")`` target string. Those
     are item 15, mock only at the edge, and they are a different cure. 152
     direct writes and 2,113 patch-target strings were measured on the fleet
-    2026-09-21 and deliberately left to that rule.
+    2026-09-21 and deliberately left to that rule. An f-string target
+    (``patch(f"{MODULE}._x")``) is the same write (leg 10).
 
 One known limit, measured rather than assumed: ``import aipass.x._private as
 m`` -- the plain-import form of shape (a) -- is not convicted, because item 10
@@ -90,6 +92,9 @@ PRODUCT_ROOT = "aipass"
 # A test importing a helper from another test file is sharing its own fixtures,
 # which item 10 says nothing about.
 _TEST_SEGMENTS: frozenset[str] = frozenset({"tests", "conftest"})
+
+# The builtin that reads an attribute by its string name.
+GETATTR = "getattr"
 
 FIX = (
     "reach it through the command or a public function; if no route exists, "
@@ -186,6 +191,9 @@ def _private_reads(tree: ast.Module, bases: Dict[str, str]) -> List[Tuple[int, s
     """
     found: List[Tuple[int, str]] = []
     for node in ast.walk(tree):
+        read = _getattr_read(node)
+        if read is not None:
+            node = read
         if not isinstance(node, ast.Attribute) or not _is_private(node.attr):
             continue
         if not isinstance(node.ctx, ast.Load):
@@ -198,6 +206,20 @@ def _private_reads(tree: ast.Module, bases: Dict[str, str]) -> List[Tuple[int, s
             continue
         found.append((node.lineno, ".".join([root, *path])))
     return found
+
+
+def _getattr_read(node: ast.AST) -> ast.Attribute | None:
+    """``getattr(m, "_helper")`` as the attribute read it is, or None.
+
+    The string spelling reaches the same private name, so it is read the same
+    way (seedgo, fleet green leg 10).
+    """
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == GETATTR):
+        return None
+    if len(node.args) < 2 or not isinstance(node.args[1], ast.Constant) or not isinstance(node.args[1].value, str):
+        return None
+    read = ast.Attribute(value=node.args[0], attr=node.args[1].value, ctx=ast.Load())
+    return ast.copy_location(read, node)
 
 
 def scan(source: str) -> List[Tuple[int, str, str]]:

@@ -167,6 +167,12 @@ body are still a clone. A decorator is never a harmless extra, so a decorated te
 subsumed by an undecorated one (2026-10-03, seedgo fleet green leg 9: the code used to
 compare bodies alone; flow, devpulse and seedgo reported the gap).
 
+**Only the decorators that change the case count.** `parametrize`, `usefixtures`, `patch`
+and any decorator that is not a pytest mark make a different case. A scheduling mark
+(`@pytest.mark.timeout`, `skipif`, `slow`, or `mark.X` imported bare) runs the same case
+under a different clock or on fewer platforms, so twins that differ only by one are still
+a clone (2026-10-03, seedgo fleet green leg 10; 0 fleet lines flipped).
+
 **A file Python cannot parse yields no findings.** `ruff` already convicts the syntax error.
 
 ---

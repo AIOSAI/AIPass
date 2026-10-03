@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: through_the_command_content.py
 # Description: Through The Command Standards Content Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-21
-# Modified: 2026-09-21
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -44,6 +44,7 @@ def get_through_the_command_standards() -> str:
         "  [red]from aipass.memory.apps.handlers.chroma import chroma_subprocess[/red]",
         "  [red]...[/red]",
         '  [red]assert chroma_subprocess._source_matches(source, "DPLAN-0012")[/red]',
+        '  [red]assert getattr(chroma_subprocess, "_source_matches")(...)[/red]  [dim](same read)[/dim]',
         "",
         "  The base is resolved from [dim]this file's own import bindings[/dim] and nothing",
         "  deeper. A name the file never imported from the product is not the product.",
@@ -61,6 +62,7 @@ def get_through_the_command_standards() -> str:
         "  [green]A WRITE to a private name[/green] -- [dim]m._cache = {}[/dim],",
         '  [dim]monkeypatch.setattr(m, "_cache", ...)[/dim], [dim]patch("aipass.x._helper")[/dim].',
         "  Those are [bold]item 15[/bold] (mock only at the edge) and a different cure.",
+        '  An f-string target [dim]patch(f"{MODULE}._x")[/dim] is the same write.',
         "",
         "[bold cyan]THE FIX:[/bold cyan]",
         "  [green]Reach it through the command or a public function.[/green] Call the verb",

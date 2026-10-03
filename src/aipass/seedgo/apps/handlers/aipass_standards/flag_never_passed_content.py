@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: flag_never_passed_content.py
 # Description: Flag Never Passed Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -72,6 +72,8 @@ def get_flag_never_passed_standards() -> str:
         "  builds argv for something else, is NOT declared and is never convicted.",
         "  The declared set starts at handle_command and follows only the same-file",
         "  functions it calls. The router's contract is the one the tests exercise.",
+        "  Nothing under an .archive/ is read: a disposal copy is neither a parser",
+        "  nor a test.",
         "",
         "[bold cyan]WHY IT CANNOT BE SATISFIED BY ACCIDENT:[/bold cyan]",
         "  If the literal never reaches the parser in any test, the branch behind it",

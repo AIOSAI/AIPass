@@ -1,6 +1,6 @@
 # Test File Top Standards
 **Status:** v1
-**Date:** 2026-09-22 (banner ruling 2026-09-27)
+**Date:** 2026-10-03 (banner ruling 2026-09-27; header span, leg 10)
 
 ---
 
@@ -79,6 +79,10 @@ The template once said *"for a test file the banner word is `META`"*, while `met
 **The owner's ruling, 2026-09-27: `AIPass` is the banner word for product and test files alike.** So a test file's banner passes exactly when `meta_check` would pass it on a product file: its `META_HEADER` (`AIPass`) or its `META_HEADER_LEGACY` (`META`), the whole line, stripped. The checker imports those two constants; there is one banner rule in the pack, and if `meta_check` ever retires the legacy line this rule follows it. The 22 `META` files pass as legacy, the same as a product file would; no banner is rewritten fleet-wide for this. The 72 squashed `AIPASS` lines are refused by `meta_check`'s exact line, so they are refused here, and the message prints the line wanted.
 
 The **fields** are `meta_check`'s five — Name, Description, Version, Created, Modified — because item 5 says "the same block product files carry", and that is the block they carry.
+
+**The block is read to its footer, however long it runs** (2026-10-03, seedgo fleet green leg 10). It ends at the footer line or at its first line that is not a comment. A 20-line window used to read a long header's fields as missing; a section divider below the code is never taken for the footer. 0 fleet files flipped.
+
+**A comment under the declared pass is a finding.** Every comment line in the block after its opening sentence is a `# seedgo: no-test-needed(...)` marker; prose goes on the marker's own line. No live file has one today.
 
 ---
 

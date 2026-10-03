@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logged_fallback_content.py
 # Description: Logged Fallback Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -39,6 +39,9 @@ def get_logged_fallback_standards() -> str:
         "  [yellow]assign-and-fall-through[/yellow] (not read)  [yellow]generators[/yellow]",
         "  [yellow]finally returns[/yellow]",
         "  [yellow]a success return of a call or parameter[/yellow]  nested defs judged on their own.",
+        "  [yellow]a success return right after error(...)[/yellow] - a failure already shown.",
+        "  Still convicted on purpose: return str(e) beside reason strings, and a",
+        "  guard's return None beside the handler's. One hit scores the file 0.",
         "",
         "[bold cyan]CHECK FIRST (2026-09-25):[/bold cyan]",
         "  1,216 product files. [red]496 hits in 230 files[/red], 16 branches. On the 40-hit sample:",

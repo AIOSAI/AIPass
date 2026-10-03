@@ -41,6 +41,7 @@ AST-parses each file to find `def` and `async def` definitions. The following ar
 - **Dunder methods:** `__init__`, `__str__`, `__repr__`, `__enter__`, `__exit__`, etc.
 - **Framework conventions:** `main()` and `handle_command()`
 - **Decorated functions:** Any function with a decorator (`@property`, `@staticmethod`, `@track_operation`, etc.)
+- **Overrides of an imported base** (2026-10-03, seedgo fleet green leg 10) -- a method whose class inherits from an imported class that defines the same name in its own body (`class Watcher(FileSystemEventHandler): def on_created(...)`). The base calls it by name, so it is used. The base's source is located with `importlib.util.find_spec` on the top-level package only and read with `ast`, never imported or run. One level only: a name the base inherits from its own base, a base the imports do not name, and a base Python ships as compiled code stay convicted. A name a registry or another branch calls is NOT this rule and stays convicted (see What this check actually measures)
 
 ### Phase 4: Reference Counting
 

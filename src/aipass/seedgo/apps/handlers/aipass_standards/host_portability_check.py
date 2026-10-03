@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-12
-# Modified: 2026-09-12
+# Modified: 2026-10-03
 # =============================================
 
 """Host Portability Standards Checker Handler.
@@ -179,6 +179,9 @@ _FS_EXCEPT_TYPES = frozenset(
     }
 )
 
+#: The pytest context that expects an exception; around a missing-file error it is a guard.
+RAISES = "raises"
+
 #: Calls that answer "is it there" - the other honest guard for a /proc read.
 _EXISTENCE_CALLS = frozenset({"exists", "is_file", "is_dir", "isfile", "isdir", "is_mount"})
 
@@ -311,7 +314,22 @@ def _fs_except_lines(tree: ast.Module) -> Set[int]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Try) and any(_handler_catches(h, _FS_EXCEPT_TYPES) for h in node.handlers):
             lines.update(_collect_child_linenos(node))
+        if isinstance(node, (ast.With, ast.AsyncWith)) and any(_expects_missing(i.context_expr) for i in node.items):
+            lines.update(_collect_child_linenos(node))
     return lines
+
+
+def _expects_missing(context: ast.expr) -> bool:
+    """``pytest.raises(X)`` where X is a missing-file error: the test passes on every host.
+
+    A /proc read or a missing binary inside it raises that error where the host
+    lacks them, which is what the test claims (seedgo, fleet green leg 10).
+    """
+    if not (isinstance(context, ast.Call) and _tail_name(context.func) == RAISES and context.args):
+        return False
+    expected = context.args[0]
+    names = expected.elts if isinstance(expected, ast.Tuple) else [expected]
+    return any(_tail_name(name) in _FS_EXCEPT_TYPES | {"OSError"} for name in names)
 
 
 def _calls_existence(node: ast.AST) -> bool:

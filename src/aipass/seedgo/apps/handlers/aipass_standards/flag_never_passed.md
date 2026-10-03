@@ -1,6 +1,6 @@
 # Flag Never Passed Standards
 **Status:** v1
-**Date:** 2026-09-22
+**Date:** 2026-10-03
 
 ---
 
@@ -135,6 +135,12 @@ the declared set would need a cross-module call graph and would start guessing.
 
 **Branch-level, not file-level.** The verdict compares a branch's `apps/` against its whole
 `tests/` tree, so no single file owns it.
+
+**An `.archive/` is not read** (2026-10-03, seedgo fleet green leg 10). A disposal copy is
+neither a parser nor a test: an archived test passing a flag no longer acquits it, and an
+archived parser declares nothing. The fleet sweep moved @spawn's `--role` and `--purpose`
+from `apps/modules/.archive/passport.py` to their live parse site in `core.py`; nothing else
+flipped.
 
 ---
 

@@ -1,6 +1,6 @@
 # Through The Command Standards
 **Status:** v1
-**Date:** 2026-09-21
+**Date:** 2026-10-03
 
 ---
 
@@ -59,8 +59,9 @@ The base is resolved from the file's own import bindings and nothing deeper:
 | `import aipass.a.b as m` | `m._helper(...)`, `m._TABLE` |
 | `from aipass.a import b` | `b._helper(...)` |
 | `import aipass.a.b` | `aipass.a.b._helper(...)` |
+| any of the above | `getattr(m, "_helper")` — the string spelling of the same read |
 
-A name this file never imported from the product is not the product.
+A name this file never imported from the product is not the product. A `getattr` whose name is computed, or not a str, is not read (2026-10-03, seedgo fleet green leg 10; daemon reported the gap, and its one fleet line is the only flip).
 
 ---
 
@@ -73,7 +74,7 @@ A name this file never imported from the product is not the product.
 | `result._x`, where `result` came back from a product call | Dataflow. The checker resolves a base to an import binding or it declines |
 | `m._cache = {}` · `monkeypatch.setattr(m, "_cache", ...)` · `patch("aipass.x._helper")` | **Item 15**, mock only at the edge. A different rule with a different cure |
 
-That last row is a deliberate boundary, not an oversight. The same fleet scan counted **152 direct writes** to a product private name and **2,113 patch-target strings** naming one. They are left to item 15, and this checker reports zero of them.
+That last row is a deliberate boundary, not an oversight. The same fleet scan counted **152 direct writes** to a product private name and **2,113 patch-target strings** naming one. They are left to item 15, and this checker reports zero of them. An f-string target, `patch(f"{MODULE}._private")`, is the same write and stays item 15's (2026-10-03, leg 10: daemon's report is rejected on that ground), as does `setattr(m, "_x", ...)`.
 
 ---
 

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: duplicate_test_check.py
 # Description: Duplicate Test Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
 # Modified: 2026-10-03
 # =============================================
@@ -92,6 +92,10 @@ TEST_PREFIX = "test_"
 #: Marks a decorator among a test's statement shapes, so no statement can equal it.
 DECORATOR = "@"
 
+#: The pytest marks that change the case itself; every other mark (timeout,
+#: skipif, slow) only schedules the same case.
+CASE_MARKS = {"parametrize", "usefixtures"}
+
 CLONE = "is the same test as"
 SUBSUMED = "asserts nothing that is not already asserted by"
 
@@ -140,6 +144,23 @@ def _harmless(statement: ast.AST) -> bool:
     return False
 
 
+def _changes_the_case(decorator: ast.expr) -> bool:
+    """Whether a decorator makes the test a different case (seedgo, fleet green leg 10).
+
+    parametrize, usefixtures, patch and any non-mark decorator change what runs.
+    A ``pytest.mark.X`` or ``mark.X`` outside CASE_MARKS does not: twins that
+    differ only by a timeout or a skipif are one case run twice.
+    """
+    target = decorator.func if isinstance(decorator, ast.Call) else decorator
+    if not isinstance(target, ast.Attribute):
+        return True
+    owner = target.value
+    is_mark = (isinstance(owner, ast.Attribute) and owner.attr == "mark") or (
+        isinstance(owner, ast.Name) and owner.id == "mark"
+    )
+    return not is_mark or target.attr in CASE_MARKS
+
+
 def _tests(tree: ast.Module) -> List[Tuple[int, str, Dict[str, ast.AST]]]:
     """(line, name, statements by shape) for every test with a body in this file."""
     found: List[Tuple[int, str, Dict[str, ast.AST]]] = []
@@ -154,7 +175,8 @@ def _tests(tree: ast.Module) -> List[Tuple[int, str, Dict[str, ast.AST]]]:
             # bodies under different parametrize cases or patch answers are two
             # tests, as the page said all along. Each decorator is a member that
             # is never harmless, so it can neither be shared away nor subsumed.
-            statements.update({DECORATOR + _shape(d): d for d in node.decorator_list})
+            # Only the decorators that change the case count (leg 10).
+            statements.update({DECORATOR + _shape(d): d for d in node.decorator_list if _changes_the_case(d)})
             found.append((node.lineno, node.name, statements))
     return found
 
