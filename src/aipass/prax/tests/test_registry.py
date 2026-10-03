@@ -3,7 +3,7 @@
 # Description: Tests for registry load and save handlers
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/registry/load.py and apps/handlers/registry/save.py."""
@@ -14,7 +14,6 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(error_handling) — _atomic_write's warning when the temp file cleanup fails, covered by that row
-# seedgo: no-test-needed(error_handling) — load_last_scan answering {} on an unreadable registry, covered by that row
 
 import json
 from datetime import timedelta
@@ -60,6 +59,43 @@ def _patch_registry_save(monkeypatch, tmp_path):
     # Replace stdlib logger with a MagicMock so tests can assert on calls
     mock_logger = MagicMock()
     monkeypatch.setattr(save_mod, "logger", mock_logger)
+
+
+# =============================================
+# TESTS: load_last_scan
+# =============================================
+
+
+class TestLoadLastScan:
+    """load_last_scan tells "never scanned" ({}) from "could not read" (None).
+
+    prax, leg 7: an unreadable registry used to answer {}, which status printed
+    as "never — run: drone @prax discover run" over a registry that had been
+    scanned. The pin's proof is its mutant (the old {} put back).
+    """
+
+    def test_a_registry_never_scanned_answers_empty(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        _patch_registry_load(monkeypatch, tmp_path)
+        load_mod.REGISTRY_FILE.write_text(json.dumps({"modules": {}}), encoding="utf-8")
+
+        assert load_mod.load_last_scan() == {}
+
+    def test_a_scanned_registry_answers_its_block(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        _patch_registry_load(monkeypatch, tmp_path)
+        block = {"timestamp": "2026-10-03T15:00:00+00:00", "added": 3, "removed": 1}
+        load_mod.REGISTRY_FILE.write_text(json.dumps({"modules": {}, "last_scan": block}), encoding="utf-8")
+
+        assert load_mod.load_last_scan() == block
+
+    def test_an_unreadable_registry_answers_none_and_says_why(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        _patch_registry_load(monkeypatch, tmp_path)
+        load_mod.REGISTRY_FILE.write_text("<<<not json>>>", encoding="utf-8")
+
+        assert load_mod.load_last_scan() is None
+        warning = cast(MagicMock, load_mod.logger).warning
+        assert warning.call_count == 1
+        form, where, _why = warning.call_args.args
+        assert (form, where) == ("load: failed to read last_scan from '%s': %s", load_mod.REGISTRY_FILE)
 
 
 # =============================================

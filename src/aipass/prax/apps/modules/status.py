@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: PRAX Status Command
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-09-24
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -43,7 +43,7 @@ def print_help():
     console.print()
 
 
-def _format_last_scan(last_scan: dict) -> str:
+def _format_last_scan(last_scan: dict | None) -> str:
     """One line describing the last discovery scan.
 
     There used to be a `File Watcher: Active/Inactive` line here. It reported
@@ -52,7 +52,13 @@ def _format_last_scan(last_scan: dict) -> str:
     while discovery was perfectly healthy. A field that is always wrong is worse
     than no field. Since DPLAN-0339 step 4 discovery is a scheduled scan, so the
     honest facts are when it last ran and what it changed.
+
+    None is load_last_scan's answer for a registry it could not read, said as
+    such: printed as "never" it sent the operator to scan a registry that had
+    been scanned (prax, leg 7).
     """
+    if last_scan is None:
+        return "unreadable — the registry could not be read; see the prax log"
     if not last_scan:
         return "never — run: drone @prax discover run"
 

@@ -3,7 +3,7 @@
 # Description: Tests for the log-health command module
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/log_health.py."""
@@ -36,6 +36,8 @@ import io
 
 import pytest
 from rich.console import Console
+
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
 
 
 def _render(call):
@@ -128,8 +130,6 @@ class TestRouting:
         It used to print the right words and return True, which the router turns
         into exit 0 (@devpulse's fleet CLI sweep, 2026-09-07).
         """
-        from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
-
         module = importlib.import_module("aipass.prax.apps.modules.log_health")
 
         with pytest.raises(UnknownArgument) as refusal:

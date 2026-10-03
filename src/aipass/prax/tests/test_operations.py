@@ -3,7 +3,7 @@
 # Description: Unit tests for dashboard operations handler
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/dashboard/operations.py."""
@@ -25,6 +25,8 @@ import types
 from pathlib import Path
 
 import pytest
+
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
 
 
 MODULE_PATH = "aipass.prax.apps.handlers.dashboard.operations"
@@ -1662,8 +1664,6 @@ class TestDashboardHandleCommand:
         `drone @prax dashboard refrsh` silently did nothing and reported success
         (@devpulse's fleet CLI sweep, 2026-09-07).
         """
-        from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
-
         mod = _load_dashboard_module()
 
         with pytest.raises(UnknownArgument) as refusal:

@@ -3,7 +3,7 @@
 # Description: Tests for the unified monitoring module
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/monitor.py."""
@@ -31,6 +31,8 @@ import sys
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +121,6 @@ class TestHandleCommand:
         Returning True is what the router reads as success; `monitor bogus` used
         to exit 0 (@devpulse's fleet CLI sweep, 2026-09-07).
         """
-        from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
-
         mod = _import_monitor()
 
         with pytest.raises(UnknownArgument) as refusal:

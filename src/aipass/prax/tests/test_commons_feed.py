@@ -3,7 +3,7 @@
 # Description: Tests for the commons live feed handler
 # Version: 1.1.0
 # Created: 2026-07-21
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/monitoring/commons_feed.py."""
@@ -338,9 +338,11 @@ class TestFeedState:
         assert state.events_count == 2
 
     def test_visible_true_when_no_filter(self):
-        """With no active room filter, every event is visible."""
+        """With no active room filter, every event is visible: the room the filter
+        test hides ("general") included (prax, leg 7)."""
         state = feed.FeedState()
         assert state.visible({"room_name": "dev"}) is True
+        assert state.visible({"room_name": "general"}) is True
 
     def test_visible_respects_room_filter(self):
         """With an active room filter, only matching-room events are visible."""

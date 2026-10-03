@@ -194,6 +194,53 @@
       "file": "apps/handlers/json/json_handler.py",
       "standard": "naming",
       "reason": "Shim pattern \u2014 module-level names are BOUND METHODS of the fleet json service's JsonHandle, not constants. Lowercase is correct for callable bindings, and the file is byte-identical in all 18 branches by the owner's ruling (2026-09-03), hashed by seedgo. Matches the identical bypass in spawn/, canary/ and memory/."
+    },
+    {
+      "file": "apps/__init__.py",
+      "standard": "cli_flags",
+      "reason": "prax, leg 7: a two-line package init (`from . import handlers`), not an entry point; it parses no argv. The entry point is apps/prax.py, which takes --version/-V (argparse, and TOP_LEVEL_OPTIONS). The check names no line, so the rule is file-wide on this file alone."
+    },
+    {
+      "file": "apps/modules/status.py",
+      "standard": "logged_fallback",
+      "lines": [132],
+      "reason": "prax, leg 7: True is the handler contract's 'this module owned the command', not an answer. The failure reaches the caller through error() on the line above, which is what marks the run failed for the exit seam in prax.py main(). The checker's error() exemption reads a success-path return, not the handler's own."
+    },
+    {
+      "file": "apps/prax.py",
+      "standard": "logged_fallback",
+      "lines": [197],
+      "reason": "prax, leg 7: same contract as status.py:132. The router's True means a module owned the command, as its docstring says, and the failure is reported through error() on the line above, which sets the exit code."
+    },
+    {
+      "file": "apps/handlers/monitoring/commons_feed.py",
+      "standard": "logged_fallback",
+      "lines": [463],
+      "reason": "prax, leg 7: True is the command's 'handled'. The failure was already shown to the operator through error() two lines above (then the relay is stopped), the same as the db-missing guard's return True; error() is what marks the run failed."
+    },
+    {
+      "file": "apps/handlers/json/json_service.py",
+      "standard": "logged_fallback",
+      "lines": [263],
+      "reason": "prax, leg 7: 'unknown' means one thing on both paths, as the docstring says: there is no module behind frame 2. sys._getframe raises ValueError exactly when the stack is too shallow to have that frame; it is the same answer, not a failure dressed as one."
+    },
+    {
+      "file": "apps/handlers/logging/introspection.py",
+      "standard": "logged_fallback",
+      "lines": [150],
+      "reason": "prax, leg 7: the docstring names None as the answer 'the caller cannot be located \u2014 an answer, not a failure'. A path that will not resolve is a caller that cannot be located; branch detection is a routing hint and must never raise into the caller's import."
+    },
+    {
+      "file": "apps/handlers/monitoring/branch_detector.py",
+      "standard": "logged_fallback",
+      "lines": [392, 423, 604, 662, 701],
+      "reason": "prax, leg 7: these are display labels and detector hints, and the value means the same on both paths. None at 392/423 is 'this detector has no answer, try the next' (an unreadable passport falls back to path matching, a file outside ~/Projects is not an external project); 'UNKNOWN' at 604/662/701 is the label for 'branch not determined', which is true when detection failed. The event is still displayed either way; no caller acts on the difference."
+    },
+    {
+      "file": "apps/handlers/monitoring/filesystem_handler.py",
+      "standard": "logged_fallback",
+      "lines": [235],
+      "reason": "prax, leg 7: None means 'this session file names no working directory', which is what an unreadable session file tells the caller as well; the caller then labels the event by the next means. The read is a display hint and the failure is logged at the line above."
     }
   ],
   "notes": {

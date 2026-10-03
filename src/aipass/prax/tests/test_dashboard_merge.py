@@ -3,7 +3,7 @@
 # Description: quick_status has many writers — none may delete another's key
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/dashboard/status.py, refresh.py, operations.py, template_pusher.py and template_differ.py."""
@@ -233,12 +233,6 @@ class TestListShapedActivePlans:
         results = [calc(FLOW_LIST_SECTION, branch) for _name, calc in _calculators()]
         assert all(r == results[0] for r in results[1:])
 
-    def test_canary_unguarded_comparison_raises(self):
-        """Proof the guard is load-bearing: the old expression still explodes."""
-        active_plans = FLOW_LIST_SECTION["flow"]["active_plans"]
-        with pytest.raises(TypeError):
-            _ = active_plans > 0
-
 
 # ---------------------------------------------------------------------------
 # Finding 3 — push-template is a fourth writer, and it deletes on purpose
@@ -349,9 +343,3 @@ class TestActionRequiredMatchesItsOwnSummary:
         result = calc({}, branch)
         assert result["summary"] == "All clear", name
         assert result["action_required"] is False, name
-
-    def test_canary_old_rule_disagrees_with_its_summary(self):
-        """Proof of the reported defect: the retired expression ignores todos."""
-        new_mail, active_plans, todo_count = 0, 0, 1
-        assert (new_mail > 0 or active_plans > 0) is False
-        assert f"{todo_count} todos"

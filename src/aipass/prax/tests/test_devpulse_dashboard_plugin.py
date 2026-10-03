@@ -3,7 +3,7 @@
 # Description: Tests for devpulse dashboard plugin
 # Version: 1.3.0
 # Created: 2026-05-16
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/plugins/devpulse_dashboard/git_section.py, dispatch_section.py and refresh.py."""
@@ -19,6 +19,30 @@ import json
 from unittest.mock import patch, MagicMock
 
 import pytest
+
+from aipass.prax.apps.handlers.dashboard import operations
+from aipass.prax.apps.plugins.devpulse_dashboard import git_section as dashboard_git_section
+from aipass.prax.apps.plugins.devpulse_dashboard.dispatch_section import build_dispatch_section
+from aipass.prax.apps.plugins.devpulse_dashboard.git_section import build_git_section
+from aipass.prax.apps.plugins.devpulse_dashboard.refresh import DEVPULSE_PATH, refresh
+
+
+def _glance(mock_run, branch, subject_stdout):
+    """The last_commit_msg build_git_section writes when git's subject reads ``subject_stdout``.
+
+    Through the section builder, not its private _subject_line (prax, leg 7).
+    """
+
+    def _responses(cmd, **kwargs):
+        result = _git_subprocess_responses(cmd, **kwargs)
+        if tuple(cmd[1:]) == ("log", "-1", "--format=%s"):
+            result.stdout = subject_stdout
+        return result
+
+    mock_run.side_effect = _responses
+    assert dashboard_git_section.build_git_section(branch) is True
+    dash = json.loads((branch / "DASHBOARD.local.json").read_text(encoding="utf-8"))
+    return dash["sections"]["git"]["last_commit_msg"]
 
 
 def _git_subprocess_responses(cmd, **kwargs):
@@ -85,7 +109,6 @@ class TestGitSection:
     @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section.subprocess.run")
     def test_build_git_section_success(self, mock_run, branch_with_git):
         """Test successful git section build with mocked subprocess."""
-        from aipass.prax.apps.plugins.devpulse_dashboard.git_section import build_git_section
 
         mock_run.side_effect = _git_subprocess_responses
         result = build_git_section(branch_with_git)
@@ -104,45 +127,32 @@ class TestGitSection:
     @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section.subprocess.run")
     def test_essay_subject_is_capped_to_one_glance(self, mock_run, branch_with_git):
         """A 3 KB one-line subject (the essay era) lands as its first SUBJECT_CAP chars."""
-        from aipass.prax.apps.plugins.devpulse_dashboard import git_section
-
         essay = "fix(memory): " + "why " * 800
 
-        def _responses(cmd, **kwargs):
-            result = _git_subprocess_responses(cmd, **kwargs)
-            if tuple(cmd[1:]) == ("log", "-1", "--format=%s"):
-                result.stdout = essay + "\n"
-            return result
+        msg = _glance(mock_run, branch_with_git, essay + "\n")
 
-        mock_run.side_effect = _responses
-        assert git_section.build_git_section(branch_with_git) is True
-
-        dash = json.loads((branch_with_git / "DASHBOARD.local.json").read_text(encoding="utf-8"))
-        msg = dash["sections"]["git"]["last_commit_msg"]
-        assert git_section.SUBJECT_CAP - 4 < len(msg) <= git_section.SUBJECT_CAP
+        cap = dashboard_git_section.SUBJECT_CAP
+        assert cap - 4 < len(msg) <= cap
         assert msg.startswith("fix(memory): why")
         assert msg.endswith("...")
 
-    def test_subject_line_keeps_short_subjects_and_drops_the_body(self):
+    @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section.subprocess.run")
+    def test_subject_line_keeps_short_subjects_and_drops_the_body(self, mock_run, branch_with_git):
         """Short subjects pass through untouched; a body under the subject never reaches the glance."""
-        from aipass.prax.apps.plugins.devpulse_dashboard.git_section import _subject_line
+        assert _glance(mock_run, branch_with_git, "feat(x): short\n") == "feat(x): short"
+        assert _glance(mock_run, branch_with_git, "feat(x): short\n\nWHY: the essay lives here\n") == "feat(x): short"
+        assert _glance(mock_run, branch_with_git, "   \n") == ""
 
-        assert _subject_line("feat(x): short\n") == "feat(x): short"
-        assert _subject_line("feat(x): short\n\nWHY: the essay lives here\n") == "feat(x): short"
-        assert _subject_line("   \n") == ""
-
-    def test_the_plugin_reads_the_shared_cap_instead_of_its_own(self):
+    @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section.subprocess.run")
+    def test_the_plugin_reads_the_shared_cap_instead_of_its_own(self, mock_run, branch_with_git):
         """A commit subject and a plan subject are the same glance — one number (DPLAN-0347)."""
-        from aipass.prax.apps.handlers.dashboard import operations
-        from aipass.prax.apps.plugins.devpulse_dashboard import git_section
 
-        assert git_section.SUBJECT_CAP is operations.SUBJECT_CAP
-        assert git_section._subject_line("x" * 500) == operations.cap_subject("x" * 500)
+        assert dashboard_git_section.SUBJECT_CAP is operations.SUBJECT_CAP
+        assert _glance(mock_run, branch_with_git, "x" * 500) == operations.cap_subject("x" * 500)
 
     @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section.subprocess.run")
     def test_build_git_section_subprocess_failure(self, mock_run, branch_with_git):
         """Test git section handles subprocess failures gracefully."""
-        from aipass.prax.apps.plugins.devpulse_dashboard.git_section import build_git_section
 
         mock_run.side_effect = OSError("git not found")
         # Should not raise — handles errors internally
@@ -153,7 +163,6 @@ class TestGitSection:
     @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section._find_git_root")
     def test_build_git_section_no_git_dir(self, mock_find_root, branch_path):
         """Test git section when no .git directory exists."""
-        from aipass.prax.apps.plugins.devpulse_dashboard.git_section import build_git_section
 
         mock_find_root.side_effect = FileNotFoundError("No .git found above " + str(branch_path))
         with pytest.raises(FileNotFoundError):
@@ -165,7 +174,6 @@ class TestDispatchSection:
 
     def test_build_dispatch_section_no_locks(self, branch_path):
         """Test dispatch section when no agents are active."""
-        from aipass.prax.apps.plugins.devpulse_dashboard.dispatch_section import build_dispatch_section
 
         # Create sibling branch dirs (dispatch scans parent for all branches)
         parent = branch_path.parent
@@ -183,7 +191,6 @@ class TestDispatchSection:
 
     def test_build_dispatch_section_with_locks(self, branch_path):
         """Test dispatch section detects active dispatch locks."""
-        from aipass.prax.apps.plugins.devpulse_dashboard.dispatch_section import build_dispatch_section
 
         parent = branch_path.parent
         # Create lock for "prax"
@@ -203,7 +210,6 @@ class TestDispatchSection:
 
     def test_build_dispatch_section_corrupt_lock(self, branch_path):
         """Test dispatch section handles corrupt lock files."""
-        from aipass.prax.apps.plugins.devpulse_dashboard.dispatch_section import build_dispatch_section
 
         parent = branch_path.parent
         seedgo_mail = parent / "seedgo" / ".ai_mail.local"
@@ -226,7 +232,6 @@ class TestRefresh:
     @patch("aipass.prax.apps.plugins.devpulse_dashboard.dispatch_section.build_dispatch_section")
     def test_refresh_all_success(self, mock_dispatch, mock_git, branch_path):
         """Test refresh orchestrator calls all builders."""
-        from aipass.prax.apps.plugins.devpulse_dashboard.refresh import refresh
 
         results = refresh(branch_path)
         assert results["git"]["success"] is True
@@ -238,17 +243,17 @@ class TestRefresh:
     @patch("aipass.prax.apps.plugins.devpulse_dashboard.dispatch_section.build_dispatch_section")
     def test_refresh_partial_failure(self, mock_dispatch, mock_git, branch_path):
         """Test refresh continues when one section fails."""
-        from aipass.prax.apps.plugins.devpulse_dashboard.refresh import refresh
 
         mock_git.side_effect = FileNotFoundError("No .git")
         results = refresh(branch_path)
         assert results["git"]["success"] is False
         assert "No .git" in results["git"]["error"]
         assert results["dispatch"]["success"] is True
+        # "Continues" is the dispatch builder still reached, for the same branch (prax, leg 7).
+        mock_dispatch.assert_called_once_with(branch_path)
 
     def test_refresh_default_path(self):
         """Test refresh uses DEVPULSE_PATH by default."""
-        from aipass.prax.apps.plugins.devpulse_dashboard.refresh import DEVPULSE_PATH
 
         assert DEVPULSE_PATH.name == "devpulse"
         assert "src" in DEVPULSE_PATH.parts and "aipass" in DEVPULSE_PATH.parts

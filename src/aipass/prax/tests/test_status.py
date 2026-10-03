@@ -3,7 +3,7 @@
 # Description: Unit tests for PRAX status module
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/status.py and apps/handlers/status/sync.py."""
@@ -24,6 +24,8 @@ import sys
 from unittest.mock import MagicMock
 
 import pytest
+
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
 
 
 # =============================================
@@ -119,8 +121,6 @@ def test_handle_command_unknown_sub_argument_is_refused(mock_prax_infrastructure
     0, so a typo'd subcommand was indistinguishable from the real thing
     (@devpulse's fleet CLI sweep, 2026-09-07).
     """
-    from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
-
     _ensure_sync_mock(monkeypatch)
     handle_command, _, _ = _fresh_import()
 
@@ -241,6 +241,19 @@ def test_last_scan_survives_a_block_missing_its_counts(mock_prax_infrastructure,
     line = _last_scan_line(monkeypatch, mock_prax_infrastructure.console, {"timestamp": "2026-09-12T07:57:47+00:00"})
 
     assert line == "2026-09-12T07:57:47+00:00 (+? / -?)"
+
+
+def test_last_scan_unreadable_is_not_reported_as_never(mock_prax_infrastructure, monkeypatch):
+    """None is load_last_scan's answer for a registry it could not read (prax, leg 7).
+
+    Printed as "never" it told the operator to scan a registry that had been
+    scanned. The pin's proof is its mutant (None folded back into "never").
+    """
+    _ensure_sync_mock(monkeypatch)
+
+    line = _last_scan_line(monkeypatch, mock_prax_infrastructure.console, None)
+
+    assert line == "unreadable — the registry could not be read; see the prax log"
 
 
 # =============================================

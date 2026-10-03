@@ -3,7 +3,7 @@
 # Description: A help probe must never execute the thing it asks about
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/log_audit.py, log_health.py, monitor.py and apps/handlers/cli/help_flags.py."""
@@ -35,6 +35,8 @@ import sys
 from unittest.mock import patch
 
 import pytest
+
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
 
 
 LOG_AUDIT_PATH = "aipass.prax.apps.modules.log_audit"
@@ -186,8 +188,6 @@ class TestUnknownArgumentIsRefused:
 
     def test_an_unknown_sub_argument_is_refused_by_name_not_reported_handled(self):
         """log-audit raises instead of returning True — True is what became exit 0."""
-        from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
-
         mod = _load(LOG_AUDIT_PATH)
 
         with _no_execution(mod, LOG_AUDIT_PATH), pytest.raises(UnknownArgument) as refusal:
