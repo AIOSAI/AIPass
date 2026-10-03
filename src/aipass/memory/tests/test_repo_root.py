@@ -3,7 +3,7 @@
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
 # Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/repo_root.py."""
@@ -249,7 +249,7 @@ class TestNoLaneKeepsAPrivateCopyOfTheAnswer:
                 body = match.group(1)
                 if "repo_root.find_repo_root" not in body and "rr.find_repo_root" not in body:
                     offenders.append(path.relative_to(_APPS))
-        assert not offenders, (
+        assert offenders == [], (
             f"{len(offenders)} lane(s) implement the walk themselves instead of delegating: {offenders}"
         )
 
@@ -287,7 +287,7 @@ class TestNoLaneKeepsAPrivateCopyOfTheAnswer:
             for path in _SOURCES
             if re.search(r"^\s*return Path\.cwd\(\)", path.read_text(encoding="utf-8"), re.MULTILINE)
         ]
-        assert not offenders, f"process-directory fallback still present in: {offenders}"
+        assert offenders == [], f"process-directory fallback still present in: {offenders}"
 
     def test_the_only_remaining_cwd_reads_are_the_caller_cwd_species(self):
         """Not a ban on cwd — a ban on cwd standing in for "where does the code live".
@@ -314,7 +314,7 @@ class TestNoLaneKeepsAPrivateCopyOfTheAnswer:
                 if path == Path(rr.__file__).resolve():
                     continue
                 offenders.append(f"{path.relative_to(_APPS)}:{number}")
-        assert not offenders, f"unexplained Path.cwd() reads: {offenders}"
+        assert offenders == [], f"unexplained Path.cwd() reads: {offenders}"
 
 
 class TestTheSweepCanStillSee:
@@ -931,8 +931,8 @@ class TestResolvingOwnFileIsACwdReadOnWindows:
                     continue
                 offenders.append(f"{path.relative_to(_APPS.parent)}:{number}")
 
-        assert not offenders, "use repo_root.module_file(__file__) — resolve() reads the cwd on Windows: " + ", ".join(
-            offenders
+        assert offenders == [], (
+            "use repo_root.module_file(__file__) — resolve() reads the cwd on Windows: " + ", ".join(offenders)
         )
 
 
@@ -994,7 +994,7 @@ class TestNothingReadsTheStackAtImportTime:
                 if "inspect.stack()" in stripped:
                     offenders.append(f"{path.relative_to(_APPS.parent)}:{number}")
 
-        assert not offenders, (
+        assert offenders == [], (
             "inspect.stack() resolves every frame's source file, which reads the working "
             "directory on Windows — walk sys._getframe() instead: " + ", ".join(offenders)
         )
@@ -1391,7 +1391,7 @@ class TestTheTwoWorldsMustNotBeStacked:
             text = path.read_text(encoding="utf-8")
             if "DEAD_CWD_WORLD + REALPATH_DENIED_WORLD" in text:
                 offenders.append(path.name)
-        assert not offenders, "these stack the two denials and measure a kinder world: " + ", ".join(offenders)
+        assert offenders == [], "these stack the two denials and measure a kinder world: " + ", ".join(offenders)
 
 
 class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:

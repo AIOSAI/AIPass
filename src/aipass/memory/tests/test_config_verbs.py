@@ -903,6 +903,16 @@ class TestBranchDisplayMarkers:
 # 5. A help flag is never an instruction
 # ===========================================================================
 
+# A help flag beside --json, in every position. TestHelpOutranksJson asks what
+# they print; TestHelpNeverWrites asks that none of them writes.
+_HELP_WITH_JSON = [
+    ("set", "@memory", "sessions", "12", "--help", "--json"),
+    ("set", "@memory", "sessions", "12", "--json", "--help"),
+    ("set", "--json", "@memory", "sessions", "12", "-h"),
+    ("--json", "set", "@memory", "sessions", "12", "help"),
+    ("set-default", "sessions", "12", "--json", "--help"),
+]
+
 
 class TestHelpNeverWrites:
     """The `rollover push --help` scar: a question must not be executed."""
@@ -917,9 +927,16 @@ class TestHelpNeverWrites:
             ("set", "@memory", "sessions", "12", "-h"),
             ("set", "@memory", "sessions", "12", "help"),
             ("set-default", "sessions", "12", "--help"),
-        ],
+        ]
+        + _HELP_WITH_JSON,
     )
     def test_file_is_byte_identical(self, verbs, args) -> None:
+        """A help request, alone or beside --json, leaves the config byte-identical.
+
+        The --json half was a second test of the same name and body in
+        TestHelpOutranksJson; it was retired into this table in leg 7 (compass 443),
+        so the twelve requests are still each run once.
+        """
         before = verbs.path.read_bytes()
         assert _run(verbs, *args) is True
         assert verbs.path.read_bytes() == before
@@ -1956,21 +1973,9 @@ class TestJsonFlagPosition:
 class TestHelpOutranksJson:
     """`--help --json` is still a question. The push scar, one flag later."""
 
-    _COMBOS = [
-        ("set", "@memory", "sessions", "12", "--help", "--json"),
-        ("set", "@memory", "sessions", "12", "--json", "--help"),
-        ("set", "--json", "@memory", "sessions", "12", "-h"),
-        ("--json", "set", "@memory", "sessions", "12", "help"),
-        ("set-default", "sessions", "12", "--json", "--help"),
-    ]
+    _COMBOS = _HELP_WITH_JSON
     # seedgo SHORT-TABLE (2026-08-31): same guard as _CASES above.
     assert len(_COMBOS) == 5
-
-    @pytest.mark.parametrize("args", _COMBOS)
-    def test_file_is_byte_identical(self, verbs, args) -> None:
-        before = verbs.path.read_bytes()
-        assert _run(verbs, *args) is True
-        assert verbs.path.read_bytes() == before
 
     @pytest.mark.parametrize("args", _COMBOS)
     def test_no_payload_is_emitted(self, verbs, capsys, args) -> None:

@@ -833,7 +833,9 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
         callers = [
             path.relative_to(root) for path in _walk(root) if "changed_entries(" in path.read_text(encoding="utf-8")
         ]
-        assert callers, (
+        # The bypass reason names this file as the caller; the claim is that file.
+        assert Path("handlers", "security", "edit_gate.py") in callers, (
+            f"edit_gate.py is not among @hooks' callers of changed_entries() ({callers}) — "
             "no file in @hooks calls changed_entries() any more — the unused_function bypass in "
             ".seedgo/bypass.json is now a false claim. Either the caller moved (update the reason) "
             "or the function is genuinely dead (delete it and drop the bypass)."

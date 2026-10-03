@@ -38,6 +38,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import orchestrator
 from aipass.memory.apps.handlers.templates import push_report
@@ -1528,8 +1529,24 @@ class TestEntryRulesReadTheConfig:
         assert tp.todo_defect(entry, cap_spec) is None
         assert tp.todo_defect(entry, {"field": "task", "max_chars": 100}) == tp.DEFECT_UNKNOWN
 
-    def test_the_global_fallback_is_cached_not_re_read_per_entry(self):
-        """734 entries must not be 734 config reads; the push path never touches it."""
+    def test_the_global_fallback_is_cached_not_re_read_per_entry(self, monkeypatch):
+        """734 entries must not be 734 config reads; the push path never touches it.
+
+        Counted at the config read itself: eight answers over the four sections
+        cost one read. The clear stays on the private cache, since no public reset
+        exists and one for this test alone would be a door for the test (leg 7).
+        """
+        reads = []
+        real_load = entry_limits.load_entry_limits
+
+        def counting_load(*args, **kwargs):
+            reads.append(args)
+            return real_load(*args, **kwargs)
+
+        monkeypatch.setattr(entry_limits, "load_entry_limits", counting_load)
         tp._RULES_CACHE.clear()
-        assert tp.entry_rules("todos") is not None
-        assert set(tp._RULES_CACHE) == {"sessions", "key_learnings", "todos", "observations"}
+        sections = ("sessions", "key_learnings", "todos", "observations")
+        answers = [tp.entry_rules(section) for section in sections * 2]
+
+        assert reads == [("",)]
+        assert [sorted(answer) if answer else answer for answer in answers] == [["optional", "required"]] * 8

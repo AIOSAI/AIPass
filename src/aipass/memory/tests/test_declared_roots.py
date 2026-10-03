@@ -3,7 +3,7 @@
 # Description: Pins the declared-roots anchor and the external tier it opens
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-09-27
+# Modified: 2026-10-02
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py — the declared-roots anchor and the external tier."""
@@ -45,6 +45,7 @@ from pathlib import Path
 
 import pytest
 
+from aipass.memory.apps.handlers import repo_root
 from aipass.memory.apps.handlers.monitor import registry_scope as rs
 from aipass.memory.apps.modules import fleet
 
@@ -579,7 +580,12 @@ class TestACaseInsensitiveFilesystemCannotWidenTheWalk:
 
 
 class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
-    """The predicate on its own, on every platform, with no filesystem at all."""
+    """The predicate on its own, on every platform, with no filesystem at all.
+
+    registry_scope's filter delegates to the public repo_root.exactly_named, so
+    the predicate is asked there (leg 7). That both walks still filter is pinned
+    through external_branches by the lowercase-neighbour tests above.
+    """
 
     def test_it_keeps_the_exact_case_and_drops_every_other_spelling(self, tmp_path):
         candidates = [
@@ -590,7 +596,7 @@ class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
             tmp_path / "x" / "WREN_REGISTRY.JSON",
         ]
 
-        kept = rs._exactly_named(candidates, rs.CORE_REGISTRY_SUFFIX)
+        kept = repo_root.exactly_named(candidates, rs.CORE_REGISTRY_SUFFIX)
 
         assert [path.name for path in kept] == ["AIPASS_REGISTRY.json", "WREN_REGISTRY.json"]
 
@@ -611,7 +617,7 @@ class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
         filenames — and the equivalence is a property of this suffix rather than
         a promise the next one will keep.
         """
-        kept = rs._exactly_named(
+        kept = repo_root.exactly_named(
             [tmp_path / "x" / "AIPASS_REGISTRY.json.bak", tmp_path / "x" / "AIPASS_REGISTRY.json"],
             rs.CORE_REGISTRY_SUFFIX,
         )
@@ -632,7 +638,7 @@ class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
             tmp_path / "x" / "aa_REGISTRY.json",
         ]
 
-        kept = rs._exactly_named(candidates, rs.CORE_REGISTRY_SUFFIX)
+        kept = repo_root.exactly_named(candidates, rs.CORE_REGISTRY_SUFFIX)
 
         assert kept == [tmp_path / "x" / "B_REGISTRY.json", tmp_path / "x" / "aa_REGISTRY.json"]
 
