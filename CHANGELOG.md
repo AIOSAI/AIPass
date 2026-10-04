@@ -73,6 +73,7 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **flow: an unreadable plan registry refuses instead of answering empty; fleet green leg 6** (DPLAN-0354, 1740f53d). A corrupt registry read as empty, so `create` reissued 0001 over live plans and saved a one-row registry over the file, and a bare-number close could close another type's plan. A nested project's broken register let `close --all` sweep the outer project's plans, and the registry heal could close a row by bare number alone. All four now refuse or check the plan's own prefix.
 - **canary: dead local-layout import fallback removed; fleet green leg 1** (DPLAN-0354, a8902c56). The fallback was unreachable and retried a failed module under the wrong name. The reload test became a child-interpreter probe; all 8 test files meet File_Top. Audit 98.01 → 99.97.
 - **commons: a malformed registry (bad branches field or a non-dict entry) refuses the caller lookup; fleet green legs 7 and 8** (DPLAN-0354, 2494a48c, 3e4ca417). Both used to read as "no match" and fall through to the AIPass namesake.
 - **commons: an unreadable caller registry no longer serves an AIPass namesake's identity; fleet green leg 6** (DPLAN-0354, 4e084c8a). An unusable `AIPASS_CALLER_CWD` or an unreadable registry answered an empty list, and the name lookup then served the AIPass citizen of the same name. Both now raise, and the caller lookup refuses with `CallerLookupFailed`.
