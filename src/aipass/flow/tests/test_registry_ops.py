@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_ops.py
 # Description: Tests for registry_ops handler — template registry CRUD
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/template/registry_ops.py and the plan registry save it drives."""
@@ -315,21 +315,27 @@ class TestSaveRegistry:
         assert saved["metadata"]["last_updated"] != "1999-01-01"
         assert saved["metadata"]["type_count"] == 2
 
-    def test_returns_false_for_invalid_structure_not_dict(self, setup_flow_root):
-        """Returns False when data is not a dict."""
+    def test_raises_for_invalid_structure_not_dict(self, setup_flow_root):
+        """Raises when data is not a dict, and writes nothing.
+
+        It answered False before leg 5, the same as a failed write. Red first
+        on that code; mutant `raise ValueError(...)` -> `return False`.
+        """
         mod = registry_ops
 
-        result = mod.save_registry("not a dict")  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="invalid registry structure: str"):
+            mod.save_registry("not a dict")  # type: ignore[arg-type]
 
-        assert result is False
+        assert not (setup_flow_root / "flow_json" / "template_registry.json").exists()
 
-    def test_returns_false_for_missing_types_key(self, setup_flow_root):
-        """Returns False when 'types' key is absent."""
+    def test_raises_for_missing_types_key(self, setup_flow_root):
+        """Raises when 'types' key is absent, and writes nothing."""
         mod = registry_ops
 
-        result = mod.save_registry({"metadata": {}})
+        with pytest.raises(ValueError, match="invalid registry structure: dict"):
+            mod.save_registry({"metadata": {}})
 
-        assert result is False
+        assert not (setup_flow_root / "flow_json" / "template_registry.json").exists()
 
     def test_returns_false_on_os_error(self, setup_flow_root, monkeypatch, tmp_path):
         """Returns False when file write fails with OSError."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: append_closed_plan.py
 # Description: Closed Plans Local Registry Handler
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2026-03-03
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -101,7 +101,15 @@ def append_to_closed_plans(plan_key: str, plan_info: dict, plan_location: Path) 
         plan_location: Path to the directory where the plan resides (branch directory)
 
     Returns:
-        True on success, False on failure
+        True on success (or the entry was already there), False when the
+        lock stayed held past its budget.
+
+    Raises:
+        Exception: Whatever broke the read, the write or the lock (a denial
+            past budget is a PermissionError). It used to be logged and
+            answered False, so the caller could not tell a held lock from a
+            failure and never saw the reason (flow's decision, leg 5). The
+            one caller, close_plan_impl, catches it and reports it.
     """
     try:
         # Extract prefix from plan_info's file_path (e.g., FPLAN, DPLAN)
@@ -162,4 +170,4 @@ def append_to_closed_plans(plan_key: str, plan_info: dict, plan_location: Path) 
 
     except Exception as e:
         logger.warning(f"[{MODULE_NAME}] Failed to append closed plan: {e}")
-        return False
+        raise

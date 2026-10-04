@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_plan.py
 # Description: Tests for apps/modules/close_plan.py -- handle_command routing
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/close_plan.py."""
@@ -15,6 +15,7 @@
 import pytest
 from unittest.mock import patch
 
+from aipass.flow.apps.handlers.plan.confirmation import confirm_plan_deletion
 from aipass.flow.apps.modules.close_plan import close_all_plans, close_plan, handle_command
 
 # ─── Patch targets ───────────────────────────────────────
@@ -291,3 +292,50 @@ class TestCloseAllOrchestrator:
     def test_close_all_bool_fallback(self, mock_impl):
         result = close_all_plans()
         assert result is False
+
+
+# ═══════════════════════════════════════════════════════════
+# 10. --confirm: the prompt close_plan hands to close_plan_impl
+# ═══════════════════════════════════════════════════════════
+
+
+class _Terminal:
+    """Stands in for the TTY question and the prompt; records what the product asked."""
+
+    def __init__(self, tty: bool, answers: list[str | None]):
+        self.tty = tty
+        self.answers = answers
+        self.tty_checks = 0
+        self.prompts: list[str] = []
+
+    def isatty(self) -> bool:
+        self.tty_checks += 1
+        return self.tty
+
+    def ask(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        answer = self.answers.pop(0)
+        if answer is None:
+            raise EOFError
+        return answer
+
+
+class TestConfirmPlanDeletion:
+    def test_input_that_ends_before_an_answer_is_not_a_yes(self):
+        """Shipped defect: EOF at the --confirm prompt answered True and closed the plan."""
+        term = _Terminal(tty=True, answers=[None])
+        assert confirm_plan_deletion("0042", ask=term.ask, interactive=term.isatty) is None
+        assert term.prompts == ["Close FPLAN-0042? (yes/no): "]
+
+    def test_yes_confirms_and_no_cancels_at_a_tty(self):
+        term = _Terminal(tty=True, answers=[" Y ", "no"])
+        assert confirm_plan_deletion("0042", ask=term.ask, interactive=term.isatty) is True
+        assert confirm_plan_deletion("0042", ask=term.ask, interactive=term.isatty) is False
+        assert term.prompts == ["Close FPLAN-0042? (yes/no): "] * 2
+        assert term.tty_checks == 2
+
+    def test_no_tty_confirms_without_asking(self):
+        term = _Terminal(tty=False, answers=[])
+        assert confirm_plan_deletion("0042", ask=term.ask, interactive=term.isatty) is True
+        assert term.prompts == []
+        assert term.tty_checks == 1

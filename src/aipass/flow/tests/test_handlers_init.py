@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handlers_init.py
 # Description: Tests for handlers/__init__.py branch access guard
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for handlers/__init__.py — branch access guard."""
@@ -75,7 +75,7 @@ class TestExtractBranchName:
 
     def test_forward_slash_path(self):
         """Forward-slash paths are parsed correctly on all platforms."""
-        result = _extract_branch_name("C:/Users/dev/Projects/AIPass/src/aipass/flow/test.py")
+        result = _extract_branch_name("C:/Projects/AIPass/src/aipass/flow/test.py")
         assert result == "flow"
 
 
@@ -308,7 +308,7 @@ class TestGuardBranchAccess:
     def test_allows_flow_subpath_with_backslashes(self):
         """Windows-style paths with backslashes still match the flow branch."""
         # The guard replaces backslashes with forward slashes before checking
-        caller = "C:\\Users\\dev\\Projects\\AIPass\\src\\aipass\\flow\\apps\\modules\\foo.py"
+        caller = "C:\\Projects\\AIPass\\src\\aipass\\flow\\apps\\modules\\foo.py"
 
         with patch(
             "aipass.flow.apps.handlers._find_real_caller",

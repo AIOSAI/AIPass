@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops.py
 # Description: Tests for close_ops handler — plan closure business logic
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
@@ -467,7 +467,15 @@ class TestClosePlanImplSuccess:
         budget = len(attempts)
         assert budget > 1
         assert not closed_plans.exists()
-        assert any("CLOSED_PLANS append failed" in m.get("text", "") for m in result["messages"])
+        # The denial reaches the user with its reason. Before leg 5 the append
+        # logged it and answered False, read as a held lock: "append failed",
+        # no reason. Red first on that code; mutant `raise` -> `return False`.
+        reported = [m["text"] for m in result["messages"] if "CLOSED_PLANS" in m.get("text", "")]
+        assert len(reported) == 1
+        assert reported[0].startswith("  CLOSED_PLANS update failed: Lock ")
+        assert str(lock) in reported[0]
+        waited = sum(c.args[0] for c in sleep.call_args_list)
+        assert reported[0].endswith(f"after {budget} attempts ({waited:.2f}s waited)")
         # The logged arguments themselves, never str(call): a call's repr doubles
         # every backslash, so a Windows path is never a substring of it.
         warned = " ".join(str(arg) for c in mock_logger.warning.call_args_list for arg in c.args)
@@ -1846,14 +1854,11 @@ class TestTheScopeComparisonIsPlatformNeutral:
             assert not _under(flavour(self.OTHER), flavour(self.ROOT)), flavour.__name__
 
     def test_a_sibling_that_merely_shares_a_prefix_is_not_inside(self):
-        """/aipass-old is not under /aipass. A string prefix would say it is."""
+        """ROOT + "-old" is not under ROOT. A string prefix would say it is."""
         for flavour in (PurePosixPath, PureWindowsPath):
-            assert not _under(flavour("/aipass-old/src"), flavour(self.ROOT)), flavour.__name__
-
-    def test_the_string_prefix_idiom_is_the_thing_that_broke(self):
-        """Pins the mechanism, so the docstring above cannot rot into folklore."""
-        assert str(PurePosixPath(self.ROW)).startswith(self.ROOT)
-        assert not str(PureWindowsPath(self.ROW)).startswith(self.ROOT)
+            sibling = flavour(self.ROOT + "-old") / "src"
+            assert str(sibling).startswith(str(flavour(self.ROOT)))
+            assert not _under(sibling, flavour(self.ROOT)), flavour.__name__
 
 
 class TestTheFenceUnderWindowsPathSemantics:

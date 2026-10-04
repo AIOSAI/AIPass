@@ -358,6 +358,34 @@
       "standard": "json_structure",
       "category": "architectural",
       "reason": "Pure predicate \u2014 one question over a token list, no I/O and no state. It is called before every command in 5 modules (9 call sites), so a log_operation() here would record 'a help flag was looked for' on every single invocation and drown the operations log in non-events; it would also make the help gate depend on the JSON layer it is meant to run ahead of. The callers that ACT on the answer already log what they did. Same file, same call and same reasoning as @drone, @trigger and @memory carry for their identical helper (DPLAN-0291 rule E, 2026-08-13)."
+    },
+    {
+      "file": "apps/modules/create_plan.py",
+      "standard": "logged_fallback",
+      "category": "false_positive",
+      "lines": [313],
+      "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). The handler calls cli_error() first, which flow.py's resolve_exit turns into exit 2: measured 2026-10-04, `drone @flow create . probe NOSUCHTYPE` exits 2. The failure reaches the caller through the exit code, not the bool (flow's decision, leg 5)."
+    },
+    {
+      "file": "apps/modules/post_close_runner.py",
+      "standard": "logged_fallback",
+      "category": "false_positive",
+      "lines": [99],
+      "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). The handler calls error() first, which flow.py's resolve_exit turns into a failing exit code; False would route the command on to the next module and end in 'unknown command' (flow's decision, leg 5)."
+    },
+    {
+      "file": "apps/handlers/runner/lock_ops.py",
+      "standard": "logged_fallback",
+      "category": "false_positive",
+      "lines": [97, 147, 173],
+      "reason": "The exception is the answer, not a failure. 97: os.kill(pid, 0) raising PermissionError means the process exists and belongs to someone else, so alive is the true answer. 147 and 173: FileNotFoundError on the lock means its holder released it between our create and our read, so stale (take over) is the true answer; every other OSError on those reads re-raises (leg 3). 89 is not here: it is a real fallback (HELD) (flow's decision, leg 5)."
+    },
+    {
+      "file": "apps/flow.py",
+      "standard": "logged_fallback",
+      "category": "false_positive",
+      "lines": [117],
+      "reason": "route_command's True means 'a module handled this command'. A BrokenPipeError is the reader closing stdout early (`drone @flow list | head`): the command ran and its output was cut by the reader, not failed. False would print 'unknown command' for a known one (flow's decision, leg 5)."
     }
   ],
   "notes": {
