@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 5.0.0
+# Version: 5.1.0
 # Description: Raw git and gh, GitHub API writes and credentials for every seat; protected file changes (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -71,7 +71,20 @@ _GIT_TWINS = {
     "fetch": "drone @git smart-sync",
     "rebase": "drone @git smart-sync",
     "merge": "drone @git merge-main (dev) or drone @git merge <PR#>",
+    # drone's read twins, 2026-10-04 (devpulse 662be795).
+    "ls-files": "drone @git tracked <path ...>",
+    "check-ignore": "drone @git tracked <path ...>",
+    "rev-list": "drone @git status --all (ahead/behind line)",
+    "merge-base": "drone @git status --all (ahead/behind line)",
+    "archive": "drone @git export <ref> <dir>",
 }
+
+# A verb whose twin depends on its words: (does this call need it, that twin).
+_SHAPED_TWINS = {
+    "diff": (lambda words: "--stat" in words or any(not w.startswith("-") for w in words),
+             "drone @git diff [--staged] [--stat] <path ...>"),
+    "log": (lambda words: any(".." in w for w in words), "drone @git log [n] <a>..<b>"),
+}  # fmt: skip
 
 _GIT_OPTS_WITH_ARG = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--namespace"})
 
@@ -233,6 +246,18 @@ def _extract_git_verb(tokens: list[str] | tuple[str, ...]) -> str | None:
     return None
 
 
+def _twin_of(tail: list[str] | tuple[str, ...]) -> tuple[str, str | None]:
+    """(verb, its drone twin or None) for one git call's words after ``git``; a shaped twin outranks the plain one."""
+    verb = _extract_git_verb(tail)
+    if verb is None:
+        return "(no verb)", None
+    words = next((tail[i + 1 :] for i, word in enumerate(tail) if word.lower() == verb), ())
+    shaped = _SHAPED_TWINS.get(verb)
+    if shaped and shaped[0](words):
+        return verb, shaped[1]
+    return verb, _GIT_TWINS.get(verb)
+
+
 def _git_refusal(invocations: list, seat: _Seat) -> dict | None:
     """Raw git, read or write, refused for every seat, the admin seat included; the refusal names the twin.
 
@@ -246,8 +271,7 @@ def _git_refusal(invocations: list, seat: _Seat) -> dict | None:
     ]
     if not calls:
         return None
-    verb = _extract_git_verb(calls[0]) or "(no verb)"
-    twin = _GIT_TWINS.get(verb)
+    verb, twin = _twin_of(calls[0])
     line = TWIN_LINE.format(verb=verb, twin=twin) if twin else NO_TWIN_LINE.format(verb=verb)
     return _block(RAW_GIT_REFUSED.format(caller=seat.named, twin=line))
 

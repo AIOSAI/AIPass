@@ -19,9 +19,19 @@ or gh raw: `modules/admin_seat`'s grant opens none of these lanes. A git refusal
 names the caller from its passport (or says it could not be named) and the drone twin of the verb
 (`_GIT_TWINS`), as published in `drone @git --help`: `git status` is `drone @git status`, `git log`
 is `drone @git log [count] [path ...]`, and likewise diff, show, blame, remote, branch, tag and the
-owner verbs. A verb with no twin (`merge-base`, `rev-list`, `ls-files`, `for-each-ref`, `archive`,
-`check-ignore`, `rev-parse`, `cat-file` …) cannot be done; the refusal says to mail @devpulse to ask
-@drone for one. A bare `git` (no argument) prints usage and passes. Agent Bash only: service code that
+owner verbs. Drone's read twins of 2026-10-04 (5.1.0):
+
+| Raw git | Its drone twin |
+|---|---|
+| `git ls-files`, `git check-ignore` | `drone @git tracked <path ...>` |
+| `git diff` with paths or `--stat` | `drone @git diff [--staged] [--stat] <path ...>` |
+| `git rev-list`, `git merge-base` | `drone @git status --all` (the ahead/behind line) |
+| `git log` with a range `a..b` | `drone @git log [n] <a>..<b>` |
+| `git archive` | `drone @git export <ref> <dir>` |
+
+The diff and log rows depend on the call's words (`_SHAPED_TWINS`): a plain `git diff` or `git log`
+is still named its plain twin. A verb with no twin (`for-each-ref`, `rev-parse`, `cat-file`,
+`describe` …) cannot be done; the refusal says to mail @devpulse to ask @drone for one. A bare `git` (no argument) prints usage and passes. Agent Bash only: service code that
 runs git as a subprocess (drone itself) never passes through a hook.
 
 **gh.** Every raw `gh` call is refused for every seat, `gh api` GET included (`GH_REDIRECT`). Drone

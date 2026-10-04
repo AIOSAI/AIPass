@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.0.1
+# Version: 5.1.0
 # Description: Tests for git_gate: raw git and gh refused for every seat; protected config writes the admin seat's
 # Branch: hooks
 # Created: 2026-05-21
@@ -124,10 +124,10 @@ class TestGitGateGlobalOptions:
     def test_the_twin_is_read_past_the_options(self, command, twin):
         assert twin in _reason(_bash(command))
 
-    @pytest.mark.parametrize("command", ["git -C /some/path ls-files", "git -C /foo -c key=val --no-pager ls-files"])
+    @pytest.mark.parametrize("command", ["git -C /some/path cat-file -p x", "git -C /foo -c k=v --no-pager cat-file"])
     def test_a_verb_with_no_twin_past_the_options_is_named(self, command):
         reason = _reason(_bash(command))
-        assert "git ls-files has no drone twin" in reason
+        assert "git cat-file has no drone twin" in reason
 
     def test_git_multiple_opts_push_blocked(self):
         _assert_blocked(_bash("git -C /foo -c key=val --no-pager push"))
@@ -934,7 +934,23 @@ class TestRawGitAndGhAreRefusedForEverySeat:
     def test_a_raw_git_read_from_the_admin_seat_is_refused_and_names_its_twin(self, command, twin):
         assert twin in self._reason(command)
 
-    @pytest.mark.parametrize("command", ("git merge-base a b", "git rev-list HEAD", "git ls-files"))
+    @pytest.mark.parametrize(
+        ("command", "twin"),
+        (
+            ("git ls-files apps", "drone @git tracked <path ...>"),
+            ("git check-ignore -v docs.local/x.md", "drone @git tracked <path ...>"),
+            ("git diff --stat -- apps", "drone @git diff [--staged] [--stat] <path ...>"),
+            ("git rev-list --count a...b", "drone @git status --all (ahead/behind line)"),
+            ("git merge-base HEAD origin/main", "drone @git status --all (ahead/behind line)"),
+            ("git log origin/dev..HEAD", "drone @git log [n] <a>..<b>"),
+            ("git archive HEAD", "drone @git export <ref> <dir>"),
+        ),
+    )
+    def test_the_twins_drone_built_on_10_04_are_named(self, command, twin):
+        """devpulse 662be795: drone's new read twins; until then each of these said 'cannot be done'."""
+        assert twin in self._reason(command)
+
+    @pytest.mark.parametrize("command", ("git cat-file -p HEAD", "git rev-parse HEAD", "git describe --tags"))
     def test_a_read_with_no_twin_says_it_cannot_be_done(self, command):
         reason = self._reason(command)
         assert "cannot be done" in reason and "@devpulse" in reason
