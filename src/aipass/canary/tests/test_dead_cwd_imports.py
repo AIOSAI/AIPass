@@ -1,15 +1,14 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
 # Description: Windows dead-cwd import defect - two-world child pins, live-injection controls, AST ban on inspect.stack
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-31
 # Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/__init__.py and every canary package, imported under a dead cwd."""
 
-# The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(windows_compat) — that each command module below the modules package imports with a dead cwd
+# The declared pass — nothing: every canary package and every command module is probed in both worlds.
 
 import ast
 import os
@@ -54,7 +53,16 @@ BRANCH_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BRANCH_ROOT.parents[2]
 GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 
-# Every importable module in canary's tree.
+# Every package in canary's tree, then every command module. The command
+# modules are read off apps/modules/ by the rule discover_modules uses (a .py
+# not starting with '_'), so a module added next week is probed without anyone
+# remembering this list; the five that existed on 2026-10-04 were missing from
+# the hand-written one (canary's fleet green leg 2).
+COMMAND_MODULES = sorted(
+    f"aipass.canary.apps.modules.{path.stem}"
+    for path in (BRANCH_ROOT / "apps" / "modules").glob("*.py")
+    if not path.name.startswith("_")
+)
 CANARY_MODULES = [
     "aipass.canary",
     "aipass.canary.apps",
@@ -64,6 +72,7 @@ CANARY_MODULES = [
     "aipass.canary.apps.handlers.json.json_handler",
     "aipass.canary.apps.modules",
     "aipass.canary.apps.plugins",
+    *COMMAND_MODULES,
 ]
 
 # Non-optional cross-branch imports, preloaded in the healthy world so the

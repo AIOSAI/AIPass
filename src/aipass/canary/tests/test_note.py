@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_note.py
 # Description: Tests for the note store - add, list, and refusing a store that will not parse
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-09-12
 # Modified: 2026-10-04
 # =============================================
@@ -11,8 +11,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(log_structure) — that a refusal also lands in the prax log
 # seedgo: no-test-needed(json_structure) — that each add and each list lands in the json trail
-# seedgo: no-test-needed(error_handling) — that a store the disk will not read or write is refused, not raised
-
 import json
 import sys
 from datetime import datetime
@@ -207,6 +205,36 @@ def test_a_store_path_that_is_not_a_file_is_refused_nonzero(monkeypatch, capsys,
 
     assert _squash(str(store_path)) in _squash(capsys.readouterr().err)
     assert store_path.is_dir()
+
+
+def _refusing_disk(*args):
+    """Stand-in for the store's own disk call: the disk refuses, with this canary's own error."""
+    raise OSError("stand-in: the disk refused")
+
+
+def test_add_on_a_disk_that_refuses_the_write_exits_two_and_names_the_store(monkeypatch, capsys, store_path):
+    """The OSError branch of add, distinct from the parse refusal; proven by its mutants."""
+    monkeypatch.setattr(store, "append_note", _refusing_disk)
+
+    result = _run(monkeypatch, ["note", "add", "must not land"])
+
+    out, err = capsys.readouterr()
+    assert result == 2
+    assert out == ""
+    assert _squash(f"note add failed: cannot use store {store_path}: stand-in: the disk refused") in _squash(err)
+    assert not store_path.parent.exists()
+
+
+def test_list_on_a_disk_that_refuses_the_read_exits_two_and_names_the_store(monkeypatch, capsys, store_path):
+    """The OSError branch of list, distinct from the parse refusal; proven by its mutants."""
+    monkeypatch.setattr(store, "read_notes", _refusing_disk)
+
+    result = _run(monkeypatch, ["note", "list", "--json"])
+
+    out, err = capsys.readouterr()
+    assert result == 2
+    assert out == ""
+    assert _squash(f"note list failed: cannot read store {store_path}: stand-in: the disk refused") in _squash(err)
 
 
 # =============================================================================
