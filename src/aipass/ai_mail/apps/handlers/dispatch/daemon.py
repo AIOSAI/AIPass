@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Dispatch Daemon Handler
-# Version: 1.10.0
+# Version: 1.10.1
 # Created: 2026-02-17
 # Modified: 2026-10-04
 # =============================================
@@ -40,7 +40,7 @@ from aipass.ai_mail.apps.handlers.dispatch.test_token import scan_and_ack_test_e
 # the daemon and the wake answer alike (ai_mail, leg 12; todo 39). The process
 # helpers moved on to pid_lock in leg 13, and the dispatch lock pair became
 # one there too, so a zombie holder is dead to both (ai_mail, leg 13).
-from aipass.ai_mail.apps.handlers.dispatch.pid_lock import _acquire_lock, _check_lock, _is_branch_occupied
+from aipass.ai_mail.apps.handlers.dispatch.pid_lock import acquire_lock, check_lock, is_branch_occupied
 from aipass.ai_mail.apps.handlers.dispatch.wake import DEFAULT_MODEL, JsonUnreadable, _read_json
 
 
@@ -458,7 +458,7 @@ def spawn_agent(
 
     # Acquire lock BEFORE spawn to prevent TOCTOU race (DPLAN-0155 Phase 5).
     # Use current PID as placeholder; overwrite with monitor PID after spawn.
-    acquired, lock_msg = _acquire_lock(branch_path, os.getpid())
+    acquired, lock_msg = acquire_lock(branch_path, os.getpid())
     if not acquired:
         logger.info(f"Lock acquisition failed for {branch_email}: {lock_msg}")
         return False
@@ -569,7 +569,7 @@ def poll_cycle(config: Dict[str, Any], state: Dict[str, Any]) -> int:
         scan_and_ack_test_emails(branch_path, branch_email)
 
         # Always check/clean stale locks (even without dispatch emails)
-        existing_lock = _check_lock(branch_path)
+        existing_lock = check_lock(branch_path)
         if existing_lock is not None:
             logger.info(f"SKIP {branch_email}: active lock (PID {existing_lock.get('pid', '?')})")
             continue
@@ -578,7 +578,7 @@ def poll_cycle(config: Dict[str, Any], state: Dict[str, Any]) -> int:
         if dispatch_msg is None:
             continue
 
-        if _is_branch_occupied(branch_path):
+        if is_branch_occupied(branch_path):
             logger.info(f"SKIP {branch_email}: active Claude session detected (email already in inbox)")
             continue
 

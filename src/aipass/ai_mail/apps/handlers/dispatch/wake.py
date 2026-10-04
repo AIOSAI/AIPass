@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.3.2
+# Version: 3.3.3
 # Created: 2026-03-02
 # Modified: 2026-10-04
 # =============================================
@@ -31,11 +31,11 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.dispatch import session_pointer
 from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
-    _acquire_lock,
-    _check_lock,
-    _check_pid_alive,
-    _clean_zombies,
-    _is_branch_occupied,
+    acquire_lock,
+    check_lock,
+    check_pid_alive,
+    clean_zombies,
+    is_branch_occupied,
 )
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import (
     refresh_recipient_dashboard as _refresh_recipient_dashboard,
@@ -930,14 +930,14 @@ def wake_branch(
         status.ok("model", resolved_model)
 
     # Step 4: Zombie check (pre-flight)
-    zombie_count = _clean_zombies()
+    zombie_count = clean_zombies()
     if zombie_count > 0:
         status.warn("zombies", f"{zombie_count} zombie Claude process(es) detected")
     else:
         status.ok("pre-flight", "No zombie processes")
 
     # Step 5: Lock check
-    existing = _check_lock(branch_path)
+    existing = check_lock(branch_path)
     if existing is not None:
         pid = existing.get("pid", "?")
         since = existing.get("timestamp", "?")
@@ -953,7 +953,7 @@ def wake_branch(
     status.ok("lock", "No active lock — agent is sleeping")
 
     # Step 6: Occupancy check
-    if _is_branch_occupied(branch_path):
+    if is_branch_occupied(branch_path):
         status.warn("occupancy", f"Interactive Claude session in {branch_path}")
         status.fail("blocked", "Cannot spawn — interactive session running")
         logger.warning("[wake] BLOCKED %s — interactive session", email)
@@ -1094,7 +1094,7 @@ def wake_branch(
             spawn_env.pop(key)
 
     # Acquire lock BEFORE spawn to prevent TOCTOU race (DPLAN-0155 Phase 5).
-    acquired, lock_msg = _acquire_lock(branch_path, os.getpid())
+    acquired, lock_msg = acquire_lock(branch_path, os.getpid())
     if not acquired:
         status.fail("lock-acquire", f"Lock failed: {lock_msg}")
         return status, False
@@ -1227,7 +1227,7 @@ def wake_branch(
             logger.info("[wake] Cannot verify systemd unit %s: %s", _unit, e)
             status.warn("alive", "Cannot verify systemd unit status — assuming running")
     else:
-        if _check_pid_alive(monitor_pid):
+        if check_pid_alive(monitor_pid):
             status.ok("alive", f"Agent responding (PID {monitor_pid} alive)")
         else:
             status.fail("alive", f"Agent died immediately (PID {monitor_pid})")

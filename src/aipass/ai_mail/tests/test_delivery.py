@@ -21,10 +21,7 @@ from unittest.mock import patch, MagicMock
 
 import aipass.ai_mail.apps.handlers.email.delivery as delivery_mod
 from aipass.memory.apps.modules import fleet
-from aipass.ai_mail.apps.handlers.email.delivery import (
-    _migrate_inbox_format,
-    deliver_email_to_branch,
-)
+from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 
 
 # ---- Fixtures ------------------------------------------------
@@ -131,21 +128,9 @@ def test_migrate_missing_messages_key(tmp_path):
     assert result["unread_count"] == 0
 
 
-def test_migrate_already_v2_no_write(tmp_path):
-    """Fully valid v2 data does not rewrite the file."""
-    inbox_file = tmp_path / "inbox.json"
-    v2_data = {
-        "mailbox": "inbox",
-        "total_messages": 1,
-        "unread_count": 1,
-        "messages": [{"id": "m1", "status": "new"}],
-    }
-    original_text = json.dumps(v2_data, indent=2, ensure_ascii=False)
-    inbox_file.write_text(original_text, encoding="utf-8")
-
-    _migrate_inbox_format(v2_data, inbox_file)
-
-    assert inbox_file.read_text(encoding="utf-8") == original_text
+# test_migrate_already_v2_no_write retired (ai_mail, leg 15, @devpulse's leg 14
+# ruling): "already v2 is not rewritten" cannot be seen through any caller, as
+# both delivery lanes rewrite the inbox inside the same lock, so it proved nothing.
 
 
 def test_migrate_unread_count_mixed_statuses(tmp_path):

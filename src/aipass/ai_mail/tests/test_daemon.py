@@ -28,10 +28,10 @@ from aipass.ai_mail.apps.handlers.dispatch.daemon import (
     get_registered_branches,
     check_inbox_for_dispatch,
     is_protected_branch,
-    _check_lock,
-    _acquire_lock,
+    check_lock,
+    acquire_lock,
     poll_cycle,
-    _is_branch_occupied,
+    is_branch_occupied,
     spawn_agent,
     run_daemon,
 )
@@ -767,8 +767,8 @@ def test_poll_cycle_resolves_relative_branch_path(tmp_path, monkeypatch):
 
     with (
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.spawn_agent", side_effect=mock_spawn_agent),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon._check_lock", return_value=None),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon._is_branch_occupied", return_value=False),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.check_lock", return_value=None),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.is_branch_occupied", return_value=False),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.scan_and_ack_test_emails", return_value=0),
     ):
         daemon_mod.poll_cycle(config, state)
@@ -814,8 +814,8 @@ def test_poll_cycle_absolute_path_unchanged(tmp_path, monkeypatch):
 
     with (
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.spawn_agent", side_effect=mock_spawn_agent),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon._check_lock", return_value=None),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon._is_branch_occupied", return_value=False),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.check_lock", return_value=None),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.is_branch_occupied", return_value=False),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.scan_and_ack_test_emails", return_value=0),
     ):
         daemon_mod.poll_cycle(config, state)
@@ -845,12 +845,12 @@ def test_the_registered_stop_signal_sets_shutdown(monkeypatch, signame):
     assert daemon_mod.SHUTDOWN is True
 
 
-# ---- _check_lock tests -----------------------------------------
+# ---- check_lock tests ------------------------------------------
 
 
 def test_check_lock_no_file(tmp_path):
     """No lock file returns None."""
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
 
     assert result is None
 
@@ -864,9 +864,9 @@ def test_check_lock_alive_pid(tmp_path, monkeypatch):
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
     alive = MagicMock(return_value=True)
-    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
+    monkeypatch.setattr(pid_lock_mod, "check_pid_alive", alive)
 
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
 
     assert result is not None
     assert result["pid"] == 99999
@@ -882,9 +882,9 @@ def test_check_lock_dead_pid(tmp_path, monkeypatch):
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
     alive = MagicMock(return_value=False)
-    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
+    monkeypatch.setattr(pid_lock_mod, "check_pid_alive", alive)
 
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
 
     assert result is None
     assert not lock_file.exists()
@@ -901,9 +901,9 @@ def test_check_lock_stale_over_10min_removed(tmp_path, monkeypatch):
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
     alive = MagicMock(return_value=False)
-    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
+    monkeypatch.setattr(pid_lock_mod, "check_pid_alive", alive)
 
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
 
     assert result is None
     assert not lock_file.exists()
@@ -920,9 +920,9 @@ def test_check_lock_stale_under_10min_dead_pid_removed(tmp_path, monkeypatch):
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
     alive = MagicMock(return_value=False)
-    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
+    monkeypatch.setattr(pid_lock_mod, "check_pid_alive", alive)
 
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
 
     assert result is None
     assert not lock_file.exists()
@@ -936,7 +936,7 @@ def test_check_lock_fresh_corrupt_json_is_held(tmp_path):
     lock_file = lock_dir / ".dispatch.lock"
     lock_file.write_text("{bad json!!", encoding="utf-8")
 
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
 
     assert result is not None
     assert lock_file.exists()
@@ -951,7 +951,7 @@ def test_check_lock_old_corrupt_json_removed(tmp_path):
     hour_ago = lock_file.stat().st_mtime - 3600
     os.utime(lock_file, (hour_ago, hour_ago))
 
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
 
     assert result is None
     assert not lock_file.exists()
@@ -967,7 +967,7 @@ def test_check_lock_zombie_holder_is_dead(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "kill", lambda pid, sig: None)
     monkeypatch.setattr(pid_lock_mod, "_is_zombie_linux", lambda pid: pid == 4242)
 
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
 
     assert result is None
     assert not lock_file.exists()
@@ -986,18 +986,18 @@ def test_check_lock_unparseable_timestamp(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "kill", _raise_process_lookup)
 
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
 
     assert result is None
     assert not lock_file.exists()
 
 
-# ---- _acquire_lock tests ----------------------------------------
+# ---- acquire_lock tests -----------------------------------------
 
 
 def test_acquire_lock_success(tmp_path):
     """New lock file is created atomically."""
-    acquired, msg = _acquire_lock(tmp_path, 12345)
+    acquired, msg = acquire_lock(tmp_path, 12345)
 
     assert acquired is True
     assert msg == "Lock acquired"
@@ -1014,7 +1014,7 @@ def test_acquire_lock_file_exists_error(tmp_path):
     lock_file = lock_dir / ".dispatch.lock"
     lock_file.write_text('{"pid": 111}', encoding="utf-8")
 
-    acquired, msg = _acquire_lock(tmp_path, 22222)
+    acquired, msg = acquire_lock(tmp_path, 22222)
 
     assert acquired is False
     assert "already exists" in msg
@@ -1023,7 +1023,7 @@ def test_acquire_lock_file_exists_error(tmp_path):
 def test_acquire_lock_oserror(tmp_path):
     """OSError during lock creation returns (False, message)."""
     with patch("os.open", side_effect=OSError("Permission denied")):
-        acquired, msg = _acquire_lock(tmp_path, 12345)
+        acquired, msg = acquire_lock(tmp_path, 12345)
 
     assert acquired is False
     assert "Lock failed" in msg
@@ -1209,6 +1209,33 @@ def test_write_pid_file_stale_unlink_denied_create_waits_it_out(tmp_path, monkey
     alive.assert_called_once_with(999999)
 
 
+def test_stale_unlink_failing_otherwise_than_denied_escapes(tmp_path, monkeypatch):
+    """Only a DENIED unlink of the stale pid file is left to the create.
+
+    Any other failure escapes run_daemon as itself: caught, the create would
+    meet the stale file still standing and report "another daemon raced us",
+    a race that never happened. The error is this stand-in's own. Green on the
+    tree from its first run; its proof is the mutant that widens the catch to
+    OSError (ai_mail, leg 15).
+    """
+    pid_file = tmp_path / "daemon.pid"
+    pid_file.write_text("999999", encoding="utf-8")
+    monkeypatch.setattr(daemon_mod, "_pid_alive", MagicMock(return_value=False))
+    stuck = OSError(30, "Read-only file system", str(pid_file))
+    real_unlink = daemon_mod.Path.unlink
+
+    def unlink_fails(self, missing_ok=False):
+        if self == pid_file:
+            raise stuck
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(daemon_mod.Path, "unlink", unlink_fails)
+
+    with pytest.raises(OSError) as raised:
+        _start_daemon(tmp_path, monkeypatch, pid_file)
+    assert raised.value is stuck
+
+
 def test_write_pid_file_denial_that_never_clears_raises_at_budget(tmp_path, monkeypatch, fake_clock):
     """A denial that outlasts the wait raises - naming the wait, the denial as cause - and never loops forever."""
     pid_file = tmp_path / "daemon.pid"
@@ -1297,8 +1324,8 @@ def test_remove_pid_file_corrupt(tmp_path, monkeypatch):
     assert not pid_file.exists()
 
 
-# ---- _is_branch_occupied tests -----------------------------------
-# The daemon has used wake's _is_branch_occupied and its process readers since
+# ---- is_branch_occupied tests ------------------------------------
+# The daemon has used pid_lock's is_branch_occupied and its process readers since
 # leg 12; their own tests, the darwin lanes among them, live in test_wake.py
 # (ai_mail, leg 12; todo 39).
 
@@ -1313,7 +1340,7 @@ def test_is_branch_occupied_no_claude_processes(tmp_path):
         "aipass.ai_mail.apps.handlers.dispatch.daemon.subprocess.run",
         return_value=mock_result,
     ):
-        result = _is_branch_occupied(tmp_path)
+        result = is_branch_occupied(tmp_path)
 
     assert result is False
 
@@ -1333,7 +1360,7 @@ def test_is_branch_occupied_claude_in_different_dir(tmp_path, monkeypatch):
         ),
         patch("os.readlink", return_value="/some/other/dir"),
     ):
-        result = _is_branch_occupied(tmp_path)
+        result = is_branch_occupied(tmp_path)
 
     assert result is False
 
@@ -1357,7 +1384,7 @@ def test_is_branch_occupied_claude_in_same_dir_interactive(tmp_path, monkeypatch
             return_value="interactive",
         ),
     ):
-        result = _is_branch_occupied(tmp_path)
+        result = is_branch_occupied(tmp_path)
 
     assert result is True
 
@@ -1381,7 +1408,7 @@ def test_is_branch_occupied_claude_in_same_dir_daemon(tmp_path, monkeypatch):
             return_value="daemon",
         ),
     ):
-        result = _is_branch_occupied(tmp_path)
+        result = is_branch_occupied(tmp_path)
 
     assert result is False
 
@@ -1397,7 +1424,7 @@ def test_is_branch_occupied_pgrep_failure(tmp_path):
         "aipass.ai_mail.apps.handlers.dispatch.daemon.subprocess.run",
         side_effect=OSError("pgrep unavailable"),
     ):
-        result = _is_branch_occupied(tmp_path)
+        result = is_branch_occupied(tmp_path)
 
     assert result is False
 
@@ -1424,7 +1451,7 @@ def test_spawn_agent_success(tmp_path):
             return_value=mock_process,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
@@ -1494,7 +1521,7 @@ def test_spawn_agent_strips_claude_env_vars(tmp_path, monkeypatch):
             side_effect=capture_popen,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
@@ -1537,7 +1564,7 @@ def test_spawn_agent_claude_cmd_includes_model_flag(tmp_path):
             side_effect=capture_popen,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
@@ -1579,7 +1606,7 @@ def test_spawn_agent_prompt_includes_reply_id(tmp_path):
             side_effect=capture_popen,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
@@ -1622,7 +1649,7 @@ def test_spawn_agent_prompt_includes_sender(tmp_path):
             side_effect=capture_popen,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
@@ -1664,7 +1691,7 @@ def test_spawn_agent_prompt_fallback_without_id(tmp_path):
             side_effect=capture_popen,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
@@ -1862,7 +1889,7 @@ def test_poll_cycle_shutdown_breaks_loop(tmp_path, monkeypatch):
             side_effect=shutdown_on_scan,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._check_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.check_lock",
             return_value=None,
         ),
         patch(
@@ -1975,11 +2002,11 @@ def test_poll_cycle_branch_occupied_skipped(tmp_path, monkeypatch):
             return_value=0,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._check_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.check_lock",
             return_value=None,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._is_branch_occupied",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.is_branch_occupied",
             return_value=True,
         ),
         patch(
@@ -2027,11 +2054,11 @@ def test_poll_cycle_spawn_failure_not_counted(tmp_path, monkeypatch):
             return_value=0,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._check_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.check_lock",
             return_value=None,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._is_branch_occupied",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.is_branch_occupied",
             return_value=False,
         ),
         patch(
@@ -2061,7 +2088,7 @@ def _sender_admitted(tmp_path, monkeypatch, registry, sender):
     with (
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.subprocess.Popen") as popen,
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.acquire_lock",
             return_value=(False, "held"),
         ) as lock,
     ):
@@ -2104,7 +2131,7 @@ def test_an_auto_execute_dispatch_is_refused_when_the_registry_cannot_be_read(tm
     with (
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.subprocess.Popen") as popen,
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as log_dispatch,
@@ -2165,7 +2192,7 @@ def test_spawn_agent_allows_registered_auto_execute(tmp_path, monkeypatch):
             return_value=mock_process,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
@@ -2203,7 +2230,7 @@ def test_spawn_agent_no_auth_check_without_auto_execute(tmp_path, monkeypatch):
             return_value=mock_process,
         ),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,

@@ -29,16 +29,11 @@ import aipass.prax.apps.modules.dashboard as prax_dashboard_mod
 from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
 import aipass.ai_mail.apps.handlers.dispatch.pid_lock as pid_lock_mod
 from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
-    _acquire_lock,
-    _check_lock,
-    _check_pid_alive,
-    _clean_zombies,
-    _get_pid_cwd,
-    _get_pid_cwd_darwin,
-    _is_branch_occupied,
-    _is_zombie_linux,
-    _read_session_type,
-    _read_session_type_darwin,
+    acquire_lock,
+    check_lock,
+    check_pid_alive,
+    clean_zombies,
+    is_branch_occupied,
 )
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import refresh_recipient_dashboard
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
@@ -47,7 +42,6 @@ from aipass.ai_mail.apps.handlers.dispatch.wake import (
     DispatchStatus,
     KNOWN_MODEL_ALIASES,
     DEFAULT_MODEL,
-    _load_config,
     wake_branch,
 )
 
@@ -200,20 +194,20 @@ def test_read_json_corrupt(tmp_path, monkeypatch):
     assert str(raised).startswith("bad.json could not be read")
 
 
-# --- _check_pid_alive tests ------------------------------------------
+# --- check_pid_alive tests -------------------------------------------
 
 
 def test_check_pid_alive_dead(monkeypatch):
     """Dead PID returns False."""
     monkeypatch.setattr(os, "kill", _raise_process_lookup)
-    assert _check_pid_alive(99999) is False
+    assert check_pid_alive(99999) is False
 
 
 def test_check_pid_alive_permission_error(monkeypatch):
     """PermissionError means process exists but cannot signal -- returns True."""
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(os, "kill", _raise_permission)
-    assert _check_pid_alive(1) is True
+    assert check_pid_alive(1) is True
 
 
 def test_check_pid_alive_running_non_zombie(monkeypatch, tmp_path):
@@ -229,7 +223,7 @@ def test_check_pid_alive_running_non_zombie(monkeypatch, tmp_path):
         "builtins.open",
         _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
     )
-    assert _check_pid_alive(42) is True
+    assert check_pid_alive(42) is True
 
 
 def test_check_pid_alive_zombie(monkeypatch, tmp_path):
@@ -244,121 +238,140 @@ def test_check_pid_alive_zombie(monkeypatch, tmp_path):
         "builtins.open",
         _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
     )
-    assert _check_pid_alive(42) is False
+    assert check_pid_alive(42) is False
 
 
-# --- _read_session_type tests ----------------------------------------
+# --- pid_lock's process readers, through is_branch_occupied -----------
+#
+# The cwd and session-type readers are reached through the occupancy check,
+# their one caller (ai_mail, leg 15): one claude pid, its cwd, its session type.
+# A blocking session reads occupied; a dispatched/daemon one, a cwd elsewhere,
+# or a cwd that cannot be read, reads free. The darwin branch is a synthetic
+# POSIX literal, never a tmp_path: lsof output is DATA the parser reads, and on
+# a Windows runner a tmp_path is a drive-letter path (CI 35058244702). Both the
+# branch and the cwd go through the same resolve(), so they compare alike there.
+
+# Data, never a host path: built from the root separator, so lsof's name line is
+# "/private/..." on every runner and nothing on disk is read or owned.
+_DARWIN_BRANCH = _Path(os.sep, "private", "var", "folders", "aipass", "pytest-project")
+
+
+class _Ran:
+    """A finished process: its return code and stdout."""
+
+    def __init__(self, returncode, stdout=""):
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def _processes(monkeypatch, pid, lsof=None, ps=None):
+    """pgrep answers one claude *pid*; lsof and ps answer as handed (darwin)."""
+
+    def run(cmd, *a, **kw):
+        if cmd[0] == "pgrep":
+            return _Ran(0, f"{pid}\n")
+        answer = {"lsof": lsof, "ps": ps}[cmd[0]]
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+
+def _linux_claude_in(monkeypatch, tmp_path, branch, environ):
+    """A linux claude pid 123 standing in *branch*, its environ holding *environ*."""
+    monkeypatch.setattr("sys.platform", "linux")
+    _processes(monkeypatch, 123)
+    monkeypatch.setattr(os, "readlink", lambda p: str(branch.resolve()) if p == "/proc/123/cwd" else "")
+    env_file = tmp_path / "environ"
+    env_file.write_bytes(environ)
+    monkeypatch.setattr("builtins.open", _fake_open_factory(str(env_file), {"/proc/123/environ": str(env_file)}))
 
 
 def test_read_session_type_found(monkeypatch, tmp_path):
-    """Reads AIPASS_SESSION_TYPE from proc environ."""
-    monkeypatch.setattr("sys.platform", "linux")
-    env_file = tmp_path / "environ"
-    env_file.write_bytes(b"HOME=/home/user\x00AIPASS_SESSION_TYPE=daemon\x00PATH=/usr/bin\x00")
-    monkeypatch.setattr(
-        "builtins.open",
-        _fake_open_factory(str(env_file), {"/proc/123/environ": str(env_file)}),
-    )
-    assert _read_session_type("123") == "daemon"
+    """Linux: a daemon session read from the environ does not block."""
+    environ = b"HOME=/home/user\x00AIPASS_SESSION_TYPE=daemon\x00PATH=/usr/bin\x00"
+    _linux_claude_in(monkeypatch, tmp_path, tmp_path, environ)
+    assert is_branch_occupied(tmp_path) is False
 
 
 def test_read_session_type_not_set(monkeypatch, tmp_path):
-    """Missing env var returns 'interactive'."""
-    monkeypatch.setattr("sys.platform", "linux")
-    env_file = tmp_path / "environ"
-    env_file.write_bytes(b"HOME=/home/user\x00PATH=/usr/bin\x00")
-    monkeypatch.setattr(
-        "builtins.open",
-        _fake_open_factory(str(env_file), {"/proc/456/environ": str(env_file)}),
-    )
-    assert _read_session_type("456") == "interactive"
+    """Linux: no session type in the environ reads interactive, which blocks."""
+    _linux_claude_in(monkeypatch, tmp_path, tmp_path, b"HOME=/home/user\x00PATH=/usr/bin\x00")
+    assert is_branch_occupied(tmp_path) is True
 
 
-def test_read_session_type_non_linux(monkeypatch):
-    """Non-linux, non-darwin platform returns 'interactive' immediately."""
+def test_read_session_type_non_linux(monkeypatch, tmp_path):
+    """win32: no cwd can be read, so no session in the branch is seen and it reads free.
+
+    The session-type reader's own win32 arm sits behind this: through its one
+    caller it is never reached on win32, since the cwd read answers None first.
+    """
     monkeypatch.setattr("sys.platform", "win32")
-    assert _read_session_type("999") == "interactive"
+    _processes(monkeypatch, 123)
+    monkeypatch.setattr(os, "readlink", lambda p: str(tmp_path.resolve()))
+    assert is_branch_occupied(tmp_path) is False
 
 
-def test_read_session_type_unreadable_environ(monkeypatch):
-    """Linux: an environ that cannot be opened answers 'interactive', the blocking class.
+def test_read_session_type_unreadable_environ(monkeypatch, tmp_path):
+    """Linux: an environ that cannot be opened answers interactive, the blocking class.
 
     Moved from test_daemon.py when the daemon took wake's reader (ai_mail,
     leg 12; todo 39). The open is made to raise, so no host /proc is read.
     """
-    monkeypatch.setattr("sys.platform", "linux")
+    _linux_claude_in(monkeypatch, tmp_path, tmp_path, b"")
 
     def _no_environ(*args, **kwargs):
         raise OSError("no such file")
 
     monkeypatch.setattr("builtins.open", _no_environ)
-    assert _read_session_type("12345") == "interactive"
+    assert is_branch_occupied(tmp_path) is True
+
+
+def _darwin_claude(monkeypatch, cwd_stdout, ps):
+    """A darwin claude pid 123: lsof answers *cwd_stdout*, ps answers *ps*."""
+    monkeypatch.setattr("sys.platform", "darwin")
+    _processes(monkeypatch, 123, lsof=_Ran(0, cwd_stdout), ps=ps)
 
 
 def test_read_session_type_darwin_found(monkeypatch):
-    """macOS: reads AIPASS_SESSION_TYPE from ps -wwE output."""
-    monkeypatch.setattr("sys.platform", "darwin")
-
-    class FakeResult:
-        returncode = 0
-        stdout = "/usr/bin/claude AIPASS_SESSION_TYPE=dispatched HOME=/Users/u"
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-    assert _read_session_type("123") == "dispatched"
+    """macOS: a dispatched session read from ps -wwE does not block."""
+    ps = _Ran(0, "/usr/bin/claude AIPASS_SESSION_TYPE=dispatched HOME=/Users/u")
+    _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", ps)
+    assert is_branch_occupied(_DARWIN_BRANCH) is False
 
 
 def test_read_session_type_darwin_not_set(monkeypatch):
-    """macOS: missing env var returns 'interactive'."""
-    monkeypatch.setattr("sys.platform", "darwin")
-
-    class FakeResult:
-        returncode = 0
-        stdout = "/usr/bin/claude HOME=/Users/u"
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-    assert _read_session_type("456") == "interactive"
+    """macOS: no session type in ps output reads interactive, which blocks."""
+    _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", _Ran(0, "/usr/bin/claude HOME=/Users/u"))
+    assert is_branch_occupied(_DARWIN_BRANCH) is True
 
 
 def test_read_session_type_darwin_ps_failure(monkeypatch):
-    """macOS: ps failure returns 'interactive'."""
-    assert _read_session_type_darwin("999") == "interactive"
-
-
-# --- _get_pid_cwd tests ------------------------------------------------
+    """macOS: a ps that fails reads interactive, which blocks."""
+    _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", _Ran(1))
+    assert is_branch_occupied(_DARWIN_BRANCH) is True
 
 
 def test_get_pid_cwd_linux(monkeypatch, tmp_path):
-    """Linux: reads /proc/{pid}/cwd via readlink."""
-    monkeypatch.setattr("sys.platform", "linux")
-    target = str(tmp_path / "project")
-    monkeypatch.setattr(os, "readlink", lambda p: target)
-    assert _get_pid_cwd("100") == target
+    """Linux: the cwd is read from /proc/{pid}/cwd; a session standing there blocks."""
+    _linux_claude_in(monkeypatch, tmp_path, tmp_path / "project", b"PATH=/usr/bin\x00")
+    assert is_branch_occupied(tmp_path / "project") is True
+    assert is_branch_occupied(tmp_path / "elsewhere") is False
 
 
-def test_get_pid_cwd_linux_oserror(monkeypatch):
-    """Linux: OSError returns None."""
-    monkeypatch.setattr("sys.platform", "linux")
+def test_get_pid_cwd_linux_oserror(monkeypatch, tmp_path):
+    """Linux: a cwd that cannot be read is no session in the branch."""
+    _linux_claude_in(monkeypatch, tmp_path, tmp_path, b"PATH=/usr/bin\x00")
     monkeypatch.setattr(os, "readlink", lambda p: (_ for _ in ()).throw(OSError("no proc")))
-    assert _get_pid_cwd("100") is None
+    assert is_branch_occupied(tmp_path) is False
 
 
 def test_get_pid_cwd_darwin(monkeypatch):
-    """macOS: reads cwd via lsof.
-
-    The target is a synthetic POSIX literal, never a path from tmp_path: fake
-    lsof output is DATA the parser reads, not a directory the host has to own.
-    On a Windows runner tmp_path is a drive-letter path, the 'n/' prefix the
-    parser requires never appears, and the test reads None (CI 35058244702).
-    """
-    monkeypatch.setattr("sys.platform", "darwin")
-    target = "/private/var/folders/aipass/pytest-project"
-
-    class FakeResult:
-        returncode = 0
-        stdout = f"p100\nn{target}\n"
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-    assert _get_pid_cwd("100") == target
+    """macOS: the cwd is read from lsof's name line; a session standing there blocks."""
+    _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", _Ran(0, "/usr/bin/claude"))
+    assert is_branch_occupied(_DARWIN_BRANCH) is True
+    assert is_branch_occupied(_DARWIN_BRANCH.parent) is False
 
 
 def test_get_pid_cwd_darwin_ignores_a_name_line_that_is_not_an_absolute_path(monkeypatch):
@@ -366,62 +379,38 @@ def test_get_pid_cwd_darwin_ignores_a_name_line_that_is_not_an_absolute_path(mon
 
     lsof -Fn prefixes every name line with 'n'; the parser takes only the ones
     that are absolute POSIX paths. Without the slash a non-path name line would
-    be returned as a cwd. This is the mechanism behind CI 35058244702.
+    be returned as a cwd, and this branch, named the same, would read occupied.
+    This is the mechanism behind CI 35058244702.
     """
-    monkeypatch.setattr("sys.platform", "darwin")
-
-    class FakeResult:
-        returncode = 0
-        stdout = "p100\nnD:\\build\\project\n"
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-    assert _get_pid_cwd("100") is None
+    _darwin_claude(monkeypatch, "p123\nnD:\\build\\project\n", _Ran(0, "/usr/bin/claude"))
+    assert is_branch_occupied(_Path("D:\\build\\project")) is False
 
 
 def test_get_pid_cwd_darwin_failure(monkeypatch):
-    """macOS: lsof failure returns None."""
-
-    class FailedResult:
-        returncode = 1
-        stdout = ""
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FailedResult())
-    assert _get_pid_cwd_darwin("999") is None
+    """macOS: an lsof that fails is no session in the branch, even when it printed a name line."""
+    monkeypatch.setattr("sys.platform", "darwin")
+    failed = _Ran(1, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n")
+    _processes(monkeypatch, 123, lsof=failed, ps=_Ran(0, "/usr/bin/claude"))
+    assert is_branch_occupied(_DARWIN_BRANCH) is False
 
 
-def test_get_pid_cwd_unsupported_platform(monkeypatch):
-    """Unsupported platform returns None."""
-    monkeypatch.setattr("sys.platform", "win32")
-    assert _get_pid_cwd("100") is None
+def test_get_pid_cwd_unsupported_platform(monkeypatch, tmp_path):
+    """An unsupported platform reads no cwd, even where /proc would name the branch."""
+    monkeypatch.setattr("sys.platform", "sunos5")
+    _processes(monkeypatch, 123)
+    monkeypatch.setattr(os, "readlink", lambda p: str(tmp_path.resolve()))
+    assert is_branch_occupied(tmp_path) is False
 
 
-# --- _is_zombie_linux tests --------------------------------------------
-
-
-def test_is_zombie_linux_not_zombie(monkeypatch, tmp_path):
-    """Non-zombie process returns False."""
-    status_file = tmp_path / "status"
-    status_file.write_text("Name:\tclaude\nState:\tS (sleeping)\nPid:\t42\n", encoding="utf-8")
-    monkeypatch.setattr(
-        "builtins.open",
-        _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
-    )
-    assert _is_zombie_linux(42) is False
-
-
-def test_is_zombie_linux_zombie(monkeypatch, tmp_path):
-    """Zombie process returns True."""
-    status_file = tmp_path / "status"
-    status_file.write_text("Name:\tclaude\nState:\tZ (zombie)\nPid:\t42\n", encoding="utf-8")
-    monkeypatch.setattr(
-        "builtins.open",
-        _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
-    )
-    assert _is_zombie_linux(42) is True
+# test_is_zombie_linux_not_zombie and _zombie retired (ai_mail, leg 15): they
+# pinned the same two answers as test_check_pid_alive_running_non_zombie and
+# test_check_pid_alive_zombie above, which reach the reader through its caller.
 
 
 def test_is_zombie_linux_no_proc(monkeypatch):
-    """Missing /proc entry returns False (not zombie, just gone)."""
+    """Linux: a pid that answers the signal but has no /proc entry reads alive, not zombie."""
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
     _real_open = open
 
     def _fake_open(path, *a, **kw):
@@ -430,15 +419,15 @@ def test_is_zombie_linux_no_proc(monkeypatch):
         return _real_open(path, *a, **kw)
 
     monkeypatch.setattr("builtins.open", _fake_open)
-    assert _is_zombie_linux(99999) is False
+    assert check_pid_alive(99999) is True
 
 
-# --- _check_lock tests ------------------------------------------------
+# --- check_lock tests -------------------------------------------------
 
 
 def test_check_lock_no_file(tmp_path):
     """No lock file returns None."""
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
     assert result is None
 
 
@@ -450,8 +439,8 @@ def test_check_lock_alive_pid(tmp_path, monkeypatch):
     lock_data = {"pid": 1234, "timestamp": "2026-03-29T10:00:00"}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
     alive = MagicMock(return_value=True)
-    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
-    result = _check_lock(tmp_path)
+    monkeypatch.setattr(pid_lock_mod, "check_pid_alive", alive)
+    result = check_lock(tmp_path)
     assert result is not None
     assert result["pid"] == 1234
     alive.assert_called_once_with(1234)
@@ -465,8 +454,8 @@ def test_check_lock_dead_pid_removes_lock(tmp_path, monkeypatch):
     lock_data = {"pid": 99999, "timestamp": "2026-03-29T10:00:00"}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
     alive = MagicMock(return_value=False)
-    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
-    result = _check_lock(tmp_path)
+    monkeypatch.setattr(pid_lock_mod, "check_pid_alive", alive)
+    result = check_lock(tmp_path)
     assert result is None
     assert not lock_file.exists()
     alive.assert_called_once_with(99999)
@@ -481,7 +470,7 @@ def test_check_lock_stale_old_timestamp(tmp_path, monkeypatch):
     lock_data = {"pid": 99999, "timestamp": old_ts}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
     monkeypatch.setattr(os, "kill", _raise_process_lookup)
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
     assert result is None
     assert not lock_file.exists()
 
@@ -495,7 +484,7 @@ def test_check_lock_permission_error_treated_active(tmp_path, monkeypatch):
     lock_data = {"pid": 1, "timestamp": "2026-03-29T10:00:00"}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
     monkeypatch.setattr(os, "kill", _raise_permission)
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
     assert result is not None
     assert result["pid"] == 1
 
@@ -506,7 +495,7 @@ def test_check_lock_fresh_corrupt_json_is_held(tmp_path):
     lock_dir.mkdir(parents=True)
     lock_file = lock_dir / ".dispatch.lock"
     lock_file.write_text("{bad json", encoding="utf-8")
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
     assert result is not None
     assert lock_file.exists()
 
@@ -519,7 +508,7 @@ def test_check_lock_old_corrupt_json_is_reclaimed(tmp_path):
     lock_file.write_text("{bad json", encoding="utf-8")
     hour_ago = lock_file.stat().st_mtime - 3600
     os.utime(lock_file, (hour_ago, hour_ago))
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
     assert result is None
     assert not lock_file.exists()
 
@@ -532,7 +521,7 @@ def test_check_lock_unreadable_is_held(tmp_path):
     """
     lock_file = tmp_path / ".ai_mail.local" / ".dispatch.lock"
     lock_file.mkdir(parents=True)
-    result = _check_lock(tmp_path)
+    result = check_lock(tmp_path)
     assert result is not None
     assert lock_file.exists()
 
@@ -639,7 +628,7 @@ def test_resolve_branch_strips_leading_at(repo_root):
     assert result_with[1] == result_without[1]
 
 
-# --- _clean_zombies tests -------------------------------------------
+# --- clean_zombies tests --------------------------------------------
 
 
 def test_clean_zombies_finds_zombie(monkeypatch):
@@ -653,7 +642,7 @@ def test_clean_zombies_finds_zombie(monkeypatch):
         "subprocess.run",
         lambda *args, **kwargs: FakeResult(),
     )
-    count = _clean_zombies()
+    count = clean_zombies()
     assert count == 2
 
 
@@ -668,7 +657,7 @@ def test_clean_zombies_none_found(monkeypatch):
         "subprocess.run",
         lambda *args, **kwargs: FakeResult(),
     )
-    count = _clean_zombies()
+    count = clean_zombies()
     assert count == 0
 
 
@@ -678,7 +667,7 @@ def test_clean_zombies_subprocess_error(monkeypatch):
         "subprocess.run",
         _raise_subprocess_error,
     )
-    count = _clean_zombies()
+    count = clean_zombies()
     assert count == 0
 
 
@@ -890,11 +879,11 @@ class TestWakeBranchSpawnEnv:
         # The liveness probe and the occupancy scan stay walls in front of host pids and
         # live sessions; each is asserted on what it was asked (ai_mail, leg 7)
         pid_alive = MagicMock(return_value=True)
-        monkeypatch.setattr(wake_mod, "_check_pid_alive", pid_alive)
-        monkeypatch.setattr(wake_mod, "_clean_zombies", lambda: 0)
+        monkeypatch.setattr(wake_mod, "check_pid_alive", pid_alive)
+        monkeypatch.setattr(wake_mod, "clean_zombies", lambda: 0)
         occupied = MagicMock(return_value=False)
-        monkeypatch.setattr(wake_mod, "_is_branch_occupied", occupied)
-        monkeypatch.setattr(wake_mod, "_acquire_lock", lambda p, pid: (True, "ok"))
+        monkeypatch.setattr(wake_mod, "is_branch_occupied", occupied)
+        monkeypatch.setattr(wake_mod, "acquire_lock", lambda p, pid: (True, "ok"))
         sleep = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.time.sleep", sleep)
         # send_notification appends to the live feed, so it stays patched and is asserted (ai_mail, leg 6)
@@ -917,15 +906,15 @@ class TestWakeBranchSpawnEnv:
 # ─── NEW LINE COVERAGE TESTS ──────────────────────────────────
 
 
-# --- _acquire_lock tests -----------------------------------------------
+# --- acquire_lock tests ------------------------------------------------
 
 
 class TestAcquireLock:
-    """Tests for _acquire_lock() — atomic lock file creation."""
+    """Tests for acquire_lock() — atomic lock file creation."""
 
     def test_successful_lock_creation(self, tmp_path):
         """Successful lock writes pid, timestamp, and branch to JSON file."""
-        ok, msg = _acquire_lock(tmp_path, 12345)
+        ok, msg = acquire_lock(tmp_path, 12345)
         assert ok is True
         assert msg == "Lock acquired"
         lock_file = tmp_path / ".ai_mail.local" / ".dispatch.lock"
@@ -941,7 +930,7 @@ class TestAcquireLock:
         lock_dir.mkdir(parents=True)
         lock_file = lock_dir / ".dispatch.lock"
         lock_file.write_text("{}", encoding="utf-8")
-        ok, msg = _acquire_lock(tmp_path, 999)
+        ok, msg = acquire_lock(tmp_path, 999)
         assert ok is False
         assert msg == "Lock file already exists"
 
@@ -955,7 +944,7 @@ class TestAcquireLock:
             return original_os_open(path, flags, *args, **kwargs)
 
         monkeypatch.setattr(os, "open", _fail_open)
-        ok, msg = _acquire_lock(tmp_path, 999)
+        ok, msg = acquire_lock(tmp_path, 999)
         assert ok is False
         assert "Lock failed:" in msg
         assert "disk full" in msg
@@ -965,45 +954,44 @@ class TestAcquireLock:
 
 
 class TestLoadConfig:
-    """Tests for _load_config() — safety config loading with defaults."""
+    """The safety config's turn cap, read through the wake that spawns with it.
+
+    The unreadable-config row is TestScheduledManagerLane's
+    test_an_unreadable_safety_config_refuses_the_wake (ai_mail, leg 15).
+    """
+
+    def _turns(self, tmp_path, monkeypatch, config_text=None):
+        """The --max-turns value the wake handed claude."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        if config_text is not None:
+            (tmp_path / "safety_config.json").write_text(config_text, encoding="utf-8")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        wake_branch("@testbranch")
+
+        assert len(calls["popen"]) == 1
+        args = _claude_args(calls["popen"][0]["cmd"])
+        return args[args.index("--max-turns") + 1]
 
     def test_no_config_file_returns_defaults(self, tmp_path, monkeypatch):
-        """Missing config file returns default dict."""
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", tmp_path / "nonexistent.json")
-        result = _load_config()
-        assert result == {"max_turns_per_wake": 100}
+        """Missing config file spawns with the default cap."""
+        assert self._turns(tmp_path, monkeypatch) == "100"
 
     def test_partial_config_fills_defaults(self, tmp_path, monkeypatch):
-        """Config file without max_turns_per_wake gets default filled in."""
-        config_file = tmp_path / "safety_config.json"
-        config_file.write_text(json.dumps({"other_key": "value"}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config_file)
-        result = _load_config()
-        assert result["max_turns_per_wake"] == 100
-        assert result["other_key"] == "value"
+        """Config file without max_turns_per_wake spawns with the default cap."""
+        assert self._turns(tmp_path, monkeypatch, json.dumps({"other_key": "value"})) == "100"
 
     def test_full_config_returned(self, tmp_path, monkeypatch):
-        """Config file with all keys returned as-is."""
-        config_file = tmp_path / "safety_config.json"
-        config_file.write_text(json.dumps({"max_turns_per_wake": 50}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config_file)
-        result = _load_config()
-        assert result["max_turns_per_wake"] == 50
-
-    def test_unreadable_config_raises(self, tmp_path, monkeypatch):
-        """An unreadable config raises: its max_turns may be lower than the default 100 (ai_mail, leg 13)."""
-        config_file = tmp_path / "safety_config.json"
-        config_file.write_text("{max_turns", encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config_file)
-        with pytest.raises(wake_mod.JsonUnreadable):
-            _load_config()
+        """Config file's own cap is the one the spawn carries."""
+        assert self._turns(tmp_path, monkeypatch, json.dumps({"max_turns_per_wake": 50})) == "50"
 
 
-# --- _is_branch_occupied tests ------------------------------------------
+# --- is_branch_occupied tests -------------------------------------------
 
 
 class TestIsBranchOccupied:
-    """Tests for _is_branch_occupied() — checks for interactive Claude sessions."""
+    """Tests for is_branch_occupied() — checks for interactive Claude sessions."""
 
     def test_no_claude_processes(self, tmp_path, monkeypatch):
         """pgrep returns non-zero (no claude processes) -> not occupied."""
@@ -1013,7 +1001,7 @@ class TestIsBranchOccupied:
             stdout = ""
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-        assert _is_branch_occupied(tmp_path) is False
+        assert is_branch_occupied(tmp_path) is False
 
     def test_claude_in_different_dir(self, tmp_path, monkeypatch):
         """Claude running in a different directory -> not occupied."""
@@ -1025,7 +1013,7 @@ class TestIsBranchOccupied:
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
         monkeypatch.setattr(os, "readlink", lambda p: "/some/other/dir")
-        assert _is_branch_occupied(tmp_path) is False
+        assert is_branch_occupied(tmp_path) is False
 
     def test_claude_in_same_dir_interactive(self, tmp_path, monkeypatch):
         """Claude in same dir with interactive session -> occupied."""
@@ -1040,7 +1028,7 @@ class TestIsBranchOccupied:
         monkeypatch.setattr(os, "readlink", lambda p: resolved)
         # _read_session_type returns "interactive" for this PID
         monkeypatch.setattr(pid_lock_mod, "_read_session_type", lambda pid_str: "interactive")
-        assert _is_branch_occupied(tmp_path) is True
+        assert is_branch_occupied(tmp_path) is True
 
     def test_claude_in_same_dir_daemon_not_blocking(self, tmp_path, monkeypatch):
         """Claude in same dir with daemon session -> not blocking."""
@@ -1054,7 +1042,7 @@ class TestIsBranchOccupied:
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
         monkeypatch.setattr(os, "readlink", lambda p: resolved)
         monkeypatch.setattr(pid_lock_mod, "_read_session_type", lambda pid_str: "daemon")
-        assert _is_branch_occupied(tmp_path) is False
+        assert is_branch_occupied(tmp_path) is False
 
     def test_pgrep_subprocess_failure_returns_false(self, tmp_path, monkeypatch):
         """subprocess failure returns False."""
@@ -1063,7 +1051,7 @@ class TestIsBranchOccupied:
             raise subprocess.SubprocessError("pgrep failed")
 
         monkeypatch.setattr(subprocess, "run", _fail)
-        assert _is_branch_occupied(tmp_path) is False
+        assert is_branch_occupied(tmp_path) is False
 
     def test_readlink_oserror_continues(self, tmp_path, monkeypatch):
         """OSError on readlink is caught, continues to next PID."""
@@ -1079,7 +1067,7 @@ class TestIsBranchOccupied:
             raise OSError("no such file")
 
         monkeypatch.setattr(os, "readlink", _fail_readlink)
-        assert _is_branch_occupied(tmp_path) is False
+        assert is_branch_occupied(tmp_path) is False
 
 
 # --- wake_branch integration tests -------------------------------------
@@ -1110,11 +1098,11 @@ def _make_wake_fixtures(tmp_path, monkeypatch):
 def _patch_wake_deps(monkeypatch, **overrides):
     """Monkeypatch all wake_branch dependencies with sane defaults; override as needed."""
     defaults = {
-        "_check_lock": lambda p: None,
-        "_clean_zombies": lambda: 0,
-        "_is_branch_occupied": lambda p: False,
-        "_acquire_lock": lambda p, pid: (True, "ok"),
-        "_check_pid_alive": lambda pid: True,
+        "check_lock": lambda p: None,
+        "clean_zombies": lambda: 0,
+        "is_branch_occupied": lambda p: False,
+        "acquire_lock": lambda p, pid: (True, "ok"),
+        "check_pid_alive": lambda pid: True,
         # Stubbed by default: a unit test of the wake must not read the fleet's
         # real .central.json files or write a dashboard into tmp_path. The pins
         # that are ABOUT the refresh put the real hook back (see
@@ -1246,7 +1234,7 @@ class TestWakeBranch:
         trinity = branch_path / ".trinity"
         trinity.mkdir(parents=True, exist_ok=True)
         (trinity / "passport.json").write_text("{not json", encoding="utf-8")
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 0)
         calls = _record_spawn_routes(monkeypatch)
 
         status, ok = wake_branch("@testbranch")
@@ -1268,7 +1256,7 @@ class TestWakeBranch:
             json.dumps({"identity": {"citizen_class": "manager"}}),
             encoding="utf-8",
         )
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 0)
         tmux_calls = []
 
         def _fake_run(cmd, **kwargs):
@@ -1306,7 +1294,7 @@ class TestWakeBranch:
             json.dumps({"identity": {"citizen_class": "manager"}}),
             encoding="utf-8",
         )
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 0)
         which = MagicMock(return_value=None)
         monkeypatch.setattr(wake_mod.shutil, "which", which)
         status, ok = wake_branch("@testbranch", sender="@daemon")
@@ -1323,7 +1311,7 @@ class TestWakeBranch:
             json.dumps({"identity": {"citizen_class": "aipass_framework"}}),
             encoding="utf-8",
         )
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 0)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
         notify = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
@@ -1337,7 +1325,7 @@ class TestWakeBranch:
     def test_missing_passport_continues(self, tmp_path, monkeypatch):
         """No passport.json — wake proceeds normally."""
         _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 0)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
         notify = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
@@ -1353,7 +1341,7 @@ class TestWakeBranch:
     def test_zombie_check_warns_but_continues(self, tmp_path, monkeypatch):
         """Zombie detected adds warning but dispatch continues."""
         _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 2)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 2)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
         notify = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
@@ -1371,8 +1359,8 @@ class TestWakeBranch:
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(
             monkeypatch,
-            _check_lock=lambda p: {"pid": 111, "timestamp": "2026-01-01T00:00:00"},
-            _clean_zombies=lambda: 0,
+            check_lock=lambda p: {"pid": 111, "timestamp": "2026-01-01T00:00:00"},
+            clean_zombies=lambda: 0,
         )
         status, ok = wake_branch("@testbranch", auto=True)
         assert ok is False
@@ -1383,8 +1371,8 @@ class TestWakeBranch:
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(
             monkeypatch,
-            _check_lock=lambda p: {"pid": 111, "timestamp": "2026-01-01T00:00:00"},
-            _clean_zombies=lambda: 0,
+            check_lock=lambda p: {"pid": 111, "timestamp": "2026-01-01T00:00:00"},
+            clean_zombies=lambda: 0,
         )
         status, ok = wake_branch("@testbranch", auto=False)
         assert ok is True
@@ -1396,7 +1384,7 @@ class TestWakeBranch:
         """Interactive session running -> blocked."""
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
         occupied = MagicMock(return_value=True)
-        _patch_wake_deps(monkeypatch, _is_branch_occupied=occupied)
+        _patch_wake_deps(monkeypatch, is_branch_occupied=occupied)
         status, ok = wake_branch("@testbranch")
         occupied.assert_called_once_with(branch_path)
         assert ok is False
@@ -1617,7 +1605,7 @@ class TestWakeBranch:
     def test_lock_acquisition_fails_before_spawn(self, tmp_path, monkeypatch):
         """Lock fails before spawn -> fail step, returns False (DPLAN-0155 lock-before-spawn)."""
         _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _acquire_lock=lambda p, pid: (False, "Lock file already exists"))
+        _patch_wake_deps(monkeypatch, acquire_lock=lambda p, pid: (False, "Lock file already exists"))
         status, ok = wake_branch("@testbranch")
         assert ok is False
         assert any(s[0] == "fail" and "lock-acquire" in s[1] for s in status.steps)
@@ -1628,7 +1616,7 @@ class TestWakeBranch:
         """Agent dies immediately -> cleans up lock, returns False."""
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
         pid_alive = MagicMock(return_value=False)
-        _patch_wake_deps(monkeypatch, _check_pid_alive=pid_alive)
+        _patch_wake_deps(monkeypatch, check_pid_alive=pid_alive)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
         # Create the lock file so we can verify it gets cleaned up
         lock_dir = branch_path / ".ai_mail.local"
@@ -2841,7 +2829,7 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
 
     def test_an_active_lock_is_a_named_fail_step_under_auto(self, tmp_path, monkeypatch):
         _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _check_lock=lambda p: {"pid": 999, "timestamp": "now"})
+        _patch_wake_deps(monkeypatch, check_lock=lambda p: {"pid": 999, "timestamp": "now"})
 
         status, ok = wake_branch("@testbranch", auto=True)
 
@@ -2851,7 +2839,7 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
     def test_occupancy_is_the_blocked_step(self, tmp_path, monkeypatch):
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
         occupied = MagicMock(return_value=True)
-        _patch_wake_deps(monkeypatch, _is_branch_occupied=occupied)
+        _patch_wake_deps(monkeypatch, is_branch_occupied=occupied)
 
         status, ok = wake_branch("@testbranch", auto=True)
 
@@ -2861,7 +2849,7 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
 
     def test_a_refused_lock_acquire_is_its_own_named_step(self, tmp_path, monkeypatch):
         _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _acquire_lock=lambda p, pid: (False, "held by 4242"))
+        _patch_wake_deps(monkeypatch, acquire_lock=lambda p, pid: (False, "held by 4242"))
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
 
         status, ok = wake_branch("@testbranch", auto=True)

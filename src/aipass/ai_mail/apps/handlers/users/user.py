@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: user.py
 # Description: User Info Handler
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2025-11-30
-# Modified: 2026-08-21
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -194,7 +194,12 @@ def get_all_users() -> Dict[str, Dict]:
     Get all users from AIPASS_REGISTRY.json
 
     Returns:
-        Dict mapping branch emails to user info dicts
+        Dict mapping branch emails to user info dicts; {} when no registry exists.
+
+    Raises:
+        RegistryUnreadable: the registry exists and cannot be read. Read as {},
+            it answered like a registry naming nobody (ai_mail, leg 15); no
+            product caller exists today, only the package re-export.
     """
     from .branch_detection import BRANCH_REGISTRY_PATH, _get_branches_list
 
@@ -225,4 +230,6 @@ def get_all_users() -> Dict[str, Dict]:
         return users
     except Exception as e:
         logger.warning("[identity] get_all_users() failed: %s", e)
-        return {}
+        from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+        raise RegistryUnreadable(f"{registry_path} could not be read: {e}") from e

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_user_paths.py
 # Description: Tests for absolute mailbox_path resolution in user functions
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-09-29
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/users/user.py and apps/handlers/paths.py's find_repo_root()."""
@@ -22,7 +22,7 @@
 # 4. Absolute paths in the registry are preserved as-is
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — get_user_by_email()/get_all_users()'s broad except Exception on a malformed registry
+# seedgo: no-test-needed(stdlib) — get_user_by_email()'s broad except on a malformed registry (HELD, DPLAN-0357)
 
 import json
 import pytest
@@ -30,6 +30,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from aipass.ai_mail.apps.handlers import paths
+from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
 from aipass.ai_mail.apps.handlers.users.user import get_all_users, get_current_user, get_user_by_email
 
 
@@ -278,6 +279,19 @@ class TestGetAllUsersPaths:
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", fake_path):
             users = get_all_users()
             assert users == {}
+
+    def test_unreadable_registry_raises_not_empty(self, tmp_path):
+        """A registry that exists and cannot be parsed raises, naming itself.
+
+        Read as {}, it answered exactly as a registry naming nobody, so a caller
+        could not tell "no users" from "users unknown" (ai_mail, leg 15).
+        """
+        broken = tmp_path / "AIPASS_REGISTRY.json"
+        broken.write_text("{not json", encoding="utf-8")
+        with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", broken):
+            with pytest.raises(RegistryUnreadable) as raised:
+                get_all_users()
+        assert str(broken) in str(raised.value)
 
 
 # ─── Detection-failure diagnostics (error 0bd8b4f5) ──────

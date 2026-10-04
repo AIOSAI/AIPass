@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: pid_lock.py
 # Description: Process liveness, branch occupancy and the dispatch lock
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-04
 # Modified: 2026-10-04
 # =============================================
@@ -12,7 +12,7 @@ Process liveness, branch occupancy and the dispatch lock.
 Split out of wake.py in leg 13 (ai_mail, fleet green leg 13), when wake.py
 passed the 1500-line line: these helpers ask the operating system about
 processes and own the .dispatch.lock file, and both the wake and the daemon
-call them. Moved unchanged; wake.py and daemon.py import them from here.
+call them. Their public names are the interface wake.py and daemon.py import.
 """
 
 import json
@@ -54,7 +54,7 @@ def _pid_alive_windows(pid: int) -> bool:
         kernel32.CloseHandle(handle)
 
 
-# _acquire_lock creates the lock empty (O_CREAT|O_EXCL) and fills it with one
+# acquire_lock creates the lock empty (O_CREAT|O_EXCL) and fills it with one
 # small json.dump an instant later, so a reader can meet it empty or half
 # written. That window is milliseconds; 30 seconds is far past any such write
 # and far below a wake's turn, so a corrupt lock older than this is a crashed
@@ -62,7 +62,7 @@ def _pid_alive_windows(pid: int) -> bool:
 _CORRUPT_LOCK_GRACE_SECONDS = 30
 
 
-def _check_lock(branch_path: Path) -> Optional[dict]:
+def check_lock(branch_path: Path) -> Optional[dict]:
     """Return the lock data while the dispatch lock is held, or None once it is free.
 
     The one lock check of the wake and the daemon (ai_mail, leg 13). A holder
@@ -93,14 +93,14 @@ def _check_lock(branch_path: Path) -> Optional[dict]:
         logger.info("[pid_lock] Corrupt lock at %s is %.0fs old, held as mid-write", lock_file, age)
         return {"corrupt": True}
     pid = data.get("pid")
-    if isinstance(pid, int) and _check_pid_alive(pid):
+    if isinstance(pid, int) and check_pid_alive(pid):
         return data
     logger.warning("[pid_lock] Stale lock removed at %s (PID %s not running)", lock_file, pid)
     lock_file.unlink(missing_ok=True)
     return None
 
 
-def _acquire_lock(branch_path: Path, pid: int) -> Tuple[bool, str]:
+def acquire_lock(branch_path: Path, pid: int) -> Tuple[bool, str]:
     """Acquire dispatch lock for branch. Atomic creation."""
     lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
     lock_data = {"pid": pid, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "branch": str(branch_path)}
@@ -193,7 +193,7 @@ def _read_session_type_darwin(pid_str: str) -> str:
 _NON_BLOCKING_SESSION_TYPES = {"dispatched", "daemon"}
 
 
-def _is_branch_occupied(branch_path: Path) -> bool:
+def is_branch_occupied(branch_path: Path) -> bool:
     """Check if an interactive Claude session is running in this branch directory."""
     resolved = str(branch_path.resolve())
     try:
@@ -216,7 +216,7 @@ def _is_branch_occupied(branch_path: Path) -> bool:
     return False
 
 
-def _clean_zombies() -> int:
+def clean_zombies() -> int:
     """Find and report zombie Claude processes. Returns count found."""
     count = 0
     try:
@@ -231,7 +231,7 @@ def _clean_zombies() -> int:
     return count
 
 
-def _check_pid_alive(pid: int) -> bool:
+def check_pid_alive(pid: int) -> bool:
     """Check if a process is alive (not zombie)."""
     if sys.platform == "win32":
         try:

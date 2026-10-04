@@ -1262,8 +1262,8 @@ class TestBothVerbsAgreeAtTheManagerGate:
             json.dumps({"identity": {"citizen_class": "manager"}}), encoding="utf-8"
         )
         monkeypatch.setattr(f"{_H_WAKE}.resolve_branch", lambda email, admin=False: (branch, "@mgr"))
-        monkeypatch.setattr(f"{_H_WAKE}._clean_zombies", lambda: 0)
-        monkeypatch.setattr(f"{_H_WAKE}._check_lock", lambda path: {"pid": 4242, "timestamp": "held"})
+        monkeypatch.setattr(f"{_H_WAKE}.clean_zombies", lambda: 0)
+        monkeypatch.setattr(f"{_H_WAKE}.check_lock", lambda path: {"pid": 4242, "timestamp": "held"})
         monkeypatch.setattr(f"{MOD}.error", lambda msg: None)
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
 
