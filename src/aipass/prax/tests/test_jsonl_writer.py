@@ -3,7 +3,7 @@
 # Description: Tests for PRAX JSONL writer with rotation
 # Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/logging/jsonl_writer.py, exported via apps/modules/logger.py."""
@@ -21,16 +21,10 @@
 # seedgo: no-test-needed(constant) — rotation above the JSONL_MAX_BYTES default; only the size under it is tested
 
 import json
-import sys
 
-
-def _get_append_jsonl():
-    """Import append_jsonl after conftest mocks are active."""
-    mod_name = "aipass.prax.apps.modules.logger"
-    sys.modules.pop(mod_name, None)
-    from aipass.prax.apps.modules.logger import append_jsonl
-
-    return append_jsonl
+from aipass.prax.apps.handlers.logging import jsonl_writer
+from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl
+from aipass.prax.apps.modules import logger as logger_module
 
 
 class TestAppendJsonl:
@@ -38,7 +32,6 @@ class TestAppendJsonl:
 
     def test_creates_file_and_appends(self, tmp_path):
         """Verify a new file is created and data appended as JSON line."""
-        append_jsonl = _get_append_jsonl()
         target = tmp_path / "test.jsonl"
 
         append_jsonl(target, {"key": "value"})
@@ -50,7 +43,6 @@ class TestAppendJsonl:
 
     def test_appends_multiple_lines(self, tmp_path):
         """Verify successive appends produce multiple JSON lines."""
-        append_jsonl = _get_append_jsonl()
         target = tmp_path / "test.jsonl"
 
         append_jsonl(target, {"n": 1})
@@ -63,7 +55,6 @@ class TestAppendJsonl:
 
     def test_creates_parent_directories(self, tmp_path):
         """Verify missing parent directories are auto-created."""
-        append_jsonl = _get_append_jsonl()
         target = tmp_path / "deep" / "nested" / "dir" / "test.jsonl"
 
         append_jsonl(target, {"created": True})
@@ -73,7 +64,6 @@ class TestAppendJsonl:
 
     def test_handles_non_serializable_with_default_str(self, tmp_path):
         """Verify non-serializable types fall back to str()."""
-        append_jsonl = _get_append_jsonl()
         target = tmp_path / "test.jsonl"
         test_path = tmp_path / "some" / "path"
 
@@ -88,7 +78,6 @@ class TestRotation:
 
     def test_rotates_when_exceeding_max_bytes(self, tmp_path):
         """Verify file is rotated to .1 when it exceeds max_bytes."""
-        append_jsonl = _get_append_jsonl()
         target = tmp_path / "test.jsonl"
 
         target.write_text("x" * 500 + "\n", encoding="utf-8")
@@ -104,7 +93,6 @@ class TestRotation:
 
     def test_no_rotation_under_limit(self, tmp_path):
         """Verify no rotation occurs when file is under max_bytes."""
-        append_jsonl = _get_append_jsonl()
         target = tmp_path / "test.jsonl"
 
         append_jsonl(target, {"small": True}, max_bytes=10000)
@@ -114,7 +102,6 @@ class TestRotation:
 
     def test_backup_overwritten_on_second_rotation(self, tmp_path):
         """Verify second rotation overwrites the previous .1 backup."""
-        append_jsonl = _get_append_jsonl()
         target = tmp_path / "test.jsonl"
         backup = tmp_path / "test.jsonl.1"
 
@@ -132,7 +119,6 @@ class TestRotation:
 
     def test_zero_backup_count_deletes_instead(self, tmp_path):
         """Verify backup_count=0 deletes the oversized file instead of rotating."""
-        append_jsonl = _get_append_jsonl()
         target = tmp_path / "test.jsonl"
 
         target.write_text("x" * 500 + "\n", encoding="utf-8")
@@ -149,10 +135,17 @@ class TestDefaultRotation:
 
     def test_no_rotation_under_default_cap(self, tmp_path):
         """Verify file stays intact under the 500KB default cap."""
-        append_jsonl = _get_append_jsonl()
         target = tmp_path / "test.jsonl"
 
         target.write_text("x" * 400_000 + "\n", encoding="utf-8")
         append_jsonl(target, {"still": "ok"})
 
         assert not (tmp_path / "test.jsonl.1").exists()
+
+
+class TestTheExport:
+    """The logger module hands callers the writer itself, not a copy or a wrapper."""
+
+    def test_the_logger_module_exports_the_writer(self):
+        """Green from its first run, so its proof is its mutant (prax, leg 9)."""
+        assert logger_module.append_jsonl is jsonl_writer.append_jsonl

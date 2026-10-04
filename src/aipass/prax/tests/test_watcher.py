@@ -26,6 +26,36 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.prax.apps.handlers.discovery import watcher as discovery_watcher
+from aipass.prax.apps.handlers.watcher import monitor as watcher_monitor
+
+
+def _discovery_watcher_doubled(monkeypatch, tmp_path):
+    """The discovery watcher with its collaborators doubled where it binds them (prax, leg 9).
+
+    The module is the one imported at the top, never re-imported. Its state
+    (_observer, _start_thread, _LIVENESS) is set to a fresh start through
+    monkeypatch, which is what the old reload gave each test.
+    """
+    observer_cls = MagicMock()
+    fake = tmp_path / "fake"
+    monkeypatch.setattr(discovery_watcher, "WatchdogObserver", observer_cls)
+    monkeypatch.setattr(discovery_watcher, "ECOSYSTEM_ROOT", fake / "ecosystem")
+    monkeypatch.setattr(discovery_watcher, "get_system_logs_dir", lambda: fake / "logs" / "system")
+    monkeypatch.setattr(discovery_watcher, "get_module_logs_dir", lambda module_name=None: fake / "logs" / "modules")
+    monkeypatch.setattr(discovery_watcher, "load_module_registry", lambda: {})
+    monkeypatch.setattr(discovery_watcher, "save_module_registry", MagicMock())
+    monkeypatch.setattr(discovery_watcher, "json_handler", MagicMock())
+    _fresh_watcher_state(monkeypatch)
+    return discovery_watcher, observer_cls.return_value, observer_cls
+
+
+def _fresh_watcher_state(monkeypatch):
+    """The discovery watcher's state as a fresh import leaves it, undone after the test (prax, leg 9)."""
+    monkeypatch.setattr(discovery_watcher, "_observer", None)
+    monkeypatch.setattr(discovery_watcher, "_start_thread", None)
+    monkeypatch.setattr(discovery_watcher, "_LIVENESS", discovery_watcher.LivenessState())
+
 
 # ============================================================================
 # WATCHER/MONITOR.PY - BranchFileHandler and start/stop_monitoring
@@ -35,37 +65,17 @@ import pytest
 class TestBranchFileHandler:
     """Tests for BranchFileHandler event callbacks and filtering."""
 
+    @pytest.fixture(autouse=True)
+    def _quiet_module(self, monkeypatch):
+        """The monitor's logger and json service, doubled where it binds them (prax, leg 9: no re-import)."""
+        monkeypatch.setattr(watcher_monitor, "logger", MagicMock())
+        monkeypatch.setattr(watcher_monitor, "json_handler", MagicMock())
+
     def _make_handler(self):
-        """Create a BranchFileHandler with a mock callback."""
-
-        # Provide a real base class so subclass methods work properly
-        class _RealFSHandler:
-            """Stub base so BranchFileHandler methods are not swallowed."""
-
-            pass
-
-        mock_watchdog_events = MagicMock()
-        mock_watchdog_events.FileSystemEventHandler = _RealFSHandler
-        mock_watchdog_events.FileSystemEvent = MagicMock()
-        mock_watchdog_observer = MagicMock()
-        with patch.dict(
-            sys.modules,
-            {
-                "watchdog": MagicMock(),
-                "watchdog.observers": mock_watchdog_observer,
-                "watchdog.events": mock_watchdog_events,
-            },
-        ):
-            import importlib
-
-            for key in list(sys.modules):
-                if key.startswith("aipass.prax.apps.handlers.watcher"):
-                    sys.modules.pop(key, None)
-            mod = importlib.import_module("aipass.prax.apps.handlers.watcher.monitor")
-
+        """A real BranchFileHandler on the real watchdog base, with a mock callback."""
         callback = MagicMock()
-        handler = mod.BranchFileHandler("TEST", callback)
-        return handler, callback, mod
+        handler = watcher_monitor.BranchFileHandler("TEST", callback)
+        return handler, callback, watcher_monitor
 
     def _make_event(self, src_path: str, is_directory: bool = False, dest_path: str | None = None):
         event = MagicMock()
@@ -178,36 +188,18 @@ class TestBranchFileHandler:
 class TestStartStopMonitoring:
     """Tests for start_monitoring and stop_monitoring functions."""
 
+    @pytest.fixture(autouse=True)
+    def _observer_double(self, monkeypatch):
+        """Observer replaced where the monitor binds it; watchdog counts as present (prax, leg 9)."""
+        observer_cls = MagicMock()
+        monkeypatch.setattr(watcher_monitor, "WATCHDOG_AVAILABLE", True)
+        monkeypatch.setattr(watcher_monitor, "Observer", observer_cls)
+        monkeypatch.setattr(watcher_monitor, "logger", MagicMock())
+        monkeypatch.setattr(watcher_monitor, "json_handler", MagicMock())
+        self._observer_cls = observer_cls
+
     def _import_watcher_monitor(self):
-        mock_observer_cls = MagicMock()
-        mock_observer_instance = MagicMock()
-        mock_observer_cls.return_value = mock_observer_instance
-
-        mock_watchdog_observer = MagicMock()
-        mock_watchdog_observer.Observer = mock_observer_cls
-
-        mock_watchdog_events = MagicMock()
-
-        with patch.dict(
-            sys.modules,
-            {
-                "watchdog": MagicMock(),
-                "watchdog.observers": mock_watchdog_observer,
-                "watchdog.events": mock_watchdog_events,
-            },
-        ):
-            import importlib
-
-            for key in list(sys.modules):
-                if key.startswith("aipass.prax.apps.handlers.watcher"):
-                    sys.modules.pop(key, None)
-            mod = importlib.import_module("aipass.prax.apps.handlers.watcher.monitor")
-
-        # Force WATCHDOG_AVAILABLE = True and Observer to be our mock
-        setattr(mod, "WATCHDOG_AVAILABLE", True)
-        setattr(mod, "Observer", mock_observer_cls)
-
-        return mod, mock_observer_instance, mock_observer_cls
+        return watcher_monitor, self._observer_cls.return_value, self._observer_cls
 
     def test_start_monitoring_schedules_paths(self, tmp_path):
         mod, observer_inst, _cls = self._import_watcher_monitor()
@@ -269,56 +261,12 @@ class TestStartStopMonitoring:
 class TestDiscoveryWatcher:
     """Tests for the discovery watcher that registers new Python modules."""
 
+    @pytest.fixture(autouse=True)
+    def _keep_monkeypatch(self, monkeypatch):
+        self._monkeypatch = monkeypatch
+
     def _import_discovery_watcher(self, tmp_path):
-        mock_observer_cls = MagicMock()
-        mock_observer_instance = MagicMock()
-        mock_observer_cls.return_value = mock_observer_instance
-
-        mock_watchdog_observer = MagicMock()
-        mock_watchdog_observer.Observer = mock_observer_cls
-
-        mock_watchdog_events = MagicMock()
-
-        mock_config = MagicMock()
-        mock_config.ECOSYSTEM_ROOT = tmp_path / "fake" / "ecosystem"
-        mock_config.get_system_logs_dir.return_value = tmp_path / "fake" / "logs" / "system"
-        mock_config.get_module_logs_dir.return_value = tmp_path / "fake" / "logs" / "modules"
-
-        mock_registry_load = MagicMock()
-        mock_registry_load.load_module_registry.return_value = {}
-
-        mock_registry_save = MagicMock()
-
-        mock_filtering = MagicMock()
-        mock_filtering.should_ignore_path.return_value = False
-
-        mock_trigger_mod = MagicMock()
-
-        with patch.dict(
-            sys.modules,
-            {
-                "watchdog": MagicMock(),
-                "watchdog.observers": mock_watchdog_observer,
-                "watchdog.events": mock_watchdog_events,
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.registry.load": mock_registry_load,
-                "aipass.prax.apps.handlers.registry.save": mock_registry_save,
-                "aipass.prax.apps.handlers.discovery.filtering": mock_filtering,
-                "aipass.trigger": MagicMock(),
-                "aipass.trigger.apps": MagicMock(),
-                "aipass.trigger.apps.modules": MagicMock(),
-                "aipass.trigger.apps.modules.core": mock_trigger_mod,
-            },
-        ):
-            import importlib
-
-            if "aipass.prax.apps.handlers.discovery.watcher" in sys.modules:
-                mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.discovery.watcher"])
-            else:
-                mod = importlib.import_module("aipass.prax.apps.handlers.discovery.watcher")
-
-        setattr(mod, "WatchdogObserver", mock_observer_cls)
-        return mod, mock_observer_instance, mock_observer_cls
+        return _discovery_watcher_doubled(self._monkeypatch, tmp_path)
 
     def test_the_module_holds_no_trigger_at_import_time(self, tmp_path):
         """FPLAN-0556. A name the module does not bind cannot be consulted, and
@@ -428,14 +376,14 @@ class TestDiscoveryWatcher:
 class TestDispatcherSurvivesHandlerFailure:
     """The discovery handler must never be able to kill its own dispatcher."""
 
-    def _real_watcher_module(self):
-        """Import the REAL discovery watcher, with only registry writes stubbed."""
-        import importlib
+    @pytest.fixture(autouse=True)
+    def _keep_monkeypatch(self, monkeypatch):
+        self._monkeypatch = monkeypatch
 
-        for key in list(sys.modules):
-            if key.startswith("aipass.prax.apps.handlers.discovery"):
-                sys.modules.pop(key, None)
-        return importlib.import_module("aipass.prax.apps.handlers.discovery.watcher")
+    def _real_watcher_module(self):
+        """The REAL discovery watcher, bound at the top, its state fresh (prax, leg 9: no re-import)."""
+        _fresh_watcher_state(self._monkeypatch)
+        return discovery_watcher
 
     def _start_real_observer(self, mod, root: Path):
         """Start a real observer, or skip if this host cannot give us inotify."""
@@ -901,16 +849,14 @@ class TestWatcherLiveness:
     died at 02:19 on 2026-08-18 and no process noticed for 15 hours.
     """
 
-    def _fresh_module(self):
-        import importlib
+    @pytest.fixture(autouse=True)
+    def _keep_monkeypatch(self, monkeypatch):
+        self._monkeypatch = monkeypatch
 
-        for key in list(sys.modules):
-            if key.startswith("aipass.prax.apps.handlers.discovery"):
-                sys.modules.pop(key, None)
-        mod = importlib.import_module("aipass.prax.apps.handlers.discovery.watcher")
-        mod._LIVENESS.last_check = 0.0
-        mod._LIVENESS.death_reported = False
-        return mod
+    def _fresh_module(self):
+        """The discovery watcher bound at the top, with a liveness record never checked (prax, leg 9)."""
+        _fresh_watcher_state(self._monkeypatch)
+        return discovery_watcher
 
     def _dead_observer(self):
         obs = MagicMock()
@@ -1284,11 +1230,13 @@ class TestTheBackgroundStartDoesNotMakeTheCallerWait:
     longer has a caller to raise to.
     """
 
+    @pytest.fixture(autouse=True)
+    def _keep_monkeypatch(self, monkeypatch):
+        self._monkeypatch = monkeypatch
+
     def _module_and_a_gated_observer(self, tmp_path):
         """The discovery watcher with a schedule() that blocks until released."""
-        mod, observer_inst, _cls = TestDiscoveryWatcher()._import_discovery_watcher(tmp_path)
-        setattr(mod, "_observer", None)
-        setattr(mod, "_start_thread", None)
+        mod, observer_inst, _cls = _discovery_watcher_doubled(self._monkeypatch, tmp_path)
 
         gate = threading.Event()
         observer_inst.schedule.side_effect = lambda *args, **kwargs: gate.wait(30)
@@ -1358,9 +1306,7 @@ class TestTheBackgroundStartDoesNotMakeTheCallerWait:
         escaping exception is a silent death, so the warning moved inside with
         the same words.
         """
-        mod, observer_inst, _cls = TestDiscoveryWatcher()._import_discovery_watcher(tmp_path)
-        monkeypatch.setattr(mod, "_observer", None)
-        monkeypatch.setattr(mod, "_start_thread", None)
+        mod, observer_inst, _cls = _discovery_watcher_doubled(monkeypatch, tmp_path)
         observer_inst.schedule.side_effect = OSError("inotify watch limit reached")
 
         with patch.object(mod, "logger") as mock_logger:

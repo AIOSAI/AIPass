@@ -3,7 +3,7 @@
 # Description: Unit tests for discovery handlers
 # Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/discovery/filtering.py, scanner.py, scan.py and apps/modules/discover.py."""
@@ -16,12 +16,13 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — start_file_watcher, stop_file_watcher, covered by tests/test_watcher.py
 
-import importlib
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+from aipass.prax.apps.handlers.discovery import filtering, scan, scanner
+from aipass.prax.apps.modules import discover
 
 
 # =============================================
@@ -31,58 +32,32 @@ import pytest
 
 @pytest.fixture()
 def mock_ignore_patterns(monkeypatch):
-    """Mock the ignore_patterns config module in sys.modules."""
-    mock_mod = MagicMock()
-    mock_mod.load_ignore_patterns_from_config = MagicMock(return_value={".git", "__pycache__", ".venv", "node_modules"})
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.prax.apps.handlers.config.ignore_patterns",
-        mock_mod,
-    )
-    return mock_mod
+    """The ignore list, doubled where filtering binds its loader (prax, leg 9: no reload)."""
+    loader = MagicMock(return_value={".git", "__pycache__", ".venv", "node_modules"})
+    monkeypatch.setattr(filtering, "load_ignore_patterns_from_config", loader)
+    return loader
 
 
 @pytest.fixture()
 def mock_config_load(monkeypatch, tmp_path):
-    """Mock the config.load module with tmp_path-based roots."""
-    mock_mod = MagicMock()
-    mock_mod.PRAX_ROOT = tmp_path / "prax"
-    mock_mod.ECOSYSTEM_ROOT = tmp_path
-    mock_mod.get_system_logs_dir = MagicMock(return_value=tmp_path / "system_logs")
-    mock_mod.get_module_logs_dir = MagicMock(return_value=tmp_path / "logs")
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.prax.apps.handlers.config.load",
-        mock_mod,
-    )
-    return mock_mod
+    """The roots scanner bound from config.load, pointed under tmp_path where scanner holds them."""
+    monkeypatch.setattr(scanner, "ECOSYSTEM_ROOT", tmp_path)
+    monkeypatch.setattr(scanner, "get_system_logs_dir", lambda: tmp_path / "system_logs")
+    monkeypatch.setattr(scanner, "get_module_logs_dir", lambda branch=None: tmp_path / "logs")
 
 
 @pytest.fixture()
-def filtering_module(mock_ignore_patterns, mock_prax_infrastructure):
-    """Import filtering module with all dependencies mocked."""
-    mod_name = "aipass.prax.apps.handlers.discovery.filtering"
-    if mod_name in sys.modules:
-        return importlib.reload(sys.modules[mod_name])
-    import aipass.prax.apps.handlers.discovery.filtering as mod
-
-    return mod
+def filtering_module(monkeypatch, mock_ignore_patterns):
+    """filtering, with its loader and its json service doubled."""
+    monkeypatch.setattr(filtering, "json_handler", MagicMock())
+    return filtering
 
 
 @pytest.fixture()
-def scanner_module(mock_ignore_patterns, mock_config_load, mock_prax_infrastructure):
-    """Import scanner module with all dependencies mocked."""
-    # Scanner imports filtering, so ensure filtering is also reloaded
-    filt_name = "aipass.prax.apps.handlers.discovery.filtering"
-    if filt_name in sys.modules:
-        importlib.reload(sys.modules[filt_name])
-
-    mod_name = "aipass.prax.apps.handlers.discovery.scanner"
-    if mod_name in sys.modules:
-        return importlib.reload(sys.modules[mod_name])
-    import aipass.prax.apps.handlers.discovery.scanner as mod
-
-    return mod
+def scanner_module(monkeypatch, filtering_module, mock_config_load):
+    """scanner, walking tmp_path through the real filtering, its json service doubled."""
+    monkeypatch.setattr(scanner, "json_handler", MagicMock())
+    return scanner
 
 
 # =============================================
@@ -146,12 +121,13 @@ class TestShouldIgnorePath:
         # 'git_utils' is not '.git'
         assert filtering_module.should_ignore_path(tmp_path / "project" / "git_utils" / "helper.py") is False
 
-    def test_logs_filtered_path(self, filtering_module, mock_prax_infrastructure, tmp_path):
+    def test_logs_filtered_path(self, filtering_module, tmp_path):
         """When a path is ignored, json_handler.log_operation should be called."""
         ignored = tmp_path / "repo" / ".git" / "config"
         filtering_module.should_ignore_path(ignored)
-        mocks = mock_prax_infrastructure
-        mocks.json_handler.log_operation.assert_called_once_with("discovery_filtered", {"ignored_path": str(ignored)})
+        filtering_module.json_handler.log_operation.assert_called_once_with(
+            "discovery_filtered", {"ignored_path": str(ignored)}
+        )
 
 
 # =============================================
@@ -282,12 +258,8 @@ class TestScanDirectorySafely:
 class TestDiscoverPythonModules:
     """Tests for scanner.discover_python_modules."""
 
-    def test_returns_dict(self, scanner_module, tmp_path, mock_config_load):
+    def test_returns_dict(self, scanner_module, tmp_path):
         """discover_python_modules returns the discovered modules keyed by stem."""
-        mock_config_load.ECOSYSTEM_ROOT = tmp_path
-        # Reload so the module picks up the patched ECOSYSTEM_ROOT
-        scanner_module = importlib.reload(scanner_module)
-
         (tmp_path / "pkg").mkdir()
         (tmp_path / "pkg" / "gamma.py").write_text("# gamma\n", encoding="utf-8")
 
@@ -299,11 +271,8 @@ class TestDiscoverPythonModules:
         assert Path(result["gamma"]["relative_path"]) == Path("pkg/gamma.py")
         assert result["gamma"]["enabled"] is True
 
-    def test_discovers_files_in_ecosystem(self, scanner_module, tmp_path, mock_config_load):
+    def test_discovers_files_in_ecosystem(self, scanner_module, tmp_path):
         """Should discover .py files placed under ECOSYSTEM_ROOT."""
-        mock_config_load.ECOSYSTEM_ROOT = tmp_path
-        scanner_module = importlib.reload(scanner_module)
-
         (tmp_path / "alpha.py").write_text("# alpha", encoding="utf-8")
         (tmp_path / "beta.py").write_text("# beta", encoding="utf-8")
 
@@ -311,23 +280,16 @@ class TestDiscoverPythonModules:
         assert "alpha" in result
         assert "beta" in result
 
-    def test_empty_ecosystem(self, scanner_module, tmp_path, mock_config_load):
+    def test_empty_ecosystem(self, scanner_module):
         """Empty ecosystem root should return empty dict."""
-        mock_config_load.ECOSYSTEM_ROOT = tmp_path
-        scanner_module = importlib.reload(scanner_module)
-
         result = scanner_module.discover_python_modules()
         assert result == {}
 
-    def test_logs_scan_result(self, scanner_module, tmp_path, mock_config_load, mock_prax_infrastructure):
+    def test_logs_scan_result(self, scanner_module):
         """discover_python_modules should log the scan result count."""
-        mock_config_load.ECOSYSTEM_ROOT = tmp_path
-        scanner_module = importlib.reload(scanner_module)
-
         scanner_module.discover_python_modules()
-        mocks = mock_prax_infrastructure
         # An empty root: the count handed on is the count found, nought.
-        mocks.json_handler.log_operation.assert_any_call("modules_scanned", {"modules_found": 0})
+        scanner_module.json_handler.log_operation.assert_any_call("modules_scanned", {"modules_found": 0})
 
 
 # =============================================
@@ -348,18 +310,16 @@ def scan_module(monkeypatch, saved_registry):
     run_scan is orchestration: walk, diff, save. Doubling the walk and the
     registry is what lets a test state a tree and read back the arithmetic.
     """
-    import aipass.prax.apps.handlers.discovery.scan as scan_mod
-
-    scan_mod = importlib.reload(scan_mod)
 
     def fake_save(modules, scan_stats=None):
         saved_registry["modules"] = modules
         saved_registry["scan_stats"] = scan_stats
         return True
 
-    monkeypatch.setattr(scan_mod, "save_module_registry", fake_save)
-    monkeypatch.setattr(scan_mod, "json_handler", MagicMock())
-    return scan_mod
+    monkeypatch.setattr(scan, "save_module_registry", fake_save)
+    monkeypatch.setattr(scan, "json_handler", MagicMock())
+    monkeypatch.setattr(scan, "logger", MagicMock())
+    return scan
 
 
 def _walk(scan_mod, monkeypatch, before, found):
@@ -462,13 +422,10 @@ class TestRunScan:
 
 @pytest.fixture()
 def discover_module(monkeypatch):
-    """Import discover.py with the json service and the logger doubled; the console prints for capsys."""
-    import aipass.prax.apps.modules.discover as discover_mod
-
-    discover_mod = importlib.reload(discover_mod)
-    monkeypatch.setattr(discover_mod, "json_handler", MagicMock())
-    monkeypatch.setattr(discover_mod, "logger", MagicMock())
-    return discover_mod
+    """discover.py with the json service and the logger doubled; the console is real, read with capsys."""
+    monkeypatch.setattr(discover, "json_handler", MagicMock())
+    monkeypatch.setattr(discover, "logger", MagicMock())
+    return discover
 
 
 class TestDiscoverCommandGate:
@@ -494,8 +451,8 @@ class TestDiscoverCommandGate:
         assert discover_module.handle_command("discover", []) is True
         scanned.assert_not_called()
 
-    def test_run_performs_the_scan(self, discover_module, monkeypatch, mock_prax_infrastructure):
-        """The conftest's cli stand-in is the console discover prints on; read what reached it."""
+    def test_run_performs_the_scan(self, discover_module, monkeypatch, capsys):
+        """The real console prints the scan's answer; read what reached the terminal (prax, leg 9)."""
         monkeypatch.setattr(
             discover_module,
             "run_scan",
@@ -503,9 +460,9 @@ class TestDiscoverCommandGate:
         )
 
         assert discover_module.handle_command("discover", ["run"]) is True
-        printed = [c.args[0] for c in mock_prax_infrastructure.console.print.call_args_list if c.args]
-        assert "  [dim]added: fresh[/dim]" in printed
-        mock_prax_infrastructure.cli.success.assert_called_once_with("Registry updated — 4 modules")
+        captured = capsys.readouterr()
+        assert "  added: fresh" in captured.out.splitlines()
+        assert "Registry updated — 4 modules" in captured.out + captured.err
 
     def test_an_unknown_subcommand_is_refused(self, discover_module, monkeypatch):
         """`discover scna` must not be indistinguishable from `discover`."""
