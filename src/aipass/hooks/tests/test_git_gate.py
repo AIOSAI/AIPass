@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 4.1.0
-# Description: Tests for git_gate: raw reads, gh writes and protected config writes are the admin seat's alone
+# Version: 5.0.0
+# Description: Tests for git_gate: raw git and gh refused for every seat; protected config writes the admin seat's
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-01
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -12,7 +12,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that git_gate.py parses and imports, ruff and collection cover it
 # seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation standard covers it
-# seedgo: no-test-needed(constant) — GIT_REDIRECT's and GH_REDIRECT's full wording; block tests pin key phrases
+# seedgo: no-test-needed(constant) — RAW_GIT_REFUSED's and GH_REDIRECT's full wording; block tests pin key phrases
 # seedgo: no-test-needed(stdlib) — re.compile's matching engine, the stdlib's own
 
 import json
@@ -41,10 +41,10 @@ def _provider_settings() -> str:
 
 @pytest.fixture(autouse=True)
 def admin_grant():
-    """The classifier's tests run from the verified admin seat, the one seat whose raw reads pass.
+    """The classifier's tests run from the verified admin seat: since 5.0.0 the grant opens no git or gh lane.
 
     Patched at @ai_mail's rail, so no test reads this machine's real grant.
-    TestRawGitReadsAreTheAdminSeatsAlone patches it per call for the other seats.
+    TestRawGitIsRefusedForEverySeat patches it per call for the other seats.
     """
     with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True):
         yield
@@ -65,103 +65,69 @@ def _assert_blocked(result: dict) -> None:
     assert parsed["decision"] == "block"
 
 
-class TestGitGateReadAllowed:
-    """Read-only git verbs are allowed raw from the admin seat; other seats: TestRawGitReadsAreTheAdminSeatsAlone."""
+def _reason(result: dict) -> str:
+    _assert_blocked(result)
+    return json.loads(result["stdout"])["reason"]
 
-    def test_git_status(self):
-        _assert_allowed(_bash("git status"))
 
-    def test_git_log(self):
-        _assert_allowed(_bash("git log --oneline -10"))
+class TestGitReadsAreRefusedFromTheAdminSeat:
+    """The owner, 2026-10-04: every raw git read is refused, the admin seat (the autouse grant) included.
 
-    def test_git_diff(self):
-        _assert_allowed(_bash("git diff HEAD~1"))
+    Until 5.0.0 this class was TestGitGateReadAllowed: each verb below ran raw from the admin seat.
+    """
 
-    def test_git_show(self):
-        _assert_allowed(_bash("git show HEAD:README.md"))
-
-    def test_git_ls_files(self):
-        _assert_allowed(_bash("git ls-files"))
-
-    def test_git_ls_tree(self):
-        _assert_allowed(_bash("git ls-tree HEAD"))
-
-    def test_git_cat_file(self):
-        _assert_allowed(_bash("git cat-file -p HEAD"))
-
-    def test_git_check_ignore(self):
-        """Refused twice at @canary 2026-09-12 while GIT_REDIRECT promised read-only
-        verbs run raw — a refusal that contradicts its own text teaches agents to
-        route around it. Every option shapes output; none writes."""
-        _assert_allowed(_bash("git check-ignore -v docs.local/notes.md"))
-        _assert_allowed(_bash("git check-ignore -q --no-index some/path"))
-
-    def test_git_rev_parse(self):
-        _assert_allowed(_bash("git rev-parse HEAD"))
-
-    def test_git_rev_list(self):
-        _assert_allowed(_bash("git rev-list --count HEAD"))
-
-    def test_git_blame(self):
-        _assert_allowed(_bash("git blame README.md"))
-
-    def test_git_describe(self):
-        _assert_allowed(_bash("git describe --tags"))
-
-    def test_git_for_each_ref(self):
-        _assert_allowed(_bash("git for-each-ref refs/heads"))
-
-    def test_git_show_ref(self):
-        _assert_allowed(_bash("git show-ref --heads"))
-
-    def test_git_symbolic_ref(self):
-        _assert_allowed(_bash("git symbolic-ref HEAD"))
-
-    def test_git_shortlog(self):
-        _assert_allowed(_bash("git shortlog -sn"))
-
-    def test_git_grep(self):
-        _assert_allowed(_bash("git grep TODO"))
-
-    def test_git_archive(self):
-        _assert_allowed(_bash("git archive HEAD"))
-
-    def test_git_count_objects(self):
-        _assert_allowed(_bash("git count-objects -v"))
-
-    def test_git_var(self):
-        _assert_allowed(_bash("git var GIT_EDITOR"))
-
-    def test_git_help(self):
-        _assert_allowed(_bash("git help status"))
-
-    def test_git_version(self):
-        _assert_allowed(_bash("git version"))
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git status",
+            "git log --oneline -10",
+            "git diff HEAD~1",
+            "git show HEAD:README.md",
+            "git ls-files",
+            "git ls-tree HEAD",
+            "git cat-file -p HEAD",
+            "git check-ignore -v docs.local/notes.md",
+            "git check-ignore -q --no-index some/path",
+            "git rev-parse HEAD",
+            "git rev-list --count HEAD",
+            "git blame README.md",
+            "git describe --tags",
+            "git for-each-ref refs/heads",
+            "git show-ref --heads",
+            "git symbolic-ref HEAD",
+            "git shortlog -sn",
+            "git grep TODO",
+            "git archive HEAD",
+            "git count-objects -v",
+            "git var GIT_EDITOR",
+            "git help status",
+            "git version",
+        ],
+    )
+    def test_every_read_verb_is_refused(self, command):
+        assert "every seat, the admin seat included" in _reason(_bash(command))
 
 
 class TestGitGateGlobalOptions:
-    """Read verbs with global options before the subcommand."""
+    """Global options before the subcommand do not hide the verb the refusal names."""
 
-    def test_git_c_path_ls_files(self):
-        _assert_allowed(_bash("git -C /some/path ls-files"))
+    @pytest.mark.parametrize(
+        ("command", "twin"),
+        [
+            ("git --no-pager log", "drone @git log"),
+            ("git -c core.pager=less status", "drone @git status"),
+            ("git --git-dir=/foo/.git log", "drone @git log"),
+            ("git --work-tree /foo status", "drone @git status"),
+            ("git -C /some/path push", "drone @git pr"),
+        ],
+    )
+    def test_the_twin_is_read_past_the_options(self, command, twin):
+        assert twin in _reason(_bash(command))
 
-    def test_git_c_path_push_blocked(self):
-        _assert_blocked(_bash("git -C /some/path push"))
-
-    def test_git_no_pager_log(self):
-        _assert_allowed(_bash("git --no-pager log"))
-
-    def test_git_c_config_status(self):
-        _assert_allowed(_bash("git -c core.pager=less status"))
-
-    def test_git_git_dir_log(self):
-        _assert_allowed(_bash("git --git-dir=/foo/.git log"))
-
-    def test_git_work_tree_status(self):
-        _assert_allowed(_bash("git --work-tree /foo status"))
-
-    def test_git_multiple_opts_ls_files(self):
-        _assert_allowed(_bash("git -C /foo -c key=val --no-pager ls-files"))
+    @pytest.mark.parametrize("command", ["git -C /some/path ls-files", "git -C /foo -c key=val --no-pager ls-files"])
+    def test_a_verb_with_no_twin_past_the_options_is_named(self, command):
+        reason = _reason(_bash(command))
+        assert "git ls-files has no drone twin" in reason
 
     def test_git_multiple_opts_push_blocked(self):
         _assert_blocked(_bash("git -C /foo -c key=val --no-pager push"))
@@ -259,8 +225,8 @@ class TestGitGateChaining:
     def test_chained_read_then_write_blocked(self):
         _assert_blocked(_bash("git ls-files && git push"))
 
-    def test_chained_reads_allowed(self):
-        _assert_allowed(_bash("git ls-files && git log"))
+    def test_chained_reads_blocked(self):
+        _assert_blocked(_bash("git ls-files && git log"))
 
     def test_piped_read_write_blocked(self):
         _assert_blocked(_bash("git ls-files | git push"))
@@ -271,8 +237,8 @@ class TestGitGateChaining:
     def test_or_read_write_blocked(self):
         _assert_blocked(_bash("git status || git push"))
 
-    def test_read_with_non_git_allowed(self):
-        _assert_allowed(_bash("git ls-files && echo done"))
+    def test_read_with_non_git_blocked(self):
+        _assert_blocked(_bash("git ls-files && echo done"))
 
 
 class TestGitGateWordBoundary:
@@ -371,9 +337,9 @@ class TestPathSpelledExecutable:
         _assert_allowed(_bash("git"))
         _assert_allowed(_bash("echo done; git"))
 
-    def test_a_path_git_read_verb_is_allowed_like_the_bare_form(self):
-        _assert_allowed(_bash("/usr/bin/git status"))
-        _assert_allowed(_bash("./git log --oneline"))
+    def test_a_path_git_read_verb_is_refused_like_the_bare_form(self):
+        assert "drone @git status" in _reason(_bash("/usr/bin/git status"))
+        assert "drone @git log" in _reason(_bash("./git log --oneline"))
 
     def test_a_path_that_only_names_git_is_not_an_invocation(self):
         _assert_allowed(_bash("ls /usr/bin/git"))
@@ -384,27 +350,28 @@ class TestPathSpelledExecutable:
     def test_path_spelled_gh_is_ruled_the_same_way(self):
         """Same lookbehind, same file, same hole — `gh` was never read either."""
         _assert_blocked(_bash("/usr/bin/gh pr create"))
-        _assert_allowed(_bash("/usr/bin/gh api repos/x"))
+        _assert_blocked(_bash("/usr/bin/gh api repos/x"))
         _assert_allowed(_bash("ls /usr/bin/gh"))
 
 
 class TestGitGateGhCommands:
-    """gh command handling on the admin seat (the autouse grant): unchanged by DPLAN-0356 item 4."""
+    """gh on the admin seat (the autouse grant): since 5.0.0 every gh call is refused there too."""
 
     def test_block_raw_gh(self):
         _assert_blocked(_bash("gh pr list"))
 
-    def test_allow_gh_api(self):
-        _assert_allowed(_bash("gh api repos/owner/repo/pulls"))
+    def test_gh_api_get_is_refused(self):
+        _assert_blocked(_bash("gh api repos/owner/repo/pulls"))
 
-    def test_the_admin_seat_keeps_every_gh_api_method(self):
-        _assert_allowed(_bash("gh api -X DELETE repos/o/r/git/refs/heads/x"))
-        _assert_allowed(_bash("gh api graphql -f query=x"))
+    def test_the_admin_seat_keeps_no_gh_api_method(self):
+        _assert_blocked(_bash("gh api -X DELETE repos/o/r/git/refs/heads/x"))
+        _assert_blocked(_bash("gh api graphql -f query=x"))
 
 
-class TestGhApiIsReadOnlyOffTheAdminSeat:
-    """DPLAN-0356 item 4. Measured from canary before the cure: `gh api -X DELETE repos/o/r`,
-    `gh api -X PUT .../contents/f` (a commit) and `gh api repos/o/r/merges` (a merge) were all allowed."""
+class TestGhApiIsRefusedOffTheAdminSeatToo:
+    """DPLAN-0356 item 4 made `gh api` GET-only off the admin seat; the owner's 2026-10-04 ruling refuses it
+    whole. Measured from canary before item 4: `gh api -X DELETE repos/o/r`, `gh api -X PUT .../contents/f`
+    (a commit) and `gh api repos/o/r/merges` (a merge) were all allowed."""
 
     def _run(self, command: str, tmp_path: Path) -> dict:
         with patch(_RAIL, return_value=False):
@@ -420,8 +387,8 @@ class TestGhApiIsReadOnlyOffTheAdminSeat:
             "gh api -H 'Accept: application/vnd.github+json' repos/o/r",
         ],
     )
-    def test_a_get_with_no_body_runs(self, command, tmp_path):
-        _assert_allowed(self._run(command, tmp_path))
+    def test_a_get_with_no_body_is_refused(self, command, tmp_path):
+        assert "gh api GET too" in _reason(self._run(command, tmp_path))
 
     @pytest.mark.parametrize(
         "command",
@@ -444,12 +411,7 @@ class TestGhApiIsReadOnlyOffTheAdminSeat:
         ],
     )
     def test_a_write_or_graphql_is_refused_and_names_the_twins(self, command, tmp_path):
-        result = self._run(command, tmp_path)
-
-        _assert_blocked(result)
-        reason = json.loads(result["stdout"])["reason"]
-        assert "@canary" in reason
-        assert "drone @git run list" in reason
+        assert "drone @git run list" in _reason(self._run(command, tmp_path))
 
     def test_every_other_gh_subcommand_stays_refused(self, tmp_path):
         for command in ("gh pr merge 5", "gh repo delete o/r", "gh release create v1", "gh auth token"):
@@ -511,22 +473,18 @@ class TestGitGateMisc:
         result = handle({})
         assert result["exit_code"] == 0
 
-    def test_block_message_mentions_read_verbs(self):
-        result = _bash("git push")
-        parsed = json.loads(result["stdout"])
-        assert "Read-only verbs" in parsed["reason"]
+    def test_block_message_never_offers_a_raw_seat(self):
+        reason = _reason(_bash("git push"))
+        assert "run raw" not in reason
+        assert "Read-only verbs" not in reason
 
     def test_git_block_explains_why(self):
-        result = _bash("git push")
-        parsed = json.loads(result["stdout"])
-        assert "enforces git via drone" in parsed["reason"]
+        assert "if drone cannot do it, it cannot be done" in _reason(_bash("git push"))
 
-    def test_git_block_lists_drone_commands(self):
-        result = _bash("git commit -m 'msg'")
-        parsed = json.loads(result["stdout"])
-        assert "drone @git commit" in parsed["reason"]
-        assert "drone @git smart-sync" in parsed["reason"]
-        assert "drone @git --help" in parsed["reason"]
+    def test_git_block_names_the_twin_and_the_list(self):
+        reason = _reason(_bash("git commit -m 'msg'"))
+        assert "drone @git commit" in reason
+        assert "drone @git --help" in reason
 
     def test_no_refusal_teaches_switching_a_gate_off(self):
         """DPLAN-0356 item 1: the refusals said "set git_gate.enabled to false in .aipass/hooks.json"."""
@@ -536,11 +494,10 @@ class TestGitGateMisc:
             assert "disable" not in reason.lower()
 
     def test_gh_block_separate_message(self):
-        result = _bash("gh pr list")
-        parsed = json.loads(result["stdout"])
-        assert "enforces gh via drone" in parsed["reason"]
-        assert "gh api" in parsed["reason"]
-        assert "drone @git issue" in parsed["reason"]
+        reason = _reason(_bash("gh pr list"))
+        assert "Drone owns gh" in reason
+        assert "gh api GET too" in reason
+        assert "drone @git issue" in reason
 
     def test_a_crash_refuses_the_call_it_was_checking(self):
         """DPLAN-0356 item 2: `except: allow` became a refusal for Bash and the edit tools."""
@@ -634,16 +591,16 @@ class TestOneProgramSpelledManyWays:
         for spelled in self.WRITES:
             _assert_blocked(_bash(f"{spelled} {self.WRITE}"))
 
-    def test_every_spelling_of_a_read_stays_allowed(self):
-        """The promise the redirect makes the admin seat ("read-only verbs run raw") is spelling-blind too."""
+    def test_every_spelling_of_a_read_is_refused_and_names_the_twin(self):
+        """Since 5.0.0 a read is refused on the admin seat too, and the twin is named whatever the spelling."""
         for spelled in self.READS:
-            _assert_allowed(_bash(f"{spelled} status"))
+            assert "drone @git status" in _reason(_bash(f"{spelled} status"))
 
     def test_gh_is_read_the_same_way(self):
         _assert_blocked(_bash("gh.exe pr create"))
         _assert_blocked(_bash("GH pr create"))
-        _assert_allowed(_bash("gh.exe api repos/owner/repo/pulls"))
-        _assert_allowed(_bash("GH api repos/owner/repo/pulls"))
+        _assert_blocked(_bash("gh.exe api repos/owner/repo/pulls"))
+        _assert_blocked(_bash("GH api repos/owner/repo/pulls"))
 
     def test_a_dotted_tail_that_is_not_executable_is_not_the_program(self):
         """The regex finds a candidate; verb_name is what makes it a verdict.
@@ -677,10 +634,10 @@ def _seat(root: Path, name: str) -> str:
     return str(seat)
 
 
-class TestRawGitReadsAreTheAdminSeatsAlone:
-    """DPLAN-0356, the owner 2026-09-30: raw git reads refused for every seat but @devpulse.
+class TestRawGitIsRefusedForEverySeat:
+    """DPLAN-0356, the owner 2026-09-30 refused raw git reads off @devpulse; 2026-10-04 refused them on it too.
 
-    WHO is the verified admin grant (@ai_mail's rail, patched here at that edge);
+    The grant (@ai_mail's rail, patched here at that edge) no longer opens this lane;
     the passport only names the caller in the refusal.
     """
 
@@ -689,17 +646,15 @@ class TestRawGitReadsAreTheAdminSeatsAlone:
             return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd})
 
     def test_git_log_from_canary_is_refused_and_names_the_drone_twins(self, tmp_path):
-        result = self._run("git log --oneline -5", _seat(tmp_path, "canary"), grant=False)
+        reason = _reason(self._run("git log --oneline -5", _seat(tmp_path, "canary"), grant=False))
 
-        _assert_blocked(result)
-        reason = json.loads(result["stdout"])["reason"]
         assert "@canary" in reason
-        for twin in ("drone @git log 5 <path>", "drone @git status", "drone @git diff", "drone @git show <sha> <path>"):
-            assert twin in reason
+        assert "drone @git log [count] [path ...]" in reason
         assert "RAW GIT READS AND THEIR TWINS" in reason
 
-    def test_git_log_from_the_verified_admin_seat_is_allowed(self, tmp_path):
-        _assert_allowed(self._run("git log --oneline -5", _seat(tmp_path, "devpulse"), grant=True))
+    def test_git_log_from_the_verified_admin_seat_is_refused(self, tmp_path):
+        reason = _reason(self._run("git log --oneline -5", _seat(tmp_path, "devpulse"), grant=True))
+        assert "@devpulse" in reason
 
     def test_a_seat_named_devpulse_without_the_grant_is_refused(self, tmp_path):
         _assert_blocked(self._run("git status", _seat(tmp_path, "devpulse"), grant=False))
@@ -940,3 +895,56 @@ class TestProtectedPathsAreDefaultDeny:
                 {"tool_name": "Bash", "tool_input": {"command": f"vim {self._members()[3]}"}, "cwd": DEVPULSE_CWD}
             )
         _assert_allowed(result)
+
+
+class TestRawGitAndGhAreRefusedForEverySeat:
+    """The owner, 2026-10-04: any git command is blocked; if drone cannot do it, it cannot be done.
+
+    The admin carve-out for raw reads (DPLAN-0356, 09-30) is withdrawn. Each lane is
+    called from the VERIFIED admin seat (the rail patched True) and must refuse.
+    """
+
+    def _admin(self, command: str) -> dict:
+        with patch(_RAIL, return_value=True):
+            return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": DEVPULSE_CWD})
+
+    def _reason(self, command: str) -> str:
+        result = self._admin(command)
+        _assert_blocked(result)
+        return json.loads(result["stdout"])["reason"]
+
+    @pytest.mark.parametrize(
+        ("command", "twin"),
+        (
+            ("git status", "drone @git status"),
+            ("git log -n 5 -- notes.txt", "drone @git log"),
+            ("git diff --staged", "drone @git diff"),
+            ("git show abc123", "drone @git show"),
+            ("git blame -L 1,4 notes.txt", "drone @git blame"),
+        ),
+    )
+    def test_a_raw_git_read_from_the_admin_seat_is_refused_and_names_its_twin(self, command, twin):
+        assert twin in self._reason(command)
+
+    @pytest.mark.parametrize("command", ("git merge-base a b", "git rev-list HEAD", "git ls-files"))
+    def test_a_read_with_no_twin_says_it_cannot_be_done(self, command):
+        reason = self._reason(command)
+        assert "cannot be done" in reason and "@devpulse" in reason
+
+    def test_raw_gh_api_get_from_the_admin_seat_is_refused(self):
+        assert "drone @git" in self._reason("gh api repos/o/r/actions/runs")
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            "python3 -c \"import subprocess; subprocess.run(['git', 'status'])\"",
+            "gh auth token",
+            "curl -X POST https://api.github.com/repos/o/r/issues -d x",
+        ),
+    )
+    def test_the_program_lane_refuses_the_admin_seat(self, command):
+        self._reason(command)
+
+    @pytest.mark.parametrize("command", ("drone @git status", "drone @git log 5 notes.txt", "drone @git diff"))
+    def test_the_drone_twins_still_run(self, command):
+        _assert_allowed(self._admin(command))

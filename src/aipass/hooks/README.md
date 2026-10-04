@@ -34,8 +34,8 @@ refuses what it guards. Source edits are not live until `drone @hooks promote`.
   block, the date, alert banners and a mid-turn re-ground after compaction, each rendered under a cap
   its owner publishes and fired on a cadence rather than every turn.
 - **Fences writes.** A write into a file the seat does not own (another project, another branch, a
-  project-level file), raw git (reads too, off the verified admin seat), raw `gh` beyond a `gh api`
-  GET, raw `rm` for every seat and every other delete off the admin seat, the files that switch the
+  project-level file), raw git and raw `gh`, reads too, for every seat, the admin seat included (if
+  drone cannot do it, it cannot be done), raw `rm` for every seat and every other delete off the admin seat, the files that switch the
   gates, sealed registries and new test files are refused at PreToolUse — on the tool lane and on
   the shell lane both, because a fence only one of them can see is not a fence.
 - **Measures memory writes.** A write to a `.trinity` file is judged against @memory's published
@@ -127,7 +127,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/wiring.md](docs/wiring.md) | The two-tier model, every event and its wiring shape, entry names vs handler filenames, what a new handler needs in provider settings |
 | [docs/engine.md](docs/engine.md) | Dispatch, promote, gates fail closed while injectors skip, the merged output document, dynamic handler import, the import-time working-directory rule |
 | [docs/project_config.md](docs/project_config.md) | Which config runs and when trust matters, the project template and what it ships, the release notice |
-| [docs/git_gate.md](docs/git_gate.md) | Raw git reads off the admin seat, the gh lane, the closed allow-list, the protected files, and the rm gate |
+| [docs/git_gate.md](docs/git_gate.md) | Raw git and gh refused for every seat, the drone twins, the protected files, and the rm gate |
 | [docs/edit_gate.md](docs/edit_gate.md) | Who may write whose files (the 2026-09-18 ruling), the project fence, the verified admin seat, what the gate cannot see |
 | [docs/bash_writes.md](docs/bash_writes.md) | The scripted lane: what a shell command can be seen to write, what it misses, both Windows path spellings |
 | [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and judging a write on what it authors |

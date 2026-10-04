@@ -10,34 +10,23 @@
 
 The `git_gate` handler (`security/git_gate.py`) enforces git access via drone to prevent state conflicts between agents. It ships in every project `aipass init` creates, and inside AIPass it is part of the gate set the loader forces on (see [project_config.md](project_config.md)): no project config switches it off. It fails closed — a crash refuses the call it was checking, and the engine refuses on import error and timeout (see [engine.md](engine.md)).
 
-**What it blocks:** raw `git` writes for every seat, raw `git` reads off the admin seat, raw `gh` (below), and writes to the protected files (below).
+**What it blocks:** raw `git` and raw `gh`, read or write, for EVERY seat, the verified admin seat
+included; git or gh launched from inside a program, the gh credential, and GitHub API writes, for every
+seat too; and writes to the protected files off the admin seat (below).
 
-**Raw reads are the admin seat's alone (since DPLAN-0356).** A raw git
-command made only of allow-listed reads still passes only when the session is the verified admin seat:
-`modules/admin_seat`'s 5-leg grant (@devpulse), never a directory name. Every other seat is refused,
-and the refusal names the caller from its passport (or says it could not be named) and maps each common
-read to its drone twin, as published in `drone @git --help` under RAW GIT READS AND THEIR TWINS:
-`git log -n 5 -- <path>` is `drone @git log 5 <path>`, `git show <sha>:<path>` is
-`drone @git show <sha> <path>`, and likewise status, diff and blame. A read with no twin yet (a range
-diff) goes to @drone or @devpulse. Writes stay refused for every seat, the admin seat included. The
-allow-list below is therefore what the admin seat may run raw. Agent Bash only: service code that runs
-git as a subprocess never passes through a hook.
+**If drone cannot do it, it cannot be done (5.0.0, the owner's ruling 2026-10-04).** No seat runs git
+or gh raw: `modules/admin_seat`'s grant opens none of these lanes. A git refusal (`RAW_GIT_REFUSED`)
+names the caller from its passport (or says it could not be named) and the drone twin of the verb
+(`_GIT_TWINS`), as published in `drone @git --help`: `git status` is `drone @git status`, `git log`
+is `drone @git log [count] [path ...]`, and likewise diff, show, blame, remote, branch, tag and the
+owner verbs. A verb with no twin (`merge-base`, `rev-list`, `ls-files`, `for-each-ref`, `archive`,
+`check-ignore`, `rev-parse`, `cat-file` …) cannot be done; the refusal says to mail @devpulse to ask
+@drone for one. A bare `git` (no argument) prints usage and passes. Agent Bash only: service code that
+runs git as a subprocess (drone itself) never passes through a hook.
 
-**gh.** `GH_ALLOWED_SUBCOMMANDS` is `("api",)`: every other raw `gh` subcommand is refused for every
-seat with `GH_REDIRECT`, which maps `gh issue`, `gh run`, `gh workflow` and `gh pr create` to their
-`drone @git` twins. `gh api` off the admin seat is GET-only (`_gh_api_write`): a `-X`/`--method` other
-than GET, any field or body flag (`-f`, `-F`, `--field`, `--raw-field`, `--input`) or `gh api graphql`
-is refused with `GH_API_REFUSED`, which names the refused part and the caller. A GET with no body
-runs. The admin seat runs `gh api` unrestricted.
-
-**What it allows raw is a CLOSED allow-list, not "read-only verbs".** `READ_ALLOWED_GIT_SUBCOMMANDS`
-(`security/git_gate.py`) holds exactly these 21: `ls-files`, `ls-tree`, `show`, `cat-file`,
-`rev-parse`, `rev-list`, `log`, `status`, `diff`, `blame`, `describe`, `for-each-ref`, `show-ref`,
-`symbolic-ref`, `shortlog`, `grep`, `archive`, `count-objects`, `var`, `help`, `version`. A verb that
-is not on the list is refused *whatever it does*, and several ordinary read verbs are not on it:
-`git tag --sort=…`, `git branch -a`, `git remote -v`, `git config --get …`, `git stash list`,
-`git reflog`, `git worktree list` and `git notes list` are all **blocked**. Whether the list should
-grow is a code question, open.
+**gh.** Every raw `gh` call is refused for every seat, `gh api` GET included (`GH_REDIRECT`). Drone
+owns gh: the refusal maps `gh issue`, `gh run`, `gh workflow` and `gh pr create` to their
+`drone @git` twins.
 
 **What it reads is the program the shell will run (since DPLAN-0356 phase 3).** Both gates read the
 command through `modules/shell_reader.py`, the branch's ONE shell-word reader; there is no second copy.
@@ -60,18 +49,17 @@ launcher nor a known plain program (`modules/shell_programs.PLAIN_PROGRAMS`: ech
 pytest, ruff …) has its operands scanned for a delete verb, git or gh, and is read from there as a
 nested command. A plain program's operands are data, so `grep -rn rm .` and `echo git push` pass.
 
-One refusal is all-or-nothing per command: every git invocation in it must be an allowed read, so
-`git status && git tag` is refused whole. A bare `git` (no argument) prints usage and passes.
+One refusal per command: the twin named is the first git invocation's.
 
 **One program, many spellings.** `git.exe`, `GIT`, `Git`, `git.cmd`, `/usr/bin/git.exe` and `gh.exe`
 all run the program on Windows, so all are read as git or gh (`bash_writes.verb_name()`, the one
 executable-extension list). A file merely NAMED for a program (`git.py`) is nobody's invocation.
 
-**git and gh from inside a program (R5).** Off the admin seat, an interpreter whose program text
+**git and gh from inside a program (R5).** For every seat, an interpreter whose program text
 launches git or gh — `subprocess.run(['git', …])`, `os.system('gh …')`, node `execSync`, perl
 `system`, backticks — is refused (`INTERPRETER_GIT_REFUSED`), inline, in a heredoc or in a script file.
 
-**GitHub without gh (R6).** Off the admin seat, reading the gh credential is refused
+**GitHub without gh (R6).** For every seat, reading the gh credential is refused
 (`CREDENTIAL_REFUSED`: `gh auth token`, `gh auth status --show-token`, `secret-tool`/`keyring`/`security`
 lookups, python `keyring.get_password`, `hosts.yml`, `.git-credentials`), and so is an HTTP client
 sending a non-GET method or a body to `api.github.com` (`GITHUB_HTTP_REFUSED`: curl, wget, httpie, or

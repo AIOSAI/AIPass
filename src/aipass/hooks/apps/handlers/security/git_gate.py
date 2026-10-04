@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 4.1.0
-# Description: Raw git and gh, GitHub API writes and credentials off the admin seat, protected file changes (PreToolUse)
+# Version: 5.0.0
+# Description: Raw git and gh, GitHub API writes and credentials for every seat; protected file changes (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-01
+# Modified: 2026-10-04
 # =============================================
 
 """Blocks raw git and gh, GitHub writes without gh, the gh credential, and changes to the protected files.
@@ -13,16 +13,19 @@
 Failure mode: a crash refuses the call it was checking (Bash and edit tools);
 the engine refuses on import error and timeout.
 
-Since 2.0.0 (DPLAN-0356, the owner 2026-09-30) raw git READS are refused too,
-for every seat but the verified admin seat (modules/admin_seat's 5-leg grant,
-never a directory name); the refusal names the drone @git twins. Writes stay
-refused for every seat, the admin seat included. Agent Bash only: service code
-that runs git as a subprocess never passes through a hook.
+Since 5.0.0 (DPLAN-0356 follow-up, the owner 2026-10-04: "if drone cannot do
+it, it cannot be done"): raw git, read or write, raw gh (``gh api`` GET
+included) and the R5/R6 lanes below are refused for EVERY seat, the verified
+admin seat included. A git refusal names the drone @git twin of the verb; a
+verb with no twin cannot be done, and the refusal says to mail @devpulse to ask
+@drone for one. Only the protected-file lane still answers to WHO: those files
+are the admin seat's to write (modules/admin_seat's 5-leg grant, never a
+directory name). Agent Bash only: service code that runs git as a subprocess
+never passes through a hook.
 
-Since 3.0.0 (DPLAN-0356 phase 2): ``gh api`` off the admin seat is GET only;
-every other gh subcommand stays refused for every seat; the protected files
-(modules/protected_paths) are the admin seat's to write; WHO is the grant alone;
-no refusal tells an agent how to switch a gate off.
+Since 3.0.0 (DPLAN-0356 phase 2): the protected files (modules/protected_paths)
+are the admin seat's to write; WHO is the grant alone; no refusal tells an agent
+how to switch a gate off.
 
 Since 4.0.0 (DPLAN-0356 phase 3, the red team's root causes):
   - R3: the program is read through modules/shell_reader, the branch's one
@@ -30,8 +33,8 @@ Since 4.0.0 (DPLAN-0356 phase 3, the red team's root causes):
     ``$'\\x67it' push``, ``{git,x} push``, ``eval 'git push'`` and ``uv run git
     push`` are git. This gate keeps no split or regex of its own.
   - R5: an interpreter whose readable program launches git or gh (a
-    subprocess call, backticks, GitPython, octokit) is refused off the admin seat.
-  - R6: off the admin seat, reading the gh credential (``gh auth token``, the
+    subprocess call, backticks, GitPython, octokit) is refused.
+  - R6: reading the gh credential (``gh auth token``, the
     keyring, gh's hosts file) and an HTTP client writing to the GitHub API
     (curl/wget/httpie with a method other than GET or a body; the same in an
     interpreter's program) are refused. A text gate cannot close this fully:
@@ -49,40 +52,26 @@ import os
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 
-GH_ALLOWED_SUBCOMMANDS = ("api",)
-# gh api off the admin seat (DPLAN-0356 item 4): a read is a GET with no body.
-_GH_METHOD_FLAGS = ("-X", "--method")
-_GH_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field", "--input")
-
-READ_ALLOWED_GIT_SUBCOMMANDS = frozenset(
-    {
-        "ls-files",
-        "ls-tree",
-        "show",
-        "cat-file",
-        # Reads the ignore rules and answers; every option (-q -v --stdin -z -n
-        # --no-index) is output-shaping. Refusing it while GIT_REDIRECT promised
-        # read-only verbs run raw taught agents the message was unreliable.
-        "check-ignore",
-        "rev-parse",
-        "rev-list",
-        "log",
-        "status",
-        "diff",
-        "blame",
-        "describe",
-        "for-each-ref",
-        "show-ref",
-        "symbolic-ref",
-        "shortlog",
-        "grep",
-        "archive",
-        "count-objects",
-        "var",
-        "help",
-        "version",
-    }
-)
+# The owner, 2026-10-04: any git command is blocked; if drone cannot do it, it cannot be done.
+# The refusal names the drone @git twin of the verb; a verb missing here has none.
+_GIT_TWINS = {
+    "status": "drone @git status [--all]",
+    "diff": "drone @git diff [--staged] [--all]",
+    "log": "drone @git log [count] [path ...] [-- gone-path ...]",
+    "show": "drone @git show <ref> [path]",
+    "blame": "drone @git blame <file> [-L START,END]",
+    "remote": "drone @git remote",
+    "branch": "drone @git branches",
+    "tag": "drone @git tag --list",
+    "commit": "drone @git commit <msg> [--all | files]",
+    "checkout": "drone @git checkout <main|dev>",
+    "switch": "drone @git checkout <main|dev>",
+    "push": "drone @git pr <desc>",
+    "pull": "drone @git sync",
+    "fetch": "drone @git smart-sync",
+    "rebase": "drone @git smart-sync",
+    "merge": "drone @git merge-main (dev) or drone @git merge <PR#>",
+}
 
 _GIT_OPTS_WITH_ARG = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--namespace"})
 
@@ -102,24 +91,25 @@ _SECRET_PROGRAMS = frozenset({"secret-tool", "kwallet-query"})
 _SECURITY_READS = frozenset({"find-generic-password", "find-internet-password", "dump-keychain"})
 _CREDENTIAL_FILES = ("gh/hosts.yml", ".git-credentials")
 
-GIT_REDIRECT = (
-    "AIPass enforces git via drone to prevent state conflicts between agents.\n"
-    "Read-only verbs (status, log, diff, show, ...) run raw from the admin seat (@devpulse) only;\n"
-    "every other seat reads through drone @git status | diff | log | show.\n"
+RAW_GIT_REFUSED = (
+    "Raw git is refused for every seat, the admin seat included (the owner's ruling, 2026-10-04: "
+    "if drone cannot do it, it cannot be done). Caller: {caller}.\n"
     "\n"
-    "For write operations, use drone @git:\n"
-    "  drone @git commit <msg> [--all | files]   # commit changes\n"
-    "  drone @git smart-sync                     # fetch + rebase\n"
-    "  drone @git sync                           # checkout main + pull\n"
-    "  drone @git pr <desc>                      # push + create PR\n"
-    "  drone @git checkout <main|dev>            # switch branches\n"
+    "{twin}\n"
     "\n"
-    "Run `drone @git --help` for the full command list."
+    "The full list: `drone @git --help`, section RAW GIT READS AND THEIR TWINS."
+)
+
+TWIN_LINE = "Its drone twin:  git {verb}  ->  {twin}"
+
+NO_TWIN_LINE = (
+    "git {verb} has no drone twin, so it cannot be done. Need it? Mail @devpulse to ask @drone for one:\n"
+    '  drone @ai_mail email @devpulse "Drone twin: git {verb}" "<why>"'
 )
 
 GH_REDIRECT = (
-    "AIPass enforces gh via drone to prevent state conflicts between agents.\n"
-    "Raw gh is refused; off the admin seat only a read-only `gh api` GET runs raw.\n"
+    "Raw gh is refused for every seat, the admin seat included, gh api GET too (the owner's ruling, "
+    "2026-10-04). Drone owns gh.\n"
     "\n"
     "Read and act through the drone @git twins:\n"
     "  gh issue list|view|status     ->  drone @git issue list|view|status\n"
@@ -127,59 +117,34 @@ GH_REDIRECT = (
     "  gh workflow list|view         ->  drone @git workflow list|view\n"
     "  gh pr create                  ->  drone @git pr <desc>\n"
     "\n"
-    "Run `drone @git --help` for the full command list. A read with no twin: ask @drone, or mail @devpulse."
-)
-
-GH_API_REFUSED = (
-    "Raw `gh api` is read-only off the admin seat (@devpulse, the owner's ruling, DPLAN-0356). Caller: {caller}.\n"
-    "Refused: {what}. A GET with no body runs: gh api repos/OWNER/REPO/actions/runs\n"
-    "\n"
-    "Read and act through the drone @git twins:\n"
-    "  drone @git run list | run view <id> --log-failed | issue list | issue view <#> | workflow list\n"
-    "\n"
-    "A write GitHub must see goes through @devpulse: mail the request and why."
-)
-
-GIT_READ_REFUSED = (
-    "Raw git is refused for every seat but the admin seat (@devpulse, the owner's ruling, DPLAN-0356). "
-    "Caller: {caller}.\n"
-    "\n"
-    "Read through the drone @git twins instead:\n"
-    "  git log -n 5 -- <path>     ->  drone @git log 5 <path>   (a deleted path goes after --)\n"
-    "  git log --oneline -20      ->  drone @git log 20\n"
-    "  git show <sha>             ->  drone @git show <sha>\n"
-    "  git show <sha>:<path>      ->  drone @git show <sha> <path>\n"
-    "  git status                 ->  drone @git status\n"
-    "  git diff [--staged]        ->  drone @git diff [--staged]\n"
-    "  git blame -L 10,40 <f>     ->  drone @git blame <f> -L 10,40\n"
-    "\n"
-    "The full list: `drone @git --help`, section RAW GIT READS AND THEIR TWINS.\n"
-    "A read with no twin yet (a range diff): ask @drone, or mail @devpulse."
+    "Run `drone @git --help` for the full command list. No twin means it cannot be done: "
+    "mail @devpulse to ask @drone for one."
 )
 
 INTERPRETER_GIT_REFUSED = (
-    "A program launching git or gh from inside an interpreter is refused off the admin seat (@devpulse, "
-    "DPLAN-0356), the same as raw git and gh. Caller: {caller}.\n"
+    "A program launching git or gh from inside an interpreter is refused for every seat, the admin seat "
+    "included (the owner's ruling, 2026-10-04), the same as raw git and gh. Caller: {caller}.\n"
     "Seen: {what}.\n"
     "\n"
     "Use the drone @git twins from the shell instead: drone @git status | diff | log | show | run list | "
     "issue list.\n"
-    "A step that truly needs git inside a program goes through @devpulse: mail the program and why."
+    "If drone cannot do it, it cannot be done: mail @devpulse to ask @drone for a twin."
 )
 
 CREDENTIAL_REFUSED = (
-    "Reading the GitHub credential is refused off the admin seat (@devpulse, DPLAN-0356). Caller: {caller}.\n"
+    "Reading the GitHub credential is refused for every seat, the admin seat included (the owner's ruling, "
+    "2026-10-04). Caller: {caller}.\n"
     "Seen: {what}.\n"
     "\n"
-    "Nothing an agent does needs the token: reads go through drone @git, writes through @devpulse."
+    "Nothing a seat does needs the token: drone @git holds it."
 )
 
 GITHUB_HTTP_REFUSED = (
-    "A write to the GitHub API is refused off the admin seat (@devpulse, DPLAN-0356), with gh or without it. "
-    "Caller: {caller}.\n"
+    "A write to the GitHub API is refused for every seat, the admin seat included (the owner's ruling, "
+    "2026-10-04), with gh or without it. Caller: {caller}.\n"
     "Seen: {what}.\n"
     "\n"
-    "A GET with no body runs. A write GitHub must see goes through @devpulse: mail the request and why."
+    "A GET with no body runs. A write GitHub must see goes through drone @git; no twin means it cannot be done."
 )
 
 UNNAMED_CALLER = "could not be named (no readable passport above {cwd})"
@@ -269,10 +234,10 @@ def _extract_git_verb(tokens: list[str] | tuple[str, ...]) -> str | None:
 
 
 def _git_refusal(invocations: list, seat: _Seat) -> dict | None:
-    """Raw git: a write is refused for every seat, a read off the admin seat.
+    """Raw git, read or write, refused for every seat, the admin seat included; the refusal names the twin.
 
     A bare ``git`` with no argument prints usage and touches nothing; a path-spelled
-    one with no verb is not a usage print anyone types, and is read as a write.
+    one with no verb is not a usage print anyone types, and is refused.
     """
     calls = [
         inv.argv[1:]
@@ -281,39 +246,10 @@ def _git_refusal(invocations: list, seat: _Seat) -> dict | None:
     ]
     if not calls:
         return None
-    if any(_extract_git_verb(tail) not in READ_ALLOWED_GIT_SUBCOMMANDS for tail in calls):
-        return _block(GIT_REDIRECT)
-    if seat.admin:
-        return None
-    return _block(GIT_READ_REFUSED.format(caller=seat.named))
-
-
-def _gh_api_write(args: list[str] | tuple[str, ...]) -> str | None:
-    """What makes one `gh api` call more than a read, or None for a GET with no body (DPLAN-0356 item 4).
-
-    Args:
-        args: The words after ``api``, quotes already removed by the reader.
-
-    Returns:
-        A phrase naming the refused part, or None.
-    """
-    positional = [a for i, a in enumerate(args) if not a.startswith("-") and not _is_flag_value(args, i)]
-    if positional and positional[0].lower() == "graphql":
-        return "gh api graphql (a query and a mutation are one endpoint)"
-    for i, arg in enumerate(args):
-        flag, _, inline = arg.partition("=")
-        if flag in _GH_METHOD_FLAGS or (arg.startswith("-X") and len(arg) > 2):
-            method = inline if inline else arg[2:] if flag not in _GH_METHOD_FLAGS else _next(args, i)
-            if method.upper() != "GET":
-                return f"method {method or '(missing)'}"
-        if flag in _GH_FIELD_FLAGS or any(arg.startswith(f) and len(arg) > 2 for f in ("-f", "-F")):
-            return f"a request body ({flag[:7]})"
-    return None
-
-
-def _is_flag_value(args, index: int) -> bool:
-    """True when args[index] is the value of the flag before it (`-X GET`, `-H 'Accept: x'`)."""
-    return index > 0 and args[index - 1] in (*_GH_METHOD_FLAGS, *_GH_FIELD_FLAGS, "-H", "--header", "-q", "--jq")
+    verb = _extract_git_verb(calls[0]) or "(no verb)"
+    twin = _GIT_TWINS.get(verb)
+    line = TWIN_LINE.format(verb=verb, twin=twin) if twin else NO_TWIN_LINE.format(verb=verb)
+    return _block(RAW_GIT_REFUSED.format(caller=seat.named, twin=line))
 
 
 def _next(args, index: int) -> str:
@@ -321,16 +257,11 @@ def _next(args, index: int) -> str:
 
 
 def _gh_refusal(invocations: list, seat: _Seat) -> dict | None:
-    """Raw gh: every subcommand but api refused for every seat; api GET-only off the admin seat."""
-    calls = [inv.argv[1:] for inv in invocations if inv.program == "gh"]
-    if not calls:
+    """Raw gh, every subcommand, ``gh api`` GET included, refused for every seat, the admin seat included."""
+    del seat  # WHO does not matter here: drone owns gh
+    if not any(inv.program == "gh" for inv in invocations):
         return None
-    if any(not tail or tail[0].lower() not in GH_ALLOWED_SUBCOMMANDS for tail in calls):
-        return _block(GH_REDIRECT)
-    writes = [what for tail in calls if (what := _gh_api_write(tail[1:]))]
-    if not writes or seat.admin:
-        return None
-    return _block(GH_API_REFUSED.format(caller=seat.named, what=writes[0]))
+    return _block(GH_REDIRECT)
 
 
 def _credential_read(inv, reader) -> str:
@@ -405,14 +336,14 @@ def _httpie_write(program: str, args) -> str:
 
 
 def _program_refusal(invocations: list, reader, seat: _Seat) -> dict | None:
-    """R5 and R6, off the admin seat: git/gh from an interpreter, the gh credential, GitHub API writes."""
+    """R5 and R6, for every seat: git/gh from an interpreter, the gh credential, GitHub API writes."""
     launches, credentials, writes = [], [], []
     for inv in invocations:
         launches.append(reader.program_launch(inv))
         credentials.append(_credential_read(inv, reader))
         writes.extend((_http_write(inv), reader.program_github_write(inv)))
     launches, credentials, writes = ([x for x in found if x] for found in (launches, credentials, writes))
-    if not (launches or credentials or writes) or seat.admin:
+    if not (launches or credentials or writes):
         return None
     if credentials:
         logger.warning("[HOOKS] git_gate: credential read refused: %s", credentials[0])
