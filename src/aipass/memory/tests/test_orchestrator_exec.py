@@ -3,7 +3,7 @@
 # Description: Tests for the orchestrator execute_rollover pipeline
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # Category: memory/tests
 # =============================================
 
@@ -18,8 +18,10 @@
 # seedgo: no-test-needed(covered_elsewhere) — the stats update_central writes, in tests/test_central_writer.py
 # seedgo: no-test-needed(covered_elsewhere) — the pool run process_memory_pool does, in tests/test_intake.py
 
+import json
+import subprocess
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import orchestrator
@@ -805,3 +807,19 @@ class TestSyncLineCounts:
         }
         result = orch.sync_line_counts()
         assert result["success"] is False
+
+
+class TestTheEmbedRefusalNamesItsCause:
+    """A rollover's embed refusal carries the embedder's reason, not a bare word (leg 9)."""
+
+    def test_an_embedder_refusal_names_its_cause(self):
+        """The embedder's real refusal: exit 1, its reason as JSON on stdout, stderr empty."""
+        refused = MagicMock()
+        refused.returncode = 1
+        refused.stdout = json.dumps({"success": False, "error": "inhomogeneous shape"})
+        refused.stderr = ""
+
+        with patch.object(subprocess, "run", return_value=refused):
+            result = orchestrator.encode_batch_subprocess(["a long entry", "short"])
+
+        assert result == {"success": False, "error": "Embedding failed (exit 1): inhomogeneous shape"}

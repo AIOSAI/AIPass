@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: query_executor.py
 # Description: Search Query Execution Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
 # Modified: 2026-10-03
 # =============================================
@@ -29,6 +29,7 @@ from typing import Dict, Any
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.repo_root import module_file
+from aipass.memory.apps.handlers.storage.chroma_subprocess import embedder_reason
 
 # Subprocess scripts for ML operations (run in memory venv)
 _HANDLERS_DIR = module_file(__file__).parent.parent
@@ -83,7 +84,10 @@ def encode_query_subprocess(query: str) -> dict:
         )
 
         if result.returncode != 0:
-            return {"success": False, "error": result.stderr or "Embedding subprocess failed"}
+            return {
+                "success": False,
+                "error": f"Embedding failed (exit {result.returncode}): {embedder_reason(result)}",
+            }
 
         data = json.loads(result.stdout)
         if not data.get("success"):

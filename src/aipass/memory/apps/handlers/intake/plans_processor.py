@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plans_processor.py
 # Description: Plan Archival Vectorization Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-12
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -33,6 +33,7 @@ from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.repo_root import module_file
+from aipass.memory.apps.handlers.storage.chroma_subprocess import embedder_reason
 
 # Subprocess scripts
 _HANDLERS_DIR = module_file(__file__).parent.parent
@@ -301,7 +302,10 @@ def _embed_texts(texts: List[str], timeout: int = 120) -> dict:
             timeout=timeout,
         )
         if result.returncode != 0:
-            return {"success": False, "error": result.stderr or "Embedding failed"}
+            return {
+                "success": False,
+                "error": f"Embedding failed (exit {result.returncode}): {embedder_reason(result)}",
+            }
         return json.loads(result.stdout)
     except Exception as e:
         logger.warning(f"[plans_processor] Embedding subprocess failed: {e}")

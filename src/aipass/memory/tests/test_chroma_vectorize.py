@@ -3,7 +3,7 @@
 # Description: Text-in vectorize_and_store — the store owns the embedding model choice
 # Version: 1.0.1
 # Created: 2026-08-24
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py _vectorize_and_store."""
@@ -184,6 +184,72 @@ class TestVectorizeFailsLoud:
         result = _vectorize(monkeypatch, capsys, "", "email_sent", ["a"], [{}])
 
         assert result["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# 2b. ai_mail's sent folder (trigger digest 15638146, leg 9 of DPLAN-0354)
+# ---------------------------------------------------------------------------
+
+# A stand-in for fastembed, put first on the embed subprocess's path. The real
+# all-MiniLM tokenizer pads to a fixed 128 tokens but truncates at 256, so one
+# batch holding a text over 128 tokens beside a shorter one hands numpy rows of
+# different lengths and the whole batch fails (reproduced 2026-10-03 on a copy of
+# devpulse's 229 sent mails: exit 1, "inhomogeneous shape"; each text alone fine).
+# The stand-in is stricter than the model: any two lengths in one batch refuse.
+_STAND_IN_FASTEMBED = """
+class _Vector(list):
+    def tolist(self):
+        return list(self)
+
+
+class TextEmbedding:
+    def __init__(self, model_name):
+        self.model_name = model_name
+
+    def embed(self, documents, batch_size=256):
+        for start in range(0, len(documents), batch_size):
+            batch = documents[start : start + batch_size]
+            if len({len(text) for text in batch}) > 1:
+                raise ValueError("setting an array element with a sequence. inhomogeneous shape")
+            for text in batch:
+                yield _Vector([float(len(text)), 0.5])
+"""
+
+
+class TestTheSentFolderVectorizes:
+    """ai_mail's purge sends long mails of every length in one request; that request must store."""
+
+    def test_mails_of_different_lengths_embed_in_one_request(self, monkeypatch, capsys, tmp_path):
+        """The real embed subprocess runs, against the stand-in model under tmp_path; no model, no store."""
+        (tmp_path / "fastembed").mkdir()
+        (tmp_path / "fastembed" / "__init__.py").write_text(_STAND_IN_FASTEMBED, encoding="utf-8")
+        monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+        store = _stub_store(monkeypatch)
+
+        result = _vectorize(
+            monkeypatch,
+            capsys,
+            "AI_MAIL",
+            "email_sent",
+            ["short note", "a much longer mail body"],
+            [{}, {}],
+        )
+
+        assert result["success"] is True, result
+        assert store["embeddings"] == [[10.0, 0.5], [23.0, 0.5]]
+
+    def test_an_embedder_refusal_names_its_cause(self, monkeypatch, capsys):
+        """The real refusal shape: exit 1, the reason as JSON on stdout, stderr empty.
+
+        Before leg 9 only stderr was read, so 194 refusals reached ai_mail as the
+        bare "Embedding failed" while the reason sat unread on stdout.
+        """
+        _stub_embedder(monkeypatch, {"success": False, "error": "inhomogeneous shape"}, returncode=1)
+        _stub_store(monkeypatch)
+
+        result = _vectorize(monkeypatch, capsys, "AI_MAIL", "email_sent", ["x"], [{}])
+
+        assert result == {"success": False, "error": "Embedding failed (exit 1): inhomogeneous shape"}
 
 
 # ---------------------------------------------------------------------------

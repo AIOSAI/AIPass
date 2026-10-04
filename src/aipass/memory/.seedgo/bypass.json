@@ -647,7 +647,7 @@
     {
       "file": "apps/handlers/intake/plans_processor.py",
       "standard": "logged_fallback",
-      "lines": [283],
+      "lines": [284],
       "reason": "_is_stale answers 'process this plan again?'. True when the mtime cannot be compared is the decision, not a failure value: re-vectorizing is the safe answer when the manifest cannot vouch for the file. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {

@@ -3,7 +3,7 @@
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
@@ -294,6 +294,38 @@ class TestEmbedTexts:
 
         assert result["success"] is False
         assert "model not found" in result["error"]
+
+    def test_an_embedder_refusal_names_its_cause(self, monkeypatch, tmp_path):
+        """The embedder's real refusal: exit 1, its reason as JSON on stdout, stderr empty (leg 9).
+
+        Asked through process_plans, with the plans directory and the manifest under tmp_path.
+        """
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        (plans / "FPLAN-0001_probe_2026-10-03.md").write_text(
+            "## Summary\n\nthe probe plan, long enough for the chunker to keep its section\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(plans_processor, "_PROCESSED_MANIFEST", tmp_path / ".plans_processed.json")
+        monkeypatch.setattr(plans_processor, "_find_repo_root", lambda: tmp_path)
+        config = MagicMock()
+        config.section.return_value = {
+            "enabled": True,
+            "path": str(plans),
+            "supported_extensions": [".md"],
+            "collection_name": "flow_plans",
+        }
+        monkeypatch.setattr(plans_processor, "config_loader", config)
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = json.dumps({"success": False, "error": "inhomogeneous shape"})
+        mock_result.stderr = ""
+
+        with patch.object(subprocess, "run", return_value=mock_result):
+            result = plans_processor.process_plans()
+
+        assert result["errors"] == [
+            "FPLAN-0001_probe_2026-10-03.md: embed error: Embedding failed (exit 1): inhomogeneous shape"
+        ]
 
     def test_embed_texts_exception(self, monkeypatch):
         mod = plans_processor

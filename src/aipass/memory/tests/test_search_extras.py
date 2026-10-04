@@ -66,6 +66,18 @@ class TestEncodeQuerySubprocess:
         assert result["success"] is False
         assert "Model not found" in result["error"]
 
+    def test_an_embedder_refusal_names_its_cause(self):
+        """The embedder's real refusal: exit 1, its reason as JSON on stdout, stderr empty (leg 9)."""
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = json.dumps({"success": False, "error": "inhomogeneous shape"})
+        mock_result.stderr = ""
+
+        with patch.object(subprocess, "run", return_value=mock_result):
+            result = query_executor.encode_query_subprocess("test query")
+
+        assert result == {"success": False, "error": "Embedding failed (exit 1): inhomogeneous shape"}
+
     def test_encode_handles_timeout(self, monkeypatch):
         """TimeoutExpired produces a timeout error."""
         mod = query_executor

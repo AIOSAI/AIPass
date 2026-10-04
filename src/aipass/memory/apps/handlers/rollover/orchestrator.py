@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: orchestrator.py
 # Description: Rollover Orchestration Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -35,6 +35,7 @@ from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable
 from aipass.memory.apps.handlers.rollover import extractor
+from aipass.memory.apps.handlers.storage.chroma_subprocess import embedder_reason
 from aipass.memory.apps.handlers.tracking import line_counter
 from aipass.memory.apps.handlers.repo_root import module_file
 
@@ -177,7 +178,10 @@ def encode_batch_subprocess(texts: list) -> dict:
         )
 
         if result.returncode != 0:
-            return {"success": False, "error": result.stderr or "Embedding subprocess failed"}
+            return {
+                "success": False,
+                "error": f"Embedding failed (exit {result.returncode}): {embedder_reason(result)}",
+            }
 
         return json.loads(result.stdout)
     except subprocess.TimeoutExpired:
