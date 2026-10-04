@@ -1,21 +1,17 @@
 # =================== AIPass ====================
 # Name: test_note.py
 # Description: Tests for the note store - add, list, and refusing a store that will not parse
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-12
-# Modified: 2026-09-30
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for `drone @canary note`.
+"""Tests for apps/modules/note.py and the notes store it drives."""
 
-Driven through the entry point's main() with real module discovery, so the
-exit codes asserted here are the ones drone hands back to a caller.
-
-The load-bearing tests are the corrupt-store ones: a store that will not parse
-must be refused by file name with a non-zero exit, and its bytes AND mtime must
-be exactly what they were. Losing stored notes to one bad read is the failure
-the contract exists to prevent, so "did not crash" is not the assertion.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(log_structure) — that a refusal also lands in the prax log
+# seedgo: no-test-needed(json_structure) — that each add and each list lands in the json trail
+# seedgo: no-test-needed(error_handling) — that a store the disk will not read or write is refused, not raised
 
 import json
 import sys
@@ -25,6 +21,15 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.notes import store
+
+# Driven through the entry point's main() with real module discovery, so the
+# exit codes asserted here are the ones drone hands back to a caller.
+#
+# The load-bearing tests are the corrupt-store ones: a store that will not
+# parse must be refused by file name with a non-zero exit, and its bytes AND
+# mtime must be exactly what they were. Losing stored notes to one bad read is
+# the failure the contract exists to prevent, so "did not crash" is not the
+# assertion.
 
 VALID_LINE = b'{"text": "kept", "timestamp": "2026-09-12T15:00:00-07:00"}\n'
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: canary.py
 # Description: Entry point CLI for drone @canary — permanent test citizen
-# Version: 2.6.0
+# Version: 2.7.0
 # Created: 2026-08-20
-# Modified: 2026-09-20
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -40,7 +40,7 @@ if sys.platform == "win32":
 from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
 from aipass.prax import logger
 
-__version__ = "2.6.0"
+__version__ = "2.7.0"
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -49,28 +49,14 @@ __version__ = "2.6.0"
 MODULES_DIR = Path(__file__).parent / "modules"
 
 
-def _module_import_path(stem: str) -> str:
-    """Return the correct import path for a module, handling both layouts.
-
-    Args:
-        stem: Module filename without the .py suffix.
-
-    Returns:
-        The installed-package path when importable, else the local fallback.
-    """
-    try:
-        importlib.import_module(f"aipass.canary.apps.modules.{stem}")
-        return f"aipass.canary.apps.modules.{stem}"
-    except ImportError as e:
-        # Not silent: the fallback path is a real branch in behaviour, so the
-        # reason it was taken has to be readable afterwards. A canary that
-        # swallows this is the exact failure species it exists to catch.
-        logger.info("[CANARY] Package import failed for %s (%s) — using local layout", stem, e)
-        return f"apps.modules.{stem}"
-
-
 def discover_modules() -> List[Any]:
     """Auto-discover modules in modules/ directory.
+
+    Every module is imported by its package path only. The local-layout
+    fallback (apps.modules.<stem>) was removed in canary's fleet green leg 1:
+    this file imports aipass.* above, so the package is always importable, and
+    a module that failed under its package name failed again under the local
+    one and was logged by the wrong name.
 
     Returns:
         List of imported modules exposing handle_command().
@@ -84,7 +70,7 @@ def discover_modules() -> List[Any]:
         if file_path.name.startswith("_"):
             continue
 
-        module_name = _module_import_path(file_path.stem)
+        module_name = f"aipass.canary.apps.modules.{file_path.stem}"
 
         try:
             module = importlib.import_module(module_name)

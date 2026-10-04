@@ -1,22 +1,16 @@
 # =================== AIPass ====================
 # Name: test_span.py
 # Description: Tests for the duration parser - drone @canary span, its JSON form and its refusals
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for `drone @canary span`.
+"""Tests for apps/modules/span.py and the duration parser it drives."""
 
-Driven through the entry point's main() with real module discovery, so the exit
-codes asserted here are the ones drone hands back to a caller.
-
-The load-bearing assertion is the pair: a refusal exits 2 AND writes nothing to
-stdout. A refusal that printed a number would be read as an answer by whatever
-consumes the output, so "it exited non-zero" alone is not the contract. Every
-refusal case is run twice, plain and --json, because the JSON form is the one a
-caller parses without looking.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(log_structure) — that a refusal also lands in the prax log
+# seedgo: no-test-needed(json_structure) — that each answer and each refusal lands in the json trail
 
 import json
 import sys
@@ -25,6 +19,15 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.duration import parser
+
+# Driven through the entry point's main() with real module discovery, so the
+# exit codes asserted here are the ones drone hands back to a caller.
+#
+# The load-bearing assertion is the pair: a refusal exits 2 AND writes nothing
+# to stdout. A refusal that printed a number would be read as an answer by
+# whatever consumes the output, so "it exited non-zero" alone is not the
+# contract. Every refusal case is run twice, plain and --json, because the JSON
+# form is the one a caller parses without looking.
 
 VALID = {
     "days_and_hours": ("2d 4h", 187200),

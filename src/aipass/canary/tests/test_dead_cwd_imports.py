@@ -1,49 +1,15 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_dead_cwd_imports.py
-# Date: 2026-08-31
-# Version: 1.0.0
-# Category: canary/tests
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-08-31): Windows dead-cwd import defect — two-world subprocess
-#     pins, live-injection controls, and the AST ban on inspect.stack
-#
-# CODE STANDARDS:
-#   - Error handling: Use error handler system (apps/handlers/error/)
+# =================== AIPass ====================
+# Name: test_dead_cwd_imports.py
+# Description: Windows dead-cwd import defect - two-world child pins, live-injection controls, AST ban on inspect.stack
+# Version: 1.1.0
+# Created: 2026-08-31
+# Modified: 2026-10-04
 # =============================================
 
-"""Pins for the Windows dead-cwd import defect (FPLAN round 4).
+"""Tests for apps/handlers/__init__.py and every canary package, imported under a dead cwd."""
 
-THE DEFECT. ntpath.realpath reads os.getcwd() UNCONDITIONALLY, while
-posixpath reads it only for relative paths. Path.resolve() routes through
-realpath. So on Windows any resolve REACHED AT IMPORT makes the module
-unimportable in a process whose cwd is unreadable. The discriminator is
-reached-at-import, not written-at-module-scope — which is why these pins
-RUN the import in a child rather than grepping for the spelling.
-
-TWO WORLDS, because one cannot convict both species:
-
-  World A  wraps realpath to read the cwd first (emulating ntpath on this
-           POSIX box), then denies os.getcwd. Convicts a raw Path.resolve().
-           It CANNOT convict inspect.stack: denying getcwd also kills
-           os.path.abspath, so inspect.getmodule dies at getabsfile INSIDE
-           its own except clause and stack() completes green for the wrong
-           reason (measured by @daemon, reproduced here).
-
-  World B  denies os.path.realpath directly and leaves abspath working.
-           Convicts inspect.stack() via getmodule's unguarded realpath at
-           inspect.py:1009.
-
-Measured against canary's own tree on 2026-08-31, BEFORE the cure:
-World A convicted handlers/__init__.py:16 (the raw resolve) and World B
-convicted handlers/__init__.py:15 (inspect.stack) — two species in one
-function — with json_handler.py:23 masked underneath both.
-
-Every child probe rides a '<string>' pseudo-frame: the source is handed to
-the interpreter's -c flag (sys.executable, never a shell command). NEVER
-stdin: linecache caches stdin, and the probe would lie green (@hooks).
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — that each command module below the modules package imports with a dead cwd
 
 import ast
 import os
@@ -52,6 +18,37 @@ import sys
 from pathlib import Path
 
 import pytest
+
+# Pins for the Windows dead-cwd import defect (FPLAN round 4).
+#
+# THE DEFECT. ntpath.realpath reads os.getcwd() UNCONDITIONALLY, while
+# posixpath reads it only for relative paths. Path.resolve() routes through
+# realpath. So on Windows any resolve REACHED AT IMPORT makes the module
+# unimportable in a process whose cwd is unreadable. The discriminator is
+# reached-at-import, not written-at-module-scope — which is why these pins
+# RUN the import in a child rather than grepping for the spelling.
+#
+# TWO WORLDS, because one cannot convict both species:
+#
+#   World A  wraps realpath to read the cwd first (emulating ntpath on this
+#            POSIX box), then denies os.getcwd. Convicts a raw Path.resolve().
+#            It CANNOT convict inspect.stack: denying getcwd also kills
+#            os.path.abspath, so inspect.getmodule dies at getabsfile INSIDE
+#            its own except clause and stack() completes green for the wrong
+#            reason (measured by @daemon, reproduced here).
+#
+#   World B  denies os.path.realpath directly and leaves abspath working.
+#            Convicts inspect.stack() via getmodule's unguarded realpath at
+#            inspect.py:1009.
+#
+# Measured against canary's own tree on 2026-08-31, BEFORE the cure:
+# World A convicted handlers/__init__.py:16 (the raw resolve) and World B
+# convicted handlers/__init__.py:15 (inspect.stack) — two species in one
+# function — with json_handler.py:23 masked underneath both.
+#
+# Every child probe rides a '<string>' pseudo-frame: the source is handed to
+# the interpreter's -c flag (sys.executable, never a shell command). NEVER
+# stdin: linecache caches stdin, and the probe would lie green (@hooks).
 
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BRANCH_ROOT.parents[2]

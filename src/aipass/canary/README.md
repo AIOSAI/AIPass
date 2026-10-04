@@ -5,7 +5,7 @@
 **Purpose:** The permanent test citizen — spawned, dispatched, resumed, broken
 and re-scaffolded so no working branch has to be the experiment.
 **Module:** `aipass.canary`
-**Version:** 2.6.0
+**Version:** 2.7.0
 **Created:** 2026-08-20
 
 Everything here is test data by definition: the mail, the logs, the artifacts,
@@ -139,7 +139,7 @@ Depth lives in [docs/](docs/), one page per subject:
 
 ---
 
-**Last Updated:** 2026-09-20
+**Last Updated:** 2026-10-04
 
 ---
 

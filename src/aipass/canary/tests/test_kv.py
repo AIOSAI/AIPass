@@ -1,33 +1,16 @@
 # =================== AIPass ====================
 # Name: test_kv.py
 # Description: Tests for the key/value store - drone @canary kv, its JSON form, its file and its refusals
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for `drone @canary kv`.
+"""Tests for apps/modules/kv.py and the kv store it drives."""
 
-Driven through the entry point's main() with real module discovery, so the exit
-codes asserted here are the ones drone hands back to a caller.
-
-This is the first canary command that writes to a caller-named file, so three
-things are pinned that the read-only commands never had to be:
-
-* **The bytes on disk**, not just what comes back out. `set` then `get` would
-  pass on a store that kept its pairs in JSON, in reverse, or in memory. The
-  line format is read raw, with the tab counted.
-* **What a refused call leaves behind.** A store that will not parse must come
-  out of a refused `set` byte for byte unchanged - a command that repairs a file
-  it cannot read has destroyed whatever was actually in it.
-* **A single tab.** The shared console expands one to the next 8-column tab
-  stop, so `list` writes to stdout directly; an assertion that only looked for
-  the key and the value would pass on the padded version.
-
-Every refusal is asserted as the pair: exit 2 AND nothing on stdout. A value is
-about to be used by whatever called this, so a half-answer printed beside a
-refusal would be read as the value.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(log_structure) — that a refusal also lands in the prax log
+# seedgo: no-test-needed(json_structure) — that each answer and each refusal lands in the json trail
 
 import json
 import os
@@ -37,6 +20,26 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.kv import store
+
+# Driven through the entry point's main() with real module discovery, so the
+# exit codes asserted here are the ones drone hands back to a caller.
+#
+# This is the first canary command that writes to a caller-named file, so three
+# things are pinned that the read-only commands never had to be:
+#
+# * The bytes on disk, not just what comes back out. `set` then `get` would
+#   pass on a store that kept its pairs in JSON, in reverse, or in memory. The
+#   line format is read raw, with the tab counted.
+# * What a refused call leaves behind. A store that will not parse must come
+#   out of a refused `set` byte for byte unchanged - a command that repairs a
+#   file it cannot read has destroyed whatever was actually in it.
+# * A single tab. The shared console expands one to the next 8-column tab
+#   stop, so `list` writes to stdout directly; an assertion that only looked
+#   for the key and the value would pass on the padded version.
+#
+# Every refusal is asserted as the pair: exit 2 AND nothing on stdout. A value
+# is about to be used by whatever called this, so a half-answer printed beside
+# a refusal would be read as the value.
 
 
 def _run(monkeypatch, argv):

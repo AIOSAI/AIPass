@@ -1,28 +1,16 @@
 # =================== AIPass ====================
 # Name: test_top.py
 # Description: Tests for the leaderboard reader - drone @canary top, its JSON form and its refusals
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for `drone @canary top`.
+"""Tests for apps/modules/top.py and the leaderboard reader it drives."""
 
-Driven through the entry point's main() with real module discovery, so the exit
-codes asserted here are the ones drone hands back to a caller.
-
-The load-bearing assertion is the pair: a refusal exits 2 AND writes nothing to
-stdout. A partial ranking printed beside a refusal would be read as an answer by
-whatever consumes the output, so "it exited non-zero" alone is not the contract.
-Every argument refusal is run twice, plain and --json, because the JSON form is
-the one a caller parses without looking.
-
-The tie-break has its own control. Sorting by count alone would leave dictionary
-insertion order deciding equal counts - stable within one run, and therefore a
-result that passes a single-run assertion while being a property of how the file
-happened to be written. The tie tests write the same rows in two different orders
-and demand the same output.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(log_structure) — that a refusal also lands in the prax log
+# seedgo: no-test-needed(json_structure) — that each answer and each refusal lands in the json trail
 
 import json
 import sys
@@ -31,6 +19,21 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.leaderboard import reader
+
+# Driven through the entry point's main() with real module discovery, so the
+# exit codes asserted here are the ones drone hands back to a caller.
+#
+# The load-bearing assertion is the pair: a refusal exits 2 AND writes nothing
+# to stdout. A partial ranking printed beside a refusal would be read as an
+# answer by whatever consumes the output, so "it exited non-zero" alone is not
+# the contract. Every argument refusal is run twice, plain and --json, because
+# the JSON form is the one a caller parses without looking.
+#
+# The tie-break has its own control. Sorting by count alone would leave
+# dictionary insertion order deciding equal counts - stable within one run, and
+# therefore a result that passes a single-run assertion while being a property
+# of how the file happened to be written. The tie tests write the same rows in
+# two different orders and demand the same output.
 
 
 def _run(monkeypatch, argv):

@@ -1,27 +1,16 @@
 # =================== AIPass ====================
 # Name: test_align.py
 # Description: Tests for the column aligner - drone @canary align, its JSON form and its refusals
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for `drone @canary align`.
+"""Tests for apps/modules/align.py and the table aligner it drives."""
 
-Driven through the entry point's main() with real module discovery, so the exit
-codes asserted here are the ones drone hands back to a caller.
-
-The load-bearing assertion is the pair: a refusal exits 2 AND writes nothing to
-stdout. A table is the kind of output that gets piped, so a half-aligned one
-printed beside a refusal would be read as the answer. Every refusal is run
-twice, plain and --json, because the JSON form is the one a caller parses
-without looking - and because an empty result prints as nothing in the plain
-form, where it hides (canary key learning 31).
-
-Alignment is asserted as exact lines, never as "contains". Padding IS the
-output: a test that only checked for the fields would pass on a formatter that
-never padded anything at all.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(log_structure) — that a refusal also lands in the prax log
+# seedgo: no-test-needed(json_structure) — that each answer and each refusal lands in the json trail
 
 import json
 import sys
@@ -30,6 +19,20 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.table import aligner
+
+# Driven through the entry point's main() with real module discovery, so the
+# exit codes asserted here are the ones drone hands back to a caller.
+#
+# The load-bearing assertion is the pair: a refusal exits 2 AND writes nothing
+# to stdout. A table is the kind of output that gets piped, so a half-aligned
+# one printed beside a refusal would be read as the answer. Every refusal is
+# run twice, plain and --json, because the JSON form is the one a caller parses
+# without looking - and because an empty result prints as nothing in the plain
+# form, where it hides (canary key learning 31).
+#
+# Alignment is asserted as exact lines, never as "contains". Padding IS the
+# output: a test that only checked for the fields would pass on a formatter
+# that never padded anything at all.
 
 
 def _run(monkeypatch, argv):
