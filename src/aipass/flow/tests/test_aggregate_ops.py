@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_aggregate_ops.py
 # Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/plan/aggregate_ops.py."""
@@ -287,12 +287,33 @@ class TestAutoClosePlan:
 
     def test_closes_open_plan(self, tmp_path):
         auto_close_plan = _import("auto_close_plan")
-        reg = self._make_registry(tmp_path, {"0148": {"status": "open", "subject": "Test"}})
+        row = {"status": "open", "subject": "Test", "file_path": str(tmp_path / "FPLAN-0148_test.md")}
+        reg = self._make_registry(tmp_path, {"0148": row})
         result = auto_close_plan(reg, "FPLAN-0148", "flow")
         assert result is True
         saved = json.loads(reg.read_text(encoding="utf-8"))
         assert saved["plans"]["0148"]["status"] == "closed"
         assert saved["plans"]["0148"]["closed_reason"] == "auto_closed_missing_file"
+
+    @pytest.mark.parametrize(
+        "row_file",
+        ["FPLAN-0004_theirs.md", ""],
+        ids=["namesake_of_another_type", "row_names_no_file"],
+    )
+    def test_a_row_under_the_same_number_that_is_not_this_plan_stays_open(self, tmp_path, row_file):
+        """DPLAN-0004's file is missing; the row under "0004" is FPLAN-0004.
+
+        Until leg 6 the heal looked the bare number up and closed that row.
+        Red first on that code; mutants: the startswith guard -> `if False:`,
+        and f"{prefix}-" -> "" (any file passes).
+        """
+        auto_close_plan = _import("auto_close_plan")
+        row = {"status": "open", "subject": "Theirs", "file_path": str(tmp_path / row_file) if row_file else ""}
+        reg = self._make_registry(tmp_path, {"0004": row})
+        before = reg.read_text(encoding="utf-8")
+
+        assert auto_close_plan(reg, "DPLAN-0004", "flow") is False
+        assert reg.read_text(encoding="utf-8") == before
 
     def test_returns_false_for_already_closed(self, tmp_path):
         auto_close_plan = _import("auto_close_plan")
@@ -362,7 +383,7 @@ class TestValidateAndHealBranch:
         reg_dir.mkdir()
         reg_file = reg_dir / "test_registry.json"
         reg_data = {
-            "plans": {"0001": {"status": "open", "subject": "Test"}},
+            "plans": {"0001": {"status": "open", "subject": "Test", "file_path": str(tmp_path / "FPLAN-0001_test.md")}},
             "next_number": 2,
         }
         reg_file.write_text(json.dumps(reg_data), encoding="utf-8")

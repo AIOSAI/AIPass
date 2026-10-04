@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_monitor.py
 # Description: Registry auto-healing module
-# Version: 3.2.0
+# Version: 3.3.0
 # Created: 2025-11-21
-# Modified: 2026-08-16
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -62,7 +62,7 @@ from aipass.flow.apps.handlers.json import json_handler
 from aipass.cli.apps.modules import console, error, success, warning
 
 # Registry handlers
-from aipass.flow.apps.handlers.registry.load_registry import load_registry
+from aipass.flow.apps.handlers.registry.load_registry import RegistryUnreadableError, load_registry
 
 # Implementation handler
 from aipass.flow.apps.handlers.registry.monitor_ops import (
@@ -185,7 +185,13 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if subcommand in ["scan", "heal"]:
         console.print("[bold]Scanning for PLAN files...[/bold]")
-        result = scan_plan_files()
+        try:
+            result = scan_plan_files()
+        except RegistryUnreadableError as exc:
+            # Refused, not routed on: a raise here used to reach flow.py's
+            # router, which logged it and answered "unknown command".
+            error(f"Registry scan refused: {exc}")
+            return True
 
         console.print()
         success("Scan complete")
@@ -215,7 +221,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     elif subcommand == "status":
-        status = get_status()
+        try:
+            status = get_status()
+        except RegistryUnreadableError as exc:
+            error(f"Registry status refused: {exc}")
+            return True
 
         console.print()
         console.print("[bold cyan]Registry Status[/bold cyan]")

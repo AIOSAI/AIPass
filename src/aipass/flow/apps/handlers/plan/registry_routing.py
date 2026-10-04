@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_routing.py
 # Description: Plan-type Registry Routing Helpers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-28
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -102,21 +102,22 @@ def _find_plan_across_registries(plan_key: str, load_registry_fn: Any) -> str | 
     """Search all registries for a plan number when no prefix given.
 
     Returns registry filename where the plan was found, or None.
+
+    Raises:
+        Exception: Whatever load_registry_fn raises for a registry it cannot
+            read (RegistryUnreadableError for the real one). A registry
+            skipped is a registry whose plan cannot be told from another
+            type's same number, so the search stops rather than answering
+            for a namesake; it skipped and went on until leg 6 of fleet
+            green (flow's decision, leg 6).
     """
-    try:
-        template_reg = _load_template_registry()
-        for _type_key, config in template_reg.get("types", {}).items():
-            prefix = config.get("prefix", "")
-            if not prefix:
-                continue
-            reg_file = f"{prefix.lower()}_registry.json"
-            try:
-                registry = load_registry_fn(registry_file=reg_file)
-                if plan_key in registry.get("plans", {}):
-                    return reg_file
-            except Exception as e:
-                logger.warning(f"[{MODULE_NAME}] Failed to search registry '{reg_file}' for plan '{plan_key}': {e}")
-                continue
-    except Exception as e:
-        logger.warning(f"[{MODULE_NAME}] Failed to discover plan types while searching for plan '{plan_key}': {e}")
+    template_reg = _load_template_registry()
+    for _type_key, config in template_reg.get("types", {}).items():
+        prefix = config.get("prefix", "")
+        if not prefix:
+            continue
+        reg_file = f"{prefix.lower()}_registry.json"
+        registry = load_registry_fn(registry_file=reg_file)
+        if plan_key in registry.get("plans", {}):
+            return reg_file
     return None

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_restore_ops.py
 # Description: Tests for restore_ops handler -- plan restore business logic, and validator
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/plan/restore_ops.py and apps/handlers/plan/validator.py."""
@@ -634,6 +634,33 @@ class TestRecoverPlanFromBackup:
         saved_reg = save.call_args[0][0]
         assert "0042" in saved_reg["plans"]
         assert saved_reg["plans"]["0042"]["status"] == "closed"
+
+    def test_a_registry_that_cannot_be_loaded_leaves_no_copy_behind(self, tmp_path):
+        """The load runs before the copy, so its raise leaves nothing on disk.
+
+        Before leg 6 the copy came first; with the load now raising on an
+        unreadable registry, that order would strand an unregistered plan
+        file. Red first on that order; mutant: the copy moved back above the
+        load.
+        """
+        fn = recover_plan_from_backup
+        backup_dir = tmp_path / "processed_plans"
+        backup_dir.mkdir()
+        (backup_dir / "FPLAN-0042.md").write_text("# Plan\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
+        load = MagicMock(side_effect=RuntimeError("stand-in: registry unreadable"))
+        save = MagicMock()
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir),
+            patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", tmp_path / "flow"),
+            pytest.raises(RuntimeError, match="stand-in: registry unreadable"),
+        ):
+            fn("0042", load_registry=load, save_registry=save)
+
+        load.assert_called_once_with(registry_file="fplan_registry.json")
+        save.assert_not_called()
+        assert not (tmp_path / "FPLAN-0042.md").exists()
 
     def test_recovery_without_location_header(self, tmp_path):
         fn = recover_plan_from_backup

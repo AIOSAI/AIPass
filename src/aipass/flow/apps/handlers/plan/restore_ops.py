@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: restore_ops.py
 # Description: Plan Restore Implementation Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -190,10 +190,6 @@ def recover_plan_from_backup(
         original_location = str(FLOW_ROOT)
         relative_path = "flow"
 
-    # Copy file to ORIGINAL location (preserve backup) using the original filename
-    target = Path(original_location) / plan_file.name
-    copy2(plan_file, target)
-
     # Derive display label from the backup filename
     plan_label = plan_file.stem  # e.g. "FPLAN-0165" or "DPLAN-0004"
 
@@ -203,7 +199,15 @@ def recover_plan_from_backup(
     actual_prefix = _extract_prefix(plan_label)
     reg_file = f"{actual_prefix.lower()}_registry.json" if actual_prefix else None
 
+    # Loaded BEFORE the copy: an unreadable registry raises, and a raise after
+    # the copy would leave a plan file on disk that no registry names (flow's
+    # decision, leg 6).
     registry = load_registry(registry_file=reg_file) if reg_file else load_registry()
+
+    # Copy file to ORIGINAL location (preserve backup) using the original filename
+    target = Path(original_location) / plan_file.name
+    copy2(plan_file, target)
+
     registry["plans"][plan_key] = {
         "location": original_location,
         "relative_path": relative_path,

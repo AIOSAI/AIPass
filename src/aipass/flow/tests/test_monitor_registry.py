@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitor_registry.py
 # Description: Tests for monitor_ops handler and registry_monitor module
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-03-08
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/registry/monitor_ops.py and apps/modules/registry_monitor.py."""
@@ -398,6 +398,39 @@ class TestRegistryMonitorGetStatus:
             ecosystem_root=mod.ECOSYSTEM_ROOT,
             load_registry=mod.load_registry,
         )
+
+
+class TestAnUnreadableRegistryIsRefusedByName:
+    """`registry status` / `registry scan` over a registry load_registry refuses.
+
+    Before leg 6 the load answered an empty registry; now it raises, and
+    uncaught the raise reached flow.py's router, which logged it and said
+    "unknown command". Red first without the catch; mutant: the handler's
+    `except RegistryUnreadableError` narrowed to `except KeyError`.
+    """
+
+    def _refuse(self, subcommand, impl):
+        mod = registry_monitor
+        refusal = mod.RegistryUnreadableError("Plan registry fplan_registry.json cannot be read: stand-in")
+        with (
+            patch.object(mod, impl, side_effect=refusal),
+            patch.object(mod, "error") as error_stand_in,
+        ):
+            handled = mod.handle_command("registry", [subcommand])
+        return handled, error_stand_in, refusal
+
+    def test_status_is_handled_and_says_why(self):
+        handled, error_stand_in, refusal = self._refuse("status", "get_status_impl")
+
+        assert handled is True
+        error_stand_in.assert_called_once_with(f"Registry status refused: {refusal}")
+
+    def test_scan_is_handled_and_says_why(self, capsys):
+        handled, error_stand_in, refusal = self._refuse("scan", "scan_plan_files_impl")
+
+        assert handled is True
+        error_stand_in.assert_called_once_with(f"Registry scan refused: {refusal}")
+        assert "Scan complete" not in capsys.readouterr().out
 
 
 # ═══════════════════════════════════════════════════════════

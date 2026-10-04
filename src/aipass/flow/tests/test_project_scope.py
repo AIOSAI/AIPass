@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_project_scope.py
 # Description: Tests for apps/handlers/plan/project_scope.py — project root resolution and register discrimination
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/plan/project_scope.py."""
@@ -15,8 +15,11 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from aipass.flow.apps.handlers.plan import project_scope
 from aipass.flow.apps.handlers.plan.project_scope import (
+    UnreadableRegisterError,
     caller_cwd,
     caller_project_root,
     describe_project,
@@ -137,14 +140,49 @@ class TestRegisterDiscrimination:
 
         assert find_project_root(flow_json) == tmp_path.resolve()
 
-    def test_corrupt_register_is_not_treated_as_yes(self, tmp_path):
-        """Unreadable tells us nothing; answering 'yes' on no evidence splits a project."""
+    def test_corrupt_register_is_neither_yes_nor_the_outer_project(self, tmp_path):
+        """Unreadable tells us nothing, so the walk refuses.
+
+        "Yes" would split a project. "No" was the answer until leg 6 and it
+        handed sub's rows to OUTER, a namesake. Red first on that code;
+        mutant `raise UnreadableRegisterError(...)` -> `continue`.
+        """
+        _register(tmp_path, "OUTER")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        broken = sub / f"BROKEN{REGISTER_SUFFIX}"
+        broken.write_text("{not json", encoding="utf-8")
+        cache: dict = {}
+
+        with pytest.raises(UnreadableRegisterError, match="Unreadable project register") as excinfo:
+            find_project_root(sub, cache)
+
+        assert str(broken) in str(excinfo.value)
+        assert isinstance(excinfo.value.__cause__, json.JSONDecodeError)
+        assert cache == {}
+
+    def test_undecodable_register_also_refuses(self, tmp_path):
+        """Bytes that are not UTF-8 refuse the same way as broken JSON."""
+        _register(tmp_path, "OUTER")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / f"BROKEN{REGISTER_SUFFIX}").write_bytes(b"\xff\xfe{")
+
+        with pytest.raises(UnreadableRegisterError) as excinfo:
+            find_project_root(sub)
+
+        assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
+
+    def test_a_caller_standing_over_a_corrupt_register_is_not_placed_in_the_outer_project(self, tmp_path, monkeypatch):
+        """The caller's side of the same walk: no project is guessed for them."""
         _register(tmp_path, "OUTER")
         sub = tmp_path / "sub"
         sub.mkdir()
         (sub / f"BROKEN{REGISTER_SUFFIX}").write_text("{not json", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(sub))
 
-        assert find_project_root(sub) == tmp_path.resolve()
+        with pytest.raises(UnreadableRegisterError):
+            caller_project_root()
 
     def test_register_with_zero_citizens_still_marks_a_project(self, tmp_path):
         """SPEAKEASY and FEEL_GOOD_APP are real projects with no citizens."""

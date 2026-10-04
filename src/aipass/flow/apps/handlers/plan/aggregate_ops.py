@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_ops.py
 # Description: Central Plans Aggregation Implementation Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -224,7 +224,8 @@ def auto_close_plan(registry_path: Path, plan_id: str, branch_name: str) -> bool
         branch_name: Name of the branch for logging
 
     Returns:
-        True if plan was closed, False otherwise
+        True if plan was closed, False otherwise (including a row under the
+        same number whose file names another prefix, or no file at all)
     """
     plan_num = extract_plan_number(plan_id)
     if not plan_num:
@@ -241,6 +242,24 @@ def auto_close_plan(registry_path: Path, plan_id: str, branch_name: str) -> bool
         return False
 
     plan_info = plans[plan_num]
+
+    # A bare number is not an identity: every type numbers from 0001, so the
+    # row under "0004" may be FPLAN-0004 while the missing file was
+    # DPLAN-0004. Close only a row whose own file names the same prefix; a row
+    # that names none cannot be told apart and is left open (flow's decision,
+    # leg 6 of fleet green).
+    prefix = plan_id.split("-", 1)[0]
+    row_file = Path(str(plan_info.get("file_path") or "")).name
+    if not row_file.startswith(f"{prefix}-"):
+        logger.warning(
+            "[%s] %s: the row under %s in %s is %r, not this plan; left open",
+            MODULE_NAME,
+            plan_id,
+            plan_num,
+            registry_path,
+            row_file or "a row with no file",
+        )
+        return False
 
     # Skip if already closed
     if plan_info.get("status") == "closed":

@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_conftest_fixtures.py
 # Description: The autouse fixtures must actually reach what they claim to mock
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for tests/conftest.py's mock_logger and pre-import fixtures."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that conftest.py and load_registry parse and import
+# seedgo: no-test-needed(ruff) — that conftest.py and save_registry parse and import
 
 import sys
 from pathlib import Path
@@ -18,7 +18,10 @@ import pytest
 
 import aipass.flow.apps as flow_apps
 import aipass.prax.apps.modules.logger as prax_logger
-import aipass.flow.apps.handlers.registry.load_registry as load_registry_module
+
+# The specimen consumer. It was load_registry until leg 6, when that module
+# stopped logging (it raises now) and so stopped holding a logger to mock.
+import aipass.flow.apps.handlers.registry.save_registry as save_registry_module
 
 # Directories the apps/ walk below never enters. That nothing looks into a
 # dropbox or an .archive follows the project owner's ruling of 2026-09-27 20:42
@@ -42,14 +45,14 @@ class TestMockLoggerReachesTheConsumersBinding:
 
     def test_a_consumer_module_sees_the_mock(self, mock_logger):
         """The binding a handler resolves at call time IS the mock."""
-        assert load_registry_module.logger is mock_logger, (
+        assert save_registry_module.logger is mock_logger, (
             "the autouse mock_logger did not reach a consumer's own binding — "
             "it is patching upstream of an import that already happened"
         )
 
     def test_calling_the_consumers_logger_records_on_the_mock(self, mock_logger):
         """Reach is not enough: the call has to land."""
-        load_registry_module.logger.warning("probe")
+        save_registry_module.logger.warning("probe")
 
         mock_logger.warning.assert_called_once_with("probe")
 
@@ -88,13 +91,13 @@ class TestTheOptOutIsRealAndNarrow:
         """The marker must genuinely restore the real object, not a second mock."""
         from unittest.mock import MagicMock
 
-        assert not isinstance(load_registry_module.logger, MagicMock), (
+        assert not isinstance(save_registry_module.logger, MagicMock), (
             "the real_logger marker did not restore the real logger — a caplog assertion under it would be vacuous"
         )
 
     def test_unmarked_tests_still_get_the_mock(self, mock_logger):
         """Negative control: the opt-out must not leak to its neighbours."""
-        assert load_registry_module.logger is mock_logger
+        assert save_registry_module.logger is mock_logger
 
 
 class TestThePreImportListIsComplete:

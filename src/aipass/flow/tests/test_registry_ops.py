@@ -20,8 +20,47 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.flow.apps.handlers.registry import load_registry as plan_load
 from aipass.flow.apps.handlers.registry import save_registry as plan_reg
 from aipass.flow.apps.handlers.template import registry_ops
+
+
+class TestPlanRegistryLoadRefusesWhatItCannotRead:
+    """The plan registry load: absent is empty, unreadable is a refusal.
+
+    An unreadable registry answered the empty default until leg 6, and that
+    answer is a namesake (create reissued 0001; a save wrote a one-row
+    registry over it). Red first on that code; mutant: the JSON-object check
+    deleted, and `raise RegistryUnreadableError(...) from e` -> `return
+    {"plans": {}, "next_number": 1}`.
+    """
+
+    @pytest.fixture
+    def flow_json(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(plan_load, "FLOW_JSON_DIR", tmp_path)
+        monkeypatch.setattr(plan_load, "REGISTRY_FILE", tmp_path / "fplan_registry.json")
+        return tmp_path
+
+    def test_an_absent_registry_is_the_empty_default(self, flow_json):
+        assert plan_load.load_registry("dplan_registry.json") == {"plans": {}, "next_number": 1}
+
+    def test_a_registry_that_is_not_json_refuses_and_is_left_as_it_was(self, flow_json):
+        target = flow_json / "fplan_registry.json"
+        target.write_text('{"plans": {"1": ', encoding="utf-8")
+
+        with pytest.raises(plan_load.RegistryUnreadableError, match="cannot be read") as excinfo:
+            plan_load.load_registry()
+
+        assert str(target) in str(excinfo.value)
+        assert isinstance(excinfo.value.__cause__, json.JSONDecodeError)
+        assert target.read_text(encoding="utf-8") == '{"plans": {"1": '
+
+    def test_a_registry_that_is_not_an_object_refuses(self, flow_json):
+        (flow_json / "dplan_registry.json").write_text("[]", encoding="utf-8")
+
+        with pytest.raises(plan_load.RegistryUnreadableError, match="is not a JSON object: list"):
+            plan_load.load_registry("dplan_registry.json")
+
 
 # ---------------------------------------------------------------------------
 # Module-level patch targets (patch where used, not where defined)

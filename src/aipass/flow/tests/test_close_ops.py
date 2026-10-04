@@ -28,6 +28,52 @@ from aipass.flow.apps.handlers.plan.close_ops import (
     close_plan_impl,
 )
 from aipass.flow.apps.handlers.plan.registry_routing import canonical_plan_id
+from aipass.flow.apps.handlers.plan.validator import validate_plan_exists
+from aipass.flow.apps.handlers.registry import load_registry as plan_load
+
+
+class TestABareNumberNeverClosesTheNamesakeOfAnUnreadableRegistry:
+    """close 12: not in FPLAN, DPLAN's registry unreadable, PBPLAN-12 open.
+
+    Until leg 6 the cross-registry search skipped the registry it could not
+    read and went on, so 12 resolved to PBPLAN-12 and that plan was closed
+    (and the load answered an unreadable registry with an empty one). Red
+    first on that code; mutant: the search's load wrapped back in
+    `try: ... except Exception: continue`.
+    """
+
+    def test_the_close_refuses_and_writes_nothing(self, tmp_path, monkeypatch):
+        flow_json = tmp_path / "flow_json"
+        flow_json.mkdir()
+        monkeypatch.setattr(plan_load, "FLOW_JSON_DIR", flow_json)
+        monkeypatch.setattr(plan_load, "REGISTRY_FILE", flow_json / "fplan_registry.json")
+        (flow_json / "fplan_registry.json").write_text(json.dumps({"plans": {}, "next_number": 1}), encoding="utf-8")
+        (flow_json / "dplan_registry.json").write_text('{"plans": {"12": ', encoding="utf-8")
+        theirs = tmp_path / "PBPLAN-0012_theirs_2026-10-04.md"
+        theirs.write_text("# theirs\nReal notes.", encoding="utf-8")
+        row = {"status": "open", "subject": "theirs", "location": str(tmp_path), "file_path": str(theirs)}
+        pbplan = flow_json / "pbplan_registry.json"
+        pbplan.write_text(json.dumps({"plans": {"12": row}, "next_number": 13}), encoding="utf-8")
+        before = pbplan.read_text(encoding="utf-8")
+        types = {"types": {"dev_plans": {"prefix": "DPLAN"}, "playbook_plans": {"prefix": "PBPLAN"}}}
+        deps = _make_deps(load_registry=plan_load.load_registry, validate_plan_exists=validate_plan_exists)
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.registry_routing._load_template_registry", return_value=types),
+            patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess") as subprocess_stand_in,
+            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
+        ):
+            result = close_plan_impl(plan_num="12", **deps)
+
+        assert subprocess_stand_in.mock_calls == []  # no post-close runner was started
+        assert result["success"] is False
+        [message] = result["messages"]
+        assert message["type"] == "error"
+        assert message["details"].startswith(f"Plan registry {flow_json / 'dplan_registry.json'} cannot be read: ")
+        deps["save_registry"].assert_not_called()
+        deps["archive_plan_fn"].assert_not_called()
+        assert pbplan.read_text(encoding="utf-8") == before
+        assert theirs.exists()
 
 
 # ─── Helpers ─────────────────────────────────────────────
@@ -1825,6 +1871,42 @@ class TestDryRunEqualsRunUnderFences:
         assert summary["refused"] == 0
         assert summary["in_scope"] == len(preview["plan_ids"])
         mock_bg.assert_not_called()  # a preview closes nothing, so it spawns nothing
+
+    @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
+    @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
+    def test_a_corrupt_nested_register_refuses_the_sweep_not_hands_its_rows_over(self, _mock_jh, mock_bg, tmp_path):
+        """The real resolver: a row under a project whose register is broken.
+
+        Until leg 6 the walk read the broken register as "not a project" and
+        went on up, so the row counted as the outer caller's and was closed.
+        Red first on that code; the mutant is in test_project_scope.
+        """
+        suffix = "_REGISTRY" + ".json"  # assembled: the literal name is a sealed-write trigger
+        outer = tmp_path / "outer"
+        nested = outer / "projects" / "nested"
+        nested.mkdir(parents=True)
+        (outer / f"OUTER{suffix}").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        broken = nested / f"NESTED{suffix}"
+        broken.write_text("{not json", encoding="utf-8")
+        row = nested / "docs"
+        open_plans = [
+            ("0007", {"subject": "theirs", "location": str(row), "file_path": str(row / "FPLAN-0007_t.md")}),
+        ]
+        close_plan_fn = MagicMock()
+
+        result = close_all_plans_impl(
+            caller_project=outer.resolve(),
+            get_open_plans=MagicMock(return_value=open_plans),
+            close_plan_fn=close_plan_fn,
+        )
+
+        assert result["success"] is False
+        assert result["total"] == 0
+        [message] = result["messages"]
+        assert message["text"].startswith("Error in close_all: Unreadable project register ")
+        assert str(broken) in message["text"]
+        close_plan_fn.assert_not_called()
+        mock_bg.assert_not_called()
 
 
 class TestTheScopeComparisonIsPlatformNeutral:
