@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: identity_ops.py
 # Description: Identity operations handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-07
 # Modified: 2026-10-04
 # =============================================
@@ -203,14 +203,16 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, Any]]:
 
     Returns:
         List of branch dicts (dict-shaped registries are flattened to
-        their values), or [] if the file is missing or its branches
-        field is malformed.
+        their values), or [] if the file is missing.
 
     Raises:
         OSError, json.JSONDecodeError: the file exists but cannot be read
             or parsed. Logged, then raised: an empty list reads as "no
             match", and get_caller_branch would then serve the AIPass
             namesake by name (commons' decision, DPLAN-0354 leg 6).
+        ValueError: the branches field is neither a list nor a dict.
+            Logged, then raised, for the same reason (commons' decision,
+            DPLAN-0354 leg 7).
     """
     if not registry_path.exists():
         return []
@@ -226,8 +228,9 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, Any]]:
     if isinstance(raw_branches, dict):
         raw_branches = list(raw_branches.values())
     if not isinstance(raw_branches, list):
-        logger.warning(f"[commons.identity] Registry {registry_path.name} has a malformed branches field")
-        return []
+        malformed = f"Registry {registry_path.name} has a malformed branches field"
+        logger.warning(f"[commons.identity] {malformed}")
+        raise ValueError(malformed)
 
     return [branch for branch in raw_branches if isinstance(branch, dict)]
 
@@ -278,8 +281,9 @@ def _search_registries(matcher: Callable[[Path], Optional[Dict[str, Any]]]) -> O
         The first branch dict any registry matched, or None.
 
     Raises:
-        OSError, json.JSONDecodeError: a registry that exists could not be
-            read, or AIPASS_CALLER_CWD would not resolve. get_caller_branch,
+        OSError, json.JSONDecodeError, ValueError: a registry that exists
+            could not be read or has a malformed branches field, or
+            AIPASS_CALLER_CWD would not resolve. get_caller_branch,
             the one product caller, turns both into CallerLookupFailed.
     """
     found = matcher(BRANCH_REGISTRY_PATH)
