@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_parked_is_not_collected.py
 # Description: The parked directory contributes no tests, proven by running collection
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-19
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for tests/parked/conftest.py — the barrier that keeps the park at zero collected tests."""
@@ -78,23 +78,25 @@ class TestTheParkStaysParked:
 
         A park protected only by its filenames is protected until someone
         renames one. This drops a file that WOULD be collected anywhere else
-        into the park, proves the barrier still answers zero, and removes it —
-        so the guarantee is about the directory, not about today's names.
+        into a park, proves the barrier still answers zero — so the guarantee is
+        about the directory, not about today's names.
+
+        The park is rebuilt under tmp_path from the live barrier's own bytes, so
+        a broken barrier still reddens this and nothing is written into the tree
+        (the live-write plugin named the old in-tree intruder, fleet green leg 3).
         """
-        intruder = PARKED_DIR / "test_intruder_from_the_barrier_pin.py"
-        assert not intruder.exists(), "leftover from a previous run — remove it by hand"
+        park = tmp_path / "park"
+        park.mkdir()
+        (park / "conftest.py").write_text((PARKED_DIR / "conftest.py").read_text(encoding="utf-8"), encoding="utf-8")
+        source = "def test_would_be_collected_anywhere_else():\n    assert True\n"
+        (park / "test_intruder_from_the_barrier_pin.py").write_text(source, encoding="utf-8")
+        parked_result = _collect(park)
 
-        intruder.write_text("def test_would_be_collected_anywhere_else():\n    assert True\n", encoding="utf-8")
-        try:
-            parked_result = _collect(PARKED_DIR)
-
-            # The same bytes somewhere with no barrier, so the file itself is
-            # proven collectable and the zero above is the barrier's doing.
-            control = tmp_path / "test_intruder_from_the_barrier_pin.py"
-            control.write_text(intruder.read_text(encoding="utf-8"), encoding="utf-8")
-            control_result = _collect(control)
-        finally:
-            intruder.unlink()
+        # The same bytes somewhere with no barrier, so the file itself is
+        # proven collectable and the zero above is the barrier's doing.
+        control = tmp_path / "test_intruder_from_the_barrier_pin.py"
+        control.write_text(source, encoding="utf-8")
+        control_result = _collect(control)
 
         assert control_result.returncode == 0, (
             f"the control file was not collected either — this test proves nothing:\n{control_result.stdout[-2000:]}"

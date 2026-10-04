@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: CLI Display Module — public API for Rich terminal output formatting
-# Version: 0.5.0
+# Version: 0.5.1
 # Created: 2025-11-12
-# Modified: 2026-09-17
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -302,8 +302,12 @@ def run_demo():
     warning("Template version mismatch", details="Expected v2.1, found v2.0")
     CONSOLE.print()
 
-    # Demo error
+    # Demo error — an exhibit, not a failure of the demo command, so the flag it
+    # trips is cleared unless something had already failed before it ran.
+    failed_before = command_failed()
     error("Cannot create virtual environment", suggestion="sudo apt install python3-venv")
+    if not failed_before:
+        reset_command_state()
     CONSOLE.print()
 
     # Demo section

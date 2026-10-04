@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for cli's entry point routing, help and introspection
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/cli.py — routing, help, introspection and the exit seam."""
@@ -128,6 +128,21 @@ def test_print_help_publishes_escape_and_scopes_show(capsys):
     out = capsys.readouterr().out
     assert "from aipass.cli import escape" in out
     assert "Alias of display (not display show)" in out
+
+
+def test_discovery_hands_main_the_imported_modules_not_copies():
+    """A routed module's error() must trip the flag main() reads, or a refusal exits 0.
+
+    discover_modules() executed each file a second time as a fresh copy, so the
+    routed display kept its own failure flag apart from the one resolve_exit reads
+    (measured fleet green leg 3). Mutant: discovery back to spec_from_file_location.
+    """
+    discovered = {module.__name__.rsplit(".", 1)[-1]: module for module in branch_entry.discover_modules()}
+
+    discovered["display"].mark_command_failed()
+
+    assert display.command_failed() is True
+    assert branch_entry.resolve_exit(True) == 2
 
 
 # =============================================================================
