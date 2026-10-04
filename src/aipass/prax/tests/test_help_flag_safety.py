@@ -22,22 +22,23 @@
 # The rule these pin: a dashed flag counts ANYWHERE, a bare ``help`` counts only
 # at position 0 (branch names, log filenames and grep patterns are free text).
 #
-# Modules are imported inside each test — conftest.py installs autouse sys.modules
-# mocks that must be in place first.
+# Modules are bound once at the top and never reloaded (prax, leg 12).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — log_audit.py's enforce and sweep, covered by tests/test_log_audit.py
 # seedgo: no-test-needed(through_the_command) — monitor.py's run dispatch, covered by tests/test_monitor_module.py
 
 import contextlib
-import importlib
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from aipass.prax.apps import prax as prax_entry
+from aipass.prax.apps.handlers.cli import help_flags
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+from aipass.prax.apps.handlers.logging import log_watchdog
+from aipass.prax.apps.handlers.monitoring import rate_tracker
+from aipass.prax.apps.modules import log_audit, log_health, monitor
 
 
 @pytest.fixture
@@ -54,13 +55,33 @@ LOG_HEALTH_PATH = "aipass.prax.apps.modules.log_health"
 MONITOR_PATH = "aipass.prax.apps.modules.monitor"
 FLAGS_PATH = "aipass.prax.apps.handlers.cli.help_flags"
 PRAX_PATH = "aipass.prax.apps.prax"
+WATCHDOG_PATH = "aipass.prax.apps.handlers.logging.log_watchdog"
+RATE_TRACKER_PATH = "aipass.prax.apps.handlers.monitoring.rate_tracker"
+
+# Every module these tests touch, imported once at the top and never reloaded
+# (prax, leg 12: the per-test pop and reload left sys.modules changed).
+_BOUND = {
+    LOG_AUDIT_PATH: log_audit,
+    LOG_HEALTH_PATH: log_health,
+    MONITOR_PATH: monitor,
+    FLAGS_PATH: help_flags,
+    PRAX_PATH: prax_entry,
+    WATCHDOG_PATH: log_watchdog,
+    RATE_TRACKER_PATH: rate_tracker,
+}
+
+
+@pytest.fixture(autouse=True)
+def _bound_loggers_doubled(monkeypatch):
+    """Each bound module that logs gets a fresh logger double for the test."""
+    for module in _BOUND.values():
+        if hasattr(module, "logger"):
+            monkeypatch.setattr(module, "logger", MagicMock())
 
 
 def _load(module_path: str):
-    """Import (or reimport) a module under the active mocks."""
-    sys.modules.pop(module_path, None)
-    module = importlib.import_module(module_path)
-    return importlib.reload(module)
+    """The module bound at the top under this dotted path."""
+    return _BOUND[module_path]
 
 
 # The tail positions a flag can hide in, per module. Each pairs the command
@@ -76,9 +97,6 @@ DESTRUCTIVE_CASES = [
     ("monitor", MONITOR_PATH, ["run", "seedgo,cli", "-h"]),
 ]
 
-
-WATCHDOG_PATH = "aipass.prax.apps.handlers.logging.log_watchdog"
-RATE_TRACKER_PATH = "aipass.prax.apps.handlers.monitoring.rate_tracker"
 
 # Every entry point that DOES something, per module. A red run of this file
 # must not truncate a log or start a monitor to prove the gate is missing —
@@ -109,7 +127,7 @@ def _no_execution(mod, module_path):
     with contextlib.ExitStack() as stack:
         mocks = {}
         for target_module, name in EXECUTION_TARGETS[module_path]:
-            owner = mod if target_module is None else importlib.import_module(target_module)
+            owner = mod if target_module is None else _BOUND[target_module]
             mocks[name] = stack.enter_context(patch.object(owner, name))
         yield mocks
 

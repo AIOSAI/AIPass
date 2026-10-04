@@ -3,7 +3,7 @@
 # Description: Unit tests for filesystem_handler.py
 # Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py."""
@@ -24,11 +24,9 @@ import importlib
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch, mock_open as _mock_file_open
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-_mopen = _mock_file_open
 
 _INJECTED_MODULES = [
     "watchdog",
@@ -104,6 +102,18 @@ def _make_handler(mod, queue=None, command_indicator_files=None):
         event_queue=queue,
         command_indicator_files=command_indicator_files,
     )
+
+
+def _on_disk(tmp_path: Path, data: str, name: str = "session.jsonl") -> Path:
+    """Write ``data`` to a real file under tmp_path and return its path.
+
+    The handler opens, seeks and stats the file itself, so the file is real
+    (prax, leg 12): a mocked open stood in for the very read under test.
+    Bytes, so the size on disk is the size of ``data`` on every platform.
+    """
+    path = tmp_path / name
+    path.write_bytes(data.encode("utf-8"))
+    return path
 
 
 # =============================================
@@ -663,16 +673,14 @@ class TestReadCodexCwd:
         handler = _make_handler(mod)
         cwd = str(tmp_path / "project")
         meta_line = json.dumps({"type": "session_meta", "payload": {"cwd": cwd}})
-        with patch("builtins.open", _mopen(read_data=meta_line + "\n")):
-            result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
+        result = handler._read_codex_cwd(str(_on_disk(tmp_path, meta_line + "\n")))
         assert result == cwd
 
     def test_empty_first_line(self, tmp_path):
         """Should return None for empty first line."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        with patch("builtins.open", _mopen(read_data="\n")):
-            result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
+        result = handler._read_codex_cwd(str(_on_disk(tmp_path, "\n")))
         assert result is None
 
     def test_not_session_meta(self, tmp_path):
@@ -680,24 +688,21 @@ class TestReadCodexCwd:
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         meta_line = json.dumps({"type": "event_msg", "payload": {}})
-        with patch("builtins.open", _mopen(read_data=meta_line + "\n")):
-            result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
+        result = handler._read_codex_cwd(str(_on_disk(tmp_path, meta_line + "\n")))
         assert result is None
 
     def test_os_error(self, tmp_path):
-        """Should return None on OSError."""
+        """Should return None when the session file cannot be opened: here, it is absent."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        with patch("builtins.open", side_effect=OSError("no file")):
-            result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
+        result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
         assert result is None
 
     def test_json_decode_error(self, tmp_path):
         """Should return None on JSONDecodeError."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        with patch("builtins.open", _mopen(read_data="not json\n")):
-            result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
+        result = handler._read_codex_cwd(str(_on_disk(tmp_path, "not json\n")))
         assert result is None
 
 
@@ -727,8 +732,7 @@ class TestGetCodexBranch:
                 "payload": {"cwd": str(tmp_path / "Projects" / "AIPass" / "src" / "aipass" / "prax")},
             }
         )
-        with patch("builtins.open", _mopen(read_data=meta_line + "\n")):
-            result = handler._get_codex_branch(str(tmp_path / "file.jsonl"), "key2")
+        result = handler._get_codex_branch(str(_on_disk(tmp_path, meta_line + "\n", "file.jsonl")), "key2")
         assert result == "PRAX"
         assert handler._session_branches["key2"] == "PRAX"
 
@@ -736,8 +740,7 @@ class TestGetCodexBranch:
         """Should return CODEX when CWD cannot be read."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        with patch("builtins.open", _mopen(read_data="\n")):
-            result = handler._get_codex_branch(str(tmp_path / "file.jsonl"), "key3")
+        result = handler._get_codex_branch(str(_on_disk(tmp_path, "\n", "file.jsonl")), "key3")
         assert result == "CODEX"
 
     def test_cwd_but_no_branch_returns_codex(self, tmp_path):
@@ -745,8 +748,7 @@ class TestGetCodexBranch:
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         meta_line = json.dumps({"type": "session_meta", "payload": {"cwd": str(tmp_path / "nowhere")}})
-        with patch("builtins.open", _mopen(read_data=meta_line + "\n")):
-            result = handler._get_codex_branch(str(tmp_path / "file.jsonl"), "key4")
+        result = handler._get_codex_branch(str(_on_disk(tmp_path, meta_line + "\n", "file.jsonl")), "key4")
         assert result == "CODEX"
 
 
@@ -1032,16 +1034,24 @@ class TestParseCodexResponseItem:
 class TestReadNewJsonlLines:
     """Tests for _read_new_jsonl_lines."""
 
-    def test_reads_new_data(self):
-        """Should read new lines since last position."""
+    def test_reads_new_data(self, tmp_path):
+        """Should read new lines since last position, and move the position to the end."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 50
         data = '{"type": "test"}\n'
-        with patch("builtins.open", _mopen(read_data=data)):
-            result = handler._read_new_jsonl_lines(mock_path, "pk")
+        path = _on_disk(tmp_path, data)
+        result = handler._read_new_jsonl_lines(path, "pk")
         assert result == ['{"type": "test"}']
+        assert handler._jsonl_positions["pk"] == path.stat().st_size
+
+    def test_reads_only_what_was_appended(self, tmp_path):
+        """A second read starts where the first stopped: old lines are not shown twice."""
+        mod, _, _, _, _ = _import_filesystem_handler()
+        handler = _make_handler(mod)
+        path = _on_disk(tmp_path, '{"n": 1}\n')
+        handler._read_new_jsonl_lines(path, "pk")
+        path.write_bytes(path.read_bytes() + b'{"n": 2}\n')
+        assert handler._read_new_jsonl_lines(path, "pk") == ['{"n": 2}']
 
     def test_no_new_data(self):
         """Should return None when no new data."""
@@ -1053,26 +1063,19 @@ class TestReadNewJsonlLines:
         result = handler._read_new_jsonl_lines(mock_path, "pk")
         assert result is None
 
-    def test_file_truncated_resets_position(self):
+    def test_file_truncated_resets_position(self, tmp_path):
         """Should reset position when file shrinks (truncation)."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         handler._jsonl_positions["pk"] = 200
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 50
-        data = '{"type": "new"}\n'
-        with patch("builtins.open", _mopen(read_data=data)):
-            result = handler._read_new_jsonl_lines(mock_path, "pk")
+        result = handler._read_new_jsonl_lines(_on_disk(tmp_path, '{"type": "new"}\n'), "pk")
         assert result == ['{"type": "new"}']
 
-    def test_empty_new_data(self):
+    def test_empty_new_data(self, tmp_path):
         """Should return None when new data is all whitespace."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 50
-        with patch("builtins.open", _mopen(read_data="   \n  \n")):
-            result = handler._read_new_jsonl_lines(mock_path, "pk")
+        result = handler._read_new_jsonl_lines(_on_disk(tmp_path, "   \n  \n"), "pk")
         assert result is None
 
 
@@ -1190,22 +1193,17 @@ class TestExtractCodexModel:
 class TestParseCodexActivity:
     """Tests for _parse_codex_activity."""
 
-    def test_parses_lines_and_emits(self):
+    def test_parses_lines_and_emits(self, tmp_path):
         """Should parse new JSONL lines and emit agent event."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 100
-        mock_path.__str__ = MagicMock(return_value="/fake/codex.jsonl")
-        mock_path.name = "codex.jsonl"
         line = json.dumps(
             {
                 "type": "event_msg",
                 "payload": {"type": "user_message"},
             }
         )
-        with patch("builtins.open", _mopen(read_data=line + "\n")):
-            result = handler._parse_codex_activity(mock_path, "CODEX")
+        result = handler._parse_codex_activity(_on_disk(tmp_path, line + "\n", "codex.jsonl"), "CODEX")
         assert result is True
         queue.enqueue.assert_called()
 
@@ -1220,16 +1218,11 @@ class TestParseCodexActivity:
         result = handler._parse_codex_activity(mock_path, "CODEX")
         assert result is True
 
-    def test_malformed_json_skipped(self):
+    def test_malformed_json_skipped(self, tmp_path):
         """Should skip malformed JSON lines."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 100
-        mock_path.__str__ = MagicMock(return_value="/fake/codex.jsonl")
-        mock_path.name = "codex.jsonl"
-        with patch("builtins.open", _mopen(read_data="not json\n")):
-            result = handler._parse_codex_activity(mock_path, "CODEX")
+        result = handler._parse_codex_activity(_on_disk(tmp_path, "not json\n", "codex.jsonl"), "CODEX")
         assert result is True
 
     def test_exception_returns_false(self):
@@ -1243,14 +1236,10 @@ class TestParseCodexActivity:
         result = handler._parse_codex_activity(mock_path, "CODEX")
         assert result is False
 
-    def test_extracts_model_from_turn_context(self):
+    def test_extracts_model_from_turn_context(self, tmp_path):
         """Should extract model from turn_context entries."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 200
-        mock_path.__str__ = MagicMock(return_value="/fake/codex.jsonl")
-        mock_path.name = "codex.jsonl"
         lines = "\n".join(
             [
                 json.dumps(
@@ -1267,21 +1256,16 @@ class TestParseCodexActivity:
                 ),
             ]
         )
-        with patch("builtins.open", _mopen(read_data=lines + "\n")):
-            handler._parse_codex_activity(mock_path, "CODEX")
-        assert handler._session_models.get("/fake/codex.jsonl") == "o4-mini"
+        path = _on_disk(tmp_path, lines + "\n", "codex.jsonl")
+        handler._parse_codex_activity(path, "CODEX")
+        assert handler._session_models.get(str(path)) == "o4-mini"
 
-    def test_no_actionable_lines(self):
+    def test_no_actionable_lines(self, tmp_path):
         """Should return True when all lines produce no action."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 100
-        mock_path.__str__ = MagicMock(return_value="/fake/codex.jsonl")
-        mock_path.name = "codex.jsonl"
         line = json.dumps({"type": "session_meta", "payload": {}})
-        with patch("builtins.open", _mopen(read_data=line + "\n")):
-            result = handler._parse_codex_activity(mock_path, "CODEX")
+        result = handler._parse_codex_activity(_on_disk(tmp_path, line + "\n", "codex.jsonl"), "CODEX")
         assert result is True
         queue.enqueue.assert_not_called()
 
@@ -1294,20 +1278,15 @@ class TestParseCodexActivity:
 class TestParseAgentActivity:
     """Tests for _parse_agent_activity (Claude Code JSONL)."""
 
-    def test_parses_and_emits_event(self):
+    def test_parses_and_emits_event(self, tmp_path):
         """Should parse JSONL and emit agent event."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 200
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        mock_path.name = "claude.jsonl"
         entry = {
             "type": "assistant",
             "message": {"content": [{"type": "thinking"}]},
         }
-        with patch("builtins.open", _mopen(read_data=json.dumps(entry) + "\n")):
-            result = handler._parse_agent_activity(mock_path, "PRAX")
+        result = handler._parse_agent_activity(_on_disk(tmp_path, json.dumps(entry) + "\n", "claude.jsonl"), "PRAX")
         assert result is True
         queue.enqueue.assert_called()
 
@@ -1322,57 +1301,62 @@ class TestParseAgentActivity:
         result = handler._parse_agent_activity(mock_path, "PRAX")
         assert result is True
 
-    def test_file_truncated(self):
-        """Should reset position when file shrinks."""
+    def test_file_truncated(self, tmp_path):
+        """Should reset position when file shrinks, and read the file from its start."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        handler._jsonl_positions["/fake/claude.jsonl"] = 1000
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 100
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        mock_path.name = "claude.jsonl"
         entry = {"type": "user", "message": {"content": "hello"}}
-        with patch("builtins.open", _mopen(read_data=json.dumps(entry) + "\n")):
-            result = handler._parse_agent_activity(mock_path, "PRAX")
+        path = _on_disk(tmp_path, json.dumps(entry) + "\n", "claude.jsonl")
+        handler._jsonl_positions[str(path)] = 1000
+        result = handler._parse_agent_activity(path, "PRAX")
         assert result is True
+        assert handler._jsonl_positions[str(path)] == path.stat().st_size
 
-    def test_malformed_line_skipped(self):
+    def test_a_second_poll_emits_only_what_was_appended(self, tmp_path):
+        """The second read starts where the first stopped: old actions are not shown again.
+
+        Green from its first run; its proof is the mutant that seeks to 0.
+        """
+        mod, mock_eq, _, _, queue = _import_filesystem_handler()
+        handler = _make_handler(mod, queue=queue)
+
+        def tool(name: str) -> str:
+            entry = {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": name, "input": {}}]}}
+            return json.dumps(entry) + "\n"
+
+        path = _on_disk(tmp_path, tool("FirstTool") + tool("SecondTool"), "claude.jsonl")
+        handler._parse_agent_activity(path, "PRAX")
+        path.write_bytes(path.read_bytes() + tool("ThirdTool").encode("utf-8"))
+        handler._parse_agent_activity(path, "PRAX")
+
+        messages = [kwargs["message"] for _args, kwargs in mock_eq.MonitoringEvent.call_args_list]
+        assert len(messages) == 3
+        assert "ThirdTool" in messages[-1]
+
+    def test_malformed_line_skipped(self, tmp_path):
         """Should skip malformed JSON lines."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 200
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        mock_path.name = "claude.jsonl"
         good_entry = json.dumps({"type": "user", "message": {"content": "hi"}})
         data = "not json\n" + good_entry + "\n"
-        with patch("builtins.open", _mopen(read_data=data)):
-            result = handler._parse_agent_activity(mock_path, "PRAX")
+        result = handler._parse_agent_activity(_on_disk(tmp_path, data, "claude.jsonl"), "PRAX")
         assert result is True
         queue.enqueue.assert_called()
 
-    def test_deduplicates(self):
+    def test_deduplicates(self, tmp_path):
         """Should not emit duplicate actions."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        handler._last_agent_action["/fake/claude.jsonl"] = "User message"
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 100
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        mock_path.name = "claude.jsonl"
         entry = {"type": "user", "message": {"content": "hello"}}
-        with patch("builtins.open", _mopen(read_data=json.dumps(entry) + "\n")):
-            result = handler._parse_agent_activity(mock_path, "PRAX")
+        path = _on_disk(tmp_path, json.dumps(entry) + "\n", "claude.jsonl")
+        handler._last_agent_action[str(path)] = "User message"
+        result = handler._parse_agent_activity(path, "PRAX")
         assert result is True
 
-    def test_extracts_model(self):
+    def test_extracts_model(self, tmp_path):
         """Should extract model from entries."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 200
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        mock_path.name = "claude.jsonl"
         entry = {
             "type": "assistant",
             "message": {
@@ -1380,9 +1364,9 @@ class TestParseAgentActivity:
                 "content": [{"type": "thinking"}],
             },
         }
-        with patch("builtins.open", _mopen(read_data=json.dumps(entry) + "\n")):
-            handler._parse_agent_activity(mock_path, "PRAX")
-        assert handler._session_models.get("/fake/claude.jsonl") == "opus"
+        path = _on_disk(tmp_path, json.dumps(entry) + "\n", "claude.jsonl")
+        handler._parse_agent_activity(path, "PRAX")
+        assert handler._session_models.get(str(path)) == "opus"
 
     def test_exception_returns_false(self):
         """Should return False on unexpected exception."""
@@ -1395,52 +1379,34 @@ class TestParseAgentActivity:
         result = handler._parse_agent_activity(mock_path, "PRAX")
         assert result is False
 
-    def test_empty_lines_after_split(self):
+    def test_empty_lines_after_split(self, tmp_path):
         """Should return True when all lines are empty after strip."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 100
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        mock_path.name = "claude.jsonl"
-        with patch("builtins.open", _mopen(read_data="  \n  \n")):
-            result = handler._parse_agent_activity(mock_path, "PRAX")
+        result = handler._parse_agent_activity(_on_disk(tmp_path, "  \n  \n", "claude.jsonl"), "PRAX")
         assert result is True
 
-    def test_no_actionable_entries(self):
+    def test_no_actionable_entries(self, tmp_path):
         """Should return True when entries produce no actions."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 100
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        mock_path.name = "claude.jsonl"
         entry = {"type": "progress"}
-        with patch("builtins.open", _mopen(read_data=json.dumps(entry) + "\n")):
-            result = handler._parse_agent_activity(mock_path, "PRAX")
+        result = handler._parse_agent_activity(_on_disk(tmp_path, json.dumps(entry) + "\n", "claude.jsonl"), "PRAX")
         assert result is True
         queue.enqueue.assert_not_called()
 
-    def test_no_queue_still_returns_true(self):
+    def test_no_queue_still_returns_true(self, tmp_path):
         """Should return True even with no queue."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod, queue=None)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 100
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        mock_path.name = "claude.jsonl"
         entry = {"type": "user", "message": {"content": "hi"}}
-        with patch("builtins.open", _mopen(read_data=json.dumps(entry) + "\n")):
-            result = handler._parse_agent_activity(mock_path, "PRAX")
+        result = handler._parse_agent_activity(_on_disk(tmp_path, json.dumps(entry) + "\n", "claude.jsonl"), "PRAX")
         assert result is True
 
-    def test_batch_cap_limits_emitted_events(self):
+    def test_batch_cap_limits_emitted_events(self, tmp_path):
         """Should only emit last N events when batch exceeds cap."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        mock_path.name = "claude.jsonl"
         entries = []
         tools = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]
         for i, tool in enumerate(tools):
@@ -1451,20 +1417,15 @@ class TestParseAgentActivity:
                 }
             )
         data = "\n".join(json.dumps(e) for e in entries) + "\n"
-        mock_path.stat.return_value.st_size = len(data)
-        with patch("builtins.open", _mopen(read_data=data)):
-            result = handler._parse_agent_activity(mock_path, "PRAX")
+        result = handler._parse_agent_activity(_on_disk(tmp_path, data, "claude.jsonl"), "PRAX")
         assert result is True
         cap = mod.MonitoringFileHandler._MAX_AGENT_EVENTS_PER_BATCH
         assert queue.enqueue.call_count == cap
 
-    def test_batch_cap_emits_tail_not_head(self):
+    def test_batch_cap_emits_tail_not_head(self, tmp_path):
         """Should emit the last actions in a large batch, not the first."""
         mod, mock_eq, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        mock_path.name = "claude.jsonl"
         entries = []
         for i in range(6):
             entries.append(
@@ -1474,9 +1435,7 @@ class TestParseAgentActivity:
                 }
             )
         data = "\n".join(json.dumps(e) for e in entries) + "\n"
-        mock_path.stat.return_value.st_size = len(data)
-        with patch("builtins.open", _mopen(read_data=data)):
-            handler._parse_agent_activity(mock_path, "PRAX")
+        handler._parse_agent_activity(_on_disk(tmp_path, data, "claude.jsonl"), "PRAX")
         cap = mod.MonitoringFileHandler._MAX_AGENT_EVENTS_PER_BATCH
         assert queue.enqueue.call_count == cap
         last_call_kwargs = mock_eq.MonitoringEvent.call_args_list[-1][1]

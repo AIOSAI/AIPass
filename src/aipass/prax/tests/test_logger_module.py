@@ -10,14 +10,9 @@
 
 # Tests for prax logger module — the core public API for system-wide logging.
 #
-# logger.py imports from 8+ handler files at module level, so we must inject
-# mock modules into sys.modules for every handler dependency BEFORE importing
-# the module under test. The conftest autouse fixture mocks the logger module
-# itself (for other tests), but here we need to test logger.py internals so
-# we bypass that and do our own heavier mocking.
-#
-# All module imports happen inside test functions so that mocks are in place
-# before the import chain triggers.
+# logger.py takes names from 8+ handler files at import. It is bound once at
+# the top, and _inject_and_import doubles each of those names on it per test
+# (prax, leg 12).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that each __all__ re-export, e.g. get_direct_logger(), names a real import (F822)
@@ -32,6 +27,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from aipass.prax.apps.handlers.config import load as config_load
+from aipass.prax.apps.handlers.logging import lifecycle
+from aipass.prax.apps.modules import logger as logger_module
 
 
 # =============================================
@@ -126,27 +125,59 @@ def _build_handler_mocks(tmp_path):
     return mocks
 
 
+# The names logger.py takes from each handler at import: (its name, the handler's name).
+_IMPORTED_NAMES = {
+    "aipass.prax.apps.handlers.logging.setup": [
+        ("setup_individual_logger", "setup_individual_logger"),
+        ("get_captured_loggers_count", "get_captured_loggers_count"),
+        ("_enable_terminal", "enable_terminal_output"),
+        ("_disable_terminal", "disable_terminal_output"),
+    ],
+    "aipass.prax.apps.handlers.logging.introspection": [("get_caller_info", "get_caller_info")],
+    "aipass.prax.apps.handlers.logging.override": [("is_override_active", "is_override_active")],
+    "aipass.prax.apps.handlers.discovery.watcher": [
+        ("is_file_watcher_active", "is_file_watcher_active"),
+        ("check_file_watcher_liveness", "check_file_watcher_liveness"),
+    ],
+    "aipass.prax.apps.handlers.registry.load": [
+        ("load_module_registry", "load_module_registry"),
+        ("load_last_scan", "load_last_scan"),
+    ],
+    "aipass.prax.apps.handlers.config.load": [
+        ("get_system_logs_dir", "get_system_logs_dir"),
+        ("get_module_logs_dir", "get_module_logs_dir"),
+    ],
+    "aipass.prax.apps.handlers.logging.direct": [
+        ("get_direct_logger", "get_direct_logger"),
+        ("direct_log", "direct_log"),
+        ("DirectLogger", "DirectLogger"),
+    ],
+    "aipass.prax.apps.handlers.json": [("json_handler", "json_handler")],
+}
+
+
 def _inject_and_import(monkeypatch, tmp_path):
-    """Inject handler mocks into sys.modules and (re-)import logger.py.
+    """logger.py, bound at the top and never reloaded, with every name it took
+    from a handler doubled on it and its first-log-line latch reset (prax, leg 12).
 
     Returns (logger_module, handler_mocks_dict).
     """
     mocks = _build_handler_mocks(tmp_path)
+    for dep, names in _IMPORTED_NAMES.items():
+        for local, source in names:
+            monkeypatch.setattr(logger_module, local, getattr(mocks[dep], source))
+    monkeypatch.setattr(logger_module.SystemLogger, "_watcher_started", False)
+    return logger_module, mocks
 
-    # Clear cached module so it re-imports fresh
-    sys.modules.pop(MODULE_NAME, None)
 
-    # Inject all handler mocks
-    for mod_path, mock_obj in mocks.items():
-        monkeypatch.setitem(sys.modules, mod_path, mock_obj)
-
-    # Now import — the module-level imports will resolve to our mocks
-    import aipass.prax.apps.modules.logger as logger_mod
-    import importlib
-
-    importlib.reload(logger_mod)
-
-    return logger_mod, mocks
+def _lifecycle_doubled(monkeypatch, modules_count: int = 0) -> MagicMock:
+    """Double the two doors on the real lifecycle module; logger.py imports them
+    lazily, so the call reads the double (prax, leg 12)."""
+    doubled = MagicMock()
+    doubled.run_initialize.return_value = {"modules_count": modules_count}
+    monkeypatch.setattr(lifecycle, "run_initialize", doubled.run_initialize)
+    monkeypatch.setattr(lifecycle, "run_shutdown", doubled.run_shutdown)
+    return doubled
 
 
 def _inject_trigger(monkeypatch):
@@ -258,8 +289,8 @@ class TestGetSystemStatus:
             "system_logs_dir",
             "total_modules",
         ]
-        json_dir = mocks["aipass.prax.apps.handlers.config.load"].PRAX_JSON_DIR
-        assert result["registry_file"] == str(json_dir / "prax_logger_data.json")
+        # The real PRAX_JSON_DIR: logger.py is bound once (prax, leg 12).
+        assert result["registry_file"] == str(config_load.PRAX_JSON_DIR / "prax_logger_data.json")
 
     def test_contains_total_modules_key(self, monkeypatch, tmp_path):
         """Result includes total_modules count from registry."""
@@ -418,20 +449,7 @@ class TestInitializeLoggingSystem:
     def test_calls_lifecycle_run_initialize(self, monkeypatch, tmp_path):
         """initialize_logging_system calls run_initialize from lifecycle handler."""
         mod, mocks = _inject_and_import(monkeypatch, tmp_path)
-
-        # The lifecycle handler is lazy-imported inside the function,
-        # so we need to mock it in sys.modules
-        mock_lifecycle = MagicMock()
-        mock_lifecycle.run_initialize = MagicMock(
-            return_value={
-                "modules_count": 42,
-            }
-        )
-        monkeypatch.setitem(
-            sys.modules,
-            "aipass.prax.apps.handlers.logging.lifecycle",
-            mock_lifecycle,
-        )
+        mock_lifecycle = _lifecycle_doubled(monkeypatch, modules_count=42)
 
         _inject_trigger(monkeypatch)
 
@@ -442,18 +460,7 @@ class TestInitializeLoggingSystem:
     def test_prints_initialization_message(self, monkeypatch, tmp_path, capsys):
         """initialize_logging_system prints init and completion messages."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
-
-        mock_lifecycle = MagicMock()
-        mock_lifecycle.run_initialize = MagicMock(
-            return_value={
-                "modules_count": 10,
-            }
-        )
-        monkeypatch.setitem(
-            sys.modules,
-            "aipass.prax.apps.handlers.logging.lifecycle",
-            mock_lifecycle,
-        )
+        _lifecycle_doubled(monkeypatch, modules_count=10)
 
         _inject_trigger(monkeypatch)
 
@@ -470,9 +477,7 @@ class TestInitializeLoggingSystem:
         announce themselves. The standard's event table names no lifecycle
         event, so prax names it: `logging_system_initialized`."""
         mod, _ = _inject_and_import(monkeypatch, tmp_path)
-        mock_lifecycle = MagicMock()
-        mock_lifecycle.run_initialize = MagicMock(return_value={"modules_count": 42})
-        monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.logging.lifecycle", mock_lifecycle)
+        _lifecycle_doubled(monkeypatch, modules_count=42)
         trigger = _inject_trigger(monkeypatch)
 
         mod.initialize_logging_system()
@@ -483,9 +488,7 @@ class TestInitializeLoggingSystem:
         """These doors must still work on a host where trigger cannot import or
         inotify is exhausted — the guard the removed startup fire carried."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
-        mock_lifecycle = MagicMock()
-        mock_lifecycle.run_initialize = MagicMock(return_value={"modules_count": 7})
-        monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.logging.lifecycle", mock_lifecycle)
+        _lifecycle_doubled(monkeypatch, modules_count=7)
         trigger = _inject_trigger(monkeypatch)
         trigger.fire.side_effect = OSError("inotify watch limit reached")
 
@@ -509,14 +512,7 @@ class TestShutdownLoggingSystem:
     def test_calls_lifecycle_run_shutdown(self, monkeypatch, tmp_path):
         """shutdown_logging_system calls run_shutdown from lifecycle handler."""
         mod, mocks = _inject_and_import(monkeypatch, tmp_path)
-
-        mock_lifecycle = MagicMock()
-        mock_lifecycle.run_shutdown = MagicMock()
-        monkeypatch.setitem(
-            sys.modules,
-            "aipass.prax.apps.handlers.logging.lifecycle",
-            mock_lifecycle,
-        )
+        mock_lifecycle = _lifecycle_doubled(monkeypatch)
 
         _inject_trigger(monkeypatch)
 
@@ -527,14 +523,7 @@ class TestShutdownLoggingSystem:
     def test_prints_shutdown_messages(self, monkeypatch, tmp_path, capsys):
         """shutdown_logging_system prints shutdown and completion messages."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
-
-        mock_lifecycle = MagicMock()
-        mock_lifecycle.run_shutdown = MagicMock()
-        monkeypatch.setitem(
-            sys.modules,
-            "aipass.prax.apps.handlers.logging.lifecycle",
-            mock_lifecycle,
-        )
+        _lifecycle_doubled(monkeypatch)
 
         _inject_trigger(monkeypatch)
 
@@ -550,9 +539,7 @@ class TestShutdownLoggingSystem:
         """The other half of the Pattern 9 pair. Fired last, so the event says
         the system IS down rather than that it is going down."""
         mod, _ = _inject_and_import(monkeypatch, tmp_path)
-        mock_lifecycle = MagicMock()
-        mock_lifecycle.run_shutdown = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.logging.lifecycle", mock_lifecycle)
+        _lifecycle_doubled(monkeypatch)
         trigger = _inject_trigger(monkeypatch)
 
         mod.shutdown_logging_system()
@@ -562,9 +549,7 @@ class TestShutdownLoggingSystem:
     def test_a_failed_fire_does_not_fail_the_shutdown(self, monkeypatch, tmp_path):
         """A shutdown that cannot announce itself is still a shutdown."""
         mod, mocks = _inject_and_import(monkeypatch, tmp_path)
-        mock_lifecycle = MagicMock()
-        mock_lifecycle.run_shutdown = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.logging.lifecycle", mock_lifecycle)
+        mock_lifecycle = _lifecycle_doubled(monkeypatch)
         trigger = _inject_trigger(monkeypatch)
         trigger.fire.side_effect = ImportError("no aipass.trigger on this host")
 
@@ -686,7 +671,9 @@ class TestModuleConstants:
         """
         mod, mocks = _inject_and_import(monkeypatch, tmp_path)
 
-        json_dir = mocks["aipass.prax.apps.handlers.config.load"].PRAX_JSON_DIR
+        # Read off the real config: logger.py is bound once, so DATA_FILE was
+        # built from the real PRAX_JSON_DIR (prax, leg 12).
+        json_dir = config_load.PRAX_JSON_DIR
         assert isinstance(mod.DATA_FILE, Path)
         assert mod.DATA_FILE.name == "prax_logger_data.json"
         assert mod.DATA_FILE == json_dir / "prax_logger_data.json"

@@ -753,6 +753,11 @@ class TestFileWatcherWorker:
         ):
             mod._file_watcher_worker()
         mock_emit.assert_called_once_with("warning", "File watcher: no watch directories found — file events disabled")
+        # The handler is sandboxed to the repo root the worker resolved (prax, leg 12:
+        # the kwarg had no pin, and sandbox_root=None survived its mutant).
+        built = mock_fs_handler.MonitoringFileHandler.call_args.kwargs
+        assert built["sandbox_root"] is mock_config._find_repo_root.return_value
+        assert built["event_queue"] is mod._event_queue
 
     def test_observer_none_returns_early(self, monkeypatch):
         """A failed observer startup ends the worker before the watch loop is ever entered."""

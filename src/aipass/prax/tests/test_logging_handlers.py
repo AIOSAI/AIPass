@@ -26,14 +26,16 @@
 # seedgo: no-test-needed(through_the_command) — setup_individual_logger(), covered by tests/test_logging.py
 # seedgo: no-test-needed(through_the_command) — append_jsonl() in jsonl_writer.py, covered by tests/test_jsonl_writer.py
 
-import importlib  # used inside test functions for dynamic module loading
 import json
 import logging
 import sys
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
+import pytest
+
 from aipass.prax.apps.handlers.logging import direct
+from aipass.prax.apps.handlers.logging import setup as logging_setup
 
 # =============================================
 # direct.py -- direct_log
@@ -71,101 +73,53 @@ class TestDirectLog:
 
 
 class TestDirectRotatingFileHandlerDoRollover:
-    """Tests for direct.py RotatingFileHandler.doRollover()."""
+    """Tests for direct.py RotatingFileHandler.doRollover(), on the module bound at
+    the top: the handler takes its file as an argument, so nothing needs stubbing
+    (prax, leg 12)."""
 
     def test_do_rollover_success(self, mock_prax_infrastructure, tmp_path):
         """doRollover delegates to parent class on success."""
-        mock_config = MagicMock()
-        mock_config.get_system_logs_dir = MagicMock(return_value=tmp_path / "system")
-        mock_config.get_module_logs_dir = MagicMock(return_value=tmp_path / "local")
-        mock_config.DEFAULT_LOG_LEVEL = "DEBUG"
-        mock_config.load_log_config = MagicMock()
-        mock_config.lines_to_bytes = MagicMock(return_value=10000)
-        mock_config.PRAX_JSON_DIR = tmp_path / "prax_json"
+        log_file = tmp_path / "test.log"
+        log_file.write_text("line1\nline2\n", encoding="utf-8")
+        handler = direct.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="A" * 100,
+            args=(),
+            exc_info=None,
+        )
+        handler.emit(record)
+        handler.close()
 
-        mock_introspection = MagicMock()
-        mock_introspection.detect_branch_from_path = MagicMock(return_value="prax")
-
-        mock_override = MagicMock()
-        mock_override._original_getLogger = logging.getLogger
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.override": mock_override,
-            },
-        ):
-            _direct_mod_name = "aipass.prax.apps.handlers.logging.direct"
-            sys.modules.pop(_direct_mod_name, None)
-            direct_mod = importlib.import_module(_direct_mod_name)
-
-            log_file = tmp_path / "test.log"
-            log_file.write_text("line1\nline2\n", encoding="utf-8")
-            handler = direct_mod.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
-            record = logging.LogRecord(
-                name="test",
-                level=logging.INFO,
-                pathname="",
-                lineno=0,
-                msg="A" * 100,
-                args=(),
-                exc_info=None,
-            )
-            handler.emit(record)
-            handler.close()
-
-            # Rotation moved the old bytes aside and the record landed in a
-            # fresh file — both halves are pinned, so an emit that silently
-            # skipped the rollover cannot read green.
-            backup = tmp_path / "test.log.1"
-            assert backup.read_text(encoding="utf-8") == "line1\nline2\n"
-            assert log_file.read_text(encoding="utf-8") == "A" * 100 + "\n"
+        # Rotation moved the old bytes aside and the record landed in a
+        # fresh file — both halves are pinned, so an emit that silently
+        # skipped the rollover cannot read green.
+        backup = tmp_path / "test.log.1"
+        assert backup.read_text(encoding="utf-8") == "line1\nline2\n"
+        assert log_file.read_text(encoding="utf-8") == "A" * 100 + "\n"
 
     def test_do_rollover_os_error_suppressed(self, mock_prax_infrastructure, tmp_path):
         """A failed rotation is swallowed and logged — PermissionError is an OSError, one clause catches both."""
-        mock_config = MagicMock()
-        mock_config.get_system_logs_dir = MagicMock(return_value=tmp_path / "system")
-        mock_config.get_module_logs_dir = MagicMock(return_value=tmp_path / "local")
-        mock_config.DEFAULT_LOG_LEVEL = "DEBUG"
-        mock_config.load_log_config = MagicMock()
-        mock_config.lines_to_bytes = MagicMock(return_value=10000)
-        mock_config.PRAX_JSON_DIR = tmp_path / "prax_json"
+        log_file = tmp_path / "test_os.log"
+        log_file.write_text("data\n", encoding="utf-8")
+        handler = direct.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
+        # The stand-in's own error, so naming it is ours to do: the very object is handed on.
+        failure = OSError("disk error")
 
-        mock_introspection = MagicMock()
-        mock_override = MagicMock()
-        mock_override._original_getLogger = logging.getLogger
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.override": mock_override,
-            },
+        with (
+            patch(
+                "logging.handlers.RotatingFileHandler.doRollover",
+                side_effect=failure,
+            ),
+            patch.object(direct, "logger") as mock_logger,
         ):
-            _direct_mod_name = "aipass.prax.apps.handlers.logging.direct"
-            sys.modules.pop(_direct_mod_name, None)
-            direct_mod = importlib.import_module(_direct_mod_name)
+            handler.doRollover()
 
-            log_file = tmp_path / "test_os.log"
-            log_file.write_text("data\n", encoding="utf-8")
-            handler = direct_mod.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
-            # The stand-in's own error, so naming it is ours to do: the very object is handed on.
-            failure = OSError("disk error")
-
-            with (
-                patch(
-                    "logging.handlers.RotatingFileHandler.doRollover",
-                    side_effect=failure,
-                ),
-                patch.object(direct_mod, "logger") as mock_logger,
-            ):
-                handler.doRollover()
-
-            mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", failure)
-            handler.close()
+        mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", failure)
+        handler.close()
 
 
 # =============================================
@@ -1063,119 +1017,84 @@ class TestSetupSystemLogger:
 
 
 class TestSetupWindowsSafeRotatingHandlerDoRollover:
-    """Tests for setup.py _WindowsSafeRotatingHandler.doRollover()."""
+    """Tests for the rotating handler setup.py builds into every module logger.
 
-    def _make_mocks(self, tmp_path):
-        """Build the standard mock set for setup.py handler tests."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.get_system_logs_dir = MagicMock(return_value=tmp_path)
-        mock_config.get_module_logs_dir = MagicMock(return_value=tmp_path)
-        mock_config.load_log_config = MagicMock(
-            return_value={
+    The handler is taken off a logger built by the public setup_individual_logger,
+    with both log dirs under tmp_path, not constructed by its private class name
+    (prax, leg 12).
+    """
+
+    @pytest.fixture
+    def system_handler(self, monkeypatch, tmp_path):
+        """The system-log handler of a freshly built logger, its file holding 'data'."""
+        monkeypatch.setattr(logging_setup, "get_system_logs_dir", lambda: tmp_path)
+        monkeypatch.setattr(logging_setup, "get_module_logs_dir", lambda branch: tmp_path / "local")
+        monkeypatch.setattr(
+            logging_setup,
+            "load_log_config",
+            lambda: {
                 "log_format": "%(message)s",
                 "date_format": "%H:%M:%S",
-                "system_logs": {"max_lines": 100, "backup_count": 1},
-                "local_logs": {"max_lines": 100, "backup_count": 1},
-            }
+                "system_logs": {"max_lines": 1, "backup_count": 1},
+                "local_logs": {"max_lines": 1, "backup_count": 1},
+            },
         )
-        mock_config.lines_to_bytes = MagicMock(return_value=20000)
-        mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
-        mock_config.PRAX_JSON_DIR = tmp_path / "prax_json"
+        monkeypatch.setattr(logging_setup, "lines_to_bytes", lambda lines: 10)
+        monkeypatch.setattr(logging_setup, "_captured_loggers", {})
+        monkeypatch.setattr(logging_setup, "_system_logger", None)
+        monkeypatch.setattr(logging_setup, "_terminal_output_enabled", False)
+        log_file = tmp_path / "prax_rollover_test.log"
+        log_file.write_text("data\n", encoding="utf-8")
+        built = logging_setup.setup_individual_logger("rollover_test", caller_branch="prax")
+        try:
+            yield built.handlers[0], log_file
+        finally:
+            for handler in list(built.handlers):
+                built.removeHandler(handler)
+                handler.close()
 
-        mock_introspection = MagicMock()
-        mock_introspection.get_calling_module_path = MagicMock(return_value=None)
-        mock_introspection.detect_branch_from_path = MagicMock(return_value=None)
-
-        mock_filtering = MagicMock()
-        mock_formatting = MagicMock()
-
-        return mock_config, mock_introspection, mock_filtering, mock_formatting
-
-    def test_do_rollover_success(self, mock_prax_infrastructure, tmp_path):
+    def test_do_rollover_success(self, mock_prax_infrastructure, system_handler, tmp_path):
         """Normal rollover succeeds."""
-        mock_config, mock_intro, mock_filt, mock_fmt = self._make_mocks(tmp_path)
+        handler, log_file = system_handler
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="A" * 50,
+            args=(),
+            exc_info=None,
+        )
+        handler.emit(record)
+        handler.close()
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_intro,
-                "aipass.prax.apps.handlers.logging.terminal.filtering": mock_filt,
-                "aipass.prax.apps.handlers.logging.terminal.formatting": mock_fmt,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.setup", None)
-            import aipass.prax.apps.handlers.logging.setup as setup_mod
+        # One outcome is reachable here, not two: the file is over
+        # maxBytes, so the old bytes move to .log.1 and the record lands in
+        # a fresh .log. Both halves pinned.
+        backup = tmp_path / "prax_rollover_test.log.1"
+        assert backup.read_text(encoding="utf-8") == "data\n"
+        assert log_file.read_text(encoding="utf-8") == "A" * 50 + "\n"
 
-            log_file = tmp_path / "rollover_test.log"
-            log_file.write_text("data\n", encoding="utf-8")
-            handler = setup_mod._WindowsSafeRotatingHandler(
-                str(log_file),
-                maxBytes=10,
-                backupCount=1,
-                encoding="utf-8",
-            )
-            record = logging.LogRecord(
-                name="test",
-                level=logging.INFO,
-                pathname="",
-                lineno=0,
-                msg="A" * 50,
-                args=(),
-                exc_info=None,
-            )
-            handler.emit(record)
-            handler.close()
-
-            # One outcome is reachable here, not two: the file is over
-            # maxBytes, so the old bytes move to .log.1 and the record lands in
-            # a fresh .log. Both halves pinned.
-            backup = tmp_path / "rollover_test.log.1"
-            assert backup.read_text(encoding="utf-8") == "data\n"
-            assert log_file.read_text(encoding="utf-8") == "A" * 50 + "\n"
-
-    def test_do_rollover_permission_error_suppressed(self, mock_prax_infrastructure, tmp_path):
+    def test_do_rollover_permission_error_suppressed(self, mock_prax_infrastructure, system_handler, tmp_path):
         """PermissionError during rollover is caught, not raised."""
-        mock_config, mock_intro, mock_filt, mock_fmt = self._make_mocks(tmp_path)
+        handler, log_file = system_handler
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_intro,
-                "aipass.prax.apps.handlers.logging.terminal.filtering": mock_filt,
-                "aipass.prax.apps.handlers.logging.terminal.formatting": mock_fmt,
-            },
+        with (
+            patch(
+                "logging.handlers.RotatingFileHandler.doRollover",
+                side_effect=PermissionError("locked"),
+            ),
+            patch.object(logging_setup, "logger") as mock_logger,
         ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.setup", None)
-            import aipass.prax.apps.handlers.logging.setup as setup_mod
+            handler.doRollover()
+        handler.close()
 
-            log_file = tmp_path / "perm_test.log"
-            log_file.write_text("data\n", encoding="utf-8")
-            handler = setup_mod._WindowsSafeRotatingHandler(
-                str(log_file),
-                maxBytes=10,
-                backupCount=1,
-                encoding="utf-8",
-            )
-
-            with (
-                patch(
-                    "logging.handlers.RotatingFileHandler.doRollover",
-                    side_effect=PermissionError("locked"),
-                ),
-                patch.object(setup_mod, "logger") as mock_logger,
-            ):
-                handler.doRollover()
-            handler.close()
-
-            # "It did not raise" is half the contract. The other half: the
-            # skipped rotation is reported once, and no backup was produced.
-            mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", ANY)
-            assert str(mock_logger.warning.call_args[0][1]) == "locked"
-            assert not (tmp_path / "perm_test.log.1").exists()
-            assert log_file.read_text(encoding="utf-8") == "data\n"
+        # "It did not raise" is half the contract. The other half: the
+        # skipped rotation is reported once, and no backup was produced.
+        mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", ANY)
+        assert str(mock_logger.warning.call_args[0][1]) == "locked"
+        assert not (tmp_path / "prax_rollover_test.log.1").exists()
+        assert log_file.read_text(encoding="utf-8") == "data\n"
 
 
 # =============================================

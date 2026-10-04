@@ -37,16 +37,17 @@
 # seedgo: no-test-needed(through_the_command) — the rate worker's scan_rates(), covered by tests/test_rate_tracker.py
 # seedgo: no-test-needed(constant) — COLORS, SYMBOLS and LEVEL_COLORS, the style tables print_event reads
 
-import importlib
 import io
-import sys
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
 from rich.console import Console
+from rich.errors import MarkupError
 
 from aipass.prax.apps.handlers.monitoring import unified_stream
 from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
+from aipass.prax.apps.modules import monitor
 
 # ---------------------------------------------------------------------------
 # Real-console rendering helper
@@ -141,10 +142,15 @@ class TestEventTextIsUntrustedMarkup:
         assert "PRAX" in output
 
     def test_canary_unescaped_message_raises(self):
-        """Proof the assertions above can fail: raw interpolation still explodes."""
+        """Proof the assertions above can fail: the line print_event draws, interpolated
+        raw into the same markup, explodes (prax, leg 12: the canary now reaches the
+        product it is the canary for)."""
+        output = self._render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
+        assert "[/usr/bin]" in output
+
         buffer = io.StringIO()
         console = Console(file=buffer, width=200, no_color=True, highlight=False, markup=True)
-        with pytest.raises(Exception):
+        with pytest.raises(MarkupError):
             console.print(f"[white]{CRASHING_MESSAGE}[/white]")
 
 
@@ -152,30 +158,22 @@ class TestEventTextIsUntrustedMarkup:
 # Defect 2 — one bad event must not kill the consumer
 # ---------------------------------------------------------------------------
 
-_MONITORING_MOCKS = (
-    "aipass.prax.apps.handlers.monitoring",
-    "aipass.prax.apps.handlers.monitoring.event_queue",
-    "aipass.prax.apps.handlers.monitoring.filesystem_handler",
-    "aipass.prax.apps.handlers.monitoring.log_watcher",
-    "aipass.prax.apps.handlers.monitoring.unified_stream",
-    "aipass.prax.apps.handlers.monitoring.module_tracker",
-    "aipass.prax.apps.handlers.monitoring.branch_detector",
-    "aipass.prax.apps.handlers.monitoring.interactive_filter",
-    "aipass.prax.apps.handlers.monitoring.monitoring_filters",
-    "aipass.prax.apps.handlers.monitoring.file_watcher_integration",
-    "aipass.prax.apps.handlers.monitoring.telegram_relay",
-    "aipass.prax.apps.handlers.monitoring.pid_cache",
-    "aipass.prax.apps.handlers.monitoring.instance_lock",
-)
+
+@pytest.fixture(autouse=True)
+def _monitor_fresh(monkeypatch):
+    """monitor.py, bound at the top and never reloaded, with its run state fresh and
+    its logger and relay doubled for each test (prax, leg 12)."""
+    monkeypatch.setattr(monitor, "logger", MagicMock())
+    monkeypatch.setattr(monitor, "relay_event", MagicMock())
+    monkeypatch.setattr(monitor, "_event_queue", None)
+    monkeypatch.setattr(monitor, "_stop_event", threading.Event())
+    monkeypatch.setattr(monitor, "_render_failures", 0)
+    monkeypatch.setattr(monitor, "_last_render_warning", 0.0)
 
 
 def _import_monitor():
-    """Import (or reload) monitor.py with all monitoring handlers mocked."""
-    fresh = {name: MagicMock() for name in _MONITORING_MOCKS}
-    with patch.dict(sys.modules, fresh):
-        if "aipass.prax.apps.modules.monitor" in sys.modules:
-            return importlib.reload(sys.modules["aipass.prax.apps.modules.monitor"])
-        return importlib.import_module("aipass.prax.apps.modules.monitor")
+    """The top-bound monitor; _monitor_fresh has reset its state."""
+    return monitor
 
 
 def _event(branch="DRONE"):

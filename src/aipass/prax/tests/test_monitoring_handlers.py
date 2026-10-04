@@ -20,10 +20,8 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — print_hook_event(), covered by tests/test_display_resilience.py
 
-import importlib
 import io
 import json
-import sys
 from pathlib import Path, PurePosixPath
 from unittest.mock import MagicMock, mock_open as _mock_file_open, patch
 
@@ -31,7 +29,9 @@ import pytest
 from rich.console import Console
 
 from aipass.prax.apps.handlers import repo_root as repo_root_mod
-from aipass.prax.apps.handlers.monitoring import unified_stream
+from aipass.prax.apps.handlers.config import load as config_load
+from aipass.prax.apps.handlers.monitoring import branch_detector, unified_stream
+from aipass.prax.apps.handlers.monitoring import file_watcher_integration, interactive_filter
 
 # The detector is fed POSIX-spelled strings through a mocked Path, so none of
 # these reach a disk. Built from parts under a root with no home directory in
@@ -49,41 +49,28 @@ _mopen = _mock_file_open
 # =============================================
 
 
+@pytest.fixture(autouse=True)
+def _branch_detector_fresh(monkeypatch):
+    """Double branch_detector's collaborators where it binds them and empty its singleton.
+
+    Replaces a re-import under a mocked Path, json.load and open: the module
+    reads no file at import, so all the re-import gave was an empty singleton.
+    """
+    monkeypatch.setattr(branch_detector, "logger", MagicMock())
+    monkeypatch.setattr(branch_detector, "json_handler", MagicMock())
+    monkeypatch.setattr(branch_detector, "_detector_instance", None)
+
+
 def _import_branch_detector():
-    """Import branch_detector with fresh module state."""
-    mod_name = "aipass.prax.apps.handlers.monitoring.branch_detector"
-    sys.modules.pop(mod_name, None)
-    # Mock Path(__file__).resolve().parent chain so _find_repo_root
-    # does not walk the real filesystem during __init__.
-    with patch(f"{mod_name}.Path") as mock_path_cls, patch(f"{mod_name}.json.load") as mock_json_load:
-        # _find_repo_root checks (parent / "AIPASS_REGISTRY.json").exists()
-        mock_repo_root = MagicMock(spec=Path)
-        mock_registry_path = MagicMock(spec=Path)
-        mock_registry_path.exists.return_value = True
-        mock_repo_root.__truediv__ = MagicMock(return_value=mock_registry_path)
+    """The branch_detector module, bound at the top of this file."""
+    return branch_detector
 
-        mock_resolved = MagicMock()
-        mock_resolved.parent = mock_repo_root
-        mock_resolved.parents = []
-        mock_path_cls.return_value.resolve.return_value = mock_resolved
-        mock_path_cls.__file__ = __file__
 
-        # Registry data returned by json.load
-        mock_json_load.return_value = {
-            "branches": [
-                {"name": "PRAX", "path": str(_ECO / "prax")},
-                {"name": "SEEDGO", "path": str(_ECO / "seedgo")},
-                {"name": "FLOW", "path": str(_ECO / "flow")},
-                {"name": "CLI", "path": str(_ECO / "cli")},
-                {"name": "AI_MAIL", "path": str(_ECO / "ai_mail")},
-            ],
-        }
-
-        # Patch open for reading registry file
-        with patch("builtins.open", _mopen(read_data="{}")):
-            mod = importlib.import_module(mod_name)
-
-    return mod
+def _detector_log() -> MagicMock:
+    """The logger double the autouse fixture set on branch_detector."""
+    log = branch_detector.logger
+    assert isinstance(log, MagicMock), "branch_detector.logger is not doubled"
+    return log
 
 
 def _make_detector_with_branches(mod, branches: dict | None = None):
@@ -449,149 +436,116 @@ class TestGetStats:
 # =============================================
 
 
+_FILE_WATCHER_DOUBLES: dict[str, MagicMock] = {}
+
+
+@pytest.fixture(autouse=True)
+def _file_watcher_doubled(monkeypatch, tmp_path):
+    """Double file_watcher_integration's collaborators where it binds them.
+
+    The watcher and the event queue are replaced on the module itself, and the
+    repo root the loader asks config.load for is this test's tmp_path, so a
+    registry the test writes there is the one read. Replaces raw sys.modules
+    assignments that nothing put back (prax, leg 12).
+    """
+    watcher = MagicMock()
+    watcher.WATCHDOG_AVAILABLE = True
+    watcher.start_monitoring = MagicMock(return_value=MagicMock())
+    event_queue = MagicMock()
+    event_queue.global_queue.enqueue = MagicMock(return_value=True)
+    for name in ("start_monitoring", "stop_monitoring", "WATCHDOG_AVAILABLE"):
+        monkeypatch.setattr(file_watcher_integration, name, getattr(watcher, name))
+    monkeypatch.setattr(file_watcher_integration, "MonitoringEvent", event_queue.MonitoringEvent)
+    monkeypatch.setattr(file_watcher_integration, "global_queue", event_queue.global_queue)
+    monkeypatch.setattr(file_watcher_integration, "logger", MagicMock())
+    monkeypatch.setattr(file_watcher_integration, "json_handler", MagicMock())
+    monkeypatch.setattr(file_watcher_integration, "_file_watcher", None)
+    monkeypatch.setattr(config_load, "_find_repo_root", lambda: tmp_path)
+    monkeypatch.setitem(_FILE_WATCHER_DOUBLES, "watcher", watcher)
+    monkeypatch.setitem(_FILE_WATCHER_DOUBLES, "event_queue", event_queue)
+
+
 def _import_file_watcher_integration():
-    """Import file_watcher_integration with mocked dependencies."""
-    mod_name = "aipass.prax.apps.handlers.monitoring.file_watcher_integration"
-    sys.modules.pop(mod_name, None)
+    """The top-bound module and the doubles the autouse fixture set on it."""
+    return (
+        file_watcher_integration,
+        _FILE_WATCHER_DOUBLES["watcher"],
+        _FILE_WATCHER_DOUBLES["event_queue"],
+        config_load,
+    )
 
-    # Mock the watcher.monitor imports
-    mock_watcher = MagicMock()
-    mock_watcher.WATCHDOG_AVAILABLE = True
-    mock_watcher.start_monitoring = MagicMock(return_value=MagicMock())
-    mock_watcher.stop_monitoring = MagicMock()
-    sys.modules["aipass.prax.apps.handlers.watcher.monitor"] = mock_watcher
-    sys.modules["aipass.prax.apps.handlers.watcher"] = MagicMock()
 
-    # Mock event_queue
-    mock_event_queue = MagicMock()
-    mock_event = MagicMock()
-    mock_event_queue.MonitoringEvent = mock_event
-    mock_queue_instance = MagicMock()
-    mock_queue_instance.enqueue = MagicMock(return_value=True)
-    mock_event_queue.global_queue = mock_queue_instance
-    sys.modules["aipass.prax.apps.handlers.monitoring.event_queue"] = mock_event_queue
-
-    # Mock config.load — return a MagicMock (not a real Path) so __truediv__ is writable
-    mock_config_load = MagicMock()
-    mock_repo = MagicMock()
-    mock_config_load._find_repo_root = MagicMock(return_value=mock_repo)
-    sys.modules["aipass.prax.apps.handlers.config.load"] = mock_config_load
-    sys.modules["aipass.prax.apps.handlers.config"] = MagicMock()
-
-    mod = importlib.import_module(mod_name)
-    return mod, mock_watcher, mock_event_queue, mock_config_load
+def _write_registry(root: Path, payload: str) -> None:
+    """Write AIPASS_REGISTRY.json under the repo root the loader is pointed at."""
+    (root / "AIPASS_REGISTRY.json").write_text(payload, encoding="utf-8")
 
 
 class TestLoadBranchPaths:
     """Tests for load_branch_paths()."""
 
-    def test_returns_branch_tuples(self):
-        """Should return list of (name, Path) tuples from registry."""
-        mod, _, _, mock_config = _import_file_watcher_integration()
+    def test_returns_branch_tuples(self, tmp_path):
+        """Should return list of (name, Path) tuples from registry, folders that exist only."""
+        mod, _, _, _ = _import_file_watcher_integration()
+        for name in ("prax", "cli"):
+            (tmp_path / name).mkdir()
+        branches = [{"name": n, "path": str(tmp_path / n.lower())} for n in ("PRAX", "CLI", "GONE")]
+        _write_registry(tmp_path, json.dumps({"branches": branches}))
 
-        registry_data = {
-            "branches": [
-                {"name": "PRAX", "path": str(_HOME / "prax")},
-                {"name": "CLI", "path": str(_HOME / "cli")},
-            ],
-        }
+        result = mod.load_branch_paths()
 
-        mock_registry_path = MagicMock()
-        mock_registry_path.exists.return_value = True
-        mock_config._find_repo_root.return_value.__truediv__ = MagicMock(return_value=mock_registry_path)
+        assert result == [("PRAX", tmp_path / "prax"), ("CLI", tmp_path / "cli")]
 
-        with (
-            patch("builtins.open", _mopen(read_data=json.dumps(registry_data))),
-            patch.object(Path, "exists", return_value=True),
-        ):
-            result = mod.load_branch_paths()
-
-        assert len(result) == 2
-        assert result[0][0] == "PRAX"
-        assert result[1][0] == "CLI"
-
-    def test_with_branch_filter(self):
+    def test_with_branch_filter(self, tmp_path):
         """Should filter branches when branch_filter is provided."""
-        mod, _, _, mock_config = _import_file_watcher_integration()
+        mod, _, _, _ = _import_file_watcher_integration()
+        for name in ("prax", "cli", "flow"):
+            (tmp_path / name).mkdir()
+        branches = [{"name": n, "path": str(tmp_path / n.lower())} for n in ("PRAX", "CLI", "FLOW")]
+        _write_registry(tmp_path, json.dumps({"branches": branches}))
 
-        registry_data = {
-            "branches": [
-                {"name": "PRAX", "path": str(_HOME / "prax")},
-                {"name": "CLI", "path": str(_HOME / "cli")},
-                {"name": "FLOW", "path": str(_HOME / "flow")},
-            ],
-        }
+        result = mod.load_branch_paths(branch_filter=["prax", "FLOW"])
 
-        mock_registry_path = MagicMock()
-        mock_registry_path.exists.return_value = True
-        mock_config._find_repo_root.return_value.__truediv__ = MagicMock(return_value=mock_registry_path)
+        assert [name for name, _ in result] == ["PRAX", "FLOW"]
 
-        with (
-            patch("builtins.open", _mopen(read_data=json.dumps(registry_data))),
-            patch.object(Path, "exists", return_value=True),
-        ):
-            result = mod.load_branch_paths(branch_filter=["PRAX", "FLOW"])
-
-        names = [name for name, _ in result]
-        assert "PRAX" in names
-        assert "FLOW" in names
-        assert "CLI" not in names
-
-    def test_missing_registry_returns_empty(self):
+    def test_missing_registry_returns_empty(self, tmp_path):
         """Should return empty list when registry file is missing.
 
         The absence is measured by the open FAILING, not by an exists() call
         that answered about a moment already over: the loader opens and handles
-        FileNotFoundError, so this stubs open, not exists. Stubbing exists here
-        would keep passing against a loader that had lost the guard entirely.
+        FileNotFoundError, so no registry is written and nothing is stubbed.
         """
-        mod, _, _, mock_config = _import_file_watcher_integration()
+        mod, _, _, _ = _import_file_watcher_integration()
 
-        mock_registry_path = MagicMock()
-        mock_config._find_repo_root.return_value.__truediv__ = MagicMock(return_value=mock_registry_path)
-
-        with (
-            patch("builtins.open", side_effect=FileNotFoundError(2, "No such file or directory")),
-            patch.object(mod, "logger") as mock_logger,
-        ):
-            result = mod.load_branch_paths()
+        result = mod.load_branch_paths()
 
         assert result == []
         # The message has to be the ABSENCE one, not the catch-all: a loader
         # that lost its guard also answers [] here, through the generic
         # "Could not read the branch registry" clause at the bottom, so the
         # return value alone cannot tell the two apart.
-        warnings = " ".join(str(call) for call in mock_logger.warning.call_args_list)
+        warnings = " ".join(str(call) for call in mod.logger.warning.call_args_list)
         assert "No branch registry at" in warnings
-        assert mock_logger.error.call_args_list == []
+        assert mod.logger.error.call_args_list == []
 
-    def test_invalid_json_returns_empty(self):
-        """Should return empty list on JSON decode error."""
-        mod, _, _, mock_config = _import_file_watcher_integration()
+    def test_invalid_json_returns_empty(self, tmp_path):
+        """Should return empty list on JSON decode error, and say it was the JSON."""
+        mod, _, _, _ = _import_file_watcher_integration()
+        _write_registry(tmp_path, "{invalid json")
 
-        mock_registry_path = MagicMock()
-        mock_registry_path.exists.return_value = True
-        mock_config._find_repo_root.return_value.__truediv__ = MagicMock(return_value=mock_registry_path)
-
-        with patch("builtins.open", _mopen(read_data="{invalid json")):
-            result = mod.load_branch_paths()
+        result = mod.load_branch_paths()
 
         assert result == []
+        assert "The branch registry is not valid JSON (line 1)" in mod.logger.error.call_args.args[0]
 
-    def test_empty_branches_returns_empty(self):
+    def test_empty_branches_returns_empty(self, tmp_path):
         """Should return empty list when branches array is empty."""
-        mod, _, _, mock_config = _import_file_watcher_integration()
+        mod, _, _, _ = _import_file_watcher_integration()
+        _write_registry(tmp_path, json.dumps({"branches": []}))
 
-        registry_data = {"branches": []}
-
-        mock_registry_path = MagicMock()
-        mock_registry_path.exists.return_value = True
-        mock_config._find_repo_root.return_value.__truediv__ = MagicMock(return_value=mock_registry_path)
-
-        with patch("builtins.open", _mopen(read_data=json.dumps(registry_data))):
-            result = mod.load_branch_paths()
+        result = mod.load_branch_paths()
 
         assert result == []
+        assert "lists no branches" in mod.logger.warning.call_args.args[0]
 
 
 class TestFileEventCallback:
@@ -784,10 +738,8 @@ class TestFileWatcherManagerGetStats:
 
 
 def _import_interactive_filter():
-    """Import interactive_filter with fresh module state."""
-    mod_name = "aipass.prax.apps.handlers.monitoring.interactive_filter"
-    sys.modules.pop(mod_name, None)
-    return importlib.import_module(mod_name)
+    """The interactive_filter module, bound at the top of this file; it holds no state."""
+    return interactive_filter
 
 
 class TestParseCommand:
@@ -1209,114 +1161,75 @@ class TestRegisterBranch:
 class TestLoadRegistry:
     """Tests for BranchDetector._load_registry()."""
 
-    def test_loads_branches_from_valid_registry(self, tmp_path):
-        """Should populate known_branches from valid registry file."""
-        mod = _import_branch_detector()
+    # Each test points the detector at a repo root under tmp_path and writes the
+    # registry there for real (prax, leg 12): a mocked open stood in for the very
+    # read under test.
+
+    def _detector_at(self, mod, root: Path):
         detector = _make_detector_with_branches(mod, branches={})
-        detector._repo_root = tmp_path / "fake" / "root"
+        detector._repo_root = root
+        return detector
 
-        registry_data = {
-            "branches": [
-                {"name": "PRAX", "path": "/fake/prax"},
-                {"name": "FLOW", "path": "/fake/flow"},
-            ],
-        }
+    def test_loads_branches_from_valid_registry(self, tmp_path):
+        """Should populate known_branches and branch_map from a valid registry file."""
+        mod = _import_branch_detector()
+        detector = self._detector_at(mod, tmp_path)
+        branches = [{"name": n.lower(), "path": str(tmp_path / n.lower())} for n in ("PRAX", "FLOW")]
+        _write_registry(tmp_path, json.dumps({"branches": branches}))
 
-        mock_registry = MagicMock(spec=Path)
-        mock_registry.exists.return_value = True
+        detector._load_registry()
 
-        mock_root = MagicMock(spec=Path)
-        mock_root.__truediv__ = MagicMock(return_value=mock_registry)
+        assert detector.known_branches == {"PRAX", "FLOW"}
+        assert detector.branch_map[str((tmp_path / "prax").resolve())] == "PRAX"
 
-        with (
-            patch.object(detector, "_find_repo_root", return_value=mock_root),
-            patch("builtins.open", _mopen(read_data=json.dumps(registry_data))),
-            patch(f"{mod.__name__}.json.load", return_value=registry_data),
-            patch(f"{mod.__name__}.Path") as mock_path_cls,
-        ):
-            mock_path_cls.return_value.resolve.return_value = MagicMock(__str__=MagicMock(return_value="/resolved"))
-            detector._load_registry()
-
-        assert len(detector.known_branches) >= 2
-
-    def test_loads_fallback_when_registry_missing(self):
+    def test_loads_fallback_when_registry_missing(self, tmp_path):
         """Should load fallback branches when registry file not found."""
         mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod, branches={})
-        detector.known_branches.clear()
+        detector = self._detector_at(mod, tmp_path)
 
-        mock_root = MagicMock(spec=Path)
-        mock_registry = MagicMock(spec=Path)
-        mock_registry.exists.return_value = False
-        mock_root.__truediv__ = MagicMock(return_value=mock_registry)
-
-        with patch.object(detector, "_find_repo_root", return_value=mock_root):
-            detector._load_registry()
+        detector._load_registry()
 
         assert "PRAX" in detector.known_branches
         assert "SEEDGO" in detector.known_branches
+        assert "no branch registry at" in _detector_log().warning.call_args.args[0]
 
-    def test_loads_fallback_when_no_branches_key(self):
+    def test_loads_fallback_when_no_branches_key(self, tmp_path):
         """Should load fallback when registry has empty branches array."""
         mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod, branches={})
-        detector.known_branches.clear()
+        detector = self._detector_at(mod, tmp_path)
+        _write_registry(tmp_path, json.dumps({"branches": []}))
 
-        mock_root = MagicMock(spec=Path)
-        mock_registry = MagicMock(spec=Path)
-        mock_registry.exists.return_value = True
-        mock_root.__truediv__ = MagicMock(return_value=mock_registry)
-
-        with (
-            patch.object(detector, "_find_repo_root", return_value=mock_root),
-            patch("builtins.open", _mopen(read_data='{"branches": []}')),
-            patch(f"{mod.__name__}.json.load", return_value={"branches": []}),
-        ):
-            detector._load_registry()
+        detector._load_registry()
 
         assert "PRAX" in detector.known_branches
+        assert "lists no branches" in _detector_log().warning.call_args.args[0]
 
-    def test_loads_fallback_on_json_decode_error(self):
-        """Should load fallback on JSONDecodeError."""
+    def test_loads_fallback_on_json_decode_error(self, tmp_path):
+        """Should load fallback on JSONDecodeError, and say it was the JSON."""
         mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod, branches={})
-        detector.known_branches.clear()
+        detector = self._detector_at(mod, tmp_path)
+        _write_registry(tmp_path, "{bad json")
 
-        mock_root = MagicMock(spec=Path)
-        mock_registry = MagicMock(spec=Path)
-        mock_registry.exists.return_value = True
-        mock_root.__truediv__ = MagicMock(return_value=mock_registry)
-
-        with (
-            patch.object(detector, "_find_repo_root", return_value=mock_root),
-            patch("builtins.open", _mopen(read_data="{bad json")),
-            patch(
-                f"{mod.__name__}.json.load",
-                side_effect=json.JSONDecodeError("err", "doc", 0),
-            ),
-        ):
-            detector._load_registry()
+        detector._load_registry()
 
         assert "PRAX" in detector.known_branches
+        assert "is not valid JSON (line 1)" in _detector_log().error.call_args.args[0]
 
-    def test_loads_fallback_on_generic_exception(self):
-        """Should load fallback on any unexpected exception."""
+    def test_loads_fallback_on_generic_exception(self, tmp_path):
+        """Should load fallback when the registry cannot be read at all.
+
+        The registry name is a directory: it exists, and opening it fails with
+        whatever error this platform raises for that. The assert names no error
+        type, only that the catch-all clause, not the JSON one, answered.
+        """
         mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod, branches={})
-        detector.known_branches.clear()
+        detector = self._detector_at(mod, tmp_path)
+        (tmp_path / "AIPASS_REGISTRY.json").mkdir()
 
-        mock_root = MagicMock(spec=Path)
-        mock_registry = MagicMock(spec=Path)
-        mock_registry.exists.return_value = True
-        mock_root.__truediv__ = MagicMock(return_value=mock_registry)
-
-        with (
-            patch.object(detector, "_find_repo_root", return_value=mock_root),
-            patch("builtins.open", side_effect=PermissionError("denied")),
-        ):
-            detector._load_registry()
+        detector._load_registry()
 
         assert "PRAX" in detector.known_branches
+        assert "could not read the branch registry" in _detector_log().error.call_args.args[0]
 
 
 class TestLoadFallbackBranches:

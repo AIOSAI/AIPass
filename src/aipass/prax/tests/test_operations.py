@@ -10,15 +10,13 @@
 
 # Unit tests for aipass.prax.apps.handlers.dashboard.operations.
 #
-# Because conftest.py patches sys.modules with autouse mocks before imports,
-# the module under test is imported INSIDE each test function via importlib
-# to ensure the mocked dependencies are in place.
+# The modules under test are bound once at the top; an autouse fixture doubles
+# their logger and json service before every test (prax, leg 12).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(json_structure) — write_section's log_operation("section_updated") record, covered by that row
 # seedgo: no-test-needed(through_the_command) — merge_quick_status, covered by tests/test_dashboard_merge.py
 
-import importlib
 import json
 import sys
 import types
@@ -28,11 +26,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+from aipass.prax.apps.handlers.dashboard import operations, refresh, status, template_differ, template_pusher
 from aipass.prax.apps.modules import dashboard as dashboard_module
 
 # The dashboard module and the handler modules it was built on, as imported once
 # at collection. Their logger and json service are doubled before every test.
-_DASHBOARD_MODULES = [dashboard_module] + [
+_DASHBOARD_MODULES = [dashboard_module, operations, refresh, status, template_differ, template_pusher] + [
     module
     for name, module in sorted(sys.modules.items())
     if name.startswith("aipass.prax.apps.handlers.dashboard") and isinstance(module, types.ModuleType)
@@ -49,16 +48,13 @@ def _dashboard_quiet(monkeypatch):
                 monkeypatch.setattr(module, name, MagicMock())
 
 
-MODULE_PATH = "aipass.prax.apps.handlers.dashboard.operations"
-
-
 def _load_ops():
-    """Import (or reimport) the operations module under active mocks."""
-    sys.modules.pop(MODULE_PATH, None)
-    import aipass.prax.apps.handlers.dashboard.operations as mod
+    """The operations module, bound at the top; _dashboard_quiet doubles its edges.
 
-    importlib.reload(mod)
-    return mod
+    It used to be popped and reloaded per test; it holds constants only, and
+    the three tests that move _PRAX_ROOT put it back themselves (prax, leg 12).
+    """
+    return operations
 
 
 # =============================================
@@ -662,17 +658,10 @@ class TestUpdateSectionLegacy:
 # refresh_all_dashboards (refresh.py)
 # =============================================
 
-REFRESH_MODULE_PATH = "aipass.prax.apps.handlers.dashboard.refresh"
-
 
 def _load_refresh() -> types.ModuleType:
-    """Import (or reimport) the refresh module under active mocks."""
-    sys.modules.pop(REFRESH_MODULE_PATH, None)
-    sys.modules.pop("aipass.prax.apps.handlers.dashboard.operations", None)
-    import aipass.prax.apps.handlers.dashboard.refresh as mod
-
-    importlib.reload(mod)
-    return mod
+    """The refresh module, bound at the top; _dashboard_quiet doubles its edges."""
+    return refresh
 
 
 class TestRefreshAllDashboards:
@@ -830,16 +819,10 @@ class TestRefreshSingleDashboard:
 # get_branch_paths (status.py)
 # =============================================
 
-STATUS_MODULE_PATH = "aipass.prax.apps.handlers.dashboard.status"
-
 
 def _load_status() -> types.ModuleType:
-    """Import (or reimport) the status module under active mocks."""
-    sys.modules.pop(STATUS_MODULE_PATH, None)
-    import aipass.prax.apps.handlers.dashboard.status as mod
-
-    importlib.reload(mod)
-    return mod
+    """The status module, bound at the top; _dashboard_quiet doubles its edges."""
+    return status
 
 
 class TestGetBranchPaths:
@@ -1031,16 +1014,10 @@ class TestResolveBranchPath:
 # diff_dashboard_template (template_differ.py)
 # =============================================
 
-DIFFER_MODULE_PATH = "aipass.prax.apps.handlers.dashboard.template_differ"
-
 
 def _load_differ() -> types.ModuleType:
-    """Import (or reimport) the template_differ module under active mocks."""
-    sys.modules.pop(DIFFER_MODULE_PATH, None)
-    import aipass.prax.apps.handlers.dashboard.template_differ as mod
-
-    importlib.reload(mod)
-    return mod
+    """The template_differ module, bound at the top; _dashboard_quiet doubles its edges."""
+    return template_differ
 
 
 class TestDiffDashboardTemplate:
@@ -1246,16 +1223,10 @@ class TestDiffDashboardTemplate:
 # push_dashboard_template (template_pusher.py)
 # =============================================
 
-PUSHER_MODULE_PATH = "aipass.prax.apps.handlers.dashboard.template_pusher"
-
 
 def _load_pusher() -> types.ModuleType:
-    """Import (or reimport) the template_pusher module under active mocks."""
-    sys.modules.pop(PUSHER_MODULE_PATH, None)
-    import aipass.prax.apps.handlers.dashboard.template_pusher as mod
-
-    importlib.reload(mod)
-    return mod
+    """The template_pusher module, bound at the top; _dashboard_quiet doubles its edges."""
+    return template_pusher
 
 
 class TestPushDashboardTemplate:

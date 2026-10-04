@@ -266,7 +266,7 @@
     {
       "file": "tests/test_monitoring_handlers.py",
       "standard": "mock_console",
-      "lines": [911],
+      "lines": [863],
       "reason": "prax, leg 11, under devpulse's console ruling (b): the colour is the claim (error level red, SEEDGO green, an unknown branch white), and it exists nowhere but inside print_event's console call (a dict lookup into the markup string). capsys strips it. A real Console on a buffer with colour forced, set by monkeypatch for the three colour tests alone; every other test in the file reads the real console with capsys."
     },
     {
