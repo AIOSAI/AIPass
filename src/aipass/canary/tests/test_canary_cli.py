@@ -3,7 +3,7 @@
 # Description: Tests for canary's entry point routing, help and introspection
 # Version: 1.0.0
 # Created: 2026-08-22
-# Modified: 2026-08-22
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for canary's CLI entry point.

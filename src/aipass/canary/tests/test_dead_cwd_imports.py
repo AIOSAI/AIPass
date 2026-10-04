@@ -111,6 +111,7 @@ def _run_child(body: str) -> subprocess.CompletedProcess:
         [sys.executable, "-c", body],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
         cwd=str(REPO_ROOT),
     )

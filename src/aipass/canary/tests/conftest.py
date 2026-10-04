@@ -2,10 +2,12 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Date: 2026-09-03
-# Version: 3.0.0
+# Version: 3.1.0
 # Category: canary/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v3.1.0 (2026-10-03): Template C1/C2 - pinned console width, command state reset
+#     after every test; product import moved to the top
 #   - v3.0.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam — the
 #     fleet service resolves its directory per call, so there is no singleton
 #     and no private attribute left to patch (DPLAN-0325)
@@ -41,12 +43,29 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 
+from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.json import json_handler
+from aipass.cli.apps.modules import display
 
 # Never discover out of .archive/: it holds verbatim disposal copies (old
 # handler tests, the archived json_dir pin) that must not be collected or
 # rglob-walked into dotted module names (DPLAN-0325, spec 4c).
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture
@@ -112,8 +131,6 @@ def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
 
         def error(self, *args, **kwargs):
             captured.append(("error", args))
-
-    from aipass.canary.apps import canary as canary_entry
 
     monkeypatch.setattr(canary_entry, "logger", _CapturingLogger())
     return captured
