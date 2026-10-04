@@ -279,7 +279,7 @@
       "path": "__init__.py"
     },
     "f027": {
-      "content_hash": "3f94fa075d1f",
+      "content_hash": "1469c1103a90",
       "has_branch_placeholder": true,
       "name": "{{BRANCH}}.py",
       "path": "apps/{{BRANCH}}.py"
@@ -405,7 +405,7 @@
       "path": "apps/handlers/json/json_handler.py"
     },
     "f048": {
-      "content_hash": "e4fe1ed373a7",
+      "content_hash": "85dc65f0293f",
       "has_branch_placeholder": false,
       "name": "test_cli_routing.py",
       "path": "tests/test_cli_routing.py"
@@ -419,7 +419,7 @@
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-09-19",
+    "last_updated": "2026-10-04",
     "version": "1.0.0"
   }
 }

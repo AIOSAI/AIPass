@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: {{BRANCH}}.py
 # Description: Entry point CLI for drone @{{BRANCH}}
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: {{DATE}}
 # Modified: {{DATE}}
 # =============================================
@@ -49,31 +49,15 @@ __version__ = "1.0.0"
 MODULES_DIR = Path(__file__).parent / "modules"
 
 
-def _module_import_path(stem: str) -> str:
-    """Return the correct import path for a module, handling both layouts.
-
-    Args:
-        stem: Module filename without the .py suffix.
-
-    Returns:
-        The installed-package path when importable, else the local fallback.
-    """
-    try:
-        importlib.import_module(f"aipass.{{BRANCH}}.apps.modules.{stem}")
-        return f"aipass.{{BRANCH}}.apps.modules.{stem}"
-    except (ImportError, OSError) as e:
-        # Not silent: the fallback path is a real branch in behaviour, so the
-        # reason it was taken has to stay readable afterwards.
-        # OSError as well as ImportError: the package import runs the handler
-        # access guard, which touches the filesystem, so an unreadable cwd
-        # raises FileNotFoundError here — and the local layout is exactly the
-        # right answer in that world too.
-        logger.info("[{{BRANCHNAME}}] Package import failed for %s (%s) - using local layout", stem, e)
-        return f"apps.modules.{stem}"
-
-
 def discover_modules() -> List[Any]:
     """Auto-discover modules in modules/ directory.
+
+    Every module is imported by its package path only. The local-layout
+    fallback (apps.modules.<stem>) was removed in canary's fleet green leg 1
+    and ported to this template in spawn's leg 10: this file imports aipass.*
+    above, so the package is always importable, and a module that failed under
+    its package name failed again under the local one and was logged by the
+    wrong name.
 
     Returns:
         List of imported modules exposing handle_command().
@@ -87,7 +71,7 @@ def discover_modules() -> List[Any]:
         if file_path.name.startswith("_"):
             continue
 
-        module_name = _module_import_path(file_path.stem)
+        module_name = f"aipass.{{BRANCH}}.apps.modules.{file_path.stem}"
 
         try:
             module = importlib.import_module(module_name)
