@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_activity_report.py
 # Description: Tests for the activity_report CLI module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-03
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
@@ -299,9 +299,17 @@ def _clean_payload(**overrides):
 
 
 def _render(branch="DAEMON"):
-    """Resolve the renderer by name so this file imports before the fix lands."""
-    fn = getattr(activity_report, "_render_entry_health")
-    return fn(branch)
+    """The entry-health block as `branch-health <branch>` prints it, escape codes stripped.
+
+    Through the command, not the private renderer (daemon, fleet green leg 5): the
+    roster is pinned to the one branch and the base report is empty, so what is
+    printed is the entry-health block alone.
+    """
+    with patch(ROSTER_TARGET, return_value=[branch]):
+        with patch(f"{MODULE}.generate_branch_report", return_value=""):
+            with cli_console.capture() as captured:
+                handle_command("branch-health", [branch])
+    return _strip_ansi(captured.get())
 
 
 class TestRenderEntryHealthSeverity:

@@ -3,10 +3,10 @@
 # Description: Data loader tests — inbox and local.json loading, message triage, the real mailbox path
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for apps/handlers/update/data_loader.py, and the inbox path apps/daemon_wakeup.py shares with it."""
+"""Tests for apps/handlers/update/data_loader.py, and apps/daemon_wakeup.py's shared inbox path and --help guard."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — json.load's own parse of a well-formed file
@@ -327,3 +327,27 @@ class TestGetEscalations:
         messages = [{"id": "1"}]
         result = get_escalations(messages)
         assert result == []
+
+
+class TestWakeupHelpAfterAnArgument:
+    """daemon_wakeup <arg> --help shows the help and runs nothing (daemon, fleet green leg 5)."""
+
+    def test_help_after_an_argument_prints_help_and_runs_nothing(self, tmp_path, monkeypatch, capsys):
+        """Red first: main read only args[0], so `daemon_wakeup run --help` ran the wake-up job.
+
+        The lock file is moved under tmp_path and the job is a recorder, so the old
+        code's run touches nothing live.
+        Mutant killed: the --help guard on the arguments after the first removed.
+        """
+        from unittest.mock import patch
+
+        ran: list[bool] = []
+        monkeypatch.setattr(_wakeup_mod, "LOCK_FILE", tmp_path / "wakeup.lock")
+        monkeypatch.setattr(_wakeup_mod, "_run_locked", lambda: ran.append(True) or 0)
+        logged: list[tuple] = []
+        monkeypatch.setattr(_wakeup_mod.json_handler, "log_operation", lambda *a, **k: logged.append(a))
+        with patch("sys.argv", ["daemon_wakeup", "run", "--help"]):
+            assert _wakeup_mod.main() == 0
+        assert ran == [], "a --help after an argument must not run the wake-up job"
+        assert logged == [], f"a --help must not record a wake-up trigger: {logged}"
+        assert "USAGE:" in capsys.readouterr().out
