@@ -3,7 +3,7 @@
 # Description: Unit tests for skills runner
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # Category: skills/tests
 # =============================================
 
@@ -12,9 +12,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that runner.py and runner_handler.py parse and import
 
-import builtins
 import os
-import sys
 import time
 from collections import namedtuple
 
@@ -131,7 +129,8 @@ class TestRunSkillReturnContract:
 # for (FPLAN-0554, runs 34704362515 / 34707099650). The world has three parts
 # and all three are load-bearing:
 #
-#   sys.platform says darwin        - the host names itself honestly
+#   the handler's platform is darwin - the host names itself honestly, through
+#                                     the handler's _host_platform seam
 #   every /proc read is refused     - what makes the world discriminating; the
 #                                     pre-cure handler read /proc itself and
 #                                     goes red under exactly this fixture
@@ -220,35 +219,20 @@ def status_handler():
 
 
 @pytest.fixture()
-def darwin_host(monkeypatch, status_handler):
+def darwin_host(monkeypatch, status_handler, audit_guard):
     """A host with no /proc, with psutil answering the way it does on a Mac."""
-    real_open = builtins.open
-    real_exists = os.path.exists
-    real_listdir = os.listdir
 
-    def _is_proc(path):
-        text = str(path)
-        return text == PROC_ROOT or text.startswith(PROC_ROOT + "/")
+    def _deny_proc(event, args):
+        # "open" covers builtins.open, io.open, os.open and pathlib; the two
+        # directory reads are their own events. Every route, no name replaced.
+        if event not in ("open", "os.listdir", "os.scandir") or not isinstance(args[0], (str, os.PathLike)):
+            return
+        text = os.fspath(args[0])
+        if text == PROC_ROOT or text.startswith(PROC_ROOT + "/"):
+            raise FileNotFoundError(2, "No such file or directory", text)
 
-    def _open(file, *args, **kwargs):
-        if _is_proc(file):
-            raise FileNotFoundError(2, "No such file or directory", str(file))
-        return real_open(file, *args, **kwargs)
-
-    def _exists(path):
-        if _is_proc(path):
-            return False
-        return real_exists(path)
-
-    def _listdir(path="."):
-        if _is_proc(path):
-            raise FileNotFoundError(2, "No such file or directory", str(path))
-        return real_listdir(path)
-
-    monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr(builtins, "open", _open)
-    monkeypatch.setattr(os.path, "exists", _exists)
-    monkeypatch.setattr(os, "listdir", _listdir)
+    audit_guard(_deny_proc)
+    monkeypatch.setattr(status_handler, "_host_platform", lambda: "darwin")
     # 1d 1h 1m 1s ago, read at fixture time
     monkeypatch.setattr(status_handler, "psutil", _darwin_psutil(time.time() - 90061))
     return status_handler
@@ -258,22 +242,25 @@ class TestTheDarwinWorldIsLive:
     """Controls. A world that reached nothing must not pass quietly."""
 
     def test_the_host_has_no_proc(self, darwin_host):
-        assert sys.platform == "darwin"
-        assert os.path.exists(PROC_MEMINFO) is False
+        assert darwin_host._host_platform() == "darwin"
         with pytest.raises(FileNotFoundError):
             open(PROC_MEMINFO, encoding="utf-8").close()
+        with pytest.raises(FileNotFoundError):
+            os.close(os.open(PROC_MEMINFO, os.O_RDONLY))
 
     def test_the_denial_can_still_say_yes(self, darwin_host, tmp_path):
         """Control on the control: a path outside /proc still opens."""
         probe = tmp_path / "probe.txt"
         probe.write_text("alive", encoding="utf-8")
-        assert os.path.exists(str(probe)) is True
         with open(probe, encoding="utf-8") as handle:
             assert handle.read() == "alive"
+        assert "probe.txt" in os.listdir(tmp_path)
 
     def test_the_process_table_is_gone_too(self, darwin_host):
         with pytest.raises(FileNotFoundError):
             os.listdir(PROC_ROOT)
+        with pytest.raises(FileNotFoundError):
+            os.scandir(PROC_ROOT).close()
 
 
 class TestSystemStatusOffLinux:

@@ -3,7 +3,7 @@
 # Description: The machine_vitals() contract
 # Version: 1.1.0
 # Created: 2026-09-12
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # Category: skills/tests
 # =============================================
 
@@ -12,10 +12,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the skill's handler module parses and imports
 
-import builtins
-import io
 import os
-import sys
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -322,7 +319,7 @@ def sysfs(tmp_path, monkeypatch):
     """A Linux host whose hwmon tree is the MacBook's, built in tmp_path."""
     root = _build_hwmon(tmp_path / "hwmon")
     monkeypatch.setattr(status, "HWMON_ROOT", root)
-    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(status, "_host_platform", lambda: "linux")
     return root
 
 
@@ -334,50 +331,39 @@ def machine(monkeypatch, clock, sysfs):
 
 
 @pytest.fixture()
-def guarded_sysfs(sysfs, monkeypatch):
+def guarded_sysfs(sysfs, audit_guard):
     """Record every open under the sysfs tree; a fan control file or a write mode raises.
 
-    builtins.open, io.open and os.open are all covered - pathlib reaches files
-    through io.open, and on Python 3.10 through os.open as well.
+    The interpreter's "open" audit event covers builtins.open, io.open, os.open
+    and pathlib alike (pathlib reaches files through io.open, and on Python
+    3.10 through os.open as well), so no route escapes and no name is replaced.
+    The event carries the mode for open() and None for os.open(), whose flags
+    are recorded instead.
     """
-    real_open = builtins.open
-    real_os_open = os.open
     root = os.fspath(sysfs)
     opened = []
     write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 
-    def _relative(file):
-        if isinstance(file, (str, os.PathLike)) and os.fspath(file).startswith(root):
-            return Path(os.fspath(file)).relative_to(sysfs).as_posix()
-        return None
+    def _guard(event, args):
+        if event != "open" or not isinstance(args[0], (str, os.PathLike)):
+            return
+        path, mode, flags = args
+        if not os.fspath(path).startswith(root):
+            return
+        relative = Path(os.fspath(path)).relative_to(sysfs).as_posix()
+        opened.append((relative, mode if mode is not None else flags))
+        if Path(relative).name in FAN_CONTROL_FILES:
+            raise PermissionError(13, "a fan control file was opened", os.fspath(path))
+        if flags & write_flags:
+            raise PermissionError(13, "sysfs was opened for writing", os.fspath(path))
 
-    def _open(file, mode="r", *args, **kwargs):
-        relative = _relative(file)
-        if relative is not None:
-            opened.append((relative, mode))
-            if Path(relative).name in FAN_CONTROL_FILES:
-                raise PermissionError(13, "a fan control file was opened", os.fspath(file))
-            if set(mode) & set("wax+"):
-                raise PermissionError(13, "sysfs was opened for writing", os.fspath(file))
-        return real_open(file, mode, *args, **kwargs)
-
-    def _os_open(path, flags, *args, **kwargs):
-        relative = _relative(path)
-        if relative is not None:
-            opened.append((relative, flags))
-            if Path(relative).name in FAN_CONTROL_FILES or flags & write_flags:
-                raise PermissionError(13, "sysfs was opened for writing", os.fspath(path))
-        return real_os_open(path, flags, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "open", _open)
-    monkeypatch.setattr(io, "open", _open)
-    monkeypatch.setattr(os, "open", _os_open)
+    audit_guard(_guard)
     return opened
 
 
 def _manufacture(monkeypatch, clock, tmp_path, platform):
     """A host with no sensor functions at all, naming itself as platform."""
-    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(status, "_host_platform", lambda: platform)
     monkeypatch.setattr(status, "HWMON_ROOT", tmp_path / "no_sysfs_here")
     stand_in = _Machine(clock)
     monkeypatch.setattr(status, "psutil", stand_in)
@@ -648,7 +634,7 @@ class TestTheFanRangeReadIsReadOnly:
         assert status.machine_vitals()["fan"]["fans"] == [RIGHT_SIDE_AT_ITS_FLOOR]
 
     def test_off_linux_the_range_is_never_read(self, machine, guarded_sysfs, monkeypatch):
-        monkeypatch.setattr(sys, "platform", "freebsd14")
+        monkeypatch.setattr(status, "_host_platform", lambda: "freebsd14")
         fan = status.machine_vitals()["fan"]
         assert fan["reason"] == "no_range"
         assert fan["current"] == 1290

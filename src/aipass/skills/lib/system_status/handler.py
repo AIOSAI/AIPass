@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handler.py
 # Description: System Status skill handler - disk, memory, uptime, processes, machine_vitals()
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-07
-# Modified: 2026-09-13
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -48,6 +48,17 @@ except ImportError:
 # What to tell a caller whose host has no psutil. Naming the recipe is the
 # point: "not available" sent the reader looking at their kernel.
 PSUTIL_RECIPE = "psutil is not importable on this host - install it with: pip install 'psutil>=5.9'"
+
+
+def _host_platform():
+    """The platform this process runs on: sys.platform, read at the call.
+
+    One door for every platform branch in this module, so a test can name the
+    host it builds (macOS, Windows, FreeBSD) on this module alone instead of
+    replacing sys.platform for every reader in the process (skills, fleet
+    green leg 3).
+    """
+    return sys.platform
 
 
 def run(action, args=None, config=None):
@@ -559,7 +570,7 @@ def _read_load(ps):
     """1, 5 and 15 minute load averages."""
     # On Windows psutil emulates load with a sampler thread that reads 0 until
     # it warms. That 0 is not a measurement, so the platform is named instead.
-    if sys.platform == "win32" or not hasattr(ps, "getloadavg"):
+    if _host_platform() == "win32" or not hasattr(ps, "getloadavg"):
         return _section("load", "platform")
 
     one, five, fifteen = ps.getloadavg()
@@ -701,7 +712,7 @@ def _fan_range(chip, label):
             usable range - off Linux, not found, missing, unreadable, or min not
             below max.
     """
-    if sys.platform != "linux":
+    if _host_platform() != "linux":
         return None, "The fan range is read from Linux sysfs, and this host is not Linux."
 
     try:

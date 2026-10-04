@@ -3,7 +3,7 @@
 # Description: Dead-cwd import pins
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -42,20 +42,25 @@ BRANCH_ROOT = Path(__file__).resolve().parents[1]
 GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 
 
-def _skills_modules() -> list:
+def _skills_modules(branch_root: Path = BRANCH_ROOT) -> list:
     """Every importable skills module, by dotted name.
+
+    Skips are judged on the parts relative to branch_root, never the whole
+    path, so a checkout under a directory named dropbox is still walked.
+    dropbox is a sandbox nothing runs out of (the owner's ruling of
+    2026-09-27); docs.local is untracked scratch no import can spell.
 
     Returns:
         list[str]: Dotted module names, tests and templates excluded.
     """
     mods = []
-    for path in sorted((SRC_ROOT / "aipass" / "skills").rglob("*.py")):
-        rel = path.relative_to(SRC_ROOT)
+    for path in sorted(branch_root.rglob("*.py")):
+        rel = path.relative_to(branch_root)
         if any(part.startswith(".") for part in rel.parts):
             continue
-        if {"tests", "__pycache__", "templates"} & set(rel.parts):
+        if {"tests", "__pycache__", "templates", "dropbox", "docs.local"} & set(rel.parts):
             continue
-        parts = list(rel.with_suffix("").parts)
+        parts = ["aipass", "skills", *rel.with_suffix("").parts]
         if parts[-1] == "__init__":
             parts = parts[:-1]
         mods.append(".".join(parts))
@@ -1095,3 +1100,20 @@ class TestTheAccessorTrapResolveRoute:
         other reason rather than because it reached the accessor.
         """
         assert _run_emulation(ACCESSOR_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve") == "VERDICT=NO_RAISE"
+
+
+class TestTheModuleWalk:
+    def test_the_walk_skips_sandboxes_by_name_relative_to_its_root(self, tmp_path):
+        """Pins the shipped defect: docs.local/ scratch tools were walked and went RED as modules.
+
+        The root stands inside a directory named dropbox, so a skip judged on
+        the whole path would hide the branch itself. A test module cannot be
+        served by the mutant runner; this pin stands on red first alone.
+        """
+        branch = tmp_path / "dropbox" / "skills"
+        for rel in ("apps/a.py", "dropbox/tool.py", "docs.local/x/tool.py", ".archive/old.py", "tests/test_a.py"):
+            target = branch / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("", encoding="utf-8")
+
+        assert _skills_modules(branch) == ["aipass.skills.apps.a"]
