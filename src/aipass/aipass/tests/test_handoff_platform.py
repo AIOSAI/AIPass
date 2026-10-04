@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handoff_platform.py
 # Description: Tests for handoff_platform handler
-# Version: 1.1.5
+# Version: 1.1.6
 # Created: 2026-05-12
-# Modified: 2026-09-29
+# Modified: 2026-09-30
 # =============================================
 
 """Tests for apps/handlers/handoff_platform/__init__.py and the handoff module it drives."""
@@ -567,6 +567,20 @@ class TestHandoffCommandRefusal:
     refusal that exited 0, and it had NO test at all, so nothing pinned either
     the old outcome or the new one.
     """
+
+    def test_help_names_what_bare_prints(self, capsys) -> None:
+        """Bare `aipass handoff` prints this usage; status is `--info`.
+
+        Mutant: the bare line claims "Show status" again -> red.
+        Mutant: the `--info` line dropped -> red.
+        """
+        assert handle_command("handoff", ["--help"]) is True
+        out, _err = capsys.readouterr()
+        usage = {
+            cmd.strip(): note.strip() for cmd, sep, note in (line.partition("#") for line in out.splitlines()) if sep
+        }
+        assert usage["aipass handoff"] == "Show this usage"
+        assert usage["aipass handoff --info"] == "Show status and stored CLI"
 
     def test_unknown_cli_refuses_non_zero(self) -> None:
         """An unrecognised CLI launches nothing, so it cannot exit 0.

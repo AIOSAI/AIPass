@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handoff.py
 # Description: CLI handoff orchestration — aipass handoff command
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-16
-# Modified: 2026-04-20
+# Modified: 2026-09-30
 # =============================================
 
 """
@@ -13,7 +13,8 @@ Thin coordinator. Delegates platform dispatch to handlers/handoff_platform/
 which handles tmux (Linux/Mac), wt.exe (Windows), or prints fallback command.
 
 Usage:
-    aipass handoff                    # show status / introspection
+    aipass handoff                    # show this usage
+    aipass handoff --info             # show status / introspection
     aipass handoff launch             # launch with stored profile settings
     aipass handoff launch --cli claude --cwd src/my-agent
     aipass handoff --help
@@ -98,7 +99,8 @@ def print_help() -> None:
     console.print("[bold cyan]aipass handoff[/bold cyan] — launch CLI in a new session")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  [green]aipass handoff[/green]                      [dim]# Show status[/dim]")
+    console.print("  [green]aipass handoff[/green]                      [dim]# Show this usage[/dim]")
+    console.print("  [green]aipass handoff --info[/green]               [dim]# Show status and stored CLI[/dim]")
     console.print("  [green]aipass handoff launch[/green]               [dim]# Launch with profile defaults[/dim]")
     console.print("  [green]aipass handoff launch --cli claude[/green]  [dim]# Specify CLI[/dim]")
     console.print()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_feedback.py
 # Description: Tests for aipass feedback — toggle alias for @hooks feedback pulse
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-07-18
-# Modified: 2026-09-27
+# Modified: 2026-09-30
 # =============================================
 
 """Tests for apps/modules/feedback.py and the feedback toggle command it drives."""
@@ -33,6 +33,20 @@ class TestHandleCommand:
         assert handle_command("feedback", ["--help"]) is True
         out, _err = capsys.readouterr()
         assert "toggle the feedback reminder" in out
+
+    def test_help_names_what_bare_prints(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Bare `aipass feedback` prints the module banner; the pulse state lives with @hooks.
+
+        Mutant: the bare line claims "show current state" again -> red.
+        Mutant: the pointer to `drone @hooks feedback` dropped -> red.
+        """
+        assert handle_command("feedback", ["--help"]) is True
+        out, _err = capsys.readouterr()
+        usage = {
+            cmd.strip(): note.strip() for cmd, sep, note in (line.partition("#") for line in out.splitlines()) if sep
+        }
+        assert usage["aipass feedback"] == "show module info"
+        assert usage["drone @hooks feedback"] == "show current state"
 
     def test_info(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: --info branch skips print_introspection -> red."""

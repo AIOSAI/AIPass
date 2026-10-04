@@ -1,16 +1,17 @@
 # =================== AIPass ====================
 # Name: feedback.py
 # Description: aipass feedback — toggle the feedback reminder pulse on/off
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-18
-# Modified: 2026-07-18
+# Modified: 2026-09-30
 # =============================================
 
 """
 aipass feedback — user-facing alias for the @hooks feedback toggle.
 
 Usage:
-    aipass feedback          # show current state
+    aipass feedback          # show module info
+    drone @hooks feedback    # show current state
     aipass feedback on       # enable feedback reminders
     aipass feedback off      # disable feedback reminders
     aipass feedback --help
@@ -55,7 +56,8 @@ def print_help() -> None:
     console.print("[bold cyan]aipass feedback[/bold cyan] — toggle the feedback reminder")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  [green]aipass feedback[/green]       [dim]# show current state[/dim]")
+    console.print("  [green]aipass feedback[/green]       [dim]# show module info[/dim]")
+    console.print("  [green]drone @hooks feedback[/green] [dim]# show current state[/dim]")
     console.print("  [green]aipass feedback on[/green]    [dim]# enable feedback reminders[/dim]")
     console.print("  [green]aipass feedback off[/green]   [dim]# disable feedback reminders[/dim]")
     console.print()
