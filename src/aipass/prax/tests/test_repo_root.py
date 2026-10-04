@@ -3,7 +3,7 @@
 # Description: Repo-Root Resolution Pins
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -285,7 +285,8 @@ def _run_without_a_working_directory(body: str, world: str = _INJECT_DEAD_CWD, m
 class TestSourceRoot:
     """The fallback is derived from the FILE, and nothing else.
 
-    The component walk is pinned through _walk_to_source_root on BOTH path
+    The host's dialect is pinned through source_root on tmp_path, the other
+    dialect through _walk_to_source_root (prax, leg 14). It was pinned on BOTH path
     dialects, from either platform. @devpulse's Windows CI leg found the first
     version of these tests asserting on ``Path("/x/checkout/src/...")``, which is
     rooted-but-driveless and therefore NOT absolute as a WindowsPath — so
@@ -296,28 +297,29 @@ class TestSourceRoot:
     stops being the world you meant on the other platform.
     """
 
-    @pytest.mark.parametrize("flavour", [PurePosixPath, PureWindowsPath])
-    def test_the_directory_containing_src_is_the_checkout(self, flavour):
-        start = flavour("/x/checkout/src/aipass/prax/a.py")
-        assert repo_root_mod._walk_to_source_root(start) == flavour("/x/checkout")
+    # The host's own dialect goes through source_root, the public door, on a
+    # start built from tmp_path; the root is asked of the platform (prax, leg 14).
+    # Only the other dialect still needs the pure walk (the drive-qualified test).
 
-    @pytest.mark.parametrize("flavour", [PurePosixPath, PureWindowsPath])
-    def test_no_src_component_falls_to_the_root(self, flavour):
+    def test_the_directory_containing_src_is_the_checkout(self, tmp_path):
+        start = tmp_path / "checkout" / "src" / "aipass" / "prax" / "a.py"
+        assert repo_root_mod.source_root(start) == tmp_path / "checkout"
+
+    def test_no_src_component_falls_to_the_root(self, tmp_path):
         """Defined, incapable of raising, and absurd enough to fail loudly.
 
         A plausible-looking answer here is worse than an absurd one: it would
         resolve quietly into somebody's home directory.
         """
-        walked = repo_root_mod._walk_to_source_root(flavour("/nowhere/at/all/a.py"))
-        assert walked == flavour("/")
+        start = tmp_path / "nowhere" / "at" / "all" / "a.py"
+        assert repo_root_mod.source_root(start) == Path(start.anchor)
 
     def test_a_drive_qualified_windows_path_walks_to_its_own_checkout(self):
         """The spelling a real Windows caller actually produces."""
         start = PureWindowsPath(r"D:\a\AIPass\AIPass\src\aipass\prax\a.py")
         assert repo_root_mod._walk_to_source_root(start) == PureWindowsPath(r"D:\a\AIPass\AIPass")
 
-    @pytest.mark.parametrize("flavour", [PurePosixPath, PureWindowsPath])
-    def test_the_src_match_is_exact_case_not_folded(self, flavour):
+    def test_the_src_match_is_exact_case_not_folded(self, tmp_path):
         """A deliberate semantic, pinned because a mutation folding it survived.
 
         Case-folding the component match would "work" on Windows and GUESS on
@@ -326,7 +328,8 @@ class TestSourceRoot:
         the registry trust anchor. An unrecognised layout takes the loud last
         resort instead — which is what the last resort is for.
         """
-        assert repo_root_mod._walk_to_source_root(flavour("/x/SRC/aipass/prax/a.py")) == flavour("/")
+        start = tmp_path / "x" / "SRC" / "aipass" / "prax" / "a.py"
+        assert repo_root_mod.source_root(start) == Path(start.anchor)
 
     def test_a_relative_start_is_refused_not_resolved(self):
         """Resolving it would read the working directory this module exists to avoid."""

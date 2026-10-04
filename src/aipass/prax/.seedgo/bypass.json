@@ -253,6 +253,18 @@
       "reason": "prax, leg 10 (file-wide: this checker passes no line; the one patch is at 741). The subject is how many times the handler stats one file per event. Path.stat is wrapped, not replaced: the wrapper counts calls on that one path and returns the real answer for every path, for the test's span only (monkeypatch). A stat seam in the handler would be a door for this test alone."
     },
     {
+      "file": "tests/test_dashboard_merge.py",
+      "standard": "through_the_command",
+      "lines": [187, 188, 189],
+      "reason": "prax, leg 14. These calls were always here; the _load helper hid them from the checker until this leg bound the modules by import. The file's subject is four copies of one quick_status calculator, and the defect it pins is the drift between them, so each copy is called by name in the parametrize table; a public door mixes in the merge and the other writers and could not tell which copy drifted. The other private calls the helper hid (the pusher's structural step, the differ's per-branch diff) now go through push_dashboard_template and diff_dashboard_template on a tmp world."
+    },
+    {
+      "file": "tests/test_repo_root.py",
+      "standard": "through_the_command",
+      "lines": [320, 842],
+      "reason": "prax, leg 14. 320: the walk on the OTHER platform's dialect (a drive-qualified Windows path, from a Linux run). source_root makes a host Path of its start, so only the pure walk can take that dialect; the host's own dialect goes through source_root in the three tests above it. 842: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
+    },
+    {
       "file": "tests/test_telegram_relay.py",
       "standard": "through_the_command",
       "lines": [109, 425],

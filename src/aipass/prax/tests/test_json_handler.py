@@ -36,6 +36,7 @@ import pytest
 import aipass.prax
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.json import json_service
+from aipass.prax.apps.handlers.monitoring import rate_tracker
 
 
 # =============================================
@@ -374,11 +375,14 @@ class TestTheBoundedReplaceRetry:
 
         monkeypatch.setattr(json_service.os, "replace", always_blocked)
         monkeypatch.setattr(json_service, "_REPLACE_BACKOFF_SECONDS", 0)
+        # The bound is set here, so the count is the test's own number and never
+        # a copy of the product's (prax, leg 14).
+        monkeypatch.setattr(json_service, "_REPLACE_ATTEMPTS", 3)
         target = tmp_path / "live.json"
 
         assert handle.write_json(target, {"payload": 1}) is False
 
-        assert attempts["count"] == json_service._REPLACE_ATTEMPTS
+        assert attempts["count"] == 3
         assert target.exists() is False
 
     def test_a_non_sharing_oserror_is_not_retried(self, handle, monkeypatch, tmp_path):
@@ -823,31 +827,38 @@ class TestEveryLogWriteBumpsTheDataLeg:
 class TestRateTrackerKeepsKeysItDoesNotOwn:
     """rate_tracker_data.json is both the tracker's state and its data leg."""
 
-    def test_the_counters_and_the_trackers_files_survive_each_others_writes(self, sandbox, monkeypatch):
+    def test_the_counters_and_the_trackers_files_survive_each_others_writes(self, sandbox, monkeypatch, tmp_path):
         """The real tracker against the real shim, both writing one document.
 
         The old _save_state rebuilt the dict every scan: ``created`` re-stamped
         to today and the service's counters wiped. Now each writer sets only its
         own keys — and the bump that follows a save keeps the tracker's files.
+        The save is reached through configure and scan_rates, the public door
+        (prax, leg 14).
         """
-        import importlib
-
-        tracker = importlib.import_module("aipass.prax.apps.handlers.monitoring.rate_tracker")
-        monkeypatch.setattr(tracker, "json_handler", json_handler)
-        monkeypatch.setattr(tracker, "_tracked", {})
+        logs = tmp_path / "scanned_logs"
+        logs.mkdir()
+        log_file = logs / "a.log"
+        log_file.write_bytes(b"x" * 4096)
+        monkeypatch.setattr(rate_tracker, "json_handler", json_handler)
+        monkeypatch.setattr(rate_tracker, "_tracked", {})
+        monkeypatch.setattr(rate_tracker, "_state_loaded", False)
+        monkeypatch.setattr(rate_tracker, "_logs_dir", None)
+        monkeypatch.setattr(rate_tracker, "_suppressed_files", set())
         _seed_data(sandbox, "rate_tracker", {"created": "2020-01-01", "last_updated": "2020-01-01"})
 
         json_handler.log_operation("runaway_detected", module_name="rate_tracker")
         json_handler.log_operation("runaway_detected", module_name="rate_tracker")
-        tracker._tracked["/logs/a.log"] = tracker.FileRateState(4096, 1000.0)
-        tracker._save_state()
+        rate_tracker.configure(logs_dir=logs)
+        rate_tracker.scan_rates()
 
         saved = _read_data(sandbox, "rate_tracker")
         assert saved["operations_total"] == 2
         assert saved["last_operation"] == "runaway_detected"
         assert saved["created"] == "2020-01-01"
         assert saved["module_name"] == "rate_tracker"
-        assert saved["files"] == {"/logs/a.log": tracker.FileRateState(4096, 1000.0).to_dict()}
+        assert list(saved["files"]) == [str(log_file)]
+        assert saved["files"][str(log_file)]["last_offset"] == 4096
 
         json_handler.log_operation("runaway_detected", module_name="rate_tracker")
 

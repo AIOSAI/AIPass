@@ -3,7 +3,7 @@
 # Description: Tests for the rate tracker runaway-log detector
 # Version: 1.5.0
 # Created: 2026-07-14
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/monitoring/rate_tracker.py"""
@@ -233,6 +233,10 @@ class TestSubsidence:
         log_file.write_text("x" * 100, encoding="utf-8")
 
         event_mock = _reset_tracker(monkeypatch, logs_dir=logs_dir)
+        # The window is set here, so the idle scans that clear it are the test's
+        # own number and never a read of the product's (prax, leg 14).
+        window = 6
+        monkeypatch.setattr(mod, "_WINDOW_INTERVALS", window)
 
         base_time = time.time()
         mod.scan_rates()
@@ -250,7 +254,7 @@ class TestSubsidence:
 
         assert event_mock.call_count == 1
 
-        for j in range(mod._WINDOW_INTERVALS):
+        for j in range(window):
             idle_offset = mod.WARNING_SUSTAINED_INTERVALS + j + 1
             with patch.object(
                 mod.time,
@@ -259,7 +263,7 @@ class TestSubsidence:
             ):
                 mod.scan_rates()
 
-        gap = mod.WARNING_SUSTAINED_INTERVALS + mod._WINDOW_INTERVALS
+        gap = mod.WARNING_SUSTAINED_INTERVALS + window
         for i in range(mod.WARNING_SUSTAINED_INTERVALS):
             log_file.write_bytes(b"x" * bytes_per_interval + log_file.read_bytes())
             with patch.object(
@@ -430,6 +434,9 @@ class TestBurstDetection:
         log_file.write_text("x" * 100, encoding="utf-8")
 
         event_mock = _reset_tracker(monkeypatch, logs_dir=logs_dir)
+        # The window is the test's own number, set here (prax, leg 14).
+        window = 6
+        monkeypatch.setattr(mod, "_WINDOW_INTERVALS", window)
         base_time = time.time()
         mod.scan_rates()
 
@@ -448,7 +455,7 @@ class TestBurstDetection:
         assert event_mock.call_count == 1
 
         offset = mod.WARNING_SUSTAINED_INTERVALS
-        for j in range(mod._WINDOW_INTERVALS):
+        for j in range(window):
             with patch.object(
                 mod.time,
                 "time",
@@ -741,7 +748,10 @@ class TestRateHistoryPersistence:
         log_file.write_text("x" * 100, encoding="utf-8")
 
         _reset_tracker(monkeypatch, logs_dir=logs_dir)
-        ancient = time.time() - (mod._RATE_HISTORY_SIZE * mod.SCAN_INTERVAL) - 60
+        # The horizon is the test's own number, set here (prax, leg 14).
+        horizon = 300.0
+        monkeypatch.setattr(mod, "_RATE_STALE_AFTER", horizon)
+        ancient = time.time() - horizon - 60
         _jh().load_json.return_value = self._persisted(log_file, [[ancient, 900.0]])
 
         snapshot = mod.get_snapshot()

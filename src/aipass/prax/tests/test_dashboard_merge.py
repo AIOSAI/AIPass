@@ -24,8 +24,8 @@
 # copies raise TypeError on it. The copies are the reason one guard was missing,
 # so the drift is pinned shut here too.
 #
-# Modules are imported inside each test — conftest.py installs autouse sys.modules
-# mocks that must be in place first.
+# The handlers are bound at the top by import statement. The reload this file
+# used to do was for conftest's sys.modules stubs, which are gone (prax, leg 14).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — load_dashboard and save_dashboard, covered by tests/test_operations.py
@@ -41,26 +41,17 @@
 # seedgo: no-test-needed(dead_code) — _extract_ai_mail_section's block, which refresh pops before save and nothing reads
 # seedgo: no-test-needed(json_structure) — the log_operation records of the refresh, push and diff, covered by that row
 
-import importlib
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-
-STATUS_PATH = "aipass.prax.apps.handlers.dashboard.status"
-REFRESH_PATH = "aipass.prax.apps.handlers.dashboard.refresh"
-OPS_PATH = "aipass.prax.apps.handlers.dashboard.operations"
-PUSHER_PATH = "aipass.prax.apps.handlers.dashboard.template_pusher"
-
-
-def _load(module_path: str):
-    """Import (or reimport) a dashboard handler under the active mocks."""
-    sys.modules.pop(module_path, None)
-    module = importlib.import_module(module_path)
-    return importlib.reload(module)
+from aipass.prax.apps.handlers.dashboard import operations as ops
+from aipass.prax.apps.handlers.dashboard import refresh
+from aipass.prax.apps.handlers.dashboard import status
+from aipass.prax.apps.handlers.dashboard import template_differ as differ
+from aipass.prax.apps.handlers.dashboard import template_pusher as pusher
 
 
 # A key only @flow writes. prax must carry it through untouched.
@@ -92,6 +83,27 @@ def _seed_branch(tmp_path: Path, quick_status: dict, todos: int = 2) -> Path:
     return branch
 
 
+def _push_world(tmp_path: Path, monkeypatch, module, template: dict, branch: "Path | None"):
+    """Point the pusher or the differ at a world under tmp_path and return it.
+
+    The template file, the registry (naming ``branch``, or nothing when None),
+    the repo root and the pusher's version file all live under tmp_path, so
+    push_dashboard_template and diff_dashboard_template, the public doors, run
+    for real on it (prax, leg 14: these tests used to call the private step).
+    """
+    template_file = tmp_path / "DASHBOARD.template.json"
+    template_file.write_text(json.dumps(template), encoding="utf-8")
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    entries = [] if branch is None else [{"name": branch.name.upper(), "path": str(branch), "status": "active"}]
+    registry.write_text(json.dumps({"branches": entries}), encoding="utf-8")
+    monkeypatch.setattr(module, "TEMPLATE_FILE", template_file)
+    monkeypatch.setattr(module, "AIPASS_REGISTRY", registry)
+    monkeypatch.setattr(module, "_find_repo_root", lambda: tmp_path)
+    if module is pusher:
+        monkeypatch.setattr(pusher, "VERSION_FILE", tmp_path / ".dashboard_version.json")
+    return module
+
+
 def _read_quick_status(branch: Path) -> dict:
     return json.loads((branch / "DASHBOARD.local.json").read_text(encoding="utf-8"))["quick_status"]
 
@@ -105,7 +117,6 @@ class TestForeignKeysSurviveEveryWriter:
     """commons_mentions is flow's. Every prax write path must carry it through."""
 
     def test_merge_preserves_unknown_keys(self):
-        status = _load(STATUS_PATH)
         merged = status.merge_quick_status(
             {"commons_mentions": 4, "new_mail": 9}, {"new_mail": 1, "summary": "1 new emails"}
         )
@@ -113,30 +124,24 @@ class TestForeignKeysSurviveEveryWriter:
 
     def test_merge_lets_owned_keys_win(self):
         """Preserving foreign keys must not freeze prax's own counters."""
-        status = _load(STATUS_PATH)
         merged = status.merge_quick_status({"new_mail": 9}, {"new_mail": 1})
         assert merged["new_mail"] == 1
 
     def test_merge_tolerates_missing_existing_block(self):
-        status = _load(STATUS_PATH)
         assert status.merge_quick_status(None, {"new_mail": 0})["new_mail"] == 0
 
     def test_write_section_preserves_foreign_key(self, tmp_path):
-        ops = _load(OPS_PATH)
         branch = _seed_branch(tmp_path, {"new_mail": 0, **FOREIGN})
         ops.write_section(branch, "memory", {"managed_by": "memory", "vectors_stored": 7})
         assert _read_quick_status(branch)["commons_mentions"] == 4
 
     def test_update_section_preserves_foreign_key(self, tmp_path):
-        ops = _load(OPS_PATH)
-        status = _load(STATUS_PATH)
         branch = _seed_branch(tmp_path, {"new_mail": 0, **FOREIGN})
         ops.update_section(branch, "memory", {"managed_by": "memory"}, {}, status.calculate_quick_status)
         assert _read_quick_status(branch)["commons_mentions"] == 4
 
     def test_refresh_single_preserves_foreign_key(self, tmp_path):
         """The live path: `drone @prax dashboard refresh @prax`."""
-        refresh = _load(REFRESH_PATH)
         branch = _seed_branch(tmp_path, {"new_mail": 0, **FOREIGN})
         with patch.object(refresh, "read_all_centrals", return_value={}):
             refresh.refresh_single_dashboard(branch)
@@ -144,7 +149,6 @@ class TestForeignKeysSurviveEveryWriter:
 
     def test_refresh_single_still_recomputes_owned_keys(self, tmp_path):
         """Preservation must not turn refresh into a no-op."""
-        refresh = _load(REFRESH_PATH)
         branch = _seed_branch(tmp_path, {"new_mail": 99, "todo_count": 99, **FOREIGN}, todos=2)
         with patch.object(refresh, "read_all_centrals", return_value={}):
             refresh.refresh_single_dashboard(branch)
@@ -179,10 +183,10 @@ FLOW_LIST_SECTION = {
 def _calculators():
     """Every entry point that computes a quick_status block."""
     return [
-        ("status.calculate_quick_status", _load(STATUS_PATH).calculate_quick_status),
-        ("refresh._calculate_quick_status", _load(REFRESH_PATH)._calculate_quick_status),
-        ("operations._calculate_quick_status_standalone", _load(OPS_PATH)._calculate_quick_status_standalone),
-        ("template_pusher._calculate_quick_status", _load(PUSHER_PATH)._calculate_quick_status),
+        ("status.calculate_quick_status", status.calculate_quick_status),
+        ("refresh._calculate_quick_status", refresh._calculate_quick_status),
+        ("operations._calculate_quick_status_standalone", ops._calculate_quick_status_standalone),
+        ("template_pusher._calculate_quick_status", pusher._calculate_quick_status),
     ]
 
 
@@ -250,7 +254,6 @@ class TestPushTemplateIsNotAWreckingBall:
     """
 
     def test_commons_mentions_is_not_deprecated(self):
-        pusher = _load(PUSHER_PATH)
         assert "commons_mentions" not in pusher.DEPRECATED_QUICK_STATUS_KEYS
 
     def test_the_differ_reads_the_pushers_list_not_its_own_copy(self):
@@ -258,35 +261,40 @@ class TestPushTemplateIsNotAWreckingBall:
         the deletion of flow's live key for weeks after the writer was fixed
         (docs/dashboard.md, 2026-08-25). One list, the pusher's, or the advice
         and the write disagree again."""
-        pusher = _load(PUSHER_PATH)
-        differ = _load("aipass.prax.apps.handlers.dashboard.template_differ")
         assert differ.DEPRECATED_QUICK_STATUS_KEYS is pusher.DEPRECATED_QUICK_STATUS_KEYS
         assert "commons_mentions" not in differ.DEPRECATED_QUICK_STATUS_KEYS
 
-    def test_structural_update_preserves_foreign_key(self, tmp_path):
-        pusher = _load(PUSHER_PATH)
+    def test_structural_update_preserves_foreign_key(self, tmp_path, monkeypatch):
         branch = _seed_branch(tmp_path, {"new_mail": 0, **FOREIGN})
-        data = json.loads((branch / "DASHBOARD.local.json").read_text(encoding="utf-8"))
-        pusher._apply_structural_updates(data, {}, [], branch)
-        assert data["quick_status"]["commons_mentions"] == 4
 
-    def test_structural_update_keeps_todo_count(self, tmp_path):
+        result = _push_world(tmp_path, monkeypatch, pusher, {}, branch).push_dashboard_template(dry_run=False)
+
+        assert result["branches_updated"] == 1
+        assert _read_quick_status(branch)["commons_mentions"] == 4
+
+    def test_structural_update_keeps_todo_count(self, tmp_path, monkeypatch):
         """The pusher's own calculator had no todo_count at all, so it dropped it."""
-        pusher = _load(PUSHER_PATH)
         branch = _seed_branch(tmp_path, {"new_mail": 0, "todo_count": 99}, todos=2)
-        data = json.loads((branch / "DASHBOARD.local.json").read_text(encoding="utf-8"))
-        pusher._apply_structural_updates(data, {}, [], branch)
-        assert data["quick_status"]["todo_count"] == 2
 
-    def test_structural_update_without_a_branch_stays_placeholder(self, tmp_path):
+        _push_world(tmp_path, monkeypatch, pusher, {}, branch).push_dashboard_template(dry_run=False)
+
+        assert _read_quick_status(branch)["todo_count"] == 2
+
+    def test_structural_update_without_a_branch_stays_placeholder(self, tmp_path, monkeypatch):
         """spawn's builder template has no .trinity/ or inbox — it must not gain counts."""
-        pusher = _load(PUSHER_PATH)
-        data = {"quick_status": {}, "sections": {"flow": {"active_plans": 0}}}
-        pusher._apply_structural_updates(data, {}, [], None)
-        assert data["quick_status"]["todo_count"] == 0
-        assert data["quick_status"]["new_mail"] == 0
+        spawn_template = tmp_path / "src" / "aipass" / "spawn" / "templates" / "builder" / "DASHBOARD.local.json"
+        spawn_template.parent.mkdir(parents=True)
+        spawn_template.write_text(
+            json.dumps({"quick_status": {}, "sections": {"flow": {"active_plans": 0}}}), encoding="utf-8"
+        )
 
-    def test_a_template_section_the_constant_never_heard_of_is_advised(self, tmp_path):
+        _push_world(tmp_path, monkeypatch, pusher, {}, None).push_dashboard_template(dry_run=False)
+
+        quick = json.loads(spawn_template.read_text(encoding="utf-8"))["quick_status"]
+        assert quick["todo_count"] == 0
+        assert quick["new_mail"] == 0
+
+    def test_a_template_section_the_constant_never_heard_of_is_advised(self, tmp_path, monkeypatch):
         """The adviser's third copy of the policy.
 
         _diff_branch accepted the loaded template and compared against
@@ -296,16 +304,12 @@ class TestPushTemplateIsNotAWreckingBall:
         silent both ways: a section added to the template would never be advised,
         and the advice would keep naming one the template had dropped.
         """
-        differ = _load("aipass.prax.apps.handlers.dashboard.template_differ")
         branch = _seed_branch(tmp_path, {"new_mail": 0})
+        template = {"sections": {"a_brand_new_section": {}}, "quick_status": {"new_mail": 0}}
 
-        result = differ._diff_branch(
-            "SOMEBRANCH",
-            branch,
-            {"sections": {"a_brand_new_section": {}}, "quick_status": {"new_mail": 0}},
-        )
+        result = _push_world(tmp_path, monkeypatch, differ, template, branch).diff_dashboard_template("PRAX")
 
-        assert "a_brand_new_section section" in result["additions"]
+        assert "a_brand_new_section section" in result["branches"][0]["additions"]
 
     def test_canary_deprecation_list_still_deletes(self):
         """Proof the first assertion can fail: the removal loop is real."""

@@ -19,10 +19,14 @@
 # seedgo: no-test-needed(through_the_command) — detect_branch_from_log, covered by tests/test_monitoring_handlers.py
 # seedgo: no-test-needed(json_structure) — start_log_watcher's log_watcher_started log_operation record
 
-import sys
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
+
+import pytest
+from watchdog.observers import polling as watchdog_polling
+
+from aipass.prax.apps.handlers.monitoring import log_watcher
 
 
 # ---------------------------------------------------------------------------
@@ -30,58 +34,24 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 
 
-class _RealFSHandler:
-    """Stub base so LogFileWatcher subclass methods are not swallowed by MagicMock."""
+@pytest.fixture(autouse=True)
+def _log_watcher_doubled(monkeypatch, tmp_path) -> None:
+    """The real log_watcher, its edges doubled where the module bound them.
 
-    pass
+    No sys.modules stand-ins and no reload (prax, leg 14): the observer class is a
+    MagicMock so nothing watches a real directory, the logs dir is under tmp_path,
+    the branch detector answers PRAX, and MonitoringEvent records what was built.
+    LogFileWatcher keeps the real watchdog FileSystemEventHandler as its base.
+    """
+    monkeypatch.setattr(log_watcher, "WatchdogObserver", MagicMock())
+    monkeypatch.setattr(log_watcher, "get_system_logs_dir", MagicMock(return_value=tmp_path / "system_logs"))
+    monkeypatch.setattr(log_watcher, "detect_branch_from_log", MagicMock(return_value="PRAX"))
+    monkeypatch.setattr(log_watcher, "MonitoringEvent", MagicMock())
 
 
 def _import_log_watcher() -> ModuleType:
-    """Import log_watcher with all heavy deps mocked."""
-    mock_observer_cls = MagicMock()
-    mock_observer_instance = MagicMock()
-    mock_observer_cls.return_value = mock_observer_instance
-
-    mock_watchdog_observer = MagicMock()
-    mock_watchdog_observer.Observer = mock_observer_cls
-
-    # Provide a real base class for FileSystemEventHandler
-    mock_watchdog_events = MagicMock()
-    mock_watchdog_events.FileSystemEventHandler = _RealFSHandler
-
-    mock_config = MagicMock()
-    mock_config.get_system_logs_dir.return_value = Path("fake", "logs", "system")
-
-    mock_branch_detector = MagicMock()
-    mock_branch_detector.detect_branch_from_log.return_value = "PRAX"
-
-    mock_event_queue_mod = MagicMock()
-
-    mock_trigger_mod = MagicMock()
-
-    with patch.dict(
-        sys.modules,
-        {
-            "watchdog": MagicMock(),
-            "watchdog.observers": mock_watchdog_observer,
-            "watchdog.events": mock_watchdog_events,
-            "aipass.prax.apps.handlers.config.load": mock_config,
-            "aipass.prax.apps.handlers.monitoring.event_queue": mock_event_queue_mod,
-            "aipass.prax.apps.handlers.monitoring.branch_detector": mock_branch_detector,
-            "aipass.trigger": MagicMock(),
-            "aipass.trigger.apps": MagicMock(),
-            "aipass.trigger.apps.modules": MagicMock(),
-            "aipass.trigger.apps.modules.core": mock_trigger_mod,
-        },
-    ):
-        import importlib
-
-        if "aipass.prax.apps.handlers.monitoring.log_watcher" in sys.modules:
-            mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.monitoring.log_watcher"])
-        else:
-            mod = importlib.import_module("aipass.prax.apps.handlers.monitoring.log_watcher")
-
-    return mod
+    """The log_watcher module, bound at the top; _log_watcher_doubled doubles its edges."""
+    return log_watcher
 
 
 def _make_watcher(mod: ModuleType):
@@ -360,14 +330,10 @@ class TestLogWatcherLifecycle:
 
         monkeypatch.setattr(mod, "_log_observer", None)
 
-        with patch.dict(
-            sys.modules,
-            {
-                "watchdog.observers.polling": MagicMock(PollingObserver=mock_polling_cls),
-            },
-        ):
-            with patch.object(mod, "get_system_logs_dir", return_value=tmp_path / "logs"):
-                result = mod.start_log_watcher(mock_queue, use_polling=True)
+        # The lazy import reads PollingObserver off the real polling module.
+        monkeypatch.setattr(watchdog_polling, "PollingObserver", mock_polling_cls)
+        with patch.object(mod, "get_system_logs_dir", return_value=tmp_path / "logs"):
+            result = mod.start_log_watcher(mock_queue, use_polling=True)
 
         assert result is mock_observer
         mock_observer.start.assert_called_once()
