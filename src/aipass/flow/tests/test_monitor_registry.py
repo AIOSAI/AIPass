@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_monitor_registry.py
 # Description: Tests for monitor_ops handler and registry_monitor module
-# Version: 2.0.1
+# Version: 2.1.0
 # Created: 2026-03-08
 # Modified: 2026-10-04
 # =============================================
@@ -13,6 +13,7 @@
 
 import os
 from pathlib import Path
+from typing import List, Tuple
 from unittest.mock import MagicMock, patch
 
 from aipass.flow.apps.handlers.registry import monitor_ops
@@ -20,10 +21,10 @@ from aipass.flow.apps.modules import registry_monitor
 
 
 def _make_plan_file(directory: Path, number: str) -> Path:
-    """Create a FPLAN-NNNN.md file in the given directory."""
+    """Create a FPLAN-NNNN.md file in the given directory, with a plan's header line."""
     filename = f"FPLAN-{number}.md"
     plan_file = directory / filename
-    plan_file.write_text(f"# Plan {number}\nTest content", encoding="utf-8")
+    plan_file.write_text(f"# FPLAN-{number}: Test plan\nTest content", encoding="utf-8")
     return plan_file
 
 
@@ -114,7 +115,7 @@ class TestScanPlanFilesImpl:
         """Non-plan files should be ignored even if they look similar."""
         mod = monitor_ops
         _make_plan_file(tmp_path, "0001")
-        (tmp_path / "DPLAN-0002.md").write_text("also a plan", encoding="utf-8")
+        (tmp_path / "DPLAN-0002.md").write_text("# DPLAN-0002: also a plan", encoding="utf-8")
         (tmp_path / "FPLAN-ABC.md").write_text("bad number", encoding="utf-8")
         (tmp_path / "README.md").write_text("readme", encoding="utf-8")
         (tmp_path / "NOTES-0003.md").write_text("not a plan prefix", encoding="utf-8")
@@ -153,7 +154,7 @@ class TestScanPlanFilesImpl:
     def test_detects_plan_files_with_slug_and_date_suffix(self, tmp_path):
         """Real plan filenames carry a subject slug + date suffix and must still match."""
         mod = monitor_ops
-        (tmp_path / "FPLAN-0001_some_subject_slug_2026-07-27.md").write_text("plan", encoding="utf-8")
+        (tmp_path / "FPLAN-0001_some_subject_slug_2026-07-27.md").write_text("# FPLAN-0001: plan", encoding="utf-8")
 
         with patch.object(mod, "_fire_event", return_value=True):
             result = mod.scan_plan_files_impl(
@@ -284,29 +285,28 @@ class TestScanPlanFilesImpl:
         assert result["added"] == []
         assert result["updated"] == []
         assert result["removed"] == []
-        assert result["renumbered"] == []
+        assert result["duplicates"] == []
         assert result["healing_performed"] is False
 
-    def test_duplicate_plan_files_renumbered(self, tmp_path):
-        """Duplicate plan numbers should be auto-renumbered."""
+    def test_duplicate_plan_files_reported_not_renamed(self, tmp_path):
+        """Duplicate plan numbers are reported; both files keep their names (leg 7)."""
         mod = monitor_ops
         dir_a = tmp_path / "project_a"
         dir_a.mkdir()
         dir_b = tmp_path / "project_b"
         dir_b.mkdir()
 
-        _make_plan_file(dir_a, "0001")
-        _make_plan_file(dir_b, "0001")
+        first = _make_plan_file(dir_a, "0001")
+        second = _make_plan_file(dir_b, "0001")
 
         with patch.object(mod, "_fire_event", return_value=True):
             result = mod.scan_plan_files_impl(
                 ecosystem_root=tmp_path,
                 load_registry=lambda: {"plans": {}},
             )
-        assert len(result["renumbered"]) == 1
-        assert result["renumbered"][0]["old_number"] == "0001"
-        assert result["renumbered"][0]["new_number"] == "0002"
-        assert result["healing_performed"] is True
+        assert result["duplicates"] == [{"prefix": "FPLAN", "number": "0001", "paths": [str(first), str(second)]}]
+        assert first.exists() and second.exists()
+        assert sorted(p.name for p in tmp_path.rglob("*.md")) == ["FPLAN-0001.md", "FPLAN-0001.md"]
 
     def test_scan_calls_json_handler_log(self, tmp_path, mock_json_handler):
         """Scan should log its results via json_handler."""
@@ -480,10 +480,11 @@ class TestFireEvent:
 
 
 def _write_plan(directory: Path, name: str) -> Path:
-    """Create a plan file on disk and return its path."""
+    """Create a plan file on disk, opening with its plan header, and return its path."""
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
-    path.write_text("# plan\n", encoding="utf-8")
+    identity = name.removesuffix(".md").split("_")[0]
+    path.write_text(f"# {identity}: plan\n", encoding="utf-8")
     return path
 
 
@@ -502,7 +503,7 @@ class TestCrossTypeNumbersAreNotDuplicates:
         # would also pass on an empty scan.
         assert fire.call_count == 2, "scan did not reach both plan files"
 
-        assert result["renumbered"] == []
+        assert result["duplicates"] == []
         assert aplan.exists(), "APLAN-0007 was renamed away"
         assert fplan.exists(), "FPLAN-0007 was renamed away"
 
@@ -517,15 +518,20 @@ class TestCrossTypeNumbersAreNotDuplicates:
             result = mod.scan_plan_files_impl(tmp_path, load_registry=lambda: {"plans": {}})
 
         assert fire.call_count == 4, "scan did not reach all four plan files"
-        assert result["renumbered"] == []
+        assert result["duplicates"] == []
         for p in paths:
             assert p.exists(), f"{p.name} was renamed away"
 
 
-class TestGenuineDuplicatesStillRenumber:
-    """Same prefix AND same number really is a collision — behaviour preserved."""
+class TestGenuineDuplicatesAreReportedNotRenamed:
+    """Same prefix AND same number: reported, never renamed (flow's decision, leg 7).
 
-    def test_two_fplans_with_one_number_still_renumber(self, tmp_path):
+    The scan renamed every file after the first until leg 7, and most of the
+    46 files it renamed in flow's logs were reports named after a plan.
+    Mutant: the report's paths emptied reddens this (leg7 M5).
+    """
+
+    def test_two_fplans_with_one_number_both_keep_their_names(self, tmp_path):
         mod = monitor_ops
         first = _write_plan(tmp_path / "one", "FPLAN-0007_first_2026-08-13.md")
         second = _write_plan(tmp_path / "two", "FPLAN-0007_second_2026-08-13.md")
@@ -533,38 +539,73 @@ class TestGenuineDuplicatesStillRenumber:
         with patch.object(mod, "_fire_event", MagicMock(return_value=True)) as fire:
             result = mod.scan_plan_files_impl(tmp_path, load_registry=lambda: {"plans": {}})
 
-        assert fire.call_count == 2, "scan did not reach both plan files"
-        assert len(result["renumbered"]) == 1
-        # One of the pair keeps 0007, the other is renamed to a free number.
-        survivors = [p for p in (first, second) if p.exists()]
-        assert len(survivors) == 1
-        assert result["renumbered"][0]["old_number"] == "0007"
-        assert result["renumbered"][0]["new_number"] != "0007"
+        # REACHED: one created event for the number; the report names both.
+        assert fire.call_count == 1, "scan did not reach the plan files"
+        assert result["duplicates"] == [{"prefix": "FPLAN", "number": "0007", "paths": [str(first), str(second)]}]
+        assert first.exists() and second.exists()
+        assert sorted(p.name for p in tmp_path.rglob("*.md")) == [first.name, second.name]
 
-    def test_renumbering_draws_from_its_own_prefix_sequence(self, tmp_path):
-        """A duplicate FPLAN must not be handed a number chosen by looking at DPLANs."""
+
+class TestALookAlikeIsNotAPlan:
+    """A report named like a plan is not one (leg 7: hooks' DPLAN-0356_ph2_report.md).
+
+    Live on 2026-10-04 02:31 the scan renamed hooks/docs.local/
+    DPLAN-0356_ph2_report.md to DPLAN-0358.md and heal registered it as a plan.
+    Proof is the mutants, not a first red: the scan's gate off, the header
+    check off, the number dropped from it, and unreadable -> True each redden
+    a test here (leg7/mutants.txt M1 to M4).
+    """
+
+    @staticmethod
+    def _world(root: Path) -> Tuple[Path, Path]:
+        """A real DPLAN-0356 and a phase report named after it in a docs.local folder."""
+        plan = _write_plan(root / "devpulse", "DPLAN-0356_fleet_green_2026-10-01.md")
+        report = root / "hooks" / "docs.local" / "DPLAN-0356_ph2_report.md"
+        report.parent.mkdir(parents=True)
+        report.write_text("DPLAN-0356 phase 2 DONE\n", encoding="utf-8")
+        return plan, report
+
+    def test_scan_neither_renames_nor_reports_the_report(self, tmp_path):
         mod = monitor_ops
-        _write_plan(tmp_path / "d", "DPLAN-0900_unrelated_2026-08-13.md")
-        _write_plan(tmp_path / "one", "FPLAN-0007_first_2026-08-13.md")
-        _write_plan(tmp_path / "two", "FPLAN-0007_second_2026-08-13.md")
+        plan, report = self._world(tmp_path)
 
         with patch.object(mod, "_fire_event", MagicMock(return_value=True)) as fire:
             result = mod.scan_plan_files_impl(tmp_path, load_registry=lambda: {"plans": {}})
 
-        assert fire.call_count == 3, "scan did not reach all three plan files"
-        assert len(result["renumbered"]) == 1
-        # 0008, not 0901 — the unrelated DPLAN must not drive the FPLAN sequence.
-        assert result["renumbered"][0]["new_number"] == "0008"
+        fire.assert_called_once_with("plan_file_created", path=str(plan))
+        assert result["duplicates"] == []
+        assert report.read_text(encoding="utf-8") == "DPLAN-0356 phase 2 DONE\n"
+        assert sorted(p.name for p in tmp_path.rglob("*.md")) == [plan.name, report.name]
+
+    def test_is_plan_file_tells_the_two_apart(self, tmp_path):
+        plan, report = self._world(tmp_path)
+
+        assert monitor_ops.is_plan_file(plan) is True
+        assert monitor_ops.is_plan_file(report) is False
+
+    def test_a_header_for_another_number_is_not_this_plan(self, tmp_path):
+        """A copy of DPLAN-0356 saved as DPLAN-0357.md is not plan 0357."""
+        copy = tmp_path / "DPLAN-0357.md"
+        copy.write_text("# DPLAN-0356: fleet green\n", encoding="utf-8")
+
+        assert monitor_ops.is_plan_file(copy) is False
+
+    def test_an_unreadable_file_is_unknown_not_a_plan(self, tmp_path):
+        """Undecodable bytes: None, which every caller treats as 'not a plan to act on'."""
+        binary = tmp_path / "DPLAN-0356.md"
+        binary.write_bytes(b"\xff\xfe# DPLAN-0356: x\n")
+
+        assert monitor_ops.is_plan_file(binary) is None
 
 
-class TestDuplicateSurvivorIsDeterministic:
-    """Which file keeps the number is identity, not the order the OS walked."""
+class TestDuplicateReportIsDeterministic:
+    """The report's path order is identity, not the order the OS walked."""
 
     @staticmethod
-    def _survivor(mod, root: Path, reverse_walk: bool) -> str:
-        """Scan ``root`` with the walk emitted in a chosen order; name the keeper."""
-        alpha = _write_plan(root / "alpha", "FPLAN-0007_alpha_2026-08-13.md")
-        beta = _write_plan(root / "beta", "FPLAN-0007_beta_2026-08-13.md")
+    def _report(mod, root: Path, reverse_walk: bool) -> List[str]:
+        """Scan ``root`` with the walk emitted in a chosen order; return the reported names."""
+        _write_plan(root / "alpha", "FPLAN-0007_alpha_2026-08-13.md")
+        _write_plan(root / "beta", "FPLAN-0007_beta_2026-08-13.md")
         real_walk = os.walk
 
         def ordered_walk(top, **kwargs):
@@ -573,17 +614,16 @@ class TestDuplicateSurvivorIsDeterministic:
 
         with patch.object(mod.os, "walk", ordered_walk):
             with patch.object(mod, "_fire_event", MagicMock(return_value=True)):
-                mod.scan_plan_files_impl(root, load_registry=lambda: {"plans": {}})
+                result = mod.scan_plan_files_impl(root, load_registry=lambda: {"plans": {}})
 
-        survivors = [p.name for p in (alpha, beta) if p.exists()]
-        assert len(survivors) == 1, f"expected exactly one keeper, got {survivors}"
-        return survivors[0]
+        assert len(result["duplicates"]) == 1, f"expected one duplicate, got {result['duplicates']}"
+        return [Path(p).name for p in result["duplicates"][0]["paths"]]
 
-    def test_same_file_keeps_the_number_in_either_walk_order(self, tmp_path):
-        """Reversing the walk must not hand the number to the other file."""
+    def test_same_order_in_either_walk_order(self, tmp_path):
+        """Reversing the walk must not reorder the report. Mutant: the sort -> reverse() reddens this (leg7 M6)."""
         mod = monitor_ops
 
-        forward = self._survivor(mod, tmp_path / "forward", reverse_walk=False)
-        backward = self._survivor(mod, tmp_path / "backward", reverse_walk=True)
+        forward = self._report(mod, tmp_path / "forward", reverse_walk=False)
+        backward = self._report(mod, tmp_path / "backward", reverse_walk=True)
 
-        assert forward == backward, f"walk order chose the keeper: forward kept {forward}, reversed kept {backward}"
+        assert forward == backward == ["FPLAN-0007_alpha_2026-08-13.md", "FPLAN-0007_beta_2026-08-13.md"]

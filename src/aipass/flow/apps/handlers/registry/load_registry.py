@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: load_registry.py
 # Description: Load Registry Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-07
 # Modified: 2026-10-04
 # =============================================
@@ -96,3 +96,19 @@ def load_registry(registry_file: str | None = None) -> Dict[str, Any]:
         },
     )
     return data
+
+
+def next_free_number(registry: Dict[str, Any]) -> int:
+    """The next plan number no row already holds.
+
+    ``next_number`` alone is not trusted: a self-heal registered a row at
+    the stored number without moving it on (DPLAN row 0358 beside
+    next_number 358, 2026-10-04), and the next create would have issued
+    0358 a second time and written over that row (flow's decision, leg 7).
+
+    Returns:
+        max(next_number, highest numeric row + 1), at least 1.
+    """
+    numbers = [int(key) for key in registry.get("plans", {}) if str(key).isdigit()]
+    highest_row = max(numbers, default=0)
+    return max(int(registry.get("next_number", 1)), highest_row + 1)

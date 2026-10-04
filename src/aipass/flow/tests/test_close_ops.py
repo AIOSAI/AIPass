@@ -855,11 +855,23 @@ class TestFindUnregisteredPlanFile:
         branch_dir = tmp_path / "somebranch"
         branch_dir.mkdir()
         plan_file = branch_dir / "DPLAN-0176_design_topic_2026-05-10.md"
-        plan_file.write_text("# Plan", encoding="utf-8")
+        plan_file.write_text("# DPLAN-0176: design topic", encoding="utf-8")
 
         result = find_fn("DPLAN", "0176")
         assert result is not None
         assert result.name == "DPLAN-0176_design_topic_2026-05-10.md"
+
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
+    def test_a_report_named_like_the_plan_is_never_found(self, mock_flow_root, tmp_path):
+        """Leg 7: close would register and archive hooks' DPLAN-0356_ph2_report.md as the plan.
+
+        Mutant: the is_plan_file gate off reddens this (leg7 C1)."""
+        mock_flow_root.parent = tmp_path
+        report = tmp_path / "hooks" / "docs.local" / "DPLAN-0356_ph2_report.md"
+        report.parent.mkdir(parents=True)
+        report.write_text("DPLAN-0356 phase 2 DONE\n", encoding="utf-8")
+
+        assert _find_unregistered_plan_file("DPLAN", "0356") is None
 
     @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
     def test_skips_backup_directory(self, mock_flow_root, tmp_path):
@@ -906,9 +918,9 @@ class TestFindUnregisteredPlanFile:
         mock_flow_root.parent = aipass_root
         (aipass_root / "somebranch" / "dropbox").mkdir(parents=True)
         plan = aipass_root / "somebranch" / "DPLAN-0336_live_2026-09-28.md"
-        plan.write_text("# Plan", encoding="utf-8")
+        plan.write_text("# DPLAN-0336: live", encoding="utf-8")
         copy = aipass_root / "somebranch" / "dropbox" / "DPLAN-0337_copy_2026-09-28.md"
-        copy.write_text("# Copy", encoding="utf-8")
+        copy.write_text("# DPLAN-0337: copy", encoding="utf-8")
 
         assert _find_unregistered_plan_file("DPLAN", "0336") == plan
         assert _find_unregistered_plan_file("DPLAN", "0337") is None
@@ -974,7 +986,10 @@ class TestSelfHealNoCollision:
         assert "0176" in updated_reg["plans"]
         assert updated_reg["plans"]["0176"]["self_healed"] is True
         assert updated_reg["plans"]["0176"]["status"] == "open"
-        assert updated_reg["next_number"] == 175
+        # 177, not the 175 this pinned until leg 7: a row at 0176 beside
+        # next_number 175 hands 0176 out again two creates later (live:
+        # DPLAN row 0358 beside next_number 358, 2026-10-04).
+        assert updated_reg["next_number"] == 177
         save_fn.assert_called_once_with(registry, registry_file="dplan_registry.json")
 
     def test_extracts_subject_from_filename(self, tmp_path):
@@ -1035,6 +1050,27 @@ class TestSelfHealSamePrefixCollision:
         assert "0005" in updated_reg["plans"]
         assert updated_reg["next_number"] == 11
         assert any("Bumping" in m.get("text", "") for m in messages)
+
+    def test_the_bump_never_lands_on_a_held_row(self, tmp_path):
+        """next_number 10 beside a row at 0010: the bump takes 0011 and 0010 survives (leg 7).
+
+        Mutant: the bump read from next_number alone reddens this (leg7 C2, L1b)."""
+        plan_file = tmp_path / "FPLAN-0005_colliding_2026-03-01.md"
+        plan_file.write_text("# FPLAN-0005: colliding", encoding="utf-8")
+        held = {"status": "open", "subject": "held"}
+        registry = {"plans": {"0005": {"status": "closed", "subject": "existing"}, "0010": held}, "next_number": 10}
+
+        with patch(
+            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
+            return_value={"types": {}},
+        ):
+            actual_key, updated_reg = _self_heal_unregistered_plan(
+                "FPLAN", "0005", plan_file, registry, "fplan_registry.json", MagicMock(), MagicMock(), []
+            )
+
+        assert actual_key == "0011"
+        assert updated_reg["plans"]["0010"] is held
+        assert updated_reg["next_number"] == 12
 
 
 class TestSelfHealCrossPrefixCollision:

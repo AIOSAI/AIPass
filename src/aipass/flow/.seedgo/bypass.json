@@ -377,7 +377,7 @@
       "file": "apps/modules/registry_monitor.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [194, 228],
+      "lines": [194, 230],
       "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). Each handler calls error() first, which flow.py's resolve_exit turns into a failing exit code; False would route 'registry' on to the next module and end in 'unknown command' (flow's decision, leg 6)."
     },
     {

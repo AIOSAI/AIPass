@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create_ops.py
 # Description: Plan Creation Implementation Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -32,6 +32,7 @@ from aipass.flow.apps.handlers.json import json_handler
 # INFRASTRUCTURE
 # =============================================
 
+from aipass.flow.apps.handlers.registry.load_registry import next_free_number
 from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
@@ -154,8 +155,8 @@ def create_plan_impl(
             save_registry(registry, registry_file=registry_file)
             messages.append({"type": "dim", "text": f"[AUTO-CLEANUP] Closed {auto_closed_count} orphaned plan(s)"})
 
-        # STEP 3: Get next plan number
-        NEXT_NUM = registry["next_number"]
+        # STEP 3: Get next plan number -- never one a row already holds
+        NEXT_NUM = next_free_number(registry)
 
         # STEP 4: Resolve location (@folder syntax support)
         success, target_dir, error_msg = resolve_plan_location(location, ecosystem_root)

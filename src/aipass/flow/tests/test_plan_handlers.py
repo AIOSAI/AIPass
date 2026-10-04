@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
 # Version: 1.0.0
 # Created: 2026-04-05
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
@@ -565,6 +565,28 @@ class TestCreatePlanImpl:
         deps["create_plan_file"].assert_called_once()
         deps["save_registry"].assert_called()
         bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="Widget feature")
+
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
+    def test_a_number_a_row_holds_is_never_issued_again(self, mock_jh, bus):
+        """Live 2026-10-04: DPLAN next_number 358 beside a self-healed row 0358 (leg 7).
+
+        Create read next_number alone and would have issued 0358 again,
+        writing its row over the one already there.
+        Mutant: NEXT_NUM read from next_number alone reddens this (leg7 R1, L1a).
+        """
+        held = {"status": "open", "subject": "DPLAN-0358"}
+        registry = {"next_number": 358, "plans": {"0358": held}}
+        deps = self._make_deps(
+            load_registry=MagicMock(return_value=registry),
+            auto_close_orphaned_plans=MagicMock(return_value=(registry, 0)),
+        )
+
+        success, plan_num, _, _, _, _ = create_plan_impl(subject="next", plan_type_config=None, **deps)
+
+        assert success is True
+        assert plan_num == 359
+        assert registry["plans"]["0358"] is held
+        assert registry["next_number"] == 360
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     def test_missing_dependency_returns_failure(self, mock_jh):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: heal_registry.py
 # Description: Registry Doctrine Self-Heal Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-29
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -68,7 +68,7 @@ from aipass.flow.apps.handlers.plan.auto_cleanup import auto_close_orphaned_plan
 from aipass.flow.apps.handlers.plan.close_helpers import _self_heal_unregistered_plan
 from aipass.flow.apps.handlers.plan.registry_routing import _load_template_registry
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
-from aipass.flow.apps.handlers.registry.monitor_ops import IGNORE_FOLDERS, PLAN_PATTERN
+from aipass.flow.apps.handlers.registry.monitor_ops import IGNORE_FOLDERS, PLAN_PATTERN, is_plan_file
 from aipass.flow.apps.handlers.registry.save_registry import save_registry
 from aipass.flow.apps.handlers.repo_root import exists_exactly, find_repo_root
 
@@ -97,6 +97,8 @@ def _build_plan_file_index(ecosystem_root: Path) -> Dict[Tuple[str, str], Path]:
     Walk skeleton mirrors ``monitor_ops.scan_plan_files_impl`` (same
     IGNORE_FOLDERS pruning, same permission-error tolerance). Directory and
     file lists are sorted so the index is deterministic run to run.
+    Only a file monitor_ops.is_plan_file() calls a plan is indexed: a report
+    named after a plan was registered as one until leg 7 of fleet green.
 
     Args:
         ecosystem_root: Root directory to scan from
@@ -124,6 +126,8 @@ def _build_plan_file_index(ecosystem_root: Path) -> Dict[Tuple[str, str], Path]:
                 continue
             key = (match.group(1), match.group(2))
             file_path = Path(root) / filename
+            if not is_plan_file(file_path):
+                continue
             if key in index:
                 logger.warning(f"[{MODULE_NAME}] On-disk duplicate for {key[0]}-{key[1]}: {file_path} (keeping first)")
                 continue

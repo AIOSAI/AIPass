@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: registry_monitor.py
 # Description: Registry auto-healing module
-# Version: 3.3.0
+# Version: 3.4.0
 # Created: 2025-11-21
 # Modified: 2026-10-04
 # =============================================
@@ -14,7 +14,7 @@ All business logic delegated to handlers/registry/monitor_ops.py.
 
 Features:
 - Scan and heal registry (orphaned entries, missing files)
-- Duplicate plan detection with auto-renumbering
+- Duplicate plan detection, reported and never renamed
 - Registry doctrine self-heal (number collisions, unregistered files,
   wrong-prefix rows, orphaned locations) applied directly on every scan
 - Quarantine list for locations the healer refuses to guess at, surfaced
@@ -113,7 +113,7 @@ def scan_plan_files() -> Dict[str, Any]:
     Scan ecosystem for PLAN files and heal the registry (thin orchestrator)
 
     Two passes, both delegated to handlers:
-    1. monitor_ops.scan_plan_files_impl — detection + duplicate renumbering
+    1. monitor_ops.scan_plan_files_impl — detection + duplicate report
     2. heal_registry.heal_registry_doctrine_impl — direct, synchronous
        registry repair for the three doctrine cases (number collision,
        unregistered file, wrong-prefix row). Runs on every scan so these
@@ -199,7 +199,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print(f"  • Added: {len(result['added'])}")
         console.print(f"  • Updated: {len(result['updated'])}")
         console.print(f"  • Removed: {len(result['removed'])}")
-        console.print(f"  • Renumbered: {len(result['renumbered'])}")
+        console.print(f"  • Duplicates (reported, not renamed): {len(result['duplicates'])}")
+        for dup in result["duplicates"]:
+            console.print(f"    - {dup['prefix']}-{dup['number']}: {', '.join(dup['paths'])}")
         console.print(f"  • Doctrine healed: {result.get('doctrine_healed', 0)}")
 
         if result.get("doctrine_healed", 0) > 0:
@@ -290,7 +292,7 @@ def print_introspection():
 
     console.print("[yellow]Features:[/yellow]")
     console.print("  • Scan and heal registry")
-    console.print("  • Duplicate detection with auto-renumbering")
+    console.print("  • Duplicate detection (reported, never renamed)")
     console.print("  • Doctrine self-heal (collisions, unregistered files, wrong-prefix rows)")
     console.print("  • Registry status reporting")
     console.print()

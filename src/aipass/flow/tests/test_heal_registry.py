@@ -3,7 +3,7 @@
 # Description: Tests for heal_registry doctrine self-heal handler
 # Version: 1.0.0
 # Created: 2026-07-29
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/registry/heal_registry.py."""
@@ -52,10 +52,11 @@ class FakeRegistryStore:
 
 
 def _make_plan_file(directory: Path, name: str) -> Path:
-    """Create a real plan .md file so the filesystem walk can find it."""
+    """Create a real plan .md file, opening with its plan header, so the walk counts it."""
     directory.mkdir(parents=True, exist_ok=True)
     plan_file = directory / name
-    plan_file.write_text(f"# {name}\nContent that must never be touched.\n", encoding="utf-8")
+    identity = name.removesuffix(".md").split("_")[0]
+    plan_file.write_text(f"# {identity}: plan\nContent that must never be touched.\n", encoding="utf-8")
     return plan_file
 
 
@@ -170,6 +171,27 @@ class TestUnregisteredFile:
         assert healed["file_path"] == str(plan_file)
         # File itself is untouched — by design this handler never writes .md files.
         assert plan_file.exists()
+
+    def test_a_report_named_like_a_plan_is_not_registered(self, tmp_path, quiet_cross_prefix):
+        """Leg 7: hooks' DPLAN-0356_ph2_report.md in docs.local was registered as a plan.
+
+        The world of 2026-10-04 02:31:06: the scan had renamed the report to
+        DPLAN-0358.md, no row held 0358, and heal registered it as DPLAN-0358.
+        A file named like a plan with a free number must not be registered.
+        Mutant: the index's is_plan_file gate off reddens this (leg7 H1b).
+        """
+        plan = _make_plan_file(tmp_path / "devpulse", "DPLAN-0356_fleet_green_2026-10-01.md")
+        report = tmp_path / "hooks" / "docs.local" / "DPLAN-0358.md"
+        report.parent.mkdir(parents=True)
+        report.write_text("DPLAN-0356 phase 2 DONE\n", encoding="utf-8")
+        row = {"status": "open", "file_path": str(plan), "location": str(plan.parent)}
+        store = FakeRegistryStore({"dplan_registry.json": {"plans": {"0356": row}, "next_number": 357}})
+
+        actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}})
+
+        assert actions == []
+        assert store.plans("dplan_registry.json") == {"0356": row}
+        assert report.read_text(encoding="utf-8") == "DPLAN-0356 phase 2 DONE\n"
 
     def test_other_type_files_are_ignored(self, tmp_path, quiet_cross_prefix):
         """Only files whose prefix matches this registry are considered."""

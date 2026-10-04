@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_helpers.py
 # Description: Plan Closure Helper Functions
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-16
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -34,6 +34,8 @@ from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.plan.registry_routing import _load_template_registry
+from aipass.flow.apps.handlers.registry.load_registry import next_free_number
+from aipass.flow.apps.handlers.registry.monitor_ops import is_plan_file
 
 # =============================================
 # INFRASTRUCTURE
@@ -95,7 +97,11 @@ def _find_relocated_plan(plan_file: Path) -> Path | None:
 
 
 def _find_unregistered_plan_file(prefix: str, plan_key: str) -> Path | None:
-    """Search src/aipass/ for a plan file matching PREFIX-plan_key not in any registry."""
+    """Search src/aipass/ for a plan file matching PREFIX-plan_key not in any registry.
+
+    Only a file monitor_ops.is_plan_file() calls a plan: a report named
+    after the plan is not one, and close would register and archive it.
+    """
     aipass_root = FLOW_ROOT.parent
     pattern = f"{prefix}-{plan_key}*.md"
     # dropbox: a sandbox like .archive, nothing looks into it (ruling of 2026-09-27);
@@ -106,6 +112,8 @@ def _find_unregistered_plan_file(prefix: str, plan_key: str) -> Path | None:
         # Parts below the scan root only: a checkout that itself lives under a
         # directory named dropbox or .backup must still find its plans (leg 4).
         if any(part in skip_parts for part in match.relative_to(aipass_root).parts):
+            continue
+        if not is_plan_file(match):
             continue
         return match
 
@@ -139,7 +147,8 @@ def _self_heal_unregistered_plan(
     actual_key = plan_key
 
     if plan_key in registry.get("plans", {}):
-        next_num = registry.get("next_number", int(plan_key) + 1)
+        # Not next_number alone: it can name a row already held (leg 7).
+        next_num = next_free_number(registry)
         actual_key = f"{next_num:04d}"
         messages.append(
             {
@@ -193,8 +202,10 @@ def _self_heal_unregistered_plan(
     }
 
     registry["plans"][actual_key] = entry
-    if actual_key != plan_key:
-        registry["next_number"] = int(actual_key) + 1
+    # Always, not only on a bump: a row registered at the stored number
+    # without moving it on left DPLAN next_number at 358 beside row 0358,
+    # and the next create would have issued 0358 again (leg 7).
+    registry["next_number"] = next_free_number(registry)
     save_registry_fn(registry, registry_file=reg_file)
 
     messages.append(
