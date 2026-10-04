@@ -1291,6 +1291,20 @@ class TestPushDashboardTemplate:
         assert (tmp_path / "flow" / "DASHBOARD.local.json").exists()
         assert (tmp_path / "ai_mail" / "DASHBOARD.local.json").exists()
 
+    def test_a_created_dashboard_carries_its_branch_name(self, tmp_path, monkeypatch):
+        """The {{BRANCHNAME}} placeholder is replaced by the branch the dashboard is for.
+
+        Green from its first run; its proof is its mutant (prax, leg 13): the
+        replace returning the raw value survived every other test in this file.
+        """
+        mod = _load_pusher()
+        self._setup_template_and_registry(tmp_path, mod, monkeypatch, ["flow"])
+
+        mod.push_dashboard_template(dry_run=False)
+
+        created = json.loads((tmp_path / "flow" / "DASHBOARD.local.json").read_text(encoding="utf-8"))
+        assert created["branch"] == "FLOW"
+
     def test_dry_run_does_not_write_files(self, tmp_path, monkeypatch):
         """Dry run reports changes but does not create files on disk."""
         mod = _load_pusher()

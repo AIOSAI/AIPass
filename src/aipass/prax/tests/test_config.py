@@ -3,7 +3,7 @@
 # Description: Tests for prax config handlers (load + ignore_patterns)
 # Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 
 from aipass.prax.apps.handlers.config import ignore_patterns as ip_mod
 from aipass.prax.apps.handlers.config import load as load_mod
+from aipass.prax.apps.handlers.json import json_service
 
 
 # =============================================
@@ -55,7 +56,14 @@ def _patch_load_world(monkeypatch, tmp_path):
     monkeypatch.setattr(load_mod, "PRAX_LOGGER_CONFIG_FILE", prax_json_dir / "prax_logger_config.json")
     # Reset the lazy cache so get_system_logs_dir() re-resolves
     monkeypatch.setattr(load_mod, "_system_logs_dir_cache", None)
-    # Clear test log redirects so tests exercise real path resolution
+    # Clear test log redirects so tests exercise real path resolution. The real
+    # json service reads the same variable, so its directory is held under
+    # tmp_path at its own edge: with no redirect, the direct and introspection
+    # records would land in the live prax_json (prax, leg 13).
+    json_root = tmp_path / "json_service"
+    monkeypatch.setattr(
+        json_service.JsonHandle, "json_dir", property(lambda handle: json_root / handle.branch_root.name)
+    )
     monkeypatch.delenv("AIPASS_TEST_LOG_DIR", raising=False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     # Suppress sys.modules-based pytest detection so tests can verify prod paths;

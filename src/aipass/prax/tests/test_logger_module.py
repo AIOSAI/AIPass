@@ -23,14 +23,17 @@ import json
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.cli.apps.modules import display
 from aipass.prax.apps.handlers.config import load as config_load
 from aipass.prax.apps.handlers.logging import lifecycle
 from aipass.prax.apps.modules import logger as logger_module
+from aipass.trigger.apps.modules import core as trigger_core
 
 
 # =============================================
@@ -188,13 +191,16 @@ def _inject_trigger(monkeypatch):
     that separation is the whole point of DPLAN-0339 step 3. Injecting it per
     test keeps the module-level dependency list honest about what logging costs.
 
-    Returns the mock `trigger` object the functions will call fire() on.
+    The real core module is loaded and only its `trigger` instance is swapped
+    for a recorder, so nothing reaches the live bus (prax, leg 13: no sys.modules
+    entry stands in for the module).
+
+    Returns the recorder the functions will call fire() on.
     """
-    core = MagicMock()
-    core.trigger = MagicMock()
-    core.trigger.fire = MagicMock(return_value={"handlers": 0, "ran": 0, "failed": 0})
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", core)
-    return core.trigger
+    recorder = MagicMock()
+    recorder.fire = MagicMock(return_value={"handlers": 0, "ran": 0, "failed": 0})
+    monkeypatch.setattr(trigger_core, "trigger", recorder)
+    return recorder
 
 
 # =============================================
@@ -289,8 +295,9 @@ class TestGetSystemStatus:
             "system_logs_dir",
             "total_modules",
         ]
-        # The real PRAX_JSON_DIR: logger.py is bound once (prax, leg 12).
-        assert result["registry_file"] == str(config_load.PRAX_JSON_DIR / "prax_logger_data.json")
+        # DATA_FILE was built at import from config's PRAX_ROOT/prax_json; the
+        # conftest points PRAX_JSON_DIR itself at tmp_path (prax, leg 13).
+        assert result["registry_file"] == str(config_load.PRAX_ROOT / "prax_json" / "prax_logger_data.json")
 
     def test_contains_total_modules_key(self, monkeypatch, tmp_path):
         """Result includes total_modules count from registry."""
@@ -672,8 +679,9 @@ class TestModuleConstants:
         mod, mocks = _inject_and_import(monkeypatch, tmp_path)
 
         # Read off the real config: logger.py is bound once, so DATA_FILE was
-        # built from the real PRAX_JSON_DIR (prax, leg 12).
-        json_dir = config_load.PRAX_JSON_DIR
+        # built at import from PRAX_ROOT/prax_json, which the conftest's tmp_path
+        # PRAX_JSON_DIR does not reach (prax, leg 13).
+        json_dir = config_load.PRAX_ROOT / "prax_json"
         assert isinstance(mod.DATA_FILE, Path)
         assert mod.DATA_FILE.name == "prax_logger_data.json"
         assert mod.DATA_FILE == json_dir / "prax_logger_data.json"
@@ -715,8 +723,9 @@ class TestPrintIntrospection:
         """print_introspection falls back to rich Console if CLI import fails."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
 
-        # A None entry makes the import inside print_introspection raise ImportError.
-        monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules.display", None)
+        # Without its console name the real display makes print_introspection's
+        # from-import raise ImportError (prax, leg 13: no sys.modules stand-in).
+        monkeypatch.delattr(display, "console")
 
         capsys.readouterr()
         mod.print_introspection()  # must not raise
@@ -747,15 +756,22 @@ def _load_lazily(name: str):
 
     Under the lazy (PEP 562) init the name is NOT bound at exec time — the
     fallback's moment moved from import to first attribute access. So the probe
-    execs the source and then calls the module's own ``__getattr__``, with the
-    failure installed for both steps.
+    execs the source and then calls the module's own ``__getattr__``.
 
-    A sys.modules entry of None makes the import raise ImportError, which is the
-    branch under test.
+    The failure sits at the edge of the probe's own namespace: its ``importlib``
+    raises ImportError for the logger module and imports anything else for real
+    (prax, leg 13: no sys.modules entry stands in for the logger).
     """
-    with patch.dict(sys.modules, {"aipass.prax.apps.modules.logger": None}):
-        namespace = _exec_prax_init()
-        return namespace["__getattr__"](name)
+    namespace = _exec_prax_init()
+    real_import = namespace["importlib"].import_module
+
+    def broken_logger_chain(module_name: str):
+        if module_name == namespace["_LOGGER_MODULE"]:
+            raise ImportError(f"logger chain broken for {module_name}")
+        return real_import(module_name)
+
+    namespace["importlib"] = types.SimpleNamespace(import_module=broken_logger_chain)
+    return namespace["__getattr__"](name)
 
 
 def _load_fallback_logger():

@@ -292,7 +292,7 @@
     {
       "file": "tests/test_logging_handlers.py",
       "standard": "stdlib_patch",
-      "reason": "prax, leg 11 (file-wide: this checker passes no line; the patches are at 159-160 and 1164-1165). The subject is the handler surviving a rollover that fails on a full or locked disk; doRollover is made to raise the test's own OSError, in a with-block. No platform fails a rollover on demand under tmp_path. The sys.stderr patch at 862 was cured to capsys this leg."
+      "reason": "prax, leg 11 (file-wide: this checker passes no line; the patches are at 118-119 and 777-778 since prax, leg 13). The subject is the handler surviving a rollover that fails on a full or locked disk; doRollover is made to raise the test's own OSError, in a with-block. No platform fails a rollover on demand under tmp_path. The sys.stderr patch at 862 was cured to capsys this leg."
     },
     {
       "file": "tests/test_instance_lock.py",

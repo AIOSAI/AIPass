@@ -8,8 +8,8 @@
 
 """Shared pytest fixtures for prax tests.
 
-Provides infrastructure mocking so test modules can import prax code
-without triggering real logging, file watching, or CLI dependencies.
+The real logger and json service run in every test, redirected under that
+test's tmp_path; the consoles are pinned and the header's trigger recorded.
 """
 
 import os
@@ -23,12 +23,16 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import sys
 import types
 import pytest
+from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock
 
-# The real display, bound before any fixture stubs sys.modules: the two fixtures
-# below pin and reset the consoles the product actually prints through.
+# The real display: the two fixtures below pin and reset the consoles the
+# product actually prints through.
 from aipass.cli.apps.modules import display
+from aipass.prax.apps.handlers.config import load as config_load
+from aipass.prax.apps.handlers.registry import load as registry_load
+from aipass.prax.apps.handlers.registry import save as registry_save
 
 collect_ignore_glob = [".archive/*"]
 
@@ -132,8 +136,8 @@ def pinned_console_width() -> None:
 def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next.
 
-    Declared above mock_prax_infrastructure so the reset runs after its sys.modules
-    stubs come out.
+    Declared above mock_prax_infrastructure so the reset runs after its redirects
+    come out.
     """
     yield
     display.reset_command_state()
@@ -157,44 +161,24 @@ def header_fires_into_a_recorder(monkeypatch) -> MagicMock:
 
 
 @pytest.fixture(autouse=True)
-def mock_prax_infrastructure(monkeypatch):
-    """Mock heavy prax infrastructure before any prax imports.
+def mock_prax_infrastructure(monkeypatch, tmp_path) -> Path:
+    """The real logger and the real json handler, writing under this test's tmp_path.
 
-    Patches sys.modules so that importing prax modules doesn't trigger
-    real logging setup, CLI initialization, or json_handler file I/O.
+    No stand-ins (prax, leg 13): AIPASS_TEST_LOG_DIR is the seam both already
+    read on every call (system logs, module logs, each branch's json dir), and the
+    path constants computed at import are pointed at the same root. A test that
+    needs to see a log line reads the file there or uses caplog.
+
+    Returns the root everything under test writes into.
     """
-    # Mock prax logger module
-    mock_logger_mod = MagicMock()
-    mock_logger = MagicMock()
-    mock_logger.info = MagicMock()
-    mock_logger.warning = MagicMock()
-    mock_logger.error = MagicMock()
-    mock_logger.debug = MagicMock()
-    mock_logger_mod.system_logger = mock_logger
-    mock_logger_mod.get_direct_logger = MagicMock(return_value=mock_logger)
-    mock_logger_mod.get_system_logger = MagicMock(return_value=mock_logger)
-    mock_logger_mod.DirectLogger = MagicMock
-    mock_logger_mod.SystemLogger = MagicMock
-
-    # Mock json_handler
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    mock_json_mod = MagicMock()
-    mock_json_mod.json_handler = mock_json_handler
-
-    # Inject mocks into sys.modules. The cli package is not stubbed: the product
-    # prints through the real console, which the width and trigger fixtures above
-    # make safe, and tests read it with capsys (prax, leg 11).
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", mock_logger_mod)
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.json", mock_json_mod)
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.json.json_handler", mock_json_handler)
-
-    # Store mocks for test access
-    class Mocks:
-        logger = mock_logger
-        json_handler = mock_json_handler
-
-    return Mocks
+    root = tmp_path / "aipass_test_logs"
+    json_dir = root / "prax" / "prax_json"
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(root))
+    monkeypatch.setattr(config_load, "PRAX_JSON_DIR", json_dir)
+    monkeypatch.setattr(registry_load, "REGISTRY_FILE", json_dir / "prax_registry.json")
+    monkeypatch.setattr(registry_save, "PRAX_JSON_DIR", json_dir)
+    monkeypatch.setattr(registry_save, "REGISTRY_FILE", json_dir / "prax_registry.json")
+    return root
 
 
 @pytest.fixture

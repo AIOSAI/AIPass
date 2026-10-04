@@ -20,34 +20,49 @@
 # seedgo: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
 # seedgo: no-test-needed(json_structure) — the shape of __init__'s file_change_handled log_operation record
 
-import importlib
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-_INJECTED_MODULES = [
-    "watchdog",
-    "watchdog.observers",
-    "watchdog.events",
-    "aipass.prax.apps.handlers.monitoring.event_queue",
-    "aipass.prax.apps.handlers.monitoring.branch_detector",
-    "aipass.prax.apps.handlers.monitoring.monitoring_filters",
-    "aipass.prax.apps.handlers.monitoring.filesystem_handler",
-]
+from aipass.prax.apps.handlers.monitoring import filesystem_handler
+
+# The doubles _filesystem_handler_doubled set on the module for the running test.
+_DOUBLES: dict = {}
 
 
 @pytest.fixture(autouse=True)
-def _cleanup_injected_modules():
-    """Remove mocked monitoring modules from sys.modules after each test."""
-    saved = {k: sys.modules[k] for k in _INJECTED_MODULES if k in sys.modules}
-    yield
-    for k in _INJECTED_MODULES:
-        sys.modules.pop(k, None)
-    for k, v in saved.items():
-        sys.modules[k] = v
+def _filesystem_handler_doubled(monkeypatch):
+    """filesystem_handler is bound at the top and never reloaded; each name it took
+    from the event queue, the branch detector and the filters is doubled on it for
+    one test, with its logger and json service (prax, leg 13: the raw sys.modules
+    stubs of watchdog and three handlers were the import_site rows)."""
+    event_queue = MagicMock()
+    event_queue.MonitoringEvent = MagicMock()
+    event_queue.MonitoringQueue = MagicMock
+    branch_detector = MagicMock()
+    branch_detector.detect_branch_from_path = MagicMock(return_value="PRAX")
+    filters = MagicMock()
+    filters.should_monitor = MagicMock(return_value=True)
+    filters.get_priority = MagicMock(return_value="info")
+    queue = MagicMock()
+    queue.enqueue = MagicMock(return_value=True)
+
+    monkeypatch.setattr(filesystem_handler, "MonitoringEvent", event_queue.MonitoringEvent)
+    monkeypatch.setattr(filesystem_handler, "MonitoringQueue", event_queue.MonitoringQueue)
+    monkeypatch.setattr(filesystem_handler, "detect_branch_from_path", branch_detector.detect_branch_from_path)
+    monkeypatch.setattr(filesystem_handler, "should_monitor", filters.should_monitor)
+    monkeypatch.setattr(filesystem_handler, "get_priority", filters.get_priority)
+    monkeypatch.setattr(filesystem_handler, "logger", MagicMock())
+    monkeypatch.setattr(filesystem_handler, "json_handler", MagicMock())
+    for name, double in (
+        ("event_queue", event_queue),
+        ("branch_detector", branch_detector),
+        ("filters", filters),
+        ("queue", queue),
+    ):
+        monkeypatch.setitem(_DOUBLES, name, double)
 
 
 # =============================================
@@ -56,44 +71,15 @@ def _cleanup_injected_modules():
 
 
 def _import_filesystem_handler():
-    """Import filesystem_handler with mocked watchdog and monitoring deps."""
-    mod_name = "aipass.prax.apps.handlers.monitoring.filesystem_handler"
-    sys.modules.pop(mod_name, None)
-
-    # Mock watchdog.events
-    mock_watchdog_events = MagicMock()
-
-    class FakeFileSystemEventHandler:
-        """Stub base class for watchdog handler."""
-
-    mock_watchdog_events.FileSystemEventHandler = FakeFileSystemEventHandler
-    # The parent package runs log_watcher, which imports watchdog.observers,
-    # so the stub serves that name too and the file passes when run alone.
-    sys.modules["watchdog"] = MagicMock()
-    sys.modules["watchdog.observers"] = MagicMock()
-    sys.modules["watchdog.events"] = mock_watchdog_events
-
-    # Mock monitoring sub-modules
-    mock_event_queue = MagicMock()
-    mock_event_cls = MagicMock()
-    mock_event_queue.MonitoringEvent = mock_event_cls
-    mock_queue_instance = MagicMock()
-    mock_queue_instance.enqueue = MagicMock(return_value=True)
-    mock_event_queue.MonitoringQueue = MagicMock
-
-    mock_branch_detector = MagicMock()
-    mock_branch_detector.detect_branch_from_path = MagicMock(return_value="PRAX")
-
-    mock_filters = MagicMock()
-    mock_filters.should_monitor = MagicMock(return_value=True)
-    mock_filters.get_priority = MagicMock(return_value="info")
-
-    sys.modules["aipass.prax.apps.handlers.monitoring.event_queue"] = mock_event_queue
-    sys.modules["aipass.prax.apps.handlers.monitoring.branch_detector"] = mock_branch_detector
-    sys.modules["aipass.prax.apps.handlers.monitoring.monitoring_filters"] = mock_filters
-
-    mod = importlib.import_module(mod_name)
-    return mod, mock_event_queue, mock_branch_detector, mock_filters, mock_queue_instance
+    """The top-bound module and the doubles the autouse fixture set on it:
+    (module, event_queue, branch_detector, filters, queue)."""
+    return (
+        filesystem_handler,
+        _DOUBLES["event_queue"],
+        _DOUBLES["branch_detector"],
+        _DOUBLES["filters"],
+        _DOUBLES["queue"],
+    )
 
 
 def _make_handler(mod, queue=None, command_indicator_files=None):
@@ -1657,9 +1643,13 @@ class TestHandleEvent:
         mock_filters.should_monitor.return_value = True
         mock_filters.get_priority.return_value = "error"
         mock_bd.detect_branch_from_path.return_value = "PRAX"
-        handler._handle_event("modified", str(tmp_path / "src" / "aipass" / "prax" / "test.py"))
+        event_path = tmp_path / "src" / "aipass" / "prax" / "test.py"
+        handler._handle_event("modified", str(event_path))
         call_kwargs = mock_eq.MonitoringEvent.call_args
         assert "error" in str(call_kwargs)
+        # The level is asked for this path and this action (prax, leg 13: an
+        # action dropped from the call survived every test in this file).
+        mock_filters.get_priority.assert_called_once_with(event_path, "modified")
 
     def test_the_sandbox_root_reaches_should_monitor(self, tmp_path):
         """should_monitor is judged against the root the handler was given (prax, leg 4)."""
