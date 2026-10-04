@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_email_module.py
 # Description: Tests for email.py and email_send.py orchestrator functions
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/email.py and email_send.py."""
@@ -33,8 +33,6 @@ from unittest.mock import MagicMock, patch
 from aipass.ai_mail.apps.modules import email as email_mod
 from aipass.ai_mail.apps.modules import email_send as email_send_mod
 from aipass.ai_mail.apps.modules.email import (
-    _print_row,
-    _resolve_branch_path,
     handle_close,
     handle_command,
     handle_contacts,
@@ -46,9 +44,6 @@ from aipass.ai_mail.apps.modules.email import (
     print_introspection,
 )
 from aipass.ai_mail.apps.modules.email_send import (
-    _get_branch_info_fn,
-    _send_broadcast,
-    _send_direct,
     handle_send,
 )
 
@@ -1053,18 +1048,25 @@ class TestHandleCommand:
 class TestResolveBranchPath:
     """Tests for _resolve_branch_path identity behaviour."""
 
-    def test_runtime_error_propagates_no_substitution(self, monkeypatch):
+    def test_runtime_error_propagates_no_substitution(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """POLICY CHANGE 2026-08-21: an unresolvable caller no longer collapses to
         _AI_MAIL_DIR. That substitution pointed view/close/reply at @ai_mail's own
         mailbox, so a caller standing outside any branch read and archived another
-        citizen's mail with no signal (the owner's ruling via @devpulse, 096c9a42)."""
+        citizen's mail with no signal (the owner's ruling via @devpulse, 096c9a42).
+
+        Reached through the `sent` command (ai_mail, leg 14): the identity error is
+        the answer, and no mailbox, @ai_mail's included, is listed in its place."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.get_current_user",
             lambda: (_ for _ in ()).throw(RuntimeError("no branch")),
         )
+        errors: list[str] = []
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", errors.append)
+        printed = _StdoutLines(capsys)
 
-        with pytest.raises(RuntimeError, match="no branch"):
-            _resolve_branch_path()
+        assert handle_command("sent", []) is True
+        assert errors == ["Error: no branch"]
+        assert not any("sent messages" in p.lower() for p in printed)
 
 
 # ===========================================================================
@@ -1398,6 +1400,40 @@ class TestPrintIntrospection:
 # ===========================================================================
 
 
+def _no_error_dispatch(monkeypatch):
+    """Fail the test, past send's `except Exception`, if a send reaches the error report.
+
+    pytest.fail raises a BaseException, so the product's broad catch cannot swallow it.
+    """
+    monkeypatch.setattr(
+        email_send_mod,
+        "dispatch_send_error",
+        lambda *a: pytest.fail(f"a send failed and reached the error report: {a!r}"),
+    )
+
+
+def _stub_single_send(monkeypatch, tmp_path, on_send=None):
+    """Stub the sender, the dispatch target and the one-recipient send under handle_send.
+
+    `on_send` sees the positional args send_to_single was handed; the send answers success.
+    """
+    monkeypatch.setattr(
+        email_send_mod,
+        "resolve_sender_info",
+        lambda *a: {"email_address": "@ai_mail", "display_name": "AI_MAIL", "mailbox_path": str(tmp_path)},
+    )
+    monkeypatch.setattr(email_send_mod, "resolve_dispatch_target", lambda recipient, auto, info: recipient)
+    # A failed send must stop here, never reach the real error report to @drone (ai_mail, leg 14).
+    _no_error_dispatch(monkeypatch)
+
+    def _send(*a, **kw):
+        if on_send is not None:
+            on_send(a)
+        return True, None
+
+    monkeypatch.setattr(email_send_mod, "send_to_single", _send)
+
+
 class TestDeliveryCallback:
     """Tests for email_send._delivery_callback."""
 
@@ -1410,9 +1446,11 @@ class TestDeliveryCallback:
             delivered_args.append({"update_central_fn": update_central_fn})
 
         monkeypatch.setattr(email_send_mod, "on_email_delivered", mock_on_delivered)
+        _stub_single_send(monkeypatch, tmp_path, on_send=lambda a: a[11](str(tmp_path), 3, 2, 5))
 
-        email_send_mod._delivery_callback(str(tmp_path), 3, 2, 5)
-        assert len(delivered_args) == 1
+        # The callback is the one `send` hands the delivery (ai_mail, leg 14).
+        assert handle_send(["@target", "Sub", "Msg"]) is True
+        assert delivered_args == [{"update_central_fn": email_send_mod.update_central}]
 
 
 # ===========================================================================
@@ -1423,16 +1461,25 @@ class TestDeliveryCallback:
 class TestGetBranchInfoFn:
     """Tests for email_send._get_branch_info_fn."""
 
-    def test_get_branch_info_fn_success(self):
+    def _lookup_handed_over(self, monkeypatch, tmp_path):
+        """The branch-info lookup `send` hands dispatch-target resolution (ai_mail, leg 14)."""
+        _stub_single_send(monkeypatch, tmp_path)
+        handed: list = []
+        monkeypatch.setattr(email_send_mod, "resolve_dispatch_target", lambda r, auto, info: handed.append(info) or r)
+        assert handle_send(["@target", "Sub", "Msg"]) is True
+        assert len(handed) == 1
+        return handed[0]
+
+    def test_get_branch_info_fn_success(self, monkeypatch, tmp_path):
         """Returns function on success."""
-        result = _get_branch_info_fn()
+        result = self._lookup_handed_over(monkeypatch, tmp_path)
         # MEASURED 2026-09-08: the import succeeds here and a real function comes
         # back, so ``result is None`` never held — the ``or`` let the failure
         # this unit is named for pass as success.
         assert callable(result)
         assert result.__name__ == "get_branch_info_from_registry"
 
-    def test_get_branch_info_fn_import_error(self, monkeypatch):
+    def test_get_branch_info_fn_import_error(self, monkeypatch, tmp_path):
         """Returns None on ImportError."""
         import builtins
 
@@ -1446,7 +1493,7 @@ class TestGetBranchInfoFn:
 
         monkeypatch.setattr(builtins, "__import__", mock_import)
 
-        result = _get_branch_info_fn()
+        result = self._lookup_handed_over(monkeypatch, tmp_path)
         assert result is None
 
 
@@ -1466,8 +1513,9 @@ class TestSendDirectExtended:
         )
         error_mock = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
+        _no_error_dispatch(monkeypatch)
 
-        result = _send_direct("@target", "Sub", "Msg")
+        result = handle_send(["@target", "Sub", "Msg"])  # through the command (ai_mail, leg 14)
         assert result is True
         # A closed stdout is not a failed send: nothing is reported as an error
         error_mock.assert_not_called()
@@ -1489,9 +1537,9 @@ class TestSendDirectExtended:
             lambda msg: errors.append(msg),
         )
 
-        result = _send_direct("@target", "Sub", "Msg")
-        assert result is False
-        assert any("send boom" in e for e in errors)
+        result = handle_send(["@target", "Sub", "Msg"])  # through the command (ai_mail, leg 14)
+        assert result is True  # recognised; the failure is what was reported
+        assert errors == ["Error: send boom"]
         assert len(dispatched_errors) == 1
         assert dispatched_errors[0][0] == "@target"
 
@@ -1517,7 +1565,7 @@ class TestSendDirectExtended:
         error_mock = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
 
-        result = _send_direct("@all", "Hello", "World")
+        result = handle_send(["@all", "Hello", "World"])  # through the command (ai_mail, leg 14)
         assert result is True
         assert any("Broadcast" in p or "OK" in p for p in printed)
         error_mock.assert_not_called()
@@ -1531,14 +1579,21 @@ class TestSendDirectExtended:
 class TestFireDispatchTrigger:
     """Tests for email_send._fire_dispatch_trigger exception handling."""
 
-    def test_fire_dispatch_trigger_exception_logged(self, monkeypatch):
-        """Exception in trigger.fire is logged but does not propagate."""
+    def test_fire_dispatch_trigger_exception_logged(self, monkeypatch, tmp_path):
+        """Exception in trigger.fire is logged but does not propagate: `send --dispatch` still answers.
+
+        Reached through handle_send, not the helper (ai_mail, leg 14).
+        """
         mock_trigger = MagicMock()
         mock_trigger.fire.side_effect = RuntimeError("trigger broken")
         monkeypatch.setattr(email_send_mod, "trigger", mock_trigger)
+        log = MagicMock()
+        monkeypatch.setattr(email_send_mod, "logger", log)
+        _stub_single_send(monkeypatch, tmp_path)
 
-        email_send_mod._fire_dispatch_trigger("@target", "Test Subject")
+        assert handle_send(["@target", "Test Subject", "Body", "--dispatch"]) is True
         mock_trigger.fire.assert_called_once_with("email_dispatched", to="@target", subject="Test Subject")
+        assert log.warning.call_args.args[0] == "[email_send] trigger fire for email_dispatched failed: %s"
 
 
 # ===========================================================================
@@ -1571,7 +1626,8 @@ class TestSendBroadcast:
             "display_name": "AI_MAIL",
             "mailbox_path": str(tmp_path),
         }
-        result = _send_broadcast("Subj", "Msg", user_info, False, False, None, None)
+        monkeypatch.setattr(email_send_mod, "resolve_sender_info", lambda *a: user_info)
+        result = handle_send(["@all", "Subj", "Msg"])  # the broadcast, through the command (ai_mail, leg 14)
         assert result is True
         assert any("Broadcasting" in p for p in printed)
         assert any("2/2" in p for p in printed)
@@ -1598,9 +1654,10 @@ class TestSendBroadcast:
             "display_name": "AI_MAIL",
             "mailbox_path": str(tmp_path),
         }
-        result = _send_broadcast("Subj", "Msg", user_info, False, False, None, None)
-        assert result is False
-        assert any("Failed to load" in e for e in errors)
+        monkeypatch.setattr(email_send_mod, "resolve_sender_info", lambda *a: user_info)
+        result = handle_send(["@all", "Subj", "Msg"])  # the broadcast, through the command (ai_mail, leg 14)
+        assert result is True  # recognised; the failure is what was reported
+        assert errors == ["Failed to load email file for broadcast"]
 
 
 # ===========================================================================
@@ -1651,9 +1708,11 @@ class TestSendInteractiveExtended:
         errors: list[str] = []
         monkeypatch.setattr(email_send_mod, "error", lambda msg: errors.append(str(msg)))
 
-        result = email_send_mod._send_interactive()
+        # `email` with no arguments is the interactive send (ai_mail, leg 14); the
+        # command was recognised, and the refusal is what was said.
+        result = handle_send([])
 
-        assert result is False
+        assert result is True
         assert listed == []
         assert any("terminal" in e for e in errors)
         tty.assert_called_once_with()
@@ -1687,13 +1746,15 @@ class TestSendInteractiveExtended:
                 "mailbox_path": str(tmp_path / "mailbox"),
             },
         )
-        monkeypatch.setattr(email_send_mod, "send_to_single", lambda *a, **kw: (True, None))
+        sent_to: list[str] = []
+        monkeypatch.setattr(email_send_mod, "send_to_single", lambda *a, **kw: sent_to.append(a[0]) or (True, None))
         printed = _StdoutLines(capsys)
         error_mock = MagicMock()
         monkeypatch.setattr(email_send_mod, "error", error_mock)
 
-        result = email_send_mod._send_interactive()
+        result = handle_send([])  # the interactive send, through the command (ai_mail, leg 14)
         assert result is True
+        assert sent_to == ["@alpha"]
         assert any("@alpha" in p for p in printed)
         assert any("sent" in p.lower() for p in printed)
         tty.assert_called_once_with()
@@ -1821,19 +1882,21 @@ class TestListingNeverHidesMail:
         assert [r.strip() for r in rows] == ["1. subject-2", "2. subject-1", "3. subject-0"]
         assert any("Showing 3 of 3 messages" in p for p in printed)
 
-    def test_row_that_fails_to_render_is_shown_raw_not_hidden(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
+    def test_row_that_fails_to_render_is_shown_raw_not_hidden(
+        self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]
+    ):
         """CANARY: a row the console rejects degrades visibly instead of vanishing.
 
         The real console rejects the stray closing tag itself (leg 5 took out the
         fake console that raised on cue), so the failure is Rich's own. The logger
-        is replaced so the degraded path writes no live log, and asserted.
+        is replaced so the degraded path writes no live log, and asserted. The row
+        is printed by `inbox` itself, not by the row helper (ai_mail, leg 14).
         """
         log = MagicMock()
         monkeypatch.setattr(email_mod, "logger", log)
 
-        _print_row("1. Subject: RE: [/rc] recovered")
-
-        blob = capsys.readouterr().out
+        messages = [{"id": "m0", "subject": "Subject: RE: [/rc] recovered", "status": "new"}]
+        blob = "\n".join(self._run_inbox(monkeypatch, tmp_path, messages, capsys))
         assert "RE: [/rc] recovered" in blob, "unrenderable row vanished instead of degrading"
         assert "RAW" in blob, "degraded row must carry a visible marker"
         log.warning.assert_called_once()

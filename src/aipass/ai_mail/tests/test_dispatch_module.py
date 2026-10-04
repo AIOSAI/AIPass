@@ -32,7 +32,6 @@ from aipass.ai_mail.apps.modules.dispatch import (
     print_introspection,
 )
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
-import aipass.ai_mail.apps.modules.dispatch as dmod
 
 
 # Each verb is reached the way `drone @ai_mail dispatch ...` reaches it: through
@@ -441,23 +440,28 @@ class TestOrchestrateWake:
         combined = " ".join(printed)
         assert "Wake" in combined
 
-    def test_help_flag_prints_help(self, monkeypatch):
-        """--help prints wake help and returns True."""
+    def test_wake_help_prints_the_wake_usage(self, monkeypatch):
+        """`dispatch wake help` prints the wake usage and returns True (ai_mail, leg 14)."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = dmod._orchestrate_wake(["--help"])
+        result = _wake(["help"])
         assert result is True
         combined = " ".join(printed)
-        assert "Wake" in combined
+        assert 'Usage: dispatch wake @branch ["custom message"]' in combined
 
-    def test_h_flag_prints_help(self, monkeypatch):
-        """-h prints wake help and returns True."""
+    def test_h_flag_after_wake_is_answered_and_wakes_nothing(self, monkeypatch):
+        """`dispatch wake -h` is help, never a wake: wants_help answers it before the verb (ai_mail, leg 14)."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+        woken = []
+        monkeypatch.setattr(f"{_H_WAKE}.wake_branch", lambda *a, **kw: woken.append(a))
 
-        result = dmod._orchestrate_wake(["-h"])
+        result = _wake(["-h"])
         assert result is True
+        assert woken == []
+        # The dispatch help answered, not the wake arm's own usage line.
+        assert not any("Wake - Manual branch spawn" in line for line in printed)
 
     def test_help_word_prints_help(self, monkeypatch):
         """'help' prints wake help and returns True."""
@@ -1200,19 +1204,22 @@ class TestWakeBackPromiseMatchesDelivery:
     """The line printed after a successful dispatch must describe what will
     actually happen. A manager is never woken — it is mailed."""
 
-    def _run(self, monkeypatch, sender_is_manager):
-        """Stub the wake and the manager verdict; the real console prints to stdout."""
+    def _run(self, sender, sender_is_manager):
+        """`dispatch @canary` under the shared send patch set, the wake-back going to `sender`.
+
+        The wake and the manager verdict are stubbed; the real console prints to
+        stdout. Reached through the command, not the helper (ai_mail, leg 14).
+        """
         status = DispatchStatus()
         status.ok("spawn", "agent started")
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch",
-            MagicMock(return_value=(status, True)),
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.is_manager",
-            MagicMock(return_value=sender_is_manager),
-        )
-        return dmod
+        overrides = {
+            f"{_H_WAKE}.wake_branch": MagicMock(return_value=(status, True)),
+            # Keyed on the address, so asking about the wrong one is seen.
+            f"{_H_WAKE}.is_manager": MagicMock(side_effect=lambda addr: sender_is_manager and addr == sender),
+            f"{_H_VERIFIED}.resolve_wake_sender": MagicMock(return_value=sender),
+        }
+        with _send_patches(overrides):
+            assert _send(["@canary", "Subject", "Body"]) is True
 
     def test_manager_sender_is_promised_mail_not_a_wake(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """@devpulse was told 'sender will be woken' three times on 2026-08-21
@@ -1221,16 +1228,14 @@ class TestWakeBackPromiseMatchesDelivery:
         Read from stdout with the wrapped lines joined, so a promise Rich breaks
         across two lines is still seen whole.
         """
-        dmod = self._run(monkeypatch, sender_is_manager=True)
-        dmod._announce_wake_back("@canary", "@devpulse")
+        self._run("@devpulse", sender_is_manager=True)
         line = " ".join(capsys.readouterr().out.split()).lower()
         assert "mailed" in line
         assert "will be woken" not in line
 
     def test_ordinary_sender_is_still_promised_a_wake(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """A sender who is not a manager is still promised the wake, read from stdout."""
-        dmod = self._run(monkeypatch, sender_is_manager=False)
-        dmod._announce_wake_back("@canary", "@prax")
+        self._run("@prax", sender_is_manager=False)
         line = " ".join(capsys.readouterr().out.split()).lower()
         assert "sender will be woken when @canary completes" in line
 

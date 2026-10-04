@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_send_identity.py
 # Description: Tests for sender identity detection chain
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-10
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the sender identity chain in apps/handlers/email/send.py."""
@@ -42,9 +42,6 @@ from aipass.ai_mail.apps.handlers.users.branch_detection import (
     detect_branch_from_pwd,
     find_branch_root,
     get_branch_info_from_registry,
-    _lookup_branch_by_name,
-    _find_caller_registry,
-    _get_contact_info,
 )
 from aipass.ai_mail.apps.handlers.email.send import resolve_sender_info
 from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args
@@ -347,6 +344,26 @@ class TestFindBranchRoot:
 # ─── _lookup_branch_by_name() tests (isolated with temp registry) ──
 
 
+def _registry_answer(name: str):
+    """The registry row detect_branch_from_pwd seats a caller named only by AIPASS_CALLER_BRANCH.
+
+    The name lookup is reached through the detection, not called (ai_mail, leg 14):
+    no caller cwd, so nothing is synthesized, and the address book is recorded and
+    answers nothing, so a found row can only have come from the registry.
+    """
+    asked: list[str] = []
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AIPASS_CALLER_")}
+    env["AIPASS_CALLER_BRANCH"] = name
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch("aipass.ai_mail.apps.handlers.email.contacts.get_contact", side_effect=asked.append),
+    ):
+        found = detect_branch_from_pwd()
+    # The address book is asked exactly when the registry had no row.
+    assert asked == ([] if found else [name])
+    return found
+
+
 class TestLookupBranchByName:
     """Tests for registry name lookup. Uses patched temp registry."""
 
@@ -354,7 +371,7 @@ class TestLookupBranchByName:
         """Should find a branch that exists in the registry."""
         registry_path, branch_data = temp_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
-            result = _lookup_branch_by_name("mock_spawn")
+            result = _registry_answer("mock_spawn")
             assert result is not None
             assert result["email"] == "@mock_spawn"
             assert result["name"] == "MOCK_SPAWN"
@@ -363,8 +380,8 @@ class TestLookupBranchByName:
         """Should match regardless of case."""
         registry_path, _ = temp_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
-            lower = _lookup_branch_by_name("test_branch")
-            upper = _lookup_branch_by_name("TEST_BRANCH")
+            lower = _registry_answer("test_branch")
+            upper = _registry_answer("TEST_BRANCH")
             assert lower is not None
             assert upper is not None
             assert lower["email"] == upper["email"] == "@test_branch"
@@ -373,14 +390,14 @@ class TestLookupBranchByName:
         """Should return None for a branch not in registry."""
         registry_path, _ = temp_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
-            result = _lookup_branch_by_name("this_branch_does_not_exist_xyz")
+            result = _registry_answer("this_branch_does_not_exist_xyz")
             assert result is None
 
     def test_returns_none_when_registry_missing(self, tmp_path):
         """Should return None (not crash) when registry file doesn't exist."""
         fake_path = tmp_path / "nonexistent_registry.json"
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", fake_path):
-            result = _lookup_branch_by_name("anything")
+            result = _registry_answer("anything")
             assert result is None
 
     def test_returns_none_when_registry_corrupted(self, tmp_path):
@@ -388,14 +405,14 @@ class TestLookupBranchByName:
         corrupt_path = tmp_path / "AIPASS_REGISTRY.json"
         corrupt_path.write_text("{this is not valid json!!!", encoding="utf-8")
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", corrupt_path):
-            result = _lookup_branch_by_name("anything")
+            result = _registry_answer("anything")
             assert result is None
 
     def test_list_format_registry_works(self, list_format_registry):
         """Should work with production list-format registry (not just dict)."""
         _, registry_path = list_format_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
-            result = _lookup_branch_by_name("spawn")
+            result = _registry_answer("spawn")
             assert result is not None
             assert result["name"] == "SPAWN"
             assert result["email"] == "@spawn"
@@ -710,63 +727,73 @@ class TestAntiRegression:
         assert result["mode"] == "direct"
 
 
-# ─── _find_caller_registry() tests ───────────────────────
+# ─── The caller registry fallback, through get_branch_info_from_registry() ──
+
+
+def _seat_registry(registry: Path, seat: Path) -> Path:
+    """Write *registry* holding one row for *seat*, named after the file: the name tells which registry answered."""
+    name = registry.name.removesuffix("_REGISTRY.json")
+    registry.write_text(json.dumps({"branches": [{"name": name, "path": str(seat)}]}), encoding="utf-8")
+    return registry
+
+
+def _answering_registry(seat: Path, aipass_registry: Path):
+    """The name of the registry that answers a lookup of *seat* by path, or None when none does."""
+    with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", aipass_registry):
+        info = get_branch_info_from_registry(seat)
+    return None if info is None else info["name"]
 
 
 class TestFindCallerRegistry:
-    """Tests for the caller registry fallback used for external project branches."""
+    """The caller registry fallback for external project branches, read through the public path lookup."""
 
-    def test_returns_none_when_no_env(self, clean_env):
-        """Returns None when AIPASS_CALLER_CWD is not set."""
-        result = _find_caller_registry()
-        assert result is None
+    def test_returns_none_when_no_env(self, clean_env, tmp_path, monkeypatch):
+        """No AIPASS_CALLER_CWD: a registry holding the seat is never consulted, not even in the process CWD."""
+        seat = tmp_path / "seat"
+        _seat_registry(tmp_path / "VERA_REGISTRY.json", seat)
+        monkeypatch.chdir(tmp_path)
+
+        assert _answering_registry(seat, tmp_path / "other" / "AIPASS_REGISTRY.json") is None
 
     def test_returns_none_when_no_registry_in_tree(self, clean_env, tmp_path):
-        """Returns None when no *_REGISTRY.json found under AIPASS_CALLER_CWD."""
+        """No *_REGISTRY.json under AIPASS_CALLER_CWD: the lookup answers None."""
         os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
-        result = _find_caller_registry()
-        assert result is None
+
+        assert _answering_registry(tmp_path / "seat", tmp_path / "other" / "AIPASS_REGISTRY.json") is None
 
     def test_finds_registry_in_cwd(self, clean_env, tmp_path):
-        """Returns registry path when AIPASS_REGISTRY.json exists in caller CWD."""
-        registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text('{"branches": []}', encoding="utf-8")
+        """A registry in the caller CWD answers."""
+        seat = tmp_path / "seat"
+        _seat_registry(tmp_path / "AIPASS_REGISTRY.json", seat)
 
         os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
-        with patch(
-            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
-            tmp_path / "other" / "AIPASS_REGISTRY.json",
-        ):
-            result = _find_caller_registry()
 
-        assert result == registry
+        assert _answering_registry(seat, tmp_path / "other" / "AIPASS_REGISTRY.json") == "AIPASS"
 
     def test_finds_registry_in_parent(self, clean_env, tmp_path):
-        """Returns registry path when found in a parent directory of caller CWD."""
-        registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text('{"branches": []}', encoding="utf-8")
+        """A registry in a parent directory of the caller CWD answers."""
+        seat = tmp_path / "seat"
+        _seat_registry(tmp_path / "AIPASS_REGISTRY.json", seat)
         nested = tmp_path / "src" / "vera"
         nested.mkdir(parents=True)
 
         os.environ["AIPASS_CALLER_CWD"] = str(nested)
-        with patch(
-            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
-            tmp_path / "other" / "AIPASS_REGISTRY.json",
-        ):
-            result = _find_caller_registry()
 
-        assert result == registry
+        assert _answering_registry(seat, tmp_path / "other" / "AIPASS_REGISTRY.json") == "AIPASS"
 
     def test_skips_aipass_registry_itself(self, clean_env, tmp_path):
-        """Returns None when found registry is the same as BRANCH_REGISTRY_PATH."""
+        """The AIPass registry found again as the caller's answers nothing a second time.
+
+        Through the public lookup the skip cannot be seen here alone (the second read
+        of the same empty registry also answers None); its proof is
+        test_prefers_external_registry_over_aipass_one, where the skip decides the answer.
+        """
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text('{"branches": []}', encoding="utf-8")
 
         os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
-        with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry):
-            result = _find_caller_registry()
 
-        assert result is None
+        assert _answering_registry(tmp_path / "seat", registry) is None
 
     # ─── External project registries (VERA reply bug, S31/S33) ───
     #
@@ -777,64 +804,48 @@ class TestFindCallerRegistry:
     # stayed green while the function was unreachable in production.
 
     def test_finds_external_project_registry(self, clean_env, tmp_path):
-        """A PROJECTNAME_REGISTRY.json is found, not just AIPASS_REGISTRY.json."""
-        registry = tmp_path / "VERA-STUDIO_REGISTRY.json"
-        registry.write_text('{"branches": []}', encoding="utf-8")
+        """A PROJECTNAME_REGISTRY.json answers, not just AIPASS_REGISTRY.json."""
+        seat = tmp_path / "seat"
+        _seat_registry(tmp_path / "VERA-STUDIO_REGISTRY.json", seat)
         nested = tmp_path / "src" / "vera_studio" / "vera"
         nested.mkdir(parents=True)
 
         os.environ["AIPASS_CALLER_CWD"] = str(nested)
-        with patch(
-            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
-            tmp_path / "other" / "AIPASS_REGISTRY.json",
-        ):
-            result = _find_caller_registry()
 
-        assert result == registry
+        assert _answering_registry(seat, tmp_path / "other" / "AIPASS_REGISTRY.json") == "VERA-STUDIO"
 
     def test_prefers_external_registry_over_aipass_one(self, clean_env, tmp_path):
-        """The double-lookup guard still skips the AIPass registry when both sit together."""
+        """The double-lookup guard skips the AIPass registry when both sit together, so the external one answers."""
         aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
         aipass_registry.write_text('{"branches": []}', encoding="utf-8")
-        external = tmp_path / "VERA-STUDIO_REGISTRY.json"
-        external.write_text('{"branches": []}', encoding="utf-8")
+        seat = tmp_path / "seat"
+        _seat_registry(tmp_path / "VERA-STUDIO_REGISTRY.json", seat)
 
         os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
-        with patch(
-            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
-            aipass_registry,
-        ):
-            result = _find_caller_registry()
 
-        assert result == external
+        assert _answering_registry(seat, aipass_registry) == "VERA-STUDIO"
 
     def test_multiple_registries_resolve_deterministically(self, clean_env, tmp_path):
         """sorted() so a dir holding several registries always yields the same one."""
+        seat = tmp_path / "seat"
         for name in ("ZEBRA_REGISTRY.json", "ALPHA_REGISTRY.json", "MIDDLE_REGISTRY.json"):
-            (tmp_path / name).write_text('{"branches": []}', encoding="utf-8")
+            _seat_registry(tmp_path / name, seat)
 
         os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
-        with patch(
-            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
-            tmp_path / "other" / "AIPASS_REGISTRY.json",
-        ):
-            results = [_find_caller_registry() for _ in range(3)]
+        other = tmp_path / "other" / "AIPASS_REGISTRY.json"
 
-        assert results == [tmp_path / "ALPHA_REGISTRY.json"] * 3
+        assert [_answering_registry(seat, other) for _ in range(3)] == ["ALPHA"] * 3
 
     def test_unrelated_json_is_not_treated_as_a_registry(self, clean_env, tmp_path):
-        """The glob is *_REGISTRY.json — arbitrary JSON in the tree is ignored."""
-        (tmp_path / "package.json").write_text("{}", encoding="utf-8")
-        (tmp_path / "REGISTRY.json").write_text("{}", encoding="utf-8")
+        """The glob is *_REGISTRY.json — arbitrary JSON in the tree is ignored, even when it holds the seat."""
+        seat = tmp_path / "seat"
+        row = json.dumps({"branches": [{"name": "UNRELATED", "path": str(seat)}]})
+        (tmp_path / "package.json").write_text(row, encoding="utf-8")
+        (tmp_path / "REGISTRY.json").write_text(row, encoding="utf-8")
 
         os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
-        with patch(
-            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
-            tmp_path / "other" / "AIPASS_REGISTRY.json",
-        ):
-            result = _find_caller_registry()
 
-        assert result is None
+        assert _answering_registry(seat, tmp_path / "other" / "AIPASS_REGISTRY.json") is None
 
     def test_external_branch_resolves_by_relative_path(self, clean_env, tmp_path):
         """End of the sender-detection chain: relative path resolves against the registry dir."""
@@ -860,11 +871,31 @@ class TestFindCallerRegistry:
 # ─── Caller registry fallback tests ──────────────────────
 
 
+def _caller_seated(monkeypatch, name: str, caller_cwd: Path):
+    """The row detect_branch_from_pwd seats for a caller named *name* standing in *caller_cwd*.
+
+    The name lookup is reached through the detection, not called (ai_mail, leg 14).
+    The source is "assigned", a credential, so a cwd outside any branch is not
+    refused; the address book is recorded and answers nothing, so a row with an
+    email can only have come from a registry (a synthesized caller carries none).
+    """
+    asked: list[str] = []
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", name)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller_cwd))
+    monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "assigned")
+    with patch("aipass.ai_mail.apps.handlers.email.contacts.get_contact", side_effect=asked.append):
+        found = detect_branch_from_pwd()
+    assert found is not None
+    # The address book is asked exactly when no registry had the row.
+    assert asked == ([] if found.get("email") else [name])
+    return found
+
+
 class TestCallerRegistryFallback:
     """Tests for branch lookup fallback to external project registry."""
 
-    def test_lookup_by_name_falls_back_to_caller_registry(self, clean_env, tmp_path):
-        """_lookup_branch_by_name finds external branch via caller registry."""
+    def test_lookup_by_name_falls_back_to_caller_registry(self, clean_env, tmp_path, monkeypatch):
+        """The name lookup finds an external branch via the caller registry."""
         caller_registry = tmp_path / "AIPASS_REGISTRY.json"
         caller_registry.write_text(
             json.dumps(
@@ -877,16 +908,14 @@ class TestCallerRegistryFallback:
         empty_aipass.parent.mkdir(parents=True)
         empty_aipass.write_text('{"branches": []}', encoding="utf-8")
 
-        os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", empty_aipass):
-            result = _lookup_branch_by_name("vera")
+            result = _caller_seated(monkeypatch, "vera", tmp_path)
 
-        assert result is not None
         assert result["email"] == "@vera"
         assert result["name"] == "VERA"
 
-    def test_lookup_by_name_prefers_aipass_registry(self, clean_env, tmp_path):
-        """_lookup_branch_by_name returns AIPass result first when branch exists in both."""
+    def test_lookup_by_name_prefers_aipass_registry(self, clean_env, tmp_path, monkeypatch):
+        """The name lookup returns the AIPass row first when the branch exists in both."""
         aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
         aipass_registry.write_text(
             json.dumps(
@@ -918,11 +947,9 @@ class TestCallerRegistryFallback:
             encoding="utf-8",
         )
 
-        os.environ["AIPASS_CALLER_CWD"] = str(caller_dir)
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", aipass_registry):
-            result = _lookup_branch_by_name("spawn")
+            result = _caller_seated(monkeypatch, "spawn", caller_dir)
 
-        assert result is not None
         assert result["email"] == "@spawn-aipass"
 
     def test_get_branch_info_falls_back_to_caller_registry(self, clean_env, tmp_path):
@@ -958,29 +985,44 @@ class TestGetContactInfo:
     one.
     """
 
-    def test_returns_none_when_branch_root_is_gone(self, clean_env, tmp_path):
+    @staticmethod
+    def _caller_named(monkeypatch, tmp_path, name):
+        """Who detect_branch_from_pwd says the caller is when only AIPASS_CALLER_BRANCH names it.
+
+        The registry is an empty tmp path, so the address book is the only lane
+        that can answer; with no caller cwd nothing is synthesized. The contact
+        lookup is reached through the detection, not called (ai_mail, leg 14).
+        """
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
+            tmp_path / "AIPASS_REGISTRY.json",
+        )
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", name)
+        return detect_branch_from_pwd()
+
+    def test_returns_none_when_branch_root_is_gone(self, clean_env, tmp_path, monkeypatch):
         """A stale row (branch dir no longer on disk) falls through, unverified."""
         dead_inbox = tmp_path / "gone" / ".ai_mail.local" / "inbox.json"
         register_contact("ghost", "AIPass", str(dead_inbox))
 
-        assert _get_contact_info("ghost") is None
+        assert self._caller_named(monkeypatch, tmp_path, "ghost") is None
 
-    def test_returns_info_when_branch_root_exists(self, clean_env, tmp_path):
+    def test_returns_info_when_branch_root_exists(self, clean_env, tmp_path, monkeypatch):
         """A live row (branch dir present) still resolves normally."""
         branch_root = tmp_path / "live_branch"
         (branch_root / ".ai_mail.local").mkdir(parents=True)
         inbox = branch_root / ".ai_mail.local" / "inbox.json"
         register_contact("alive", "AIPass", str(inbox))
 
-        result = _get_contact_info("alive")
+        result = self._caller_named(monkeypatch, tmp_path, "alive")
 
         assert result is not None
         assert result["email"] == "@alive"
         assert result["path"] == str(branch_root)
 
-    def test_no_contact_still_returns_none(self, clean_env):
+    def test_no_contact_still_returns_none(self, clean_env, tmp_path, monkeypatch):
         """Baseline: an unknown branch name is None, same as before this guard."""
-        assert _get_contact_info("nobody-registered-this") is None
+        assert self._caller_named(monkeypatch, tmp_path, "nobody-registered-this") is None
 
 
 # ─── Identity resolution observability (@aipass misattribution, 2026-08-07) ───

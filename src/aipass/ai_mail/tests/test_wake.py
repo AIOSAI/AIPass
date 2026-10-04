@@ -40,8 +40,8 @@ from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
     _read_session_type,
     _read_session_type_darwin,
 )
+from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import refresh_recipient_dashboard
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
-    _read_json,
     _find_claude_bin,
     resolve_branch,
     DispatchStatus,
@@ -159,26 +159,45 @@ def test_dispatch_status_format_output():
 # --- _read_json tests ------------------------------------------------
 
 
-def test_read_json_valid(tmp_path):
+# Read through fable_allowed(), the public reader of the wake config, not called
+# directly (ai_mail, leg 14). A missing file and a corrupt one both fall to the
+# default grant; only the corrupt one is warned about.
+
+
+def _grant_from(monkeypatch, config_file):
+    """The Fable grant read from `config_file`, and the logger that saw the read."""
+    monkeypatch.setattr(wake_mod, "CONFIG_FILE", config_file)
+    log = MagicMock()
+    monkeypatch.setattr(wake_mod, "logger", log)
+    return wake_mod.fable_allowed(), log
+
+
+def test_read_json_valid(tmp_path, monkeypatch):
     """Valid JSON file returns parsed dict."""
     f = tmp_path / "data.json"
-    f.write_text(json.dumps({"key": "value"}), encoding="utf-8")
-    result = _read_json(f)
-    assert result == {"key": "value"}
+    f.write_text(json.dumps({wake_mod.FABLE_GRANT_KEY: ["@vera"]}), encoding="utf-8")
+    grant, log = _grant_from(monkeypatch, f)
+    assert grant == frozenset({"@vera"})
+    log.warning.assert_not_called()
 
 
-def test_read_json_missing_file(tmp_path):
-    """Missing file returns None."""
-    result = _read_json(tmp_path / "nope.json")
-    assert result is None
+def test_read_json_missing_file(tmp_path, monkeypatch):
+    """Missing file returns None: the default grant, and nothing to warn about."""
+    grant, log = _grant_from(monkeypatch, tmp_path / "nope.json")
+    assert grant == wake_mod.FABLE_GRANT_DEFAULT
+    log.warning.assert_not_called()
 
 
-def test_read_json_corrupt(tmp_path):
+def test_read_json_corrupt(tmp_path, monkeypatch):
     """Corrupt JSON raises JsonUnreadable, distinct from a missing file (ai_mail, leg 13)."""
     f = tmp_path / "bad.json"
     f.write_text("{not valid", encoding="utf-8")
-    with pytest.raises(wake_mod.JsonUnreadable):
-        _read_json(f)
+    grant, log = _grant_from(monkeypatch, f)
+    assert grant == wake_mod.FABLE_GRANT_DEFAULT
+    fmt, raised = log.warning.call_args.args
+    assert fmt == "[wake] %s — the Fable grant falls back to the default"
+    assert isinstance(raised, wake_mod.JsonUnreadable)
+    assert str(raised).startswith("bad.json could not be read")
 
 
 # --- _check_pid_alive tests ------------------------------------------
@@ -2893,10 +2912,13 @@ class TestRecipientDashboardRefresh:
 
     @staticmethod
     def _real_refresh(monkeypatch, **overrides):
-        """_patch_wake_deps, but with the REAL refresh hook left in place."""
+        """_patch_wake_deps, but with the REAL refresh hook left in place.
+
+        The hook is named at its public home, wake_dashboard (ai_mail, leg 14).
+        """
         _patch_wake_deps(
             monkeypatch,
-            _refresh_recipient_dashboard=wake_mod._refresh_recipient_dashboard,
+            _refresh_recipient_dashboard=refresh_recipient_dashboard,
             **overrides,
         )
 

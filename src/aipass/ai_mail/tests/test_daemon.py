@@ -21,8 +21,6 @@ from unittest.mock import MagicMock, patch
 import aipass.ai_mail.apps.handlers.dispatch.daemon as daemon_mod
 import aipass.ai_mail.apps.handlers.dispatch.pid_lock as pid_lock_mod
 from aipass.ai_mail.apps.handlers.dispatch.daemon import (
-    _read_json,
-    _write_json,
     load_config,
     load_daemon_state,
     save_daemon_state,
@@ -30,13 +28,9 @@ from aipass.ai_mail.apps.handlers.dispatch.daemon import (
     get_registered_branches,
     check_inbox_for_dispatch,
     is_protected_branch,
-    _handle_signal,
     _check_lock,
     _acquire_lock,
-    _is_registered_sender,
     poll_cycle,
-    _write_pid_file,
-    _remove_pid_file,
     _is_branch_occupied,
     spawn_agent,
     run_daemon,
@@ -72,75 +66,89 @@ def _redirect_paths(tmp_path, monkeypatch):
 # ---- _read_json tests ----------------------------------------
 
 
-def test_read_json_valid_file(tmp_path):
+# Read and written through the daemon state file's public load and save, not
+# called directly (ai_mail, leg 14).
+
+
+def _state_read_from(monkeypatch, state_file):
+    """load_daemon_state() with its state file at `state_file`."""
+    monkeypatch.setattr(daemon_mod, "DAEMON_STATE_FILE", state_file)
+    return daemon_mod.load_daemon_state()
+
+
+def _state_saved_to(monkeypatch, state_file, state) -> dict:
+    """save_daemon_state(state) into `state_file`; the file as written, its stamp set aside."""
+    monkeypatch.setattr(daemon_mod, "DAEMON_STATE_FILE", state_file)
+    daemon_mod.save_daemon_state(state)
+    written = json.loads(state_file.read_text(encoding="utf-8"))
+    assert set(written) - set(state) == set(), "save writes exactly the state it was handed"
+    written.pop("last_updated")
+    return written
+
+
+def test_read_json_valid_file(tmp_path, monkeypatch):
     """Valid JSON file returns parsed dict."""
     target = tmp_path / "data.json"
-    target.write_text(json.dumps({"key": "value"}), encoding="utf-8")
+    stored = {"daily_counts": {"@flow": 2}, "session_cycles": {}, "date": str(date.today())}
+    target.write_text(json.dumps(stored), encoding="utf-8")
 
-    result = _read_json(target)
+    result = _state_read_from(monkeypatch, target)
 
-    assert result == {"key": "value"}
-
-
-def test_read_json_missing_file(tmp_path):
-    """Nonexistent file returns None."""
-    result = _read_json(tmp_path / "does_not_exist.json")
-
-    assert result is None
+    assert result == stored
 
 
-def test_read_json_invalid_json(tmp_path):
+def test_read_json_missing_file(tmp_path, monkeypatch):
+    """Nonexistent file returns None: the state starts empty."""
+    result = _state_read_from(monkeypatch, tmp_path / "does_not_exist.json")
+
+    assert result == {"daily_counts": {}, "session_cycles": {}, "date": str(date.today())}
+
+
+def test_read_json_invalid_json(tmp_path, monkeypatch):
     """Corrupt JSON raises JsonUnreadable, distinct from a missing file (ai_mail, leg 13)."""
     target = tmp_path / "bad.json"
     target.write_text("{not valid json!!!", encoding="utf-8")
 
     with pytest.raises(JsonUnreadable):
-        _read_json(target)
+        _state_read_from(monkeypatch, target)
 
 
-def test_read_json_empty_file(tmp_path):
+def test_read_json_empty_file(tmp_path, monkeypatch):
     """An empty file is unreadable too, not absent (ai_mail, leg 13)."""
     target = tmp_path / "empty.json"
     target.write_text("", encoding="utf-8")
 
     with pytest.raises(JsonUnreadable):
-        _read_json(target)
+        _state_read_from(monkeypatch, target)
 
 
 # ---- _write_json tests ----------------------------------------
 
 
-def test_write_json_creates_file(tmp_path):
+def test_write_json_creates_file(tmp_path, monkeypatch):
     """Writing data creates the file with correct content."""
     target = tmp_path / "output.json"
-    data = {"branches": ["@flow", "@backup"]}
 
-    result = _write_json(target, data)
+    written = _state_saved_to(monkeypatch, target, {"branches": ["@flow", "@backup"]})
 
-    assert result is True
-    assert target.exists()
-    written = json.loads(target.read_text(encoding="utf-8"))
     assert written == {"branches": ["@flow", "@backup"]}
 
 
-def test_write_json_creates_parent_dirs(tmp_path):
+def test_write_json_creates_parent_dirs(tmp_path, monkeypatch):
     """Writing to a nested path creates intermediate directories."""
     target = tmp_path / "deep" / "nested" / "file.json"
 
-    result = _write_json(target, {"ok": True})
+    written = _state_saved_to(monkeypatch, target, {"ok": True})
 
-    assert result is True
-    assert target.exists()
-    written = json.loads(target.read_text(encoding="utf-8"))
     assert written == {"ok": True}
 
 
-def test_write_json_unicode(tmp_path):
+def test_write_json_unicode(tmp_path, monkeypatch):
     """Unicode content is preserved (ensure_ascii=False)."""
     target = tmp_path / "unicode.json"
     data = {"message": "Hello from branch \u2014 done"}
 
-    _write_json(target, data)
+    _state_saved_to(monkeypatch, target, data)
 
     raw = target.read_text(encoding="utf-8")
     assert "\u2014" in raw, "Unicode dash should appear literally, not escaped"
@@ -820,11 +828,19 @@ def test_poll_cycle_absolute_path_unchanged(tmp_path, monkeypatch):
 # ---- _handle_signal tests --------------------------------------
 
 
-def test_handle_signal_sets_shutdown(monkeypatch):
-    """Calling _handle_signal sets SHUTDOWN to True."""
-    monkeypatch.setattr(daemon_mod, "SHUTDOWN", False)
+@pytest.mark.parametrize("signame", ["SIGTERM", "SIGINT"])
+def test_the_registered_stop_signal_sets_shutdown(monkeypatch, signame):
+    """The handler the daemon registers for a stop signal sets SHUTDOWN.
 
-    _handle_signal(15, None)
+    Reached through the handler table the import fills, not by name, and
+    called directly: no signal is sent to the test process (ai_mail, leg 14).
+    """
+    monkeypatch.setattr(daemon_mod, "SHUTDOWN", False)
+    signum = getattr(daemon_mod.signal, signame)
+    handler = daemon_mod.signal.getsignal(signum)
+    assert callable(handler)
+
+    handler(signum, None)
 
     assert daemon_mod.SHUTDOWN is True
 
@@ -1016,34 +1032,47 @@ def test_acquire_lock_oserror(tmp_path):
 # ---- _write_pid_file tests --------------------------------------
 
 
-def test_write_pid_file_no_existing(tmp_path, monkeypatch):
-    """No existing PID file: writes current PID and returns True."""
-    pid_file = tmp_path / "daemon.pid"
+def _start_daemon(tmp_path, monkeypatch, pid_file, while_running=None):
+    """Run run_daemon with SHUTDOWN set, so it stops right after start-up.
+
+    Returns what the pid file held when config loaded; [] means the daemon
+    never started. while_running stands in for whatever touches the pid file
+    during the run (ai_mail, leg 14).
+    """
     monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
+    monkeypatch.setattr(daemon_mod, "SHUTDOWN", True)
+    pid_at_start = []
 
-    result = _write_pid_file()
+    def config_after_pid():
+        pid_at_start.append(pid_file.read_text(encoding="utf-8").strip())
+        if while_running is not None:
+            while_running()
+        return {"poll_interval_seconds": 0, "kill_switch_path": str(tmp_path / "pause"), "autonomous_branches": []}
 
-    assert result is True
-    assert pid_file.exists()
-    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
+    monkeypatch.setattr(daemon_mod, "load_config", config_after_pid)
+    run_daemon()
+    return pid_at_start
+
+
+def test_write_pid_file_no_existing(tmp_path, monkeypatch):
+    """No existing PID file: the daemon writes its own PID and starts."""
+    pid_file = tmp_path / "daemon.pid"
+
+    assert _start_daemon(tmp_path, monkeypatch, pid_file) == [str(os.getpid())]
 
 
 def test_write_pid_file_existing_alive_pid(tmp_path, monkeypatch):
-    """Existing PID file with alive process returns False."""
+    """Existing PID file with alive process: the daemon does not start."""
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text(str(os.getpid()), encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
 
-    result = _write_pid_file()
-
-    assert result is False
+    assert _start_daemon(tmp_path, monkeypatch, pid_file) == []
 
 
 def test_write_pid_file_existing_dead_pid(tmp_path, monkeypatch):
-    """Existing PID file with dead process: takes over and returns True."""
+    """Existing PID file with dead process: the daemon takes over and starts."""
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text("999999", encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
 
     def _kill_stub(pid, sig):
         if pid == 999999:
@@ -1051,39 +1080,29 @@ def test_write_pid_file_existing_dead_pid(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "kill", _kill_stub)
 
-    result = _write_pid_file()
-
-    assert result is True
-    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
+    assert _start_daemon(tmp_path, monkeypatch, pid_file) == [str(os.getpid())]
 
 
 def test_write_pid_file_existing_permission_error(tmp_path, monkeypatch):
-    """Existing PID file with PermissionError on kill returns False."""
+    """Existing PID file with PermissionError on kill: the daemon does not start."""
     monkeypatch.setattr("sys.platform", "linux")
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text("888888", encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
 
     def _raise_permission(pid, sig):
         raise PermissionError("Operation not permitted")
 
     monkeypatch.setattr(os, "kill", _raise_permission)
 
-    result = _write_pid_file()
-
-    assert result is False
+    assert _start_daemon(tmp_path, monkeypatch, pid_file) == []
 
 
 def test_write_pid_file_corrupt_pid_file(tmp_path, monkeypatch):
-    """Corrupt PID file is handled gracefully and overwritten."""
+    """Corrupt PID file is overwritten and the daemon starts."""
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text("not-a-number", encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
 
-    result = _write_pid_file()
-
-    assert result is True
-    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
+    assert _start_daemon(tmp_path, monkeypatch, pid_file) == [str(os.getpid())]
 
 
 # ---- _write_pid_file: the Windows delete-pending denial -------------
@@ -1139,12 +1158,10 @@ def _scripted_pid_open(pid_file, script, calls):
 def test_write_pid_file_first_create_denied_once_then_lands(tmp_path, monkeypatch, fake_clock):
     """The first create, denied once (a previous daemon's file still releasing), is polled and lands."""
     pid_file = tmp_path / "daemon.pid"
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
     calls = []
     monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [_denial(pid_file)], calls))
 
-    assert _write_pid_file() is True
-    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
+    assert _start_daemon(tmp_path, monkeypatch, pid_file) == [str(os.getpid())]
     assert len(calls) == 2
     assert fake_clock["sleeps"] == 1
 
@@ -1153,15 +1170,13 @@ def test_write_pid_file_retake_denied_once_then_lands(tmp_path, monkeypatch, fak
     """The create right after unlinking a stale pid file - our own delete still pending - is polled and lands."""
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text("999999", encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
     alive = MagicMock(return_value=False)
     monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
     calls = []
     # real (exists) -> denied (the unlink we just made is still pending) -> real
     monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [None, _denial(pid_file)], calls))
 
-    assert _write_pid_file() is True
-    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
+    assert _start_daemon(tmp_path, monkeypatch, pid_file) == [str(os.getpid())]
     assert len(calls) == 3
     alive.assert_called_once_with(999999)
 
@@ -1170,13 +1185,15 @@ def test_write_pid_file_stale_unlink_denied_create_waits_it_out(tmp_path, monkey
     """Unlinking a stale pid file someone else already deleted is denied too; the create waits the release out."""
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text("999999", encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
     alive = MagicMock(return_value=False)
     monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
     real_unlink = daemon_mod.Path.unlink
+    denied = []
 
     def unlink_denied(self, missing_ok=False):
-        if self == pid_file:
+        # Denied once: the stale file's release. The stop's own unlink lands.
+        if self == pid_file and not denied:
+            denied.append(self)
             raise _denial(self)
         return real_unlink(self, missing_ok=missing_ok)
 
@@ -1187,15 +1204,14 @@ def test_write_pid_file_stale_unlink_denied_create_waits_it_out(tmp_path, monkey
     monkeypatch.setattr(daemon_mod.Path, "unlink", unlink_denied)
     monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [None, pending_delete_completes], []))
 
-    assert _write_pid_file() is True
-    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
+    assert _start_daemon(tmp_path, monkeypatch, pid_file) == [str(os.getpid())]
+    assert denied == [pid_file]
     alive.assert_called_once_with(999999)
 
 
 def test_write_pid_file_denial_that_never_clears_raises_at_budget(tmp_path, monkeypatch, fake_clock):
     """A denial that outlasts the wait raises - naming the wait, the denial as cause - and never loops forever."""
     pid_file = tmp_path / "daemon.pid"
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
     denial = _denial(pid_file)
     attempts = []
 
@@ -1211,7 +1227,7 @@ def test_write_pid_file_denial_that_never_clears_raises_at_budget(tmp_path, monk
     start = fake_clock["now"]
 
     with pytest.raises(PermissionError) as excinfo:
-        _write_pid_file()
+        _start_daemon(tmp_path, monkeypatch, pid_file)
 
     assert excinfo.value is not denial
     assert excinfo.value.__cause__ is denial
@@ -1244,45 +1260,39 @@ def test_run_daemon_starts_after_a_denied_pid_create(tmp_path, monkeypatch, fake
 
 
 def test_remove_pid_file_matching_pid(tmp_path, monkeypatch):
-    """PID file with matching PID is removed."""
+    """A clean stop removes the daemon's own PID file."""
     pid_file = tmp_path / "daemon.pid"
-    pid_file.write_text(str(os.getpid()), encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
 
-    _remove_pid_file()
+    _start_daemon(tmp_path, monkeypatch, pid_file)
 
     assert not pid_file.exists()
 
 
 def test_remove_pid_file_different_pid(tmp_path, monkeypatch):
-    """PID file with different PID is left alone."""
+    """A PID file another daemon took over during the run is left alone at stop."""
     pid_file = tmp_path / "daemon.pid"
-    pid_file.write_text("999999", encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
 
-    _remove_pid_file()
+    _start_daemon(tmp_path, monkeypatch, pid_file, lambda: pid_file.write_text("999999", encoding="utf-8"))
 
-    assert pid_file.exists()
     assert pid_file.read_text(encoding="utf-8").strip() == "999999"
 
 
 def test_remove_pid_file_missing(tmp_path, monkeypatch):
-    """Missing PID file does not raise errors."""
+    """A PID file gone during the run does not break the stop."""
     pid_file = tmp_path / "daemon.pid"
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
+    moved = tmp_path / "moved.pid"
 
-    _remove_pid_file()
+    _start_daemon(tmp_path, monkeypatch, pid_file, lambda: pid_file.rename(moved))
 
     assert not pid_file.exists()
+    assert moved.exists()
 
 
 def test_remove_pid_file_corrupt(tmp_path, monkeypatch):
-    """Corrupt PID file is removed."""
+    """A PID file corrupted during the run is removed at stop."""
     pid_file = tmp_path / "daemon.pid"
-    pid_file.write_text("not-a-number", encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
 
-    _remove_pid_file()
+    _start_daemon(tmp_path, monkeypatch, pid_file, lambda: pid_file.write_text("not-a-number", encoding="utf-8"))
 
     assert not pid_file.exists()
 
@@ -2037,41 +2047,43 @@ def test_poll_cycle_spawn_failure_not_counted(tmp_path, monkeypatch):
 # ---- _is_registered_sender tests (DPLAN-0159 S2) ----------------
 
 
-def test_is_registered_sender_found(tmp_path, monkeypatch):
-    """Registered sender returns True."""
-    registry = {"branches": [{"email": "@flow"}, {"email": "@backup"}]}
+def _sender_admitted(tmp_path, monkeypatch, registry, sender):
+    """Run an auto_execute dispatch from sender through spawn_agent; True if the sender gate let it by.
+
+    An admitted dispatch reaches the lock, which answers held, so nothing is
+    spawned either way (ai_mail, leg 14). registry None leaves the file missing.
+    """
     reg_file = tmp_path / "AIPASS_REGISTRY.json"
-    reg_file.write_text(json.dumps(registry), encoding="utf-8")
+    if registry is not None:
+        reg_file.write_text(json.dumps(registry), encoding="utf-8")
     monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", reg_file)
-
-    assert _is_registered_sender("@flow") is True
-
-
-def test_is_registered_sender_not_found(tmp_path, monkeypatch):
-    """Unregistered sender returns False."""
-    registry = {"branches": [{"email": "@flow"}]}
-    reg_file = tmp_path / "AIPASS_REGISTRY.json"
-    reg_file.write_text(json.dumps(registry), encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", reg_file)
-
-    assert _is_registered_sender("@evil") is False
-
-
-def test_is_registered_sender_missing_registry(tmp_path, monkeypatch):
-    """Missing registry fails open (returns True)."""
-    monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", tmp_path / "missing.json")
-
-    assert _is_registered_sender("@anyone") is True
+    message = {"from": sender, "id": "msg1", "subject": "Run this", "auto_execute": True}
+    with (
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.subprocess.Popen") as popen,
+        patch(
+            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            return_value=(False, "held"),
+        ) as lock,
+    ):
+        result = spawn_agent(tmp_path / "branch", "@testbranch", message, {"max_turns_per_wake": 5}, {})
+    assert result is False
+    popen.assert_not_called()
+    return lock.call_count == 1
 
 
-def test_is_registered_sender_empty_branches(tmp_path, monkeypatch):
-    """Empty branches list returns False for any sender."""
-    registry = {"branches": []}
-    reg_file = tmp_path / "AIPASS_REGISTRY.json"
-    reg_file.write_text(json.dumps(registry), encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", reg_file)
-
-    assert _is_registered_sender("@flow") is False
+@pytest.mark.parametrize(
+    ("registry", "sender", "admitted"),
+    [
+        ({"branches": [{"email": "@flow"}, {"email": "@backup"}]}, "@flow", True),
+        ({"branches": [{"email": "@flow"}]}, "@evil", False),
+        (None, "@anyone", True),
+        ({"branches": []}, "@flow", False),
+    ],
+    ids=["registered", "unregistered", "missing_registry_admits", "empty_branches"],
+)
+def test_the_sender_gate_admits_only_a_registered_sender(tmp_path, monkeypatch, registry, sender, admitted):
+    """Only a sender the registry lists passes; a missing registry admits (DPLAN-0159 S2)."""
+    assert _sender_admitted(tmp_path, monkeypatch, registry, sender) is admitted
 
 
 def test_an_auto_execute_dispatch_is_refused_when_the_registry_cannot_be_read(tmp_path, monkeypatch):
@@ -2215,7 +2227,6 @@ def test_write_pid_file_atomic_race_second_loses(tmp_path, monkeypatch):
     """
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text("999999", encoding="utf-8")
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
     monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: pid != 999999)
     create_calls = []
 
@@ -2225,7 +2236,5 @@ def test_write_pid_file_atomic_race_second_loses(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daemon_mod, "_create_pid_file", _create_always_loses)
 
-    result = _write_pid_file()
-
-    assert result is False
+    assert _start_daemon(tmp_path, monkeypatch, pid_file) == []
     assert len(create_calls) == 2

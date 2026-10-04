@@ -31,12 +31,35 @@ import pytest
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.registry.read as reg
 import aipass.ai_mail.apps.modules.email_send as es
-from aipass.ai_mail.apps.handlers.email.delivery import _check_cross_project_boundary
+from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
 from aipass.ai_mail.apps.handlers.users.verified_caller import is_verified_admin_caller
 
 _H_VERIFIED = "aipass.ai_mail.apps.handlers.users.verified_caller"
 _H_DELIVERY = "aipass.ai_mail.apps.handlers.email.delivery"
+
+
+def _deliver_across(recipient: Path, sender_email: str, email_data=None, to_branch: str = "@devpulse"):
+    """Deliver `to_branch`'s mail into `recipient` and answer (refused, message) (ai_mail, leg 14).
+
+    The cross-project boundary is reached through deliver_email_to_branch, not
+    called: only the registry lookup is stubbed, so `to_branch` names `recipient`.
+    The tmp inbox is written when the mail passes; contacts and the feed are the
+    conftest's tmp copies.
+    """
+    data = {
+        "subject": "S",
+        "message": "M",
+        "timestamp": "2026-10-04 00:00:00",
+        "from_name": sender_email,
+        **(email_data or {}),
+        "from": sender_email,
+    }
+    lookup = MagicMock(return_value=[{"email": to_branch, "path": str(recipient)}])
+    with patch(f"{_H_DELIVERY}.get_all_branches", lookup):
+        delivered, msg = deliver_email_to_branch(to_branch, data)
+    lookup.assert_called_with()
+    return not delivered, msg
 
 
 @pytest.fixture(autouse=True)
@@ -187,7 +210,7 @@ class TestCrossProjectBoundary:
     """delivery._check_cross_project_boundary: exempt the verified admin only."""
 
     def _boundary(self, recipient: Path, sender_email: str = "@devpulse"):
-        return _check_cross_project_boundary(recipient, sender_email)
+        return _deliver_across(recipient, sender_email, to_branch="@baud")
 
     def test_non_admin_cross_project_still_refused(self, repo, monkeypatch):
         """Exactly today's refusal, wording included."""
@@ -225,7 +248,7 @@ class TestReplyReturnPath:
     """
 
     def _boundary(self, recipient: Path, sender_email: str = "@baud", email_data=None, to_branch: str = "@devpulse"):
-        return _check_cross_project_boundary(recipient, sender_email, email_data=email_data, to_branch=to_branch)
+        return _deliver_across(recipient, sender_email, email_data=email_data, to_branch=to_branch)
 
     @pytest.fixture
     def baud(self, repo, monkeypatch):
@@ -357,7 +380,7 @@ class TestLaneDarkMeansNoWidening:
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(repo / "src" / "aipass" / "devpulse"))
 
         with _admin(False):
-            refused, msg = _check_cross_project_boundary(repo / "projects" / "baud", "@devpulse")
+            refused, msg = _deliver_across(repo / "projects" / "baud", "@devpulse", to_branch="@baud")
         assert refused is True
         assert "Cross-project mail refused" in msg
 
@@ -428,7 +451,7 @@ class TestReplyProofMailboxResolution:
     """
 
     def _boundary(self, recipient: Path, email_data, sender_email: str = "@baud", to_branch: str = "@devpulse"):
-        return _check_cross_project_boundary(recipient, sender_email, email_data=email_data, to_branch=to_branch)
+        return _deliver_across(recipient, sender_email, email_data=email_data, to_branch=to_branch)
 
     @pytest.fixture
     def deep_seat(self, repo, monkeypatch):

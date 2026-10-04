@@ -11,11 +11,31 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — DAEMON_SESSION_PREFIX, unrelated to the blocklist
 
-import inspect
+from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
 from aipass.ai_mail.apps.handlers.dispatch.wake import WAKE_BLOCKLIST, is_wake_blocked
 from aipass.ai_mail.apps.modules import dispatch as dispatch_mod
+
+_H = "aipass.ai_mail.apps.handlers"
+
+
+def _send_defaults() -> dict:
+    """The send patch set test_dispatch_module uses: nothing is mailed, written, woken or fired."""
+    return {
+        f"{_H}.email.send.resolve_sender_info": MagicMock(return_value={"email_address": "@ai_mail"}),
+        f"{_H}.email.header.prepend_dispatch_header": MagicMock(return_value="[DISPATCH] Body"),
+        f"{_H}.email.send.send_to_single": MagicMock(return_value=(True, None)),
+        f"{_H}.email.error_dispatch.on_email_delivered": MagicMock(),
+        f"{_H}.users.user.get_current_user": MagicMock(return_value={"name": "test"}),
+        f"{_H}.registry.read.get_branch_by_email": MagicMock(return_value={"email": "@target"}),
+        f"{_H}.central_writer.update_central": MagicMock(),
+        f"{_H}.email.create.create_email_file": MagicMock(),
+        f"{_H}.email.create.load_email_file": MagicMock(),
+        f"{_H}.email.delivery.deliver_email_to_branch": MagicMock(),
+        f"{_H}.email.error_dispatch.dispatch_send_error": MagicMock(),
+        "aipass.trigger.apps.modules.core.trigger": MagicMock(),
+    }
 
 
 class TestIsWakeBlocked:
@@ -111,6 +131,22 @@ class TestOrchestrateWakeBlocklist:
         mock_error.assert_called_once()
 
     def test_dispatch_send_does_not_check_blocklist(self):
-        """_orchestrate_dispatch_send must not call is_wake_blocked (internal path)."""
-        src = inspect.getsource(dispatch_mod._orchestrate_dispatch_send)
-        assert "is_wake_blocked" not in src
+        """`dispatch @devpulse` sends and wakes without asking the blocklist (internal path).
+
+        Run through the command under the shared send patch set, with the
+        blocklist recorded at its home (ai_mail, leg 14).
+        """
+        blocked = MagicMock(return_value=True)
+        status_mock = MagicMock()
+        status_mock.format.return_value = ""
+        wake = MagicMock(return_value=(status_mock, True))
+        overrides = {
+            "aipass.ai_mail.apps.handlers.dispatch.wake.is_wake_blocked": blocked,
+            "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch": wake,
+        }
+        with ExitStack() as stack:
+            for target, mock_obj in {**_send_defaults(), **overrides}.items():
+                stack.enter_context(patch(target, mock_obj))
+            assert dispatch_mod.handle_command("dispatch", ["@devpulse", "Subject", "Body"]) is True
+        blocked.assert_not_called()
+        assert wake.call_args.args == ("@devpulse",)

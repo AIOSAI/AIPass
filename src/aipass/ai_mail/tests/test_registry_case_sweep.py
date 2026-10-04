@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Registry globs must not widen on a case-insensitive filesystem
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-31
-# Modified: 2026-10-02
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/paths.py's registry glob readers on a case-insensitive filesystem."""
@@ -49,17 +49,40 @@ import os
 import re
 import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from unittest.mock import patch
 
 import pytest
 
 from aipass.ai_mail.apps.handlers.paths import find_project_root, registries_in
 from aipass.ai_mail.apps.handlers.users import branch_detection as bd
-from aipass.ai_mail.apps.handlers.email.reply import _validate_reply_path
+from aipass.ai_mail.apps.handlers.email.reply import send_reply
 from aipass.ai_mail.apps.handlers.registry.read import (
     get_caller_project_branches,
     get_project_tree_branches,
     resident_registry_paths,
 )
+
+
+def _reply_along(tmp_path: Path, reply_path: Path):
+    """send_reply to an external @vera whose message carried `reply_path` (ai_mail, leg 14).
+
+    The reply_path validator is reached through send_reply, not called. Only the
+    registry lookups, the close and the notification are stubbed; the reply is
+    written into the tmp inbox it names, or refused.
+    """
+    branch_a = tmp_path / "branch_a"
+    branch_a.mkdir(exist_ok=True)
+    original = {"id": "orig0001", "from": "@vera", "subject": "Hello", "reply_path": str(reply_path)}
+    h = "aipass.ai_mail.apps.handlers"
+    with (
+        patch(f"{h}.users.branch_detection.get_branch_info_from_registry", return_value={"email": "@branch_a"}),
+        patch(f"{h}.registry.read.get_all_branches", return_value=[]),
+        patch(f"{h}.email.inbox_cleanup.mark_as_closed_and_archive", return_value=(True, "closed")),
+        patch(f"{h}.email.delivery._emit_notification_event"),
+    ):
+        success, msg, _rid = send_reply(branch_a, original, "Reply")
+    return success, msg
+
 
 REAL_GLOB = Path.glob
 
@@ -601,11 +624,23 @@ class TestCallerRegistryNeverResolvesToACounter:
         _decoy(caller)
 
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
+        monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "assigned")
         monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", tmp_path / "AIPASS_REGISTRY.json")
+        # No contact row vouches for either name; only a registry can.
+        asked: list[str] = []
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.email.contacts.get_contact", lambda name: asked.append(name))
 
-        assert bd._lookup_branch_by_name("impostor") is None
-        genuine = bd._lookup_branch_by_name("genuine")
+        # Through detect_branch_from_pwd, the caller-branch lane (ai_mail, leg 14):
+        # the impostor finds no registry seat and is only synthesized as external.
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "impostor")
+        impostor = bd.detect_branch_from_pwd()
+        assert impostor is not None and impostor["type"] == "external"
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "genuine")
+        genuine = bd.detect_branch_from_pwd()
         assert genuine is not None and genuine["email"] == "@genuine"
+        assert genuine.get("type") != "external"
+        # Only the impostor fell through to the address book.
+        assert asked == ["impostor"]
 
 
 class TestReplyPathValidationIsNotSatisfiedByACounter:
@@ -620,9 +655,9 @@ class TestReplyPathValidationIsNotSatisfiedByACounter:
         inbox.parent.mkdir(parents=True)
         inbox.write_text("{}", encoding="utf-8")
 
-        allowed, reason = _validate_reply_path(str(inbox))
-        assert allowed is False
-        assert "REGISTRY" in reason
+        success, msg = _reply_along(tmp_path, inbox)
+        assert success is False
+        assert msg.startswith("Invalid reply_path: No *_REGISTRY.json found in ancestors of")
 
     def test_a_real_registry_ancestor_still_validates(self, tmp_path, case_insensitive_fs):
         project = tmp_path / "project"
@@ -631,8 +666,9 @@ class TestReplyPathValidationIsNotSatisfiedByACounter:
         inbox.parent.mkdir(parents=True)
         inbox.write_text("{}", encoding="utf-8")
 
-        allowed, reason = _validate_reply_path(str(inbox))
-        assert allowed is True, reason
+        success, msg = _reply_along(tmp_path, inbox)
+        assert success is True, msg
+        assert [m["message"] for m in json.loads(inbox.read_text(encoding="utf-8"))["messages"]] == ["Reply"]
 
 
 class TestResidentAndProjectTreeDiscovery:

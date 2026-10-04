@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_register.py
 # Description: Tests for the dispatch register append-only log
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-22
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register."""
@@ -305,8 +305,11 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
         )
         monkeypatch.setattr(register, "_kernel32", lambda: fake_kernel32)
         monkeypatch.setattr(register, "_last_win32_error", lambda: last_error)
+        # Through monitor_alive, which routes win32 to the Windows leg (ai_mail, leg 14).
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(register.os, "kill", lambda *a: pytest.fail("os.kill must never be reached on win32"))
 
-        assert register._monitor_alive_windows(4242) is expected
+        assert register.monitor_alive(4242) is expected
         assert opened_with == [(0x1000, False, 4242)]
         assert closed == ([handle] if handle else []), "an opened handle is closed exactly once, an unopened one never"
 
