@@ -110,6 +110,37 @@
       "reason": "Package marker, not an entry point (ai_mail, fleet green leg 9): the file is two lines, a comment and 'from . import handlers', with no argv, no main and no command. The entry point is apps/ai_mail.py, which answers --version/-V at line 256 and passes cli_flags. cli_flags is a file-level row that passes no line, so this file-wide rule is the only form a bypass can take; it covers this file alone."
     },
     {
+      "file": "tests/test_wake.py",
+      "standard": "stdlib_patch",
+      "reason": "Platform and pid simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 10: os.kill 186 193 199 215 446 460 (dead/alive answers of the kill(0) family); sys.platform 192 200 216 233 245 257 263 275 295 303 316 334 357 454 948 960 975 998 (the linux/darwin/win32 lanes); builtins.open 206 221 236 248 368 379 395 and os.readlink 297 304 955 968 983 1009 (the /proc reads of a pid); shutil.which 689 1127 1155 1580 2827 (which tools the host has); time.sleep 835 1056 (the wait on a pid, no real waiting); Path.home 1936 (the host home sent to tmp). One line is not platform or pid, 893 (an OSError injected into the lock open); it is named here, not hidden, and @devpulse rules whether it stays under this rule. A seam for any of these would exist for the test alone."
+    },
+    {
+      "file": "tests/test_daemon.py",
+      "standard": "stdlib_patch",
+      "reason": "Platform and pid simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 10: os.kill 914 995 1013 (dead/alive answers of the kill(0) family); sys.platform 1005 1238 1249 1260 1269 1297 1317 1341; builtins.open 1241 1252 1271 and os.readlink 1308 1328 1352 (the /proc reads of a pid); os.open 1087 1104 1131 1153 1171 and Path.unlink 1130 (the Windows sharing denial on the pid file); time.monotonic/sleep 1051 1052 (the clock of that denial retry, no real waiting); os.waitpid 1695 (child reaping). Two lines are not platform or pid, 952 (an OSError injected into lock creation) and 1694 (the sleep of the daemon loop beside the waitpid); they are named here, not hidden, and @devpulse rules whether they stay under this rule. A seam for any of these would exist for the test alone."
+    },
+    {
+      "file": "tests/test_dispatch_register.py",
+      "standard": "stdlib_patch",
+      "reason": "Platform simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 10: 315 sys.platform set to win32, 317 os.kill replaced by a guard that fails the test if the POSIX probe is reached on win32. A seam would exist for the test alone."
+    },
+    {
+      "file": "tests/test_misc_handlers.py",
+      "standard": "stdlib_patch",
+      "reason": "Pid simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Line covered as of leg 10: 174 os.waitpid raising ChildProcessError (no child left to reap). A seam would exist for the test alone."
+    },
+    {
+      "file": "tests/test_registry_case_sweep.py",
+      "standard": "stdlib_patch",
+      "reason": "Platform simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 10: Path.glob 147 191 220 and Path.exists 190, which make a Linux run answer like a case-insensitive filesystem (macOS, Windows) so the case-exact registry walk is tested where CI cannot fold case. A seam would exist for the test alone."
+    },
+    {
+      "file": "apps/handlers/dispatch/report.py",
+      "standard": "logged_fallback",
+      "lines": [284],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10): _prune_reports returns how many reports it removed, and a listing that failed removed none, so 0 is the count, not a stand-in. Its one caller, write_report, ignores the count and has already written the report; the failure is logged at warning. A raise here would turn a missed prune into a lost dispatch record."
+    },
+    {
       "file": "apps/modules/email.py",
       "standard": "logged_fallback",
       "lines": [250, 254, 307, 311, 352, 389, 425, 445],
@@ -124,8 +155,50 @@
     {
       "file": "apps/modules/dispatch.py",
       "standard": "logged_fallback",
-      "lines": [487],
-      "reason": "Same CLI handler contract (ai_mail, fleet green leg 9): the send phase failure has already called error() (mark_command_failed); True tells the router the command was recognised."
+      "lines": [203, 491],
+      "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 491 (487 before leg 10's edit above it) is the send phase failure, which has already called error() (mark_command_failed); 203 is _orchestrate_status meeting an unreadable dispatch log, which it reports through error() since leg 10 instead of printing 'No dispatches recorded yet.'. True tells the router the command was recognised."
+    },
+    {
+      "file": "apps/handlers/email/send.py",
+      "standard": "logged_fallback",
+      "lines": [312, 320, 336, 344],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10): collect_interactive_input documents None as 'cancelled', and these four arms are the user cancelling at a prompt (Ctrl-C, end of input, or a pick that is not a number), the same answer its in-try paths give for an out-of-range pick, an empty subject or a 'n' at the confirm. No system failure is hidden: its one caller, email_send.py:189, prints 'Cancelled' and sends nothing, and each arm logs what was typed or raised."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "logged_fallback",
+      "lines": [186, 236, 567],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10). 186: _wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and _log_wake_result plus the report's wake_result carry it. 236: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 567: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
+    },
+    {
+      "file": "apps/handlers/email/format.py",
+      "standard": "logged_fallback",
+      "lines": [64],
+      "reason": "The value is the true answer for display (ai_mail, fleet green leg 10): lookup_branch_alias returns None for 'no alias to show', and its one caller, format_sender_display, then shows the branch name, which is what a reader needs when the alias cannot be read. Nothing is written behind it; a raise would break the inbox view over a cosmetic suffix. The failure is logged at warning."
+    },
+    {
+      "file": "apps/handlers/notify.py",
+      "standard": "logged_fallback",
+      "lines": [298, 313],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10): _trim_jsonl returns whether the log was trimmed, and a read or replace that failed trimmed nothing (313 also removes its temp file). Its one caller, notify.py:199, ignores the answer, under the lock, after the append has landed; the failure is logged at error. A raise would fail a notification that was already written."
+    },
+    {
+      "file": "apps/handlers/dispatch/test_token.py",
+      "standard": "logged_fallback",
+      "lines": [88, 107],
+      "reason": "False is the failure answer, not a fallback (ai_mail, fleet green leg 10): auto_ack_test_email returns True only when both the reply and the close went, and every failure, a non-zero exit, a missing id or these subprocess errors, answers False. Its caller, test_token.py:134, counts acks only, so the message stays in the inbox, unacked, and is seen again."
+    },
+    {
+      "file": "apps/modules/email.py",
+      "standard": "logged_fallback",
+      "lines": [133],
+      "reason": "The value is the answer (ai_mail, fleet green leg 10): the caller-identity gate returns '' when the caller resolves and the refusal text when it does not, as its docstring says; the except arm IS the refusal, carrying get_current_user()'s own RuntimeError text, and the entry point refuses on any non-empty answer."
+    },
+    {
+      "file": "apps/handlers/dispatch/status.py",
+      "standard": "logged_fallback",
+      "lines": [147],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10): calculate_age renders a display string, and 'unknown' is what it shows for a stamp it cannot read, the same as for an empty stamp. Its one caller is the dispatch status table (modules/dispatch.py); nothing is written behind it, and the parse failure is logged at warning."
     },
     {
       "file": "apps/ai_mail.py",
@@ -136,20 +209,20 @@
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
-      "lines": [519, 522],
-      "reason": "_check_pid_alive (ai_mail, fleet green leg 9): os.kill(pid, 0) answers through its exception. ProcessLookupError IS 'no such process' (False) and PermissionError IS 'it exists, owned by another user' (True). Neither is a fallback: the exception is the answer. The guessed branches of the same function (514 Windows probe failed, 525 other OSError) are not covered here and stay HELD."
+      "lines": [514, 519, 522, 525],
+      "reason": "_check_pid_alive (ai_mail, fleet green legs 9 and 10, under @devpulse's leg 10 ruling b for the os.kill family): os.kill(pid, 0) answers through its exception. ProcessLookupError IS 'no such process' (False) and PermissionError IS 'it exists, owned by another user' (True); neither is a fallback. Leg 10 adds the two guessed arms, named as guesses: 514, the Windows probe raised, answers alive, the fail-closed direction (an occupied branch is not woken over and its lock is not reclaimed); 525, any other OSError, answers dead, but POSIX defines no other error for signal 0 (EINVAL needs a bad signal, EPERM and ESRCH are the two arms above), so the arm is unreachable there and Windows never reaches it. The wake/daemon pid-helper merge (todo 39) re-reads both."
     },
     {
       "file": "apps/handlers/dispatch/daemon.py",
       "standard": "logged_fallback",
-      "lines": [135],
-      "reason": "_pid_alive (ai_mail, fleet green leg 9): PermissionError from os.kill(pid, 0) means the process exists under another user, so True is the answer, not a fallback. The guessed branch at 127 (Windows probe failed) is not covered here and stays HELD."
+      "lines": [127, 135],
+      "reason": "_pid_alive (ai_mail, fleet green legs 9 and 10, under @devpulse's leg 10 ruling b for the os.kill family): PermissionError from os.kill(pid, 0) means the process exists under another user, so True at 135 is the answer, not a fallback. 127, the Windows probe raised, answers alive as a named guess in the fail-closed direction: the daemon does not spawn over a process it cannot rule out. The wake/daemon pid-helper merge (todo 39) re-reads it."
     },
     {
       "file": "apps/handlers/dispatch/register.py",
       "standard": "logged_fallback",
-      "lines": [207],
-      "reason": "monitor_alive (ai_mail, fleet green leg 9): PermissionError from os.kill(pid, 0) means the process exists under another user, so True is the answer. 210 (any other OSError -> None, 'could not probe') is not covered here."
+      "lines": [207, 210],
+      "reason": "monitor_alive (ai_mail, fleet green legs 9 and 10, os.kill family): PermissionError from os.kill(pid, 0) means the process exists under another user, so True at 207 is the answer. 210 answers None, 'could not probe', a third value the success path never returns (it answers True or False), and the register's readers show it as unknown; the checker reads a tri-state as a fallback."
     },
     {
       "file": "tests/test_dispatch_monitor.py",

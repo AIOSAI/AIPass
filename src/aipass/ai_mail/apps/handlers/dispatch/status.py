@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Dispatch Status Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-02-02
-# Modified: 2026-02-02
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -28,17 +28,19 @@ DISPATCH_LOG_FILE = _AI_MAIL_DIR / ".ai_mail.local" / "dispatch_log.json"
 
 
 def load_dispatch_log() -> List[Dict[str, Any]]:
-    """Load dispatch log from JSON file"""
+    """Load dispatch log from JSON file.
+
+    Raises:
+        OSError, ValueError: the log exists and cannot be read or parsed. An
+            empty list would read as "no dispatches", and log_dispatch would
+            then save one entry over the unreadable file (ai_mail, leg 10).
+    """
     if not DISPATCH_LOG_FILE.exists():
         return []
 
-    try:
-        with open(DISPATCH_LOG_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data.get("dispatches", [])
-    except (json.JSONDecodeError, IOError) as e:
-        logger.warning("[status] Failed to load dispatch log: %s", e)
-        return []
+    with open(DISPATCH_LOG_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        return data.get("dispatches", [])
 
 
 def save_dispatch_log(dispatches: List[Dict[str, Any]]) -> bool:
@@ -71,11 +73,19 @@ def log_dispatch(branch: str, pid: Optional[int], status: str, error_msg: Option
         error_msg: Error message if failed
 
     Returns:
-        True if logged successfully
+        True if logged successfully; False if the log could not be read (it is
+        left untouched, never overwritten) or could not be saved. Both callers,
+        daemon.py's spawn path, ignore the answer: a raise there would reach the
+        spawn's except, which releases the lock of an agent already running
+        (ai_mail, leg 10).
     """
     json_handler.log_operation("log_dispatch", {"branch": branch, "status": status})
 
-    dispatches = load_dispatch_log()
+    try:
+        dispatches = load_dispatch_log()
+    except (OSError, ValueError) as e:
+        logger.warning("[status] dispatch log unreadable, %s not logged and the file left as it is: %s", branch, e)
+        return False
 
     entry: Dict[str, Any] = {
         "branch": branch,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.5.1
+# Version: 2.5.2
 # Created: 2026-03-02
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -419,7 +419,21 @@ def _cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple
         # asking for it again. No transcript = nothing was consumed, and the
         # command stands as built.
         stripped = _make_fresh_cmd(claude_cmd) if session_id else []
-        if session_id and stripped and _transcript_exists(branch_path, session_id):
+        spent: Optional[bool] = False
+        if session_id and stripped:
+            try:
+                spent = _transcript_exists(branch_path, session_id)
+            except OSError as e:
+                # Unknown is neither spent nor free: resuming an id attempt 1
+                # never claimed fails, and so does re-sending one it did. A new
+                # id is right either way (ai_mail, leg 10).
+                logger.warning(
+                    "[monitor] Attempt 2: cannot tell whether session %s exists (%s) — minting a new id", session_id, e
+                )
+                spent = None
+        if spent is None:
+            return _fresh_cmd_with_new_id(claude_cmd, branch_path)
+        if spent:
             logger.info("[monitor] Attempt 2: session %s already exists — retrying as --resume", session_id)
             # Rebuilt in wake.py's shape — `--resume <id>` straight after the
             # binary — rather than swapped where --session-id sat. A swap in
@@ -436,16 +450,32 @@ def _cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple
     if not has_resume and session_id is None:
         return list(claude_cmd), "fresh"
 
+    return _fresh_cmd_with_new_id(claude_cmd, branch_path)
+
+
+def _fresh_cmd_with_new_id(claude_cmd: list, branch_path: Path) -> Tuple[list, str]:
+    """Strip the session binding, mint a new id, and point the branch at it.
+
+    Strike 3's route, and attempt 2's when it cannot tell whether attempt 1
+    claimed its id (ai_mail, leg 10). A pointer write that fails is logged and
+    never costs the attempt.
+    """
     fresh_cmd = _make_fresh_cmd(claude_cmd)
     new_id = session_pointer.mint_session_id()
     fresh_cmd += [SESSION_ID_FLAG, new_id]
     if not session_pointer.write_pointer(branch_path, new_id, "monitor-retry-fresh"):
-        logger.warning("[monitor] Strike-3 pointer write failed for %s — running fresh anyway", new_id)
+        logger.warning("[monitor] Retry pointer write failed for %s — running fresh anyway", new_id)
     return fresh_cmd, "fresh"
 
 
 def _transcript_exists(branch_path: Path, session_id: str) -> bool:
-    """True when a transcript file exists for this session in this branch."""
+    """True when a transcript file exists for this session in this branch.
+
+    Raises:
+        OSError: the transcript could not be stat'd. False would say the id is
+            free to re-send when it may already be taken; _cmd_for_attempt
+            mints a new id on this instead (ai_mail, leg 10).
+    """
     transcript = session_pointer.transcript_file(branch_path, session_id)
     if transcript is None:
         # No home means no transcript can be located — and "unknown beats wrong"
@@ -453,13 +483,7 @@ def _transcript_exists(branch_path: Path, session_id: str) -> bool:
         # a session id is safe to re-send.
         return False
 
-    try:
-        return transcript.is_file()
-    except OSError as e:
-        # Unknown beats wrong here: a stat failure must not make us re-send an
-        # id that may already be taken.
-        logger.warning("[monitor] Cannot stat transcript for session %s: %s", session_id, e)
-        return False
+    return transcript.is_file()
 
 
 def _aimed_at_a_session(claude_cmd: list) -> bool:

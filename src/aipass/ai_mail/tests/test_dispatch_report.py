@@ -3,7 +3,7 @@
 # Description: Completion report tests — build_report, write_report, fire_completed, and the sent-mail attribution scan
 # Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/dispatch/report.py."""
@@ -145,6 +145,47 @@ class TestTheHonestyRequirements:
         assert built["emails_sent"] == []
         assert built["bg_orphaned"] is True, "an empty email list without this flag reads as a lazy agent"
         assert "max_turns_hit" in built
+
+    def test_memories_that_cannot_be_listed_report_unknown_not_untouched(self, branch, monkeypatch):
+        """A listing that failed is not "no memory written": the report says None.
+
+        Before leg 10 memories_edited answered False on a listing error, the
+        same answer as an agent that never touched its memories. A raise out of
+        build_report would lose the report at dispatch_monitor's terminal catch,
+        so the unknown is recorded in the report instead. Its proof is the
+        mutant that puts False back (ai_mail, leg 10).
+        """
+
+        def _unlistable(branch_path, since):
+            raise OSError("listing failed")
+
+        monkeypatch.setattr(report, "memories_edited", _unlistable)
+
+        built = report.build_report(
+            "abc", "@devpulse", "@ai_mail", branch, time.time(), 30, 0, "completed", [], False, False, "woken"
+        )
+
+        assert built["memories_edited"] is None
+
+    def test_sent_mail_that_cannot_be_listed_reports_unknown_not_none_sent(self, branch, monkeypatch):
+        """A sent folder that failed to list is not "sent nothing": both mail fields say None.
+
+        An empty list here reads as an agent that ignored its mail, which is the
+        misreading this report exists to prevent. Its proof is the mutant that
+        puts the empty list back (ai_mail, leg 10).
+        """
+
+        def _unlistable(branch_path, dispatch_id):
+            raise OSError("listing failed")
+
+        monkeypatch.setattr(report, "emails_sent", _unlistable)
+
+        built = report.build_report(
+            "abc", "@devpulse", "@ai_mail", branch, time.time(), 30, 0, "completed", [], False, False, "woken"
+        )
+
+        assert built["emails_sent"] is None
+        assert built["agents_contacted"] is None
 
     def test_every_rule_four_fact_is_present(self, branch):
         built = report.build_report(

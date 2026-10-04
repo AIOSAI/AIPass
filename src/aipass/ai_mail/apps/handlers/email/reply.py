@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reply.py
 # Description: Email Reply Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2025-11-30
-# Modified: 2026-08-31
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -46,21 +46,21 @@ def get_email_by_id(inbox_file: Path, message_id: str) -> Optional[Dict]:
 
     Returns:
         Email dict or None if not found
+
+    Raises:
+        OSError, ValueError: the inbox could not be read or parsed. None would
+            read as "message not found" about a broken inbox; handle_reply turns
+            the raise into its error line (ai_mail, leg 10).
     """
     if not inbox_file.exists():
         return None
 
-    try:
-        with open(inbox_file, "r", encoding="utf-8") as f:
-            inbox_data = json.load(f)
+    with open(inbox_file, "r", encoding="utf-8") as f:
+        inbox_data = json.load(f)
 
-        from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
+    from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
 
-        return find_message(inbox_data.get("messages", []), message_id)
-
-    except Exception as e:
-        logger.warning("[reply] get_email_by_id(%s, %s) failed: %s", inbox_file, message_id, e)
-        return None
+    return find_message(inbox_data.get("messages", []), message_id)
 
 
 def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str) -> Tuple[bool, str, Optional[str]]:

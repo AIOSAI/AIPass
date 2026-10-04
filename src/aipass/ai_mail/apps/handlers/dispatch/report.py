@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: report.py
 # Description: Dispatch Completion Report
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-08-22
+# Modified: 2026-10-03
 # =============================================
 
 """The completion report — what the finishing agent says about its own run.
@@ -95,14 +95,14 @@ def memories_edited(branch_path: Path, since: float) -> bool:
 
     Returns:
         True if at least one .trinity/*.json is newer than *since*
+
+    Raises:
+        OSError: the memory directory could not be listed. False would read as
+            "this run never touched its memories"; build_report records the
+            unknown as None instead (ai_mail, leg 10).
     """
     trinity = Path(branch_path) / ".trinity"
-
-    try:
-        candidates = list(trinity.glob("*.json"))
-    except OSError as e:
-        logger.warning("[report] could not list %s: %s", trinity, e)
-        return False
+    candidates = list(trinity.glob("*.json"))
 
     for memory_file in candidates:
         try:
@@ -129,17 +129,17 @@ def emails_sent(branch_path: Path, dispatch_id: Optional[str]) -> List[Dict[str,
 
     Returns:
         [{"to": "@devpulse", "kind": "reply"}, ...], oldest first
+
+    Raises:
+        OSError: the sent folder could not be listed. An empty list would read
+            as "sent nothing"; build_report records the unknown as None instead
+            (ai_mail, leg 10).
     """
     if not dispatch_id:
         return []
 
     sent_folder = Path(branch_path) / ".ai_mail.local" / "sent"
-
-    try:
-        records = sorted(sent_folder.glob("*.json"))
-    except OSError as e:
-        logger.warning("[report] could not list %s: %s", sent_folder, e)
-        return []
+    records = sorted(sent_folder.glob("*.json"))
 
     found = []
     for record in records:
@@ -190,9 +190,26 @@ def build_report(
     may never have been sent — so the report will honestly say ZERO EMAILS SENT
     for an agent that believed it had replied. Without those two flags beside
     it, a reader concludes the agent ignored its mail. Never a bare exit 0.
+
+    A listing that fails is recorded as None ("could not tell"), never as False
+    or an empty list: those are answers about the run, and a raise from here
+    would lose the whole report at the monitor's terminal catch (ai_mail, leg 10).
     """
     parsed = result_json or {}
-    sent = emails_sent(branch_path, dispatch_id)
+
+    sent: Optional[List[Dict[str, str]]]
+    try:
+        sent = emails_sent(branch_path, dispatch_id)
+    except OSError as e:
+        logger.warning("[report] sent mail of %s could not be listed, recorded as unknown: %s", branch_path, e)
+        sent = None
+
+    edited: Optional[bool]
+    try:
+        edited = memories_edited(branch_path, start_time)
+    except OSError as e:
+        logger.warning("[report] memories of %s could not be listed, recorded as unknown: %s", branch_path, e)
+        edited = None
 
     return {
         "dispatch_id": dispatch_id,
@@ -211,9 +228,9 @@ def build_report(
         "output_tokens": _output_tokens(parsed),
         "num_turns": parsed.get("num_turns"),
         "result_excerpt": str(parsed.get("result", ""))[:RESULT_EXCERPT_CHARS],
-        "memories_edited": memories_edited(branch_path, start_time),
+        "memories_edited": edited,
         "emails_sent": sent,
-        "agents_contacted": sorted({mail["to"] for mail in sent if mail.get("to")}),
+        "agents_contacted": None if sent is None else sorted({mail["to"] for mail in sent if mail.get("to")}),
     }
 
 

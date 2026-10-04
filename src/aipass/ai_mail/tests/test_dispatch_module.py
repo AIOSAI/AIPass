@@ -3,7 +3,7 @@
 # Description: Tests for dispatch.py orchestrator functions
 # Version: 1.0.2
 # Created: 2026-04-26
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -160,6 +160,30 @@ class TestHandleCommand:
         result = handle_command("dispatch", ["status"])
         assert result is True
         assert "No dispatches recorded yet." in " ".join(printed)
+
+    def test_dispatch_status_with_an_unreadable_log_says_so(self, monkeypatch):
+        """An unreadable dispatch log is an error, never "No dispatches recorded yet.".
+
+        load_dispatch_log raises on a log it cannot parse since leg 10; status
+        reports that through error() and prints no empty-log line. Its proof is
+        the mutant that answers [] again (ai_mail, leg 10).
+        """
+
+        def _unreadable():
+            raise json.JSONDecodeError("Expecting value", "{", 0)
+
+        monkeypatch.setattr(f"{MOD}.load_dispatch_log", _unreadable)
+        printed: list[str] = []
+        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+        errors: list[str] = []
+        monkeypatch.setattr(f"{MOD}.error", lambda message, *a, **k: errors.append(message))
+
+        result = handle_command("dispatch", ["status"])
+
+        assert result is True
+        assert "No dispatches recorded yet." not in " ".join(printed)
+        assert len(errors) == 1
+        assert errors[0].startswith("Dispatch log unreadable: ")
 
     def test_dispatch_daemon_subcommand(self, monkeypatch):
         """'dispatch daemon' delegates to _orchestrate_daemon."""

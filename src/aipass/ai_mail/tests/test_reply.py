@@ -3,7 +3,7 @@
 # Description: Tests for email reply handler
 # Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/email/reply.py."""
@@ -81,13 +81,17 @@ def test_get_email_by_id_missing_file(tmp_path):
 
 
 def test_get_email_by_id_corrupt_json(tmp_path):
-    """Returns None when inbox file contains invalid JSON."""
+    """An inbox that cannot be parsed raises; it is not "message not found".
+
+    Before leg 10 this answered None, the same answer as an id that is not in a
+    readable inbox, so reply told the user "Message not found" about a broken
+    inbox. handle_reply turns the raise into its error line (ai_mail, leg 10).
+    """
     inbox_file = tmp_path / "inbox.json"
     inbox_file.write_text("{broken json!!!", encoding="utf-8")
 
-    result = get_email_by_id(inbox_file, "abc123")
-
-    assert result is None
+    with pytest.raises(json.JSONDecodeError):
+        get_email_by_id(inbox_file, "abc123")
 
 
 def test_get_email_by_id_empty_messages(tmp_path):

@@ -3,7 +3,7 @@
 # Description: Tests for dispatch monitor lifecycle handler
 # Version: 1.1.1
 # Created: 2026-04-02
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py -- startup check, retry loop, bounce, rate limiting."""
@@ -3583,6 +3583,38 @@ def test_attempt_2_leaves_an_unconsumed_session_id_alone(tmp_path, pointer_home)
 
     assert built == cmd
     assert mode == "fresh"
+
+
+def test_attempt_2_mints_a_new_id_when_the_transcript_cannot_be_checked(tmp_path, pointer_home, monkeypatch):
+    """Unknown is neither "spent" nor "free": attempt 2 takes a new id, as strike 3 does.
+
+    Before leg 10 a stat failure answered "no transcript", so attempt 2 re-sent
+    an id that attempt 1 may already have claimed, the "already in use" failure
+    the comment beside it said it prevented. Resuming the id would be as wrong
+    the other way. Its proof is the mutant that answers False again
+    (ai_mail, leg 10).
+    """
+    branch = tmp_path / "branch"
+    branch.mkdir()
+
+    class _UnstatableTranscript:
+        def is_file(self):
+            raise OSError("stat failed")
+
+    monkeypatch.setattr(mod.session_pointer, "transcript_file", lambda branch_path, session_id: _UnstatableTranscript())
+    cmd = ["claude", "-p", "hi", "--session-id", "abc-123"]
+
+    built, mode = _cmd_for_attempt(cmd, 2, branch)
+
+    assert mode == "fresh"
+    assert "abc-123" not in built
+    assert "--resume" not in built
+    new_id = built[built.index("--session-id") + 1]
+    assert built == ["claude", "-p", "hi", "--session-id", new_id]
+    pointer = mod.session_pointer.read_pointer(branch)
+    assert pointer is not None
+    assert pointer["session_id"] == new_id
+    assert pointer["set_by"] == "monitor-retry-fresh"
 
 
 def test_attempt_2_of_a_dash_c_run_is_unchanged(tmp_path, pointer_home):

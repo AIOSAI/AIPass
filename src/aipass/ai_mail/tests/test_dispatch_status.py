@@ -3,7 +3,7 @@
 # Description: Tests for dispatch status handler
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/dispatch/status.py."""
@@ -79,13 +79,30 @@ def test_load_dispatch_log_valid(dispatch_log_file):
 
 
 def test_load_dispatch_log_invalid_json(dispatch_log_file):
-    """Corrupt JSON returns empty list instead of crashing."""
+    """Corrupt JSON raises; it is not an empty log.
+
+    Before leg 10 this answered [], the same answer as a log with no entries,
+    and log_dispatch then saved one entry over the unreadable file (ai_mail, leg 10).
+    """
     dispatch_log_file.parent.mkdir(parents=True, exist_ok=True)
     dispatch_log_file.write_text("{this is not valid json!!!", encoding="utf-8")
 
-    result = load_dispatch_log()
-    assert result == []
-    assert isinstance(result, list)
+    with pytest.raises(json.JSONDecodeError):
+        load_dispatch_log()
+
+
+def test_log_dispatch_never_writes_over_an_unreadable_log(dispatch_log_file):
+    """A log that cannot be read is left as it is, and log_dispatch answers False.
+
+    Its proof is the mutant that lets the load answer [] again: the save then
+    replaces the unreadable bytes with a one-entry log (ai_mail, leg 10).
+    """
+    dispatch_log_file.parent.mkdir(parents=True, exist_ok=True)
+    unreadable = "{this is not valid json!!!"
+    dispatch_log_file.write_text(unreadable, encoding="utf-8")
+
+    assert log_dispatch("@flow", 4242, "spawned") is False
+    assert dispatch_log_file.read_text(encoding="utf-8") == unreadable
 
 
 # --- save_dispatch_log tests ------------------------------------------

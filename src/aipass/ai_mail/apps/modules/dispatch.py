@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.3.0
+# Version: 3.3.1
 # Created: 2026-02-02
-# Modified: 2026-09-12
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -196,7 +196,11 @@ def _orchestrate_status() -> bool:
     """Orchestrate dispatch status display."""
     logger.info("[dispatch] Showing dispatch status")
 
-    dispatches = load_dispatch_log()
+    try:
+        dispatches = load_dispatch_log()
+    except (OSError, ValueError) as e:
+        error(f"Dispatch log unreadable: {e}")
+        return True
 
     if not dispatches:
         console.print("\n[dim]No dispatches recorded yet.[/dim]")
