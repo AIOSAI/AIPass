@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -25,6 +25,7 @@
 import sqlite3
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from aipass.commons.apps.handlers.notifications.preferences import (
     get_preference,
@@ -33,6 +34,23 @@ from aipass.commons.apps.handlers.notifications.preferences import (
     should_notify,
     get_watchers,
 )
+
+
+# =============================================================================
+# set_preference -- a failed write raises (DPLAN-0354 leg 5)
+# =============================================================================
+
+
+def test_set_preference_raises_a_failed_write_instead_of_answering_invalid() -> None:
+    """Before: the except answered False, the same False as an invalid level or target type."""
+    conn = MagicMock()
+    conn.execute.side_effect = sqlite3.OperationalError("database is locked")
+
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        set_preference(conn, "TEST_BRANCH", "room", "general", "watch")
+
+    conn.execute.assert_called_once()
+    conn.commit.assert_not_called()
 
 
 # =============================================================================

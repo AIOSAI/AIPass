@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: notification_ops.py
 # Description: Notification Preference Operations Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -123,8 +123,10 @@ def _set_notification_level(args: List[str], level: str) -> dict:
                 return {"success": False, "error": f"Post/thread {target_id} not found"}
             target_id = str(post_id_int)
 
-        success = set_preference(conn, agent_name, target_type, target_id, level)
-        close_db(conn)
+        try:
+            success = set_preference(conn, agent_name, target_type, target_id, level)
+        finally:
+            close_db(conn)
 
         if success:
             json_handler.log_operation(

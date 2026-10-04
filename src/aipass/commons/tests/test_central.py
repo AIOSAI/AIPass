@@ -3,7 +3,7 @@
 # Description: Tests for central_writer, dashboard_writer, and dashboard_pipeline handlers
 # Version: 1.0.0
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/central/, apps/handlers/dashboard/, and apps/handlers/notifications/dashboard_pipeline.py."""
@@ -289,6 +289,16 @@ def test_write_commons_activity_branch_not_found(
     assert result is False
 
 
+def test_write_commons_activity_raises_a_failed_write_instead_of_answering_not_found() -> None:
+    """Before (DPLAN-0354 leg 5): the except answered False, the same False as "branch not found"."""
+    with (
+        patch.object(dashboard_writer, "_find_branch_path", side_effect=OSError("registry unreadable")) as lookup,
+        pytest.raises(OSError, match="registry unreadable"),
+    ):
+        dashboard_writer.write_commons_activity("SEED", {"mentions": 0})
+    lookup.assert_called_once_with("SEED")
+
+
 # =============================================================================
 # DASHBOARD WRITER — update_commons_dashboard
 # =============================================================================
@@ -335,6 +345,39 @@ def test_update_commons_dashboard_queries_db(
     assert section_data["managed_by"] == "the_commons"
     assert section_data["mentions"] == 1
     assert section_data["new_posts_since_last_visit"] == 1
+
+
+def test_update_commons_dashboard_raises_a_failed_write_instead_of_answering_not_found() -> None:
+    """Before (DPLAN-0354 leg 5): the except answered False, the same False as "branch not found"."""
+    with (
+        patch.object(dashboard_writer, "_find_branch_path", side_effect=OSError("registry unreadable")) as lookup,
+        patch.object(dashboard_writer, "get_db") as db,
+        pytest.raises(OSError, match="registry unreadable"),
+    ):
+        dashboard_writer.update_commons_dashboard("SEED")
+    lookup.assert_called_once_with("SEED")
+    db.assert_not_called()
+
+
+@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_central")
+@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_commons_dashboard")
+@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline._collect_branches_to_update")
+def test_update_dashboards_for_event_counts_past_a_branch_whose_write_raised(
+    mock_collect: MagicMock,
+    mock_update_dash: MagicMock,
+    mock_update_central: MagicMock,
+    mock_json: MagicMock,
+) -> None:
+    """The caller of the raising write: one branch raising is skipped and the rest still update."""
+    mock_collect.return_value = ["GOOD", "BAD", "ALSO_GOOD"]
+    mock_update_dash.side_effect = [True, OSError("registry unreadable"), True]
+
+    count = dashboard_pipeline.update_dashboards_for_event("new_post", {"room_name": "general", "author": "X"})
+
+    assert count == 2
+    assert mock_update_dash.call_count == 3
+    mock_update_central.assert_called_once()
 
 
 # =============================================================================

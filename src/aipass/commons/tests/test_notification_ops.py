@@ -5,7 +5,7 @@
 # Date: 2026-04-03
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -684,6 +684,35 @@ def test_set_watch_preference_fails(
     result = set_watch(["room", "general"])
     assert result["success"] is False
     assert "Failed to set preference" in result["error"]
+
+
+@patch(_MOCK_LOGGER)
+@patch(_MOCK_JSON)
+@patch(_MOCK_CALLER, return_value={"name": "test-branch"})
+@patch(_MOCK_CLOSE_DB)
+@patch(_MOCK_GET_DB)
+@patch(
+    "aipass.commons.apps.handlers.notifications.notification_ops.set_preference",
+    side_effect=sqlite3.OperationalError("database is locked"),
+)
+def test_set_watch_names_a_failed_preference_write_and_closes_the_database(
+    mock_set_pref: MagicMock,
+    mock_get_db: MagicMock,
+    mock_close_db: MagicMock,
+    mock_caller: MagicMock,
+    mock_json: MagicMock,
+    mock_logger: MagicMock,
+    initialized_db: sqlite3.Connection,
+) -> None:
+    """The caller of the raising write (DPLAN-0354 leg 5): the error is named and the connection still closed."""
+    conn: sqlite3.Connection = initialized_db
+    mock_get_db.return_value = conn
+
+    result = set_watch(["room", "general"])
+
+    mock_set_pref.assert_called_once_with(conn, "test-branch", "room", "general", "watch")
+    assert result == {"success": False, "error": "database is locked"}
+    mock_close_db.assert_called_once_with(conn)
 
 
 # =============================================================================

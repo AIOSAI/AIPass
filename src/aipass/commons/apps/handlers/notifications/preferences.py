@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: preferences.py
 # Description: Notification Preferences Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -53,7 +53,13 @@ def set_preference(
     Set a notification preference for an agent on a target.
 
     Returns:
-        True if set successfully, False otherwise
+        True if set; False for an invalid target type or level.
+
+    Raises:
+        Whatever the write raises, logged first, so a failed write is never the
+        False of invalid input. The one caller, notification_ops
+        _set_notification_level, names it in its answer (commons' decision,
+        DPLAN-0354 leg 5).
     """
     valid_types = ("room", "post", "thread")
     valid_levels = ("watch", "track", "mute")
@@ -77,7 +83,7 @@ def set_preference(
         return True
     except Exception as e:
         logger.error(f"[preferences] Failed to set preference: {e}")
-        return False
+        raise
 
 
 def get_all_preferences(conn: sqlite3.Connection, agent_name: str) -> List[Dict[str, Any]]:
