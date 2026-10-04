@@ -241,6 +241,37 @@
       "standard": "logged_fallback",
       "lines": [235],
       "reason": "prax, leg 7: None means 'this session file names no working directory', which is what an unreadable session file tells the caller as well; the caller then labels the event by the next means. The read is a display hint and the failure is logged at the line above."
+    },
+    {
+      "file": "tests/test_watcher.py",
+      "standard": "sleep_in_test",
+      "reason": "prax, leg 10 (file-wide: this checker passes no line). The sleeps at 433-475 belong to the two TestDispatcherSurvivesHandlerFailure tests, whose subject is a real watchdog dispatcher thread surviving a file that vanishes before its stat and then still draining its queue. The race lives in the observer's own thread over real time; there is no event to wait on that the product exposes, and a wait seam in the watcher would be a door for this test alone."
+    },
+    {
+      "file": "tests/test_watcher.py",
+      "standard": "stdlib_patch",
+      "reason": "prax, leg 10 (file-wide: this checker passes no line; the one patch is at 741). The subject is how many times the handler stats one file per event. Path.stat is wrapped, not replaced: the wrapper counts calls on that one path and returns the real answer for every path, for the test's span only (monkeypatch). A stat seam in the handler would be a door for this test alone."
+    },
+    {
+      "file": "tests/test_telegram_relay.py",
+      "standard": "through_the_command",
+      "lines": [109, 425],
+      "reason": "prax, leg 10. 109: the autouse fixture resets the relay's backoff to its starting value, which the module keeps only in _BACKOFF_INITIAL; copying the number would let the reset drift from the product. 425: _render_event is the one point where an event fans out to the relay and the console; the only public route to it is 'monitor run', a live loop on real watchers and the real relay, so the test calls the fan-out with both sinks doubled. Mutants: order swapped and relay argument changed both die at the assert."
+    },
+    {
+      "file": "tests/test_monitor_module.py",
+      "standard": "stdlib_patch",
+      "reason": "prax, leg 10 (file-wide: this checker passes no line). Three families, each a with-block undone at its end. Path.home: _get_watch_directories reads ~/.claude/projects and ~/.codex/sessions, and without the patch the test would walk the operator's live session trees; it answers tmp_path. time.sleep: the monitor loops pace themselves with time.sleep(0.1/0.5); the doubles end the loop (KeyboardInterrupt) or count turns, and a clock seam would be a door for the tests alone. sys.stdin.isatty and builtins.input: the interactive prompt reads the terminal; the tests choose the TTY branch and feed lines or EOF, where a reader seam would be a door for the tests alone."
+    },
+    {
+      "file": "tests/test_instance_lock.py",
+      "standard": "stdlib_patch",
+      "reason": "prax, leg 10 (file-wide: this checker passes no line; the patches are at 62-107 and 171). The subject is try_acquire's liveness verdict, which branches on sys.platform and asks os.kill(pid, 0) on POSIX. The patches pin each branch on every CI platform and assert the pid passed; a real os.kill would signal a real process, and a platform or kill seam in the lock would be a door for the tests alone. Line 171 makes the /proc boot-id read fail the way a platform without /proc does. Each patch is a with-block, undone at its end."
+    },
+    {
+      "file": "tests/test_pid_cache.py",
+      "standard": "stdlib_patch",
+      "reason": "prax, leg 10 (file-wide: this checker passes no line; the patches are at 64-65 and 115-116). The subject is the POSIX /proc liveness branch, chosen by sys.platform at call time. The tests pin that branch on every CI platform; Path.exists is wrapped to answer for the one /proc pid and fall through to the real call otherwise. A platform seam in pid_cache would be a door for the tests alone. Each patch is a with-block, undone at its end."
     }
   ],
   "notes": {

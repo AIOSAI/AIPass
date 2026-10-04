@@ -25,10 +25,8 @@
 # seedgo: no-test-needed(stdlib) — _flush_loop, a threading.Event.wait timer around the tested _flush_buffer
 # seedgo: no-test-needed(json_structure) — init_relay's and stop_relay's log_operation records, covered by that row
 
-import importlib
 import json
 import os
-import sys
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -39,6 +37,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.prax.apps.handlers.monitoring import telegram_relay
+from aipass.prax.apps.modules import monitor
 
 
 def _operator_control_file() -> Path:
@@ -412,40 +411,20 @@ class TestFloodCap:
 class TestRenderEventCallsRelay:
     """Test that monitor._render_event calls relay_event."""
 
-    def test_render_event_calls_relay(self):
-        """_render_event in monitor.py calls relay_event after console render."""
-        fresh_mocks = {
-            "aipass.prax.apps.handlers.monitoring": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.event_queue": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.filesystem_handler": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.log_watcher": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.unified_stream": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.module_tracker": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.branch_detector": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.interactive_filter": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.monitoring_filters": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.file_watcher_integration": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.telegram_relay": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.pid_cache": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.instance_lock": MagicMock(),
-        }
-        with patch.dict(sys.modules, fresh_mocks):
-            if "aipass.prax.apps.modules.monitor" in sys.modules:
-                mod = importlib.reload(sys.modules["aipass.prax.apps.modules.monitor"])
-            else:
-                mod = importlib.import_module("aipass.prax.apps.modules.monitor")
+    def test_render_event_calls_relay(self, monkeypatch):
+        """_render_event hands the event to the relay, then to the console.
+
+        monitor is imported once at the top; both sinks are doubled where monitor
+        binds them, so no reload and no stubbed package (prax, leg 10).
+        """
+        sinks: list[tuple[str, object]] = []
+        monkeypatch.setattr(monitor, "relay_event", lambda e: sinks.append(("relay", e)))
+        monkeypatch.setattr(monitor, "_print_event_to_console", lambda e: sinks.append(("console", e)))
 
         event = MagicMock()
-        event.event_type = "log"
-        event.branch = "TEST"
-        event.message = "hello"
-        event.level = "info"
-        event.action = ""
+        monitor._render_event(event)
 
-        with patch.object(mod, "_get_pid_for_branch", return_value=None):
-            mod._render_event(event)
-
-        mod.relay_event.assert_called_once_with(event)
+        assert sinks == [("relay", event), ("console", event)]
 
 
 # ---------------------------------------------------------------------------
