@@ -3601,14 +3601,42 @@ def test_attempt_2_mints_a_new_id_when_the_transcript_cannot_be_checked(tmp_path
         def is_file(self):
             raise OSError("stat failed")
 
-    monkeypatch.setattr(mod.session_pointer, "transcript_file", lambda branch_path, session_id: _UnstatableTranscript())
+    unstatable = MagicMock(return_value=_UnstatableTranscript())
+    monkeypatch.setattr(mod.session_pointer, "transcript_file", unstatable)
     cmd = ["claude", "-p", "hi", "--session-id", "abc-123"]
 
     built, mode = _cmd_for_attempt(cmd, 2, branch)
 
+    unstatable.assert_called_once_with(branch, "abc-123")
     assert mode == "fresh"
     assert "abc-123" not in built
     assert "--resume" not in built
+    new_id = built[built.index("--session-id") + 1]
+    assert built == ["claude", "-p", "hi", "--session-id", new_id]
+    pointer = mod.session_pointer.read_pointer(branch)
+    assert pointer is not None
+    assert pointer["session_id"] == new_id
+    assert pointer["set_by"] == "monitor-retry-fresh"
+
+
+def test_attempt_2_mints_a_new_id_when_there_is_no_home(tmp_path, pointer_home, monkeypatch):
+    """No home means no transcript can be located, so the id's state is unknown: new id.
+
+    Before leg 11 this answered "no transcript" and re-sent the id, the same
+    defect leg 10 cured for a stat failure. Its proof is the mutant that answers
+    False again (ai_mail, leg 11).
+    """
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    no_home = MagicMock(return_value=None)
+    monkeypatch.setattr(mod.session_pointer, "transcript_file", no_home)
+    cmd = ["claude", "-p", "hi", "--session-id", "abc-123"]
+
+    built, mode = _cmd_for_attempt(cmd, 2, branch)
+
+    no_home.assert_called_once_with(branch, "abc-123")
+    assert mode == "fresh"
+    assert "abc-123" not in built
     new_id = built[built.index("--session-id") + 1]
     assert built == ["claude", "-p", "hi", "--session-id", new_id]
     pointer = mod.session_pointer.read_pointer(branch)

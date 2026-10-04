@@ -3,7 +3,7 @@
 # Description: Tests for wake dispatch handler
 # Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py and wake_dashboard.py."""
@@ -1101,6 +1101,29 @@ class TestWakeBranch:
         assert ok is True
         assert any(s[1] == "manager" for s in status.steps)
 
+    def test_unreadable_passport_fails_closed_as_a_manager(self, tmp_path, monkeypatch):
+        """A passport that exists but cannot be read never lets the target be woken.
+
+        Its class is unknown, and the target may be a manager; before leg 11 the
+        gate fell through and spawned it. Now the default lane treats it as a
+        manager: wake skipped, the caller mails. Its proof is the mutant that
+        falls through again (ai_mail, leg 11).
+        """
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        trinity = branch_path / ".trinity"
+        trinity.mkdir(parents=True, exist_ok=True)
+        (trinity / "passport.json").write_text("{not json", encoding="utf-8")
+        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch")
+
+        assert ok is True
+        manager = status.find_step("manager")
+        assert manager is not None
+        assert manager[0] == "info"
+        assert calls["popen"] == [] and calls["tmux"] == []
+
     def test_manager_daemon_scheduled_wake_spawns_interactive(self, tmp_path, monkeypatch):
         """Manager + sender=@daemon bypasses the gate and spawns an interactive
         tmux session — managers are never headless. Self-authored
@@ -1635,6 +1658,24 @@ class TestScheduledManagerLane:
         assert str(wake_mod.MONITOR_SCRIPT) in calls["popen"][0]["cmd"]
         assert any(s[0] == "ok" and s[1] == "scheduled" for s in status.steps)
 
+    def test_scheduled_wake_with_an_unreadable_passport_still_runs(self, tmp_path, monkeypatch):
+        """The fail-closed skip is the default lane's alone: the scheduled lane wakes managers too.
+
+        An unreadable passport in this lane spawns headless, the same as a manager
+        would. Its proof is the mutant that drops ``scheduled`` from the exemption
+        (ai_mail, leg 11).
+        """
+        branch_path = _make_scheduled_fixtures(tmp_path, monkeypatch)
+        (branch_path / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@flow", scheduled=True)
+
+        assert ok is True
+        assert status.find_step("manager") is None
+        assert len(calls["popen"]) == 1
+
     def test_scheduled_manager_wake_hands_the_pin_site_the_spawn(self, tmp_path, monkeypatch):
         """The monitor is argv[1] and wake's own env carries no CLAUDE_* leak.
 
@@ -2085,6 +2126,20 @@ class TestIsManager:
         the behaviour that existed before this helper. Never invent a manager."""
         monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (tmp_path / "nope", e))
         assert wake_mod.is_manager("@ghost") is False
+
+    def test_a_passport_that_cannot_be_read_is_treated_as_a_manager(self, tmp_path, monkeypatch):
+        """Fail closed: an unreadable passport answers True, the same as the wake gate.
+
+        The gate skips the wake and the caller mails, so the dispatch-time promise
+        "you will be MAILED" is the true one. A missing passport above stays False
+        (no class was ever declared). Its proof is the mutant that answers False
+        again (ai_mail, leg 11).
+        """
+        branch = tmp_path / "corrupt"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (branch, e))
+        assert wake_mod.is_manager("@corrupt") is True
 
     def test_manager_gate_log_does_not_claim_mail_it_did_not_send(self):
         """wake_branch's manager gate sends NO mail — the caller does. Its log line

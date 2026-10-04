@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.4.2
+# Version: 3.4.3
 # Created: 2025-12-02
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -677,7 +677,14 @@ def deliver_email_to_branch(
         # "Unknown branch email" while the wake already knew the address.
         from aipass.ai_mail.apps.handlers.registry.read import get_external_branches
 
-        branches.update(get_external_branches(_REPO_ROOT))
+        try:
+            branches.update(get_external_branches(_REPO_ROOT))
+        except Exception as e:
+            # The gateway is @memory's; its failures are not ours to type. It is
+            # caught here, at delivery's own door, so trigger and every other
+            # caller keep the (False, message) shape they handle (ai_mail, leg 11).
+            logger.warning("[delivery] external citizen tier unavailable for %s: %s", to_branch, e)
+            return False, f"External citizen tier unavailable, {to_branch} not resolved: {e}"
         via_external = to_branch in branches
 
     if to_branch not in branches:

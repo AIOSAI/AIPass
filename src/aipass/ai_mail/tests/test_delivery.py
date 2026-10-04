@@ -3,7 +3,7 @@
 # Description: Tests for email delivery handler
 # Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py."""
@@ -21,6 +21,7 @@ from typing import cast, Dict
 from unittest.mock import patch, MagicMock
 
 import aipass.ai_mail.apps.handlers.email.delivery as delivery_mod
+from aipass.memory.apps.modules import fleet
 from aipass.ai_mail.apps.handlers.email.delivery import (
     _check_cross_project_boundary,
     _migrate_inbox_format,
@@ -289,6 +290,28 @@ def test_deliver_unknown_branch(repo_root, noop_inbox_lock):
     assert success is False
     assert "Unknown branch email" in error
     assert "@nonexistent" in error
+
+
+def test_deliver_says_so_when_the_external_tier_cannot_answer(repo_root, noop_inbox_lock, monkeypatch):
+    """A gateway that cannot answer is not "unknown address": delivery names it.
+
+    Before leg 11 get_external_branches answered {} on any gateway failure, so a
+    dispatch to an external citizen was refused as an unknown branch while the
+    tier that knows it was down. The refusal keeps delivery's (False, message)
+    shape that trigger already handles. Its proof is the mutant that answers {}
+    again (ai_mail, leg 11).
+    """
+
+    def _gateway_down(**kwargs):
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(fleet, "external_branches", _gateway_down)
+
+    with patch.object(delivery_mod, "get_all_branches", return_value=[]):
+        success, error = deliver_email_to_branch("@nonexistent", _make_email_data())
+
+    assert success is False
+    assert error == "External citizen tier unavailable, @nonexistent not resolved: gateway down"
 
 
 def test_deliver_private_branch_blocked(tmp_path, repo_root, noop_inbox_lock):

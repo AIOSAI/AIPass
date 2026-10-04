@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.3.0
+# Version: 3.3.1
 # Created: 2026-03-02
-# Modified: 2026-09-25
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -623,15 +623,18 @@ def is_manager(branch_email: str) -> bool:
     the manager then heard nothing at all (@devpulse P0, 2026-08-21). Managers are
     mailed instead — the promise has to say so.
 
-    Fails toward "not a manager": an unreadable or missing passport keeps the
-    ordinary wake path, which is the behaviour that predates this helper. Inventing
-    a manager would silently suppress a wake that should happen.
+    Agrees with wake_branch's manager gate on every passport: a missing passport
+    declares no class (False, the ordinary path); a passport that exists but
+    cannot be read fails closed (True), because the gate then skips the wake and
+    the caller mails, so "you will be MAILED" is the promise that holds
+    (ai_mail, leg 11; before it, an unreadable passport answered False).
 
     Args:
         branch_email: Address of the branch to classify (e.g. "@devpulse").
 
     Returns:
-        bool: True only when a readable passport says citizen_class == "manager".
+        bool: True when a readable passport says citizen_class == "manager", or
+        when the passport exists and cannot be read.
     """
     resolved = resolve_branch(branch_email)
     if not resolved:
@@ -640,9 +643,12 @@ def is_manager(branch_email: str) -> bool:
     try:
         with open(branch_path / ".trinity" / "passport.json", "r", encoding="utf-8") as f:
             passport = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
-        logger.info("[wake] Could not classify %s: %s", branch_email, exc)
+    except FileNotFoundError as exc:
+        logger.info("[wake] No passport to classify %s: %s", branch_email, exc)
         return False
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("[wake] Passport of %s unreadable — treated as a manager: %s", branch_email, exc)
+        return True
     return passport.get("identity", {}).get("citizen_class", "") == "manager"
 
 
@@ -1060,8 +1066,23 @@ def wake_branch(
                 status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
                 logger.info("[wake] %s is citizen_class=manager — wake skipped, no mail sent here", email)
                 return status, True
-    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
-        logger.info("[wake] Could not read passport for %s: %s", email, exc)
+    except FileNotFoundError as exc:
+        # No passport: no class was ever declared, so nothing marks this target
+        # a manager. The ordinary path stands (pinned: missing passport continues).
+        logger.info("[wake] No passport for %s: %s", email, exc)
+    except (json.JSONDecodeError, OSError) as exc:
+        # A passport that exists but cannot be read leaves the class unknown, and
+        # the target may be a manager. Fail closed in the lane that never wakes
+        # managers: skip the wake, the caller mails. The scheduled, admin and
+        # @daemon lanes wake managers too, so they go on (ai_mail, leg 11).
+        if not (scheduled or admin or sender == "@daemon"):
+            status.info(
+                "manager",
+                f"{email} passport unreadable — class unknown, treated as a manager: wake skipped, caller must mail",
+            )
+            logger.warning("[wake] %s passport unreadable, treated as a manager — wake skipped: %s", email, exc)
+            return status, True
+        logger.warning("[wake] %s passport unreadable, waking in a lane that wakes managers too: %s", email, exc)
 
     # Step 3b: Model policy, decided ONCE for both spawn lanes. Resolved here
     # rather than at each spawn site because a second site would be a second

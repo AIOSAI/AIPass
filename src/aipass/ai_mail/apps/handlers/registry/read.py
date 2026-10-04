@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: read.py
 # Description: Registry Read Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2025-11-15
-# Modified: 2026-08-31
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -458,23 +458,25 @@ def get_external_branches(repo_root: Path) -> Dict[str, str]:
     seat dispatches any agent in any directory; a map that stops at projects/
     is the gap, not the design.
 
-    Contained like the wake tier: a gateway that cannot answer yields an empty
-    map and a warning, never a traceback into delivery.
+    A gateway that cannot answer raises; it is not "no external citizens".
+    Its one caller, deliver_email_to_branch, catches it at its own door and
+    refuses with its (False, message) shape, so no caller outside ai_mail sees
+    the raise (ai_mail, leg 11; before it, the failure answered {} and the
+    address was refused as unknown).
 
     Args:
         repo_root: The AIPass repo root the gateway resolves declarations from.
 
     Returns:
-        Dict mapping email address to absolute path string. Empty on failure
-        or when no roots are declared.
-    """
-    try:
-        from aipass.memory.apps.modules import fleet
+        Dict mapping email address to absolute path string. Empty when no
+        roots are declared.
 
-        rows = fleet.external_branches(repo_root=repo_root)
-    except Exception as exc:
-        logger.warning("[registry] external tier unavailable for delivery: %s", exc)
-        return {}
+    Raises:
+        Exception: whatever the @memory gateway raised, unchanged.
+    """
+    from aipass.memory.apps.modules import fleet
+
+    rows = fleet.external_branches(repo_root=repo_root)
     result: Dict[str, str] = {}
     for citizen in rows:
         email = citizen.get("email")

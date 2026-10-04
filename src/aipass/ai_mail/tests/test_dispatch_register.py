@@ -389,6 +389,23 @@ class TestAReplyClosesTheRow:
         assert register.close_on_reply("@trigger", "@devpulse", "RE: Your brief", repo_root=repo) is None
         assert len(register.outstanding(repo_root=repo)) == 1
 
+    def test_a_register_that_cannot_be_read_raises_rather_than_matching_nothing(self, repo, monkeypatch):
+        """None means "this reply answers no open row"; an unreadable register is not that.
+
+        Before leg 11 the read failure answered None too. Its one caller,
+        reply's _close_dispatch_row_on_reply, swallows and logs every raise after
+        the reply is delivered, so the raise reaches a log line, never the reply.
+        Its proof is the mutant that answers None again (ai_mail, leg 11).
+        """
+
+        def _unreadable(**kwargs):
+            raise OSError("register unreadable")
+
+        monkeypatch.setattr(register, "outstanding", _unreadable)
+
+        with pytest.raises(OSError, match="register unreadable"):
+            register.close_on_reply("@api", "@devpulse", "RE: Your brief", repo_root=repo)
+
     def test_a_reply_to_someone_else_does_not_close_it(self, repo):
         """Answering a third party says nothing to the seat that promised it."""
         register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)

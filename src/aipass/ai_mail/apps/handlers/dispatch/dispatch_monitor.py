@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.5.2
+# Version: 2.5.3
 # Created: 2026-03-02
 # Modified: 2026-10-03
 # =============================================
@@ -468,8 +468,14 @@ def _fresh_cmd_with_new_id(claude_cmd: list, branch_path: Path) -> Tuple[list, s
     return fresh_cmd, "fresh"
 
 
-def _transcript_exists(branch_path: Path, session_id: str) -> bool:
-    """True when a transcript file exists for this session in this branch.
+def _transcript_exists(branch_path: Path, session_id: str) -> Optional[bool]:
+    """Whether a transcript file exists for this session in this branch.
+
+    Returns:
+        True or False when the transcript can be looked for; None when this
+        machine cannot name its home, so no transcript can be located and the
+        id's state is unknown. _cmd_for_attempt mints a new id on None
+        (ai_mail, leg 11; before it, no home answered False and the id was re-sent).
 
     Raises:
         OSError: the transcript could not be stat'd. False would say the id is
@@ -478,10 +484,8 @@ def _transcript_exists(branch_path: Path, session_id: str) -> bool:
     """
     transcript = session_pointer.transcript_file(branch_path, session_id)
     if transcript is None:
-        # No home means no transcript can be located — and "unknown beats wrong"
-        # applies with more force here than to a stat failure: this gates whether
-        # a session id is safe to re-send.
-        return False
+        logger.warning("[monitor] No home to locate session %s's transcript — its state is unknown", session_id)
+        return None
 
     return transcript.is_file()
 
