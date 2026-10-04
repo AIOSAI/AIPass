@@ -299,7 +299,7 @@ class TestClosePlanImplAlreadyClosedOrphan:
 
         # Create orphan file on disk
         plan_file = tmp_path / "FPLAN-0002_closed_2026-03-18.md"
-        plan_file.write_text("# Plan content", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0002: closed", encoding="utf-8")
 
         registry = {
             "plans": {
@@ -321,6 +321,112 @@ class TestClosePlanImplAlreadyClosedOrphan:
         # Registry should have been saved with cleanup flags
         deps["save_registry"].assert_called()
         assert any("orphan" in m.get("text", "").lower() for m in result["messages"])
+
+
+class TestCloseNeverArchivesAFileThatIsNotAPlan:
+    """Leg 9: rows registered before leg 7 name reports; close would archive them.
+
+    Live: FPLAN 0564 to 0583 named devpulse's FPLAN-0508_rows_*.md reports.
+    Red first on the close of leg 8. Mutants leg9 K1 (normal-path guard off),
+    K2 (orphan-path guard off) and K3 (None let through) each redden a test here.
+    """
+
+    REPORT = "FPLAN-0508 rows seedgo\nmeasured rows, not a plan\n"
+
+    @staticmethod
+    def _close(row: dict, deps: dict) -> dict:
+        deps["load_registry"].return_value = {"plans": {"564": row}}
+        with (
+            patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None),
+        ):
+            return close_plan_impl(plan_num="564", spawn_background=False, **deps)
+
+    def test_an_open_row_naming_a_report_is_refused_and_nothing_moves(self, tmp_path):
+        report = tmp_path / "FPLAN-0516.md"
+        report.write_text(self.REPORT, encoding="utf-8")
+        row = {"status": "open", "subject": "FPLAN-0516", "file_path": str(report)}
+        deps = _make_deps()
+
+        result = self._close(row, deps)
+
+        assert result["success"] is False
+        assert result["messages"] == [
+            {
+                "type": "error_text",
+                "text": f"Refused: {report} is not a plan (its first line is no plan header). "
+                "Nothing was archived, moved or renamed.",
+            }
+        ]
+        deps["archive_plan_fn"].assert_not_called()
+        deps["save_registry"].assert_not_called()
+        assert row["status"] == "open"
+        assert report.read_text(encoding="utf-8") == self.REPORT
+
+    def test_the_orphan_cleanup_of_a_closed_row_naming_a_report_is_refused(self, tmp_path):
+        report = tmp_path / "FPLAN-0516.md"
+        report.write_text(self.REPORT, encoding="utf-8")
+        row = {"status": "closed", "closed": "2026-10-04", "file_path": str(report)}
+        deps = _make_deps()
+
+        result = self._close(row, deps)
+
+        assert result["success"] is False
+        assert str(report) in result["messages"][0]["text"]
+        deps["archive_plan_fn"].assert_not_called()
+        deps["save_registry"].assert_not_called()
+        assert "processed" not in row
+        assert report.read_text(encoding="utf-8") == self.REPORT
+
+    def test_an_unreadable_file_is_refused_not_archived(self, tmp_path):
+        """is_plan_file None (undecodable bytes): nobody can tell, so nothing moves."""
+        unreadable = tmp_path / "FPLAN-0564.md"
+        unreadable.write_bytes(b"\xff\xfe# FPLAN-0564: x\n")
+        row = {"status": "open", "file_path": str(unreadable)}
+        deps = _make_deps()
+
+        result = self._close(row, deps)
+
+        assert result["success"] is False
+        assert result["messages"][0]["text"] == (
+            f"Refused: {unreadable} cannot be read. Nothing was archived, moved or renamed."
+        )
+        deps["archive_plan_fn"].assert_not_called()
+
+    @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
+    @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
+    def test_close_all_archives_the_plan_and_refuses_the_report(self, _mock_jh, mock_bg, tmp_path):
+        """close --all closes each row through close_plan_impl, so the refusal holds per row."""
+        plan = tmp_path / "FPLAN-0001_real_2026-10-04.md"
+        plan.write_text("# FPLAN-0001 - real\n", encoding="utf-8")
+        report = tmp_path / "FPLAN-0516.md"
+        report.write_text(self.REPORT, encoding="utf-8")
+        rows = {
+            "1": {"status": "open", "subject": "real", "location": str(tmp_path), "file_path": str(plan)},
+            "564": {"status": "open", "subject": "junk", "location": str(tmp_path), "file_path": str(report)},
+        }
+        deps = _make_deps()
+        deps["load_registry"].return_value = {"plans": rows}
+
+        def close_one(plan_num, **kwargs):
+            with (
+                patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None),
+                patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None),
+            ):
+                return close_plan_impl(plan_num=plan_num.split("-")[-1], **kwargs, **deps)
+
+        result = close_all_plans_impl(
+            caller_project=tmp_path,
+            resolve_project_fn=lambda _location: tmp_path,
+            get_open_plans=MagicMock(return_value=[(key, row) for key, row in rows.items()]),
+            close_plan_fn=close_one,
+        )
+
+        deps["archive_plan_fn"].assert_called_once_with(plan)
+        assert rows["564"]["status"] == "open"
+        assert report.read_text(encoding="utf-8") == self.REPORT
+        assert (result["success_count"], result["failure_count"]) == (1, 1)
+        mock_bg.assert_called_once_with()  # one runner for the one plan archived
 
 
 class TestClosePlanImplDryRun:
@@ -363,7 +469,7 @@ class TestClosePlanImplSuccess:
     def test_successful_close(self, mock_subprocess, _mock_find, _mock_resolve, tmp_path):
         """Mutant: `if spawn_background:` -> `if False:` reddens this."""
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
-        plan_file.write_text("# Real content\nSome actual plan notes.", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0001: test\nSome actual plan notes.", encoding="utf-8")
 
         registry = {
             "plans": {
@@ -413,7 +519,7 @@ class TestClosePlanImplSuccess:
         each redden the None case.
         """
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
-        plan_file.write_text("# Real content\nSome actual plan notes.", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0001: test\nSome actual plan notes.", encoding="utf-8")
         registry = {
             "plans": {
                 "1": {"status": "open", "subject": "Test plan", "location": str(tmp_path), "file_path": str(plan_file)}
@@ -446,7 +552,7 @@ class TestClosePlanImplSuccess:
         close_plan_impl's result.
         """
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
-        plan_file.write_text("# Real content\nSome actual plan notes.", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0001: test\nSome actual plan notes.", encoding="utf-8")
         registry = {
             "plans": {
                 "1": {
@@ -559,7 +665,8 @@ class TestTemplateDetectionNeverDeletes:
     def test_template_flagged_plan_is_archived_not_deleted(self, mock_subprocess, _mock_find, _mock_resolve, tmp_path):
 
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
-        plan_file.write_text("[What do you want to achieve? Specific end state.]", encoding="utf-8")
+        template_body = "# FPLAN-0001 - test\n[What do you want to achieve? Specific end state.]"
+        plan_file.write_text(template_body, encoding="utf-8")
 
         registry = {
             "plans": {
@@ -606,7 +713,7 @@ class TestSpawnBackgroundBehavior:
     @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
     def test_spawn_background_true_calls_background_runner(self, _mock_find, _mock_resolve, mock_runner, tmp_path):
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
-        plan_file.write_text("# Real content\nNotes here.", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0001: test\nNotes here.", encoding="utf-8")
         registry = {
             "plans": {
                 "1": {
@@ -638,7 +745,7 @@ class TestSpawnBackgroundBehavior:
     def test_spawn_background_false_skips_background_runner(self, _mock_find, _mock_resolve, mock_runner, tmp_path):
         """Mutant: append_to_closed_plans(..., plan_file.parent) -> (..., plan_file) reddens this."""
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
-        plan_file.write_text("# Real content\nNotes here.", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0001: test\nNotes here.", encoding="utf-8")
         registry = {
             "plans": {
                 "1": {
@@ -672,7 +779,7 @@ class TestClosePlanImplConfirmCancelled:
     def test_confirm_cancelled(self, _mock_find, _mock_resolve, tmp_path):
 
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
-        plan_file.write_text("# Real content", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0001: test", encoding="utf-8")
 
         registry = {
             "plans": {
@@ -1132,7 +1239,7 @@ class TestClosePlanImplSelfHeal:
     def test_triggers_self_heal_when_not_in_registry(self, mock_subprocess, _mock_resolve, tmp_path):
 
         plan_file = tmp_path / "DPLAN-0176_design_topic_2026-05-10.md"
-        plan_file.write_text("# Real content\nDesign notes here.", encoding="utf-8")
+        plan_file.write_text("# DPLAN-0176: design topic\nDesign notes here.", encoding="utf-8")
 
         registry = {"plans": {}, "next_number": 175}
         deps = _make_deps()
@@ -1198,7 +1305,7 @@ class TestSelfHealVerifyBlock:
     def test_verify_all_pass(self, mock_subprocess, _mock_resolve, tmp_path):
 
         plan_file = tmp_path / "FPLAN-0042_test_2026-03-01.md"
-        plan_file.write_text("# Real content here.", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0042: test", encoding="utf-8")
         processed_dir = tmp_path / "processed"
         processed_dir.mkdir()
         dest_file = processed_dir / plan_file.name
@@ -1251,7 +1358,7 @@ class TestSelfHealVerifyBlock:
     def test_verify_fails_when_file_not_in_processed(self, mock_subprocess, _mock_resolve, tmp_path):
 
         plan_file = tmp_path / "FPLAN-0055_missing_2026-03-01.md"
-        plan_file.write_text("# Content", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0055: missing", encoding="utf-8")
         processed_dir = tmp_path / "processed_empty"
         processed_dir.mkdir()
 
@@ -1296,7 +1403,7 @@ class TestSelfHealVerifyBlock:
     def test_verify_fails_when_source_still_exists(self, mock_subprocess, _mock_resolve, tmp_path):
 
         plan_file = tmp_path / "FPLAN-0060_leftover_2026-03-01.md"
-        plan_file.write_text("# Content", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0060: leftover", encoding="utf-8")
         processed_dir = tmp_path / "processed"
         processed_dir.mkdir()
         (processed_dir / plan_file.name).write_text("# Archived copy", encoding="utf-8")
@@ -1339,7 +1446,7 @@ class TestSelfHealVerifyBlock:
     def test_verify_skipped_for_non_self_healed_plans(self, tmp_path):
 
         plan_file = tmp_path / "FPLAN-0070_normal_2026-03-01.md"
-        plan_file.write_text("# Normal plan content", encoding="utf-8")
+        plan_file.write_text("# FPLAN-0070: normal", encoding="utf-8")
 
         registry = {
             "plans": {

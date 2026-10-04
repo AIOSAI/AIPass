@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_ops.py
 # Description: Plan Closure Implementation Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -100,6 +100,33 @@ def _scope_reason(row_project: Any) -> str:
     if row_project is None:
         return "no project register above its location"
     return f"belongs to {describe_project(row_project)}"
+
+
+def _refuse_non_plan_file(plan_file: Path, plan_label: str, plan_key: str) -> Dict[str, Any] | None:
+    """The failure result when ``plan_file`` is present but not a plan, else None.
+
+    Close archives the file a row names. Rows registered before leg 7 of fleet
+    green name reports that were only named like plans, so close, close --all
+    and the orphan cleanup would move another branch's report into
+    processed_plans. Only monitor_ops.is_plan_file True passes; an unreadable
+    file (None) is refused as well (devpulse's ruling of leg 8, flow's design).
+    Nothing is saved, moved or renamed on a refusal.
+    """
+    from aipass.flow.apps.handlers.registry.monitor_ops import is_plan_file
+
+    verdict = is_plan_file(plan_file)
+    if verdict is True:
+        return None
+    why = "cannot be read" if verdict is None else "is not a plan (its first line is no plan header)"
+    logger.warning(f"[{MODULE_NAME}] Refused to close {plan_label}: {plan_file} {why}; nothing archived")
+    return {
+        "success": False,
+        "messages": [
+            {"type": "error_text", "text": f"Refused: {plan_file} {why}. Nothing was archived, moved or renamed."}
+        ],
+        "plan_key": plan_key,
+        "cancelled": False,
+    }
 
 
 # =============================================
@@ -247,6 +274,9 @@ def close_plan_impl(
 
             # Check if .md file is orphaned on disk (registry-closed but file never moved)
             if plan_file.exists():
+                refusal = _refuse_non_plan_file(plan_file, plan_label, plan_key)
+                if refusal is not None:
+                    return refusal
                 messages.append(
                     {
                         "type": "warning",
@@ -289,6 +319,13 @@ def close_plan_impl(
                 )
                 logger.info(f"[{MODULE_NAME}] Relocated {plan_label}: {relocated}")
                 plan_file = relocated
+
+        # A present file that is not a plan is never archived (leg 9). An
+        # absent one still closes in the registry only, as before.
+        if plan_file.exists():
+            refusal = _refuse_non_plan_file(plan_file, plan_label, plan_key)
+            if refusal is not None:
+                return refusal
 
         # --- Step 1/5: Template check (informational only -- never deletes) ---
         # Was previously a fast-delete branch (unlink + registry row removal). Removed:

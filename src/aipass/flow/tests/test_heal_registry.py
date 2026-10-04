@@ -151,6 +151,75 @@ class TestBuildPlanFileIndex:
 # ═══════════════════════════════════════════════════════════
 
 
+class TestNotAPlanRows:
+    """Case 6 (leg 9): an open row whose present file is not a plan is closed, registry only.
+
+    Live: FPLAN 0564 to 0583 named reports the scan had renamed before leg 7.
+    Red first on the heal of leg 8. Mutants leg9 N1 (sweep not called), N2 (None
+    closed too), N3 (reason changed), N4 (closed row not saved) redden tests here.
+    """
+
+    REPORT = "FPLAN-0508 rows seedgo\n"
+
+    def test_a_row_naming_a_report_is_closed_and_the_report_stays(self, tmp_path, quiet_cross_prefix):
+        report = tmp_path / "devpulse" / "artifacts" / "reports" / "FPLAN-0516.md"
+        report.parent.mkdir(parents=True)
+        report.write_text(self.REPORT, encoding="utf-8")
+        store = FakeRegistryStore(
+            {"fplan_registry.json": {"plans": {"0569": {"status": "open", "file_path": str(report)}}}}
+        )
+
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
+
+        assert actions == [
+            {
+                "action": "closed_not_a_plan",
+                "prefix": "FPLAN",
+                "registry_file": "fplan_registry.json",
+                "number": "0569",
+                "file": str(report),
+            }
+        ]
+        row = store.plans("fplan_registry.json")["0569"]
+        assert (row.get("status"), row.get("closed_reason"), row.get("file_path")) == (
+            "closed",
+            "not_a_plan",
+            str(report),
+        )
+        assert report.read_text(encoding="utf-8") == self.REPORT
+        assert sorted(p.name for p in tmp_path.rglob("*.md")) == ["FPLAN-0516.md"]
+
+    def test_real_plans_in_both_header_forms_stay_open(self, tmp_path, quiet_cross_prefix):
+        """The guard against the risk named in leg 8: a real plan's row is never closed."""
+        colon = _make_plan_file(tmp_path, "DPLAN-0011_colon_2026-10-04.md")
+        dash = tmp_path / "FPLAN-0300_dash_2026-10-04.md"
+        dash.write_text("# FPLAN-0300 - an older plan\n", encoding="utf-8")
+        store = FakeRegistryStore(
+            {
+                "dplan_registry.json": {"plans": {"0011": {"status": "open", "file_path": str(colon)}}},
+                "fplan_registry.json": {"plans": {"0300": {"status": "open", "file_path": str(dash)}}},
+            }
+        )
+
+        actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}, "f": {"prefix": "FPLAN"}})
+
+        assert actions == []
+        assert store.plans("dplan_registry.json")["0011"]["status"] == "open"
+        assert store.plans("fplan_registry.json")["0300"]["status"] == "open"
+
+    def test_an_unreadable_file_leaves_its_row_open(self, tmp_path, quiet_cross_prefix):
+        """is_plan_file None: nobody can tell, so the row is neither closed nor touched."""
+        unreadable = tmp_path / "FPLAN-0564.md"
+        unreadable.write_bytes(b"\xff\xfe# FPLAN-0564: x\n")
+        row = {"status": "open", "file_path": str(unreadable)}
+        store = FakeRegistryStore({"fplan_registry.json": {"plans": {"0564": row}}})
+
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
+
+        assert actions == []
+        assert store.plans("fplan_registry.json")["0564"] == {"status": "open", "file_path": str(unreadable)}
+
+
 class TestUnregisteredFile:
     """A real plan file with no registry row gets registered."""
 
