@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status_handler.py
 # Description: Scoped git status for branch directories
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-17
-# Modified: 2026-09-13
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -103,3 +103,42 @@ def get_branch_status(branch_dir: Path, repo_root: Path | None = None) -> dict:
     logger.info(message)
 
     return {"ok": True, "files": files, "total": total, "message": message}
+
+
+def _git(repo_root: Path, *argv: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *argv], capture_output=True, text=True, cwd=str(repo_root))
+
+
+def _no_count(branch: str | None, message: str) -> dict:
+    return {"ok": True, "branch": branch, "upstream": None, "ahead": None, "behind": None, "message": message}
+
+
+def get_ahead_behind(repo_root: Path) -> dict:
+    """How far the current branch is from its origin twin, as of the last fetch: no network.
+
+    The twin of ``git rev-list --left-right --count origin/<b>...HEAD``.
+
+    Returns:
+        Dict with ok (bool), branch (str, or None when HEAD is detached),
+        upstream (``origin/<b>``, or None when origin has no such branch),
+        ahead and behind (int, or None with no upstream), and message (str).
+    """
+    head = _git(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if head.returncode == 1:
+        return _no_count(None, "HEAD is detached: no branch to compare with origin")
+    if head.returncode != 0:
+        logger.error("git symbolic-ref failed in %s: %s", repo_root, head.stderr.strip())
+        return {**_no_count(None, f"git symbolic-ref error: {head.stderr.strip()}"), "ok": False}
+    branch = head.stdout.strip()
+    upstream = f"origin/{branch}"
+    known = _git(repo_root, "rev-parse", "--verify", "--quiet", f"refs/remotes/{upstream}")
+    if known.returncode != 0:
+        return _no_count(branch, f"{branch}: no {upstream} to compare with")
+    counted = _git(repo_root, "rev-list", "--left-right", "--count", f"refs/remotes/{upstream}...HEAD")
+    if counted.returncode != 0:
+        logger.error("git rev-list failed for %s: %s", upstream, counted.stderr.strip())
+        return {**_no_count(branch, f"git rev-list error: {counted.stderr.strip()}"), "ok": False}
+    behind, ahead = (int(n) for n in counted.stdout.split())
+    message = f"{branch}: {ahead} ahead, {behind} behind {upstream} (as of the last fetch)"
+    json_handler.log_operation("get_ahead_behind", {"branch": branch, "ahead": ahead, "behind": behind})
+    return {"ok": True, "branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind, "message": message}

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
 # Description: Tests for the @git module — lock, status, sync, PR, and routing
-# Version: 1.1.5
+# Version: 1.1.6
 # Created: 2026-04-21
-# Modified: 2026-09-29
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/git_module.py and the lock, status, sync and PR handlers it drives."""
@@ -2107,7 +2107,7 @@ class TestVerbFlags:
         with patch(f"{_GIT_MOD}.diff_handler.get_branch_diff", return_value=answer) as mock_diff:
             result = handle_command("diff", ["--staged"])
 
-        mock_diff.assert_called_once_with(branch_dir.resolve(), staged=True)
+        mock_diff.assert_called_once_with(branch_dir.resolve(), staged=True, stat=False)
         assert result["exit_code"] == 0
         assert result["stdout"].startswith("diff --git a/x b/x")
 
@@ -2122,7 +2122,7 @@ class TestVerbFlags:
         with patch(f"{_GIT_MOD}.diff_handler.get_branch_diff", return_value=answer) as mock_diff:
             result = handle_command("diff", [])
 
-        mock_diff.assert_called_once_with(branch_dir.resolve(), staged=False)
+        mock_diff.assert_called_once_with(branch_dir.resolve(), staged=False, stat=False)
         assert result["exit_code"] == 0
 
     @patch(_AUTH, return_value="devpulse")

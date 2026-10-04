@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_handler.py
 # Description: Git log handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-05-12
-# Modified: 2026-09-30
+# Modified: 2026-10-04
 # =============================================
 
 """Git log handler."""
@@ -43,17 +43,50 @@ def resolve_log_path(token: str, repo_root: Path, cwd: Path | None, must_exist: 
     return str(bases[0] / path)
 
 
-def get_git_log(count: int = 10, repo_root: Path | None = None, paths: list[str] | None = None) -> dict:
+def _is_commit(side: str, repo_root: Path) -> bool:
+    """Whether *side* names a commit. A flag-shaped name is never one: it would reach git as an option."""
+    if side.startswith("-"):
+        return False
+    verify = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "--end-of-options", f"{side}^{{commit}}"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+    )
+    return verify.returncode == 0
+
+
+def is_commit_range(token: str, repo_root: Path) -> bool:
+    """Whether *token* is ``a..b`` or ``a...b`` with a commit on each side (an empty side is HEAD, as in git)."""
+    separator = "..." if "..." in token else ".."
+    if separator not in token:
+        return False
+    left, _, right = token.partition(separator)
+    return all(_is_commit(side or "HEAD", repo_root) for side in (left, right))
+
+
+def get_git_log(
+    count: int | None = 10,
+    repo_root: Path | None = None,
+    paths: list[str] | None = None,
+    rev_range: str | None = None,
+) -> dict:
     """Get recent git log entries from *repo_root* (default: the standing repo).
 
     *paths* keeps only the commits that touch them (``git log -- <paths>``).
-    ``success`` is False when git could not answer; an empty history is a
-    success with no entries.
+    *rev_range* (``origin/dev..HEAD``) lists the commits in it, read-only;
+    the caller verifies it with :func:`is_commit_range` first. A *count* of
+    None lists them all. ``success`` is False when git could not answer; an
+    empty history is a success with no entries.
     """
     if repo_root is None:
         repo_root = find_repo_root()
 
-    cmd = ["git", "log", "--oneline", f"-{count}"]
+    cmd = ["git", "log", "--oneline"]
+    if count is not None:
+        cmd.append(f"-{count}")
+    if rev_range is not None:
+        cmd += ["--end-of-options", rev_range]
     if paths:
         cmd += ["--", *paths]
     try:
@@ -77,7 +110,7 @@ def get_git_log(count: int = 10, repo_root: Path | None = None, paths: list[str]
 
     entries = [line for line in result.stdout.splitlines() if line.strip()]
 
-    json_handler.log_operation("get_git_log", {"count": len(entries), "paths": len(paths or [])})
+    json_handler.log_operation("get_git_log", {"count": len(entries), "paths": len(paths or []), "range": rev_range})
     logger.info("Retrieved %d log entries", len(entries))
 
     return {"success": True, "entries": entries, "count": len(entries), "message": f"{len(entries)} log entries"}

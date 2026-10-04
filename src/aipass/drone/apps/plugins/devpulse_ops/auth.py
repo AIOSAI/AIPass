@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.2.7
+# Version: 1.2.8
 # Created: 2026-03-30
-# Modified: 2026-10-01
+# Modified: 2026-10-04
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -40,6 +40,8 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "log",
             "show",
             "blame",
+            "tracked",
+            "export",
             "remote",
             "lock",
             "issue",
@@ -48,6 +50,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "branches",
             "tag-list",
         ],
+        # export reads the repo and writes only the empty directory it is handed
         "description": "Read-only — available to all branches",
     },
     "owner": {

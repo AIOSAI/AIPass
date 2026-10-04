@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_json_and_remote.py
-# Description: Machine output on the git read doors, the remote read door, the gh passthrough tiers and merge-main
-# Version: 1.0.4
+# Description: The git read doors and their --json, remote, gh tiers, merge-main and the read twins
+# Version: 1.0.5
 # Created: 2026-08-18
-# Modified: 2026-10-01
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/git_module.py's --json on status/log/show and apps/handlers/git/remote_handler.py."""
@@ -41,6 +41,7 @@ _GIT_MOD = "aipass.drone.apps.modules.git_module"
 _AUTH = "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access"
 _STATUS_MOD = "aipass.drone.apps.handlers.git.status_handler"
 _REMOTE_MOD = "aipass.drone.apps.handlers.git.remote_handler"
+_EXPORT_MOD = "aipass.drone.apps.handlers.git.export_handler"
 
 
 # ===========================================================================
@@ -387,7 +388,7 @@ class TestLogPathFilter:
 
         assert result["exit_code"] == 1
         assert result["stderr"] == (
-            "Unknown argument for 'log': no_such_dir (not a count, and no such path; "
+            "Unknown argument for 'log': no_such_dir (not a count, not a range of commits, and no such path; "
             "a path that no longer exists goes after --)"
         )
         mock_log.assert_not_called()
@@ -1165,3 +1166,278 @@ class TestMergeMain:
         assert "drone @git merge-main" in get_help("fix")
         owner_part = get_help().split("Owner (devpulse only):\n", 1)[1].split("\n\n", 1)[0]
         assert "  merge-main " in owner_part
+
+
+# ---------------------------------------------------------------------------
+# The four read twins devpulse uses (DPLAN-0356, git_gate 5.0.0): tracked,
+# diff paths and --stat, status --all ahead/behind with log ranges, export
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def seat(diverged: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    """The diverged repo with a canary branch seat in it, excluded from git, and the caller standing there."""
+    work = diverged["work"]
+    home = work / "canary"
+    (home / ".trinity").mkdir(parents=True)
+    passport = {"branch_info": {"branch_name": "canary"}}
+    (home / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    with (work / ".git" / "info" / "exclude").open("a", encoding="utf-8") as fh:
+        fh.write("canary/\n")
+    (work / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    _git(work, "add", ".gitignore")
+    _git(work, "commit", "-q", "-m", "ignore logs")
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+    monkeypatch.chdir(home)
+    return {**diverged, "home": home}
+
+
+def _twin(work: Path, verb: str, args: list[str]) -> dict:
+    with patch(_AUTH, return_value="canary"), patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=work):
+        return handle_command(verb, args)
+
+
+def _commits(work: Path, count: int) -> None:
+    for n in range(count):
+        (work / "d.txt").write_text(f"dev {n}\n", encoding="utf-8")
+        _git(work, "commit", "-q", "-am", f"dev {n}")
+
+
+class TestTracked:
+    """tracked <path ...>: each path named tracked, ignored, untracked, missing or outside."""
+
+    def test_each_path_gets_its_state_in_the_order_given(self, seat: dict[str, Path]) -> None:
+        work = seat["work"]
+        (work / "x.log").write_text("log\n", encoding="utf-8")
+        (work / "new.txt").write_text("new\n", encoding="utf-8")
+
+        result = _twin(work, "tracked", ["a.txt", "x.log", "new.txt", "gone.txt"])
+
+        assert result == {
+            "stdout": "tracked    a.txt\nignored    x.log\nuntracked  new.txt\nmissing    gone.txt",
+            "stderr": "",
+            "exit_code": 0,
+        }
+
+    def test_a_path_is_read_against_the_caller_directory_first(self, seat: dict[str, Path]) -> None:
+        (seat["home"] / "a.txt").write_text("canary's own\n", encoding="utf-8")
+
+        result = _twin(seat["work"], "tracked", ["a.txt"])
+
+        assert result["stdout"] == "ignored    canary/a.txt"
+
+    def test_a_path_outside_the_repo_is_named_outside(self, seat: dict[str, Path], tmp_path: Path) -> None:
+        stray = tmp_path / "stray.txt"
+        stray.write_text("x\n", encoding="utf-8")
+
+        result = _twin(seat["work"], "tracked", [str(stray)])
+
+        assert result["stdout"] == f"outside    {stray}"
+
+    def test_no_path_is_a_usage_refusal(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "tracked", [])
+
+        assert result == {"stdout": "", "stderr": "Usage: drone @git tracked <path ...>", "exit_code": 1}
+
+
+class TestDiffPathsAndStat:
+    """diff [--staged] [--stat] <path ...>: the diff of the named files, or its summary."""
+
+    def test_a_path_narrows_the_diff_to_that_file(self, seat: dict[str, Path]) -> None:
+        work = seat["work"]
+        (work / "a.txt").write_text("a edited\n", encoding="utf-8")
+        (work / "b.txt").write_text("b edited\n", encoding="utf-8")
+
+        for args in (["a.txt"], ["--", "a.txt"]):
+            result = _twin(work, "diff", args)
+
+            assert result["exit_code"] == 0, result["stderr"]
+            assert "+a edited" in result["stdout"], args
+            assert "b.txt" not in result["stdout"], args
+
+    def test_stat_prints_the_summary_not_the_patch(self, seat: dict[str, Path]) -> None:
+        work = seat["work"]
+        (work / "a.txt").write_text("a edited\n", encoding="utf-8")
+
+        result = _twin(work, "diff", ["--stat", "a.txt"])
+
+        assert result["stdout"].startswith(" a.txt | 2 +-")
+        assert "@@" not in result["stdout"]
+
+    def test_staged_reads_the_index_for_the_named_file(self, seat: dict[str, Path]) -> None:
+        work = seat["work"]
+        (work / "a.txt").write_text("a staged\n", encoding="utf-8")
+        _git(work, "add", "a.txt")
+        (work / "a.txt").write_text("a staged then edited\n", encoding="utf-8")
+
+        result = _twin(work, "diff", ["--staged", "a.txt"])
+
+        assert "+a staged" in result["stdout"]
+        assert "then edited" not in result["stdout"]
+
+    def test_an_unknown_flag_is_refused_by_name(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "diff", ["--cached", "a.txt"])
+
+        assert result == {"stdout": "", "stderr": "Unknown argument for 'diff': --cached", "exit_code": 1}
+
+    def test_a_path_in_neither_place_is_refused_unless_after_the_separator(self, seat: dict[str, Path]) -> None:
+        refused = _twin(seat["work"], "diff", ["nope.txt"])
+        allowed = _twin(seat["work"], "diff", ["--", "nope.txt"])
+
+        assert refused["exit_code"] == 1
+        assert refused["stderr"].startswith("Unknown argument for 'diff': nope.txt (no such path")
+        assert allowed["exit_code"] == 0
+
+
+class TestAheadBehindAndRanges:
+    """status --all says how far the branch is from origin; log reads a range, read-only."""
+
+    @staticmethod
+    def _diverge_from_origin_dev(seat: dict[str, Path], ahead: int) -> None:
+        work, upstream = seat["work"], seat["upstream"]
+        _git(work, "push", "-q", "origin", "dev")
+        _git(upstream, "fetch", "-q", "origin")
+        _git(upstream, "checkout", "-q", "-b", "dev", "origin/dev")
+        (upstream / "u.txt").write_text("upstream dev\n", encoding="utf-8")
+        _git(upstream, "add", "u.txt")
+        _git(upstream, "commit", "-q", "-m", "upstream on dev")
+        _git(upstream, "push", "-q", "origin", "dev")
+        _git(work, "fetch", "-q", "origin")
+        _commits(work, ahead)
+
+    def test_status_all_names_ahead_and_behind_of_origin(self, seat: dict[str, Path]) -> None:
+        self._diverge_from_origin_dev(seat, ahead=2)
+
+        result = _twin(seat["work"], "status", ["--all"])
+
+        assert result["stdout"].splitlines()[1:2] == ["dev: 2 ahead, 1 behind origin/dev (as of the last fetch)"]
+
+    def test_status_all_json_carries_the_counts(self, seat: dict[str, Path]) -> None:
+        self._diverge_from_origin_dev(seat, ahead=2)
+
+        doc = json.loads(_twin(seat["work"], "status", ["--all", JSON_FLAG])["stdout"])
+
+        assert (doc.get("upstream"), doc.get("ahead"), doc.get("behind")) == ("origin/dev", 2, 1)
+
+    def test_a_branch_origin_lacks_says_so(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "status", ["--all"])
+
+        assert result["stdout"].splitlines()[1:2] == ["dev: no origin/dev to compare with"]
+
+    def test_branch_scope_status_carries_no_count(self, seat: dict[str, Path]) -> None:
+        self._diverge_from_origin_dev(seat, ahead=1)
+
+        result = _twin(seat["work"], "status", [])
+
+        assert "ahead" not in result["stdout"]
+
+    def test_a_range_lists_every_commit_in_it_not_the_default_ten(self, seat: dict[str, Path]) -> None:
+        self._diverge_from_origin_dev(seat, ahead=11)
+
+        result = _twin(seat["work"], "log", ["origin/dev..HEAD"])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert [line.split(" ", 1)[1] for line in result["stdout"].splitlines()] == [
+            f"dev {n}" for n in range(10, -1, -1)
+        ]
+
+    def test_a_count_still_caps_a_range(self, seat: dict[str, Path]) -> None:
+        self._diverge_from_origin_dev(seat, ahead=4)
+
+        result = _twin(seat["work"], "log", ["2", "origin/dev..HEAD"])
+
+        assert len(result["stdout"].splitlines()) == 2
+
+    def test_a_range_side_that_is_no_commit_is_refused_by_name(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "log", ["origin/nope..HEAD"])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].startswith(
+            "Unknown argument for 'log': origin/nope..HEAD (not a count, not a range of commits, and no such path"
+        )
+
+
+class TestExport:
+    """export <ref> <dir>: the tracked tree at a ref, into an empty dir under the temp dir or your docs.local."""
+
+    def test_the_tracked_tree_is_written_and_nothing_untracked(self, seat: dict[str, Path], tmp_path: Path) -> None:
+        work = seat["work"]
+        (work / "sub").mkdir()
+        (work / "sub" / "c.txt").write_text("in a directory\n", encoding="utf-8")
+        _git(work, "add", "sub/c.txt")
+        _git(work, "commit", "-q", "-m", "a file in a directory")
+        (work / "new.txt").write_text("untracked\n", encoding="utf-8")
+        (work / "x.log").write_text("ignored\n", encoding="utf-8")
+        dest = tmp_path / "export_out"
+
+        result = _twin(work, "export", ["HEAD", str(dest)])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        written = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
+        assert written == sorted(_git(work, "ls-files").splitlines())
+        sha = _git(work, "rev-parse", "--short", "HEAD")
+        assert result["stdout"] == f"Exported HEAD ({sha}) to {dest}: {len(written)} file(s)"
+
+    def test_the_callers_docs_local_is_a_home_for_it(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "export", ["HEAD", "docs.local/tree"])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert (seat["home"] / "docs.local" / "tree" / "a.txt").is_file()
+
+    def test_a_destination_outside_both_homes_is_refused_and_not_made(
+        self, seat: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(f"{_EXPORT_MOD}.temp_roots", lambda: [tmp_path / "the_temp_dir"])
+        dest = tmp_path / "elsewhere"
+
+        result = _twin(seat["work"], "export", ["HEAD", str(dest)])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].startswith(f"export refused: {dest} is not under ")
+        assert not dest.exists()
+
+    def test_a_destination_that_holds_anything_is_refused(self, seat: dict[str, Path], tmp_path: Path) -> None:
+        dest = tmp_path / "full"
+        dest.mkdir()
+        (dest / "keep.txt").write_text("keep\n", encoding="utf-8")
+
+        result = _twin(seat["work"], "export", ["HEAD", str(dest)])
+
+        assert result == {"stdout": "", "stderr": f"export refused: {dest} is not empty", "exit_code": 1}
+        assert sorted(p.name for p in dest.iterdir()) == ["keep.txt"]
+
+    @pytest.mark.parametrize("ref", ["no-such-ref", "--output=x"])
+    def test_a_ref_that_is_no_commit_is_refused(self, seat: dict[str, Path], tmp_path: Path, ref: str) -> None:
+        dest = tmp_path / "out"
+
+        result = _twin(seat["work"], "export", [ref, str(dest)])
+
+        assert result == {"stdout": "", "stderr": f"export refused: {ref} is not a commit", "exit_code": 1}
+        assert not dest.exists()
+
+    def test_a_missing_argument_is_a_usage_refusal(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "export", ["HEAD"])
+
+        assert result == {"stdout": "", "stderr": "Usage: drone @git export <ref> <dir>", "exit_code": 1}
+
+
+class TestTwinTiersAndHelp:
+    def test_tracked_and_export_are_global_reads(self) -> None:
+        for verb in ("tracked", "export"):
+            assert verb in GIT_ACCESS_TIERS["global"]["commands"]
+            assert verb not in GIT_ACCESS_TIERS["owner"]["commands"]
+
+    def test_the_twins_table_names_all_four(self) -> None:
+        table = get_help().split("RAW GIT READS AND THEIR TWINS", 1)[1].split("\n\n", 1)[0]
+        for row in (
+            "  git ls-files / check-ignore <p>  drone @git tracked <p ...>\n",
+            "  git diff [--stat] -- <path>      drone @git diff [--staged] [--stat] <path ...>\n",
+            "  git rev-list --count a...b       drone @git status --all  (ahead/behind origin)\n",
+            "  git log origin/dev..HEAD         drone @git log origin/dev..HEAD\n",
+            "  git archive <ref> | tar -x       drone @git export <ref> <dir>\n",
+        ):
+            assert row in table
+
+    def test_each_new_verb_has_its_own_page(self) -> None:
+        assert get_help("tracked").startswith("git tracked <path ...> — ")
+        assert get_help("export").startswith("git export <ref> <dir> — ")
