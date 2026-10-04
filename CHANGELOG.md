@@ -73,6 +73,7 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **cli: an error inside a routed command now fails the command; fleet green leg 3** (DPLAN-0354, 6620b70d). Module discovery executed each module file a second time, so the routed display was a copy with its own failure flag and the command exited 0. Modules are now imported by dotted name; `display demo` still exits 0 because its sample error is an exhibit.
 - **backup: a Drive folder check that could not ask no longer reads as trashed; fleet green leg 5** (DPLAN-0354, 458b9c7f). `_verify_folder_id` now answers None when Drive gave no answer; the folder searches still refuse to create on no answer. Audit 99.91 → 100.0, nothing held.
 - **commons: failed dashboard and preference writes raise instead of answering "not found"; fleet green leg 5** (DPLAN-0354, e86ae82d). `write_commons_activity`, `update_commons_dashboard` and `set_preference` log and raise; the per-branch pipeline still counts past a failure, and the preference path closes its database in a finally. Audit 99.83 → 99.95.
 - **daemon: `daemon_wakeup run --help` no longer runs the wake-up job; fleet green leg 5** (DPLAN-0354, bbd3dde0). `main` read only the first argument, so a help flag after it ran the job. Any `--help`/`-h` now prints help and returns 0. 28 logged_fallback lines bypassed line-scoped with reasons; audit 99.64 → 99.94, one HELD line left.
