@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_residency_scope.py
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py and the callers that classify through it."""
@@ -66,6 +66,8 @@ import pytest
 
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.monitor import registry_scope as rs
+from aipass.memory.apps.handlers.rollover import todo_roll
+from aipass.memory.apps.handlers.templates import trinity_push
 from aipass.memory.tests.dead_cwd import DEAD_CWD_WORLD
 
 # Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
@@ -913,3 +915,64 @@ class TestTheResidentWalkReadsNamesNotSpellings:
 
         assert "mirage" not in names
         assert "live" in names, "the real resident was lost while excluding the impostor"
+
+
+class TestAnUnreadableCoreRegistryNeverHandsOverANamesake:
+    """Leg 10 of DPLAN-0354: the name-keyed write lanes refuse when the core registry cannot be read.
+
+    The world: a resident project carries a branch whose directory is ``alpha``, the same name as
+    the core citizen. A todo backlog lives at ``.backup/todo/<name>/`` and the push matches by
+    name, so with the core row present both lanes refuse or act on both. With the core registry
+    unreadable the core row vanished, and the resident ``alpha`` was the only answer for ``alpha``:
+    its todos would merge into the core citizen's backlog. Red first: both lanes resolved to the
+    resident.
+    """
+
+    @staticmethod
+    def _namesake_world(fleet: Path) -> Path:
+        """The fixture's repo with a resident ``alpha`` and an unreadable core registry; returns that registry."""
+        _write(fleet / "projects/twin/TWIN_REGISTRY.json", _registry(_branch("alpha", "src/twin/alpha")))
+        _write(fleet / "projects/twin/src/twin/alpha/.trinity/passport.json", _passport("resident"))
+        core = fleet / "AIPASS_REGISTRY.json"
+        core.write_text("{not json", encoding="utf-8")
+        return core
+
+    def test_the_todo_lane_refuses_rather_than_resolve_the_namesake(self, fleet, monkeypatch):
+        core = self._namesake_world(fleet)
+        monkeypatch.setattr(todo_roll, "_find_repo_root", lambda: fleet)
+
+        target = todo_roll.resolve_target("alpha")
+
+        assert (target["name"], target["path"], target["backlog"]) == (None, None, None)
+        assert target["error"].startswith(f"REFUSED: Unreadable registry {core}: ")
+
+    def test_the_push_lane_refuses_rather_than_resolve_the_namesake(self, fleet, monkeypatch):
+        core = self._namesake_world(fleet)
+        monkeypatch.setattr(trinity_push, "_REPO_ROOT", fleet)
+
+        scope = trinity_push.resolve_scope("alpha")
+
+        assert scope["branches"] == []
+        assert scope["error"].startswith(f"REFUSED: Unreadable registry {core}: ")
+
+    def test_control_a_readable_core_registry_still_resolves(self, fleet, monkeypatch):
+        """The control: the same lanes answer the core citizen when its registry reads."""
+        monkeypatch.setattr(todo_roll, "_find_repo_root", lambda: fleet)
+        monkeypatch.setattr(trinity_push, "_REPO_ROOT", fleet)
+
+        assert todo_roll.resolve_target("alpha")["path"] == fleet / "src/aipass/alpha"
+        assert [item["path"] for item in trinity_push.resolve_scope("alpha")["branches"]] == [
+            fleet / "src/aipass/alpha"
+        ]
+
+    def test_an_absent_core_registry_is_no_refusal(self, fleet, monkeypatch):
+        """A fresh clone has no core registry: the residents still resolve. Green from its first run; its proof is
+        the mutant that drops ``core.exists()`` from the strict read."""
+        (fleet / "AIPASS_REGISTRY.json").unlink()
+        monkeypatch.setattr(todo_roll, "_find_repo_root", lambda: fleet)
+        monkeypatch.setattr(trinity_push, "_REPO_ROOT", fleet)
+
+        assert todo_roll.resolve_target("live")["path"] == fleet / "projects/live/src/live/live"
+        assert [item["path"] for item in trinity_push.resolve_scope("live")["branches"]] == [
+            fleet / "projects/live/src/live/live"
+        ]

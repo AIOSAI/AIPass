@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
 # Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-08-27
-# Modified: 2026-10-02
+# Modified: 2026-10-04
 # =============================================
 
 """Trinity Push Handler
@@ -519,11 +519,15 @@ def resolve_scope(branch: str | None = None) -> dict:
     # external tier build never writes outside this repo and the push does not
     # get to be the exception, so the scope stops at the repo edge here — at the
     # one consumer that acts on the list, not in the reader that serves them all.
-    branches = [
-        item
-        for item in registry_scope.fleet_branches(_REPO_ROOT, name_from="path")
-        if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL
-    ]
+    # Strict, because this lane matches by NAME and then writes: with the core
+    # registry unreadable, a resident sharing a core citizen's name was the only
+    # match for it (leg 10 of DPLAN-0354). The refusal names the file.
+    try:
+        fleet = registry_scope.fleet_branches(_REPO_ROOT, name_from="path", strict=True)
+    except registry_scope.RegistryUnreadable as exc:
+        logger.error(f"[trinity_push] REFUSED: {exc}")
+        return {"branches": [], "error": f"REFUSED: {exc}"}
+    branches = [item for item in fleet if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL]
 
     if branch is None:
         return {"branches": branches, "error": None}

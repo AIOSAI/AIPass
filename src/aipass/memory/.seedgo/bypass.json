@@ -611,8 +611,12 @@
     {
       "file": "tests/test_repo_root.py",
       "standard": "stdlib_patch",
-      "lines": [659],
-      "reason": "The only way to make a real directory unlistable for one call without root or platform ACLs. A scandir parameter on exists_exactly would be a door for the test alone (no caller passes it), so the patch stays: monkeypatch scopes it to this test and restores it, and the test asserts the denied listing was the parent. Leg 8 of DPLAN-0354, @devpulse's landing ruling."
+      "reason": "File-wide because stdlib_patch passes no line (the checklist calls a lines rule inert); it covers one patch, rr.os.scandir at 659. The only way to make a real directory unlistable for one call without root or platform ACLs. A scandir parameter on exists_exactly would be a door for the test alone (no caller passes it), so the patch stays: monkeypatch scopes it to this test and restores it, and the test asserts the denied listing was the parent. Leg 8 of DPLAN-0354, @devpulse's landing ruling; made file-wide in leg 10."
+    },
+    {
+      "file": "tests/conftest.py",
+      "standard": "stdlib_patch",
+      "reason": "File-wide because stdlib_patch passes no line; it covers two opt-in fixtures, case_insensitive_filesystem (Path.glob, 414) and case_insensitive_exists (Path.exists, 443). They emulate what Windows and macOS answer so the case-fold pins go red on Linux before CI. Every walk must see the emulation the way it sees the platform, so a product seam per walk would be a door for the tests alone, and Linux cannot show the effect on disk. monkeypatch restores both after each test that asks for them. Leg 10 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "tests/test_symbolic_parked.py",
@@ -665,8 +669,14 @@
     {
       "file": "apps/handlers/monitor/registry_scope.py",
       "standard": "logged_fallback",
-      "lines": [198, 438],
-      "reason": "Both lines are FileNotFoundError: an absent passport declares nothing (None), and an absent declared-roots file declares no roots ([]). That is the answer for an absent file, not a failure value; the unreadable branches (201, 308, 441) are not covered here. Leg 8 of DPLAN-0354, @memory's decision."
+      "lines": [207, 467],
+      "reason": "Both lines are FileNotFoundError: an absent passport declares nothing (None), and an absent declared-roots file declares no roots ([]). That is the answer for an absent file, not a failure value; the unreadable roots branch (470) is not covered here. Leg 8 of DPLAN-0354, @memory's decision; lines moved in leg 10."
+    },
+    {
+      "file": "apps/handlers/monitor/registry_scope.py",
+      "standard": "logged_fallback",
+      "lines": [210],
+      "reason": "declared_residency: an unreadable passport declares nothing, logged at error. None cannot add or swap a citizen: a core citizen is kept (the sealed registry is the anchor) and a resident candidate is refused, the same policy as for an absent passport. The contract was asked for by @daemon (5031a591), whose scheduler calls it. Leg 10 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/templates/receipt.py",

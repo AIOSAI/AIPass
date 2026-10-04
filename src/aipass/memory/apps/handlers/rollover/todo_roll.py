@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: todo_roll.py
 # Description: Todo pad roll-off to .backup/todo/<branch>/backlog.json, file only, verified before the pad is pruned
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-09-15
-# Modified: 2026-09-18
+# Modified: 2026-10-04
 # =============================================
 
 """Todo Roll Handler (DPLAN-0345 row 1, FPLAN-0590)
@@ -258,11 +258,17 @@ def in_scope_branches(root: Path | None = None) -> list[dict[str, Any]]:
 
     Returns:
         ``registry_scope.fleet_branches`` rows without the external tier.
+
+    Raises:
+        registry_scope.RegistryUnreadable: the core registry exists and cannot
+            be read. Without its rows a resident sharing a core citizen's
+            directory name would be the only answer for that name, and the
+            backlog path is keyed by the name (leg 10 of DPLAN-0354).
     """
     base = Path(root) if root is not None else _find_repo_root()
     return [
         item
-        for item in registry_scope.fleet_branches(base, name_from="path")
+        for item in registry_scope.fleet_branches(base, name_from="path", strict=True)
         if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL
     ]
 
@@ -375,10 +381,17 @@ def resolve_target(
     Returns:
         ``{"name", "path", "local", "backlog", "backlog_display", "error", "reason"}``.
         ``name`` is None when nothing resolved: ``error`` carries a refusal
-        (unknown branch, directory-name collision), ``reason`` an honest
-        "no branch here" (repo root, outside every branch).
+        (unknown branch, directory-name collision, unreadable core registry),
+        ``reason`` an honest "no branch here" (repo root, outside every branch).
     """
-    scope = list(fleet) if fleet is not None else in_scope_branches()
+    if fleet is not None:
+        scope = list(fleet)
+    else:
+        try:
+            scope = in_scope_branches()
+        except registry_scope.RegistryUnreadable as exc:
+            logger.error(f"[todo_roll] REFUSED: {exc}")
+            return _no_target(error=f"REFUSED: {exc}")
 
     if branch is not None:
         wanted = branch.strip().lstrip("@")
