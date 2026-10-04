@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_compass_store.py
 # Description: Tests for the compass SQLite/FTS5 storage core
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-16
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/compass/store.py through the compass package API, on a tmp_path db_path."""
@@ -17,7 +17,6 @@ import sqlite3
 import pytest
 
 from aipass.devpulse.apps.handlers import compass
-from aipass.devpulse.apps.handlers.compass import store  # internal probe access only
 
 
 @pytest.fixture
@@ -453,9 +452,9 @@ class TestSetNote:
 class TestScoreRemoved:
     """score is gone from every Python surface (DPLAN-0246 seedgo ruling)."""
 
-    def test_score_not_in_decision_columns(self):
-        """The code-level column list no longer names score."""
-        assert "score" not in store._DECISION_COLUMNS
+    # test_score_not_in_decision_columns retired 2026-10-04 (fleet green): it read the
+    # private column list. The public query and review answers below carry no score
+    # key, which is the contract.
 
     def test_score_absent_from_query_dict(self, db):
         """Query result dicts carry no score key."""

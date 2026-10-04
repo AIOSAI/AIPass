@@ -58,7 +58,7 @@ def _guard_caller() -> bool:
     if guard_owner_caller("admin_grant"):
         return True
     owner = owner_address()
-    whose = f"they belong to {owner}" if owner else "no owner is sealed for this project"
+    whose = f"they belong to {owner}" if owner else "no owner is sealed or readable for this project"
     error(
         "admin_grant ceremony verbs are owner-only and this seat is not the owner",
         suggestion=(

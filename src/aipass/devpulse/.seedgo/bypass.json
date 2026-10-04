@@ -6,6 +6,95 @@
   },
   "bypass": [
     {
+      "standard": "through_the_command",
+      "file": "tests/test_watchdog_wire.py",
+      "lines": [152, 874, 875, 876, 893, 900, 944, 954, 961, 970, 980, 988, 996],
+      "reason": "Wire-identity primitives (_stdout_target, _session_dir_of, _cmdline, _looks_like_ours). Their one public caller, arm_wire, registers a live wire, installs a SIGTERM handler, and sweeps and signals other live wires by pid, so a test through it acts on real processes. Each row pins one primitive's answer for one platform, with the platform pretended on wire's own sys name and ps/lsof stubbed. 152 is the host probe that decides whether this machine can see fd/1 (fleet green, 2026-10-04)."
+    },
+    {
+      "standard": "through_the_command",
+      "file": "tests/test_watchdog_agent.py",
+      "lines": [769],
+      "reason": "Pins a cache guarantee no public answer shows: an unchanged transcript is parsed once, then every tick reuses the verdict. The counter wraps the real _tail_lines and returns its answer, so the verdicts asserted are the product's."
+    },
+    {
+      "standard": "stdlib_patch",
+      "file": "tests/test_watchdog_agent.py",
+      "reason": "File-wide because the stdlib_patch checker passes no line; the one patch it covers is _case_insensitive_glob. Every other stdlib name in this file is swapped on the module under test only (pretend_platform). It emulates a case-insensitive (Windows) directory listing so the exact-case *_REGISTRY.json filter can be shown load-bearing from Linux, where the effect cannot occur on disk. The wrapper widens the real glob and monkeypatch restores it; a product seam per glob would be a door for tests alone. Same reason as memory's case-fold fixtures (leg 11)."
+    },
+    {
+      "standard": "through_the_command",
+      "file": "tests/test_watchdog_dispatches.py",
+      "lines": [119],
+      "reason": "An identity pin, not a reach: seat_email's owner lookup must BE guard.owner_address, one implementation of 'who owns this project' (the 2026-08-21 two-answers bug). No behaviour shows the difference until a second copy drifts."
+    },
+    {
+      "standard": "through_the_command",
+      "file": "tests/test_watchdog_registry.py",
+      "lines": [600, 601],
+      "reason": "The default store location is the contract (next to the code that owns it, from any cwd). Its public routes, register() and wake_in() with no store named, write the live .watchdog/ of the seat running the suite, which the conftest seal exists to prevent (2026-09-27, a test armed a real wire). The test carries live_default_store and only resolves the path."
+    },
+    {
+      "standard": "logged_fallback",
+      "file": "apps/modules/compass.py",
+      "lines": [262, 283, 318, 342, 357, 370, 417, 442, 453, 461, 484, 495, 525, 540, 566],
+      "reason": "CLI handler contract (fleet green, devpulse 2026-10-04; ai_mail leg 9 precedent). A _handle_* return is 'command recognised', not 'it worked': the router stops on True. Every line follows a cli error(), which marks the command failed and sets the non-zero exit, so the caller is told by that flag, never by the bool."
+    },
+    {
+      "standard": "logged_fallback",
+      "file": "apps/modules/watchdog.py",
+      "lines": [302, 332, 405],
+      "reason": "CLI handler contract, as compass.py: each True follows a cli error(), which marks the command failed and sets the exit."
+    },
+    {
+      "standard": "logged_fallback",
+      "file": "apps/devpulse.py",
+      "lines": [160],
+      "reason": "Router contract: a module that raised is reported through cli error() (exit non-zero, 'A defect in the module, not an unknown command'); True stops the router from answering 'Unknown command' on top of it."
+    },
+    {
+      "standard": "logged_fallback",
+      "file": "apps/handlers/owner/admin_grant.py",
+      "lines": [91, 195],
+      "reason": "Fail closed. 91: a key file that exists but is not hex reads as no key, so nothing is signed or verified (logged as an error). 195: an unreadable caller passport answers '', which matches no seat, so the ceremony refuses. Neither can grant anything."
+    },
+    {
+      "standard": "logged_fallback",
+      "file": "apps/handlers/owner/guard.py",
+      "lines": [127, 133],
+      "reason": "owner_address answers None for 'no owner resolved' by contract (docstring): its callers are refusal-message builders, which word it as 'no owner is sealed or readable', and the watchdog dispatch register, which raises RegisterUnavailable on it. The access decision does not read it: _owner_decision refuses an unreadable registry on its own (2026-10-04)."
+    },
+    {
+      "standard": "logged_fallback",
+      "file": "apps/handlers/release_notify/compose.py",
+      "lines": [112],
+      "reason": "An unreadable CHANGELOG gives no headline, and compose_body then says so in the mail itself ('could not be read on the sending machine - open the release notes above'); the failure is logged as an error. The reader is told, not misled."
+    },
+    {
+      "standard": "logged_fallback",
+      "file": "apps/handlers/release_notify/managers.py",
+      "lines": [198],
+      "reason": "None is 'cannot read this passport', and its one caller (discover_managers) lists that path in skipped with reason 'passport unreadable - see the log', which the run reports. Never counted as a non-manager."
+    },
+    {
+      "standard": "logged_fallback",
+      "file": "apps/handlers/watchdog/agent.py",
+      "lines": [200, 205, 208, 211, 243, 447],
+      "reason": "200/208: liveness fails safe to alive (a check that cannot run never declares a running agent dead; the lock and timeout still end the watch). 205: ProcessLookupError is the answer 'dead', not a failure. 211: any other os.kill error is an invalid pid, dead. 243: an unreadable transcript tail feeds only the advisory stall signal, never the exit verdict. 447: FileNotFoundError between exists() and read is a lock released in that instant, absent. The unreadable lock itself answers {} (held), 2026-10-04."
+    },
+    {
+      "standard": "logged_fallback",
+      "file": "apps/handlers/watchdog/registry.py",
+      "lines": [174, 256, 261, 265],
+      "reason": "Liveness, as agent.py: an unreadable /proc status is not proof of a zombie (174), a Windows check that cannot run answers alive (256), ProcessLookupError is the answer dead (261), PermissionError means the process exists (265). A wrong 'alive' costs a slower reap; a wrong 'dead' would drop a live watch."
+    },
+    {
+      "standard": "logged_fallback",
+      "file": "apps/handlers/watchdog/wire.py",
+      "lines": [239],
+      "reason": "None is the documented 'stdout target unknown', the same answer /proc gives for an unreadable fd/1 (_stdout_target docstring); the wrapper is then classified as having no session, never as a wrong one."
+    },
+    {
       "standard": "json_structure",
       "file": "devpulse_json/compass",
       "reason": "compass/ is the devpulse-owned Compass decision store (SQLite/FTS5 \u2014 db + wal + shm) which needs its own directory. Legitimate data subdir, not operator-config (custom_config/) nor auto-gen root data. Sanctioned exception per #643."

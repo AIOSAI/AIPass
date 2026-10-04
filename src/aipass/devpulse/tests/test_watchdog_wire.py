@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_wire.py
 # Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-08-19
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/watchdog/wire.py: arm_wire delivering THIS seat's dispatch completions."""
@@ -16,6 +16,7 @@
 import json
 import os
 import shutil
+import signal as _real_signal
 import subprocess
 import sys
 import time
@@ -93,11 +94,24 @@ def _private_heartbeat(tmp_path, monkeypatch):
     return hb
 
 
+class _SignalNoRebind:
+    """wire's ``signal`` name for a test: every constant reads the real module,
+    and installing a handler does nothing."""
+
+    def __getattr__(self, name: str):
+        return getattr(_real_signal, name)
+
+    @staticmethod
+    def signal(*args, **kwargs) -> None:
+        return None
+
+
 @pytest.fixture(autouse=True)
 def _no_signal_rebind(monkeypatch):
     """arm_wire installs a SIGTERM handler for clean deregistration; inside
-    pytest that rebinding must not leak past the test."""
-    monkeypatch.setattr(wire.signal, "signal", lambda *a, **kw: None)
+    pytest that rebinding must not leak past the test. Only wire's own ``signal``
+    name is swapped: patching signal.signal itself is process-wide."""
+    monkeypatch.setattr(wire, "signal", _SignalNoRebind())
 
 
 @pytest.fixture
@@ -473,7 +487,7 @@ _REAL_LSOF = pytest.mark.skipif(
         pytest.param("darwin", id="darwin", marks=_REAL_LSOF),
     ],
 )
-def test_the_wire_leaves_no_process_running(tmp_path, monkeypatch, lane):
+def test_the_wire_leaves_no_process_running(tmp_path, monkeypatch, lane, pretend_platform):
     """Rule 2: idle is zero running processes. The arm door used to spawn a daemon.
 
     The claim is about what is LEFT RUNNING, and the mock has to read no wider
@@ -498,7 +512,7 @@ def test_the_wire_leaves_no_process_running(tmp_path, monkeypatch, lane):
     store = _store(tmp_path)
     _write_feed(root, [])
     if lane == "darwin":
-        monkeypatch.setattr(wire.sys, "platform", "darwin")
+        pretend_platform(wire, "darwin")
 
     spawned: list[subprocess.Popen] = []
     real_popen = subprocess.Popen
@@ -922,61 +936,61 @@ def _missing_binary(name: str):
     return _run
 
 
-def test_cmdline_off_linux_asks_ps(monkeypatch):
+def test_cmdline_off_linux_asks_ps(monkeypatch, pretend_platform):
     argv_seen: list = []
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("drone @devpulse watchdog baseline --once\n", argv_seen))
 
     assert wire._cmdline(4242) == "drone @devpulse watchdog baseline --once"
     assert argv_seen == [["ps", "-p", "4242", "-o", "command="]]
 
 
-def test_a_live_wire_off_linux_is_recognised_as_ours(monkeypatch):
+def test_a_live_wire_off_linux_is_recognised_as_ours(monkeypatch, pretend_platform):
     """Row 1 in one assertion: with "" this was False for every pid, so a live
     wire was buried as a recycled pid instead of taken over."""
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("drone @devpulse watchdog baseline\n"))
 
     assert wire._looks_like_ours(4242) is True
 
 
-def test_cmdline_off_linux_is_empty_when_ps_cannot_run(monkeypatch):
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+def test_cmdline_off_linux_is_empty_when_ps_cannot_run(monkeypatch, pretend_platform):
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _missing_binary("ps"))
 
     assert wire._cmdline(4242) == ""
 
 
-def test_stdout_target_off_linux_asks_lsof(tmp_path, monkeypatch, raw_stdout_probe):
+def test_stdout_target_off_linux_asks_lsof(tmp_path, monkeypatch, raw_stdout_probe, pretend_platform):
     argv_seen: list = []
     named = tmp_path / "sess-abc" / "tasks" / "t.output"
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run(f"p4242\nfd1\nn{named}\n", argv_seen))
 
     assert wire._stdout_target(4242) == named
     assert argv_seen == [["lsof", "-p", "4242", "-a", "-d", "1", "-Fn"]]
 
 
-def test_stdout_target_off_linux_names_this_process_by_number(monkeypatch, raw_stdout_probe):
+def test_stdout_target_off_linux_names_this_process_by_number(monkeypatch, raw_stdout_probe, pretend_platform):
     """pid None means "me". /proc spells that "self"; lsof needs the number."""
     argv_seen: list = []
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("nsocket:[4532132]\n", argv_seen))
 
     assert wire._stdout_target() == Path("socket:[4532132]")
     assert argv_seen == [["lsof", "-p", str(os.getpid()), "-a", "-d", "1", "-Fn"]]
 
 
-def test_stdout_target_off_linux_is_none_when_lsof_names_no_file(monkeypatch, raw_stdout_probe):
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+def test_stdout_target_off_linux_is_none_when_lsof_names_no_file(monkeypatch, raw_stdout_probe, pretend_platform):
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("p4242\nfd1\n"))
 
     assert wire._stdout_target(4242) is None
 
 
-def test_stdout_target_off_linux_is_none_when_lsof_cannot_run(monkeypatch, raw_stdout_probe):
+def test_stdout_target_off_linux_is_none_when_lsof_cannot_run(monkeypatch, raw_stdout_probe, pretend_platform):
     """None is "cannot tell". A guessed path would be read as a wrapper."""
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _missing_binary("lsof"))
 
     assert wire._stdout_target(4242) is None

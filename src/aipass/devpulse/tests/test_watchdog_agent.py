@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_agent.py
 # Description: Tests for the watchdog agent handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-04-14
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""
@@ -164,6 +164,51 @@ def test_resolve_branch_path_local_wins_over_projects(monkeypatch, tmp_path):
 
     result = agent_handler.watch_agent("@twin", timeout_seconds=5)
     assert (result["agent_state"], result["exit_code"]) == ("crashed", 7)
+
+
+def test_an_unreadable_main_registry_never_hands_over_a_projects_namesake(monkeypatch, tmp_path):
+    """The main registry exists but cannot be read: refuse, never watch a namesake.
+
+    Skipping it let a projects/* citizen with the same name answer, and the
+    watchdog then watched (and reported on) the wrong agent (fleet green, 2026-10-04).
+    """
+    (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    shadow_dir = tmp_path / "projects" / "twin" / "home"
+    shadow_dir.mkdir(parents=True)
+    (tmp_path / "projects" / "twin" / "TWIN_REGISTRY.json").write_text(
+        json.dumps({"branches": [{"name": "TWIN", "email": "@twin", "path": "home"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
+    _pin_home(monkeypatch, tmp_path / "nohome")
+    _mark_resolved(shadow_dir)
+
+    result = agent_handler.watch_agent("@twin", timeout_seconds=5)
+    assert (result["woke"], result["agent_state"], result["exit_code"]) == (False, "timeout", None)
+    assert "unreadable" in result["reason"]
+
+
+def test_an_unreadable_lock_is_a_held_lock(monkeypatch, tmp_path):
+    """A lock that exists but cannot be parsed is a dispatch in flight, not an idle agent.
+
+    It used to read as no lock, so the watchdog answered "agent already idle" at once
+    while the agent ran (a half-written lock, or a corrupt one).
+    """
+    branch_path = _build_fake_branch(tmp_path)
+    lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
+    lock_file.write_text('{"pid": 12', encoding="utf-8")
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
+    ticks: list = []
+
+    def exit_on_first_tick():
+        ticks.append(1)
+        lock_file.unlink()
+
+    _exit_during_first_poll(monkeypatch, exit_on_first_tick)
+
+    result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
+    assert ticks == [1]
+    assert result["reason"].endswith("(lock removed)")
 
 
 def test_watch_agent_no_active_lock(monkeypatch, tmp_path):
@@ -896,29 +941,38 @@ def test_lowercase_counter_never_answers_an_external_resolve(monkeypatch, tmp_pa
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_a_zombie_agent_is_not_alive_off_linux(monkeypatch):
+def _watch_this_pid_as_darwin(monkeypatch, pretend_platform, tmp_path, ps_state: str) -> dict:
+    """watch_agent on a lock holding THIS pid, with agent and registry both seeing darwin.
+
+    Both modules are pretended, because agent's liveness asks registry's zombie
+    rule; the ps answer is the only thing that can call this live pid a corpse.
+    """
+    branch_path = _build_fake_branch(tmp_path)
+    lock_file = _write_lock(branch_path, pid=os.getpid())
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
+    pretend_platform(agent_handler, "darwin")
+    pretend_platform(watch_registry, "darwin")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout=ps_state, stderr=""),
+    )
+    _exit_during_first_poll(monkeypatch, lambda: lock_file.unlink(missing_ok=True))
+    return agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
+
+
+def test_a_zombie_agent_is_not_alive_off_linux(monkeypatch, pretend_platform, tmp_path):
     """This pid genuinely answers os.kill(pid, 0) — the ps state is the only
     thing that can call it a corpse, and before FPLAN-0554 nobody asked."""
-    monkeypatch.setattr(sys, "platform", "darwin")  # one module object, both checks
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout="Z+\n", stderr=""),
-    )
-
-    assert agent_handler._pid_alive(os.getpid()) is False
+    result = _watch_this_pid_as_darwin(monkeypatch, pretend_platform, tmp_path, "Z+\n")
+    assert "dead, lock still present" in result["reason"]
 
 
-def test_a_live_agent_off_linux_is_still_alive(monkeypatch):
-    """The other half: the portable probe must not bury a working agent."""
-    monkeypatch.setattr(sys, "platform", "darwin")  # one module object, both checks
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout="S+\n", stderr=""),
-    )
-
-    assert agent_handler._pid_alive(os.getpid()) is True
+def test_a_live_agent_off_linux_is_still_alive(monkeypatch, pretend_platform, tmp_path):
+    """The other half: the portable probe must not bury a working agent — the
+    watch runs on until the lock goes."""
+    result = _watch_this_pid_as_darwin(monkeypatch, pretend_platform, tmp_path, "S+\n")
+    assert result["reason"].endswith("(lock removed)")
 
 
 def test_the_zombie_rule_is_not_duplicated_in_this_module():

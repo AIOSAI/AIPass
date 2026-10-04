@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_registry.py
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-14
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/watchdog/registry.py and the handlers that register through it."""
@@ -20,6 +20,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -226,24 +227,24 @@ def _fake_ps(stdout: str, argv_seen: list | None = None):
     return _run
 
 
-def test_is_zombie_off_linux_reads_the_ps_state(monkeypatch):
+def test_is_zombie_off_linux_reads_the_ps_state(monkeypatch, pretend_platform):
     argv_seen: list = []
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n", argv_seen))
 
     assert watch_registry.is_zombie(4242) is True
     assert argv_seen == [["ps", "-o", "state=", "-p", "4242"]]
 
 
-def test_a_running_state_off_linux_is_not_a_zombie(monkeypatch):
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+def test_a_running_state_off_linux_is_not_a_zombie(monkeypatch, pretend_platform):
+    pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("S\n"))
 
     assert watch_registry.is_zombie(4242) is False
 
 
-def test_is_zombie_off_linux_is_false_when_ps_cannot_run(monkeypatch):
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+def test_is_zombie_off_linux_is_false_when_ps_cannot_run(monkeypatch, pretend_platform):
+    pretend_platform(watch_registry, "darwin")
 
     def _explode(argv, **kwargs):
         raise FileNotFoundError(2, "No such file or directory", "ps")
@@ -252,19 +253,19 @@ def test_is_zombie_off_linux_is_false_when_ps_cannot_run(monkeypatch):
     assert watch_registry.is_zombie(4242) is False
 
 
-def test_a_zombie_is_not_alive_off_linux(monkeypatch):
+def test_a_zombie_is_not_alive_off_linux(monkeypatch, pretend_platform):
     """Row 3 in one assertion. This pid genuinely answers os.kill(pid, 0) — the
     ps state is the ONLY thing that can say it is a corpse, and before FPLAN-0554
     nothing asked it off Linux."""
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
 
     assert watch_registry.is_pid_alive(os.getpid()) is False
 
 
-def test_a_live_pid_off_linux_is_still_alive(monkeypatch):
+def test_a_live_pid_off_linux_is_still_alive(monkeypatch, pretend_platform):
     """The other half: the portable probe must not bury the living."""
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("S+\n"))
 
     assert watch_registry.is_pid_alive(os.getpid()) is True
@@ -278,10 +279,10 @@ def test_a_live_pid_off_linux_is_still_alive(monkeypatch):
     "The zombie state it prunes on has no Windows spelling either (ps -o state= is POSIX). Pruning "
     "itself is pinned on this host and on macOS.",
 )
-def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch):
+def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch, pretend_platform):
     """What the bug cost operationally: a dead watch stayed listed forever."""
     watch_registry.register("agent", {"label": "reaped"}, storage_path=store_path)
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
 
     assert watch_registry.list_active(storage_path=store_path, prune_stale=True) == []
@@ -535,9 +536,12 @@ def test_handler_deregisters_on_exception(store_path, monkeypatch):
         """Simulate a KeyboardInterrupt / cancellation mid-sleep."""
         raise RuntimeError("boom")
 
-    with patch("aipass.devpulse.apps.handlers.watchdog.timer.time.sleep", exploding_sleep):
-        with pytest.raises(RuntimeError, match="boom"):
-            watch_timer.wake_in("5s")
+    # Only timer's own ``time`` name is swapped: patching time.sleep is process-wide.
+    monkeypatch.setattr(
+        watch_timer, "time", SimpleNamespace(sleep=exploding_sleep, monotonic=time.monotonic, time=time.time)
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        watch_timer.wake_in("5s")
 
     # Even though wake_in raised, the finally block must have deregistered.
     assert watch_registry.list_active(storage_path=store_path, prune_stale=False) == []

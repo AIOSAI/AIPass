@@ -164,7 +164,7 @@ def _guard_caller() -> bool:
     if guard_owner_caller("watchdog"):
         return True
     owner = _owner_address()
-    whose = f"it belongs to {owner}" if owner else "no owner is sealed for this project"
+    whose = f"it belongs to {owner}" if owner else "no owner is sealed or readable for this project"
     error(
         "watchdog is owner-only and this seat is not the owner",
         suggestion=(

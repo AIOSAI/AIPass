@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog schedule handler + router integration
 # Version: 1.0.0
 # Created: 2026-04-14
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/watchdog/schedule.py and the watchdog schedule command that drives it."""
@@ -15,7 +15,8 @@
 
 import sys
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -250,8 +251,13 @@ def test_wake_at_nonexistent_command():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_wake_at_sleeps_in_chunks():
-    """Long waits sleep in chunks of at most 5.0s, never once; mutant chunk 5.5 reddens it."""
+def test_wake_at_sleeps_in_chunks(monkeypatch):
+    """Long waits sleep in chunks of at most 5.0s, never once; mutant chunk 5.5 reddens it.
+
+    Only schedule's own ``time`` name is swapped (a namespace carrying the fake
+    sleep): patching time.sleep itself is process-wide and raced the prax
+    logger's daemon threads.
+    """
     start = datetime(2026, 4, 14, 10, 0, 0)
     # Real-time clock — no advancement per call — so wake_at relies on sleep.
     # We fake sleep to advance our synthetic clock instead.
@@ -263,8 +269,9 @@ def test_wake_at_sleeps_in_chunks():
     def fake_sleep(seconds):
         state["now"] = state["now"] + timedelta(seconds=seconds)
 
-    with patch.object(schedule_handler.time, "sleep", side_effect=fake_sleep) as sleep_mock:
-        schedule_handler.wake_at("+30s", now_fn=fake_clock)
+    sleep_mock = MagicMock(side_effect=fake_sleep)
+    monkeypatch.setattr(schedule_handler, "time", SimpleNamespace(sleep=sleep_mock))
+    schedule_handler.wake_at("+30s", now_fn=fake_clock)
 
     # Each chunk is capped at 5.0 seconds, so 30s -> >= 6 calls.
     max_chunk = 5.0

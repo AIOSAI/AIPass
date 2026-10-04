@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for devpulse tests
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-08
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Shared pytest fixtures for devpulse tests.
@@ -16,6 +16,7 @@ only redirect a suite needs. Nothing patches handler attributes any more.
 """
 
 import os
+import sys
 import tempfile
 
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
@@ -61,6 +62,32 @@ def sealed_watchdog_store(request: pytest.FixtureRequest, tmp_path: Path, monkey
     store = tmp_path / "_sealed_watchdog"
     monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store / "watchdog_active.json")
     monkeypatch.setattr(watch_timer, "_default_storage_path", lambda: store / "watchdog_timers.json")
+
+
+class _SysAs:
+    """A stand-in for one module's ``sys`` name: ``platform`` is the pretended one,
+    every other attribute reads the real ``sys`` at the moment it is asked."""
+
+    def __init__(self, platform: str) -> None:
+        self.platform = platform
+
+    def __getattr__(self, name: str):
+        return getattr(sys, name)
+
+
+@pytest.fixture
+def pretend_platform(monkeypatch: pytest.MonkeyPatch):
+    """Make ONE module see another ``sys.platform``: ``pretend_platform(wire, "darwin")``.
+
+    Setting sys.platform itself is process-wide: every module and the prax logger's
+    threads would see it until the test ends. Swapping only the module's own ``sys``
+    name keeps the pretence inside the code under test.
+    """
+
+    def _pretend(module, platform: str) -> None:
+        monkeypatch.setattr(module, "sys", _SysAs(platform))
+
+    return _pretend
 
 
 @pytest.fixture(autouse=True, scope="session")

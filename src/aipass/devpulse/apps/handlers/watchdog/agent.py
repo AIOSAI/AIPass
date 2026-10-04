@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-04-14
-# Modified: 2026-09-25
+# Modified: 2026-10-04
 # =============================================
 
 # Signal choice: ai_mail dispatch lock file polling.
@@ -66,12 +66,25 @@ def _find_repo_root(start: Path | None = None) -> Path | None:
     return None
 
 
-def _search_registry(registry_file: Path, target_email: str) -> Path | None:
-    """Search a single registry file for a branch matching target_email."""
+class RegistryUnreadable(Exception):
+    """The main registry exists but cannot be read; no branch may be resolved past it."""
+
+
+def _search_registry(registry_file: Path, target_email: str, strict: bool = False) -> Path | None:
+    """Search a single registry file for a branch matching target_email.
+
+    An unreadable registry costs only its own rows, except with ``strict`` (the
+    main registry): there it raises RegistryUnreadable, because skipping it lets
+    a projects/* namesake answer for a core citizen.
+    """
     try:
         registry = json.loads(registry_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        if not isinstance(registry, dict):
+            raise ValueError(f"not a JSON object: {type(registry).__name__}")
+    except (OSError, ValueError) as exc:
         logger.warning("[watchdog.agent] failed to read registry %s: %s", registry_file, exc)
+        if strict:
+            raise RegistryUnreadable(f"{registry_file}: {exc}") from exc
         return None
     registry_dir = registry_file.parent
     raw_branches = registry.get("branches", [])
@@ -105,7 +118,7 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
     repo_root = _find_repo_root()
     if repo_root is not None:
         registry_file = repo_root / "AIPASS_REGISTRY.json"
-        result = _search_registry(registry_file, target)
+        result = _search_registry(registry_file, target, strict=True)
         if result is not None:
             return result
 
@@ -419,14 +432,23 @@ class TranscriptScanner:
 
 
 def _read_lock(lock_file: Path) -> dict | None:
-    """Read lock file, return dict or None on miss/error."""
+    """Read the dispatch lock: its dict, None when absent, ``{}`` when held but unreadable.
+
+    A lock that exists but cannot be parsed (half-written, corrupt) is still a
+    dispatch in flight, the same rule as ai_mail's pid_lock: ``{}`` means held,
+    with no pid or timestamp to read. It used to answer None, and the watchdog
+    reported "agent already idle" while the agent ran.
+    """
     if not lock_file.exists():
         return None
     try:
-        return json.loads(lock_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("[watchdog.agent] could not read lock %s: %s", lock_file, exc)
-        return None
+        data = json.loads(lock_file.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None  # released between the exists() and the read
+    except (OSError, ValueError) as exc:
+        logger.warning("[watchdog.agent] lock %s unreadable, treated as held: %s", lock_file, exc)
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _check_sent_for_reply(branch_path: Path, dispatch_ts: str | None) -> bool:
@@ -651,7 +673,19 @@ def watch_agent(
     )
 
     try:
-        branch_path = _resolve_branch_path(agent_id)
+        try:
+            branch_path = _resolve_branch_path(agent_id)
+        except RegistryUnreadable as exc:
+            _stderr(f"[watchdog.agent] {agent_id}: main registry unreadable — refusing to resolve: {exc}")
+            return {
+                "woke": False,
+                "reason": f"main registry unreadable: {exc}",
+                "elapsed": int(time.monotonic() - started_at),
+                "agent_state": "timeout",
+                "exit_code": None,
+                "agent_id": agent_id,
+                "handle": handle,
+            }
         if branch_path is None:
             elapsed = int(time.monotonic() - started_at)
             _stderr(f"[watchdog.agent] {agent_id}: branch not found in registry")

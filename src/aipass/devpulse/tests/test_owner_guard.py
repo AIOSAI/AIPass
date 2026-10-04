@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_owner_guard.py
 # Description: Tests for the shared owner-capability caller guard (#681)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/owner/guard.py through guard_owner_caller, against a stubbed sealed registry."""
@@ -120,6 +120,30 @@ class TestLegacyHeuristic:
         _patch_registry(monkeypatch, None)
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path / "flow" / "apps"))
         assert guard_mod.guard_owner_caller("watchdog") is False
+
+    def test_an_unreadable_registry_never_reaches_the_heuristic(self, monkeypatch, tmp_path):
+        """A registry that exists but cannot be read refuses, even a caller in a devpulse tree.
+
+        Spawn's real resolver answers an unreadable registry with no owner, the same
+        answer as an unsealed project. The heuristic then let any directory named
+        devpulse (a namesake in any project) run owner-only verbs, admin_grant's
+        ceremony among them (fleet green, 2026-10-04).
+        """
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        namesake = tmp_path / "src" / "devpulse"
+        namesake.mkdir(parents=True)
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(namesake))
+        assert guard_mod.guard_owner_caller("admin_grant") is False
+
+    def test_a_readable_unsealed_registry_still_reaches_the_heuristic(self, monkeypatch, tmp_path):
+        """Control: a readable registry with no owner keeps the legacy fail-safe (#681)."""
+        (tmp_path / "AIPASS_REGISTRY.json").write_text('{"metadata": {}, "branches": []}', encoding="utf-8")
+        tree = tmp_path / "src" / "devpulse"
+        tree.mkdir(parents=True)
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tree))
+        assert guard_mod.guard_owner_caller("admin_grant") is True
 
 
 # ------------------------------------------------------------------

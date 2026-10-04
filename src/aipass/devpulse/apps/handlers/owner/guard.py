@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: guard.py
 # Description: Owner-capability caller guard for devpulse owner-only tools
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-08-22
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -82,12 +82,24 @@ def _owner_decision(email: str, caller_cwd: Path) -> bool:
         # is_owner is the frozen shared owner-capability contract (spawn is its
         # sole home; no modules re-export). Lazy import keeps cold start fast and
         # enables the fail-safe fallback below.
-        from aipass.spawn.apps.handlers.registry import get_owner, is_owner
+        from aipass.spawn.apps.handlers.registry import (
+            find_registry,
+            get_owner,
+            is_owner,
+            registry_is_writable_document,
+        )
     except ImportError as exc:
         logger.warning("[owner_guard] owner resolver unavailable (%s) — legacy heuristic", exc)
         return _legacy_devpulse_heuristic(caller_cwd)
 
     if get_owner(start_path=caller_cwd) is None:
+        # get_owner answers an UNREADABLE registry with None too, the same as an
+        # unsealed one. Only the unsealed case may reach the heuristic: for an
+        # unreadable one it let any directory named devpulse run owner verbs.
+        registry_path = find_registry(start_path=caller_cwd)
+        if registry_path is not None and not registry_is_writable_document(registry_path):
+            logger.warning("[owner_guard] registry %s exists but cannot be read — refusing", registry_path)
+            return False
         # No sealed owner in this project -> resolver can't decide -> legacy path check.
         logger.info("[owner_guard] no sealed owner at %s — legacy heuristic", caller_cwd)
         return _legacy_devpulse_heuristic(caller_cwd)
