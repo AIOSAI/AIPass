@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_rollover.py
 # Description: Tests for the rollover module's command routing and SUBCOMMANDS
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-02
+# Modified: 2026-10-04
 # Category: memory/tests
 # =============================================
 
@@ -54,27 +54,13 @@ def _prepare_rollover_mocks(monkeypatch):
     real_rollover_config = importlib.import_module("aipass.memory.apps.modules.rollover_config")
     real_rollover_json = importlib.import_module("aipass.memory.apps.modules.rollover_json")
 
-    # rich
-    mock_panel = MagicMock()
-    mock_box = MagicMock()
-    rich_panel_mod = MagicMock()
-    rich_panel_mod.Panel = mock_panel
-    rich_box_mod = MagicMock()
-    rich_box_mod.box = mock_box
-    monkeypatch.setitem(sys.modules, "rich.panel", rich_panel_mod)
-    monkeypatch.setitem(sys.modules, "rich", MagicMock())
-
-    # aipass.cli console / error / warning
-    mock_console = MagicMock()
+    # aipass.cli is the REAL package (leg 11 of DPLAN-0354): its console only
+    # prints, and no test here reads the console. error() and warning() are
+    # replaced at the use site, on each module that bound them, because error()
+    # marks the process's command as failed; _import_rollover patches the
+    # re-imported rollover the same way.
     mock_error = MagicMock()
     mock_warning = MagicMock()
-    cli_modules_mod = MagicMock()
-    cli_modules_mod.console = mock_console
-    cli_modules_mod.error = mock_error
-    cli_modules_mod.warning = mock_warning
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules_mod)
 
     # aipass.memory handler sub-packages
     mock_detector = MagicMock()
@@ -158,15 +144,13 @@ def _prepare_rollover_mocks(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", mock_orchestrator)
     # Patched attribute by attribute rather than through the sys.modules
     # stand-in, because `_refuse` reads `error` from ITS OWN globals - without
-    # these three the mock error() the tests assert on is never called.
+    # these two the mock error() the tests assert on is never called.
     # monkeypatch restores each one.
-    monkeypatch.setattr(real_rollover_config, "console", mock_console)
     monkeypatch.setattr(real_rollover_config, "error", mock_error)
     monkeypatch.setattr(real_rollover_config, "detector", mock_detector)
-    # And the same two on rollover_json, which is where `_emit` reads `console`
-    # and `_refuse` reads `error` now — a patch on rollover_config no longer
-    # reaches either of them. No `detector` there: that module never took one.
-    monkeypatch.setattr(real_rollover_json, "console", mock_console)
+    # And `error` on rollover_json, which is where `_refuse` reads it now — a
+    # patch on rollover_config no longer reaches it. No `detector` there: that
+    # module never took one.
     monkeypatch.setattr(real_rollover_json, "error", mock_error)
 
     # intake (lazy import inside process_plans_command)
@@ -180,7 +164,6 @@ def _prepare_rollover_mocks(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.plans_processor", mock_plans_processor)
 
     return {
-        "console": mock_console,
         "error": mock_error,
         "warning": mock_warning,
         "detector": mock_detector,
@@ -197,8 +180,9 @@ _ROLLOVER_MODULE = "aipass.memory.apps.modules.rollover"
 def _import_rollover(monkeypatch):
     """Prepare mocks and import (or reimport) the rollover module.
 
-    The re-import binds rollover to the MagicMock cli, so its error() marks
-    nothing. Both evictions go through monkeypatch, which records what stood
+    The re-import binds rollover to the real cli, and its error() and warning()
+    are then replaced on the module, so its error() marks nothing. Both
+    evictions go through monkeypatch, which records what stood
     there - the real module, or nothing - and teardown puts exactly that back.
     A bare pop left the mock-bound module cached after teardown: the next
     in-process memory.main() on that xdist worker routed `rollover <bogus>`
@@ -221,6 +205,11 @@ def _import_rollover(monkeypatch):
     delattr(parent, "rollover")
 
     from aipass.memory.apps.modules import rollover
+
+    # The re-import bound the REAL cli; error() and warning() are replaced at
+    # the use site, so a test's refusal never marks the process's command failed.
+    monkeypatch.setattr(rollover, "error", mocks["error"])
+    monkeypatch.setattr(rollover, "warning", mocks["warning"])
 
     return rollover, mocks
 
@@ -597,7 +586,26 @@ class TestSubcommandHelpFlag:
 
 
 class TestDiscoverHandlers:
-    """Verify _discover_handlers scans handler directories correctly."""
+    """Verify the handler walk, read through its one caller: the introspection screen.
+
+    Leg 11 of DPLAN-0354: these tests called the private walk; they now read the
+    map the public print_introspection() prints, which is where it is seen.
+    """
+
+    @staticmethod
+    def _connected(capsys) -> tuple[dict[str, list[str]], list[str]]:
+        """The "Connected Handlers" block of the screen: the map it shows, and its raw lines."""
+        rollover_module.print_introspection()
+        lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
+        block = lines[lines.index("Connected Handlers:") + 1 :]
+        block = block[: block.index("")]
+        shown = {}
+        for line in block:
+            if line == "No handlers found":
+                continue
+            directory, _, files = line.partition("  ")
+            shown[directory.removeprefix("handlers/").rstrip("/")] = files.strip().split(", ") if files.strip() else []
+        return shown, block
 
     def test_returns_empty_dict_when_no_handlers_dir(self, monkeypatch, tmp_path, capsys):
         """Returns empty dict when handlers/ directory does not exist."""
@@ -607,9 +615,10 @@ class TestDiscoverHandlers:
         fake_module.write_text("", encoding="utf-8")
 
         monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
-        result = rollover_module._discover_handlers()
+        result, block = self._connected(capsys)
 
         assert result == {}
+        assert block == ["No handlers found"]
 
     def test_discovers_py_files_in_handler_dirs(self, monkeypatch, tmp_path, capsys):
         """Discovers .py files inside handler subdirectories."""
@@ -635,7 +644,7 @@ class TestDiscoverHandlers:
         (rollover_dir / "orchestrator.py").write_text("", encoding="utf-8")
 
         monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
-        result = rollover_module._discover_handlers()
+        result, _ = self._connected(capsys)
 
         assert "monitor" in result
         assert "detector.py" in result["monitor"]
@@ -661,7 +670,7 @@ class TestDiscoverHandlers:
         (pycache / "something.py").write_text("", encoding="utf-8")
 
         monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
-        result = rollover_module._discover_handlers()
+        result, _ = self._connected(capsys)
 
         assert "__pycache__" not in result
 
@@ -678,7 +687,7 @@ class TestDiscoverHandlers:
         (empty_handler / "__init__.py").write_text("", encoding="utf-8")
 
         monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
-        result = rollover_module._discover_handlers()
+        result, _ = self._connected(capsys)
 
         assert "empty_handler" not in result
 
@@ -700,7 +709,7 @@ class TestDiscoverHandlers:
             (d / "a_file.py").write_text("", encoding="utf-8")
 
         monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
-        result = rollover_module._discover_handlers()
+        result, _ = self._connected(capsys)
 
         keys = list(result.keys())
         assert keys == sorted(keys), "Handler directory keys should be sorted"
@@ -723,6 +732,6 @@ class TestDiscoverHandlers:
         (mixed_dir / "config.json").write_text("", encoding="utf-8")
 
         monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
-        result = rollover_module._discover_handlers()
+        result, _ = self._connected(capsys)
 
         assert result["mixed"] == ["handler.py"]

@@ -367,10 +367,13 @@ class TestEveryLaneReadsTheOneDefinition:
         classification was gone, 29 tests green. Reading the code under test
         is not the same as running it, and grep-shaped pins fail exactly where
         it matters: on a change that keeps the words and drops the behaviour.
+
+        Read through the public ``read_scope`` (leg 11): the fleet declares no
+        external roots, so its rows are exactly the write scope's.
         """
         monkeypatch.setattr(detector, "_REPO_ROOT", fleet)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
-        names = {Path(branch["path"]).name for branch in detector._read_registry()}
+        names = {Path(branch["path"]).name for branch in detector.read_scope()}
 
         assert "live" in names, "the declared resident never reached the detector lane"
         for refused in ("mute", "impostor", "ghost", "martian", "stale", "hidden", "nested"):

@@ -707,6 +707,89 @@
       "standard": "logged_fallback",
       "lines": [113],
       "reason": "handle_command answers 'was this command routed here', not 'did it succeed'. An invalid --n is handled: the error is printed to the user and logged, so True is correct and False would send the router looking for another handler. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/conftest.py",
+      "standard": "import_site",
+      "lines": [93, 94, 95, 96, 120, 121, 128, 129, 130, 131],
+      "reason": "The stub is the cure (compass 493; @devpulse's leg 11 ruling (a)). Each keeps a far side off the disk or the bus. 93-96 aipass.prax: the real logger writes every module's log file under logs/, and its json service writes operation logs. 120-121 handlers.json.json_handler: log_operation writes memory_json operation logs. 128-131 aipass.trigger: Trigger.fire posts real events to the bus. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/conftest.py",
+      "standard": "through_the_command",
+      "lines": [218],
+      "reason": "Ruling (b): a read, not a patch. The live-state guard reads trinity_push._REPO_ROOT to check that the push lane's own root holds a core registry with rows before a live-fleet test runs. No public name carries that root (registry_scope.REPO_ROOT is the other lane, read beside it), and no door is added for the guard. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_config_loader.py",
+      "standard": "import_site",
+      "lines": [78],
+      "reason": "The stub is the cure (ruling (a)). _get_module re-imports config_loader after the fixture evicted the json package, so it binds conftest's json_handler stand-in; with the real one bound, load/save write memory_json operation logs. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_vector.py",
+      "standard": "import_site",
+      "lines": [72, 77],
+      "reason": "Parked tier: vector/embedder.py was parked with the symbolic fragments tier on 2026-08-14 (the owner's ruling) and this file skips; the lines stay as they were. The stub also keeps fastembed from loading a model. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_symbolic_extras.py",
+      "standard": "import_site",
+      "lines": [90, 101, 102, 111, 112, 113, 114, 115, 153, 154, 184, 185, 205, 206, 212, 213, 219, 220, 1209, 1229, 1676],
+      "reason": "Parked tier: the symbolic fragments tier was parked on 2026-08-14 (the owner's ruling) and this file skips; the lines stay as they were. Where the import is meant to raise (the parked package's __init__ raises), the raise is the test. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_symbolic_extras.py",
+      "standard": "state_leak",
+      "lines": [153, 184, 205, 212, 219],
+      "reason": "Parked tier: the owner's ruling of 2026-08-14 keeps this file as it was, and it skips, so these pops never run. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_rollover.py",
+      "standard": "import_site",
+      "lines": [54, 55, 107, 108, 109, 203, 267, 291, 316],
+      "reason": "Not stubs: each importlib.import_module fetches the REAL module. 54/55 first-import rollover_config and rollover_json before any stand-in lands, because what they bind at import they keep. 107-109 take the real cli flag helpers so the routing guards are real. 203/291 fetch the parent package to evict its cached attribute (monkeypatch restores it). 267/316 fetch the real handlers.cli package to compare with. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_rollover.py",
+      "standard": "import_site",
+      "lines": [134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 163, 164, 207],
+      "reason": "The stub is the cure (ruling (a)). rollover.py imports these at import time, and each far side writes. orchestrator.execute_rollover writes .trinity, the backups and the vector stores. memory_watcher.check_and_rollover runs that same rollover. detector's walk recreates a missing .trinity file. todo_report.roll_pad writes the .backup todo backlogs. plans_processor.process_plans embeds and writes the flow_plans store. 134-137 register the REAL cli flag helpers under the stand-in package, which has no __path__. 139/140 are the parent packages. 207 is the deliberate re-import of rollover against them. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_marker7_memory_lane.py",
+      "standard": "through_the_command",
+      "lines": [149, 228, 262, 284, 409, 1015],
+      "reason": "Contracts pinned, each with no public caller that leaves the disk alone. 149/284: detector._read_registry is the rollover WRITE scope (it stops at the repo edge); its public readers walk files and return counts, never rows, and read_scope adds the externals. 228/262: rollover._normalize_rolled never reaches another repository and names a branch whose frame could not be written; its public caller runs a real rollover first. 409: spawn_pusher._write_json refuses a path outside the root; its public caller pushes the spawn templates. 1015: templates._announce_bump fires on the bus; its public caller stamps the receipts. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_residency_scope.py",
+      "standard": "through_the_command",
+      "lines": [408],
+      "reason": "Contract pinned: the WRITE scope (detector._read_registry) stops at the repo edge while read_scope reaches a declared external. The write scope's public readers (check_all_branches, get_rollover_stats) walk files and return counts, not rows, so the difference is visible only here. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_roots_lifecycle.py",
+      "standard": "through_the_command",
+      "lines": [483, 491],
+      "reason": "Contract pinned: a declared root is written with forward slashes on Windows. The tests hand _spell a Windows path flavour, which no public caller accepts; the public caller (roots add) writes AIPASS_ROOTS.json under the real home with the host's flavour. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_trinity_push.py",
+      "standard": "through_the_command",
+      "lines": [1547],
+      "reason": "Ruling (b): tp._RULES_CACHE.clear() empties the module's cache of the global rules file so the test reads its own tmp copy and can count re-reads; there is no public reset, and no door is added for the test. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_trinity_standard.py",
+      "standard": "through_the_command",
+      "lines": [361, 370, 379, 774, 790],
+      "reason": "Contracts pinned on a tmp file: the meta line is tab then template semantics, a refresh restores _usage from the template and never leaves a bare tab, and the receipt is bumped after a refresh (or the refresh succeeds with no receipt). The public caller refreshes every live branch's .trinity files, which is live state. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_declared_roots.py",
+      "standard": "no_product_call",
+      "reason": "File-wide because no_product_call passes no line (the checklist calls a lines rule inert); it covers TestWhatTheHostCanActuallyHold, lines 660 and 675. Host probes @devpulse asked for. They measure what the running file system holds (case-only names fold or not; a differing stem is always a second file), the premise every case-glob pin in this file is written on. No product code answers that question. Leg 11 of DPLAN-0354."
     }
   ],
   "notes": {
