@@ -27,24 +27,27 @@ import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
 import aipass.prax.apps.modules.dashboard as prax_dashboard_mod
 from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
-from aipass.ai_mail.apps.handlers.dispatch.wake import (
-    _read_json,
+import aipass.ai_mail.apps.handlers.dispatch.pid_lock as pid_lock_mod
+from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
+    _acquire_lock,
     _check_lock,
     _check_pid_alive,
+    _clean_zombies,
     _get_pid_cwd,
     _get_pid_cwd_darwin,
+    _is_branch_occupied,
+    _is_zombie_linux,
     _read_session_type,
     _read_session_type_darwin,
-    _is_zombie_linux,
-    _clean_zombies,
+)
+from aipass.ai_mail.apps.handlers.dispatch.wake import (
+    _read_json,
     _find_claude_bin,
     resolve_branch,
     DispatchStatus,
     KNOWN_MODEL_ALIASES,
     DEFAULT_MODEL,
-    _acquire_lock,
     _load_config,
-    _is_branch_occupied,
     wake_branch,
 )
 
@@ -171,11 +174,11 @@ def test_read_json_missing_file(tmp_path):
 
 
 def test_read_json_corrupt(tmp_path):
-    """Corrupt JSON returns None."""
+    """Corrupt JSON raises JsonUnreadable, distinct from a missing file (ai_mail, leg 13)."""
     f = tmp_path / "bad.json"
     f.write_text("{not valid", encoding="utf-8")
-    result = _read_json(f)
-    assert result is None
+    with pytest.raises(wake_mod.JsonUnreadable):
+        _read_json(f)
 
 
 # --- _check_pid_alive tests ------------------------------------------
@@ -428,7 +431,7 @@ def test_check_lock_alive_pid(tmp_path, monkeypatch):
     lock_data = {"pid": 1234, "timestamp": "2026-03-29T10:00:00"}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
     alive = MagicMock(return_value=True)
-    monkeypatch.setattr(wake_mod, "_check_pid_alive", alive)
+    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
     result = _check_lock(tmp_path)
     assert result is not None
     assert result["pid"] == 1234
@@ -443,7 +446,7 @@ def test_check_lock_dead_pid_removes_lock(tmp_path, monkeypatch):
     lock_data = {"pid": 99999, "timestamp": "2026-03-29T10:00:00"}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
     alive = MagicMock(return_value=False)
-    monkeypatch.setattr(wake_mod, "_check_pid_alive", alive)
+    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
     result = _check_lock(tmp_path)
     assert result is None
     assert not lock_file.exists()
@@ -478,14 +481,41 @@ def test_check_lock_permission_error_treated_active(tmp_path, monkeypatch):
     assert result["pid"] == 1
 
 
-def test_check_lock_corrupt_json(tmp_path):
-    """Corrupt lock file returns None."""
+def test_check_lock_fresh_corrupt_json_is_held(tmp_path):
+    """A corrupt lock younger than the grace is a writer mid-write: held, not removed (ai_mail, leg 13)."""
     lock_dir = tmp_path / ".ai_mail.local"
     lock_dir.mkdir(parents=True)
     lock_file = lock_dir / ".dispatch.lock"
     lock_file.write_text("{bad json", encoding="utf-8")
     result = _check_lock(tmp_path)
+    assert result is not None
+    assert lock_file.exists()
+
+
+def test_check_lock_old_corrupt_json_is_reclaimed(tmp_path):
+    """A corrupt lock an hour old is a crashed writer's leftover: removed, None (ai_mail, leg 13)."""
+    lock_dir = tmp_path / ".ai_mail.local"
+    lock_dir.mkdir(parents=True)
+    lock_file = lock_dir / ".dispatch.lock"
+    lock_file.write_text("{bad json", encoding="utf-8")
+    hour_ago = lock_file.stat().st_mtime - 3600
+    os.utime(lock_file, (hour_ago, hour_ago))
+    result = _check_lock(tmp_path)
     assert result is None
+    assert not lock_file.exists()
+
+
+def test_check_lock_unreadable_is_held(tmp_path):
+    """A lock that cannot be read at all is held and left in place (ai_mail, leg 13).
+
+    A directory where the lock file belongs cannot be read as text; the wake
+    once answered None for it and the daemon tried to remove it.
+    """
+    lock_file = tmp_path / ".ai_mail.local" / ".dispatch.lock"
+    lock_file.mkdir(parents=True)
+    result = _check_lock(tmp_path)
+    assert result is not None
+    assert lock_file.exists()
 
 
 # --- resolve_branch tests --------------------------------------------
@@ -941,6 +971,14 @@ class TestLoadConfig:
         result = _load_config()
         assert result["max_turns_per_wake"] == 50
 
+    def test_unreadable_config_raises(self, tmp_path, monkeypatch):
+        """An unreadable config raises: its max_turns may be lower than the default 100 (ai_mail, leg 13)."""
+        config_file = tmp_path / "safety_config.json"
+        config_file.write_text("{max_turns", encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config_file)
+        with pytest.raises(wake_mod.JsonUnreadable):
+            _load_config()
+
 
 # --- _is_branch_occupied tests ------------------------------------------
 
@@ -982,7 +1020,7 @@ class TestIsBranchOccupied:
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
         monkeypatch.setattr(os, "readlink", lambda p: resolved)
         # _read_session_type returns "interactive" for this PID
-        monkeypatch.setattr(wake_mod, "_read_session_type", lambda pid_str: "interactive")
+        monkeypatch.setattr(pid_lock_mod, "_read_session_type", lambda pid_str: "interactive")
         assert _is_branch_occupied(tmp_path) is True
 
     def test_claude_in_same_dir_daemon_not_blocking(self, tmp_path, monkeypatch):
@@ -996,7 +1034,7 @@ class TestIsBranchOccupied:
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
         monkeypatch.setattr(os, "readlink", lambda p: resolved)
-        monkeypatch.setattr(wake_mod, "_read_session_type", lambda pid_str: "daemon")
+        monkeypatch.setattr(pid_lock_mod, "_read_session_type", lambda pid_str: "daemon")
         assert _is_branch_occupied(tmp_path) is False
 
     def test_pgrep_subprocess_failure_returns_false(self, tmp_path, monkeypatch):
@@ -1751,6 +1789,22 @@ class TestScheduledManagerLane:
         assert ok is True
         assert status.find_step("manager") is None
         assert len(calls["popen"]) == 1
+
+    def test_an_unreadable_safety_config_refuses_the_wake(self, tmp_path, monkeypatch):
+        """No spawn on an unreadable safety config: its max_turns may be under the default 100 (ai_mail, leg 13)."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        (tmp_path / "safety_config.json").write_text("{max_turns", encoding="utf-8")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@flow", scheduled=True)
+
+        assert ok is False
+        config = status.find_step("config")
+        assert config is not None
+        assert config[0] == "fail"
+        assert config[2].startswith("safety_config.json could not be read")
+        assert calls["popen"] == [] and calls["tmux"] == []
 
     def test_scheduled_manager_wake_hands_the_pin_site_the_spawn(self, tmp_path, monkeypatch):
         """The monitor is argv[1] and wake's own env carries no CLAUDE_* leak.

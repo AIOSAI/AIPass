@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake_blocklist.py
 # Description: Tests for FPLAN-0190 Task B — manual wake blocklist
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-20
-# Modified: 2026-09-29
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py -- manual wake blocklist (FPLAN-0190 Task B)."""
@@ -62,7 +62,7 @@ class TestOrchestrateWakeBlocklist:
     """Tests that _orchestrate_wake enforces the blocklist."""
 
     def _call_orchestrate_wake(self, args):
-        """Call _orchestrate_wake with mocked wake_branch and console.
+        """Run `dispatch wake <args>` through handle_command with mocked wake_branch and console.
 
         wake_branch is lazily imported inside _orchestrate_wake, so we patch it
         at the source module rather than as a dispatch module attribute.
@@ -78,7 +78,7 @@ class TestOrchestrateWakeBlocklist:
             ),
             patch("aipass.ai_mail.apps.modules.dispatch.error") as mock_error,
         ):
-            result = dispatch_mod._orchestrate_wake(args)
+            result = dispatch_mod.handle_command("dispatch", ["wake", *args])
             return result, mock_error
 
     def test_blocked_returns_true(self):

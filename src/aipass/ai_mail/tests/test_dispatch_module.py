@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_module.py
 # Description: Tests for dispatch.py orchestrator functions
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-26
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -27,16 +27,34 @@ from unittest.mock import MagicMock, patch
 
 from aipass.ai_mail.apps.handlers.dispatch.wake import DispatchStatus
 from aipass.ai_mail.apps.modules.dispatch import (
-    _orchestrate_daemon,
-    _orchestrate_dispatch_send,
-    _orchestrate_status,
-    _orchestrate_wake,
     handle_command,
     print_help,
     print_introspection,
 )
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.modules.dispatch as dmod
+
+
+# Each verb is reached the way `drone @ai_mail dispatch ...` reaches it: through
+# handle_command (ai_mail, leg 13).
+def _send(args):
+    """`dispatch <@target|/path> Subject Body ...`."""
+    return handle_command("dispatch", args)
+
+
+def _wake(args):
+    """`dispatch wake ...`."""
+    return handle_command("dispatch", ["wake", *args])
+
+
+def _status():
+    """`dispatch status`."""
+    return handle_command("dispatch", ["status"])
+
+
+def _daemon():
+    """`dispatch daemon`."""
+    return handle_command("dispatch", ["daemon"])
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +281,7 @@ class TestOrchestrateStatus:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_status()
+        result = _status()
         assert result is True
         assert any("No dispatches" in p for p in printed)
 
@@ -283,7 +301,7 @@ class TestOrchestrateStatus:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_status()
+        result = _status()
         assert result is True
         combined = " ".join(printed)
         assert "RUNNING" in combined
@@ -306,7 +324,7 @@ class TestOrchestrateStatus:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_status()
+        result = _status()
         assert result is True
         combined = " ".join(printed)
         assert "COMPLETED" in combined
@@ -327,7 +345,7 @@ class TestOrchestrateStatus:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_status()
+        result = _status()
         assert result is True
         combined = " ".join(printed)
         assert "FAILED" in combined
@@ -348,7 +366,7 @@ class TestOrchestrateStatus:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_status()
+        result = _status()
         assert result is True
         combined = " ".join(printed)
         assert "UNKNOWN" in combined
@@ -370,7 +388,7 @@ class TestOrchestrateStatus:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_status()
+        result = _status()
         assert result is True
         combined = " ".join(printed)
         assert "Active: 2" in combined
@@ -392,7 +410,7 @@ class TestOrchestrateStatus:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_status()
+        result = _status()
         assert result is True
         combined = " ".join(printed)
         assert "Total: 5" in combined
@@ -418,7 +436,7 @@ class TestOrchestrateWake:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_wake([])
+        result = _wake([])
         assert result is True
         combined = " ".join(printed)
         assert "Wake" in combined
@@ -428,7 +446,7 @@ class TestOrchestrateWake:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_wake(["--help"])
+        result = dmod._orchestrate_wake(["--help"])
         assert result is True
         combined = " ".join(printed)
         assert "Wake" in combined
@@ -438,7 +456,7 @@ class TestOrchestrateWake:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_wake(["-h"])
+        result = dmod._orchestrate_wake(["-h"])
         assert result is True
 
     def test_help_word_prints_help(self, monkeypatch):
@@ -446,7 +464,7 @@ class TestOrchestrateWake:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_wake(["help"])
+        result = _wake(["help"])
         assert result is True
 
     def test_missing_branch_after_flags_reports_and_stays_handled(self, monkeypatch):
@@ -461,7 +479,7 @@ class TestOrchestrateWake:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_wake(["--fresh"])
+        result = _wake(["--fresh"])
         assert result is True
         assert any("Missing" in e for e in errors)
 
@@ -476,7 +494,7 @@ class TestOrchestrateWake:
             "aipass.ai_mail.apps.handlers.dispatch.wake.is_wake_blocked",
             return_value=True,
         ):
-            result = _orchestrate_wake(["@protected"])
+            result = _wake(["@protected"])
         assert result is True
         assert any("protected" in e for e in errors)
 
@@ -498,7 +516,7 @@ class TestOrchestrateWake:
                 return_value=(mock_status, True),
             ),
         ):
-            result = _orchestrate_wake(["@branch"])
+            result = _wake(["@branch"])
         assert result is True
         combined = " ".join(printed)
         assert "WAKE OK" in combined
@@ -527,7 +545,7 @@ class TestOrchestrateWake:
                 return_value=(mock_status, False),
             ),
         ):
-            result = _orchestrate_wake(["@branch"])
+            result = _wake(["@branch"])
         assert result is True
         assert any("Wake failed for @branch" in e for e in errors)
 
@@ -555,7 +573,7 @@ class TestOrchestrateWake:
                 side_effect=mock_wake,
             ),
         ):
-            _orchestrate_wake(["--fresh", "@branch"])
+            _wake(["--fresh", "@branch"])
         assert len(wake_calls) == 1
         assert wake_calls[0]["fresh"] is True
 
@@ -583,7 +601,7 @@ class TestOrchestrateWake:
                 side_effect=mock_wake,
             ),
         ):
-            _orchestrate_wake(["--model", "opus", "@branch"])
+            _wake(["--model", "opus", "@branch"])
         assert len(wake_calls) == 1
         assert wake_calls[0]["model"] == "opus"
 
@@ -611,7 +629,7 @@ class TestOrchestrateWake:
                 side_effect=mock_wake,
             ),
         ):
-            _orchestrate_wake(["--sender", "@custom", "@branch"])
+            _wake(["--sender", "@custom", "@branch"])
         return wake_calls
 
     def test_sender_flag_unverified_caller(self, monkeypatch):
@@ -659,7 +677,7 @@ class TestOrchestrateWake:
                 side_effect=mock_wake,
             ),
         ):
-            _orchestrate_wake(["@branch", "Check your inbox now"])
+            _wake(["@branch", "Check your inbox now"])
         assert len(wake_calls) == 1
         assert wake_calls[0]["msg"] == "Check your inbox now"
 
@@ -712,7 +730,7 @@ class TestOrchestrateDispatchSend:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        result = _orchestrate_dispatch_send(["@target", "Subject"])
+        result = _send(["@target", "Subject"])
         assert result is True
         assert any("Usage" in e for e in errors)
 
@@ -723,7 +741,7 @@ class TestOrchestrateDispatchSend:
 
         patches = _send_patches()
         with patches:
-            result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            result = _send(["@target", "Subject", "Body"])
 
         assert result is True
         combined = " ".join(printed)
@@ -750,7 +768,7 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            result = _send(["@target", "Subject", "Body"])
 
         assert result is True
         assert any("Dispatch to @target not sent" in e for e in errors)
@@ -776,7 +794,7 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            result = _send(["@target", "Subject", "Body"])
 
         assert result is True
         assert any("wake failed" in e.lower() for e in errors)
@@ -801,7 +819,7 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--fresh"])
+            _send(["@target", "Subject", "Body", "--fresh"])
 
         assert len(wake_calls) == 1
         assert wake_calls[0]["fresh"] is True
@@ -824,7 +842,7 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@custom_sender"])
+            _send(["@target", "Subject", "Body", "--from", "@custom_sender"])
 
         assert len(sender_calls) == 1
         assert sender_calls[0] == "@custom_sender"
@@ -849,7 +867,7 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--model", "sonnet"])
+            _send(["@target", "Subject", "Body", "--model", "sonnet"])
 
         assert len(wake_calls) == 1
         assert wake_calls[0]["model"] == "sonnet"
@@ -872,7 +890,7 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--no-memory-save"])
+            _send(["@target", "Subject", "Body", "--no-memory-save"])
 
         assert len(header_calls) == 1
         assert header_calls[0]["no_memory_save"] is True
@@ -891,7 +909,7 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            result = _send(["@target", "Subject", "Body"])
 
         assert result is True
 
@@ -908,7 +926,7 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            result = _send(["@target", "Subject", "Body"])
 
         assert result is True
         assert any("Dispatch to @target not sent: boom" in e for e in errors)
@@ -932,7 +950,7 @@ class TestOrchestrateDaemon:
             "aipass.ai_mail.apps.handlers.dispatch.daemon.run_daemon",
             side_effect=lambda: daemon_called.append(True),
         ):
-            result = _orchestrate_daemon()
+            result = _daemon()
 
         assert result is True
         assert len(daemon_called) == 1
@@ -977,7 +995,7 @@ class TestWakeBackMessaging:
 
         patches = _send_patches()
         with patches:
-            result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            result = _send(["@target", "Subject", "Body"])
 
         assert result is True
         combined = " ".join(printed)
@@ -999,7 +1017,7 @@ class TestWakeBackMessaging:
             }
         )
         with patches:
-            _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            _send(["@target", "Subject", "Body"])
 
         combined = " ".join(printed)
         assert "Wake-back enabled" not in combined
@@ -1011,7 +1029,7 @@ class TestWakeBackMessaging:
 
         patches = _send_patches()
         with patches:
-            result = _orchestrate_dispatch_send(["@target", "Subject", "Body", "--no-watchdog"])
+            result = _send(["@target", "Subject", "Body", "--no-watchdog"])
 
         assert result is True
 
@@ -1028,7 +1046,7 @@ class TestWakeBackMessaging:
             }
         )
         with patches:
-            _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            _send(["@target", "Subject", "Body"])
 
         combined = " ".join(printed)
         assert "Wake-back enabled" not in combined
@@ -1066,7 +1084,7 @@ class TestSpoofedSenderRefusal:
         send = MagicMock(return_value=(True, None))
         patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_H_SEND}.send_to_single": send})
         with patches:
-            result = _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@daemon"])
+            result = _send(["@target", "Subject", "Body", "--from", "@daemon"])
 
         assert result is True
         wake.assert_not_called()
@@ -1087,7 +1105,7 @@ class TestSpoofedSenderRefusal:
             patch(f"{_H_WAKE}.is_wake_blocked", return_value=False),
             patch(f"{_H_WAKE}.wake_branch", wake),
         ):
-            result = _orchestrate_wake(["--sender", "@daemon", "@target"])
+            result = _wake(["--sender", "@daemon", "@target"])
 
         assert result is True
         wake.assert_not_called()
@@ -1102,7 +1120,7 @@ class TestSpoofedSenderRefusal:
         wake = MagicMock()
         patches = _send_patches({f"{_H_WAKE}.wake_branch": wake})
         with patches:
-            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@daemon"])
+            _send(["@target", "Subject", "Body", "--from", "@daemon"])
 
         wake.assert_not_called()
         assert errors and "unverified" in errors[0].lower()
@@ -1124,7 +1142,7 @@ class TestSpoofedSenderRefusal:
 
         patches = _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=mock_wake)})
         with patches:
-            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@daemon"])
+            _send(["@target", "Subject", "Body", "--from", "@daemon"])
 
         assert len(wake_calls) == 1
         assert wake_calls[0]["sender"] == "@daemon"
@@ -1152,7 +1170,7 @@ class TestSpoofedSenderRefusal:
             }
         )
         with patches:
-            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@spawn"])
+            _send(["@target", "Subject", "Body", "--from", "@spawn"])
 
         # The mail is still authored by @spawn...
         assert resolve.call_args[0][0] == "@spawn"
@@ -1171,7 +1189,7 @@ class TestSpoofedSenderRefusal:
         send = MagicMock(return_value=(True, None))
         patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_H_SEND}.send_to_single": send})
         with patches:
-            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@spawn"])
+            _send(["@target", "Subject", "Body", "--from", "@spawn"])
 
         send.assert_called_once()
         wake.assert_called_once()
@@ -1257,9 +1275,9 @@ class TestBothVerbsAgreeAtTheManagerGate:
             return status, ok
 
         with patch(f"{_H_WAKE}.wake_branch", _spy):
-            _orchestrate_wake(["@mgr"])
+            _wake(["@mgr"])
         with _send_patches({f"{_H_WAKE}.wake_branch": _spy}):
-            _orchestrate_dispatch_send(["@mgr", "Subject", "Body"])
+            _send(["@mgr", "Subject", "Body"])
         return verdicts
 
     def test_admin_seat_gets_one_verdict_from_both_verbs(self, monkeypatch):

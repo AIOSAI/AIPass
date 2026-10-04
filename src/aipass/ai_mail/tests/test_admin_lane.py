@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_admin_lane.py
 # Description: Tests for admin-grant verification + dispatch wiring (FPLAN-0401 Phase 4)
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-08-12
-# Modified: 2026-09-29
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/users/verified_caller.py and the dispatch admin-wiring it feeds."""
@@ -28,8 +28,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.ai_mail.apps.handlers.users.verified_caller import verify_admin_caller
-from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
+from aipass.ai_mail.apps.modules.dispatch import handle_command
 from aipass.devpulse.apps.handlers.owner.admin_grant import compute_signature
+
+
+def _dispatch_send(args):
+    """Send a dispatch the way `drone @ai_mail dispatch` does: through handle_command."""
+    return handle_command("dispatch", args)
+
 
 MOD = "aipass.ai_mail.apps.modules.dispatch"
 _H_WAKE = "aipass.ai_mail.apps.handlers.dispatch.wake"
@@ -225,7 +231,7 @@ def _wake_spy(calls: list):
 
 
 def _send_patches(overrides: dict) -> ExitStack:
-    """Default patch set for _orchestrate_dispatch_send (mirrors test_dispatch_module)."""
+    """Default patch set for a dispatch send (mirrors test_dispatch_module)."""
     defaults = {
         f"{_H_SEND}.resolve_sender_info": MagicMock(return_value={"email_address": "@devpulse"}),
         "aipass.ai_mail.apps.handlers.email.header.prepend_dispatch_header": MagicMock(return_value="body"),
@@ -265,7 +271,7 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": MagicMock(return_value=(True, "admin grant verified")),
             }
         ):
-            _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            _dispatch_send(["@target", "Subject", "Body"])
 
         assert len(calls) == 1
         assert calls[0]["admin"] is True
@@ -275,7 +281,7 @@ class TestDispatchSendAdminWiring:
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
         calls: list = []
         with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=_wake_spy(calls))}):
-            _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            _dispatch_send(["@target", "Subject", "Body"])
 
         assert len(calls) == 1
         assert calls[0]["admin"] is False
@@ -284,7 +290,7 @@ class TestDispatchSendAdminWiring:
         """Unverifiable callers get the closed lane, no exception."""
         calls: list = []
         with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=_wake_spy(calls))}):
-            _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            _dispatch_send(["@target", "Subject", "Body"])
 
         assert calls[0]["admin"] is False
 
@@ -299,7 +305,7 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": verifier,
             }
         ):
-            _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            _dispatch_send(["@target", "Subject", "Body"])
 
         verifier.assert_not_called()
 
@@ -316,7 +322,7 @@ class TestDispatchSendAdminWiring:
                 ),
             }
         ):
-            _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            _dispatch_send(["@target", "Subject", "Body"])
 
         assert calls[0]["admin"] is False
         out = " ".join(capsys.readouterr().out.split())
@@ -337,7 +343,7 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": MagicMock(side_effect=_boom),
             }
         ):
-            result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            result = _dispatch_send(["@target", "Subject", "Body"])
 
         assert result is True
         assert len(calls) == 1
@@ -357,6 +363,6 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": MagicMock(return_value=(False, "lane dark")),
             }
         ):
-            _orchestrate_dispatch_send(["@target", "Subject", "Body"])
+            _dispatch_send(["@target", "Subject", "Body"])
 
         assert calls[0]["admin"] is False

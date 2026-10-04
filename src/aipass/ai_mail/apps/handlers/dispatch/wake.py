@@ -30,6 +30,13 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.dispatch import session_pointer
+from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
+    _acquire_lock,
+    _check_lock,
+    _check_pid_alive,
+    _clean_zombies,
+    _is_branch_occupied,
+)
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import (
     refresh_recipient_dashboard as _refresh_recipient_dashboard,
 )
@@ -166,7 +173,12 @@ def fable_allowed() -> frozenset:
     an accident — it is the spelling for revoking the grant from everyone, and
     it is distinguishable from the key being absent.
     """
-    config = _read_json(CONFIG_FILE)
+    try:
+        config = _read_json(CONFIG_FILE)
+    except JsonUnreadable as e:
+        # Unreadable falls to the written ruling, as above (ai_mail, leg 13).
+        logger.warning("[wake] %s — the Fable grant falls back to the default", e)
+        return FABLE_GRANT_DEFAULT
     if not isinstance(config, dict) or FABLE_GRANT_KEY not in config:
         return FABLE_GRANT_DEFAULT
     granted = config[FABLE_GRANT_KEY]
@@ -287,96 +299,24 @@ class DispatchStatus:
 # ─── Helpers ────────────────────────────────────────────
 
 
+class JsonUnreadable(Exception):
+    """A JSON file that exists and cannot be read or parsed (ai_mail, leg 13)."""
+
+
 def _read_json(filepath: Path) -> Optional[dict]:
-    """Read and parse a JSON file, returning None on failure."""
+    """Read and parse a JSON file; None when it does not exist.
+
+    Raises:
+        JsonUnreadable: The file exists and cannot be read or parsed. Each
+            caller gives its own answer for that (ai_mail, leg 13).
+    """
     if not filepath.exists():
         return None
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning("[wake] Failed to read %s: %s", filepath, e)
-        return None
-
-
-def _pid_alive_windows(pid: int) -> bool:
-    """Windows-safe liveness check via OpenProcess + GetExitCodeProcess."""
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return False
-        return exit_code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-def _check_lock(branch_path: Path) -> Optional[dict]:
-    """Check if branch has an active dispatch lock. Returns lock data or None."""
-    lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
-    if not lock_file.exists():
-        return None
-    try:
-        with open(lock_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        pid = data.get("pid")
-        if pid is not None:
-            if _check_pid_alive(pid):
-                return data
-            logger.info("[wake] Lock PID %s dead — cleaning stale lock", pid)
-        # Stale lock — check age (10 min timeout)
-        ts = data.get("timestamp", "")
-        if ts:
-            try:
-                from datetime import datetime
-
-                lock_time = datetime.fromisoformat(ts)
-                age = (datetime.now() - lock_time).total_seconds()
-                if age > 600:
-                    lock_file.unlink(missing_ok=True)
-                    return None
-            except (ValueError, TypeError):
-                logger.info("[wake] Unparseable lock timestamp at %s", lock_file)
-        # Dead process, remove stale lock
-        lock_file.unlink(missing_ok=True)
-        return None
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("[wake] Failed to read lock file %s: %s", lock_file, e)
-        return None
-
-
-def _acquire_lock(branch_path: Path, pid: int) -> Tuple[bool, str]:
-    """Acquire dispatch lock for branch. Atomic creation."""
-    lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
-    lock_data = {"pid": pid, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "branch": str(branch_path)}
-    try:
-        lock_file.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        with os.fdopen(fd, "w") as f:
-            json.dump(lock_data, f, indent=2)
-        return True, "Lock acquired"
-    except FileExistsError as e:
-        logger.warning("[wake] Lock file already exists at %s: %s", lock_file, e)
-        return False, "Lock file already exists"
-    except OSError as e:
-        logger.warning("[wake] Lock acquisition failed at %s: %s", lock_file, e)
-        return False, f"Lock failed: {e}"
+        raise JsonUnreadable(f"{filepath.name} could not be read ({filepath}): {e}") from e
 
 
 def _load_config() -> dict:
@@ -389,155 +329,6 @@ def _load_config() -> dict:
         if key not in config:
             config[key] = val
     return config
-
-
-def _get_pid_cwd(pid_str: str) -> Optional[str]:
-    """Get the cwd of a process. Cross-platform: Linux /proc, macOS lsof."""
-    if sys.platform == "linux":
-        try:
-            return os.readlink(f"/proc/{pid_str}/cwd")
-        except (OSError, PermissionError):
-            logger.info("[wake] Cannot read cwd for PID %s", pid_str)
-            return None
-    if sys.platform == "darwin":
-        return _get_pid_cwd_darwin(pid_str)
-    logger.info("[wake] Cannot determine cwd for PID %s on %s", pid_str, sys.platform)
-    return None
-
-
-def _get_pid_cwd_darwin(pid_str: str) -> Optional[str]:
-    """macOS: get process cwd via lsof."""
-    try:
-        result = subprocess.run(
-            ["lsof", "-a", "-p", pid_str, "-d", "cwd", "-Fn"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Cannot read cwd for PID %s on macOS", pid_str)
-        return None
-    if result.returncode != 0:
-        return None
-    for line in result.stdout.strip().split("\n"):
-        if line.startswith("n/"):
-            return line[1:]
-    return None
-
-
-def _read_session_type(pid_str: str) -> str:
-    """Read AIPASS_SESSION_TYPE from process environment. Returns 'interactive' if unset."""
-    if sys.platform == "linux":
-        try:
-            with open(f"/proc/{pid_str}/environ", "rb") as f:
-                data = f.read()
-            for entry in data.split(b"\0"):
-                if entry.startswith(b"AIPASS_SESSION_TYPE="):
-                    return entry.split(b"=", 1)[1].decode("utf-8")
-        except (OSError, PermissionError):
-            logger.info("[wake] Cannot read session type for PID %s", pid_str)
-        return "interactive"
-    if sys.platform == "darwin":
-        return _read_session_type_darwin(pid_str)
-    return "interactive"
-
-
-def _read_session_type_darwin(pid_str: str) -> str:
-    """macOS: read AIPASS_SESSION_TYPE from ps environment output."""
-    try:
-        result = subprocess.run(
-            ["ps", "-p", pid_str, "-wwE", "-o", "command="],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Cannot read session type for PID %s on macOS", pid_str)
-        return "interactive"
-    if result.returncode != 0:
-        return "interactive"
-    for token in result.stdout.split():
-        if token.startswith("AIPASS_SESSION_TYPE="):
-            return token.split("=", 1)[1]
-    return "interactive"
-
-
-# Session types that should NOT block dispatch (idle/background sessions)
-_NON_BLOCKING_SESSION_TYPES = {"dispatched", "daemon"}
-
-
-def _is_branch_occupied(branch_path: Path) -> bool:
-    """Check if an interactive Claude session is running in this branch directory."""
-    resolved = str(branch_path.resolve())
-    try:
-        result = subprocess.run(["pgrep", "-x", "claude"], capture_output=True, text=True, timeout=5)
-        if result.returncode != 0:
-            return False
-        for pid_str in result.stdout.strip().split("\n"):
-            pid_str = pid_str.strip()
-            if not pid_str:
-                continue
-            cwd = _get_pid_cwd(pid_str)
-            if cwd is None:
-                continue
-            if str(Path(cwd).resolve()) == resolved:
-                session_type = _read_session_type(pid_str)
-                if session_type not in _NON_BLOCKING_SESSION_TYPES:
-                    return True
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Failed to check branch occupancy")
-    return False
-
-
-def _clean_zombies() -> int:
-    """Find and report zombie Claude processes. Returns count found."""
-    count = 0
-    try:
-        result = subprocess.run(["ps", "-eo", "pid,stat,comm"], capture_output=True, text=True, timeout=5)
-        for line in result.stdout.strip().split("\n"):
-            parts = line.split()
-            if len(parts) >= 3 and parts[2] == "claude" and "Z" in parts[1]:
-                count += 1
-                logger.info("[wake] Found zombie Claude process PID %s", parts[0])
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Failed to check for zombie processes")
-    return count
-
-
-def _check_pid_alive(pid: int) -> bool:
-    """Check if a process is alive (not zombie)."""
-    if sys.platform == "win32":
-        try:
-            return _pid_alive_windows(pid)
-        except Exception as exc:
-            logger.info("[wake] PID %s Windows check failed (assuming alive): %s", pid, exc)
-            return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError as exc:
-        logger.warning("[wake] PID %s not found: %s", pid, exc)
-        return False
-    except PermissionError as exc:
-        logger.warning("[wake] PID %s permission denied: %s", pid, exc)
-        return True
-    except OSError as exc:
-        logger.warning("[wake] PID %s os.kill error (assuming dead): %s", pid, exc)
-        return False
-    if sys.platform == "linux" and _is_zombie_linux(pid):
-        return False
-    return True
-
-
-def _is_zombie_linux(pid: int) -> bool:
-    """Return True if PID is a zombie (Linux /proc/status check)."""
-    try:
-        with open(f"/proc/{pid}/status", "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("State:"):
-                    return "Z" in line
-    except FileNotFoundError as exc:
-        logger.warning("[wake] PID %s /proc not found: %s", pid, exc)
-    return False
 
 
 def _spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lock_file_path, custom_message, status):
@@ -721,9 +512,10 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
     # Step 1: AIPass registry (local branches). One that exists and cannot be
     # read refuses: read as absent, steps 2-4 could serve another project's
     # namesake, and the daemon wakes with no caller cwd (ai_mail, leg 12).
-    registry = _read_json(BRANCH_REGISTRY)
-    if registry is None and BRANCH_REGISTRY.exists():
-        raise RegistryUnreadable(f"{BRANCH_REGISTRY.name} could not be read ({BRANCH_REGISTRY})")
+    try:
+        registry = _read_json(BRANCH_REGISTRY)
+    except JsonUnreadable as e:
+        raise RegistryUnreadable(f"{BRANCH_REGISTRY.name} could not be read ({BRANCH_REGISTRY})") from e
     if registry is not None:
         for branch in registry.get("branches", []):
             if branch.get("email", "").lower() == email:
@@ -1183,7 +975,13 @@ def wake_branch(
         return _spawn_manager_interactive(branch_path, email, custom_message or DEFAULT_PROMPT, resolved_model, status)
 
     # Step 7: Build spawn command
-    config = _load_config()
+    # An unreadable safety config refuses the wake: its max_turns may be lower
+    # than the default 100 (ai_mail, leg 13). No lock is held yet.
+    try:
+        config = _load_config()
+    except JsonUnreadable as e:
+        status.fail("config", str(e))
+        return status, False
     max_turns = config.get("max_turns_per_wake", 100)
 
     if custom_message:

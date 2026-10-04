@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_contacts.py
 # Description: Tests for the contacts address book handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-11
-# Modified: 2026-09-29
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/email/contacts.py."""
@@ -22,7 +22,6 @@ from aipass.ai_mail.apps.handlers.email.contacts import (
     get_contact,
     register_contact,
     all_contacts,
-    _load_contacts,
 )
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
@@ -46,29 +45,26 @@ def isolated_contacts(tmp_path, monkeypatch):
     return contacts_file
 
 
-# ---- _load_contacts() tests --------------------------------
+# ---- loading contacts.json, read through all_contacts() -----
 
 
 def test_load_contacts_missing_file(isolated_contacts):
-    """Missing contacts.json returns default empty structure."""
-    result = _load_contacts()
-    assert result == {"contacts": {}}
+    """Missing contacts.json lists no contacts."""
+    assert all_contacts() == {}
 
 
 def test_load_contacts_invalid_json(isolated_contacts):
-    """Corrupted contacts.json returns default empty structure."""
+    """Corrupted contacts.json lists no contacts."""
     isolated_contacts.parent.mkdir(parents=True, exist_ok=True)
     isolated_contacts.write_text("not json", encoding="utf-8")
-    result = _load_contacts()
-    assert result == {"contacts": {}}
+    assert all_contacts() == {}
 
 
 def test_load_contacts_missing_key(isolated_contacts):
-    """contacts.json without 'contacts' key returns default empty structure."""
+    """contacts.json without 'contacts' key lists no contacts."""
     isolated_contacts.parent.mkdir(parents=True, exist_ok=True)
     isolated_contacts.write_text(json.dumps({"other": {}}), encoding="utf-8")
-    result = _load_contacts()
-    assert result == {"contacts": {}}
+    assert all_contacts() == {}
 
 
 # ---- get_contact() tests -----------------------------------

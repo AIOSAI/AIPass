@@ -19,6 +19,7 @@ from datetime import datetime, date, timedelta
 from unittest.mock import MagicMock, patch
 
 import aipass.ai_mail.apps.handlers.dispatch.daemon as daemon_mod
+import aipass.ai_mail.apps.handlers.dispatch.pid_lock as pid_lock_mod
 from aipass.ai_mail.apps.handlers.dispatch.daemon import (
     _read_json,
     _write_json,
@@ -46,6 +47,7 @@ from aipass.ai_mail.apps.handlers.dispatch.test_token import (
     scan_and_ack_test_emails,
     TEST_TOKEN,
 )
+from aipass.ai_mail.apps.handlers.dispatch.wake import JsonUnreadable
 
 
 # ---- Fixtures ------------------------------------------------
@@ -88,23 +90,21 @@ def test_read_json_missing_file(tmp_path):
 
 
 def test_read_json_invalid_json(tmp_path):
-    """Corrupt JSON returns None instead of raising."""
+    """Corrupt JSON raises JsonUnreadable, distinct from a missing file (ai_mail, leg 13)."""
     target = tmp_path / "bad.json"
     target.write_text("{not valid json!!!", encoding="utf-8")
 
-    result = _read_json(target)
-
-    assert result is None
+    with pytest.raises(JsonUnreadable):
+        _read_json(target)
 
 
 def test_read_json_empty_file(tmp_path):
-    """Empty file returns None (json.JSONDecodeError)."""
+    """An empty file is unreadable too, not absent (ai_mail, leg 13)."""
     target = tmp_path / "empty.json"
     target.write_text("", encoding="utf-8")
 
-    result = _read_json(target)
-
-    assert result is None
+    with pytest.raises(JsonUnreadable):
+        _read_json(target)
 
 
 # ---- _write_json tests ----------------------------------------
@@ -214,15 +214,25 @@ def test_load_config_full_file(tmp_path):
     assert result["kill_switch_path"] == str(tmp_path / "test_pause")
 
 
-def test_load_config_corrupt_json(tmp_path):
-    """Corrupt config file returns defaults."""
+def test_load_config_corrupt_json_refuses(tmp_path):
+    """A corrupt safety config raises, never the defaults (ai_mail, leg 13).
+
+    The defaults are the less safe side: autonomous_branches [] means every
+    branch is autonomous, and the kill switch path is the default one.
+    """
     config_file = tmp_path / "safety_config.json"
     config_file.write_text("{{broken", encoding="utf-8")
 
-    result = load_config()
+    with pytest.raises(JsonUnreadable):
+        load_config()
 
-    assert result["poll_interval_seconds"] == 300
-    assert result["max_turns_per_wake"] == 100
+
+def test_load_daemon_state_corrupt_refuses(tmp_path):
+    """A corrupt state file raises: an empty state would reset today's dispatch counts (ai_mail, leg 13)."""
+    (tmp_path / "daemon_state.json").write_text("{{broken", encoding="utf-8")
+
+    with pytest.raises(JsonUnreadable):
+        load_daemon_state()
 
 
 # ---- load_daemon_state tests -----------------------------------
@@ -366,6 +376,13 @@ def test_get_registered_branches_no_file():
     assert isinstance(result, list)
 
 
+def test_get_registered_branches_unreadable_polls_none(tmp_path):
+    """An unreadable registry answers no branches: nothing is polled, nothing spawned (ai_mail, leg 13)."""
+    (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+
+    assert get_registered_branches() == []
+
+
 def test_get_registered_branches_no_branches_key(tmp_path):
     """Registry without 'branches' key returns empty list."""
     registry = tmp_path / "AIPASS_REGISTRY.json"
@@ -422,6 +439,16 @@ def test_check_inbox_dispatch_no_inbox_file(tmp_path):
     result = check_inbox_for_dispatch(tmp_path / "nonexistent_branch")
 
     assert result is None
+
+
+def test_an_unreadable_inbox_yields_no_dispatch_and_no_ack(tmp_path):
+    """An unreadable inbox spawns nothing and acks nothing; neither scan raises (ai_mail, leg 13)."""
+    inbox = tmp_path / ".ai_mail.local" / "inbox.json"
+    inbox.parent.mkdir(parents=True)
+    inbox.write_text("{not json", encoding="utf-8")
+
+    assert check_inbox_for_dispatch(tmp_path) is None
+    assert scan_and_ack_test_emails(tmp_path, "@testbranch") == 0
 
 
 def test_check_inbox_dispatch_orphaned_opened_message(tmp_path):
@@ -821,7 +848,7 @@ def test_check_lock_alive_pid(tmp_path, monkeypatch):
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
     alive = MagicMock(return_value=True)
-    monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
+    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
 
     result = _check_lock(tmp_path)
 
@@ -839,7 +866,7 @@ def test_check_lock_dead_pid(tmp_path, monkeypatch):
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
     alive = MagicMock(return_value=False)
-    monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
+    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
 
     result = _check_lock(tmp_path)
 
@@ -858,7 +885,7 @@ def test_check_lock_stale_over_10min_removed(tmp_path, monkeypatch):
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
     alive = MagicMock(return_value=False)
-    monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
+    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
 
     result = _check_lock(tmp_path)
 
@@ -877,7 +904,7 @@ def test_check_lock_stale_under_10min_dead_pid_removed(tmp_path, monkeypatch):
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
     alive = MagicMock(return_value=False)
-    monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
+    monkeypatch.setattr(pid_lock_mod, "_check_pid_alive", alive)
 
     result = _check_lock(tmp_path)
 
@@ -886,12 +913,43 @@ def test_check_lock_stale_under_10min_dead_pid_removed(tmp_path, monkeypatch):
     alive.assert_called_once_with(99999)
 
 
-def test_check_lock_corrupt_json_removed(tmp_path):
-    """Corrupt lock file is removed and returns None."""
+def test_check_lock_fresh_corrupt_json_is_held(tmp_path):
+    """A corrupt lock younger than the grace is a writer mid-write: held, not removed (ai_mail, leg 13)."""
     lock_dir = tmp_path / ".ai_mail.local"
     lock_dir.mkdir(parents=True)
     lock_file = lock_dir / ".dispatch.lock"
     lock_file.write_text("{bad json!!", encoding="utf-8")
+
+    result = _check_lock(tmp_path)
+
+    assert result is not None
+    assert lock_file.exists()
+
+
+def test_check_lock_old_corrupt_json_removed(tmp_path):
+    """A corrupt lock an hour old is a crashed writer's leftover: removed, None."""
+    lock_dir = tmp_path / ".ai_mail.local"
+    lock_dir.mkdir(parents=True)
+    lock_file = lock_dir / ".dispatch.lock"
+    lock_file.write_text("{bad json!!", encoding="utf-8")
+    hour_ago = lock_file.stat().st_mtime - 3600
+    os.utime(lock_file, (hour_ago, hour_ago))
+
+    result = _check_lock(tmp_path)
+
+    assert result is None
+    assert not lock_file.exists()
+
+
+def test_check_lock_zombie_holder_is_dead(tmp_path, monkeypatch):
+    """A lock held by a linux zombie is reclaimed: the wake's liveness rule (ai_mail, leg 13)."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    lock_dir = tmp_path / ".ai_mail.local"
+    lock_dir.mkdir(parents=True)
+    lock_file = lock_dir / ".dispatch.lock"
+    lock_file.write_text(json.dumps({"pid": 4242}), encoding="utf-8")
+    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(pid_lock_mod, "_is_zombie_linux", lambda pid: pid == 4242)
 
     result = _check_lock(tmp_path)
 
@@ -1285,7 +1343,7 @@ def test_is_branch_occupied_claude_in_same_dir_interactive(tmp_path, monkeypatch
         ),
         patch("os.readlink", return_value=str(tmp_path.resolve())),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.wake._read_session_type",
+            "aipass.ai_mail.apps.handlers.dispatch.pid_lock._read_session_type",
             return_value="interactive",
         ),
     ):
@@ -1309,7 +1367,7 @@ def test_is_branch_occupied_claude_in_same_dir_daemon(tmp_path, monkeypatch):
         ),
         patch("os.readlink", return_value=str(tmp_path.resolve())),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.wake._read_session_type",
+            "aipass.ai_mail.apps.handlers.dispatch.pid_lock._read_session_type",
             return_value="daemon",
         ),
     ):
@@ -1717,6 +1775,44 @@ def test_run_daemon_write_pid_failure_returns_early(tmp_path, monkeypatch):
         run_daemon()
 
     mock_config.assert_not_called()
+
+
+def test_run_daemon_does_not_start_on_an_unreadable_config(tmp_path, monkeypatch):
+    """An unreadable safety config stops the daemon before a cycle, and its pid file goes (ai_mail, leg 13)."""
+    pid_file = tmp_path / "daemon.pid"
+    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
+    (tmp_path / "safety_config.json").write_text("{{broken", encoding="utf-8")
+    cycles = []
+    monkeypatch.setattr(daemon_mod, "poll_cycle", lambda config, state: cycles.append(config) or 0)
+    monkeypatch.setattr(daemon_mod, "SHUTDOWN", False)
+
+    run_daemon()
+
+    assert cycles == []
+    assert not pid_file.exists()
+
+
+def test_run_daemon_skips_a_cycle_on_unreadable_state(tmp_path, monkeypatch):
+    """A cycle whose state file cannot be read spawns nothing (ai_mail, leg 13)."""
+    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", tmp_path / "daemon.pid")
+    (tmp_path / "daemon_state.json").write_text("{{broken", encoding="utf-8")
+    config = {"poll_interval_seconds": 0, "kill_switch_path": str(tmp_path / "pause"), "autonomous_branches": []}
+    monkeypatch.setattr(daemon_mod, "load_config", lambda: dict(config))
+    cycles = []
+    monkeypatch.setattr(daemon_mod, "poll_cycle", lambda cfg, state: cycles.append(state) or 0)
+    sleeps = []
+
+    def _stop_after_one_skip(seconds):
+        sleeps.append(seconds)
+        daemon_mod.SHUTDOWN = True
+
+    monkeypatch.setattr(daemon_mod.time, "sleep", _stop_after_one_skip)
+    monkeypatch.setattr(daemon_mod, "SHUTDOWN", False)
+
+    run_daemon()
+
+    assert cycles == []
+    assert sleeps == [0]
 
 
 # ---- poll_cycle edge case tests -----------------------------------

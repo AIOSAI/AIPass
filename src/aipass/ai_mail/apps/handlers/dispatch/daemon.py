@@ -36,9 +36,12 @@ from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.dispatch.test_token import scan_and_ack_test_emails
 
 # The occupancy check with its process readers (pgrep, /proc, lsof, ps), and
-# _read_json, were copied here from wake and live there alone since leg 12, so
-# one body answers for both the daemon and the wake (ai_mail, leg 12; todo 39).
-from aipass.ai_mail.apps.handlers.dispatch.wake import DEFAULT_MODEL, _is_branch_occupied, _read_json
+# _read_json, were copied here from wake and have one body since leg 12, so
+# the daemon and the wake answer alike (ai_mail, leg 12; todo 39). The process
+# helpers moved on to pid_lock in leg 13, and the dispatch lock pair became
+# one there too, so a zombie holder is dead to both (ai_mail, leg 13).
+from aipass.ai_mail.apps.handlers.dispatch.pid_lock import _acquire_lock, _check_lock, _is_branch_occupied
+from aipass.ai_mail.apps.handlers.dispatch.wake import DEFAULT_MODEL, JsonUnreadable, _read_json
 
 
 # Infrastructure paths
@@ -129,61 +132,6 @@ def _pid_alive(pid: int) -> bool:
         logger.info("[daemon] PID %s os.kill error (assuming dead): %s", pid, exc)
         return False
     return True
-
-
-def _check_lock(branch_path: Path) -> Optional[Dict[str, Any]]:
-    """Check if branch has an active dispatch lock. Returns lock data or None."""
-    lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
-    if not lock_file.exists():
-        return None
-    try:
-        with open(lock_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        pid = data.get("pid")
-        if pid is not None:
-            if _pid_alive(pid):
-                return data
-            logger.info("Lock PID %s dead — stale lock cleanup needed", pid)
-        # Stale lock — check age (10 min timeout)
-        ts = data.get("timestamp", "")
-        if ts:
-            try:
-                lock_time = datetime.fromisoformat(ts)
-                age = (datetime.now() - lock_time).total_seconds()
-                if age > 600:
-                    logger.warning("Stale lock removed at %s (PID %s dead, age %.0fs)", lock_file, pid, age)
-                    lock_file.unlink(missing_ok=True)
-                    return None
-            except (ValueError, TypeError):
-                logger.info("Unparseable lock timestamp at %s", lock_file)
-        # Dead process, remove stale lock
-        logger.warning("Stale lock removed at %s (PID %s no longer running)", lock_file, pid)
-        lock_file.unlink(missing_ok=True)
-        return None
-    except (json.JSONDecodeError, OSError):
-        logger.warning("Corrupt lock file removed at %s", lock_file)
-        lock_file.unlink(missing_ok=True)
-        return None
-
-
-def _acquire_lock(branch_path: Path, pid: int) -> tuple[bool, str]:
-    """Acquire dispatch lock for branch. Atomic creation via O_CREAT|O_EXCL."""
-    lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
-    lock_data = {"pid": pid, "timestamp": datetime.now().isoformat(), "branch": str(branch_path)}
-    try:
-        lock_file.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        try:
-            os.write(fd, json.dumps(lock_data, indent=2).encode("utf-8"))
-        finally:
-            os.close(fd)
-        return True, "Lock acquired"
-    except FileExistsError as e:
-        logger.warning("[daemon] Lock file already exists at %s: %s", lock_file, e)
-        return False, "Lock file already exists"
-    except OSError as e:
-        logger.warning("[daemon] Lock acquisition failed at %s: %s", lock_file, e)
-        return False, f"Lock failed: {e}"
 
 
 def load_config() -> Dict[str, Any]:
@@ -324,8 +272,16 @@ def _remove_pid_file() -> None:
 
 
 def get_registered_branches() -> list:
-    """Load all registered branches from AIPASS_REGISTRY.json."""
-    data = _read_json(BRANCH_REGISTRY)
+    """Load all registered branches from AIPASS_REGISTRY.json.
+
+    An unreadable registry answers [] like a missing one: no branch is polled,
+    so nothing is spawned, the safe side (ai_mail, leg 13).
+    """
+    try:
+        data = _read_json(BRANCH_REGISTRY)
+    except JsonUnreadable as e:
+        logger.warning("[daemon] %s — no branch is polled this cycle", e)
+        return []
     if data is None:
         return []
     return data.get("branches", [])
@@ -339,11 +295,12 @@ def _is_registered_sender(sender: str) -> bool:
     for any sender, and before leg 12 it failed open and let spawn_agent run
     an auto_execute dispatch from anyone (ai_mail, leg 12; todo 44).
     """
-    registry = _read_json(BRANCH_REGISTRY)
+    try:
+        registry = _read_json(BRANCH_REGISTRY)
+    except JsonUnreadable as e:
+        logger.warning("[daemon] %s — %s not vouched for", e, sender)
+        return False
     if registry is None:
-        if BRANCH_REGISTRY.exists():
-            logger.warning("[daemon] Registry %s unreadable — %s not vouched for", BRANCH_REGISTRY, sender)
-            return False
         return True
     for branch in registry.get("branches", []):
         if branch.get("email") == sender:
@@ -360,7 +317,12 @@ def check_inbox_for_dispatch(branch_path: Path) -> Optional[Dict[str, Any]]:
     before completing).
     """
     inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
-    inbox_data = _read_json(inbox_file)
+    try:
+        inbox_data = _read_json(inbox_file)
+    except JsonUnreadable as e:
+        # No dispatch found is the safe side: nothing spawns (ai_mail, leg 13).
+        logger.warning("[daemon] %s — no dispatch read from it", e)
+        return None
     if inbox_data is None:
         return None
 
@@ -641,7 +603,14 @@ def run_daemon() -> None:
     logger.info(f"DISPATCH DAEMON STARTING (PID {os.getpid()})")
     logger.info("=" * 60)
 
-    config = load_config()
+    # An unreadable safety config stops the daemon: its defaults are the less
+    # safe side, every branch autonomous (ai_mail, leg 13).
+    try:
+        config = load_config()
+    except JsonUnreadable as e:
+        logger.error("[daemon] Not starting: %s", e)
+        _remove_pid_file()
+        return
     poll_interval = config.get("poll_interval_seconds", 300)
 
     logger.info(f"Poll interval: {poll_interval}s")
@@ -673,10 +642,17 @@ def run_daemon() -> None:
             time.sleep(poll_interval)
             continue
 
-        config = load_config()
+        # Unreadable config or state skips the cycle and spawns nothing: the
+        # defaults would make every branch autonomous and an empty state would
+        # reset today's dispatch counts (ai_mail, leg 13).
+        try:
+            config = load_config()
+            state = load_daemon_state()
+        except JsonUnreadable as e:
+            logger.warning("[daemon] Cycle skipped, nothing spawned: %s", e)
+            time.sleep(poll_interval)
+            continue
         poll_interval = config.get("poll_interval_seconds", 300)
-
-        state = load_daemon_state()
         cycle_count += 1
 
         logger.info(f"--- Poll cycle {cycle_count} ---")
