@@ -37,7 +37,6 @@ from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
 )
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import refresh_recipient_dashboard
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
-    _find_claude_bin,
     resolve_branch,
     DispatchStatus,
     KNOWN_MODEL_ALIASES,
@@ -734,48 +733,57 @@ def test_known_model_aliases_are_bare_names():
 
 
 class TestFindClaudeBin:
-    """Tests for _find_claude_bin() — resolves claude binary path."""
+    """The claude binary, resolved by the wake that spawns it (ai_mail, leg 16).
 
-    def test_uses_shutil_which_when_found(self, monkeypatch):
-        """Returns shutil.which result when claude is on PATH."""
-        which = MagicMock(return_value="/usr/local/bin/claude")
-        monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.shutil.which", which)
-        result = _find_claude_bin()
-        assert result == "/usr/local/bin/claude"
-        which.assert_called_once_with("claude")
+    Each row reads the command the wake handed the monitor, so the answer is
+    the one a spawn carries. HOME/USERPROFILE name tmp_path so Path.home
+    answers from the environment the platform reads. shutil.which is the
+    stand-in for PATH, as in _record_spawn_routes.
+    """
 
-    def test_falls_back_to_local_bin(self, monkeypatch, tmp_path):
-        """Falls back to ~/.local/bin/claude when not on PATH.
-
-        PATH names one empty directory and HOME/USERPROFILE name tmp_path, so
-        shutil.which and Path.home answer from the environment the platform
-        reads, with nothing of shutil or pathlib replaced (ai_mail, leg 6).
-        """
-        empty_path = tmp_path / "empty_path"
-        empty_path.mkdir()
-        monkeypatch.setenv("PATH", str(empty_path))
+    def _wake(self, tmp_path, monkeypatch, claude_on_path):
+        """Wake once with which answering *claude_on_path* for claude."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, resolve_claude=True)
+        calls = _record_spawn_routes(monkeypatch)
+        monkeypatch.setattr(wake_mod.shutil, "which", lambda name: claude_on_path if name == "claude" else None)
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
-        fake_local_bin = tmp_path / ".local" / "bin"
-        fake_local_bin.mkdir(parents=True)
-        fake_claude = fake_local_bin / "claude"
+
+        status, ok = wake_branch("@testbranch")
+        return status, ok, calls
+
+    def test_uses_shutil_which_when_found(self, tmp_path, monkeypatch):
+        """The PATH answer at the wake is the binary spawned, not one read at import."""
+        on_path = str(tmp_path / "bin" / "claude")
+
+        status, ok, calls = self._wake(tmp_path, monkeypatch, on_path)
+
+        assert ok is True
+        assert _claude_args(calls["popen"][0]["cmd"])[0] == on_path
+
+    def test_falls_back_to_local_bin(self, tmp_path, monkeypatch):
+        """Off PATH, ~/.local/bin/claude is the binary spawned."""
+        fake_claude = tmp_path / ".local" / "bin" / "claude"
+        fake_claude.parent.mkdir(parents=True)
         fake_claude.touch()
-        result = _find_claude_bin()
-        assert result == str(fake_claude)
 
-    def test_falls_back_to_name_when_not_found(self, monkeypatch, tmp_path):
-        """Returns bare 'claude' when no known location has the binary.
+        status, ok, calls = self._wake(tmp_path, monkeypatch, None)
 
-        The environment, not a patch of shutil or pathlib, empties PATH and
-        moves home to tmp_path (ai_mail, leg 6).
-        """
-        empty_path = tmp_path / "empty_path"
-        empty_path.mkdir()
-        monkeypatch.setenv("PATH", str(empty_path))
-        monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
-        result = _find_claude_bin()
-        assert result == "claude"
+        assert ok is True
+        assert _claude_args(calls["popen"][0]["cmd"])[0] == str(fake_claude)
+
+    def test_falls_back_to_name_when_not_found(self, tmp_path, monkeypatch):
+        """No binary anywhere refuses the wake by name: no spawn of a bare 'claude'."""
+        status, ok, calls = self._wake(tmp_path, monkeypatch, None)
+
+        assert ok is False
+        assert calls["popen"] == []
+        step = status.find_step("claude")
+        assert step is not None
+        assert step[0] == "fail"
+        assert "PATH" in step[2]
+        assert str(tmp_path / ".local" / "bin" / "claude") in step[2]
 
 
 class TestResolveBranchCallerRegistry:
@@ -1095,8 +1103,13 @@ def _make_wake_fixtures(tmp_path, monkeypatch):
     return branch_path
 
 
-def _patch_wake_deps(monkeypatch, **overrides):
-    """Monkeypatch all wake_branch dependencies with sane defaults; override as needed."""
+def _patch_wake_deps(monkeypatch, resolve_claude=False, **overrides):
+    """Monkeypatch all wake_branch dependencies with sane defaults; override as needed.
+
+    The claude binary is stubbed to the bare name unless *resolve_claude*: the
+    wake resolves it per spawn, and a CI runner has no claude to find. The
+    rows about that resolution (TestFindClaudeBin) let the real one run.
+    """
     defaults = {
         "check_lock": lambda p: None,
         "clean_zombies": lambda: 0,
@@ -1109,6 +1122,8 @@ def _patch_wake_deps(monkeypatch, **overrides):
         # TestRecipientDashboardRefresh._real_refresh).
         "_refresh_recipient_dashboard": lambda path, email, status: None,
     }
+    if not resolve_claude:
+        defaults["_find_claude_bin"] = lambda: "claude"
     defaults.update(overrides)
     for attr, val in defaults.items():
         monkeypatch.setattr(wake_mod, attr, val)

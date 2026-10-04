@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_notify.py
 # Description: Tests for the notification feed writer
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-04-03
-# Modified: 2026-10-02
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/notify.py -- JSONL notification feed writer."""
@@ -241,6 +241,36 @@ def test_a_feed_exactly_at_cap_is_not_trimmed(feed, monkeypatch):
         mod.send_notification(f"Title {i}", "B")
 
     assert [event["title"] for event in _lines(feed)] == ["Title 0", "Title 1", "Title 2"]
+
+
+def test_an_undecodable_line_neither_fails_the_send_nor_stops_the_trim(feed, monkeypatch):
+    """A byte that is not UTF-8 in the feed is a malformed line, not a crash.
+
+    The trim decoded the feed to count its lines, so one such byte made every
+    later send raise UnicodeDecodeError after its line was written (ai_mail,
+    leg 16). The trim counts bytes now; the bad line ages out like any other.
+    """
+    monkeypatch.setattr(mod, "FEED_MAX_LINES", 3)
+    monkeypatch.setattr(mod, "FEED_KEEP_LINES", 2)
+    feed.parent.mkdir(parents=True)
+    feed.write_bytes(b"\xff not utf-8\n")
+
+    results = [mod.send_notification(f"Title {i}", "B") for i in range(3)]
+
+    assert results == [True, True, True]
+    assert [event["title"] for event in _lines(feed)] == ["Title 1", "Title 2"]
+
+
+def test_records_skip_an_undecodable_line_and_name_it(tmp_path, _capture_logger):
+    """jsonl_records skips a line that is not UTF-8 as it skips bad JSON (ai_mail, leg 16).
+
+    strict is about reading the file; one bad line never costs the records after it.
+    """
+    log = tmp_path / "register.jsonl"
+    log.write_bytes(b'{"n": 1}\n\xff\n{"n": 2}\n')
+
+    assert [record["n"] for record in mod.jsonl_records(log, strict=True)] == [1, 2]
+    _capture_logger.warning.assert_called_once_with("[notify] skipping malformed line %d in %s", 2, log)
 
 
 def test_trim_reports_false_and_logs_when_feed_is_unreadable(tmp_path, _capture_logger):

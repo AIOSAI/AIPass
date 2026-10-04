@@ -33,11 +33,6 @@
       "reason": "run_daemon() depth 5 (main daemon loop with retry + signal handling)"
     },
     {
-      "file": "apps/handlers/dispatch/wake.py",
-      "standard": "deep_nesting",
-      "reason": "3 functions: _check_lock() depth 4 (lock validation with PID checks and age), _is_branch_occupied() depth 5 (process inspection, filters by session type — must check /proc), resolve_branch() depth 4 (AIPass registry scan + caller-registry fallback for cross-project dispatch)"
-    },
-    {
       "file": "apps/handlers/email/inbox_ops.py",
       "standard": "deep_nesting",
       "reason": "load_inbox() depth 5 — auto-migration between v1 and v2 inbox formats requires nested schema checks. (Was written as depth 4; the checker reports 5 at line 46 as of 2026-08-13, so the code drifted a level deeper than the reason claimed.)"
@@ -199,8 +194,8 @@
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
-      "lines": [447],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in leg 13): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too."
+      "lines": [453],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in legs 13 and 16): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too."
     },
     {
       "file": "apps/handlers/email/create.py",
@@ -235,8 +230,8 @@
     {
       "file": "apps/handlers/notify.py",
       "standard": "logged_fallback",
-      "lines": [298, 313],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 10): _trim_jsonl returns whether the log was trimmed, and a read or replace that failed trimmed nothing (313 also removes its temp file). Its one caller, notify.py:199, ignores the answer, under the lock, after the append has landed; the failure is logged at error. A raise would fail a notification that was already written."
+      "lines": [305, 320],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined in leg 16): _trim_jsonl returns whether the log was trimmed, and a read or replace that failed trimmed nothing (320 also removes its temp file). Its one caller, notify.py:199, ignores the answer, under the lock, after the append has landed; the failure is logged at error. A raise would fail a notification that was already written."
     },
     {
       "file": "apps/handlers/dispatch/test_token.py",
@@ -283,8 +278,8 @@
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
-      "lines": [356, 380],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 12; re-lined in leg 13). 356 and 380: _spawn_in_systemd_scope documents False as 'fall back to direct Popen', the same as a non-zero systemd-run, and its caller 1145 does exactly that."
+      "lines": [362, 386],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 12; re-lined in legs 13 and 16). 362 and 386: _spawn_in_systemd_scope documents False as 'fall back to direct Popen', the same as a non-zero systemd-run, and its caller 1166 does exactly that."
     },
     {
       "file": "apps/handlers/dispatch/pid_lock.py",

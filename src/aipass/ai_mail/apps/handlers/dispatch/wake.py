@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.3.3
+# Version: 3.4.0
 # Created: 2026-03-02
 # Modified: 2026-10-04
 # =============================================
@@ -47,21 +47,27 @@ def _find_claude_bin() -> str:
 
     Background processes (trigger Medic, prax watchdog) may have a restricted
     PATH without ~/.local/bin. This resolves the absolute path directly.
+    Called by wake_branch at each wake, not once at import: a binary installed
+    or moved after the module loaded is the one spawned (ai_mail, leg 16).
+
+    Raises:
+        FileNotFoundError: no claude on PATH or at a known location; the
+            message names what was searched. It used to answer the bare name,
+            and the headless lane then handed the monitor a binary nobody had.
     """
     found = shutil.which("claude")
     if found:
         return found
-    for candidate in [
+    candidates = [
         Path.home() / ".local" / "bin" / "claude",
         Path("/usr/local/bin/claude"),
         Path("/usr/bin/claude"),
-    ]:
+    ]
+    for candidate in candidates:
         if candidate.exists():
             return str(candidate)
-    return "claude"  # Last resort — will raise FileNotFoundError if not found
-
-
-_CLAUDE_BIN = _find_claude_bin()
+    searched = ", ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(f"claude not found on PATH or at {searched}")
 
 
 # Infrastructure paths
@@ -672,8 +678,11 @@ def _spawn_manager_interactive(
     prompt: str,
     model: str,
     status: "DispatchStatus",
+    claude_bin: str,
 ) -> Tuple["DispatchStatus", bool]:
     """Spawn an interactive tmux session for a manager branch.
+
+    `claude_bin` is the binary wake_branch resolved for this wake.
 
     The attachable path: a session the user CAN attach to (same pattern as the
     manual tmux interactive wake). Used only for @daemon self-wakes that passed
@@ -709,7 +718,7 @@ def _spawn_manager_interactive(
 
     session = f"{DAEMON_SESSION_PREFIX}{branch_path.name}-{time.strftime('%H%M%S')}"
     claude_line = (
-        f"{shlex.quote(_CLAUDE_BIN)} --model {shlex.quote(model)} "
+        f"{shlex.quote(claude_bin)} --model {shlex.quote(model)} "
         f"--permission-mode bypassPermissions "
         f'"$(cat {shlex.quote(str(prompt_file))})"'
     )
@@ -870,6 +879,18 @@ def wake_branch(
         with open(passport_file, "r", encoding="utf-8") as f:
             passport = json.load(f)
         citizen_class = passport.get("identity", {}).get("citizen_class", "")
+        # The refusal first, then the three lanes: one level shallower than an
+        # elif chain ending in the refusal, same order (ai_mail, leg 16).
+        if citizen_class == MANAGER_CLASS and not (scheduled or admin or sender == "@daemon"):
+            # Returns True having woken nothing and sent nothing. The caller
+            # owns the notification: the dispatch pipeline already mailed this
+            # manager before calling, and dispatch_monitor's wake-back mails it
+            # via _mail_wake_back(). Saying "mail delivered" here asserted a
+            # delivery this function never makes, which is how the wake-back's
+            # silent drop read as success for months (@devpulse P0, 2026-08-21).
+            status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
+            logger.info("[wake] %s is citizen_class=manager — wake skipped, no mail sent here", email)
+            return status, True
         if citizen_class == MANAGER_CLASS:
             if scheduled:
                 status.ok("manager", f"{email} manager gate bypassed — scheduled wake")
@@ -879,20 +900,11 @@ def wake_branch(
                 status.ok("manager", f"{email} manager gate bypassed — verified admin dispatch")
                 status.ok("admin", "Headless lane — dispatch_monitor pipeline (admin grant verified by caller)")
                 logger.info("[wake] %s manager woken headless — admin lane", email)
-            elif sender == "@daemon":
+            else:
+                # sender == "@daemon", the one lane the refusal above left.
                 manager_scheduled = True
                 status.ok("manager", f"{email} manager gate bypassed — daemon-scheduled self-wake")
                 logger.info("[wake] %s manager gate bypassed — @daemon scheduled wake", email)
-            else:
-                # Returns True having woken nothing and sent nothing. The caller
-                # owns the notification: the dispatch pipeline already mailed this
-                # manager before calling, and dispatch_monitor's wake-back mails it
-                # via _mail_wake_back(). Saying "mail delivered" here asserted a
-                # delivery this function never makes, which is how the wake-back's
-                # silent drop read as success for months (@devpulse P0, 2026-08-21).
-                status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
-                logger.info("[wake] %s is citizen_class=manager — wake skipped, no mail sent here", email)
-                return status, True
     except FileNotFoundError as exc:
         # No passport: no class was ever declared, so nothing marks this target
         # a manager. The ordinary path stands (pinned: missing passport continues).
@@ -966,13 +978,25 @@ def wake_branch(
     # and all three spawn lanes below (tmux manager, systemd scope, detached
     # Popen) are downstream — so the dashboard is written exactly when a session
     # is certain to start, and exactly once. Fail-open; see the helper.
+    # Step 6a: the claude binary, resolved at this wake for both spawn lanes.
+    # Before the dashboard refresh, so a wake that cannot spawn writes nothing,
+    # and before any lock (ai_mail, leg 16).
+    try:
+        claude_bin = _find_claude_bin()
+    except FileNotFoundError as e:
+        status.fail("claude", str(e))
+        logger.warning("[wake] %s not woken: %s", email, e)
+        return status, False
+
     _refresh_recipient_dashboard(branch_path, email, status)
 
     # A @daemon-sender manager wake spawns an interactive tmux session instead
     # of the -p/monitor pipeline below. The scheduled lane deliberately does not
     # set this flag — an unattended run belongs in the monitored pipeline.
     if manager_scheduled:
-        return _spawn_manager_interactive(branch_path, email, custom_message or DEFAULT_PROMPT, resolved_model, status)
+        return _spawn_manager_interactive(
+            branch_path, email, custom_message or DEFAULT_PROMPT, resolved_model, status, claude_bin
+        )
 
     # Step 7: Build spawn command
     # An unreadable safety config refuses the wake: its max_turns may be lower
@@ -1037,7 +1061,7 @@ def wake_branch(
             logger.warning("[wake] %s pointer write failed for session %s — spawning anyway", email, session_id)
         logger.info("[wake] %s fresh session %s", email, session_id)
         status.ok("session", f"fresh session {session_id[:8]}")
-        claude_cmd = [_CLAUDE_BIN, *base_args, "--session-id", session_id]
+        claude_cmd = [claude_bin, *base_args, "--session-id", session_id]
     else:
         resume_id, reason = session_pointer.resolve_resume_target(branch_path)
         # Verbatim: this reason string is the only trace left when an agent
@@ -1045,10 +1069,10 @@ def wake_branch(
         logger.info("[wake] %s session decision: %s", email, reason)
         if resume_id:
             status.ok("session", f"resuming {resume_id[:8]} (pointer)")
-            claude_cmd = [_CLAUDE_BIN, "--resume", resume_id, *base_args]
+            claude_cmd = [claude_bin, "--resume", resume_id, *base_args]
         else:
             status.info("session", "no pointer — continuing newest transcript (-c)")
-            claude_cmd = [_CLAUDE_BIN, "-c", *base_args]
+            claude_cmd = [claude_bin, "-c", *base_args]
 
     # Step 7: Spawn via dispatch_monitor
     log_dir = branch_path / "logs"
