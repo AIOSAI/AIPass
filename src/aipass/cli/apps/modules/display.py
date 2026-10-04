@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: CLI Display Module — public API for Rich terminal output formatting
-# Version: 0.5.1
+# Version: 0.5.2
 # Created: 2025-11-12
 # Modified: 2026-10-04
 # =============================================
@@ -283,7 +283,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     if args[0] == "demo":
         run_demo()
         return True
-    return False
+    # The verb is ours, so the refusal is ours too: name the refused token,
+    # not the verb, and return True so resolve_exit reports 2, not 1.
+    error(f"Unknown display subcommand: {args[0]}", suggestion="Run 'drone @cli display --help' for usage")
+    return True
 
 
 def run_demo():

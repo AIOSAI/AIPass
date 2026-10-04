@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display.py
 # Description: The display module — messages, header, routing, demo, exit seam, escape
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
@@ -138,9 +138,13 @@ class TestHandleCommandRouting:
         mock_run_demo.assert_not_called()
         assert result is True
 
-    def test_display_unknown_subcommand_returns_false(self):
+    def test_display_unknown_subcommand_refusal_names_the_token(self, capsys):
+        """`display unknown_sub` is refused by name, and the refusal trips the exit flag."""
         result = display.handle_command("display", ["unknown_sub"])
-        assert result is False
+        out, err = capsys.readouterr()
+        assert "Unknown display subcommand: unknown_sub" in err
+        assert display.command_failed() is True
+        assert result is True
 
 
 # =============================================================================

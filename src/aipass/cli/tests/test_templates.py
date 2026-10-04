@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_templates.py
 # Description: The templates module — operation_start, operation_complete, routing, demo
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/templates.py — the operation output templates."""
@@ -103,9 +103,13 @@ class TestHandleCommandRouting:
         mock_run_demo.assert_not_called()
         assert result is True
 
-    def test_templates_unknown_subcommand_returns_false(self):
+    def test_templates_unknown_subcommand_refusal_names_the_token(self, capsys):
+        """`templates bogus` is refused by name, and the refusal trips the exit flag."""
         result = templates.handle_command("templates", ["bogus"])
-        assert result is False
+        out, err = capsys.readouterr()
+        assert "Unknown templates subcommand: bogus" in err
+        assert display.command_failed() is True
+        assert result is True
 
 
 # ============================================================================

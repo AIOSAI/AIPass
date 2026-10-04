@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: templates.py
 # Description: CLI Templates Module — reusable operation output patterns
-# Version: 0.3.1
+# Version: 0.3.2
 # Created: 2025-11-12
-# Modified: 2026-09-15
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -20,7 +20,7 @@ import sys
 from typing import List
 
 # Import console from CLI display module (using our own service!)
-from aipass.cli.apps.modules.display import console as CONSOLE
+from aipass.cli.apps.modules.display import console as CONSOLE, error
 from aipass.cli.apps.handlers.json import json_handler
 from aipass.cli.apps.handlers.cli.help_flags import wants_help
 # NOTE: Cannot import prax here — circular import (prax depends on cli)
@@ -119,7 +119,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     if args[0] == "demo":
         run_demo()
         return True
-    return False
+    # The verb is ours, so the refusal is ours too: name the refused token,
+    # not the verb, and return True so resolve_exit reports 2, not 1.
+    error(f"Unknown templates subcommand: {args[0]}", suggestion="Run 'drone @cli templates --help' for usage")
+    return True
 
 
 def run_demo():

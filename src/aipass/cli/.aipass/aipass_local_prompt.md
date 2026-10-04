@@ -13,7 +13,7 @@ The face is `README.md`, kept short for strangers. Depth lives in `docs/`, one p
  - `docs/rich_markup.md` — literal brackets, what eats placeholders
  - `docs/testing_output.md` — assert visible output, never raw bytes
  - `docs/json_handler.md` — the json shim and the circular-import exception
- - `docs/known_issues.md` — open items
+ - `docs.local/known_issues.md` — open items, untracked working notes
 
 # Tree
 
