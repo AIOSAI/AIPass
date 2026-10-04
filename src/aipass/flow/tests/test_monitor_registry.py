@@ -17,6 +17,7 @@ from typing import List, Tuple
 from unittest.mock import MagicMock, patch
 
 from aipass.flow.apps.handlers.registry import monitor_ops
+from aipass.flow.apps.handlers.template import get_template as template_mod
 from aipass.flow.apps.modules import registry_monitor
 
 
@@ -26,6 +27,42 @@ def _make_plan_file(directory: Path, number: str) -> Path:
     plan_file = directory / filename
     plan_file.write_text(f"# FPLAN-{number}: Test plan\nTest content", encoding="utf-8")
     return plan_file
+
+
+class TestEveryPlanCreateWritesIsAPlan:
+    """Every template create renders must read as a plan, in both header forms (leg 8).
+
+    Leg 7 checked the colon form only and claimed every template used it;
+    flow_plans (FPLAN, the default type) and playbook_plans open with
+    ``# {plan_number} - {subject}``, and six live open plans carry the dash.
+    devpulse widened is_plan_file in d1a1100d. Red first against the
+    colon-only line; mutant leg8 D1 (dash form dropped) reddens both tests.
+    """
+
+    def test_the_dash_form_is_a_plan(self, tmp_path):
+        plan = tmp_path / "FPLAN-0300_old_form_2026-01-01.md"
+        plan.write_text("# FPLAN-0300 - an older plan\n", encoding="utf-8")
+
+        assert monitor_ops.is_plan_file(plan) is True
+
+    def test_every_template_renders_a_plan_header(self, tmp_path):
+        """Renders each template under templates/ the way create does and asks is_plan_file."""
+        templates = Path(monitor_ops.__file__).parents[3] / "templates"
+        rendered = sorted(p for p in templates.glob("*/*.md") if p.name != "README.md")
+        assert len(rendered) >= 11, f"walk did not reach the templates: {rendered}"
+
+        not_plans = []
+        with patch.object(template_mod, "json_handler", MagicMock()):
+            for number, template in enumerate(rendered, start=1):
+                text = template_mod.get_template(
+                    number=number, subject="subject", template_path=template, prefix="FPLAN"
+                )
+                plan = tmp_path / f"FPLAN-{number:04d}_{template.parent.name}_{template.stem}.md"
+                plan.write_text(text, encoding="utf-8")
+                if monitor_ops.is_plan_file(plan) is not True:
+                    not_plans.append(f"{template.parent.name}/{template.name}: {text.splitlines()[0]!r}")
+
+        assert not_plans == []
 
 
 # ═══════════════════════════════════════════════════════════
@@ -582,6 +619,16 @@ class TestALookAlikeIsNotAPlan:
 
         assert monitor_ops.is_plan_file(plan) is True
         assert monitor_ops.is_plan_file(report) is False
+
+    def test_a_heading_that_only_starts_with_the_id_is_not_a_plan(self, tmp_path):
+        """'# DPLAN-0356 phase 2 notes' is a report's heading: only ':' or ' - ' follow a plan's id.
+
+        Mutant leg8 D2 (' - ' widened to ' ') survived without this test.
+        """
+        notes = tmp_path / "DPLAN-0356_ph2_notes.md"
+        notes.write_text("# DPLAN-0356 phase 2 notes\n", encoding="utf-8")
+
+        assert monitor_ops.is_plan_file(notes) is False
 
     def test_a_header_for_another_number_is_not_this_plan(self, tmp_path):
         """A copy of DPLAN-0356 saved as DPLAN-0357.md is not plan 0357."""
