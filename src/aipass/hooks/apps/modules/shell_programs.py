@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: shell_programs.py
-# Version: 1.0.1
+# Version: 1.1.0
 # Description: Which programs only read, and which only take data — the default-deny tables (DPLAN-0356 phase 4)
 # Branch: hooks
 # Layer: apps/modules
@@ -17,6 +17,9 @@ every file fence at once. Phase 4 turns it around for the paths that matter:
   - :data:`READ_ONLY_PROGRAMS` (P2). Off the admin seat, a protected path, a path
     in another branch or a ``.trinity`` path may appear as an operand only of a
     program on this short list. Anything else naming it is refused, whatever it is.
+    Since 1.1.0 (devpulse 73358617) the branch and .trinity lanes judge a word by
+    what exists on disk: a path that does not exist, whose first existing ancestor
+    is in no branch (``-k cd_into`` run from src/aipass), names no file.
   - :data:`PLAIN_PROGRAMS` (P3). Programs whose operands are data or files, never a
     program to run. Every OTHER command word may be a launcher nobody tabled, so
     modules/shell_reader scans its operands for a delete verb, git or gh and reads
@@ -30,6 +33,7 @@ read these; no other copy exists.
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
@@ -105,11 +109,37 @@ def _operand_texts(argv: tuple[str, ...]) -> list[str]:
     return [text for text in texts if text]
 
 
-def named_operands(invocations: list) -> list[tuple[str, Path]]:
+def first_existing(path: Path) -> Path:
+    """*path* itself when it exists, else its nearest existing ancestor (the filesystem root at worst)."""
+    for candidate in (path, *path.parents):
+        if candidate.exists():
+            return candidate
+    return Path(path.anchor)
+
+
+def _names_a_place(path: Path, places) -> bool:
+    """True when *path* exists, or its first existing ancestor is one *places* accepts (devpulse 73358617).
+
+    A flag's value (``-k cd_into``, ``-p no:cacheprovider``) resolves to a path that
+    does not exist under a directory no branch owns: it names no file. An unreadable
+    path is kept, so the lane rules it as before rather than guessing.
+    """
+    try:
+        found = first_existing(path)
+    except OSError as exc:
+        logger.warning("[HOOKS] shell_programs: %s could not be checked on disk, kept as an operand: %s", path, exc)
+        return True
+    return found == path or bool(places(found))
+
+
+def named_operands(invocations: list, places=None) -> list[tuple[str, Path]]:
     """(program, path) for every operand of a program that does not only read (P2), resolved from its cwd.
 
     Args:
         invocations: shell_reader.invocations() of one command.
+        places: Optional judge of a directory. When given, an operand that does not
+            exist is kept only when places(its first existing ancestor) is true
+            (edit_gate: inside a branch). None keeps every operand (the protected lane).
 
     Returns:
         Each operand of each acting program, as the absolute path it would name.
@@ -126,7 +156,8 @@ def named_operands(invocations: list) -> list[tuple[str, Path]]:
             path = Path(text).expanduser()
             if not path.is_absolute() and inv.cwd:
                 path = Path(inv.cwd) / path
-            found.append((inv.program, path))
+            if places is None or _names_a_place(path, places):
+                found.append((inv.program, path))
     return found
 
 

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.0.0
+# Version: 2.1.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-09-30
+# Modified: 2026-10-04
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
@@ -188,6 +188,16 @@ def branch_at(project: Project | None, path: Path, package: str) -> Branch | Non
         if package and part == package and i > 0 and parts[i - 1] == "src" and i + 1 < len(parts):
             return Branch(parts[i + 1].lower(), Path(*parts[: i + 2]))
     return None
+
+
+def in_a_branch(path: Path) -> bool:
+    """True when *path* is a branch directory or inside one: its project's rows, else the src/<package>/<branch> shape.
+
+    The edit gate's default-deny lane asks it of a word's first existing ancestor
+    (devpulse 73358617): src/aipass itself, a project root or anything above a
+    branch is no branch's, so a flag value resolving there names no file.
+    """
+    return branch_at(project_of(path), path, package_of(path)) is not None
 
 
 def ownership_refusal(

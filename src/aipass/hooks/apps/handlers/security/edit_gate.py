@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.18.0
+# Version: 1.18.1
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-01
+# Modified: 2026-10-04
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -221,7 +221,8 @@ def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
     # Phase 4, P2: default-deny. Every operand of a program that does not only read
     # is judged by the same three rules, whatever verb it is (shell_programs).
     invocations = _import_module("aipass.hooks.apps.modules.shell_reader").invocations(command, cwd)
-    operands = _import_module("aipass.hooks.apps.modules.shell_programs").named_operands(invocations)
+    places = _import_module("aipass.hooks.apps.modules.write_ownership").in_a_branch  # a flag value is no write
+    operands = _import_module("aipass.hooks.apps.modules.shell_programs").named_operands(invocations, places)
     return targets + [(path, f"{program} (not a read-only program)") for program, path in operands]
 
 

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.0.0
+# Version: 5.0.1
 # Description: Tests for git_gate: raw git and gh refused for every seat; protected config writes the admin seat's
 # Branch: hooks
 # Created: 2026-05-21
@@ -884,6 +884,14 @@ class TestProtectedPathsAreDefaultDeny:
             for command in (f"cat {path}", f"grep x {path}", f"sha256sum {path}", f"sudo cat {path}"):
                 _assert_allowed(_canary_bash(command, seat))
         _assert_allowed(_canary_bash("drone @git status", seat))
+
+    def test_a_protected_path_not_yet_written_is_still_refused(self, tmp_path):
+        """devpulse 73358617 judges a word by what exists, for the branch lanes. Not here: a new .git hook or
+        registry does not exist until it is written, and its first existing ancestor is no branch."""
+        seat = _seat(tmp_path, "canary")
+        for path in (_REPO / ".git" / "hooks" / "pre-push-new", _REPO / "NEW_REGISTRY.json"):
+            assert not path.exists()
+            _assert_blocked(_canary_bash(f"unknownwriter {path.as_posix()}", seat))
 
     def test_a_redirect_into_one_is_refused_even_from_a_read_only_program(self, tmp_path):
         target = self._members()[3]

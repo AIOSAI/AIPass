@@ -1030,6 +1030,28 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
         other = Path(registered_projects["memory"]).as_posix()
         assert _blocked(_run(registered_projects["hooks"], command=f"cd {other} && rm apps/x.py"))
 
+    @pytest.mark.parametrize("flags", ["-p no:cacheprovider", "-k cd_into", "-k slow/net"])
+    def test_a_flag_value_is_not_a_branch_write(self, registered_projects: dict, grant_withheld, flags):
+        """devpulse 73358617: a word that does not exist, whose first existing ancestor is src/aipass, names no file.
+
+        `-k slow/net` is the one the first-existing-ancestor walk decides: its own parent
+        (src/aipass/slow) reads as a branch by the path shape; src/aipass, where the walk stops, does not.
+        """
+        aipass = Path(registered_projects["hooks"]).parent.as_posix()
+        result = _run(registered_projects["hooks"], command=f"cd {aipass} && pytest hooks/tests {flags}")
+        assert result["exit_code"] == 0, result["stdout"]
+
+    def test_a_new_file_in_another_branch_is_still_a_write(self, registered_projects: dict, grant_withheld):
+        aipass = Path(registered_projects["hooks"]).parent
+        other = (aipass / "flow" / "new.py").as_posix()
+        assert _blocked(_run(registered_projects["hooks"], command=f"cd {aipass.as_posix()} && cp x {other}"))
+        assert _blocked(_run(registered_projects["hooks"], command=f"unknownwriter {other}"))
+
+    def test_an_existing_file_in_another_branch_is_still_refused(self, registered_projects: dict, grant_withheld):
+        existing = Path(registered_projects["memory"]) / "existing.py"
+        existing.write_text("x = 1\n", encoding="utf-8")
+        assert _blocked(_run(registered_projects["hooks"], command=f"rm {existing.as_posix()}"))
+
     def test_drone_and_own_branch_work_still_pass(self, registered_projects: dict):
         seat = registered_projects["hooks"]
         for command in ("drone @seedgo checklist apps", "mkdir -p .archive && mv old.py .archive/", "pytest tests -q"):
