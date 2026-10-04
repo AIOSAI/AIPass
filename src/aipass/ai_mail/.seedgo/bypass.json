@@ -103,6 +103,71 @@
       "pattern": "register_path, outstanding_dispatches",
       "reason": "HALF OF THIS ENTRY HAS NOW EXPIRED, and it is recorded rather than quietly kept. Both doors were requested in writing by @devpulse (FPLAN-0452 P0 addendum, mail 8c9c65cb) for a watchdog wire that was unbuilt at the time. It is built now: outstanding_dispatches() is called in production by devpulse/apps/handlers/watchdog/dispatches.py:143, so seedgo would no longer flag it and it needs no cover. register_path() is the half that still does — its only caller in the repo is devpulse's tests/conftest.py:75, which patches it; a door reached only by a test patch is a door with no production reader. It stays exported because @devpulse asked for it in writing and removing another branch's requested door on my own initiative is not mine to do, but the honest state is 'unused, kept on request', not 'unused, pending'. REMOVE THIS ENTRY the day register_path() gets a production caller — an unused_function bypass that outlives its cause is how a dead export becomes permanent.",
       "measured": "2026-08-23 (S154) — re-checked against the built wire, not assumed. One of the two doors named here is now live; the entry survives only for register_path()."
+    },
+    {
+      "file": "apps/__init__.py",
+      "standard": "cli_flags",
+      "reason": "Package marker, not an entry point (ai_mail, fleet green leg 9): the file is two lines, a comment and 'from . import handlers', with no argv, no main and no command. The entry point is apps/ai_mail.py, which answers --version/-V at line 256 and passes cli_flags. cli_flags is a file-level row that passes no line, so this file-wide rule is the only form a bypass can take; it covers this file alone."
+    },
+    {
+      "file": "apps/modules/email.py",
+      "standard": "logged_fallback",
+      "lines": [250, 254, 307, 311, 352, 389, 425, 445],
+      "reason": "CLI handler layer (ai_mail, fleet green leg 9). A handle_* return is 'command recognised', not 'it worked' (branch prompt, Critical Rules): the router stops on True. Failure is told by cli error(), which calls mark_command_failed() and sets the process exit; a BrokenPipeError is stdout closed early, not a failure. So True on these lines is the contract, and the checker reads it as an indistinguishable fallback."
+    },
+    {
+      "file": "apps/modules/email_send.py",
+      "standard": "logged_fallback",
+      "lines": [270, 275],
+      "reason": "Same CLI handler contract as apps/modules/email.py (ai_mail, fleet green leg 9): 270 is a BrokenPipeError (stdout closed early); 275 has already called error() (mark_command_failed) and mailed the failure through dispatch_send_error, so the caller is told by the failure flag, not by the bool."
+    },
+    {
+      "file": "apps/modules/dispatch.py",
+      "standard": "logged_fallback",
+      "lines": [487],
+      "reason": "Same CLI handler contract (ai_mail, fleet green leg 9): the send phase failure has already called error() (mark_command_failed); True tells the router the command was recognised."
+    },
+    {
+      "file": "apps/ai_mail.py",
+      "standard": "logged_fallback",
+      "lines": [204],
+      "reason": "route_command (ai_mail, fleet green leg 9): a BrokenPipeError is stdout closed early by the reader (e.g. piped to head); the command ran and was recognised, so True is the true answer."
+    },
+    {
+      "file": "apps/handlers/dispatch/wake.py",
+      "standard": "logged_fallback",
+      "lines": [519, 522],
+      "reason": "_check_pid_alive (ai_mail, fleet green leg 9): os.kill(pid, 0) answers through its exception. ProcessLookupError IS 'no such process' (False) and PermissionError IS 'it exists, owned by another user' (True). Neither is a fallback: the exception is the answer. The guessed branches of the same function (514 Windows probe failed, 525 other OSError) are not covered here and stay HELD."
+    },
+    {
+      "file": "apps/handlers/dispatch/daemon.py",
+      "standard": "logged_fallback",
+      "lines": [135],
+      "reason": "_pid_alive (ai_mail, fleet green leg 9): PermissionError from os.kill(pid, 0) means the process exists under another user, so True is the answer, not a fallback. The guessed branch at 127 (Windows probe failed) is not covered here and stays HELD."
+    },
+    {
+      "file": "apps/handlers/dispatch/register.py",
+      "standard": "logged_fallback",
+      "lines": [207],
+      "reason": "monitor_alive (ai_mail, fleet green leg 9): PermissionError from os.kill(pid, 0) means the process exists under another user, so True is the answer. 210 (any other OSError -> None, 'could not probe') is not covered here."
+    },
+    {
+      "file": "tests/test_dispatch_monitor.py",
+      "standard": "literal_path",
+      "lines": [1565],
+      "reason": "(ai_mail, fleet green leg 9) The literal is the subject: _get_jsonl_projects_dir encodes a cwd STRING into Claude's project-dir name (separators to '-'). No file system is asked and nothing is read or written at that path; built from tmp_path the expected name would have to re-implement the encoding under test. Kept as the subject since leg 5; devpulse accepted it as a string parse in the leg 7 ruling."
+    },
+    {
+      "file": "tests/test_session_pointer.py",
+      "standard": "literal_path",
+      "lines": [106],
+      "reason": "(ai_mail, fleet green leg 9) Same as test_dispatch_monitor.py 1565: transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
+    },
+    {
+      "file": "apps/handlers/dispatch/session_pointer.py",
+      "standard": "logged_fallback",
+      "lines": [208, 211, 217],
+      "reason": "read_pointer (ai_mail, fleet green leg 9): the docstring states the contract - None, never a raise, when the pointer is missing, unreadable or malformed, because a pointer that cannot be trusted IS no pointer: every caller (wake.py fresh/resume decision, dispatch_monitor attempt 3) falls back to -c the same way. 208 is the plain truth (no file, no pointer); 211/217 are the documented equivalence. A raise here would cost the wake itself, which the module exists to avoid."
     }
   ],
   "notes": {

@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch register append-only log
 # Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register."""
@@ -272,13 +272,17 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
     # see a dead monitor. These pin the mapping of the Win32 answers onto the
     # tri-state without needing the platform.
 
+    # The Win32 codes are written as Win32 documents them (STILL_ACTIVE 259,
+    # ERROR_INVALID_PARAMETER 87, ERROR_ACCESS_DENIED 5,
+    # PROCESS_QUERY_LIMITED_INFORMATION 0x1000), not read back from the module:
+    # an echo of the product's own constant cannot catch a wrong one (ai_mail, leg 9).
     @pytest.mark.parametrize(
         ("handle", "exit_code", "last_error", "expected"),
         [
-            (1, register._STILL_ACTIVE, 0, True),
+            (1, 259, 0, True),
             (1, 0, 0, False),
-            (0, None, register._ERROR_INVALID_PARAMETER, False),
-            (0, None, register._ERROR_ACCESS_DENIED, True),
+            (0, None, 87, False),
+            (0, None, 5, True),
             (0, None, 6, None),
         ],
         ids=["opened-and-running", "opened-but-exited", "no-such-pid", "exists-not-ours", "other-error-unknown"],
@@ -303,7 +307,7 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
         monkeypatch.setattr(register, "_last_win32_error", lambda: last_error)
 
         assert register._monitor_alive_windows(4242) is expected
-        assert opened_with == [(register._PROCESS_QUERY_LIMITED_INFORMATION, False, 4242)]
+        assert opened_with == [(0x1000, False, 4242)]
         assert closed == ([handle] if handle else []), "an opened handle is closed exactly once, an unopened one never"
 
     def test_on_win32_monitor_alive_asks_the_windows_leg_and_never_signals(self, monkeypatch):
