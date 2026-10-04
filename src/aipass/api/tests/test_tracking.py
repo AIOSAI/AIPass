@@ -3,7 +3,7 @@
 # Description: Tests for usage tracking handler
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/usage/tracking.py, the usage tracking handler."""
@@ -26,9 +26,12 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from aipass.api.apps.handlers.usage import tracking
 from aipass.api.apps.handlers.usage.tracking import (
+    MetricsUnavailable,
     get_generation_metrics,
     store_usage_data,
+    track_usage,
 )
 
 _TRACKING_MOD = "aipass.api.apps.handlers.usage.tracking"
@@ -75,66 +78,97 @@ def test_get_generation_metrics_success(mock_requests: MagicMock):
 
 @patch(f"{_TRACKING_MOD}.requests")
 def test_get_generation_metrics_non_200(mock_requests: MagicMock):
-    """Returns None when API returns non-200 status."""
+    """
+    A non-200 raises MetricsUnavailable naming the status and the generation.
+
+    Every failure here used to return None, so track_usage could only say
+    "Failed to retrieve generation metrics" whichever of five things went
+    wrong (api, fleet green leg 9). The reason now travels in str(exc).
+    """
     mock_response = MagicMock()
     mock_response.status_code = 404
     mock_requests.get.return_value = mock_response
 
-    result = get_generation_metrics("gen-missing", "FAKE-sk-or-key")
+    with pytest.raises(MetricsUnavailable) as refusal:
+        get_generation_metrics("gen-missing", "FAKE-sk-or-key")
 
-    assert result is None
+    assert str(refusal.value) == "OpenRouter answered status 404 for generation gen-missing"
 
 
 @patch(f"{_TRACKING_MOD}.requests")
 def test_get_generation_metrics_invalid_structure_no_data_key(mock_requests: MagicMock):
-    """Returns None when response JSON lacks 'data' key."""
+    """A 200 whose JSON lacks 'data' raises, naming the generation."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {"error": "not found"}
     mock_requests.get.return_value = mock_response
 
-    result = get_generation_metrics("gen-bad", "FAKE-sk-or-key")
+    with pytest.raises(MetricsUnavailable) as refusal:
+        get_generation_metrics("gen-bad", "FAKE-sk-or-key")
 
-    assert result is None
+    assert str(refusal.value) == "OpenRouter answered without a data block for generation gen-bad"
 
 
 @patch(f"{_TRACKING_MOD}.requests")
 def test_get_generation_metrics_invalid_structure_empty_response(mock_requests: MagicMock):
-    """Returns None when response JSON is empty/None."""
+    """A 200 whose JSON is empty raises the same refusal as one without 'data'."""
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = None
     mock_requests.get.return_value = mock_response
 
-    result = get_generation_metrics("gen-empty", "FAKE-sk-or-key")
+    with pytest.raises(MetricsUnavailable) as refusal:
+        get_generation_metrics("gen-empty", "FAKE-sk-or-key")
 
-    assert result is None
+    assert str(refusal.value) == "OpenRouter answered without a data block for generation gen-empty"
 
 
 @patch(f"{_TRACKING_MOD}.requests")
 def test_get_generation_metrics_request_exception(mock_requests: MagicMock):
-    """Returns None when requests raises an exception."""
+    """A request error raises with the request's own sentence in it."""
     import requests as real_requests
 
     mock_requests.get.side_effect = real_requests.exceptions.ConnectionError("refused")
     mock_requests.exceptions = real_requests.exceptions
 
-    result = get_generation_metrics("gen-fail", "FAKE-sk-or-key")
+    with pytest.raises(MetricsUnavailable) as refusal:
+        get_generation_metrics("gen-fail", "FAKE-sk-or-key")
 
-    assert result is None
+    assert str(refusal.value) == "Request error querying generation gen-fail: refused"
 
 
 @patch(f"{_TRACKING_MOD}.requests")
 def test_get_generation_metrics_timeout(mock_requests: MagicMock):
-    """Returns None on request timeout."""
+    """A timeout raises, and says it was a timeout rather than any request error."""
     import requests as real_requests
 
     mock_requests.get.side_effect = real_requests.exceptions.Timeout("timed out")
     mock_requests.exceptions = real_requests.exceptions
 
-    result = get_generation_metrics("gen-timeout", "FAKE-sk-or-key")
+    with pytest.raises(MetricsUnavailable) as refusal:
+        get_generation_metrics("gen-timeout", "FAKE-sk-or-key")
 
-    assert result is None
+    assert str(refusal.value) == "Request timeout querying generation gen-timeout: timed out"
+
+
+@patch(f"{_TRACKING_MOD}.store_usage_data")
+@patch(f"{_TRACKING_MOD}.requests")
+def test_track_usage_reports_why_the_metrics_were_unavailable(
+    mock_requests: MagicMock, mock_store: MagicMock, monkeypatch: pytest.MonkeyPatch
+):
+    """
+    The caller-facing half: track_usage hands the reason on and stores nothing.
+
+    It used to answer "Failed to retrieve generation metrics" for a 404, a
+    timeout and a malformed body alike (api, fleet green leg 9).
+    """
+    monkeypatch.setattr(tracking, "DEFAULT_GENERATION_CHECK_DELAY", 0)
+    mock_requests.get.return_value = MagicMock(status_code=404)
+
+    result = track_usage("gen-missing", "flow_mbank", api_key="FAKE-sk-or-key")
+
+    assert result == {"success": False, "error": "OpenRouter answered status 404 for generation gen-missing"}
+    mock_store.assert_not_called()
 
 
 @patch(f"{_TRACKING_MOD}.requests")

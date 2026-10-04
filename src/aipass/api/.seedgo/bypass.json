@@ -73,6 +73,69 @@
         "_reset_refusals"
       ],
       "reason": "Called from tests/conftest.py:207,209 — the unused_function checker skips tests/, so a fixture-only helper reads as dead. Same species as this branch's existing integrations_manager and api_key entries, and NAME-SCOPED rather than file-wide so a genuinely dead function in refusals.py is still caught. It exists because the refusal memory's 60s TTL outlives a suite run: one test provoking a refusal would silence every later test on that lane, and they would still pass — a remembered refusal raises exactly what a fresh one does. INTERIM, and it does not settle @devpulse's parked ruling on whether the checker should learn about conftest; if @seedgo teaches it, this entry becomes redundant, not wrong."
+    },
+    {
+      "file": "apps/handlers/host/lifetime.py",
+      "standard": "logged_fallback",
+      "lines": [341, 347],
+      "reason": "_alive's two handlers ARE its answers, not failures: ProcessLookupError from kill(pid, 0) is the kernel saying the pid is gone (False), PermissionError is the kernel saying it exists under another owner (True). No failure is dressed as an answer (api, fleet green leg 9)."
+    },
+    {
+      "file": "apps/handlers/host/tokens.py",
+      "standard": "logged_fallback",
+      "lines": [648],
+      "reason": "_is_due answers whether to rewrite a stamp; an unreadable stamp is due by definition (the docstring says so) and is overwritten with a readable one on the same request. True here is the answer, not a stand-in for a failure (api, fleet green leg 9)."
+    },
+    {
+      "file": "apps/handlers/host/server.py",
+      "standard": "logged_fallback",
+      "lines": [600],
+      "reason": "_outside_room_for: a census that cannot answer leaves the attach on the ordinary naming rule, the same as no outside room. The caller acts identically on both, by design (docstring: A CENSUS THAT CANNOT ANSWER IS NOT AN ANSWER OF 'NO'); the attach still refuses downstream (api, fleet green leg 9)."
+    },
+    {
+      "file": "apps/handlers/host/uploads.py",
+      "standard": "logged_fallback",
+      "lines": [377],
+      "reason": "_pictures_from_user_dirs: no readable user-dirs config and no XDG line in it both mean the config has no answer; the one caller falls back to ~/Pictures in both cases, which is the correct directory on most machines (api, fleet green leg 9)."
+    },
+    {
+      "file": "apps/handlers/host/settings.py",
+      "standard": "logged_fallback",
+      "lines": [118],
+      "reason": "read_object: FileNotFoundError ONLY reads as {} (a fresh branch has written no settings, the same document as an empty file); every other OSError and every non-object raises. Ruled by the conformance corpus, FPLAN-0438 R3 (api, fleet green leg 9)."
+    },
+    {
+      "file": "apps/handlers/host/autostart.py",
+      "standard": "logged_fallback",
+      "lines": [374, 438],
+      "reason": "Both are status probes whose None means unknown and is shown as unknown: _port_in, an absent and an unreadable --port are both a port nobody can state (never a guess); linger_enabled, None is the could-not-ask answer its docstring names, beside True/False (api, fleet green leg 9)."
+    },
+    {
+      "file": "apps/handlers/openrouter/caller.py",
+      "standard": "logged_fallback",
+      "lines": [86],
+      "reason": "detect_caller: the shared None is a decision of api's (fleet green leg 5), written in its docstring: every caller does the right thing with it (get_response sends as 'unknown', ensure_caller_config answers {}), and a raise would end get_response before its request is sent (api, fleet green leg 9)."
+    },
+    {
+      "file": "tests/test_host_attach.py",
+      "standard": "sleep_in_test",
+      "reason": "FILE-WIDE because sleep_in_test passes no line. The one sleep left (time.sleep(0.5) in test_the_duration_is_the_socket_s_own_lifetime_not_a_constant) is the subject: the test pins the logged duration >= 0.5s, so the wall clock is what it measures. Every other wait in the file goes through StubSession.wait_until or wait_for_log on a Condition (fleet green leg 8); a new sleep here is hidden by this rule, so it is re-read each leg (api, fleet green leg 9)."
+    },
+    {
+      "file": "tests/test_host_read_lane.py",
+      "standard": "sleep_in_test",
+      "reason": "FILE-WIDE because sleep_in_test passes no line. The one sleep (0.4s in slow(), test_concurrent_callers_asking_the_same_question_share_one_subprocess) IS the overlap under test: the 30 later callers must queue inside the cache's single flight while the first is in it, and they block inside the product, so there is no condition a test can wait on (api, fleet green leg 9)."
+    },
+    {
+      "file": "tests/test_host_perf.py",
+      "standard": "sleep_in_test",
+      "reason": "FILE-WIDE because sleep_in_test passes no line. The one sleep (0.2s in _run, test_a_stampede_of_readers_shares_one_exec) holds one exec open so eight readers overlap it inside the cache; the waiters block inside the product, so there is no condition to wait on (api, fleet green leg 9)."
+    },
+    {
+      "file": "tests/test_host_attach.py",
+      "standard": "through_the_command",
+      "lines": [716],
+      "reason": "kwargs['preexec_fn'] is host_attach._acquire_controlling_tty: the identity IS the claim (open_attach hands Popen this very hook), so the name must be read; kept under compass 481 and accepted in leg 8 (api, fleet green leg 9)."
     }
   ],
   "notes": {

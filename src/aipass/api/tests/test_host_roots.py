@@ -3,7 +3,7 @@
 # Description: Tests for the roots roster and the widened name fence
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/host/reads.py's four-kind name fence and the /v1/roots route."""
@@ -149,8 +149,10 @@ def world(tmp_path: Path):
 
     Nothing here touches the operator's real home or the real census: the two
     doors this handler resolves through (@drone's registry, @baud's exec) are
-    both stood in for, and `Path.home` is pointed at tmp. A test that read the
-    real home would be reading the machine it happens to run on.
+    both stood in for, and the handler's own home_root is pointed at tmp. A
+    test that read the real home would be reading the machine it happens to run
+    on. home_root, not pathlib's Path.home: a patch of Path.home replaces it
+    for every reader in the process while it stands (api, fleet green leg 9).
     """
     root = tmp_path / "FakeRepo"
     branch = root / "src" / "aipass" / "demo"
@@ -207,7 +209,7 @@ def world(tmp_path: Path):
         patch(PATCH_READS_DRONE, fake_drone),
         patch(PATCH_READS_LOGGER),
         patch(PATCH_READS_JSON) as audit,
-        patch("pathlib.Path.home", return_value=home),
+        patch.object(host_reads, "home_root", return_value=home),
         patch.object(host_fleet, "list_projects", return_value=census),
     ):
         yield {
@@ -332,7 +334,7 @@ class TestTheRootKinds:
 
     def test_a_home_that_is_not_a_directory_is_unavailable(self, world: dict) -> None:
         """Not the caller's fault and not a blank listing."""
-        with patch("pathlib.Path.home", return_value=world["home"] / "todo.txt"):
+        with patch.object(host_reads, "home_root", return_value=world["home"] / "todo.txt"):
             with pytest.raises(host_reads.ReadUnavailable):
                 host_reads.resolve_root(host_reads.ROOT_HOME)
 

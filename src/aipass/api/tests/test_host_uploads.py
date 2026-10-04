@@ -3,7 +3,7 @@
 # Description: Tests for the host API photo lane — bytes onto disk, named by the server
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/host/uploads.py and its POST /v1/files/upload route."""
@@ -646,25 +646,48 @@ class TestTheUploadRouteIsGuardedLikeEveryOtherWrite:
         assert response.status_code == 503
         assert "python-multipart" in response.text
 
-    def test_the_declared_length_reader_never_raises_on_a_bad_header(self) -> None:
+    @staticmethod
+    def _declared(part_headers: dict) -> tuple:
+        """
+        Upload PNG with `part_headers` on the image part; the status and the length store_image was handed.
+
+        Through the real route and the real store_image (wrapped, so the call is
+        read and the write still lands under `landing`): these asked
+        _declared_length by name with a stand-in upload object (api, fleet green
+        leg 9).
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+
+        with patch(PATCH_SERVER_JSON), patch(PATCH_SERVER_LOGGER):
+            with patch.object(host_uploads, "store_image", wraps=host_uploads.store_image) as stored:
+                response = TestClient(host_server.create_app()).post(
+                    "/v1/files/upload",
+                    files={"image": ("x.png", BytesIO(PNG), "image/png", part_headers)},
+                    headers={"Authorization": f"Bearer {raw}"},
+                )
+
+        return response.status_code, stored.call_args.args[1]
+
+    @multipart_required
+    def test_the_declared_length_reader_never_raises_on_a_bad_header(self, store: Any, landing: Path) -> None:
         """
         A malformed Content-Length is not a size. Falling through to None means
         the running total does the work, which is where the truth was anyway —
         and it is the difference between a refused upload and a 500.
         """
+        assert self._declared({"content-length": "not-a-number"}) == (200, None)
 
-        class Upload:
-            headers = {"content-length": "not-a-number"}
-
-        assert host_server._declared_length(Upload()) is None
-
-    def test_a_missing_length_header_is_not_an_error(self) -> None:
+    @multipart_required
+    def test_a_missing_length_header_is_not_an_error(self, store: Any, landing: Path) -> None:
         """A chunked upload has no Content-Length, and that is normal."""
+        assert self._declared({}) == (200, None)
 
-        class Upload:
-            headers: dict = {}
-
-        assert host_server._declared_length(Upload()) is None
+    @multipart_required
+    def test_a_declared_length_is_handed_on_as_a_number(self, store: Any, landing: Path) -> None:
+        """The floor under the two above: a reader that always answered None would pass both."""
+        assert self._declared({"content-length": str(len(PNG))}) == (200, len(PNG))
 
 
 @fastapi_required
@@ -688,6 +711,11 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
         """
         Reproduce the exact failure: the client sent `file`, the server wants
         `image`. The sentence that reaches the phone must say so.
+
+        Also the claim of test_body_is_dropped_from_the_location, retired as
+        this one's duplicate (api, fleet green leg 9): every field on a POST is
+        in the body, so saying so adds nothing, and 'image: Field required' is
+        the whole useful content of that 422.
         """
         from fastapi.testclient import TestClient
 
@@ -772,17 +800,13 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
         """
         A 422 whose message is a blank string is the same failure this handler
         exists to fix, one layer further in.
+
+        By name on purpose: FastAPI never raises a validation error with an
+        empty list, so no request reaches this input, and a public door would
+        exist for this test alone. HELD on through_the_command (api, fleet green
+        leg 9).
         """
         assert host_server._validation_sentence([]) != ""
-
-    def test_body_is_dropped_from_the_location(self) -> None:
-        """
-        Every field on a POST is in the body, so saying so adds nothing.
-        'image: Field required' is the whole useful content of that 422.
-        """
-        sentence = host_server._validation_sentence([{"loc": ("body", "image"), "msg": "Field required"}])
-
-        assert sentence == "image: Field required"
 
 
 @fastapi_required

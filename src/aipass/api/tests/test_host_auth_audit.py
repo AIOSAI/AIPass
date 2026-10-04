@@ -3,7 +3,7 @@
 # Description: Tests for failed-auth auditing with peer address (security C1)
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/host/server.py, its failed-auth audit with the peer address."""
@@ -208,8 +208,7 @@ class TestTheAuditNeverCarriesTheSecret:
         client, audit = audited
         _, raw = host_tokens.issue_token("read-only", scope="read")
 
-        with patch.object(host_server, "_bearer", host_server._bearer):
-            client.get("/v1/whoami", headers={"Authorization": f"Bearer {raw}"})
+        client.get("/v1/whoami", headers={"Authorization": f"Bearer {raw}"})
 
         assert raw not in str(_refusals(audit))
 

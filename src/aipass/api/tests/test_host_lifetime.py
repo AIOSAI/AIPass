@@ -3,7 +3,7 @@
 # Description: Tests for a serve that outlives the shell that started it
 # Version: 1.0.0
 # Created: 2026-08-20
-# Modified: 2026-09-27
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""
@@ -176,7 +176,12 @@ class TestTheChildIsGenuinelyDetached:
         the only thing standing between this and a server that is not detached
         at all — and on the untested platform, nothing would stand there.
         """
-        assert host_lifetime._detach_kwargs(), "nothing detaches the child on this platform"
+        with patch.object(subprocess, "Popen", return_value=_spawned()) as popen:
+            host_lifetime.serve_detached()
+
+        handed = popen.call_args.kwargs
+
+        assert handed.get("start_new_session") or handed.get("creationflags"), "nothing detaches the child"
 
     def test_the_child_never_shares_the_callers_stdin(self, runtime: Path, bind_ok: None) -> None:
         """A detached server reading a closed terminal is a server that stalls."""
@@ -271,7 +276,14 @@ class TestFindingTheRunningServer:
         assert host_lifetime.running() is None
 
     def test_a_live_record_is_returned(self, runtime: Path) -> None:
-        """This process is alive by construction, which makes it a safe stand-in."""
+        """
+        This process is alive by construction, which makes it a safe stand-in.
+
+        Also the vacuity floor of TestADeadChildIsDead: an _alive that always
+        said False would pass both zombie tests, and fails here. Its own test,
+        _alive(os.getpid()) by name, was retired as this one's duplicate once
+        those tests asked through running() (api, fleet green leg 9).
+        """
         host_lifetime.record_path().write_text(
             json.dumps({"pid": os.getpid(), "host": "127.0.0.1", "port": 8790}), encoding="utf-8"
         )
@@ -281,11 +293,43 @@ class TestFindingTheRunningServer:
         assert record is not None
         assert record["port"] == 8790
 
-    def test_an_unreadable_record_is_not_a_crash(self, runtime: Path) -> None:
-        """Half a JSON file is a state, not an exception for `status` to raise."""
+    @pytest.mark.parametrize("unreadable", ["{ not json", "[]"])
+    def test_an_unreadable_record_is_unknown_not_no_server(self, runtime: Path, unreadable: str) -> None:
+        """
+        Half a JSON file, or JSON that is not a record, says NOTHING about the server.
+
+        running() used to answer None here, the same answer as no record at all,
+        so `status` said no server was running about a pid nobody had read.
+        It raises now and status renders the third answer, unknown, with the
+        reason (api, fleet green leg 9). Its proof is the mutant that puts the
+        old return None back.
+        """
+        host_lifetime.record_path().write_text(unreadable, encoding="utf-8")
+
+        with pytest.raises(host_lifetime.LifetimeError) as refusal:
+            host_lifetime.running()
+
+        answer = host_lifetime.server_state()
+
+        assert str(host_lifetime.record_path()) in str(refusal.value)
+        assert answer["state"] == "unknown"
+        assert answer["reason"] == str(refusal.value)
+
+    def test_stop_leaves_an_unreadable_record_where_it_is(self, runtime: Path) -> None:
+        """
+        The defect the old None hid (api, fleet green leg 9).
+
+        stop() reads None as a stale record and unlinks the file, so a server
+        whose record was half-written lost the one file that names its pid and
+        kept running where `stop` could no longer find it. A record nobody can
+        read is not a record anybody may clear.
+        """
         host_lifetime.record_path().write_text("{ not json", encoding="utf-8")
 
-        assert host_lifetime.running() is None
+        with pytest.raises(host_lifetime.LifetimeError):
+            host_lifetime.stop()
+
+        assert host_lifetime.record_path().read_text(encoding="utf-8") == "{ not json"
 
     def test_a_second_serve_is_refused_while_one_is_running(self, runtime: Path, bind_ok: None) -> None:
         """Two servers on one port is a race whose loser dies silently."""
@@ -316,18 +360,23 @@ class TestADeadChildIsDead:
 
     This uses a real process for exactly that reason. It is the only test here
     that could have caught it.
+
+    Asked through running(), the public question _alive answers for status and
+    stop, with a record naming the child (api, fleet green leg 9). The vacuity
+    floor, a live pid read as running, is test_a_live_record_is_returned's.
     """
 
-    def test_a_reaped_child_is_not_reported_alive(self) -> None:
+    def test_a_reaped_child_is_not_reported_alive(self, runtime: Path) -> None:
         """The pin. Without the reap in _alive, this hangs on a zombie forever."""
         child = subprocess.Popen([sys.executable, "-c", "pass"])
         child.wait()
+        host_lifetime.record_path().write_text(json.dumps({"pid": child.pid}), encoding="utf-8")
 
         # Deliberately NOT calling child.poll() again — Popen.wait() has already
         # reaped it, so this is the easy half and only proves the floor.
-        assert host_lifetime._alive(child.pid) is False
+        assert host_lifetime.running() is None
 
-    def test_an_unreaped_child_is_not_reported_alive_either(self) -> None:
+    def test_an_unreaped_child_is_not_reported_alive_either(self, runtime: Path) -> None:
         """The real case: nobody has waited on it, so the zombie is still there.
 
         This is the exact situation stop() is in when it runs in the process
@@ -338,15 +387,12 @@ class TestADeadChildIsDead:
         # Wait for it to exit WITHOUT reaping it, the way a caller polling
         # _alive would. os.waitid with WNOWAIT leaves the zombie in place.
         os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
+        host_lifetime.record_path().write_text(json.dumps({"pid": child.pid}), encoding="utf-8")
 
         try:
-            assert host_lifetime._alive(child.pid) is False, "a zombie was reported as a running server"
+            assert host_lifetime.running() is None, "a zombie was reported as a running server"
         finally:
             child.wait()
-
-    def test_a_process_that_is_genuinely_running_is_reported_alive(self) -> None:
-        """Vacuity floor: an _alive that always said False would pass the above."""
-        assert host_lifetime._alive(os.getpid()) is True
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM and os.kill(pid, 0) are POSIX")

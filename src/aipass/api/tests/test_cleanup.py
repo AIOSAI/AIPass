@@ -3,7 +3,7 @@
 # Description: Tests for usage data cleanup handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/usage/cleanup.py, the usage data retention handler."""
@@ -11,10 +11,9 @@
 # Tests for cleanup.py -- usage data retention and cleanup handler.
 #
 # Tests:
-# - _read_json() file exists, file missing, invalid JSON
 # - _write_json() success, parent dir creation, write failure
-# - cleanup_old_data() no file, no old entries, entries cleaned, retention period
-# - _identify_old_generations() valid timestamps, no timestamp, invalid timestamp, mixed
+# - cleanup_old_data() no file, does not parse, no old entries, entries cleaned, retention period
+# - which entries are old, through cleanup_old_data: valid, no timestamp, invalid, mixed
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — DEFAULT_RETENTION_DAYS's value; the retention tests pass retention_days
@@ -25,50 +24,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import pytest
 
+# _write_json stays imported by name: its parent mkdir and its two failure
+# paths (a replace the platform refuses, a dump that cannot encode) cannot be
+# reached through cleanup_old_data, which only writes a store it has just read
+# and parsed. A public writer would be a door for these tests alone, so the
+# through_the_command row stands HELD on it (api, fleet green leg 9).
 from aipass.api.apps.handlers.usage.cleanup import (  # seedgo test_coverage detection
-    _read_json,
     _write_json,
     cleanup_old_data,
-    _identify_old_generations,
 )
 
 _CLEANUP_MOD = "aipass.api.apps.handlers.usage.cleanup"
-
-
-# =============================================
-# _read_json tests
-# =============================================
-
-
-class TestReadJson:
-    """Tests for _read_json()."""
-
-    def test_file_exists(self, tmp_path: Path):
-        """Returns parsed dict when file exists and contains valid JSON."""
-        file_path = tmp_path / "data.json"
-        data = {"key": "value", "count": 42}
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-
-        result = _read_json(file_path)
-
-        assert result == data
-
-    def test_file_missing(self, tmp_path: Path):
-        """Returns None when file does not exist."""
-        file_path = tmp_path / "nonexistent.json"
-
-        result = _read_json(file_path)
-
-        assert result is None
-
-    def test_invalid_json(self, tmp_path: Path):
-        """Raises when the file does not parse: None is the absent file's answer (api, fleet green leg 3)."""
-        file_path = tmp_path / "bad.json"
-        file_path.write_text("not valid json {{{", encoding="utf-8")
-
-        with pytest.raises(ValueError):
-            _read_json(file_path)
 
 
 # =============================================
@@ -77,7 +43,15 @@ class TestReadJson:
 
 
 class TestWriteJson:
-    """Tests for _write_json()."""
+    """
+    Tests for _write_json().
+
+    TestReadJson's three tests were retired as duplicates once asked through
+    cleanup_old_data (api, fleet green leg 9): a missing store is test_no_file,
+    a store that does not parse is
+    test_a_store_that_does_not_parse_raises_and_is_left_alone, and a store that
+    parses is read by every test that cleans an entry.
+    """
 
     def test_success(self, tmp_path: Path):
         """Returns True and writes valid JSON to file."""
@@ -288,57 +262,68 @@ class TestCleanupOldData:
 # =============================================
 
 
-class TestIdentifyOldGenerations:
-    """Tests for _identify_old_generations()."""
+def _cleaned(tmp_path: Path, tracking: dict) -> tuple:
+    """Run cleanup_old_data at 30 days over a store holding `tracking`; the count and what is left."""
+    store = tmp_path / "usage.json"
+    store.write_text(json.dumps({"data": {"generation_tracking": tracking}}), encoding="utf-8")
 
-    def test_entries_with_valid_timestamps(self):
+    count = cleanup_old_data(store, retention_days=30)
+
+    return count, json.loads(store.read_text(encoding="utf-8"))["data"]["generation_tracking"]
+
+
+class TestIdentifyOldGenerations:
+    """
+    Which entries are old, asked through cleanup_old_data (api, fleet green leg 9).
+
+    These called _identify_old_generations by name with a fixed cutoff; the
+    cutoff is now cleanup's own, now minus 30 days, and the answer is what is
+    left in the store.
+    """
+
+    def test_entries_with_valid_timestamps(self, tmp_path: Path):
         """Identifies entries older than cutoff date."""
-        cutoff = datetime(2026, 5, 1)
+        now = datetime.now()
         tracking = {
-            "gen-old": {"timestamp": "2026-04-15T12:00:00"},
-            "gen-new": {"timestamp": "2026-05-10T12:00:00"},
+            "gen-old": {"timestamp": (now - timedelta(days=45)).isoformat()},
+            "gen-new": {"timestamp": (now - timedelta(days=5)).isoformat()},
         }
 
-        result = _identify_old_generations(tracking, cutoff)
+        count, left = _cleaned(tmp_path, tracking)
 
-        assert "gen-old" in result
-        assert "gen-new" not in result
+        assert count == 1
+        assert sorted(left) == ["gen-new"]
 
-    def test_no_timestamp(self):
+    def test_no_timestamp(self, tmp_path: Path):
         """Marks entries without timestamp for cleanup."""
-        cutoff = datetime(2026, 5, 1)
         tracking = {
             "gen-none": {"caller": "test"},
             "gen-empty": {"timestamp": None},
         }
 
-        result = _identify_old_generations(tracking, cutoff)
+        count, left = _cleaned(tmp_path, tracking)
 
-        assert "gen-none" in result
-        assert "gen-empty" in result
+        assert count == 2
+        assert left == {}
 
-    def test_invalid_timestamp(self):
+    def test_invalid_timestamp(self, tmp_path: Path):
         """Marks entries with invalid timestamp for cleanup."""
-        cutoff = datetime(2026, 5, 1)
-        tracking = {
-            "gen-bad": {"timestamp": "not-a-date"},
-        }
+        count, left = _cleaned(tmp_path, {"gen-bad": {"timestamp": "not-a-date"}})
 
-        result = _identify_old_generations(tracking, cutoff)
+        assert count == 1
+        assert left == {}
 
-        assert "gen-bad" in result
-
-    def test_mixed_entries(self):
+    def test_mixed_entries(self, tmp_path: Path):
         """Handles mix of valid old, valid new, missing, and invalid timestamps."""
-        cutoff = datetime(2026, 5, 1)
+        now = datetime.now()
         tracking = {
-            "gen-old": {"timestamp": "2026-03-01T00:00:00"},
-            "gen-new": {"timestamp": "2026-05-10T00:00:00"},
+            "gen-old": {"timestamp": (now - timedelta(days=60)).isoformat()},
+            "gen-new": {"timestamp": now.isoformat()},
             "gen-no-ts": {"caller": "x"},
             "gen-bad-ts": {"timestamp": "garbage"},
         }
 
-        result = _identify_old_generations(tracking, cutoff)
+        count, left = _cleaned(tmp_path, tracking)
 
-        assert sorted(result) == ["gen-bad-ts", "gen-no-ts", "gen-old"]
-        assert "gen-new" not in result
+        assert count == 3
+        assert sorted(left) == ["gen-new"]

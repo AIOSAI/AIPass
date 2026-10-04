@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lifetime.py
 # Description: Host API Lifetime Handler — a serve that outlives the shell that started it
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-19
-# Modified: 2026-08-19
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -370,6 +370,10 @@ def running() -> Optional[Dict[str, Any]]:
             here — status must say it cannot tell, stop must not signal into the
             dark, and serve must not start a second listener on a port it
             cannot see.
+        LifetimeError: A record file exists and cannot be read as a record.
+            It used to read as None, no server, so stop cleared it as stale
+            and a running server lost the file that names its pid (api, fleet
+            green leg 9). The three callers refuse as for the supervisor.
 
     Note:
         THE SUPERVISOR IS ASKED FIRST, because when a unit is running it IS the
@@ -405,9 +409,12 @@ def running() -> Optional[Dict[str, Any]]:
         record = json.loads(record_file.read_text(encoding="utf-8"))
     except (ValueError, OSError) as e:
         logger.warning("[host_api] the serve record could not be read (%s): %s", record_file, e)
-        return None
+        raise LifetimeError(f"The serve record at {record_file} could not be read: {e}") from e
 
-    if not isinstance(record, dict) or not _alive(int(record.get("pid") or 0)):
+    if not isinstance(record, dict):
+        raise LifetimeError(f"The serve record at {record_file} is not a record: {type(record).__name__}")
+
+    if not _alive(int(record.get("pid") or 0)):
         return None
 
     record["owner"] = OWNER_DETACHED
@@ -648,6 +655,10 @@ def autostart_report(host: Optional[str] = None, port: Optional[int] = None) -> 
     except autostart.SupervisorUnreachable as e:
         logger.warning("[host_api] the port-conflict check could not reach the supervisor: %s", e)
         current = None
+    except LifetimeError as e:
+        # The same courtesy, for the same reason: the unit is written by now.
+        logger.warning("[host_api] the port-conflict check could not read the serve record: %s", e)
+        current = None
 
     report["conflict"] = current if (current or {}).get("owner") == OWNER_DETACHED else None
     return report
@@ -672,6 +683,9 @@ def server_state() -> Dict[str, Any]:
         record = running()
     except autostart.SupervisorUnreachable as e:
         logger.warning("[host_api] status could not reach the supervisor: %s", e)
+        return {"state": "unknown", "record": None, "reason": str(e)}
+    except LifetimeError as e:
+        logger.warning("[host_api] status could not read the serve record: %s", e)
         return {"state": "unknown", "record": None, "reason": str(e)}
 
     if record is None:

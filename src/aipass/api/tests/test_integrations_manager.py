@@ -3,7 +3,7 @@
 # Description: Tests for integrations_manager command handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/integrations_manager.py, the integrations command handler."""
@@ -23,8 +23,6 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from aipass.api.apps.modules.integrations_manager import (
-    _run_call,
-    _run_list,
     handle_command,
     print_help,
     print_introspection,
@@ -131,8 +129,15 @@ class TestHandleCommand:
 
 
 class TestRunList:
-    """Tests for integrations_manager._run_list()."""
+    """
+    Tests for integrations_manager._run_list(), through `integrations list`.
 
+    Asked through handle_command and read off its exit code (api, fleet green
+    leg 9); _ensure_loaded is a stand-in, as in the help tests below, so no
+    driver directory is loaded.
+    """
+
+    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.get_contracts", return_value={"contracts": [], "count": 0, "success": True})
     @patch(f"{_IM}.list_contracts", return_value=[])
@@ -141,17 +146,20 @@ class TestRunList:
         _mock_list: MagicMock,
         _mock_get: MagicMock,
         _mock_header: MagicMock,
+        _mock_loaded: MagicMock,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Empty contracts list prints 'No integrations configured.'."""
-        result = _run_list()
-        assert result == 0
+        with pytest.raises(SystemExit) as result:
+            handle_command("integrations", ["list"])
+        assert result.value.code == 0
         # The docstring's line is read, not only the exit code (api, fleet green leg 3).
         # Mutant that reddens it: the empty-list line dropped or reworded.
         out = capsys.readouterr().out
         assert "No integrations configured." in out
         assert "apps/integrations/{project}/driver.py" in out
 
+    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(
         f"{_IM}.get_contracts",
@@ -163,11 +171,13 @@ class TestRunList:
         _mock_list: MagicMock,
         _mock_get: MagicMock,
         _mock_header: MagicMock,
+        _mock_loaded: MagicMock,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """With contracts, prints each name and returns 0."""
-        result = _run_list()
-        assert result == 0
+        with pytest.raises(SystemExit) as result:
+            handle_command("integrations", ["list"])
+        assert result.value.code == 0
         # Each contract name is printed
         full_output = capsys.readouterr().out
         assert "alpha" in full_output
@@ -180,20 +190,29 @@ class TestRunList:
 
 
 class TestRunCall:
-    """Tests for integrations_manager._run_call()."""
+    """
+    Tests for integrations_manager._run_call(), through `integrations call`.
 
+    Asked through handle_command and read off its exit code (api, fleet green
+    leg 9); resolve and invoke are stand-ins, so no driver runs.
+    """
+
+    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(f"{_IM}.resolve", return_value=None)
     def test_contract_not_found(
         self,
         _mock_resolve: MagicMock,
         mock_error: MagicMock,
+        _mock_loaded: MagicMock,
     ) -> None:
         """Unresolved contract calls error() and returns 1."""
-        result = _run_call("missing", [])
-        assert result == 1
+        with pytest.raises(SystemExit) as result:
+            handle_command("integrations", ["call", "missing"])
+        assert result.value.code == 1
         mock_error.assert_called_once()
 
+    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(
         f"{_IM}.invoke",
@@ -203,18 +222,22 @@ class TestRunCall:
     def test_success(
         self,
         mock_resolve: MagicMock,
-        _mock_invoke: MagicMock,
+        mock_invoke: MagicMock,
         _mock_error: MagicMock,
+        _mock_loaded: MagicMock,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Successful call returns 0 and prints result."""
         mock_resolve.return_value = MagicMock()
 
-        result = _run_call("mycontract", ["arg1"])
-        assert result == 0
+        with pytest.raises(SystemExit) as result:
+            handle_command("integrations", ["call", "mycontract", "arg1"])
+        assert result.value.code == 0
+        mock_invoke.assert_called_once_with(mock_resolve.return_value, "mycontract", ["arg1"])
         # The driver's result is what the caller sees (api, fleet green leg 3).
         assert capsys.readouterr().out == "done\n"
 
+    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(
         f"{_IM}.invoke",
@@ -226,12 +249,14 @@ class TestRunCall:
         mock_resolve: MagicMock,
         _mock_invoke: MagicMock,
         mock_error: MagicMock,
+        _mock_loaded: MagicMock,
     ) -> None:
         """Failed driver returns 1 and calls error()."""
         mock_resolve.return_value = MagicMock()
 
-        result = _run_call("failing", [])
-        assert result == 1
+        with pytest.raises(SystemExit) as result:
+            handle_command("integrations", ["call", "failing"])
+        assert result.value.code == 1
         mock_error.assert_called_once()
 
 
