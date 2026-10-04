@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.5.3
+# Version: 2.6.0
 # Created: 2026-03-02
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -105,7 +105,7 @@ NO_WAKE_BACK_FLAG = "--no-wake-back"
 WAKE_RESULT_DECLINED = "declined"
 
 
-def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str) -> str:
+def _wake_sender(sender: str, branch_email: str, exit_code: int) -> str:
     """Wake the dispatcher back after target completion.
 
     Builder-class citizens get woken back, subject to the same availability
@@ -162,7 +162,7 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
             # The wake is correctly refused; the NOTIFICATION is not optional. Until
             # this, the branch returned here having neither woken nor mailed, and
             # said "mail delivered" while delivering nothing.
-            if _mail_wake_back(sender, branch_email, exit_code, lock_file):
+            if _mail_wake_back(sender, branch_email, exit_code):
                 return "mailed_manager"
             return "failed_manager_mail"
 
@@ -186,7 +186,32 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
         return "failed"
 
 
-def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: str) -> bool:
+_AI_MAIL_DIR = Path(__file__).resolve().parents[3]  # ai_mail/
+
+
+def _send_from_ai_mail(recipient: str, subject: str, body: str) -> subprocess.CompletedProcess:
+    """Send one of the monitor's notices through drone, as @ai_mail.
+
+    The bounce and the wake-back are the mail system's own notices. They ran in
+    the woken branch's home under the monitor's inherited AIPASS_BRANCH_NAME, so
+    drone saw two claims, the name and the passport underfoot, and logged an
+    identity conflict on every one (665 since 2026-08-18, reported by @drone on
+    2026-10-04). Both claims now name ai_mail: its home as cwd and its name in
+    the env, whoever started the monitor (ai_mail's decision, 2026-10-04).
+    """
+    env = dict(os.environ)
+    env["AIPASS_BRANCH_NAME"] = "ai_mail"
+    return subprocess.run(
+        ["drone", "@ai_mail", "send", recipient, subject, body],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(_AI_MAIL_DIR),
+        env=env,
+    )
+
+
+def _mail_wake_back(sender: str, branch_email: str, exit_code: int) -> bool:
     """Deliver the wake-back as MAIL when the sender cannot be woken.
 
     Managers are blocklisted from wakes and that is correct — two claudes on one
@@ -198,9 +223,8 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: s
     had finished only if the agent happened to volunteer an email.
 
     Same transport as _send_bounce, for the same reason: `drone` resolves routing,
-    and cwd is the target branch — which is a real branch, so the identity fence
-    passes. Sending in-process would need a sender identity this process does not
-    have.
+    and _send_from_ai_mail sends it as @ai_mail. Sending in-process would need a
+    sender identity this process does not have.
 
     Returns:
         bool: True when the mail was accepted for delivery.
@@ -214,13 +238,7 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: s
         f"off the next phase if there is one."
     )
     try:
-        result = subprocess.run(
-            ["drone", "@ai_mail", "send", sender, subject, body],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(Path(lock_file).parent.parent),
-        )
+        result = _send_from_ai_mail(sender, subject, body)
         if result.returncode != 0:
             logger.warning(
                 "[monitor] Wake-back mail to manager %s FAILED (exit %d): %s",
@@ -284,14 +302,7 @@ def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, st
 
     # Send via drone (resolves paths, handles routing)
     try:
-        result = subprocess.run(
-            ["drone", "@ai_mail", "send", sender, subject, body],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(Path(lock_file).parent.parent),
-        )
-        return result.returncode == 0
+        return _send_from_ai_mail(sender, subject, body).returncode == 0
     except (subprocess.SubprocessError, OSError) as e:
         logger.warning("[monitor] Bounce email send failed for %s: %s", branch_email, e)
         # Fallback: write bounce to a file if email fails
@@ -1146,7 +1157,7 @@ def main():
     # ordering below is the whole of FPLAN-0452 P0's second fix and it is not
     # arbitrary — see the block comment on the report write.
     if wake_back:
-        wake_result = _wake_sender(sender, branch_email, exit_code, lock_file)
+        wake_result = _wake_sender(sender, branch_email, exit_code)
     else:
         # The caller declined (wake_branch(wake_back=False), e.g. @daemon's
         # scheduled nudges): a nudge owes no reply, and waking the sender back
