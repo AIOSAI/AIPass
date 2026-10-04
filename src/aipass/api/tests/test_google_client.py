@@ -3,7 +3,7 @@
 # Description: Tests for Google API client module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/google_client.py and the apps/handlers/google/auth.py it drives."""
@@ -646,6 +646,53 @@ def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _fa
     _succ.assert_not_called()
 
 
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
+@patch(f"{_MOD}.header")
+@patch(f"{_MOD}.success")
+@patch(f"{_MOD}.error")
+@patch(f"{_MOD}.warning")
+def test_cmd_reauth_shows_the_flow_reason(_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth):
+    """reauth google shows the consent flow's own reason (api, fleet green leg 10)."""
+    mock_auth.GoogleAuthUnavailable = _GOOGLE_UNAVAILABLE
+    mock_auth.is_available.return_value = True
+    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
+    mock_auth.reauth.side_effect = _GOOGLE_UNAVAILABLE("Google OAuth flow failed: port in use")
+
+    assert google_client.handle_command("reauth", ["google"]) is True
+
+    mock_err.assert_called_once_with("Google OAuth flow failed: port in use")
+    mock_json.log_operation.assert_called_once_with("google_reauth", {"status": "failed"})
+    _succ.assert_not_called()
+
+
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
+@patch(f"{_MOD}.header")
+@patch(f"{_MOD}.success")
+@patch(f"{_MOD}.error")
+@patch(f"{_MOD}.warning")
+def test_cmd_validate_shows_the_reason(mock_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth):
+    """validate google names an unreadable file or a failed refresh instead of "invalid" (api, fleet green leg 10)."""
+    mock_auth.GoogleAuthUnavailable = _GOOGLE_UNAVAILABLE
+    mock_auth.is_available.return_value = True
+    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
+    mock_auth.validate_credentials.side_effect = _GOOGLE_UNAVAILABLE("Google credential refresh failed: offline")
+
+    assert google_client.handle_command("validate", ["google"]) is True
+
+    mock_err.assert_called_once_with(
+        "Google credential refresh failed: offline", suggestion="Run 'drone @api reauth google' to authenticate"
+    )
+    mock_json.log_operation.assert_called_once_with("google_validate", {"status": "unavailable"})
+    mock_warn.assert_not_called()
+    _succ.assert_not_called()
+
+
 # =============================================
 # handle_command — exception propagation
 # =============================================
@@ -673,6 +720,7 @@ def test_handle_command_propagates_exception(_warn, _err, _succ, _hdr, _json, _r
 
 # Base patch path for auth module
 _AUTH = "aipass.api.apps.handlers.google.auth"
+_GOOGLE_UNAVAILABLE = google_client.google_auth.GoogleAuthUnavailable
 
 
 @patch(f"{_AUTH}.json_handler", autospec=True)
@@ -736,20 +784,23 @@ def test_load_credentials_no_file(mock_creds_path):
     assert result is None
 
 
-@patch(f"{_AUTH}.logger", autospec=True)
 @patch(f"{_AUTH}.json_handler", autospec=True)
 @patch(f"{_AUTH}.Credentials")
 @patch(f"{_AUTH}.CREDS_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_load_credentials_exception(mock_creds_path, mock_creds_cls, mock_json, mock_logger):
-    """load_credentials() returns None and logs error on exception."""
+def test_load_credentials_exception(mock_creds_path, mock_creds_cls, mock_json):
+    """A saved file that does not load raises GoogleAuthUnavailable with the reason.
+
+    It used to answer None, which read the same as "nothing saved yet"
+    (api, fleet green leg 10).
+    """
     mock_creds_path.exists.return_value = True
     mock_creds_cls.from_authorized_user_file.side_effect = ValueError("corrupt file")
 
-    result = load_credentials()
+    with pytest.raises(_GOOGLE_UNAVAILABLE) as caught:
+        load_credentials()
 
-    assert result is None
-    mock_logger.error.assert_called_once()
+    assert str(caught.value) == "Saved Google credentials could not be loaded: corrupt file"
     mock_json.log_operation.assert_not_called()
 
 
@@ -814,22 +865,47 @@ def test_refresh_credentials_no_refresh_token():
     assert result is False
 
 
-@patch(f"{_AUTH}.logger", autospec=True)
 @patch(f"{_AUTH}._save_credentials")
 @patch(f"{_AUTH}.Request")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_refresh_credentials_exception(mock_request_cls, mock_save, mock_logger):
-    """refresh_credentials() returns False on refresh exception."""
+def test_refresh_credentials_exception(mock_request_cls, mock_save):
+    """A failed refresh raises GoogleAuthUnavailable with the reason.
+
+    It used to answer False, which read the same as "nothing to refresh"
+    (api, fleet green leg 10).
+    """
     mock_creds = MagicMock()
     mock_creds.expired = True
     mock_creds.refresh_token = "tok_refresh"
-    mock_creds.refresh.side_effect = RuntimeError("network error")
+    mock_creds.refresh.side_effect = RuntimeError("token revoked")
 
-    result = refresh_credentials(mock_creds)
+    with pytest.raises(_GOOGLE_UNAVAILABLE) as caught:
+        refresh_credentials(mock_creds)
 
-    assert result is False
+    assert str(caught.value) == "Google credential refresh failed: token revoked"
     mock_save.assert_not_called()
-    mock_logger.error.assert_called_once()
+
+
+class _FakeTransportError(Exception):
+    """Stands in for google.auth's TransportError, absent where the libraries are."""
+
+
+@patch(f"{_AUTH}.TransportError", _FakeTransportError)
+@patch(f"{_AUTH}._save_credentials")
+@patch(f"{_AUTH}.Request")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_refresh_transport_error_is_named_transient(mock_request_cls, mock_save):
+    """A network failure during refresh raises naming itself transient (api, fleet green leg 10)."""
+    mock_creds = MagicMock()
+    mock_creds.expired = True
+    mock_creds.refresh_token = "tok_refresh"
+    mock_creds.refresh.side_effect = _FakeTransportError("dns lookup failed")
+
+    with pytest.raises(_GOOGLE_UNAVAILABLE) as caught:
+        refresh_credentials(mock_creds)
+
+    assert str(caught.value) == "Google credential refresh failed, transient network error: dns lookup failed"
+    mock_save.assert_not_called()
 
 
 # =============================================
@@ -908,18 +984,32 @@ def test_run_oauth_flow_no_client_secret(mock_secret_path):
     assert result is None
 
 
-@patch(f"{_AUTH}.logger", autospec=True)
 @patch(f"{_AUTH}._save_credentials")
 @patch(f"{_AUTH}.InstalledAppFlow")
 @patch(f"{_AUTH}.CLIENT_SECRET_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_run_oauth_flow_exception(mock_secret_path, mock_flow_cls, mock_save, mock_logger):
-    """run_oauth_flow() returns None and logs error on exception."""
+def test_run_oauth_flow_exception(mock_secret_path, mock_flow_cls, mock_save):
+    """A failed consent flow raises GoogleAuthUnavailable with the reason (api, fleet green leg 10)."""
     mock_secret_path.exists.return_value = True
-    mock_flow_cls.from_client_secrets_file.side_effect = OSError("bad secret file")
+    mock_flow_cls.from_client_secrets_file.side_effect = ValueError("bad secret file")
 
-    result = run_oauth_flow()
+    with pytest.raises(_GOOGLE_UNAVAILABLE) as caught:
+        run_oauth_flow()
 
-    assert result is None
+    assert str(caught.value) == "Google OAuth flow failed: bad secret file"
     mock_save.assert_not_called()
-    mock_logger.error.assert_called_once()
+
+
+@patch(f"{_AUTH}.run_oauth_flow")
+@patch(f"{_AUTH}.load_credentials")
+def test_reauth_repairs_an_unloadable_file_through_the_flow(mock_load, mock_flow):
+    """reauth exists for a corrupt or revoked file: a load that raises still reaches the flow.
+
+    (api, fleet green leg 10)
+    """
+    mock_load.side_effect = _GOOGLE_UNAVAILABLE("Saved Google credentials could not be loaded: corrupt")
+    fresh = MagicMock()
+    mock_flow.return_value = fresh
+
+    assert google_client.google_auth.reauth(port=8085, open_browser=False) is fresh
+    mock_flow.assert_called_once_with(scopes=None, port=8085, open_browser=False)

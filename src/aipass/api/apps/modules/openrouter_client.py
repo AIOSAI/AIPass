@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: openrouter_client.py
 # Description: OpenRouter Client Module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2025-11-15
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 # pyright: reportMissingImports=false
 
@@ -207,7 +207,11 @@ def make_call(args: List[str]):
 
     console.print(f"[dim]Calling {model}...[/dim]")
 
-    response = client.get_response(prompt, caller="cli", model=model)
+    try:
+        response = client.get_response(prompt, caller="cli", model=model)
+    except client.OpenRouterUnavailable as e:
+        error(str(e))
+        return
 
     if response:
         success(f"Response received ({len(response['content'])} chars)")
@@ -336,6 +340,10 @@ def get_response(prompt: str, caller: str | None = None, model: str | None = Non
 
     Returns:
         Dict with 'content', 'id', 'model' or None on failure
+
+    Raises:
+        client.OpenRouterUnavailable: the SDK refused to build a client or a
+        response could not be read; the reason travels (api, fleet green leg 10)
 
     Example:
         >>> from aipass.api.apps.modules.openrouter_client import get_response

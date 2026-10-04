@@ -3,7 +3,7 @@
 # Description: Tests for the host API attach lane — a real PTY running a tmux client
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/host/attach.py and the WS /v1/room/attach route in apps/handlers/host/server.py."""
@@ -1053,11 +1053,15 @@ class TestOpeningAnAttach:
 
     def test_a_missing_tmux_is_named_rather_than_shrugged_at(self, quiet: Any) -> None:
         """'Attach failed' with no subject is a support ticket."""
-        with patch.object(host_attach.shutil, "which", return_value=None):
+        # The product's own binary name pointed at one no PATH holds, so the real
+        # lookup answers absent; shutil.which is not replaced for the process
+        # (api, fleet green leg 10).
+        with patch.object(host_attach, "TMUX_BINARY", "aipass-no-such-tmux"):
             with pytest.raises(host_attach.AttachUnavailable) as caught:
                 host_attach.open_attach("api")
 
-        assert "tmux" in str(caught.value)
+        assert str(caught.value).startswith("aipass-no-such-tmux is not installed on this host")
+        assert "tmux client" in str(caught.value)
 
     def test_a_pty_case_opens_on_a_host_that_has_no_tmux(self, quiet: Any, monkeypatch: Any) -> None:
         """

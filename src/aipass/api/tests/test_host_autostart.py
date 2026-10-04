@@ -3,7 +3,7 @@
 # Description: Tests for the supervisor seam — a server that comes back on its own
 # Version: 1.0.0
 # Created: 2026-08-27
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/host/autostart.py and the host-api autostart verb that drives it."""
@@ -365,10 +365,23 @@ class TestStoppingGoesThroughTheSupervisor:
         with patch.object(host_autostart.subprocess, "run", return_value=_completed()):
             assert host_autostart.stop_unit() is True
 
-    def test_a_platform_without_systemd_refuses_rather_than_pretends(self, quiet: None) -> None:
-        with patch.object(host_autostart.sys, "platform", "win32"):
-            with pytest.raises(host_autostart.AutostartUnsupported):
-                host_autostart.stop_unit()
+    def test_a_platform_without_systemd_refuses_rather_than_pretends(
+        self, quiet: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        stop_unit asks is_supported, the product's own gate, and refuses on its no.
+
+        Answered through that gate, not by setting sys.platform for the whole
+        process (api, fleet green leg 10); the platform half of the gate is
+        test_a_platform_without_systemd_never_shells_out's.
+        """
+        asked: list = []
+        monkeypatch.setattr(host_autostart, "is_supported", lambda: asked.append("is_supported") or False)
+
+        with pytest.raises(host_autostart.AutostartUnsupported):
+            host_autostart.stop_unit()
+
+        assert asked == ["is_supported"], "stop_unit refused without asking the gate"
 
 
 class TestTheInstallStepsAreOrderedAndOutsideTheTree:

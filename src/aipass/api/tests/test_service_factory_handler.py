@@ -3,7 +3,7 @@
 # Description: Tests for Google API service factory handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/google/service_factory.py, the Google API service object factory."""
@@ -19,6 +19,10 @@
 # seedgo: no-test-needed(covered_elsewhere) — handlers/google/auth.py credential loading; tests/test_google_client.py
 
 from unittest.mock import patch, MagicMock
+
+import pytest
+
+from aipass.api.apps.handlers.google.auth import GoogleAuthUnavailable
 
 from aipass.api.apps.handlers.google.service_factory import build_service, build_thread_safe_service
 
@@ -89,25 +93,24 @@ class TestBuildService:
         assert result is mock_service
         mock_build.assert_called_once_with("drive", "v3", credentials=mock_creds)
 
-    @patch(f"{_SF}.logger", autospec=True)
     @patch(f"{_SF}.build")
     @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", True)
-    def test_build_exception_returns_none(
-        self,
-        mock_auth: MagicMock,
-        mock_build: MagicMock,
-        _mock_logger: MagicMock,
-    ) -> None:
-        """When build() raises, returns None and logs error."""
+    def test_build_exception_raises_with_the_reason(self, mock_auth: MagicMock, mock_build: MagicMock) -> None:
+        """When build() raises, GoogleAuthUnavailable carries its reason.
+
+        It used to answer None, which @backup's DriveClient saw only as
+        "get_drive_service returned None" (api, fleet green leg 10, @backup's answer).
+        """
+        mock_auth.GoogleAuthUnavailable = GoogleAuthUnavailable
         mock_auth.is_available.return_value = True
         mock_auth.authenticate.return_value = MagicMock()
         mock_build.side_effect = RuntimeError("build failed")
 
-        result = build_service("drive", "v3")
+        with pytest.raises(GoogleAuthUnavailable) as caught:
+            build_service("drive", "v3")
 
-        assert result is None
-        _mock_logger.error.assert_called_once_with("Failed to build Google drive service: build failed")
+        assert str(caught.value) == "Google drive service could not be built: build failed"
 
 
 # =============================================
@@ -178,6 +181,25 @@ class TestBuildThreadSafeService:
 
         result = build_thread_safe_service("drive", "v3")
         assert result is None
+
+    @patch(f"{_SF}.build")
+    @patch(f"{_SF}.auth", autospec=True)
+    @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", True)
+    def test_build_exception_raises_with_the_reason(self, mock_auth: MagicMock, mock_build: MagicMock) -> None:
+        """When build() raises for a worker thread, GoogleAuthUnavailable carries its reason.
+
+        @backup's _build_thread_service (client.py:132, called from client.py:123
+        and upload.py:212) receives it (api, fleet green leg 10, @backup's answer).
+        """
+        mock_auth.GoogleAuthUnavailable = GoogleAuthUnavailable
+        mock_auth.is_available.return_value = True
+        mock_auth.load_credentials.return_value = MagicMock(expired=False, valid=True)
+        mock_build.side_effect = RuntimeError("ssl handshake")
+
+        with pytest.raises(GoogleAuthUnavailable) as caught:
+            build_thread_safe_service("drive", "v3")
+
+        assert str(caught.value) == "Thread-safe Google drive service could not be built: ssl handshake"
 
     @patch(f"{_SF}.build")
     @patch(f"{_SF}.auth", autospec=True)

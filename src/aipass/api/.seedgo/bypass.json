@@ -136,6 +136,61 @@
       "standard": "through_the_command",
       "lines": [716],
       "reason": "kwargs['preexec_fn'] is host_attach._acquire_controlling_tty: the identity IS the claim (open_attach hands Popen this very hook), so the name must be read; kept under compass 481 and accepted in leg 8 (api, fleet green leg 9)."
+    },
+    {
+      "file": "tests/test_host_lifetime.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. os.kill is replaced in the stop tests because the subject is a SIGTERM to a pid the record names, and an unpatched kill would signal a real process; time.monotonic drives stop's 10s deadline without waiting it; sys.platform/shutil.which answer linger_enabled's own platform probe. A kill or clock parameter on stop() would be a door for these tests alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_attach.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. shutil.which answers the tmux preflight on hosts with and without tmux (CI runners have none), forwarding every other lookup; os.close is spied to prove a second hangup closes nothing. The missing-tmux test now uses the product's TMUX_BINARY instead (leg 10). A which/close seam on open_attach would be a door for the tests alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_read_lane.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. refusals' time.monotonic drives the 60s refusal TTL past its window without sleeping it; Path.open is a pass-through spy proving read_git_remote opens no file. The unreadable-feed test now uses feed_path (leg 10). A clock parameter on the refusal memory would be a door for these tests alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_caller_detection.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. get_caller_info's subject IS the live call stack: inspect.stack is answered with frames from flow/prax paths no test file lives under. A stack parameter would be a door for these tests alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_api_entry.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. discover_modules' subject is what importlib hands back for each module file (no handle_command, an import that raises); importlib.import_module is answered per test, scoped to the api entry module's own reference. An importer parameter would be a door for these tests alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_token_store.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. os.open is answered with the Windows delete-pending PermissionError and with a permanent denial, the two lock states the platform will not produce on demand on Linux CI. An opener parameter on the lock would be a door for these tests alone; the stale-lock race stays logged per devpulse's 09-19 ruling (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_uploads.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. os.open raising ENOSPC and Path.mkdir raising EPERM are the server-side failures (503, not 400) a test cannot make a real disk produce; the asserts read the product's own status, never the error type. A filesystem parameter on store_image would be a door for these tests alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_autostart.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. The one patch left (sys.platform = win32) is in the test of is_supported itself, whose subject is the platform answer; the stop_unit refusal now goes through is_supported (leg 10) (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_settings.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. os.unlink refusing is the double failure (write fails, cleanup fails) whose reason must still travel; no real file system refuses an unlink of a file the test owns on demand. An unlink parameter would be a door for this test alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_fleet.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. The binary lookup's PATH step is the subject: shutil.which is answered per name so each step of the search order is pinned independently of what the runner has installed (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_api.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. One shutil.which answering nothing on PATH, so the route's missing-binary answer does not depend on whether the runner has baud installed (api, fleet green leg 10)."
     }
   ],
   "notes": {

@@ -3,7 +3,7 @@
 # Description: Critical path tests for API branch core functions
 # Version: 1.0.0
 # Created: 2026-03-31
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/api_key.py and apps/modules/openrouter_client.py, the request pipeline."""
@@ -24,6 +24,8 @@
 # seedgo: no-test-needed(ruff) — that api_key.py and openrouter_client.py parse and import
 
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 from aipass.api.apps.modules import api_key
 from aipass.api.apps.modules import openrouter_client
@@ -248,6 +250,19 @@ class TestExtractResponse:
         response.model = "test/model"
 
         assert openrouter_client.extract_response(response) is None
+
+    def test_unreadable_response_raises_with_the_reason(self):
+        """A response object that fails to read raises OpenRouterUnavailable naming why.
+
+        It used to answer None, which read the same as an empty reply (api, fleet green leg 10).
+        """
+        response = MagicMock()
+        response.choices.__getitem__.side_effect = RuntimeError("bad shape")
+
+        with pytest.raises(openrouter_client.client.OpenRouterUnavailable) as caught:
+            openrouter_client.extract_response(response)
+
+        assert str(caught.value) == "OpenRouter response could not be read: bad shape"
 
     def test_response_missing_message(self):
         """Response choice without message attribute returns None."""

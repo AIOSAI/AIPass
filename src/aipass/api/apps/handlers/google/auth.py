@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Google OAuth2 authentication and credential management
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-03-14
+# Modified: 2026-10-03
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalMemberAccess=false, reportOptionalCall=false
 
@@ -69,6 +69,16 @@ except ImportError as e:
     InstalledAppFlow = None  # type: ignore[assignment, misc]
 
 
+class GoogleAuthUnavailable(RuntimeError):
+    """Saved credentials, a refresh, the consent flow or a service build failed.
+
+    Carries the library's reason where None or False used to read the same as
+    "no credentials yet" (api, fleet green leg 10). A RuntimeError, so the
+    gateway's documented raise (get_google_service: RuntimeError) still holds
+    for @backup's DriveClient, which keeps str(exc) as its last_error.
+    """
+
+
 # =============================================
 # CREDENTIAL OPERATIONS
 # =============================================
@@ -87,7 +97,12 @@ def load_credentials(scopes: Optional[list] = None) -> Optional["Credentials"]:
                 Defaults to Drive scopes if not provided.
 
     Returns:
-        Credentials object if found and loadable, None otherwise.
+        Credentials object if found and loadable, None when the libraries are
+        missing or no credentials file is saved yet.
+
+    Raises:
+        GoogleAuthUnavailable: the saved file exists but does not load; the
+        reason travels (api, fleet green leg 10).
     """
     if not GOOGLE_AUTH_AVAILABLE:
         return None
@@ -102,8 +117,7 @@ def load_credentials(scopes: Optional[list] = None) -> Optional["Credentials"]:
         json_handler.log_operation("credentials_loaded", {"source": str(CREDS_PATH)})
         return creds
     except Exception as e:
-        logger.error(f"Failed to load credentials from {CREDS_PATH}: {e}")
-        return None
+        raise GoogleAuthUnavailable(f"Saved Google credentials could not be loaded: {e}") from e
 
 
 def refresh_credentials(creds: "Credentials") -> bool:
@@ -113,7 +127,12 @@ def refresh_credentials(creds: "Credentials") -> bool:
         creds: Expired Credentials object with a refresh token.
 
     Returns:
-        True if refresh succeeded, False otherwise.
+        True if refresh succeeded, False when there is nothing to refresh
+        (libraries missing, not expired, no refresh token).
+
+    Raises:
+        GoogleAuthUnavailable: the refresh itself failed, a transient network
+        error named as such (api, fleet green leg 10).
     """
     if not GOOGLE_AUTH_AVAILABLE:
         return False
@@ -126,11 +145,9 @@ def refresh_credentials(creds: "Credentials") -> bool:
         _save_credentials(creds)
         return True
     except TransportError as e:  # type: ignore[misc]
-        logger.warning(f"Credential refresh failed - transient network error: {e}")
-        return False
+        raise GoogleAuthUnavailable(f"Google credential refresh failed, transient network error: {e}") from e
     except Exception as e:
-        logger.error(f"Failed to refresh credentials: {e}")
-        return False
+        raise GoogleAuthUnavailable(f"Google credential refresh failed: {e}") from e
 
 
 def run_oauth_flow(
@@ -149,7 +166,11 @@ def run_oauth_flow(
         open_browser: Whether to auto-open the consent page.
 
     Returns:
-        Credentials object if flow succeeded, None otherwise.
+        Credentials object if flow succeeded, None when the libraries or the
+        client secret are missing.
+
+    Raises:
+        GoogleAuthUnavailable: the consent flow failed (api, fleet green leg 10).
     """
     if not GOOGLE_AUTH_AVAILABLE:
         return None
@@ -165,8 +186,7 @@ def run_oauth_flow(
         _save_credentials(creds)
         return creds
     except Exception as e:
-        logger.error(f"OAuth flow failed: {e}")
-        return None
+        raise GoogleAuthUnavailable(f"Google OAuth flow failed: {e}") from e
 
 
 def authenticate(scopes: Optional[list] = None) -> Optional["Credentials"]:
@@ -181,7 +201,14 @@ def authenticate(scopes: Optional[list] = None) -> Optional["Credentials"]:
         scopes: OAuth2 scopes. Defaults to Drive scopes.
 
     Returns:
-        Valid Credentials object, or None if all methods fail.
+        Valid Credentials object, or None when the libraries or the client
+        secret are missing.
+
+    Raises:
+        GoogleAuthUnavailable: a saved file that does not load, a failed
+        refresh or a failed consent flow, unretouched, so a headless caller
+        (@backup's DriveClient) is told why instead of a consent flow starting
+        behind it (api, fleet green leg 10).
     """
     if not GOOGLE_AUTH_AVAILABLE:
         return None
@@ -217,13 +244,22 @@ def reauth(
         open_browser: Whether to auto-open browser.
 
     Returns:
-        Fresh Credentials object, or None on failure.
+        Fresh Credentials object, or None when the libraries or the client
+        secret are missing.
+
+    Raises:
+        GoogleAuthUnavailable: the consent flow failed. A saved file that does
+        not load, or a refresh that fails, is the very case reauth repairs: its
+        reason is logged and the consent flow runs (api, fleet green leg 10).
     """
     # Try refresh first — maybe token just expired
-    creds = load_credentials(scopes)
-    if creds and creds.expired and creds.refresh_token:
-        if refresh_credentials(creds):
-            return creds
+    try:
+        creds = load_credentials(scopes)
+        if creds and creds.expired and creds.refresh_token:
+            if refresh_credentials(creds):
+                return creds
+    except GoogleAuthUnavailable as e:
+        logger.warning(f"Saved credentials unusable, running the consent flow: {e}")
 
     # Force new flow
     return run_oauth_flow(scopes=scopes, port=port, open_browser=open_browser)
@@ -237,6 +273,11 @@ def validate_credentials(scopes: Optional[list] = None) -> bool:
 
     Returns:
         True if valid (or refreshable) credentials exist.
+
+    Raises:
+        GoogleAuthUnavailable: the saved file does not load or the refresh
+        failed; "unreadable" or "offline" is not reported as "invalid"
+        (api, fleet green leg 10).
     """
     creds = load_credentials(scopes)
     if not creds:

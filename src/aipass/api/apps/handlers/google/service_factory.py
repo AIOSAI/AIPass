@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: service_factory.py
 # Description: Google API service object factory
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-03-14
+# Modified: 2026-10-03
 # =============================================
 # pyright: reportMissingImports=false, reportOptionalCall=false
 
@@ -69,7 +69,13 @@ def build_service(
         scopes: OAuth2 scopes. Defaults to service-specific defaults from auth module.
 
     Returns:
-        Authenticated service object, or None if auth/build fails.
+        Authenticated service object, or None when the libraries or the
+        client secret are missing.
+
+    Raises:
+        auth.GoogleAuthUnavailable: authentication or the build failed; the
+        reason travels to get_google_service's callers, @backup's DriveClient
+        among them (api, fleet green leg 10, @backup's answer).
     """
     if not GOOGLE_BUILD_AVAILABLE or not auth.is_available():
         return None
@@ -83,8 +89,7 @@ def build_service(
         json_handler.log_operation("build_service", {"service": service_name, "version": version})
         return service
     except Exception as e:
-        logger.error(f"Failed to build Google {service_name} service: {e}")
-        return None
+        raise auth.GoogleAuthUnavailable(f"Google {service_name} service could not be built: {e}") from e
 
 
 def build_thread_safe_service(
@@ -103,7 +108,13 @@ def build_thread_safe_service(
         scopes: OAuth2 scopes.
 
     Returns:
-        Isolated authenticated service object, or None on failure.
+        Isolated authenticated service object, or None when the libraries are
+        missing, no credentials are saved, or they are neither valid nor
+        refreshable.
+
+    Raises:
+        auth.GoogleAuthUnavailable: the load, the refresh or the build failed
+        (api, fleet green leg 10, @backup's answer).
     """
     if not GOOGLE_BUILD_AVAILABLE or not auth.is_available():
         return None
@@ -124,5 +135,4 @@ def build_thread_safe_service(
     try:
         return build(service_name, version, credentials=creds)
     except Exception as e:
-        logger.error(f"Failed to build thread-safe Google {service_name} service: {e}")
-        return None
+        raise auth.GoogleAuthUnavailable(f"Thread-safe Google {service_name} service could not be built: {e}") from e

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: google_client.py
 # Description: Google API Client Module — public API for Google services
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-03-14
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -178,7 +178,14 @@ def _cmd_validate() -> None:
         )
         return
 
-    if google_auth.validate_credentials():
+    try:
+        valid = google_auth.validate_credentials()
+    except google_auth.GoogleAuthUnavailable as e:
+        error(str(e), suggestion="Run 'drone @api reauth google' to authenticate")
+        json_handler.log_operation("google_validate", {"status": "unavailable"})
+        return
+
+    if valid:
         success("Google credentials are valid")
         json_handler.log_operation("google_validate", {"status": "valid"})
     else:
@@ -211,7 +218,12 @@ def _cmd_reauth() -> None:
     console.print("[dim]A browser window may open for Google consent.[/dim]")
     console.print()
 
-    creds = google_auth.reauth()
+    try:
+        creds = google_auth.reauth()
+    except google_auth.GoogleAuthUnavailable as e:
+        error(str(e))
+        json_handler.log_operation("google_reauth", {"status": "failed"})
+        return
 
     if creds:
         success("Google re-authentication successful")
@@ -263,7 +275,9 @@ def get_google_service(
         Authenticated service object.
 
     Raises:
-        RuntimeError: If authentication fails or libraries unavailable.
+        RuntimeError: If authentication fails or libraries unavailable. A
+        google_auth.GoogleAuthUnavailable (a RuntimeError) carries the
+        library's own reason (api, fleet green leg 10).
     """
     if not google_auth.is_available():
         raise RuntimeError(
@@ -293,6 +307,10 @@ def authenticate_google(scopes: Optional[list] = None) -> bool:
 
     Returns:
         True if authentication succeeded.
+
+    Raises:
+        google_auth.GoogleAuthUnavailable: load, refresh or consent flow failed
+        (api, fleet green leg 10).
     """
     creds = google_auth.authenticate(scopes=scopes)
     return creds is not None
@@ -306,6 +324,10 @@ def validate_google(scopes: Optional[list] = None) -> bool:
 
     Returns:
         True if valid credentials exist.
+
+    Raises:
+        google_auth.GoogleAuthUnavailable: the saved file does not load or the
+        refresh failed (api, fleet green leg 10).
     """
     return google_auth.validate_credentials(scopes=scopes)
 
@@ -318,6 +340,10 @@ def reauth_google(scopes: Optional[list] = None) -> bool:
 
     Returns:
         True if re-authentication succeeded.
+
+    Raises:
+        google_auth.GoogleAuthUnavailable: the consent flow failed
+        (api, fleet green leg 10).
     """
     creds = google_auth.reauth(scopes=scopes)
     return creds is not None

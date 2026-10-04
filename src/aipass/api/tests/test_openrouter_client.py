@@ -3,7 +3,7 @@
 # Description: Tests for OpenRouter client module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/openrouter_client.py and create_client in apps/handlers/openrouter/client.py."""
@@ -659,13 +659,28 @@ def test_create_client_custom_timeout(mock_openai_cls, mock_jh):
 
 @patch(f"{_CLIENT_MOD}.OpenAI")
 @patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
-def test_create_client_returns_none_on_exception(mock_openai_cls):
-    """create_client returns None when OpenAI constructor raises."""
+def test_create_client_raises_with_the_sdk_reason(mock_openai_cls):
+    """create_client raises OpenRouterUnavailable carrying the SDK's reason.
+
+    It used to answer None, which read the same as "no key" (api, fleet green leg 10).
+    """
     mock_openai_cls.side_effect = RuntimeError("connection refused")
 
-    result = create_client("FAKE-sk-or-key")
+    with pytest.raises(openrouter_client.client.OpenRouterUnavailable) as caught:
+        create_client("FAKE-sk-or-key")
 
-    assert result is None
+    assert str(caught.value) == "OpenRouter client could not be created: connection refused"
+
+
+@patch(f"{_MOD}.error")
+@patch(f"{_MOD}.header")
+def test_make_call_shows_the_reason_when_openrouter_is_unavailable(mock_header, mock_error):
+    """make_call, get_response's one live caller, shows the raised reason (api, fleet green leg 10)."""
+    unavailable = openrouter_client.client.OpenRouterUnavailable("OpenRouter client could not be created: refused")
+    with patch.object(openrouter_client.client, "get_response", side_effect=unavailable):
+        openrouter_client.make_call(["What is AI?", "--model", "test/model"])
+
+    mock_error.assert_called_once_with("OpenRouter client could not be created: refused")
 
 
 class TestTrailingHelpDoesNotExecute:

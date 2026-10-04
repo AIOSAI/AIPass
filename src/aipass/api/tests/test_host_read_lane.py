@@ -3,7 +3,7 @@
 # Description: Tests for the host API read lane — feed cursor, file fence, diff
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/host/feed.py, reads.py and git_reads.py, and their /v1 routes."""
@@ -365,10 +365,15 @@ class TestFeedRobustness:
         assert [event["ts"] for event in result["events"]] == ["2026-08-14T12:00:00", "2026-08-14T10:00:00"]
 
     def test_unreadable_feed_raises_rather_than_faking_empty(self, feed_file: Path) -> None:
-        """Fail honest: an unreadable feed is not 'no notifications'."""
-        feed_file.write_text("{}", encoding="utf-8")
+        """
+        Fail honest: an unreadable feed is not 'no notifications'.
 
-        with patch.object(Path, "read_text", side_effect=OSError("boom")):
+        Unreadable for real: the handler's own feed_path seam names a directory,
+        which exists and cannot be read as text, and the platform picks the
+        error. Path.read_text is no longer replaced for the process (api, fleet
+        green leg 10); the assert is on the product's FeedUnavailable only.
+        """
+        with patch(PATCH_FEED_PATH, return_value=feed_file.parent):
             with pytest.raises(host_feed.FeedUnavailable):
                 host_feed.read_feed()
 
