@@ -704,6 +704,37 @@ def test_get_caller_branch_refuses_a_malformed_branches_field_instead_of_serving
 
 @patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.identity.identity_ops._ensure_agent_registered")
+def test_get_caller_branch_refuses_a_junk_branch_entry_instead_of_serving_the_aipass_namesake(
+    mock_register: MagicMock,
+    mock_json: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    aipass_registry: Path,
+):
+    """Defect: the caller's own entry, not a dict, was dropped and AIPASS_CALLER_BRANCH served AIPass's @drone."""
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project, name="DRONE", email="@vera-drone")
+    _write_registry(
+        project / "VERA-STUDIO_REGISTRY.json",
+        [{"name": "VERA", "path": "src/vera_studio/vera", "email": "@vera"}, "src/vera_studio/drone"],
+    )
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "drone")
+
+    with pytest.raises(
+        _ops.CallerLookupFailed,
+        match="^Caller lookup failed: Registry VERA-STUDIO_REGISTRY.json has a malformed branch entry at index 1$",
+    ) as raised:
+        _ops.get_caller_branch()
+
+    assert isinstance(raised.value.__cause__, ValueError)
+    mock_register.assert_not_called()
+    mock_json.log_operation.assert_not_called()
+
+
+@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.identity.identity_ops._ensure_agent_registered")
 def test_get_caller_branch_refuses_an_unusable_caller_cwd_instead_of_serving_the_aipass_namesake(
     mock_register: MagicMock,
     mock_json: MagicMock,

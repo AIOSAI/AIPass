@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: identity_ops.py
 # Description: Identity operations handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-07
 # Modified: 2026-10-04
 # =============================================
@@ -210,9 +210,11 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, Any]]:
             or parsed. Logged, then raised: an empty list reads as "no
             match", and get_caller_branch would then serve the AIPass
             namesake by name (commons' decision, DPLAN-0354 leg 6).
-        ValueError: the branches field is neither a list nor a dict.
-            Logged, then raised, for the same reason (commons' decision,
-            DPLAN-0354 leg 7).
+        ValueError: the branches field is neither a list nor a dict
+            (commons' decision, DPLAN-0354 leg 7), or one of its entries
+            is not a dict (leg 8; the message names the index). Logged,
+            then raised, for the same reason: a registry with a junk
+            entry is malformed as a whole.
     """
     if not registry_path.exists():
         return []
@@ -232,7 +234,13 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, Any]]:
         logger.warning(f"[commons.identity] {malformed}")
         raise ValueError(malformed)
 
-    return [branch for branch in raw_branches if isinstance(branch, dict)]
+    for index, branch in enumerate(raw_branches):
+        if not isinstance(branch, dict):
+            malformed = f"Registry {registry_path.name} has a malformed branch entry at index {index}"
+            logger.warning(f"[commons.identity] {malformed}")
+            raise ValueError(malformed)
+
+    return raw_branches
 
 
 def _match_by_path(registry_path: Path, branch_path: Path) -> Optional[Dict[str, Any]]:
