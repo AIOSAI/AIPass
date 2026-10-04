@@ -4,11 +4,24 @@
 
 **Branch** hooks · **Code** `.aipass/hooks.json`, `.aipass/project_hooks.json`, `apps/handlers/config/loader.py`, `apps/handlers/config/trust_registry.py`, `apps/modules/release_notice.py`
 
-`.aipass/hooks.json` decides what fires for a project; `.aipass/project_hooks.json` is the template `aipass init` stamps into a new one. Both are hash territory: any byte change to an enrolled `hooks.json` takes every hook dark until a human re-runs `aipass trust`.
+`.aipass/hooks.json` decides what fires for a project; `.aipass/project_hooks.json` is the template `aipass init` stamps into a new one. Which config a session runs, and when trust matters, is the loader's call (below). Security never depends on trust: an untrusted, missing or unreadable config still runs the gates.
 
 ---
 
-## auto_watchdog — retired 2026-09-07, awaiting the trust re-enrol
+## Which config runs — `loader.py` (since DPLAN-0356)
+
+`resolve_config()` walks up from the working directory:
+
+- **Inside AIPass** (AIPASS_HOME), the root `.aipass/hooks.json` is used with NO trust check. Editing it changes what fires; it never turns the hooks off. It is a protected file: only the verified admin seat writes it (see [git_gate.md](git_gate.md)).
+- **A branch-level `.aipass/hooks.json` inside AIPass is IGNORED**, with a WARNING naming it. A branch cannot switch its own gates off.
+- **An external project** — a nested project root (a directory holding a `*_REGISTRY.json`, like `projects/baud`) or anything outside AIPASS_HOME — runs its own config only when the trust registry vouches for it (`aipass trust <path>`). Changing that file breaks its trust hash, and the trust-break banner fires for external projects only.
+- **Never "no hooks".** An untrusted, missing or unreadable config falls back to the gate set: the gate entries of AIPASS_HOME's config, else the built-in set in `handlers/config/gates.py`, logged at ERROR.
+- A trusted external project inside AIPASS_HOME gets the gates forced over its config; a trusted project outside AIPass owns its gates.
+- A home config that names no gate gets the built-in gates forced over it, logged at ERROR.
+
+`drone @hooks status` explains why a project's own config is not running, and always ends "The AIPass gate set still runs."
+
+## auto_watchdog — retired 2026-09-07
 
 `auto_watchdog` fired on every PostToolUse to pattern-match one command shape and inject a reminder.
 Its arming path is owner-only, which made it a refusal for 17 of 18 citizens. Retired under
@@ -21,16 +34,8 @@ FPLAN-0495 item 3:
 2. `"enabled": false` in **both** `.aipass/hooks.json` and `.aipass/project_hooks.json`. One line
    changed per file; nothing else was touched.
 
-**Every hook in this project is DARK until the trust re-enrol runs.** `hooks.json` is hash-enrolled,
-so any byte change invalidates it. The re-enrol is a human checkpoint (the DPLAN-0285 scar — an
-out-of-band config edit took all hooks dark for ~8 minutes) and was deliberately not run here:
-
-```
-aipass trust <path-to-this-repo>
-```
-
-Enrolled hash was `sha256:2d545329590915e3…`; after the flip the file hashes `sha256:6bfb591a3e8305…`.
-Archive the handler only after a session cycle proves nothing was connected.
+The AIPass root config needs no trust re-enrol for this (see above). Archive the handler only after a
+session cycle proves nothing was connected.
 
 ## The template ruling — what a project gets, and what stays framework-only
 
@@ -55,7 +60,7 @@ ruled *project* below reaches Vera-Studio, wren and `projects/*` on their next a
 | `compass_recall` | UserPromptSubmit | framework-only | Queries @devpulse's compass FTS, an AIPass-internal decision store. A project has no compass, so the handler would query nothing on every turn. |
 | `user_message_relay` | UserPromptSubmit | framework-only | @skills' Telegram guest handler; needs per-branch chat registration and the `telegram` extra. Not a scaffold default. |
 | `telegram_response` | Stop | framework-only | Same reason — delivery into the owner's Telegram chats. |
-| `auto_watchdog` | PostToolUse | **dropped** | Retired 2026-09-07 (see above). Its handler file is already `auto_watchdog(disabled).py`, so the dotted path in the template resolved to nothing. Removed from the template on 2026-09-09; still present and `enabled: false` in `.aipass/hooks.json`, which cannot be touched without a trust re-enrol. |
+| `auto_watchdog` | PostToolUse | **dropped** | Retired 2026-09-07 (see above). Its handler file is already `auto_watchdog(disabled).py`, so the dotted path in the template resolved to nothing. Removed from the template on 2026-09-09; still present and `enabled: false` in `.aipass/hooks.json`, a protected file only the admin seat writes. |
 | `release_notice` | SessionStart | **added** | DPLAN-0335 leg 2 — see below. |
 
 Result: the template went from 18 handler entries to 25.

@@ -1,49 +1,58 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 1.3.0
-# Description: Blocks raw git/gh commands and protected file edits (PreToolUse)
+# Version: 4.1.0
+# Description: Raw git and gh, GitHub API writes and credentials off the admin seat, protected file changes (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-09-19
+# Modified: 2026-10-01
 # =============================================
 
-"""Blocks raw git/gh commands and edits to settings/hooks files."""
+"""Blocks raw git and gh, GitHub writes without gh, the gh credential, and changes to the protected files.
+
+Failure mode: a crash refuses the call it was checking (Bash and edit tools);
+the engine refuses on import error and timeout.
+
+Since 2.0.0 (DPLAN-0356, the owner 2026-09-30) raw git READS are refused too,
+for every seat but the verified admin seat (modules/admin_seat's 5-leg grant,
+never a directory name); the refusal names the drone @git twins. Writes stay
+refused for every seat, the admin seat included. Agent Bash only: service code
+that runs git as a subprocess never passes through a hook.
+
+Since 3.0.0 (DPLAN-0356 phase 2): ``gh api`` off the admin seat is GET only;
+every other gh subcommand stays refused for every seat; the protected files
+(modules/protected_paths) are the admin seat's to write; WHO is the grant alone;
+no refusal tells an agent how to switch a gate off.
+
+Since 4.0.0 (DPLAN-0356 phase 3, the red team's root causes):
+  - R3: the program is read through modules/shell_reader, the branch's one
+    shell-word reader, the way the shell will run it. ``'g'it push``,
+    ``$'\\x67it' push``, ``{git,x} push``, ``eval 'git push'`` and ``uv run git
+    push`` are git. This gate keeps no split or regex of its own.
+  - R5: an interpreter whose readable program launches git or gh (a
+    subprocess call, backticks, GitPython, octokit) is refused off the admin seat.
+  - R6: off the admin seat, reading the gh credential (``gh auth token``, the
+    keyring, gh's hosts file) and an HTTP client writing to the GitHub API
+    (curl/wget/httpie with a method other than GET or a body; the same in an
+    interpreter's program) are refused. A text gate cannot close this fully:
+    bash_writes.NOT_CAUGHT says so, and the kernel sandbox is the real boundary.
+  - R1/R2: the protected lane asks shell_reader.mutated_paths, so a delete, a
+    move away, a move over, a recursive copy over and a hard link whose source
+    is a protected file are refused off the admin seat on this lane's own
+    reading; protected_paths matches by file identity as well as by name.
+"""
 
 import importlib
 import json
 import os
-import re
-from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 
-# CANDIDATE finders, not verdicts. The optional dotted tail matches any
-# extension so that ONE list of executable extensions exists in this branch —
-# bash_writes.verb_name owns it — and _invocations() is what turns a candidate
-# into an invocation. Case-insensitive because Windows is: `GIT`, `Git.EXE` and
-# `git` are one program there, and until 2026-09-19 this gate read the last of
-# the three and let the other two past (todo 51, the owner's go on 09-19).
-RAW_GIT_RE = re.compile(r"(?<![@\w/.])(git(?:\.\w+)?)\s", re.IGNORECASE)
-RAW_GH_RE = re.compile(r"(?<![@\w/.])(gh(?:\.\w+)?)\s", re.IGNORECASE)
-
-# The lookbehind above excludes a leading `/` and `.` on purpose — it is what
-# keeps `drone @git`, `.git/hooks` and `some/path/git.py` quiet. It is also the
-# hole: `/usr/bin/git commit` never matched, and neither did `./git` or
-# `~/bin/git`, so the one mechanical layer holding git writes behind drone was a
-# full path away from being bypassed (reported 2026-09-11 by an external reader
-# of a public drone post, via @devpulse; static finding, nothing run).
-#
-# A path is only read as an INVOCATION when it stands at a command position.
-# `ls /usr/bin/git` and `cat ~/.config/git` name a file and are nobody's write,
-# which is why a basename alone can never be the rule.
-_EXEC_WRAPPERS = frozenset(
-    {"env", "command", "sudo", "nohup", "time", "exec", "builtin", "xargs", "stdbuf", "nice", "setsid"}
-)
-_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_]\w*=")
-
 GH_ALLOWED_SUBCOMMANDS = ("api",)
+# gh api off the admin seat (DPLAN-0356 item 4): a read is a GET with no body.
+_GH_METHOD_FLAGS = ("-X", "--method")
+_GH_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field", "--input")
 
 READ_ALLOWED_GIT_SUBCOMMANDS = frozenset(
     {
@@ -77,23 +86,26 @@ READ_ALLOWED_GIT_SUBCOMMANDS = frozenset(
 
 _GIT_OPTS_WITH_ARG = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--namespace"})
 
-# Matched against the path with separators normalised to "/" (_check_edit), and
-# case-insensitively: Windows and default macOS filesystems open .Claude\Settings.json
-# as the same file. Until 1.2.0 a Windows backslash path never matched and the gate
-# ALLOWED the edit (measured on the Windows CI runner, 2026-09-16).
-BLOCKED_EDIT_PATTERNS = [
-    re.compile(r"/\.claude/settings(\.local)?\.json$", re.IGNORECASE),
-    re.compile(r"/\.claude/hooks/", re.IGNORECASE),
-    re.compile(r"/\.git/hooks/", re.IGNORECASE),
-]
-
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
-TRUSTED_HOOK_EDITORS = ("devpulse", "seedgo")
+# R6: HTTP clients, and the flags that make a request more than a read.
+_HTTP_CLIENTS = frozenset({"curl", "wget", "http", "https", "xh", "xhs", "httpie"})
+_CURL_METHOD = ("-X", "--request")
+_CURL_BODY = ("-d", "--data", "--data-raw", "--data-binary", "--data-urlencode", "--data-ascii", "--json")
+_CURL_UPLOAD = ("-F", "--form", "--form-string", "-T", "--upload-file")
+_WGET_BODY = ("--post-data", "--post-file", "--body-data", "--body-file")
+_HTTPIE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_HTTPIE_BODY_FLAGS = ("-f", "--form", "--multipart", "--raw")
+
+# R6: programs that read a stored secret, and the subcommands of `security` (macOS) that do.
+_SECRET_PROGRAMS = frozenset({"secret-tool", "kwallet-query"})
+_SECURITY_READS = frozenset({"find-generic-password", "find-internet-password", "dump-keychain"})
+_CREDENTIAL_FILES = ("gh/hosts.yml", ".git-credentials")
 
 GIT_REDIRECT = (
     "AIPass enforces git via drone to prevent state conflicts between agents.\n"
-    "Read-only verbs (status, log, diff, show, blame, grep, etc.) are allowed raw.\n"
+    "Read-only verbs (status, log, diff, show, ...) run raw from the admin seat (@devpulse) only;\n"
+    "every other seat reads through drone @git status | diff | log | show.\n"
     "\n"
     "For write operations, use drone @git:\n"
     "  drone @git commit <msg> [--all | files]   # commit changes\n"
@@ -102,148 +114,145 @@ GIT_REDIRECT = (
     "  drone @git pr <desc>                      # push + create PR\n"
     "  drone @git checkout <main|dev>            # switch branches\n"
     "\n"
-    "Run `drone @git --help` for the full command list.\n"
-    "To disable this gate for your project: set git_gate.enabled to false\n"
-    "in your .aipass/hooks.json (this won't break other AIPass hooks)."
+    "Run `drone @git --help` for the full command list."
 )
 
 GH_REDIRECT = (
     "AIPass enforces gh via drone to prevent state conflicts between agents.\n"
-    "Only `gh api` is allowed raw.\n"
+    "Raw gh is refused; off the admin seat only a read-only `gh api` GET runs raw.\n"
     "\n"
-    "For GitHub operations, use drone @git:\n"
-    "  drone @git issue list     # list issues\n"
-    "  drone @git run list       # CI runs\n"
-    "  drone @git workflow run   # trigger workflows\n"
-    "  drone @git pr <desc>      # push + create PR\n"
+    "Read and act through the drone @git twins:\n"
+    "  gh issue list|view|status     ->  drone @git issue list|view|status\n"
+    "  gh run list|view|watch        ->  drone @git run list|view|watch   (view <id> --log-failed)\n"
+    "  gh workflow list|view         ->  drone @git workflow list|view\n"
+    "  gh pr create                  ->  drone @git pr <desc>\n"
     "\n"
-    "Run `drone @git --help` for the full command list.\n"
-    "To disable this gate for your project: set git_gate.enabled to false\n"
-    "in your .aipass/hooks.json (this won't break other AIPass hooks)."
+    "Run `drone @git --help` for the full command list. A read with no twin: ask @drone, or mail @devpulse."
 )
 
-EDIT_REDIRECT = (
-    "{path} is protected — settings.json, .claude/hooks/, and .git/hooks/ "
-    "govern the enforcement layer itself.\n"
-    "If a real change is needed, ask devpulse to make it directly.\n"
-    "To disable this protection: set git_gate.enabled to false in .aipass/hooks.json."
+GH_API_REFUSED = (
+    "Raw `gh api` is read-only off the admin seat (@devpulse, the owner's ruling, DPLAN-0356). Caller: {caller}.\n"
+    "Refused: {what}. A GET with no body runs: gh api repos/OWNER/REPO/actions/runs\n"
+    "\n"
+    "Read and act through the drone @git twins:\n"
+    "  drone @git run list | run view <id> --log-failed | issue list | issue view <#> | workflow list\n"
+    "\n"
+    "A write GitHub must see goes through @devpulse: mail the request and why."
+)
+
+GIT_READ_REFUSED = (
+    "Raw git is refused for every seat but the admin seat (@devpulse, the owner's ruling, DPLAN-0356). "
+    "Caller: {caller}.\n"
+    "\n"
+    "Read through the drone @git twins instead:\n"
+    "  git log -n 5 -- <path>     ->  drone @git log 5 <path>   (a deleted path goes after --)\n"
+    "  git log --oneline -20      ->  drone @git log 20\n"
+    "  git show <sha>             ->  drone @git show <sha>\n"
+    "  git show <sha>:<path>      ->  drone @git show <sha> <path>\n"
+    "  git status                 ->  drone @git status\n"
+    "  git diff [--staged]        ->  drone @git diff [--staged]\n"
+    "  git blame -L 10,40 <f>     ->  drone @git blame <f> -L 10,40\n"
+    "\n"
+    "The full list: `drone @git --help`, section RAW GIT READS AND THEIR TWINS.\n"
+    "A read with no twin yet (a range diff): ask @drone, or mail @devpulse."
+)
+
+INTERPRETER_GIT_REFUSED = (
+    "A program launching git or gh from inside an interpreter is refused off the admin seat (@devpulse, "
+    "DPLAN-0356), the same as raw git and gh. Caller: {caller}.\n"
+    "Seen: {what}.\n"
+    "\n"
+    "Use the drone @git twins from the shell instead: drone @git status | diff | log | show | run list | "
+    "issue list.\n"
+    "A step that truly needs git inside a program goes through @devpulse: mail the program and why."
+)
+
+CREDENTIAL_REFUSED = (
+    "Reading the GitHub credential is refused off the admin seat (@devpulse, DPLAN-0356). Caller: {caller}.\n"
+    "Seen: {what}.\n"
+    "\n"
+    "Nothing an agent does needs the token: reads go through drone @git, writes through @devpulse."
+)
+
+GITHUB_HTTP_REFUSED = (
+    "A write to the GitHub API is refused off the admin seat (@devpulse, DPLAN-0356), with gh or without it. "
+    "Caller: {caller}.\n"
+    "Seen: {what}.\n"
+    "\n"
+    "A GET with no body runs. A write GitHub must see goes through @devpulse: mail the request and why."
+)
+
+UNNAMED_CALLER = "could not be named (no readable passport above {cwd})"
+
+PROTECTED_REFUSED = (
+    "{path} is protected: it is {what}, which decides whether the gates run.\n"
+    "Only the admin seat (@devpulse) writes it ({lane}). Caller: {caller}.\n"
+    "If a real change is needed, mail @devpulse:\n"
+    '  drone @ai_mail email @devpulse "Config change" "<path>: <what and why>"'
+)
+
+GATE_CRASHED = (
+    "git_gate could not check this call ({error}), so it is refused: a gate that cannot read a command "
+    "does not let it through.\n"
+    'Mail @hooks and @devpulse: drone @ai_mail email @hooks "Gate broken: git_gate" "<what you ran, and this text>"'
 )
 
 _BLOCK_ALLOW = {"stdout": "", "exit_code": 0}
 
-
-def _cwd_branch(cwd: str) -> str:
-    parts = Path(cwd).parts
-    for i, part in enumerate(parts):
-        if part == "aipass" and i > 0 and parts[i - 1] == "src" and i + 1 < len(parts):
-            return parts[i + 1]
-    return ""
+# Roles under which a protected file inside a directory is reached: removing or replacing the directory.
+_CONTAINER_ROLES = frozenset({"delete", "move-away", "overlay"})
 
 
-def _verb(token: str) -> str:
-    """The program *token* names, read through the branch's one shell reader.
-
-    Three spellings reach this gate as one program on Windows — a path, an
-    executable extension and any casing. bash_writes.verb_name is where that
-    reading lives, so this gate does not grow a second copy of a list that must
-    not drift.
-
-    Falls back to the raw basename with a WARNING rather than going quiet: a
-    gate that cannot reach the reader keeps its old, narrower reading, and the
-    log says which spelling it is now one short of.
-
-    Args:
-        token: A command-position token.
-
-    Returns:
-        The normalised program name, or the raw basename when the reader is away.
-    """
-    try:
-        bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
-        return bw.verb_name(token)
-    except Exception as exc:  # any reader failure falls back to the raw name
-        logger.warning("[HOOKS] git_gate: bash_writes unavailable, reading %r raw: %s", token, exc)
-        return Path(token).name
+def _reader():
+    """The branch's one shell-word reader (modules/shell_reader), imported at call time (crash isolation)."""
+    return importlib.import_module("aipass.hooks.apps.modules.shell_reader")
 
 
-def _invocations(pattern: re.Pattern, text: str, name: str) -> list[re.Match]:
-    """The matches of *pattern* in *text* that really invoke *name*.
-
-    The pattern finds candidates; this drops the ones whose dotted tail is not
-    an executable extension. `git.exe` is git on any host that runs it;
-    `git.py ` is a python file nobody invokes as git, and reading it as one is
-    the noise that made an earlier version of this rule unusable.
-
-    Args:
-        pattern: RAW_GIT_RE or RAW_GH_RE, whose group 1 is the spelled name.
-        text: The clause or scan text to search.
-        name: The program being asked about, lowercase.
-
-    Returns:
-        The surviving matches, in order.
-    """
-    return [m for m in pattern.finditer(text) if _verb(m.group(1)) == name]
+def _shell_programs():
+    """The default-deny tables (modules/shell_programs), imported at call time (crash isolation)."""
+    return importlib.import_module("aipass.hooks.apps.modules.shell_programs")
 
 
-def _is_allowed_gh(cmd: str) -> bool:
-    for match in _invocations(RAW_GH_RE, cmd, "gh"):
-        tail = cmd[match.end() :].split()
-        return bool(tail) and tail[0].lower() in GH_ALLOWED_SUBCOMMANDS
-    return False
+def _protected_paths():
+    """modules/protected_paths, reached at call time: a handler never imports a module at import time."""
+    return importlib.import_module("aipass.hooks.apps.modules.protected_paths")
 
 
-def _command_words(clause: str) -> list[str]:
-    """The clause's tokens from its command position on, prefixes stepped past.
-
-    `VAR=1 env -i /usr/bin/git commit` invokes git: a leading assignment and a
-    wrapper that runs its own argument are not the executable. Option tokens are
-    skipped only once a wrapper has been seen, so a clause that merely STARTS
-    with a flag is left alone.
-    """
-    words = clause.split()
-    index = 0
-    saw_wrapper = False
-    while index < len(words):
-        word = words[index]
-        if _ASSIGNMENT_RE.match(word):
-            index += 1
-            continue
-        if _verb(word) in _EXEC_WRAPPERS or (saw_wrapper and word.startswith("-")):
-            saw_wrapper = True
-            index += 1
-            continue
-        break
-    return words[index:]
+def _block(reason: str) -> dict:
+    return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "git gate"}
 
 
-def _path_exec_tail(clause: str, name: str) -> list[str] | None:
-    """argv after `name` spelled as a PATH at this clause's command position.
+class _Seat:
+    """The caller, asked of modules/admin_seat once per call and only when a refusal needs it. Fail-closed."""
 
-    Returns None when the clause runs something else — including when the path
-    merely appears as an argument, which is the whole point of asking about
-    command position rather than about the text.
-    """
-    words = _command_words(clause)
-    if not words:
-        return None
-    exe = words[0]
-    if "/" not in exe and "\\" not in exe:
-        return None
-    if _verb(exe.rstrip("/").rstrip("\\")) != name:
-        return None
-    return words[1:]
+    def __init__(self, cwd: str) -> None:
+        self.cwd = cwd
+        self._answer: tuple[str | None, bool] | None = None
+
+    def _ask(self) -> tuple[str | None, bool]:
+        if self._answer is not None:
+            return self._answer
+        answer: tuple[str | None, bool] = (None, False)
+        try:
+            answer = importlib.import_module("aipass.hooks.apps.modules.admin_seat").seat_of(self.cwd)
+        except Exception as exc:  # an unreachable seat module refuses rather than opens
+            logger.warning("[HOOKS] git_gate: admin lane dark — admin_seat unavailable, refusing as unnamed: %s", exc)
+        self._answer = answer
+        return answer
+
+    @property
+    def admin(self) -> bool:
+        """True on the verified admin seat."""
+        return self._ask()[1]
+
+    @property
+    def named(self) -> str:
+        """The caller as a refusal names it."""
+        caller = self._ask()[0]
+        return f"@{caller}" if caller else UNNAMED_CALLER.format(cwd=self.cwd or "(no cwd)")
 
 
-def _split_clauses(cmd: str) -> list[str]:
-    """Split on compound operators and subshell boundaries."""
-    parts = re.split(r"&&|\|\||[;|]", cmd)
-    clauses: list[str] = []
-    for part in parts:
-        clauses.extend(re.split(r"[$()`]", part))
-    return clauses
-
-
-def _extract_git_verb(tokens: list[str]) -> str | None:
+def _extract_git_verb(tokens: list[str] | tuple[str, ...]) -> str | None:
     """Extract the git subcommand verb, skipping global options."""
     i = 0
     while i < len(tokens):
@@ -259,107 +268,225 @@ def _extract_git_verb(tokens: list[str]) -> str | None:
     return None
 
 
-def _git_arg_tails(clause: str) -> list[list[str]]:
-    """argv tails of every git invocation in one clause, both spellings.
+def _git_refusal(invocations: list, seat: _Seat) -> dict | None:
+    """Raw git: a write is refused for every seat, a read off the admin seat.
 
-    A bare `git` can appear anywhere in a clause (`env git commit`), a
-    path-spelled one only at the command position.
+    A bare ``git`` with no argument prints usage and touches nothing; a path-spelled
+    one with no verb is not a usage print anyone types, and is read as a write.
     """
-    tails = [clause[m.end() :].split() for m in _invocations(RAW_GIT_RE, clause, "git")]
-    path_tail = _path_exec_tail(clause, "git")
-    if path_tail is not None:
-        tails.append(path_tail)
-    return tails
+    calls = [
+        inv.argv[1:]
+        for inv in invocations
+        if inv.program == "git" and (len(inv.argv) > 1 or "/" in inv.argv[0] or "\\" in inv.argv[0])
+    ]
+    if not calls:
+        return None
+    if any(_extract_git_verb(tail) not in READ_ALLOWED_GIT_SUBCOMMANDS for tail in calls):
+        return _block(GIT_REDIRECT)
+    if seat.admin:
+        return None
+    return _block(GIT_READ_REFUSED.format(caller=seat.named))
 
 
-def _path_gh_calls(scan: str) -> list[list[str]]:
-    """argv tails of every gh spelled as a path at a command position.
+def _gh_api_write(args: list[str] | tuple[str, ...]) -> str | None:
+    """What makes one `gh api` call more than a read, or None for a GET with no body (DPLAN-0356 item 4).
 
-    Same hole as git, same lookbehind, same file: `/usr/bin/gh pr create` was
-    never read as gh at all.
+    Args:
+        args: The words after ``api``, quotes already removed by the reader.
+
+    Returns:
+        A phrase naming the refused part, or None.
     """
-    tails = [_path_exec_tail(clause, "gh") for clause in _split_clauses(scan)]
-    return [tail for tail in tails if tail is not None]
+    positional = [a for i, a in enumerate(args) if not a.startswith("-") and not _is_flag_value(args, i)]
+    if positional and positional[0].lower() == "graphql":
+        return "gh api graphql (a query and a mutation are one endpoint)"
+    for i, arg in enumerate(args):
+        flag, _, inline = arg.partition("=")
+        if flag in _GH_METHOD_FLAGS or (arg.startswith("-X") and len(arg) > 2):
+            method = inline if inline else arg[2:] if flag not in _GH_METHOD_FLAGS else _next(args, i)
+            if method.upper() != "GET":
+                return f"method {method or '(missing)'}"
+        if flag in _GH_FIELD_FLAGS or any(arg.startswith(f) and len(arg) > 2 for f in ("-f", "-F")):
+            return f"a request body ({flag[:7]})"
+    return None
 
 
-def _all_git_reads(scan: str) -> bool:
-    """Return True only if every git invocation in scan is a read-only verb."""
-    found_any = False
-    for clause in _split_clauses(scan):
-        for after in _git_arg_tails(clause):
-            found_any = True
-            verb = _extract_git_verb(after)
-            if verb is None or verb not in READ_ALLOWED_GIT_SUBCOMMANDS:
-                return False
-    return found_any
+def _is_flag_value(args, index: int) -> bool:
+    """True when args[index] is the value of the flag before it (`-X GET`, `-H 'Accept: x'`)."""
+    return index > 0 and args[index - 1] in (*_GH_METHOD_FLAGS, *_GH_FIELD_FLAGS, "-H", "--header", "-q", "--jq")
 
 
-def _block(reason: str) -> dict:
-    return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "git gate"}
+def _next(args, index: int) -> str:
+    return args[index + 1] if index + 1 < len(args) else ""
 
 
-def _scan_text(cmd: str) -> str:
-    """The command text this gate is entitled to convict on.
+def _gh_refusal(invocations: list, seat: _Seat) -> dict | None:
+    """Raw gh: every subcommand but api refused for every seat; api GET-only off the admin seat."""
+    calls = [inv.argv[1:] for inv in invocations if inv.program == "gh"]
+    if not calls:
+        return None
+    if any(not tail or tail[0].lower() not in GH_ALLOWED_SUBCOMMANDS for tail in calls):
+        return _block(GH_REDIRECT)
+    writes = [what for tail in calls if (what := _gh_api_write(tail[1:]))]
+    if not writes or seat.admin:
+        return None
+    return _block(GH_API_REFUSED.format(caller=seat.named, what=writes[0]))
 
-    Quoted spans were already blanked here — an argument is not a command. A
-    heredoc body was NOT, because it carries no quotes, so a mail body that
-    merely QUOTED a write-shaped line was refused as if it ran one. @ai_mail hit
-    that twice on 2026-09-15 and shipped its replies through a file instead, and
-    every dispatch brief since has carried a line telling recipients not to
-    quote such a line — a workaround issued over and over in place of a cure.
 
-    The distinction between code and data lives in ``bash_writes``, the branch's
-    one shell reader: it blanks a heredoc body whose consumer merely reads it,
-    and hands back the program text of a real interpreter, tokenized. Tokenized
-    is what closes the opposite hole in the same move: ``bash -c "<write>"`` had
-    its whole script blanked as a quoted argument and read as no invocation at
-    all.
+def _credential_read(inv, reader) -> str:
+    """What reads the gh credential in this program (R6), "" when nothing does."""
+    args = inv.argv[1:]
+    if inv.program == "gh" and args[:1] == ("auth",):
+        if args[1:2] == ("token",) or (args[1:2] == ("status",) and any(a in ("-t", "--show-token") for a in args)):
+            return "gh " + " ".join(args[:2])
+    if inv.program in _SECRET_PROGRAMS:
+        return inv.program
+    if inv.program == "keyring" or (inv.language == "python" and "keyring" in args and "-m" in args):
+        return "the keyring command"
+    if inv.program == "security" and args[:1] and args[0] in _SECURITY_READS:
+        return f"security {args[0]}"
+    for arg in args:
+        if any(name in arg.replace("\\", "/") for name in _CREDENTIAL_FILES):
+            return f"a credential file ({arg})"
+    return reader.program_credential(inv)
 
-    Fails to the OLD, BROADER reading. If the reader raises, this gate scans the
-    raw command as it always did: a gate that cannot parse a command must not
-    become permissive on it.
+
+def _flag_value(args, index: int, names: tuple[str, ...]) -> str | None:
+    """The value of a flag in *names* at args[index] (next word, ``--x=v`` or ``-Xv``), None when it is not one."""
+    arg = args[index]
+    for name in names:
+        if arg == name:
+            return _next(args, index)
+        if name.startswith("--") and arg.startswith(name + "="):
+            return arg[len(name) + 1 :]
+        if not name.startswith("--") and arg.startswith(name) and len(arg) > len(name):
+            return arg[len(name) :]
+    return None
+
+
+def _http_write(inv) -> str:
+    """The write an HTTP client makes to the GitHub API (R6): a method other than GET/HEAD, or a body."""
+    args = inv.argv[1:]
+    if inv.program not in _HTTP_CLIENTS or not any(_reader().GITHUB_API_HOST.search(a) for a in args):
+        return ""
+    if inv.program == "curl":
+        return _curl_write(args)
+    if inv.program == "wget":
+        method = next((v for i in range(len(args)) if (v := _flag_value(args, i, ("--method",))) is not None), None)
+        if method is not None and method.upper() not in ("GET", "HEAD"):
+            return f"wget --method {method}"
+        return next((f"wget {a.split('=')[0]}" for a in args if a.split("=")[0] in _WGET_BODY), "")
+    return _httpie_write(inv.program, args)
+
+
+def _curl_write(args) -> str:
+    get = "-G" in args or "--get" in args
+    for index, arg in enumerate(args):
+        method = _flag_value(args, index, _CURL_METHOD)
+        if method is not None and method.upper() not in ("GET", "HEAD"):
+            return f"curl method {method}"
+        if _flag_value(args, index, _CURL_UPLOAD) is not None:
+            return f"curl upload ({arg})"
+        if not get and _flag_value(args, index, _CURL_BODY) is not None:
+            return f"curl request body ({arg})"
+    return ""
+
+
+def _httpie_write(program: str, args) -> str:
+    positional = [a for a in args if not a.startswith("-")]
+    if positional and positional[0].upper() in _HTTPIE_METHODS:
+        return f"{program} {positional[0]}"
+    if any(a in _HTTPIE_BODY_FLAGS for a in args):
+        return f"{program} form or raw body"
+    items = positional[1:]
+    if any(":=" in a or "=@" in a or ("=" in a and "==" not in a) for a in items):
+        return f"{program} request body items"
+    return ""
+
+
+def _program_refusal(invocations: list, reader, seat: _Seat) -> dict | None:
+    """R5 and R6, off the admin seat: git/gh from an interpreter, the gh credential, GitHub API writes."""
+    launches, credentials, writes = [], [], []
+    for inv in invocations:
+        launches.append(reader.program_launch(inv))
+        credentials.append(_credential_read(inv, reader))
+        writes.extend((_http_write(inv), reader.program_github_write(inv)))
+    launches, credentials, writes = ([x for x in found if x] for found in (launches, credentials, writes))
+    if not (launches or credentials or writes) or seat.admin:
+        return None
+    if credentials:
+        logger.warning("[HOOKS] git_gate: credential read refused: %s", credentials[0])
+        return _block(CREDENTIAL_REFUSED.format(caller=seat.named, what=credentials[0]))
+    if writes:
+        return _block(GITHUB_HTTP_REFUSED.format(caller=seat.named, what=writes[0]))
+    return _block(INTERPRETER_GIT_REFUSED.format(caller=seat.named, what=launches[0]))
+
+
+def _protected_refusal(path: str, what: str, lane: str, seat: _Seat) -> dict | None:
+    """The refusal for a change to a gate-switching file; None on the verified admin seat."""
+    if seat.admin:
+        logger.info("[HOOKS] git_gate: protected change ALLOWED for the admin seat: %s (%s)", path, lane)
+        return None
+    logger.warning("[HOOKS] git_gate: protected change refused: %s (%s) caller=%s", path, lane, seat.named)
+    return _block(PROTECTED_REFUSED.format(path=path, what=what, lane=lane, caller=seat.named))
+
+
+def _check_bash_protected(cmd: str, cwd: str, invocations: list, seat: _Seat) -> dict | None:
+    """Any change to a gate-switching file the command can be seen to make, on this lane's own reading (R1, R2).
+
+    A write, a delete, a move away or over, a recursive copy over and the source
+    of a hard link all count; a directory counts when a protected file is inside
+    it and the command removes, moves or overlays the directory. Since 4.1.0 the
+    lane is default-deny (phase 4, P2): a protected path named as an operand of a
+    program that does not only read is refused, whatever the program is.
     """
-    try:
-        bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
-        code = bw.code_text(cmd)
-    except Exception as exc:  # any reader failure falls back to the raw text
-        logger.warning("[HOOKS] git_gate: bash_writes unavailable, scanning raw command: %s", exc)
-        code = cmd
-    scan = re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)
-    return re.sub(r"'(?:[^'\\]|\\.)*'", "''", scan)
+    pp = _protected_paths()
+    named = _shell_programs().named_paths(invocations, pp.protected)
+    if named:
+        program, path, what = named
+        return _protected_refusal(path, what, f"Bash: {program} (not a read-only program)", seat)
+    for path, role, how in _reader().mutated_paths(cmd, cwd):
+        what = pp.protected(path, cwd)
+        if what is None and role in _CONTAINER_ROLES:
+            what = pp.protected_within(path)
+        if what:
+            return _protected_refusal(str(path), what, f"Bash: {how}", seat)
+    return None
 
 
-def _check_bash(tool_input: dict) -> dict:
+def _check_bash(tool_input: dict, cwd: str = "") -> dict:
+    """Refuse raw git and gh, git/gh from programs, GitHub writes and credentials, and protected changes."""
     cmd = tool_input.get("command", "")
     if not cmd:
         return _BLOCK_ALLOW
-    scan = _scan_text(cmd)
-    path_git = any(_path_exec_tail(clause, "git") is not None for clause in _split_clauses(scan))
-    if (_invocations(RAW_GIT_RE, scan, "git") or path_git) and not _all_git_reads(scan):
-        return _block(GIT_REDIRECT)
-    if _invocations(RAW_GH_RE, scan, "gh") and not _is_allowed_gh(cmd):
-        return _block(GH_REDIRECT)
-    path_gh = _path_gh_calls(scan)
-    if path_gh and not all(tail and tail[0].lower() in GH_ALLOWED_SUBCOMMANDS for tail in path_gh):
-        return _block(GH_REDIRECT)
+    reader = _reader()
+    invocations = reader.invocations(cmd, cwd)
+    seat = _Seat(cwd)
+    for check in (
+        lambda: _git_refusal(invocations, seat),
+        lambda: _program_refusal(invocations, reader, seat),
+        lambda: _gh_refusal(invocations, seat),
+        lambda: _check_bash_protected(cmd, cwd, invocations, seat),
+    ):
+        refused = check()
+        if refused is not None:
+            return refused
     return _BLOCK_ALLOW
 
 
 def _check_edit(tool_input: dict, cwd: str) -> dict:
+    """Refuse an edit-tool write to a gate-switching file off the verified admin seat."""
     file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
     if not file_path:
         return _BLOCK_ALLOW
-    spelled = file_path.replace("\\", "/")
-    for pat in BLOCKED_EDIT_PATTERNS:
-        if pat.search(spelled):
-            if _cwd_branch(cwd) in TRUSTED_HOOK_EDITORS:
-                return _BLOCK_ALLOW
-            return _block(EDIT_REDIRECT.format(path=file_path))
-    return _BLOCK_ALLOW
+    what = _protected_paths().protected(file_path, cwd)
+    if not what:
+        return _BLOCK_ALLOW
+    return _protected_refusal(file_path, what, "edit tool", _Seat(cwd)) or _BLOCK_ALLOW
 
 
 def handle(hook_data: dict) -> dict:
-    """Block raw git/gh commands and protected file edits.
+    """Block raw git/gh commands, GitHub writes and credential reads, and protected file changes.
 
     Args:
         hook_data: Parsed hook event dict from engine.
@@ -367,15 +494,18 @@ def handle(hook_data: dict) -> dict:
     Returns:
         Result dict with stdout (block JSON or empty) and exit_code.
     """
+    tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     try:
-        tool_name = hook_data.get("tool_name", "")
         tool_input = hook_data.get("tool_input", {})
         cwd = hook_data.get("cwd", "") or os.getcwd()
         if tool_name == "Bash":
-            return _check_bash(tool_input)
+            # The payload's session directory only: the seat is never read off this process's cwd.
+            return _check_bash(tool_input, hook_data.get("cwd", ""))
         if tool_name in EDIT_TOOLS:
             return _check_edit(tool_input, cwd)
         return _BLOCK_ALLOW
-    except Exception as exc:
-        logger.info("[HOOKS] git_gate: unexpected error (allowing): %s", exc)
+    except Exception as exc:  # fail closed on what this gate guards (DPLAN-0356 item 2)
+        logger.error("[HOOKS] git_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
+        if tool_name == "Bash" or tool_name in EDIT_TOOLS:
+            return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
         return _BLOCK_ALLOW

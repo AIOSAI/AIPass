@@ -42,6 +42,11 @@
       "reason": "Bridge imports engine module by design — sole purpose."
     },
     {
+      "file": "apps/handlers/bridges/mount.py",
+      "standard": "json_structure",
+      "reason": "Stdlib-only by necessity (DPLAN-0356 item 3): it runs BEFORE aipass.hooks.apps exists in the hook process, and importing json_handler would import the source tree it is mounting the promoted copy in place of."
+    },
+    {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "dead_code",
       "reason": "Bridge called externally by Codex hook settings subprocess — no internal import. Wired in .codex/hooks.json."
@@ -1330,6 +1335,36 @@
       "file": "apps/handlers/config/output_merge.py",
       "standard": "json_structure",
       "reason": "Parses each handler's stdout and serialises the ONE hook-protocol document Claude Code reads, in memory, with stdlib json (FPLAN-0535). Opens no file and stores nothing, so json_handler has nothing to open and log_operation nothing to log. Same profile as post_compact_regrounding.py and the security gates' hook protocol responses."
+    },
+    {
+      "file": "apps/modules/shell_programs.py",
+      "standard": "json_structure",
+      "reason": "The default-deny program tables (DPLAN-0356 phase 4) and two pure functions over shell_reader's invocations. Reads and writes no JSON, logs no operation; same profile as shell_reader.py."
+    },
+    {
+      "file": "apps/modules/shell_programs.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: tables consumed by shell_reader, git_gate and edit_gate inside PreToolUse hooks. print_introspection() IS provided. Same profile as shell_reader.py."
+    },
+    {
+      "file": "apps/modules/shell_reader.py",
+      "standard": "json_structure",
+      "reason": "Pure shell-word reader (DPLAN-0356 phase 3): reads a Bash command, and the script files it names, as text and returns the programs it runs. Reads and writes no JSON, logs no operation; same profile as bash_writes.py."
+    },
+    {
+      "file": "apps/modules/shell_reader.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: the one shell-word reader consumed by handlers/security/rm_gate.py and git_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Same profile as bash_writes.py. print_introspection() IS provided."
+    },
+    {
+      "file": "apps/modules/protected_paths.py",
+      "standard": "json_structure",
+      "reason": "Answers whether one path is a gate-switching file (DPLAN-0356 item 1) by pattern and path arithmetic. Reads and writes no JSON, logs no operation; same profile as admin_seat.py."
+    },
+    {
+      "file": "apps/handlers/config/gates.py",
+      "standard": "json_structure",
+      "reason": "Constants and pure dict functions: which handlers are gates and how each fails (DPLAN-0356 item 2). Opens no file and stores nothing, so json_handler has nothing to open and log_operation nothing to log. Same profile as output_merge.py."
     },
     {
       "file": "apps/handlers/config/ledger_store.py",

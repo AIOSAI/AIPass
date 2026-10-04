@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.2.4
+# Version: 1.2.7
 # Created: 2026-03-30
-# Modified: 2026-09-27
+# Modified: 2026-10-01
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -39,6 +39,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "diff",
             "log",
             "show",
+            "blame",
             "remote",
             "lock",
             "issue",
@@ -54,6 +55,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "commit",
             "checkout",
             "sync",
+            "merge-main",
             "unlock",
             "merge",
             "smart-sync",
@@ -64,10 +66,56 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "delete-branch",
             "prune-temp",
             "tag",
+            "issue-write",
+            "run-write",
+            "workflow-write",
         ],
         "description": "Write operations — the project's own manager only",
     },
 }
+
+# The gh passthroughs split by subcommand (DPLAN-0356 leg 3, the owner's ruling of
+# 2026-09-30: only the admin writes, harmless reads stay fleet-wide). A read asks
+# the gate for the command itself (global tier); every write asks for
+# "<command>-write" (owner tier). A subcommand in neither list is refused.
+GH_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
+    "issue": {
+        "read": ("list", "view", "status"),
+        "write": (
+            "create",
+            "close",
+            "comment",
+            "delete",
+            "develop",
+            "edit",
+            "lock",
+            "pin",
+            "reopen",
+            "transfer",
+            "unlock",
+            "unpin",
+        ),
+    },
+    "run": {"read": ("list", "view", "watch"), "write": ("cancel", "delete", "download", "rerun")},
+    "workflow": {"read": ("list", "view"), "write": ("disable", "enable", "run")},
+}
+
+
+def gh_access_key(command: str, args: list[str]) -> str | None:
+    """The tier key a gh passthrough asks the gate for, or None when its subcommand is unknown.
+
+    No subcommand at all is gh's own usage page, a read. The subcommand must sit
+    in the first slot: a flag there (gh takes `issue -R x/y create`) is unknown.
+    """
+    if not args:
+        return command
+    table = GH_SUBCOMMANDS[command]
+    if args[0] in table["read"]:
+        return command
+    if args[0] in table["write"]:
+        return f"{command}-write"
+    return None
+
 
 # Owner-tier is earned, not listed (DPLAN-0281, the owner's ruling). A caller holds it
 # iff ALL of these hold — devpulse-in-AIPass qualifies through the general rule,

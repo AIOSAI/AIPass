@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.9.0
+# Version: 2.9.1
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
@@ -1093,7 +1093,8 @@ def print_introspection() -> None:
             # fire, not a modulo slot, so it can announce the turn mail arrives.
             CONSOLE.print(f"  Loader '{name}': period={lp} (elapsed-turns loop, announces on arrival)")
         else:
-            CONSOLE.print(f"  Loader '{name}': period={lp} offset={lcfg.get('offset', 0)}")
+            beat = "off" if lcfg.get("beat", True) is False else "on"
+            CONSOLE.print(f"  Loader '{name}': period={lp} offset={lcfg.get('offset', 0)} beat={beat}")
     branches = config.get("branches")
     CONSOLE.print(f"  Branch overrides: {json.dumps(branches) if branches else 'none (every branch runs the above)'}")
     path = _state_path()

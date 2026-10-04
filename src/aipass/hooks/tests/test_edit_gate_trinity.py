@@ -4,7 +4,7 @@
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-09-28
+# Modified: 2026-09-30
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -801,8 +801,8 @@ class TestTrinityWriteFailOpen:
 
         assert result["exit_code"] == 2
 
-    def test_import_failure_fail_open(self, tmp_path):
-        """importlib.import_module raises ImportError -> caught, fail-open."""
+    def test_import_failure_fails_closed(self, tmp_path):
+        """importlib.import_module raises ImportError -> the write is refused (DPLAN-0356 item 2; was fail-open)."""
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 500}})
@@ -810,7 +810,8 @@ class TestTrinityWriteFailOpen:
         with _imports_via_seam(ImportError("no module")):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
-        assert result["exit_code"] == 0
+        assert result["exit_code"] == 2
+        assert "edit_gate could not check this call" in json.loads(result["stdout"])["reason"]
 
 
 class TestTrinityWriteCharNotByte:

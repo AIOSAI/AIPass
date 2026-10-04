@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
 # Description: Regex coverage for git_gate handler (DPLAN-0163, migrated DPLAN-0184)
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-05-03
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for src/aipass/hooks/apps/handlers/security/git_gate.py through handle(), the hook engine's door."""
@@ -13,10 +13,13 @@
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from aipass.hooks.apps.handlers.security import git_gate
+
+_ADMIN_RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller"
 
 
 def _is_blocked(result: dict) -> bool:
@@ -135,29 +138,36 @@ class TestEscapedQuoteBypass:
         assert _is_blocked(_bash(cmd)) == should_block, f"{'Should block' if should_block else 'Should allow'}: {cmd}"
 
 
-class TestReadVerbsAllowed:
-    """Read-only git verbs in the allowlist run raw (S193, DPLAN-0195)."""
+_READ_VERBS = [
+    "git status",
+    "git log --oneline",
+    "git diff",
+    "git show HEAD",
+    "git ls-files",
+    "git ls-tree HEAD",
+    "git rev-parse --show-toplevel",
+    "git blame README.md",
+    "git grep TODO",
+    "git archive HEAD",
+    "git for-each-ref",
+    "git -C sub/x log",
+]
 
-    @pytest.mark.parametrize(
-        "cmd",
-        [
-            "git status",
-            "git log --oneline",
-            "git diff",
-            "git show HEAD",
-            "git ls-files",
-            "git ls-tree HEAD",
-            "git rev-parse --show-toplevel",
-            "git blame README.md",
-            "git grep TODO",
-            "git archive HEAD",
-            "git for-each-ref",
-            "git -C sub/x log",
-        ],
-    )
-    def test_allows_read_verbs(self, cmd):
-        """Allowlisted read verbs are not blocked — raw is fine."""
-        assert not _is_blocked(_bash(cmd)), f"Read verb should be allowed: {cmd}"
+
+class TestReadVerbsAreTheAdminSeatsAlone:
+    """Raw read verbs run from the verified admin seat only; every other seat reads through drone @git (DPLAN-0356)."""
+
+    @pytest.mark.parametrize("cmd", _READ_VERBS)
+    def test_the_admin_seat_reads_raw(self, cmd):
+        """The verified admin grant (@ai_mail's rail, patched at that edge) lets a read verb run raw."""
+        with patch(_ADMIN_RAIL, return_value=True):
+            assert not _is_blocked(_bash(cmd)), f"Read verb should be allowed for the admin seat: {cmd}"
+
+    @pytest.mark.parametrize("cmd", _READ_VERBS)
+    def test_every_other_seat_is_refused(self, cmd):
+        """Off the admin seat the same read is refused; its drone @git twin is the door."""
+        with patch(_ADMIN_RAIL, return_value=False):
+            assert _is_blocked(_bash(cmd)), f"Raw read should be refused off the admin seat: {cmd}"
 
 
 class TestNonAllowlistedGitBlocked:
@@ -268,13 +278,20 @@ class TestEditBlocking:
         """Normal project files are not blocked."""
         assert not _is_blocked(_edit(tmp_path / path, tmp_path / "project")), f"Should allow edit: {path}"
 
-    def test_trusted_editors_bypass(self, tmp_path):
-        """Trusted branches (devpulse, seedgo) can edit protected paths."""
-        result = _edit(
-            tmp_path / "home" / ".claude" / "hooks" / "test.py",
-            tmp_path / "home" / "src" / "aipass" / "devpulse" / "something",
-        )
-        assert not _is_blocked(result), "devpulse should be trusted editor"
+    def test_a_devpulse_named_directory_is_not_a_grant(self, tmp_path):
+        """A directory name decides nothing (DPLAN-0356 item 5): off the verified grant, devpulse/ is refused."""
+        with patch(_ADMIN_RAIL, return_value=False):
+            result = _edit(
+                tmp_path / "home" / ".claude" / "hooks" / "test.py",
+                tmp_path / "home" / "src" / "aipass" / "devpulse" / "something",
+            )
+        assert _is_blocked(result), "a devpulse path without the grant must not edit a protected file"
+
+    def test_the_verified_admin_seat_edits_a_protected_path(self, tmp_path):
+        """The verified admin grant is the one identity that passes."""
+        with patch(_ADMIN_RAIL, return_value=True):
+            result = _edit(tmp_path / "home" / ".claude" / "hooks" / "test.py", tmp_path / "project")
+        assert not _is_blocked(result), "the verified admin seat should edit a protected path"
 
 
 class TestNonGitAllowed:

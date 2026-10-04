@@ -1,14 +1,17 @@
 # =================== AIPass ====================
 # Name: presence_gate.py
-# Version: 3.3.0
+# Version: 3.3.1
 # Description: Single-session gate — blocks duplicate Claude runtimes per branch
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-29
-# Modified: 2026-09-07
+# Modified: 2026-09-30
 # =============================================
 
 """Single-session gate — blocks duplicate Claude runtimes per branch.
+
+Failure mode: OPEN, by decision (DPLAN-0356) — a broken presence gate would refuse every prompt in every
+seat, the owner's included, and the prompt it refuses is the one that would fix it.
 
 Sources truth from CC-native ~/.claude/sessions/<pid>.json (resume-aware,
 exit-aware) instead of PRESENCE.central.json. Resume-aware because /resume

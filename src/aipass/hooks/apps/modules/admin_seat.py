@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: admin_seat.py
-# Version: 1.0.0
-# Description: The verified admin-seat exemption, read once for every gate that honours it
+# Version: 1.1.0
+# Description: The verified admin-seat exemption and the caller's name, read once for every gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-09-30
 # =============================================
 
 """Answers one question for every security gate: is this session the admin seat?
@@ -44,7 +44,9 @@ caller all return False.
 """
 
 import importlib
+import json
 import os
+from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -70,6 +72,52 @@ def is_admin_seat(cwd: str) -> bool:
         True when the grant verifies, False on every doubt.
     """
     return _verified(cwd)
+
+
+def caller_name(cwd: str) -> str | None:
+    """The citizen a session belongs to, named by the passport above *cwd*, never by the path.
+
+    For refusal text and the deletion record only: a name never decides who
+    passes (is_admin_seat does). Moved here from rm_gate on 2026-09-30
+    (DPLAN-0356) so rm_gate and git_gate read the caller one way.
+
+    Args:
+        cwd: The session working directory from the hook payload.
+
+    Returns:
+        The passport's branch_name (else identity.name), or None when no
+        passport stands between *cwd* and the home directory.
+
+    Raises:
+        OSError, ValueError, AttributeError: the passport exists and cannot be
+        read as one. The gate decides what an unreadable passport costs.
+    """
+    if not cwd:
+        return None
+    search = Path(cwd).resolve()
+    home = Path.home()
+    while search != home and search.parent != search:
+        passport = search / ".trinity" / "passport.json"
+        if passport.exists():
+            data = json.loads(passport.read_text(encoding="utf-8"))
+            name = data.get("branch_info", {}).get("branch_name") or data.get("identity", {}).get("name")
+            return name if isinstance(name, str) and name else None
+        search = search.parent
+    return None
+
+
+def seat_of(cwd: str) -> tuple[str | None, bool]:
+    """(caller name, verified admin) for one session, for the gates that refuse by seat.
+
+    An unreadable passport costs the name, never the decision: the admin answer
+    comes from the grant alone and fails closed on its own.
+    """
+    try:
+        name = caller_name(cwd)
+    except (OSError, ValueError, AttributeError) as exc:
+        logger.warning("[HOOKS] admin_seat: caller passport above %s unreadable, caller unnamed: %s", cwd, exc)
+        name = None
+    return name, is_admin_seat(cwd)
 
 
 def _verified(cwd: str) -> bool:
@@ -103,5 +151,5 @@ def print_introspection() -> None:
     """
     CONSOLE.print(f"[bold cyan]admin_seat[/bold cyan] — is this session the admin seat (@{ADMIN_SEAT})?")
     CONSOLE.print(f"[dim]Consumes {_RAIL}.is_verified_admin_caller — the 5-leg grant.[/dim]")
-    CONSOLE.print("[dim]Consumed by handlers/security/edit_gate.py and handlers/security/testwrite_gate.py.[/dim]")
+    CONSOLE.print("[dim]Consumed by edit_gate, testwrite_gate, rm_gate and git_gate (handlers/security/).[/dim]")
     CONSOLE.print("[yellow]Fails closed:[/yellow] an unimportable rail, a raise, or an unprovable caller all refuse.")

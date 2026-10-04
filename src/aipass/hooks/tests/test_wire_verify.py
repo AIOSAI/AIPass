@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.0.1
+# Version: 1.1.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-09-28
+# Modified: 2026-10-01
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -222,6 +222,36 @@ class TestCheckEventWiring:
         wire_verify._check_event_wiring("UserPromptSubmit", hooks_group, None, errors, warnings, info)
         assert len(errors) == 1
         assert "NO provider event entry" in errors[0]
+
+
+class TestEveryGuardedToolReachesTheBridge:
+    """DPLAN-0356 phase 3, R7 (red team, MEDIUM): the live PreToolUse matcher lacked NotebookEdit,
+    so the gates that guard it never ran, and verify said nothing."""
+
+    def _errors(self, tmp_path, matcher):
+        provider = {**GOOD_PROVIDER, "PreToolUse": [_provider_entry("PreToolUse", matcher=matcher)]}
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"hooks": provider}), encoding="utf-8")
+        return wire_verify.verify_wiring(provider_path=settings, project_config=GOOD_PROJECT)["errors"]
+
+    def test_a_matcher_missing_notebookedit_is_an_error_naming_it(self, tmp_path):
+        errors = self._errors(tmp_path, "Bash|Edit|MultiEdit|Write|Read|Grep|Glob|WebSearch|WebFetch|Task")
+        assert len(errors) == 1 and "NotebookEdit" in errors[0]
+
+    def test_the_corrected_matcher_passes(self, tmp_path):
+        assert self._errors(tmp_path, "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|Task") == []
+
+    def test_an_empty_or_star_matcher_reaches_every_tool(self, tmp_path):
+        assert self._errors(tmp_path, "") == []
+        assert self._errors(tmp_path, "*") == []
+
+    def test_no_pretooluse_bridge_at_all_names_every_guarded_tool(self, tmp_path):
+        provider = {key: value for key, value in GOOD_PROVIDER.items() if key != "PreToolUse"}
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"hooks": provider}), encoding="utf-8")
+        project = {key: value for key, value in GOOD_PROJECT.items() if key != "PreToolUse"}
+        errors = wire_verify.verify_wiring(provider_path=settings, project_config=project)["errors"]
+        assert {"Bash", "Edit", "MultiEdit", "Write", "NotebookEdit"} <= {e.split()[1] for e in errors}
 
 
 class TestVerifyWiring:

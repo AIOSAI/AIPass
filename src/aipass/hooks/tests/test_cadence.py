@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.5.0
-# Description: Tests for cadence module (DPLAN-0200), fail-open warnings since 1.1.0, branch overrides since 1.4.0, one turn per prompt key since 1.5.0
+# Version: 1.6.0
+# Description: Tests for cadence module (DPLAN-0200); branch overrides 1.4.0, prompt key 1.5.0, beat display 1.6.0
 # Branch: hooks
 # Created: 2026-06-08
 # Modified: 2026-09-30
@@ -768,6 +768,17 @@ class TestModuleInterface:
         assert err.startswith("cadence Module")
         assert "Enabled: True" in err
         assert "Loader 'tier0'" in err
+
+    def test_introspection_shows_a_global_loader_whose_beat_is_off(self, tmp_path, capsys):
+        config = tmp_path / "cadence.json"
+        config.write_text(json.dumps({"loaders": {"tier0": {"beat": False}}}), encoding="utf-8")
+
+        with patch(f"{MODULE}._CONFIG_PATH", config), patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            assert handle_command("cadence", []) is True
+
+        err = capsys.readouterr().err
+        assert "Loader 'tier0': period=5 offset=0 beat=off" in err
+        assert "Loader 'navmap': period=5 offset=0 beat=on" in err
 
 
 class TestCompactIntegration:

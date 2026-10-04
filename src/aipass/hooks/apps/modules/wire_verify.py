@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.0.1
+# Version: 1.1.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-08-02
+# Modified: 2026-10-01
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -16,16 +16,20 @@ Cross-checks ~/.claude/settings.json (provider hooks) against
   - Enabled handlers with no provider bridge entry (handler never dispatched)
   - Duplicate provider entries (handler fires multiple times)
   - Orphaned provider entries (bridge entry with no project config handler)
+  - A tool a gate guards that the provider's PreToolUse bridge never sees
+    (DPLAN-0356 phase 3, R7: NotebookEdit was missing, so its gates never ran)
 
 Invoked via: drone @hooks verify
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.config import gates
 from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -141,6 +145,32 @@ def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info):
             )
 
 
+def _matcher_reaches(matcher: str, tool: str) -> bool:
+    """True when a provider matcher sends *tool* to the bridge: empty or ``*`` is every tool, else a regex."""
+    if matcher in ("", "*"):
+        return True
+    try:
+        return re.fullmatch(matcher, tool) is not None
+    except re.error as exc:  # a matcher the provider cannot compile reaches nothing
+        logger.info("[WIRE_VERIFY] unreadable PreToolUse matcher %r: %s", matcher, exc)
+        return False
+
+
+def _check_guarded_tools(provider_hooks, errors):
+    """ERROR for every tool a gate guards that no PreToolUse bridge entry sends to the engine (R7)."""
+    matchers = [
+        entry.get("matcher", "")
+        for entry in provider_hooks.get("PreToolUse", [])
+        if _extract_bridge_arg(entry) == "PreToolUse"
+    ]
+    for tool in sorted(gates.guarded_tools()):
+        if not any(_matcher_reaches(matcher, tool) for matcher in matchers):
+            errors.append(
+                f"PreToolUse: {tool} is guarded by the gates but no provider bridge matcher reaches it"
+                " — its gates never run (add it to the manifest's PreToolUse matcher)"
+            )
+
+
 def verify_wiring(provider_path=None, project_config=None):
     """Cross-check provider settings against project hook config.
 
@@ -161,6 +191,7 @@ def verify_wiring(provider_path=None, project_config=None):
         return {"errors": errors, "warnings": warnings, "info": info, "ok": False}
 
     provider_index = _build_provider_index(provider_hooks, errors)
+    _check_guarded_tools(provider_hooks, errors)
 
     for event_type, hooks_group in config.items():
         if event_type in _META_KEYS or not isinstance(hooks_group, dict):

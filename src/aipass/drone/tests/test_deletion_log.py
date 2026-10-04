@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-14
-# Modified: 2026-09-29
+# Modified: 2026-10-01
 # =============================================
 
 """Tests for apps/handlers/deletion_log.py and the safe_delete path that writes it."""
@@ -34,6 +34,10 @@ from aipass.drone.apps.handlers.rm_handler import safe_delete
 #: Windows, not as root. ``or`` short-circuits, so geteuid is never read on nt.
 _PERMISSIONS_DO_NOT_BIND = sys.platform == "win32" or os.geteuid() == 0
 _PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
+
+#: Windows makes a symlink only with Developer Mode or elevation (template item 23).
+_NO_SYMLINKS = sys.platform == "win32"
+_NO_SYMLINKS_REASON = "creating a symlink needs a privilege on Windows"
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +210,26 @@ class TestRecordContents:
         record = read_records(project)[0]
         assert record["kind"] == "symlink"
         assert real.exists(), "measuring must not follow the link"
+
+    @pytest.mark.skipif(_NO_SYMLINKS, reason=_NO_SYMLINKS_REASON)
+    def test_a_symlink_record_names_the_link_and_its_target(self, project):
+        real = project.resolve() / "real.txt"
+        real.write_text("x", encoding="utf-8")
+        link = project.resolve() / "link.txt"
+        link.symlink_to(real)
+
+        safe_delete([str(link)])
+
+        record = read_records(project)[0]
+        assert (record["path"], record.get("target")) == (str(link), str(real))
+
+    def test_a_plain_delete_writes_no_target_key(self, project):
+        target = project / "plain.txt"
+        target.write_text("x", encoding="utf-8")
+
+        safe_delete([str(target)])
+
+        assert "target" not in read_records(project)[0]
 
     def test_requested_keeps_what_the_caller_typed(self, project):
         target = project / "rel.txt"

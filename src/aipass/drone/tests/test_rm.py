@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm.py
 # Description: drone rm contained safe-delete: containment, carve-outs, stale sweep
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-06-02
-# Modified: 2026-09-28
+# Modified: 2026-10-01
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
@@ -61,6 +61,10 @@ _POSIX_CARVE_OUT_REASON = "POSIX-only carve-out: rm_handler adds /tmp on non-win
 #: Windows, not as root. ``or`` short-circuits, so geteuid is never read on nt.
 _PERMISSIONS_DO_NOT_BIND = sys.platform == "win32" or os.geteuid() == 0
 _PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
+
+#: Windows makes a symlink only with Developer Mode or elevation (template item 23).
+_NO_SYMLINKS = sys.platform == "win32"
+_NO_SYMLINKS_REASON = "creating a symlink needs a privilege on Windows"
 
 
 # ---------------------------------------------------------------------------
@@ -380,22 +384,6 @@ class TestRefuseDeletion:
     def test_refuse_absolute_outside_roots(self):
         results = safe_delete(["/usr/local/bin"])
         assert results[0][1] is False
-
-    @pytest.mark.usefixtures("_patch_roots")
-    def test_refuse_symlink_escape_from_tmp(self):
-        """Symlink under /tmp pointing to /home/user should be refused."""
-        target_outside = Path.home()
-        link_dir = Path(tempfile.mkdtemp())
-        link = link_dir / "escape_link"
-        try:
-            link.symlink_to(target_outside)
-            results = safe_delete([str(link)])
-            assert results[0][1] is False
-        finally:
-            if link.exists() or link.is_symlink():
-                link.unlink()
-            if link_dir.exists():
-                shutil.rmtree(link_dir)
 
     @pytest.mark.usefixtures("_patch_roots")
     def test_nonexistent_path_clean_error(self):
@@ -801,6 +789,103 @@ class TestContainedCitizens:
         finally:
             locked.chmod(0o700)
         assert "contains citizen api/" in message
+
+
+# ---------------------------------------------------------------------------
+# A symlink is judged and reported where the LINK lives
+#
+# Found 2026-09-30 in the live ledger: rm unlinked the link correctly, but
+# guarded and reported it by its RESOLVED target. A link to @devpulse printed
+# "Deleted: .../src/aipass/devpulse", and a link inside canary/ was deleted
+# from the devpulse seat while a file beside it was refused as canary's.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(_NO_SYMLINKS, reason=_NO_SYMLINKS_REASON)
+class TestASymlinkIsJudgedWhereItLives:
+    @pytest.fixture()
+    def aipass_dir(self, project_with_branches):
+        return (project_with_branches / "src" / "aipass").resolve()
+
+    def test_a_link_in_a_sibling_branch_is_refused_though_it_points_home(self, aipass_dir, monkeypatch):
+        monkeypatch.chdir(aipass_dir / "api")
+        link = aipass_dir / "flow" / "home_link"
+        link.symlink_to(aipass_dir / "api", target_is_directory=True)
+        ((_path, ok, message),) = safe_delete([str(link)])
+        assert ok is False
+        assert "sibling branch flow/" in message
+        assert link.is_symlink()
+
+    def test_a_link_in_my_branch_is_reported_as_the_link_and_its_target(self, aipass_dir, monkeypatch, tmp_path):
+        monkeypatch.chdir(aipass_dir / "drone")
+        link = aipass_dir / "drone" / "api_link"
+        link.symlink_to(aipass_dir / "api", target_is_directory=True)
+        ((_path, ok, message),) = safe_delete([str(link)])
+        assert message == f"Deleted: {link} (symlink to {aipass_dir / 'api'})"
+        assert ok is True
+        assert not link.is_symlink()
+        assert (aipass_dir / "api" / ".trinity").is_dir()
+        (record,) = _ledger(tmp_path)
+        assert (record["path"], record.get("target")) == (str(link), str(aipass_dir / "api"))
+
+    def test_a_link_inside_a_carveout_is_refused_wherever_it_points(self, aipass_dir, monkeypatch):
+        monkeypatch.chdir(aipass_dir / "drone")
+        build = aipass_dir / "drone" / "build"
+        build.mkdir()
+        link = aipass_dir / "drone" / ".trinity" / "build_link"
+        link.symlink_to(build, target_is_directory=True)
+        ((_path, ok, message),) = safe_delete([str(link)])
+        assert ok is False
+        assert ".trinity" in message
+        assert link.is_symlink()
+
+    def test_a_link_to_the_whole_fleet_is_only_a_link(self, aipass_dir, monkeypatch):
+        """rm unlinks; the contains-a-citizen walk must not follow the link into the fleet."""
+        monkeypatch.chdir(aipass_dir / "drone")
+        scratch = aipass_dir.parent.parent / "scratch"
+        scratch.mkdir()
+        link = scratch / "fleet_link"
+        link.symlink_to(aipass_dir, target_is_directory=True)
+        ((_path, ok, message),) = safe_delete([str(link)])
+        assert ok is True, message
+        assert not link.is_symlink()
+        assert (aipass_dir / "api" / ".trinity").is_dir()
+
+    def test_a_link_to_a_citizen_is_not_itself_a_citizen(self, aipass_dir, monkeypatch):
+        """The branch-root walk must not read the link's own name as a branch."""
+        monkeypatch.chdir(aipass_dir / "drone")
+        scratch = aipass_dir.parent.parent / "scratch"
+        scratch.mkdir()
+        link = scratch / "api_link"
+        link.symlink_to(aipass_dir / "api", target_is_directory=True)
+        ((_path, ok, message),) = safe_delete([str(link)])
+        assert ok is True, message
+        assert (aipass_dir / "api" / ".trinity").is_dir()
+
+    def test_a_link_out_of_the_roots_is_unlinked_and_its_target_survives(
+        self, project_dir, tmp_path_factory, monkeypatch
+    ):
+        outside = tmp_path_factory.mktemp("outside")
+        (outside / "keep.txt").write_text("keep", encoding="utf-8")
+        link = project_dir.resolve() / "out_link"
+        link.symlink_to(outside, target_is_directory=True)
+        monkeypatch.setattr(rm_handler, "get_allowed_roots", lambda: [project_dir.resolve()])
+        ((_path, ok, message),) = safe_delete([str(link)])
+        assert ok is True, message
+        assert not link.is_symlink()
+        assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+    def test_a_path_through_a_link_is_still_judged_at_its_target(self, project_dir, tmp_path_factory, monkeypatch):
+        """Guard: only the final name is left unfollowed. A path under a link resolves."""
+        outside = tmp_path_factory.mktemp("outside")
+        (outside / "keep.txt").write_text("keep", encoding="utf-8")
+        link = project_dir.resolve() / "out_link"
+        link.symlink_to(outside, target_is_directory=True)
+        monkeypatch.setattr(rm_handler, "get_allowed_roots", lambda: [project_dir.resolve()])
+        ((_path, ok, message),) = safe_delete([str(link / "keep.txt")])
+        assert ok is False
+        assert "outside allowed roots" in message
+        assert (outside / "keep.txt").exists()
 
 
 # ---------------------------------------------------------------------------

@@ -1,14 +1,19 @@
 # =================== AIPass ====================
 # Name: subagent_gate.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Checks modified Python files against seedgo standards on SubagentStop
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-22
-# Modified: 2026-09-27
+# Modified: 2026-09-30
 # =============================================
 
-"""Checks modified Python files against seedgo standards and blocks on violations."""
+"""Checks modified Python files against seedgo standards and blocks on violations.
+
+Failure mode: OPEN, by decision (DPLAN-0356) — a crash, a `drone @git status` timeout or a dead
+subprocess lets the stop through, logged. A block at SubagentStop keeps the sub-agent running, so a gate
+that cannot finish would refuse every stop and trap it in a loop; the main session's gates still run on
+everything it does next."""
 
 import json
 import os
@@ -233,6 +238,6 @@ def handle(hook_data: dict) -> dict:
 
         return _ALLOW
 
-    except Exception as exc:
-        logger.info("[HOOKS] subagent_gate: unexpected error (allowing): %s", exc)
+    except Exception as exc:  # OPEN by decision (DPLAN-0356): a block here traps the sub-agent, see the docstring
+        logger.info("[HOOKS] subagent_gate: unexpected error (allowing the stop, by decision): %s", exc)
         return _ALLOW

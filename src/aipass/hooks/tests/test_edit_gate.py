@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.3.1
+# Version: 1.4.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-09-28
+# Modified: 2026-09-30
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py."""
@@ -100,15 +100,17 @@ class TestEditGateHandler:
         assert parsed["decision"] == "block"
         assert "Cross-branch" in parsed["reason"]
 
-    def test_allow_trusted_cross_branch(self):
-        result = handle(
-            {
-                "tool_name": "Edit",
-                "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/apps/test.py"},
-                "cwd": "/srv/example/AIPass/src/aipass/devpulse",
-            }
-        )
-        assert result["exit_code"] == 0
+    def test_a_cross_branch_write_is_the_verified_admin_seats_never_a_names(self):
+        """DPLAN-0356 item 5: a seat standing in .../devpulse crossed on its directory name alone."""
+        data = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/apps/test.py"},
+            "cwd": "/srv/example/AIPass/src/aipass/devpulse",
+        }
+        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+            assert handle(data)["exit_code"] == 2
+        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True):
+            assert handle(data)["exit_code"] == 0
 
     def test_block_daemon_cross_branch(self):
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
@@ -175,13 +177,14 @@ class TestEditGateHandler:
         assert "'alpha' cannot write to 'beta'" in json.loads(result["stdout"])["reason"]
         assert _write(str(root / "agents" / "alpha"), root / "agents" / "alpha" / "notes.md")["exit_code"] == 0
 
-    def test_seedgo_and_spawn_write_anywhere_inside_aipass(self, registered_projects: dict):
+    def test_seedgo_and_spawn_write_their_own_branch_like_everyone_else(self, registered_projects: dict):
+        """DPLAN-0356 item 5: TRUSTED_CROSS_WRITERS let these two names write all of AIPass."""
         for seat in ("seedgo", "spawn"):
             for target in (
                 registered_projects["aipass"] / "src" / "aipass" / "hooks" / "apps" / "x.py",
                 registered_projects["aipass"] / "README.md",
             ):
-                assert _write(registered_projects[seat], target)["exit_code"] == 0, (seat, target)
+                assert _write(registered_projects[seat], target)["exit_code"] == 2, (seat, target)
 
     def test_a_file_outside_every_project_is_nobodys(self, registered_projects: dict, tmp_path: Path):
         """Scratch and temp files belong to no project: the ownership rule has nothing to say."""
@@ -191,9 +194,17 @@ class TestEditGateHandler:
         bash = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": registered_projects["hooks"]})
         assert bash["exit_code"] == 0
 
-    def test_the_registry_owner_writes_anywhere_in_the_project(self, registered_projects: dict):
+    def test_the_registry_owner_row_grants_nothing_the_verified_grant_does(self, registered_projects: dict):
+        """DPLAN-0356 item 5: an ``owner: true`` row wrote across its project with no grant."""
         for target in (registered_projects["aipass"] / "README.md", Path(registered_projects["memory"]) / "x.py"):
-            assert _write(registered_projects["devpulse"], target)["exit_code"] == 0
+            with patch(
+                "aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False
+            ):
+                assert _write(registered_projects["devpulse"], target)["exit_code"] == 2
+            with patch(
+                "aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True
+            ):
+                assert _write(registered_projects["devpulse"], target)["exit_code"] == 0
 
 
 def _write(cwd: str, target: Path, tool: str = "Edit") -> dict:
@@ -783,9 +794,10 @@ class TestEditGateExternalProject:
     # The owner's ruling, 2026-09-18 22:17: "A manager (e.g. @vera in Vera Studio, like devpulse
     # in AIPass) edits her own project's agents' files, within her project only."
 
-    def test_the_manager_writes_her_projects_agents_files(self, registered_projects: dict):
+    def test_the_manager_row_no_longer_writes_her_projects_agents_files(self, registered_projects: dict):
+        """DPLAN-0356 item 5: the manager short-circuit is gone; her own branch is hers, the rest is not."""
         for target in (Path(registered_projects["writer"]) / "draft.md", registered_projects["vera"] / "README.md"):
-            assert _write(registered_projects["vera_seat"], target)["exit_code"] == 0, target
+            assert _write(registered_projects["vera_seat"], target)["exit_code"] == 2, target
 
     def test_the_manager_reaches_nothing_outside_her_project(self, registered_projects: dict):
         with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):

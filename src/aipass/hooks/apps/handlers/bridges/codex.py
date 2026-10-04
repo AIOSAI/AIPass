@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 1.0.0
-# Description: Codex bridge — entry point for provider hook settings
+# Version: 2.0.0
+# Description: Codex bridge — mounts the promoted hook code, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-09-30
 # =============================================
 
 """Codex bridge.
@@ -21,14 +21,27 @@ Codex protocol differences from Claude Code:
 Supports two forms:
   codex.py EventType          — dispatch ALL enabled hooks for that event
   codex.py EventType:hook_name — dispatch ONLY that one hook (separate output)
+
+Since 2.0.0 (DPLAN-0356), as claude.py: the hook code is the promoted copy
+(mount.py), engine.run_event owns everything past argv and stdin, and a
+PreToolUse call whose hook code cannot load or raises is DENIED. Every other
+event answers an empty document.
 """
 
+import importlib.util
 import json
+import os
 import sys
 
-from aipass.hooks.apps.modules.engine import dispatch
-from aipass.hooks.apps.handlers.config.loader import find_project_config
 from aipass.prax.apps.modules.logger import system_logger as logger
+
+GUARDED_EVENTS = frozenset({"PreToolUse"})
+
+BROKEN = (
+    "HOOKS BROKEN: the AIPass hook engine could not run ({error}).\n"
+    "Every gate it runs is down, so nothing they guard runs until it is fixed.\n"
+    'Mail @hooks and @devpulse: drone @ai_mail email @hooks "Hooks broken" "<what you ran, and this text>"'
+)
 
 
 def _normalize_stdin(stdin_data: str) -> str:
@@ -78,39 +91,50 @@ def _wrap_output(event_type: str, output: str, exit_code: int) -> str:
     )
 
 
+def _mount() -> str:
+    """Serve aipass.hooks.apps from the promoted copy; on a bad copy, from the source tree, loudly."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location("_aipass_hooks_mount", os.path.join(here, "mount.py"))
+    if spec is None or spec.loader is None:
+        raise ImportError("mount.py has no import spec")
+    mount = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mount)
+    try:
+        return mount.mount(mount.branch_root(__file__))
+    except Exception as exc:  # a bad promoted copy: the source still gates, and says so
+        logger.error("[HOOKS:codex] promoted copy unusable, serving the source tree: %s", exc)
+        return "source (fallback)"
+
+
+def _broken_output(event_type: str, exc: BaseException) -> str:
+    """Deny a guarded event outright; any other event gets an empty document."""
+    reason = BROKEN.format(error=f"{type(exc).__name__}: {exc}")
+    logger.error("[HOOKS:codex] bridge: %s on %s", reason.splitlines()[0], event_type)
+    if event_type in GUARDED_EVENTS:
+        return _wrap_output(event_type, json.dumps({"decision": "block", "reason": reason}), 2)
+    return json.dumps({})
+
+
 def main() -> None:
-    """Entry point — receive event type from Codex, dispatch via engine."""
+    """Entry point — receive event type from Codex, dispatch via the promoted engine."""
     if len(sys.argv) < 2:
         sys.stderr.write("Usage: codex.py <EventType> or codex.py <EventType:hook_name>\n")
         sys.exit(1)
 
     arg = sys.argv[1]
-    hook_filter = None
-    if ":" in arg:
-        event_type, hook_filter = arg.split(":", 1)
-    else:
-        event_type = arg
+    event_type = arg.split(":", 1)[0]
+    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
 
-    stdin_data = ""
-    if not sys.stdin.isatty():
-        stdin_data = sys.stdin.read()
+    try:
+        _mount()
+        from aipass.hooks.apps.modules.engine import run_event
 
-    normalized = _normalize_stdin(stdin_data)
+        output, exit_code = run_event(arg, _normalize_stdin(stdin_data))
+    except Exception as exc:  # fail closed on the guarded event, see _broken_output
+        sys.stdout.write(_broken_output(event_type, exc))
+        return
 
-    config = find_project_config()
-    if config is None:
-        config = {"hooks_enabled": True}
-        logger.info("[HOOKS:codex] no project config found, using defaults")
-
-    if hook_filter:
-        full_config: dict = config
-        hook_def = full_config.get(event_type, {}).get(hook_filter, {})
-        config = {"hooks_enabled": True, event_type: {hook_filter: hook_def}}
-
-    output, exit_code = dispatch(event_type, normalized, config)
-
-    wrapped = _wrap_output(event_type, output, exit_code)
-    sys.stdout.write(wrapped)
+    sys.stdout.write(_wrap_output(event_type, output, exit_code))
 
 
 if __name__ == "__main__":

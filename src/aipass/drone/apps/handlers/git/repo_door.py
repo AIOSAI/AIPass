@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-13
-# Modified: 2026-09-27
+# Modified: 2026-10-01
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -84,6 +84,44 @@ REFUSE_DETACHED = "push refused: HEAD is detached in {repo}. Check out the branc
 
 # What drone's router stamps onto every routed command, and what the rail reads.
 _STAMP_KEYS = ("AIPASS_CALLER_CWD", "AIPASS_CALLER_BRANCH", "AIPASS_CALLER_IDENTITY_SOURCE")
+
+
+def help_block() -> str:
+    """The door's block of the @git help page, its refusals rendered from the constants above.
+
+    Lives beside the constants it renders; it moved here from git_module when
+    that file reached its 1,500-line cap (2026-10-01).
+    """
+    placeholders = {"caller": "<caller>", "path": "<path>", "verb": "<verb>", "toplevel": "<toplevel>"}
+    refusals = (
+        REFUSE_NOT_ADMIN,
+        REFUSE_LANE_DARK.replace("{reason}", "<reason>"),
+        REFUSE_VERB,
+        REFUSE_NO_VALUE,
+        REFUSE_TWICE,
+        REFUSE_MISSING,
+        REFUSE_NOT_DIR,
+        REFUSE_NOT_REPO,
+        REFUSE_NOT_TOP,
+        REFUSE_AIPASS,
+    )
+    lines = "".join(f"    {text.format(**placeholders)}\n" for text in refusals)
+    return (
+        "External-repo door — admin seat only (DPLAN-0344):\n"
+        "  status | diff [--staged] | log [count] | commit <msg> [--all | files] | push | tag <name>  --repo <path>\n"
+        "  Runs the verb in another git repo (projects/baud, a clone outside the tree).\n"
+        "  <path> is absolute, or relative to the AIPass root (not your cwd), and must be\n"
+        "  that repo's top level. --repo=<path> works too, in any slot.\n"
+        "  Checked on EVERY use against @ai_mail's verified-caller rail — the 5-leg admin\n"
+        "  grant, never cached. Project managers keep their own CWD-bound owner tier;\n"
+        "  --repo is not theirs. No AIPass PR lock is taken (git's index.lock serialises).\n"
+        "  commit never pushes, as at home: push is its own verb. commit --all runs the\n"
+        "  same lint and test gate there it runs anywhere; file paths are repo-relative.\n"
+        "  issue, run and workflow are not door verbs: their --repo OWNER/NAME is gh's own.\n"
+        "  Every use, refusals included, is one line in .ai_central/git_repo_door.jsonl:\n"
+        "  caller, cwd, verb, args, repo, HEAD before and after, exit code.\n"
+        "  Refusals, exactly as printed:\n" + lines
+    )
 
 
 class RepoFlag(NamedTuple):

@@ -315,7 +315,9 @@ class TestHandleEditTools:
 
 class TestHandleExceptionSafety:
     @patch("aipass.hooks.apps.handlers.security.registry_gate.logger")
-    def test_exception_allows(self, mock_logger):
+    def test_a_crash_refuses_the_call_it_was_checking(self, mock_logger):
+        """DPLAN-0356 item 2: `except: allow` became a refusal for the calls this gate guards."""
         result = handle({"tool_name": "Bash", "tool_input": None, "cwd": "/tmp"})
-        assert result["exit_code"] == 0
-        mock_logger.info.assert_called()
+        assert result["exit_code"] == 2
+        assert "registry_gate could not check this call" in json.loads(result["stdout"])["reason"]
+        mock_logger.error.assert_called()

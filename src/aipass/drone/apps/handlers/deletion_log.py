@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete drone performs
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-08-14
-# Modified: 2026-09-29
+# Modified: 2026-09-30
 # =============================================
 
 """Durable record of every delete drone performs.
@@ -308,6 +308,7 @@ def record_deletion(
     project_root: Path | None = None,
     mode: str | None = None,
     age: str | None = None,
+    target: Path | str | None = None,
 ) -> dict:
     """Write one deletion record to both channels and return it.
 
@@ -333,6 +334,11 @@ def record_deletion(
             the twelve keys it always had, so a plain delete writes the same
             bytes it did before stale mode existed.
         age: The age limit the mode ran with, exactly as typed (``10d``).
+        target: What a symlink pointed at, when the deleted path is a link.
+            ``path`` is then the link itself, where it lived, so the record
+            never reads as if the target went. Given, the record gains a
+            ``target`` key and the prax line names it; a plain delete gains
+            nothing.
 
     Never raises. A failed record is reported at ERROR and the caller carries
     on: losing the log must not turn into losing the delete.
@@ -355,11 +361,14 @@ def record_deletion(
     if mode is not None:
         record["mode"] = mode
         record["age"] = age
+    if target is not None:
+        record["target"] = str(target)
 
     logger.info(
-        "deletion record: %s %s by %s — %s (%s, size=%s, entries=%s)%s",
+        "deletion record: %s %s%s by %s — %s (%s, size=%s, entries=%s)%s",
         outcome,
         record["path"],
+        f" -> {target}" if target is not None else "",
         caller,
         lane,
         record["kind"],

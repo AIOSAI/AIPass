@@ -265,11 +265,13 @@ class TestBothLanesAnswerTheSame:
         command = f"python -m pytest {project['existing']}"
         assert _run(project["seat"], command=command)["exit_code"] == 0
 
-    def test_an_unparseable_command_allows_and_logs(self, project: dict):
-        """bash_writes' own contract: a command it could not read taught it nothing."""
+    def test_an_unparseable_command_is_refused(self, project: dict):
+        """DPLAN-0356 item 2: a command the gate could not read is not let through."""
         _policy(project)
         with patch.object(testwrite_gate, "testwrite_targets_bash", side_effect=ValueError("lexer died")):
-            assert _run(project["seat"], command="something ; unreadable")["exit_code"] == 0
+            result = _run(project["seat"], command="something ; unreadable")
+        assert result["exit_code"] == 2
+        assert "lexer died" in _reason(result)
 
 
 class TestTheFailModeIsObservable:
@@ -351,11 +353,11 @@ class TestTheFailModeIsObservable:
         assert corrupt.error is not None
         assert corrupt.writing_enabled is False
 
-    def test_a_gate_crash_allows_rather_than_walls(self, project: dict):
-        """Fail-closed covers a policy we could not READ. A defect in this gate is ours."""
+    def test_a_gate_crash_refuses_the_write(self, project: dict):
+        """DPLAN-0356 item 2: a defect in this gate used to allow the write; now it refuses it."""
         _policy(project)
         with patch.object(testwrite_targets, "classify", side_effect=RuntimeError("gate defect")):
-            assert _run(project["seat"], file_path=project["new_test"])["exit_code"] == 0
+            assert _blocked(_run(project["seat"], file_path=project["new_test"]))
 
 
 class TestTheAdminSeat:

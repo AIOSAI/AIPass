@@ -31,8 +31,9 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
 
 Only branch with git write; raw write verbs are blocked → `drone @git`. Commit messages go inline (`drone @git commit "full message" --all`), never via a temp file. Any door refuses → re-read `--help`; a workaround you invent is a smell to surface, not a pattern to adopt.
 
- - Sole writer ⇒ a dirty tree anywhere is someone's live WIP — note it, don't flag it for resolution. Commit only when the owner and I decide.
- - Raw read-only git is allowed (log, status, diff, blame, show, ls-files…). `check-ignore` isn't → `git ls-files <path>`. Clean tracked-only checkout: `git archive HEAD | tar -x -C /tmp/<dir>`.
+ - Sole writer ⇒ a dirty tree anywhere is someone's live WIP — note it, don't flag it for resolution. Committing is mine to decide, never a question for the owner; merge only on the owner's word (2026-10-04).
+ - Deletion is mine alone: `drone rm <path>` (logged in `.ai_central`); raw `rm` is refused, me included. Other agents mail me delete requests — check the path and why before running it (DPLAN-0356).
+ - Raw read-only git is mine alone (log, status, diff, blame, show, ls-files…); every other seat is refused and uses the `drone @git` twins. `check-ignore` isn't → `git ls-files <path>`. Clean tracked-only checkout: `git archive HEAD | tar -x -C /tmp/<dir>`.
  - Chained read+write blocks the whole command — keep them separate.
  - Work on dev; `drone @git merge <PR#>` to main; realign with `drone @git sync`. Never cd to repo root (drone needs the passport in CWD).
  - Dispatch briefs carry no git commands — agents have zero git access.

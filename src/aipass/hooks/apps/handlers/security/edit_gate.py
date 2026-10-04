@@ -1,16 +1,20 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.16.1
+# Version: 1.18.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-09-28
+# Modified: 2026-10-01
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
-state. Reports a shell memory write the reader could not see, after the call."""
+state. Reports a shell memory write the reader could not see, after the call.
+
+Failure mode: handle() refuses the call it was checking when it crashes; the tripwire pair report and never block,
+so a crash there leaves one call unwatched, logged. The engine refuses on import error and timeout for all three.
+"""
 
 import importlib
 import json
@@ -24,7 +28,12 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
-# Who may write whose files (TRUSTED_CROSS_WRITERS, the project marker, the registry rows)
+GATE_CRASHED = (
+    "edit_gate could not check this call ({error}), so it is refused: a gate that cannot read a call "
+    "does not let it through.\n"
+    'Mail @hooks and @devpulse: drone @ai_mail email @hooks "Gate broken: edit_gate" "<what you ran, and this text>"'
+)
+# Who may write whose files (the project marker, the registry rows, the admin grant)
 # lives in modules/write_ownership since the owner's ruling of 2026-09-18.
 # The one seat that reaches outwards. The owner, 2026-08-30, compassed as devpulse
 # entry 322: "It is only you who can reach outwards. Nobody else." The cross-
@@ -201,18 +210,19 @@ def _cross_project_block(caller_root: Path, target_root: Path, target: Path, how
 def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
     """Every (path, how) the shell reader can see *command* write, read once for both Bash-lane rules.
 
-    A parser that cannot read a command has learned nothing about it. Neither
-    rule may convict on that, and neither may go quiet about it: the failure is
-    logged and the answer is no targets.
+    A parser that cannot read a command raises: the gate's crash refusal then
+    refuses the Bash call, because a fence that cannot read a command does not
+    let it through (DPLAN-0356 item 2; until 1.17.0 the answer was no targets,
+    which allowed the call).
     """
     if not command:
         return []
-    try:
-        bw = _import_module("aipass.hooks.apps.modules.bash_writes")
-        return bw.write_targets(command, cwd)
-    except Exception as exc:
-        logger.warning("[HOOKS] edit_gate: bash write-target scan failed (allowing): %s", exc)
-        return []
+    targets = _import_module("aipass.hooks.apps.modules.bash_writes").write_targets(command, cwd)
+    # Phase 4, P2: default-deny. Every operand of a program that does not only read
+    # is judged by the same three rules, whatever verb it is (shell_programs).
+    invocations = _import_module("aipass.hooks.apps.modules.shell_reader").invocations(command, cwd)
+    operands = _import_module("aipass.hooks.apps.modules.shell_programs").named_operands(invocations)
+    return targets + [(path, f"{program} (not a read-only program)") for program, path in operands]
 
 
 def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path, str]]) -> dict | None:
@@ -1195,8 +1205,8 @@ def handle(hook_data: dict) -> dict:
     Returns:
         Result dict with stdout (block JSON or empty) and exit_code.
     """
+    tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     try:
-        tool_name = hook_data.get("tool_name", "")
         tool_input = hook_data.get("tool_input", {})
         file_path = tool_input.get("file_path", "")
 
@@ -1333,8 +1343,10 @@ def handle(hook_data: dict) -> dict:
         reason = f"Fix {len(errors)} error(s) in {Path(errored_file).name} before editing other files:\n{error_summary}"
         return _refuse(reason)
 
-    except Exception as exc:
-        logger.warning("[HOOKS] edit_gate: unexpected error, every fence dark for this call (allowing): %s", exc)
+    except Exception as exc:  # fail closed on what this gate guards (DPLAN-0356 item 2)
+        logger.error("[HOOKS] edit_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
+        if tool_name == "Bash" or tool_name in EDIT_TOOLS:
+            return _refuse(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
         return {"stdout": "", "exit_code": 0}
 
 

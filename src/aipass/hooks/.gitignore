@@ -13,3 +13,6 @@ build/
 *.log
 *.tmp
 *.swp
+# The promoted hook code every hook process runs (drone @hooks promote, DPLAN-0356):
+# a machine-local copy of apps/ and the pointer naming it. Never committed.
+.live-*

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete handler
-# Version: 1.4.3
+# Version: 1.4.4
 # Created: 2026-06-02
-# Modified: 2026-09-28
+# Modified: 2026-09-30
 # =============================================
 
 """Contained safe-delete handler.
@@ -113,13 +113,18 @@ def _find_branch_root(path: Path, project_root: Path) -> Path | None:
     root, not at ``src/``, not at ``src/aipass/``. The outermost hit inside the
     project IS the citizen. The walk stops at the project boundary, so a
     ``.trinity`` outside it can never claim a path inside.
+
+    A symlink is never a citizen: ``scratch/api_link`` pointing at @api has a
+    ``.trinity`` through the link, and read as one it named the link a sibling
+    branch. Only a symlink can be met here as the path itself; every ancestor
+    of a judged path is already resolved.
     """
     root = project_root.resolve()
     outermost: Path | None = None
     for parent in [path, *path.parents]:
         if not parent.is_relative_to(root):
             break
-        if (parent / ".trinity").is_dir():
+        if (parent / ".trinity").is_dir() and not parent.is_symlink():
             outermost = parent
     return outermost
 
@@ -220,6 +225,10 @@ def check_contained_citizens(resolved: Path, project_root: Path | None) -> tuple
     look must not report clear. Returns ``(blocked, reason)``.
     """
     if project_root is None or not resolved.is_relative_to(project_root) or not resolved.is_dir():
+        return False, ""
+    if resolved.is_symlink():
+        # The target itself is a link, judged where it lives: rm unlinks it and
+        # the tree it points at stays, so there is nothing below it to walk.
         return False, ""
     if _find_branch_root(resolved, project_root) is not None:
         return False, ""
@@ -355,7 +364,17 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             )
             continue
 
-        resolved = absolute.resolve()
+        # A symlink is judged and reported by where the LINK lives: its parent
+        # resolved, its own name not followed. Judged by its target, a link to
+        # @devpulse printed "Deleted: .../src/aipass/devpulse", and a link
+        # inside canary/ was deleted from the devpulse seat (2026-09-30). Only
+        # the link is removed, so only the link's place is asked about.
+        target: Path | None = None
+        if absolute.is_symlink():
+            target = absolute.resolve()
+            resolved = absolute.parent.resolve() / absolute.name
+        else:
+            resolved = absolute.resolve()
 
         allowed, reason = check_containment(resolved, roots)
         if not allowed:
@@ -372,6 +391,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 requested=path_str,
                 resolved=resolved,
                 reason=reason,
+                target=target,
             )
             continue
 
@@ -390,6 +410,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 requested=path_str,
                 resolved=resolved,
                 reason=carveout_reason,
+                target=target,
             )
             continue
 
@@ -403,13 +424,13 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             # handed rmtree "spawn/..", which emptied the tree and then failed
             # its last rmdir, because spawn was gone by then. The ledger said
             # "failed" for a delete that had happened.
-            if absolute.is_symlink():
+            if target is not None:
                 absolute.unlink()
             elif resolved.is_dir():
                 _remove_tree(resolved)
             else:
                 resolved.unlink()
-            message = f"Deleted: {resolved}"
+            message = f"Deleted: {resolved}" + (f" (symlink to {target})" if target is not None else "")
             results.append((path_str, True, message))
             logger.info("rm: deleted %s (resolved %s)", path_str, resolved)
             deletion_log.record_deletion(
@@ -419,6 +440,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 resolved=resolved,
                 reason=message,
                 measurement=measurement,
+                target=target,
             )
         except Exception as exc:
             message = f"Delete failed: {exc}{_standing_inside(resolved, cwd)}"
@@ -431,6 +453,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 resolved=resolved,
                 reason=message,
                 measurement=measurement,
+                target=target,
             )
 
     return results

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hookstatus.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Hook status — read-only view of per-project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-28
-# Modified: 2026-09-07
+# Modified: 2026-10-01
 # =============================================
 
 """Hook status — read-only view of per-project hook configuration via drone @hooks status."""
@@ -48,7 +48,7 @@ def _render_status(config: dict) -> None:
     if master:
         CONSOLE.print("[bold green]hooks_enabled: ON[/bold green]")
     else:
-        CONSOLE.print("[bold red]hooks_enabled: OFF — ALL HOOKS DISABLED[/bold red]")
+        CONSOLE.print("[bold red]hooks_enabled: OFF — injectors disabled, the gates still run[/bold red]")
     CONSOLE.print()
 
     total = 0

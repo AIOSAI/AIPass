@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.8.1
+# Version: 2.1.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-09-28
+# Modified: 2026-10-01
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -79,7 +79,7 @@ _INPLACE_FLAGS = frozenset({"-i", "--in-place"})
 _INTERPRETERS = frozenset(
     {"python", "python3", "node", "nodejs", "perl", "ruby", "php", "bash", "sh", "zsh", "awk", "gawk"}
 )
-#: The interpreters whose program text is shell grammar — what code_text() hands back.
+#: The interpreters whose program text is shell grammar.
 _SHELLS = frozenset({"bash", "sh", "zsh"})
 
 # The executable half of Windows' PATHEXT. `git.exe`, `RM.EXE` and `git.cmd` are
@@ -199,6 +199,29 @@ _SHELL_WRITE_SHAPES = (
     re.compile(r"(^|[\s;&|])(tee|touch|cp|mv|ln|install|rsync|dd|mkdir|truncate|sed)\b"),
 )
 
+#: Program text that DELETES, read in an interpreter's own inline source or heredoc
+#: (rm_gate's interpreter lane, the owner 2026-09-30: "rm is a big no no; only devpulse
+#: deletes"). Python's list.remove is not os.remove, so remove counts only on os; the
+#: other names have no harmless twin worth sparing. A shell program is not read here —
+#: modules/shell_reader reads it as shell, where rmdir and friends are verbs.
+_SOURCE_DELETE_SHAPES = (
+    # python: os.remove / os.unlink / os.rmdir / os.removedirs, shutil.rmtree, Path.unlink / rmdir.
+    re.compile(r"\bos\s*\.\s*(remove|unlink|rmdir|removedirs)\b"),
+    re.compile(r"\b(rmtree|removedirs)\b"),
+    re.compile(r"\.\s*(unlink|rmdir)\s*\("),
+    # perl and php unlink / rmdir; node fs.rm / fs.unlink / fs.rmdir and their Sync twins.
+    re.compile(r"\b(unlink|rmdir)\b"),
+    re.compile(r"\.\s*(rm|rmSync|unlinkSync|rmdirSync)\s*\("),
+    # ruby: File.delete, FileUtils.rm / rm_r / rm_rf / remove_dir.
+    re.compile(r"\b(File\s*\.\s*delete|FileUtils\s*\.\s*(rm|rm_r|rm_rf|rm_f|remove_dir|remove_entry))\b"),
+    # Shelling out to a delete verb: a shell-out call, then the verb opening a quoted string
+    # (os.system("rm -rf x"), subprocess.run(['rm', p])). Without the call it is data: print('rm x').
+    re.compile(
+        r"""\b(system|popen|Popen|subprocess|spawn\w*|exec\w*|check_call|check_output|call|run|shell_exec)\b"""
+        r"""[\s\S]*?['"`](rm|rmdir|unlink|shred)\b"""
+    ),
+)
+
 # NOTE ON TOOLING THAT CARRIES ITS OWN FENCE — `drone`, `aipass`, `git`, `gh`.
 # This module first held an explicit skip-list for them. A mutation run killed
 # it: removing the skip changed no result, because none of those commands is a
@@ -248,7 +271,8 @@ NO_WRITE_VERB = " — no write verb in its own text"
 NOT_CAUGHT: tuple[str, ...] = (
     "paths built from shell or program variables ($DIR/x, os.environ-derived) — nothing to resolve",
     "paths reached through a symlink that points into another project",
-    "find -exec / xargs, which name the write verb but not the operand",
+    "find -exec / xargs WRITES, which name the write verb but not the operand (their DELETES and "
+    "git/gh launches are read by shell_reader since DPLAN-0356 phase 3)",
     "background or detached writes (nohup, disown, at, cron, systemd-run)",
     "metadata-only changes: chmod, chown, touch -t on an existing file",
     "git, gh, drone and aipass — they name no write verb this parser reads; their own fences apply",
@@ -272,6 +296,31 @@ NOT_CAUGHT: tuple[str, ...] = (
     "what a SCRIPT FILE does — its text is on disk, never in the command, so an interpreter "
     "handed a path instead of inline source keeps the broad reading and no write-verb evidence "
     "is claimed about it",
+    # The owner, 2026-09-30 (DPLAN-0356, mail dab4e222): every delete verb, read by rm_gate.
+    "a delete an interpreter makes through a name its delete shapes do not list — an alias "
+    "(from os import remove as r), getattr(os, 'remove'), a delete built from strings",
+    # DPLAN-0356 phase 3 (the red team's R3-R6), read by modules/shell_reader for rm_gate and git_gate.
+    "a script file that changes after the check — shell_reader reads it at decision time (R4); "
+    "whatever is on disk when the shell opens it is what runs. Time of check is not time of use",
+    "a script a command creates and runs in one breath through a verb the reader cannot parse "
+    "(tar, unzip, curl -o, a compiler's output) — the file is not on disk to read at decision time",
+    "a module run by an interpreter's -m flag, or a program found on PATH — their code is "
+    "installed, not handed in, and shell_reader reads only a script path the command names",
+    "a launcher shell_reader has no table for (npx <pkg>, a package manager's run-script, a shell "
+    "function or alias) — the wrapped program is read as the launcher's argument, not as a program",
+    "the working directory of a subshell, a pipeline stage or a backgrounded job is approximated "
+    "by the last literal cd; after a cd to an expansion the cwd is unknown and relative paths read from the old one",
+    # DPLAN-0356 phase 4: the final review's out-of-scope rows, the kernel sandbox's to enforce.
+    "an interpreter's delete reached through aliasing or data flow (a name bound at runtime, a "
+    "function chosen from a table) — text gates teach; the sandbox enforces",
+    "GitHub writes to hosts other than api.github.com (uploads, raw git over https) — egress is the sandbox's",
+    "a write verb the default-deny lane cannot see as an operand: a path built at runtime, read from a "
+    "file or a pipe, or joined inside program text (phase 4 inverts the tables for named operands only)",
+    "a shell or alias table the session already holds (an alias set in an earlier Bash call, a sourced "
+    "rc file) — each Bash call is read alone",
+    "GitHub writes without gh are a TEXT gate's reach only (R6): a token pasted into a file, a client "
+    "the gate has no grammar for, a program that reads the keyring by another name. The kernel "
+    "sandbox (sandbox.py: the gh credential deny-read off the admin seat) is the real boundary",
     # devpulse's decision C, leg 4: a tilde word that does not expand is read literally.
     "an operand that neither expands nor reads as a literal path under the working directory "
     "— dropped and logged, so no fence judges it",
@@ -793,55 +842,3 @@ def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
         same as "writes nothing"; see :data:`NOT_CAUGHT`.
     """
     return [hit for _segment, hits in write_targets_by_segment(command, cwd) for hit in hits]
-
-
-def code_text(command: str) -> str:
-    """The parts of *command* that are shell CODE, with data blanked.
-
-    A mail body is an ARGUMENT, not a command. Any gate that pattern-matches a
-    whole Bash command string convicts prose: @ai_mail was refused twice on
-    2026-09-15 for a reply whose body merely QUOTED a write-shaped version
-    control line, and the standing workaround was a line in every dispatch brief
-    telling recipients not to quote one. The distinction lives here, in the
-    reader that already knows where a heredoc starts and which verbs run code,
-    so a caller asking "is there a real invocation in this command" gets one
-    answer and this module keeps the only shell grammar in the branch.
-
-    Two rules, opposite directions, one principle — text is data unless a
-    shell owns it:
-
-    * A heredoc body is blanked, because its consumer reads it as input.
-    * A SHELL's own text is appended back, tokenized, because ``bash <<'EOF'``
-      and ``bash -c "..."`` really are shell programs. Tokenized matters: the
-      caller blanks quoted spans next, and an inline script that arrives
-      already unquoted survives that blanking, which is what closes the hole
-      where ``bash -c "<write verb>"`` read as an empty string.
-
-    Shells only (:data:`_SHELLS`), not every interpreter. The caller reads shell
-    grammar; an awk or python program is not shell, and the first version that
-    appended them refused a read-only ``awk '/^diff --git a/…/'`` on a real turn
-    (2026-09-16). Their quoted programs were blanked before this function
-    existed, so leaving them out restores that reading and opens nothing new.
-
-    A command whose heredoc openers and bodies do not pair up falls back to the
-    whole command per segment, the old broader reading: a reader that cannot
-    tell whose text is whose keeps all of it.
-
-    Args:
-        command: The raw Bash command string from the tool input.
-
-    Returns:
-        The command with heredoc bodies blanked, followed by the program text of
-        each shell invocation. Never raises on unparseable input: shlex failures
-        surface as an empty reading, and the shell half is still returned.
-    """
-    shell = _strip_heredoc_bodies(command)
-    bodies = _split_heredocs(command)[1]
-    programs: list[str] = []
-    for tokens in _readings(command):
-        segments = _segments(tokens)
-        owned = _heredocs_by_segment(segments, bodies)
-        for index, segment in enumerate(segments):
-            if segment and verb_name(segment[0]) in _SHELLS:
-                programs.append(owned.get(index, " ".join(segment)))
-    return "\n".join([shell, *dict.fromkeys(programs)])

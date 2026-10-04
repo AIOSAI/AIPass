@@ -4,7 +4,7 @@
 # Description: Tests for hookstatus module (drone @hooks status)
 # Branch: hooks
 # Created: 2026-05-28
-# Modified: 2026-09-28
+# Modified: 2026-10-01
 # =============================================
 
 """Tests for apps/modules/hookstatus.py — read-only hook config viewer."""
@@ -181,14 +181,14 @@ class TestMasterSwitchOff:
         """Verify master switch OFF renders loud warning.
 
         Plain text loses the bold red that tells OFF from the bold green ON;
-        the words that differ ("OFF", "ALL HOOKS DISABLED") are what is pinned.
+        the words that differ ("OFF", "the gates still run" — DPLAN-0356 R1c) are what is pinned.
         """
 
         _render_status(MASTER_OFF_CONFIG)
 
         output = capsys.readouterr().err
         assert "OFF" in output
-        assert "ALL HOOKS DISABLED" in output
+        assert "the gates still run" in output
 
     def test_master_off_still_counts_hooks(self, capsys):
         """Verify hook counts still shown even with master OFF."""

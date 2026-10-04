@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 1.2.0
+# Version: 2.0.0
 # Description: Tests for hook engine dispatch logic
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-28
+# Modified: 2026-09-30
 # =============================================
 
 """Tests for apps/modules/engine.py and the hook dispatch it drives."""
@@ -20,12 +20,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import importlib
+
+from aipass.hooks.apps.modules import promote
 from aipass.hooks.apps.modules.engine import (
     dispatch,
+    run_event,
     _matches,
     _run_hook,
     _log,
 )
+from aipass.hooks.apps.handlers.config.gates import FAIL_CLOSED
 from aipass.hooks.apps.handlers.config.loader import find_project_config
 from aipass.hooks.apps.handlers.config.trust_registry import enroll
 
@@ -644,7 +649,7 @@ class TestFindProjectConfig:
                 "aipass.hooks.apps.handlers.config.loader._search_bounds",
                 return_value=(temp_test_dir, temp_test_dir.parent),
             ),
-            patch("aipass.hooks.apps.handlers.config.loader.AIPASS_HOME", "/test/path"),
+            patch.dict("os.environ", {"AIPASS_HOME": "/test/path"}),
         ):
             result = find_project_config()
         assert result is not None
@@ -1923,3 +1928,211 @@ class TestInjectionLedger:
         with patch(f"{_LEDGER}.json_handler"):
             mod.handle_command("ledger", [])
         assert "sess-2 (most recently written, NOT this session)" in capsys.readouterr().out
+
+
+_GATE = "aipass.hooks.apps.handlers.security.rm_gate.handle"
+_INJECTOR = "aipass.hooks.apps.handlers.prompt.temporal.handle"
+
+
+def _one(handler: str, event: str = "PreToolUse") -> dict:
+    return {"hooks_enabled": True, event: {"the_hook": {"enabled": True, "handler": handler, "matcher": ""}}}
+
+
+class TestGatesFailClosed:
+    """DPLAN-0356 item 2. Before: a gate that failed to import, raised or timed out was `continue`d past,
+    and the call ran. Four gate crashes (09-12, 09-22, 09-30) were allowed that way."""
+
+    @pytest.mark.parametrize(
+        ("result", "why"),
+        [
+            ({"exit_code": -1, "stdout": "", "stderr": "No module named x", "elapsed_ms": 1}, "failed to load"),
+            ({"exit_code": -1, "stdout": "", "stderr": "name '_X' is not defined", "elapsed_ms": 1}, "raised"),
+            ({"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 1}, "timed out"),
+            ({"exit_code": 2, "stdout": "Traceback", "stderr": "", "elapsed_ms": 1}, "without a decision"),
+        ],
+    )
+    def test_a_broken_gate_blocks_with_the_fixed_text(self, result, why, mock_logger):
+        with patch("aipass.hooks.apps.modules.engine._run_handler", return_value=result):
+            out, code = dispatch("PreToolUse", '{"tool_name": "Bash"}', _one(_GATE))
+        assert code == 2
+        reason = json.loads(out)["reason"]
+        assert reason.startswith("GATE BROKEN: the_hook")
+        assert why in reason
+        assert "Mail @hooks and @devpulse" in reason
+
+    def test_a_real_import_failure_blocks(self, mock_logger):
+        with patch("aipass.hooks.apps.modules.engine._import_handler_module", side_effect=ImportError("half-edited")):
+            _, code = dispatch("PreToolUse", '{"tool_name": "Bash"}', _one(_GATE))
+        assert code == 2
+
+    def test_a_broken_injector_is_still_skipped(self, mock_logger):
+        broken = {"exit_code": -1, "stdout": "", "stderr": "boom", "elapsed_ms": 1}
+        with patch("aipass.hooks.apps.modules.engine._run_handler", return_value=broken):
+            assert dispatch("PreToolUse", '{"tool_name": "Bash"}', _one(_INJECTOR)) == ("", 0)
+
+    def test_a_fail_open_gate_is_skipped_by_decision(self, mock_logger):
+        broken = {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 1}
+        handler = "aipass.hooks.apps.handlers.security.subagent_gate.handle"
+        with patch("aipass.hooks.apps.modules.engine._run_handler", return_value=broken):
+            assert dispatch("SubagentStop", "{}", _one(handler, "SubagentStop")) == ("", 0)
+
+    def test_the_broken_gate_is_logged_at_error(self, mock_logger):
+        broken = {"exit_code": -1, "stdout": "", "stderr": "boom", "elapsed_ms": 1}
+        with (
+            patch("aipass.hooks.apps.modules.engine._run_handler", return_value=broken),
+            patch("aipass.hooks.apps.modules.engine.logger") as log,
+        ):
+            dispatch("PreToolUse", '{"tool_name": "Bash"}', _one(_GATE))
+        assert "GATE BROKEN" in log.error.call_args[0][0]
+
+
+class TestRunEvent:
+    """The bridges' logic, served from the promoted copy (DPLAN-0356 item 3)."""
+
+    def test_it_dispatches_the_resolved_config_never_an_empty_one(self, mock_logger):
+        with (
+            patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=_one(_GATE)) as resolved,
+            patch("aipass.hooks.apps.modules.engine.dispatch", return_value=("", 0)) as sent,
+        ):
+            run_event("PreToolUse", "{}")
+        resolved.assert_called_once()
+        assert sent.call_args[0][2]["PreToolUse"]["the_hook"]["handler"] == _GATE
+
+    def test_a_named_hook_is_cut_out_of_the_config(self, mock_logger):
+        with (
+            patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=_one(_GATE)),
+            patch("aipass.hooks.apps.modules.engine.dispatch", return_value=("", 0)) as sent,
+        ):
+            run_event("PreToolUse:the_hook", "{}")
+        assert sent.call_args[0][2] == {
+            "hooks_enabled": True,
+            "PreToolUse": {"the_hook": _one(_GATE)["PreToolUse"]["the_hook"]},
+        }
+
+
+class TestMovingIsNeverRefused:
+    """dab4e222: mv and mkdir inside the seat's own branch stay allowed — by every Bash gate at once."""
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            "mkdir -p docs.local/.archive && mv docs.local/old.md docs.local/.archive/",
+            "mv docs.local/old.md 'docs.local/old(disabled).md'",
+        ),
+    )
+    def test_each_fail_closed_gate_lets_an_archive_move_through(self, command, mock_logger):
+        branch = Path(__file__).resolve().parents[1]
+        event = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(branch)}
+        for handler in FAIL_CLOSED:
+            module, _, func = handler.rpartition(".")
+            result = getattr(importlib.import_module(module), func)(dict(event))
+            assert result["exit_code"] == 0, (handler, result.get("stdout"))
+
+
+_BRANCH = Path(__file__).resolve().parents[1]
+_BRIDGE = _BRANCH / "apps" / "handlers" / "bridges" / "claude.py"
+
+
+def _load_by_path(name: str, path: Path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestTheBridgeFailsClosed:
+    """DPLAN-0356 item 2: an engine that cannot import made Python exit 1, and Claude Code ran the tool."""
+
+    def _main(self, event: str, monkeypatch, capsys) -> tuple[int, str]:
+        bridge = _load_by_path("bridge_under_test", _BRIDGE)
+        monkeypatch.setattr("sys.argv", ["claude.py", event])
+        monkeypatch.setattr("sys.stdin", __import__("io").StringIO("{}"))
+        monkeypatch.setattr(bridge, "_mount", MagicMock(side_effect=SyntaxError("half-edited engine")))
+        code = 0
+        try:
+            bridge.main()
+        except SystemExit as exc:
+            code = exc.code or 0
+        return code, capsys.readouterr().out
+
+    def test_pre_tool_use_is_refused(self, monkeypatch, capsys, mock_logger):
+        code, out = self._main("PreToolUse", monkeypatch, capsys)
+        assert code == 2
+        assert json.loads(out)["reason"].startswith("HOOKS BROKEN")
+
+    def test_every_other_event_passes(self, monkeypatch, capsys, mock_logger):
+        assert self._main("UserPromptSubmit:branch_prompt", monkeypatch, capsys) == (0, "")
+
+
+class TestPromote:
+    """DPLAN-0356 item 3. All three gate crashes were NameErrors from half-done edits to live files."""
+
+    def _branch(self, tmp_path: Path) -> Path:
+        (tmp_path / "apps" / "modules").mkdir(parents=True)
+        (tmp_path / "apps" / "__init__.py").write_text("", encoding="utf-8")
+        (tmp_path / "apps" / "modules" / "x.py").write_text("X = 1\n", encoding="utf-8")
+        return tmp_path
+
+    def test_a_failed_check_refuses_and_leaves_the_live_copy(self, tmp_path, mock_logger):
+        root = self._branch(tmp_path)
+        promote.point_at(root, ".live-old")
+        with patch.object(promote, "check_smoke", return_value=(True, "ok")) as smoke:
+            ok, report = promote.promote(root, checks=(lambda r: (False, "F821 undefined name"),))
+        assert ok is False
+        assert promote.live_name(root) == ".live-old"
+        assert not [p for p in root.iterdir() if p.name.startswith(".live-2")]
+        assert len(report) == 1 and "FAILED" in report[0]
+        smoke.assert_not_called()
+
+    def test_a_failed_smoke_discards_the_candidate(self, tmp_path, mock_logger):
+        root = self._branch(tmp_path)
+        with patch.object(promote, "check_smoke", return_value=(False, "raw rm was not refused")):
+            ok, _ = promote.promote(root, checks=())
+        assert ok is False
+        assert promote.live_name(root) is None
+        assert not [p for p in root.iterdir() if p.name.startswith(".live-")]
+
+    def test_a_passing_promote_points_at_a_copy_and_rotates(self, tmp_path, mock_logger):
+        root = self._branch(tmp_path)
+        for old in (".live-20200101T000000Z", ".live-20200102T000000Z", ".live-20200103T000000Z"):
+            (root / old).mkdir()
+        with patch.object(promote, "check_smoke", return_value=(True, "ok")):
+            ok, _ = promote.promote(root, checks=())
+        live = promote.live_name(root)
+        assert ok and live and (root / live / "modules" / "x.py").is_file()
+        assert sorted(p.name for p in root.iterdir() if p.name.startswith(".live-2")) == [
+            ".live-20200102T000000Z",
+            ".live-20200103T000000Z",
+            live,
+        ]
+
+    def test_the_bridge_and_promote_spell_the_pointer_alike(self):
+        mount = _load_by_path("mount_under_test", _BRIDGE.parent / "mount.py")
+        assert (mount.POINTER, mount.PREFIX, mount.OVERRIDE_ENV) == (
+            promote.POINTER,
+            promote.PREFIX,
+            promote.OVERRIDE_ENV,
+        )
+
+
+class TestMount:
+    def test_no_pointer_serves_the_source(self, tmp_path):
+        mount = _load_by_path("mount_under_test", _BRIDGE.parent / "mount.py")
+        assert mount.promoted_dir(str(tmp_path)) is None
+
+    def test_a_pointer_outside_the_snapshots_is_refused(self, tmp_path, monkeypatch):
+        mount = _load_by_path("mount_under_test", _BRIDGE.parent / "mount.py")
+        monkeypatch.delenv(mount.OVERRIDE_ENV, raising=False)
+        for name in ("../apps", ".live-x/../../etc", "apps"):
+            (tmp_path / mount.POINTER).write_text(name, encoding="utf-8")
+            with pytest.raises(ValueError):
+                mount.promoted_dir(str(tmp_path))
+
+    def test_a_missing_snapshot_is_an_error_not_the_source(self, tmp_path, monkeypatch):
+        mount = _load_by_path("mount_under_test", _BRIDGE.parent / "mount.py")
+        monkeypatch.delenv(mount.OVERRIDE_ENV, raising=False)
+        (tmp_path / mount.POINTER).write_text(".live-gone", encoding="utf-8")
+        with pytest.raises(FileNotFoundError):
+            mount.promoted_dir(str(tmp_path))

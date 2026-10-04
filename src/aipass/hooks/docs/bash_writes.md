@@ -47,13 +47,22 @@ still cannot be told from one it writes. The evidence is only claimed about text
 command — inline source (`-c`, `-e`) or a heredoc. A script file, and `awk`'s bare-operand program,
 keep the broad reading: answering "no write verb" about text nobody read would be inventing evidence.
 
+**The gates' reader is next door (since DPLAN-0356 phase 3).** `rm_gate` and `git_gate` no longer
+read commands here: `modules/shell_reader.py` is the one shell-word reader. It returns every program a
+command runs the way the shell runs it (quotes, escapes, ANSI-C, braces, a command-word glob, `eval`,
+`source`, script files read at decision time), and `mutated_paths()` — what a command writes, deletes,
+moves away, moves over, overlays or hard-links — for the protected lane. This module keeps the write
+lane `edit_gate` and `testwrite_gate` read, the delete shapes (`_SOURCE_DELETE_SHAPES`) the reader
+scans program text with, and `NOT_CAUGHT`, the residual of both. See [git_gate.md](git_gate.md) for
+the gates themselves.
+
 **What it deliberately does NOT catch.** A perfect shell parser is not the bar and is not achievable;
 the residual is published as data in `bash_writes.NOT_CAUGHT` and printed by `drone @hooks` module
 introspection, so this list and the code cannot drift apart:
 
 - paths built from shell or program variables (`$DIR/x`) — there is nothing to resolve
 - paths reached through a symlink pointing into another project
-- `find -exec` / `xargs`, which name the write verb but not the operand
+- `find -exec` / `xargs` writes, which name the write verb but not the operand (their deletes and git/gh launches are read since phase 3)
 - background or detached writes (`nohup`, `disown`, `at`, `cron`, `systemd-run`)
 - metadata-only changes: `chmod`, `chown`, `touch -t` on an existing file
 - `git`, `gh`, `drone`, `aipass` — they name no write verb this parser reads; their own fences apply
@@ -69,7 +78,22 @@ introspection, so this list and the code cannot drift apart:
 - a write made through a shape the write-verb vocabulary has no pattern for — the path is still
   reported, only the evidence is missing, and the broad callers are unaffected
 - which held path a write shape belongs to — the evidence is read per interpreter, not per path
-- what a script FILE does — its text is on disk, never in the command
+- what a script FILE does — its text is on disk, never in the command (the write lane; the gates'
+  reader reads it since phase 3)
+
+Added for the gates' reader in DPLAN-0356 phase 3 (each row verbatim in `NOT_CAUGHT`):
+
+- a script file that changes after the check — read at decision time, so time of check is not time
+  of use
+- a script a command creates and runs in one breath through a verb the reader cannot parse (`tar`,
+  `unzip`, `curl -o`, a compiler) — not on disk to read at decision time
+- a module run with an interpreter's `-m` flag, or a program found on PATH — installed code, not
+  handed in
+- a launcher with no table (`npx <pkg>`, a package manager's run-script, a shell function or alias)
+- a subshell's, pipeline stage's or background job's cwd, approximated by the last literal `cd`;
+  after a `cd` to an expansion it is unknown
+- an alias or shell state from an earlier Bash call — each call is read alone
+- GitHub writes without gh are a text gate's reach only: the kernel sandbox is the real boundary
 
 A command the parser cannot read at all (an unbalanced quote, an internal error) **allows** and logs:
 a parser that has learned nothing about a command must not convict on it.
@@ -115,14 +139,11 @@ on every OS. `str()` once handed windows-setup an unquoted `C:\Users\...` cd tar
 backslashes, and the reader, reading as bash does, `cd`'d into a directory named `C:Users...`, where
 an existing test looked new (PR #762).
 
-> **CONFIG WIRE — landed 2026-08-30, the lane is live.** `pre_edit_gate` now carries
-> `matcher: "Bash|Edit|MultiEdit|Write|NotebookEdit"` in `.aipass/hooks.json` (the matcher `git_gate`
-> and `registry_gate` already had). Before that widening, Bash events never reached the handler at
-> all and the scripted lane was dark no matter what the code did. Because any byte change to
-> `hooks.json` invalidates the trust hash in `~/.aipass/trusted_projects.json`, the edit was followed
-> immediately by `aipass trust <path-to-this-repo>` — an un-re-enrolled config edit takes
-> *every* hook dark. Verify with `drone @hooks hookstatus`; re-run `aipass trust` after any further
-> edit to that file.
+> **CONFIG WIRE — the lane is live.** `pre_edit_gate` carries
+> `matcher: "Bash|Edit|MultiEdit|Write|NotebookEdit"` in `.aipass/hooks.json` and in the built-in gate
+> set (`handlers/config/gates.py`); without `Bash` in the matcher, Bash events never reach the handler.
+> The AIPass root config is read with no trust check (since DPLAN-0356), so editing it never takes the
+> hooks dark; it is a protected file only the admin seat writes. Verify with `drone @hooks status`.
 
 ---
 

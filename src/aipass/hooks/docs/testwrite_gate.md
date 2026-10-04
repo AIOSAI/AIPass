@@ -32,10 +32,11 @@ The policy is data, so later changes are field flips rather than rebuilds:
   "note": "who ruled, and why" }
 ```
 
-**Why its own file and not a key in `hooks.json`.** `hooks.json` is hash-enrolled in the trust
-registry: every edit to it darks *every* hook for the project until a human re-runs `aipass trust`.
-A switch meant to be flipped cannot live in a file whose every edit disables the engine that reads
-it. Same directory, same walk-up, separate hash.
+**Why its own file and not a key in `hooks.json`.** Inside AIPass `hooks.json` is a protected file
+that only the verified admin seat writes, and an external project's `hooks.json` is hash-enrolled in
+the trust registry, so an edit to it switches that project's own hooks off until `aipass trust`
+re-enrols it. A switch meant to be flipped belongs in neither. Same directory, same walk-up, its own
+file.
 
 **The fail mode is closed** — for a missing policy *and* for an unreadable one. `bash_writes` allows
 what it cannot parse, and that is right there for a reason that does not transfer: an unparseable
@@ -47,8 +48,9 @@ policy file is not itself a test write (so the cure is always reachable from whe
 
 The **admin seat** is checked *before* the policy read — through the same verified 5-leg grant rail
 in `modules/admin_seat.py` that `edit_gate` uses — so cleanup work with the owner survives a broken
-policy file. A crash inside the gate allows rather than walls: fail-closed covers a policy that could
-not be *read*, not a defect that is ours.
+policy file. A crash inside the gate refuses the write it was checking (`GATE_CRASHED`), and the
+engine refuses on import error and timeout: the gate fails closed like every gate in
+`handlers/config/gates.FAIL_CLOSED` (see [engine.md](engine.md)).
 
 **Naming a path is not writing it (1.2.0, 2026-09-19).** `bash_writes` reports every path an
 interpreter is handed, which is the right breadth for `edit_gate`'s fence and the wrong breadth for

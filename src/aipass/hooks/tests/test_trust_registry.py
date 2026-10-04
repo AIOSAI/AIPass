@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_trust_registry.py
-# Version: 1.0.2
+# Version: 2.0.0
 # Description: Tests for trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-15
-# Modified: 2026-09-28
+# Modified: 2026-10-01
 # =============================================
 
 """Tests for apps/handlers/config/trust_registry.py and apps/handlers/config/loader.py's trust integration."""
@@ -17,9 +17,11 @@
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import patch
 
-from aipass.hooks.apps.handlers.config import loader
+from aipass.hooks.apps.handlers.config import gates, loader
+from aipass.hooks.apps.modules import engine
 from aipass.hooks.apps.handlers.config.trust_registry import (
     _hash_file,
     bootstrap,
@@ -32,6 +34,7 @@ from aipass.hooks.apps.handlers.config.trust_registry import (
     revoke,
 )
 from aipass.hooks.apps.handlers.config.loader import (
+    resolve_config,
     config_unavailable_reason,
     find_project_config,
     never_enrolled_banner,
@@ -720,7 +723,8 @@ class TestLoaderTrustIntegration:
             config = find_project_config()
         assert config is None
 
-    def test_loader_bootstraps_on_missing_registry(self, temp_test_dir, mock_logger):
+    def test_the_aipass_install_loads_with_no_trust_entry_at_all(self, temp_test_dir, mock_logger):
+        """DPLAN-0356 item 1: the install's own config is not trust's to refuse (it used to bootstrap one)."""
         reg_path = temp_test_dir / "registry.json"
         aipass_dir = temp_test_dir / "aipass_install"
         aipass_dir.mkdir()
@@ -733,7 +737,7 @@ class TestLoaderTrustIntegration:
         ):
             config = find_project_config()
         assert config is not None
-        assert reg_path.exists()
+        assert not reg_path.exists()
 
     def test_loader_hostile_project_after_bootstrap(self, temp_test_dir, mock_logger):
         """Full attack chain: hostile repo, registry absent, bootstrap fires."""
@@ -763,3 +767,143 @@ class TestLoaderTrustIntegration:
         assert reg_path.exists()
         data = json.loads(reg_path.read_text(encoding="utf-8"))
         assert str(hostile_dir.resolve()) not in data["projects"]
+
+
+def _install(root, gates_entry=True) -> Path:
+    """An AIPass install under *root*: AIPASS_REGISTRY.json, src/aipass/canary, and a root config with one gate."""
+
+    home = Path(root) / "aipass"
+    (home / ".aipass").mkdir(parents=True)
+    (home / "src" / "aipass" / "canary").mkdir(parents=True)
+    (home / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    config = {"hooks_enabled": True, "PreToolUse": {}}
+    if gates_entry:
+        config["PreToolUse"]["rm_gate"] = {
+            "enabled": True,
+            "handler": "aipass.hooks.apps.handlers.security.rm_gate.handle",
+            "matcher": "Bash",
+        }
+    config["PreToolUse"]["tool_use_sound"] = {"enabled": True, "handler": "aipass.x.sound", "matcher": ""}
+    (home / ".aipass" / "hooks.json").write_text(json.dumps(config), encoding="utf-8")
+    return home
+
+
+class TestSecurityDoesNotDependOnTrust:
+    """DPLAN-0356 item 1. Before: untrusted, malformed or missing config -> None -> NO hooks; 09-07 ran 704 hook
+    calls with no gates after a root hooks.json edit, and a branch could write its own .aipass/hooks.json."""
+
+    def _resolve(self, home, cwd, reg_path):
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch.dict("os.environ", {"AIPASS_HOME": str(home)}),
+            patch.object(loader, "_search_bounds", return_value=(cwd, home.parent.parent)),
+        ):
+            return resolve_config()
+
+    def test_an_edited_root_config_still_runs_every_gate(self, temp_test_dir, mock_logger):
+        """The 09-07 shape: enrolled, then edited (hash mismatch). The install's own config still serves."""
+        reg_path = temp_test_dir / "registry.json"
+        home = _install(temp_test_dir)
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(home))
+        (home / ".aipass" / "hooks.json").write_text(
+            (home / ".aipass" / "hooks.json").read_text(encoding="utf-8") + " ", encoding="utf-8"
+        )
+        config = self._resolve(home, home / "src" / "aipass" / "canary", reg_path)
+        assert "rm_gate" in config["PreToolUse"]
+        assert "tool_use_sound" in config["PreToolUse"]
+
+    def test_a_branch_level_config_is_ignored_and_named(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        home = _install(temp_test_dir)
+        canary = home / "src" / "aipass" / "canary"
+        (canary / ".aipass").mkdir()
+        (canary / ".aipass" / "hooks.json").write_text('{"hooks_enabled": false}', encoding="utf-8")
+        with patch.object(loader, "logger") as log:
+            config = self._resolve(home, canary, reg_path)
+        assert config["hooks_enabled"] is True
+        assert "rm_gate" in config["PreToolUse"]
+        assert "IGNORED" in log.warning.call_args[0][0]
+
+    def test_an_untrusted_external_project_gets_the_gate_set_not_nothing(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        home = _install(temp_test_dir)
+        outside = temp_test_dir / "elsewhere"
+        (outside / ".aipass").mkdir(parents=True)
+        (outside / ".aipass" / "hooks.json").write_text('{"hooks_enabled": false}', encoding="utf-8")
+        config = self._resolve(home, outside, reg_path)
+        assert config["hooks_enabled"] is True
+        assert set(config["PreToolUse"]) == {"rm_gate"}
+
+    def test_no_config_at_all_gets_the_gate_set(self, temp_test_dir, mock_logger):
+        home = _install(temp_test_dir)
+        bare = temp_test_dir / "bare"
+        bare.mkdir()
+        assert set(self._resolve(home, bare, temp_test_dir / "r.json")["PreToolUse"]) == {"rm_gate"}
+
+    def test_outside_aipass_a_root_config_naming_no_gate_still_gets_the_built_in_gates(
+        self, temp_test_dir, mock_logger
+    ):
+        home = _install(temp_test_dir, gates_entry=False)
+        bare = temp_test_dir / "bare"
+        bare.mkdir()
+        config = self._resolve(home, bare, temp_test_dir / "r.json")
+        assert config["_source"] == "builtin"
+        assert "rm_gate" in config["PreToolUse"]
+
+    def test_a_root_config_naming_no_gate_runs_the_built_in_gates_loudly(self, temp_test_dir, mock_logger):
+        home = _install(temp_test_dir)
+        (home / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true, "PreToolUse": {}}', encoding="utf-8")
+        with patch.object(loader, "logger") as log:
+            config = self._resolve(home, home / "src" / "aipass" / "canary", temp_test_dir / "r.json")
+        assert {"pre_edit_gate", "git_gate", "rm_gate", "testwrite_gate", "registry_gate"} <= set(config["PreToolUse"])
+        assert log.error.called
+
+    def test_a_malformed_root_config_runs_the_built_in_gates_loudly(self, temp_test_dir, mock_logger):
+        home = _install(temp_test_dir)
+        (home / ".aipass" / "hooks.json").write_text("{ broken", encoding="utf-8")
+        with patch.object(loader, "logger") as log:
+            config = self._resolve(home, home / "src" / "aipass" / "canary", temp_test_dir / "r.json")
+        assert config["_source"] == "builtin"
+        assert {"pre_edit_gate", "git_gate", "rm_gate", "testwrite_gate", "registry_gate"} <= set(config["PreToolUse"])
+        assert log.error.called
+
+    def test_a_trusted_project_inside_aipass_cannot_switch_a_gate_off(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        home = _install(temp_test_dir)
+        baud = home / "projects" / "baud"
+        (baud / ".aipass").mkdir(parents=True)
+        (baud / "BAUD_REGISTRY.json").write_text("{}", encoding="utf-8")
+        (baud / ".aipass" / "hooks.json").write_text(
+            '{"hooks_enabled": false, "PreToolUse": {"rm_gate": {"enabled": false, "handler": "x"}}}',
+            encoding="utf-8",
+        )
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(baud))
+        config = self._resolve(home, baud, reg_path)
+        assert config["hooks_enabled"] is True
+        assert config["PreToolUse"]["rm_gate"]["enabled"] is True
+
+    def test_the_master_switch_off_still_runs_every_gate_and_no_injector(self, temp_test_dir, mock_logger):
+        """DPLAN-0356 phase 3, R1c (red team, CRITICAL): hooks_enabled false returned before any gate ran."""
+        config = gates.builtin_config()
+        config["hooks_enabled"] = False
+        # An injector the engine would name in a warning the moment it tried to run it.
+        config["PreToolUse"]["tool_use_sound"] = {"enabled": True, "handler": "x.never.handle", "matcher": ""}
+        payload = json.dumps(
+            {"tool_name": "Bash", "tool_input": {"command": "rm notes.txt"}, "cwd": str(temp_test_dir)}
+        )
+        stdout, code = engine.dispatch("PreToolUse", payload, config)
+        assert code == 2 and "Raw rm is refused" in stdout
+        assert "x.never.handle" not in str(mock_logger.mock_calls)
+        assert "gates still run" in str(mock_logger.info.call_args_list)
+
+    def test_a_trusted_project_outside_aipass_owns_its_gates(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        home = _install(temp_test_dir)
+        outside = temp_test_dir / "theirs"
+        (outside / ".aipass").mkdir(parents=True)
+        (outside / ".aipass" / "hooks.json").write_text('{"hooks_enabled": false}', encoding="utf-8")
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(outside))
+        assert self._resolve(home, outside, reg_path)["hooks_enabled"] is False

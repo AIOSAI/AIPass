@@ -1,14 +1,21 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 1.7.0
-# Description: Hook engine — unified dispatcher for all hook events
+# Version: 2.1.0
+# Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-09-16
+# Modified: 2026-10-01
 # =============================================
 
-"""Hook engine — dispatches hook events to handlers, logs via prax + JSONL."""
+"""Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
+
+Crash isolation is split since 2.0.0 (DPLAN-0356 item 2). An injector that fails
+to import, raises or times out is skipped, as it always was. A GATE
+(handlers/config/gates.FAIL_CLOSED) that does the same is answered with a block
+and one fixed text, and logged at ERROR: what it guards does not run until it is
+fixed. Which hooks are gates is code, never config.
+"""
 
 import importlib
 import json
@@ -22,6 +29,7 @@ from pathlib import Path
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.config import gates
 from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log
 from aipass.hooks.apps.handlers.config.output_merge import combine_outputs
 from aipass.hooks.apps.handlers.module_root import module_file
@@ -189,11 +197,12 @@ def _load_budget_state(session_id: str = "") -> dict:
     path = _budget_state_path(session_id)
     if path is None or not path.exists():
         return {}
+    state: dict = {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:  # an unreadable budget starts every count afresh
         logger.info("[HOOKS] budget: state read failed: %s", exc)
-        return {}
+    return state
 
 
 def _save_budget_state(state: dict, session_id: str = "") -> None:
@@ -248,12 +257,53 @@ def _check_budget(hook_name: str, budget_cfg: dict, budget_state: dict) -> tuple
     return True, "ok"
 
 
+def _gate_failure(result: dict, timeout_s: int) -> str | None:
+    """Why a fail-closed gate did not answer, or None when it did (DPLAN-0356 item 2).
+
+    Three ways a gate goes silent, each of which used to read as "allow": it
+    timed out, it could not be imported or raised (exit -1 from _run_handler),
+    or it exited 2 without a decision (a crash, not a block).
+    """
+    if result.get("stderr") == "TIMEOUT":
+        return f"timed out after {timeout_s}s"
+    if result.get("exit_code") == -1:
+        return f"failed to load or raised: {str(result.get('stderr', ''))[:200]}"
+    if result.get("exit_code") == 2:
+        try:
+            decision = json.loads(result.get("stdout") or "{}")
+        except json.JSONDecodeError as exc:
+            logger.info("[HOOKS] gate exit 2 stdout is not JSON: %s", exc)
+            decision = None
+        if not isinstance(decision, dict) or decision.get("decision") != "block":
+            return "exited 2 without a decision"
+    return None
+
+
+def _refuse_broken_gate(event_type: str, hook_name: str, handler: str, why: str, started: float) -> tuple[str, int]:
+    """Answer a broken fail-closed gate with a BLOCK, and log it at ERROR: the line @trigger escalates."""
+    reason = gates.broken_gate_reason(hook_name, handler, why)
+    logger.error("[HOOKS] GATE BROKEN %s.%s (%s) — refusing what it guards", event_type, hook_name, why)
+    _log(
+        {
+            "ts": time.time(),
+            "event": event_type,
+            "hook": hook_name,
+            "action": "gate_broken",
+            "why": why[:200],
+            "total_ms": round((time.monotonic() - started) * 1000, 1),
+        }
+    )
+    return json.dumps({"decision": "block", "reason": reason}), 2
+
+
 def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
     """Core dispatch — run hooks for event, return (merged_stdout, exit_code)."""
     if not config.get("hooks_enabled", True):
-        logger.info("[HOOKS] all hooks disabled")
-        _log({"ts": time.time(), "event": event_type, "action": "all_hooks_disabled"})
-        return "", 0
+        # DPLAN-0356 phase 3, R1c: the master switch is the injectors' alone. A config
+        # file must never switch the gate set off, so its gates still run.
+        logger.info("[HOOKS] hooks disabled — gates still run")
+        _log({"ts": time.time(), "event": event_type, "action": "hooks_disabled_gates_run"})
+        config = gates.gate_config(config)
 
     event_hooks = config.get(event_type, {})
 
@@ -359,6 +409,10 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
             result = _run_handler(handler, parsed, timeout_s=hook_timeout)
         else:
             result = _run_hook(command, stdin_data, timeout_s=hook_timeout)
+
+        broken = _gate_failure(result, hook_timeout) if handler and gates.is_fail_closed(handler) else None
+        if broken:
+            return _refuse_broken_gate(event_type, hook_name, handler, broken, total_start)
 
         if result.get("stderr") == "TIMEOUT":
             logger.error(
@@ -506,6 +560,23 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
     merged = combine_outputs(event_type, outputs)
     _record_injection(event_type, outputs, merged, parsed)
     return merged, 0
+
+
+def run_event(arg: str, stdin_data: str) -> tuple[str, int]:
+    """One provider hook call: ``Event`` or ``Event:hook_name``, resolved and dispatched.
+
+    The bridges' whole job past argv and stdin. It lives here, in the promoted
+    copy, so the bridge scripts (which run from the source tree) never change
+    when config resolution does (DPLAN-0356 item 3).
+    """
+    from aipass.hooks.apps.handlers.config.loader import resolve_config
+
+    event_type, _, hook_filter = arg.partition(":")
+    config = resolve_config()
+    if hook_filter:
+        hook_def = config.get(event_type, {}).get(hook_filter, {})
+        config = {"hooks_enabled": True, event_type: {hook_filter: hook_def}}
+    return dispatch(event_type, stdin_data, config)
 
 
 def _record_injection(event_type: str, outputs: list, merged: str, payload: dict) -> None:

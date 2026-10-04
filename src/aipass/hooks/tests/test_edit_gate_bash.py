@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-09-28
+# Modified: 2026-10-01
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -367,8 +367,16 @@ class TestScriptedLaneDoesNotOverreach:
         command = f"cat {sibling_projects['foreign_file']} > ./local_copy.json"
         assert self._run_plain(sibling_projects, command)["exit_code"] == 0
 
-    def test_sed_without_in_place_is_a_filter_not_a_write(self, sibling_projects: dict):
-        assert self._run_plain(sibling_projects, f"sed s/a/b/ {sibling_projects['foreign_file']}")["exit_code"] == 0
+    def test_a_program_that_only_reads_may_name_a_foreign_file(self, sibling_projects: dict):
+        """DPLAN-0356 phase 4, P2: default-deny. Only a read-only program may name it as an operand.
+
+        sed without -i was allowed until phase 4; its script can still write (w) or run (e),
+        so it is no longer read as a filter. grep and cat are.
+        """
+        foreign = sibling_projects["foreign_file"]
+        assert self._run_plain(sibling_projects, f"sed s/a/b/ {foreign}")["exit_code"] == 2
+        assert self._run_plain(sibling_projects, f"grep a {foreign}")["exit_code"] == 0
+        assert self._run_plain(sibling_projects, f"cat {foreign}")["exit_code"] == 0
 
     def test_listing_a_foreign_project_is_allowed(self, sibling_projects: dict):
         assert self._run_plain(sibling_projects, f"ls -la {sibling_projects['vera']}")["exit_code"] == 0
@@ -393,10 +401,12 @@ class TestScriptedLaneDoesNotOverreach:
     def test_an_empty_command_is_allowed(self, sibling_projects: dict):
         assert self._run_plain(sibling_projects, "")["exit_code"] == 0
 
-    def test_a_parser_failure_allows_and_says_so(self, sibling_projects: dict):
+    def test_a_parser_failure_refuses_the_call(self, sibling_projects: dict):
+        """DPLAN-0356 item 2: a fence that cannot read a command does not let it through."""
         with patch.object(edit_gate, "_import_module", side_effect=RuntimeError("boom")):
             result = self._run_plain(sibling_projects, f"sed -i s/a/b/ {sibling_projects['foreign_file']}")
-        assert result["exit_code"] == 0
+        assert result["exit_code"] == 2
+        assert "boom" in json.loads(result["stdout"])["reason"]
 
     def test_a_seat_outside_any_project_is_not_fenced(self, tmp_path: Path):
         """A fence that cannot locate a boundary must not invent one."""
@@ -414,14 +424,17 @@ class TestScriptedLaneDoesNotOverreach:
         docs/edit_gate.md; the project fence still reads held paths.
         """
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
-        for command in (f"python3 -c \"print(open('{target}').read())\"", f"awk '/def /' {target}", f"cat {target}"):
+        for command in (f"python3 -c \"print(open('{target}').read())\"", f"grep def {target}", f"cat {target}"):
             assert _run(registered_projects["hooks"], command=command)["exit_code"] == 0, command
+        # DPLAN-0356 phase 4, P2: awk is not a read-only program (print > file, system()), so it may not name it.
+        assert _run(registered_projects["hooks"], command=f"awk '/def /' {target}")["exit_code"] == 2
 
-    def test_seedgo_and_the_manager_write_across_branches_from_a_shell(self, registered_projects: dict):
+    def test_seedgo_and_the_manager_no_longer_write_across_branches_from_a_shell(self, registered_projects: dict):
+        """DPLAN-0356 item 5: a name (seedgo) and a manager row (vera) decide nothing in the shell lane either."""
         memory = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
         writer = (Path(registered_projects["writer"]) / "draft.md").as_posix()
-        assert _run(registered_projects["seedgo"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 0
-        assert _run(registered_projects["vera_seat"], command=f"sed -i s/a/b/ {writer}")["exit_code"] == 0
+        assert _run(registered_projects["seedgo"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 2
+        assert _run(registered_projects["vera_seat"], command=f"sed -i s/a/b/ {writer}")["exit_code"] == 2
 
     def test_writing_your_own_branch_stays_allowed(self, registered_projects: dict):
         own = (Path(registered_projects["hooks"]) / "docs" / "x.md").as_posix()
@@ -987,3 +1000,23 @@ class TestTheGitBashDriveSpelling:
 
         targets = [t for t, _ in write_targets("sed -i s/a/b/ /c/Work/f.json", tmp_path.as_posix())]
         assert targets == [PurePosixPath("/c/Work/f.json")], targets
+
+
+class TestTheBranchAndMemoryLanesAreDefaultDeny:
+    """DPLAN-0356 phase 4, P2 in edit_gate: an unlisted write verb passed the branch and .trinity fences."""
+
+    def test_an_unlisted_program_naming_another_branch_is_refused(self, registered_projects: dict):
+        target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        assert _blocked(_run(registered_projects["hooks"], command=f"unknownwriter --in-place {target}"))
+        assert _run(registered_projects["hooks"], command=f"grep def {target}")["exit_code"] == 0
+
+    def test_an_unlisted_program_naming_a_memory_file_is_refused(self, registered_projects: dict):
+        seat = Path(registered_projects["hooks"])
+        memory = (seat / ".trinity" / "local.json").as_posix()
+        assert _blocked(_run(str(seat), command=f"unknownwriter {memory}"))
+        assert _run(str(seat), command=f"jq . {memory}")["exit_code"] == 0
+
+    def test_drone_and_own_branch_work_still_pass(self, registered_projects: dict):
+        seat = registered_projects["hooks"]
+        for command in ("drone @seedgo checklist apps", "mkdir -p .archive && mv old.py .archive/", "pytest tests -q"):
+            assert _run(seat, command=command)["exit_code"] == 0, command

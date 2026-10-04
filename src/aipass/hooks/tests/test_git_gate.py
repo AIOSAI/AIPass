@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 2.2.1
-# Description: Tests for git_gate security handler
+# Version: 4.1.0
+# Description: Tests for git_gate: raw reads, gh writes and protected config writes are the admin seat's alone
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-09-28
+# Modified: 2026-10-01
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -16,7 +16,11 @@
 # seedgo: no-test-needed(stdlib) — re.compile's matching engine, the stdlib's own
 
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 from aipass.hooks.apps.handlers.security.git_gate import handle
 
@@ -35,8 +39,19 @@ def _provider_settings() -> str:
     return str(Path.home() / ".claude" / "settings.json")
 
 
+@pytest.fixture(autouse=True)
+def admin_grant():
+    """The classifier's tests run from the verified admin seat, the one seat whose raw reads pass.
+
+    Patched at @ai_mail's rail, so no test reads this machine's real grant.
+    TestRawGitReadsAreTheAdminSeatsAlone patches it per call for the other seats.
+    """
+    with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True):
+        yield
+
+
 def _bash(cmd: str) -> dict:
-    return handle({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD})
+    return handle({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": DEVPULSE_CWD})
 
 
 def _assert_allowed(result: dict) -> None:
@@ -51,7 +66,7 @@ def _assert_blocked(result: dict) -> None:
 
 
 class TestGitGateReadAllowed:
-    """Read-only git verbs are allowed raw."""
+    """Read-only git verbs are allowed raw from the admin seat; other seats: TestRawGitReadsAreTheAdminSeatsAlone."""
 
     def test_git_status(self):
         _assert_allowed(_bash("git status"))
@@ -233,8 +248,9 @@ class TestGitGateWriteBlocked:
     def test_git_apply(self):
         _assert_blocked(_bash("git apply patch.diff"))
 
-    def test_bare_git(self):
-        _assert_blocked(_bash("git "))
+    def test_bare_git_prints_usage_and_is_allowed(self):
+        """A bare `git` with no argument touches nothing; the shell reads `git ` and `git` alike."""
+        _assert_allowed(_bash("git "))
 
 
 class TestGitGateChaining:
@@ -373,7 +389,7 @@ class TestPathSpelledExecutable:
 
 
 class TestGitGateGhCommands:
-    """gh command handling (unchanged behavior)."""
+    """gh command handling on the admin seat (the autouse grant): unchanged by DPLAN-0356 item 4."""
 
     def test_block_raw_gh(self):
         _assert_blocked(_bash("gh pr list"))
@@ -381,39 +397,86 @@ class TestGitGateGhCommands:
     def test_allow_gh_api(self):
         _assert_allowed(_bash("gh api repos/owner/repo/pulls"))
 
+    def test_the_admin_seat_keeps_every_gh_api_method(self):
+        _assert_allowed(_bash("gh api -X DELETE repos/o/r/git/refs/heads/x"))
+        _assert_allowed(_bash("gh api graphql -f query=x"))
+
+
+class TestGhApiIsReadOnlyOffTheAdminSeat:
+    """DPLAN-0356 item 4. Measured from canary before the cure: `gh api -X DELETE repos/o/r`,
+    `gh api -X PUT .../contents/f` (a commit) and `gh api repos/o/r/merges` (a merge) were all allowed."""
+
+    def _run(self, command: str, tmp_path: Path) -> dict:
+        with patch(_RAIL, return_value=False):
+            return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": _seat(tmp_path, "canary")})
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh api repos/o/r/actions/runs",
+            "gh api -X GET repos/o/r/pulls",
+            "gh api --method=get repos/o/r/issues",
+            "gh api repos/o/r/actions/runs --paginate -q .total_count",
+            "gh api -H 'Accept: application/vnd.github+json' repos/o/r",
+        ],
+    )
+    def test_a_get_with_no_body_runs(self, command, tmp_path):
+        _assert_allowed(self._run(command, tmp_path))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh api -X DELETE repos/o/r",
+            "gh api -X PUT repos/o/r/contents/f",
+            "gh api --method POST repos/o/r/merges",
+            "gh api --method=PATCH repos/o/r",
+            "gh api -XPOST repos/o/r/merges",
+            'gh api -X "DELETE" repos/o/r',
+            "gh api repos/o/r/merges -f base=main -f head=dev",
+            "gh api repos/o/r/merges -F base=main",
+            "gh api repos/o/r/merges --field base=main",
+            "gh api repos/o/r/merges --raw-field base=main",
+            "gh api repos/o/r/merges --input body.json",
+            "gh api -fbase=main repos/o/r/merges",
+            "gh api graphql -f query='mutation { x }'",
+            "gh api graphql",
+            "ls && /usr/bin/gh api -X DELETE repos/o/r",
+        ],
+    )
+    def test_a_write_or_graphql_is_refused_and_names_the_twins(self, command, tmp_path):
+        result = self._run(command, tmp_path)
+
+        _assert_blocked(result)
+        reason = json.loads(result["stdout"])["reason"]
+        assert "@canary" in reason
+        assert "drone @git run list" in reason
+
+    def test_every_other_gh_subcommand_stays_refused(self, tmp_path):
+        for command in ("gh pr merge 5", "gh repo delete o/r", "gh release create v1", "gh auth token"):
+            _assert_blocked(self._run(command, tmp_path))
+
+
+def _edit(path: str, cwd: str, grant: bool, tool: str = "Edit") -> dict:
+    with patch(_RAIL, return_value=grant):
+        return handle({"tool_name": tool, "tool_input": {"file_path": path}, "cwd": cwd})
+
 
 class TestGitGateEditProtection:
-    """Protected file edit handling."""
+    """Protected file edit handling: the verified admin seat alone, never a name (DPLAN-0356 item 5)."""
 
     def test_block_edit_settings(self):
-        result = handle(
-            {
-                "tool_name": "Edit",
-                "tool_input": {"file_path": _provider_settings()},
-                "cwd": CWD,
-            }
-        )
-        _assert_blocked(result)
+        _assert_blocked(_edit(_provider_settings(), CWD, grant=False))
 
-    def test_allow_edit_settings_from_devpulse(self):
-        result = handle(
-            {
-                "tool_name": "Edit",
-                "tool_input": {"file_path": _provider_settings()},
-                "cwd": DEVPULSE_CWD,
-            }
-        )
-        _assert_allowed(result)
+    def test_allow_edit_settings_from_the_verified_admin_seat(self):
+        _assert_allowed(_edit(_provider_settings(), DEVPULSE_CWD, grant=True))
+
+    def test_a_seat_named_devpulse_or_seedgo_without_the_grant_is_refused(self):
+        """TRUSTED_HOOK_EDITORS let these two names through until 2026-09-30, grant or none."""
+        for name in ("devpulse", "seedgo"):
+            _assert_blocked(_edit(_provider_settings(), str(_REPO / "src" / "aipass" / name), grant=False))
 
     def test_block_edit_hooks_dir(self):
-        result = handle(
-            {
-                "tool_name": "Edit",
-                "tool_input": {"file_path": PROJECT_HOOK},
-                "cwd": CWD,
-            }
-        )
-        _assert_blocked(result)
+        _assert_blocked(_edit(PROJECT_HOOK, CWD, grant=False))
 
     def test_windows_spellings_of_a_protected_path_are_blocked_on_every_host(self):
         """The Windows CI runner measured the gate ALLOWING these (2026-09-16).
@@ -430,7 +493,7 @@ class TestGitGateEditProtection:
             r"D:\work\.Claude\Settings.JSON",
             "D:/work/.CLAUDE/hooks/x.py",
         ):
-            result = handle({"tool_name": "Edit", "tool_input": {"file_path": path}, "cwd": CWD})
+            result = _edit(path, CWD, grant=False)
             assert result["exit_code"] == 2, f"allowed: {path}"
 
     def test_a_windows_path_that_only_resembles_one_stays_allowed(self):
@@ -465,11 +528,12 @@ class TestGitGateMisc:
         assert "drone @git smart-sync" in parsed["reason"]
         assert "drone @git --help" in parsed["reason"]
 
-    def test_git_block_shows_disable_path(self):
-        result = _bash("git push")
-        parsed = json.loads(result["stdout"])
-        assert "git_gate.enabled" in parsed["reason"]
-        assert "hooks.json" in parsed["reason"]
+    def test_no_refusal_teaches_switching_a_gate_off(self):
+        """DPLAN-0356 item 1: the refusals said "set git_gate.enabled to false in .aipass/hooks.json"."""
+        for result in (_bash("git push"), _bash("gh pr list"), _edit(_provider_settings(), CWD, grant=False)):
+            reason = json.loads(result["stdout"])["reason"]
+            assert "enabled" not in reason
+            assert "disable" not in reason.lower()
 
     def test_gh_block_separate_message(self):
         result = _bash("gh pr list")
@@ -478,16 +542,15 @@ class TestGitGateMisc:
         assert "gh api" in parsed["reason"]
         assert "drone @git issue" in parsed["reason"]
 
-    def test_edit_block_shows_disable_path(self):
-        result = handle(
-            {
-                "tool_name": "Edit",
-                "tool_input": {"file_path": _provider_settings()},
-                "cwd": CWD,
-            }
-        )
-        parsed = json.loads(result["stdout"])
-        assert "git_gate.enabled" in parsed["reason"]
+    def test_a_crash_refuses_the_call_it_was_checking(self):
+        """DPLAN-0356 item 2: `except: allow` became a refusal for Bash and the edit tools."""
+        with patch("aipass.hooks.apps.handlers.security.git_gate._check_bash", side_effect=NameError("x")):
+            result = _bash("ls")
+        _assert_blocked(result)
+        assert "git_gate could not check this call" in json.loads(result["stdout"])["reason"]
+        with patch("aipass.hooks.apps.handlers.security.git_gate._check_edit", side_effect=NameError("x")):
+            _assert_blocked(handle({"tool_name": "Write", "tool_input": {"file_path": "a"}, "cwd": CWD}))
+            _assert_allowed(handle({"tool_name": "Read", "tool_input": {"file_path": "a"}, "cwd": CWD}))
 
 
 class TestMailBodyIsAnArgumentNotACommand:
@@ -543,11 +606,11 @@ class TestMailBodyIsAnArgumentNotACommand:
         """
         _assert_blocked(_bash(f"find . -exec {self.WRITE_LINE} \\;"))
 
-    def test_a_reader_failure_falls_back_to_the_raw_command(self):
+    def test_a_reader_failure_refuses_the_command(self):
         """A gate that cannot parse must not become permissive on what it cannot read."""
         from unittest.mock import patch
 
-        with patch("aipass.hooks.apps.modules.bash_writes.code_text", side_effect=RuntimeError("boom")):
+        with patch("aipass.hooks.apps.modules.shell_reader.invocations", side_effect=RuntimeError("boom")):
             _assert_blocked(_bash(f"drone @ai_mail reply abc123 <<EOF\n{self.WRITE_LINE}\nEOF"))
 
 
@@ -572,7 +635,7 @@ class TestOneProgramSpelledManyWays:
             _assert_blocked(_bash(f"{spelled} {self.WRITE}"))
 
     def test_every_spelling_of_a_read_stays_allowed(self):
-        """The promise the redirect makes ("read-only verbs run raw") is spelling-blind too."""
+        """The promise the redirect makes the admin seat ("read-only verbs run raw") is spelling-blind too."""
         for spelled in self.READS:
             _assert_allowed(_bash(f"{spelled} status"))
 
@@ -599,3 +662,281 @@ class TestOneProgramSpelledManyWays:
 
         with patch("aipass.hooks.apps.modules.bash_writes.verb_name", side_effect=RuntimeError("boom")):
             _assert_blocked(_bash(f"git {self.WRITE}"))
+
+
+_RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller"
+
+
+def _seat(root: Path, name: str) -> str:
+    """A branch directory carrying a passport that names *name*."""
+    seat = root / name
+    (seat / ".trinity").mkdir(parents=True, exist_ok=True)
+    (seat / ".trinity" / "passport.json").write_text(
+        json.dumps({"branch_info": {"branch_name": name}}), encoding="utf-8"
+    )
+    return str(seat)
+
+
+class TestRawGitReadsAreTheAdminSeatsAlone:
+    """DPLAN-0356, the owner 2026-09-30: raw git reads refused for every seat but @devpulse.
+
+    WHO is the verified admin grant (@ai_mail's rail, patched here at that edge);
+    the passport only names the caller in the refusal.
+    """
+
+    def _run(self, command: str, cwd: str, grant: bool) -> dict:
+        with patch(_RAIL, return_value=grant):
+            return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd})
+
+    def test_git_log_from_canary_is_refused_and_names_the_drone_twins(self, tmp_path):
+        result = self._run("git log --oneline -5", _seat(tmp_path, "canary"), grant=False)
+
+        _assert_blocked(result)
+        reason = json.loads(result["stdout"])["reason"]
+        assert "@canary" in reason
+        for twin in ("drone @git log 5 <path>", "drone @git status", "drone @git diff", "drone @git show <sha> <path>"):
+            assert twin in reason
+        assert "RAW GIT READS AND THEIR TWINS" in reason
+
+    def test_git_log_from_the_verified_admin_seat_is_allowed(self, tmp_path):
+        _assert_allowed(self._run("git log --oneline -5", _seat(tmp_path, "devpulse"), grant=True))
+
+    def test_a_seat_named_devpulse_without_the_grant_is_refused(self, tmp_path):
+        _assert_blocked(self._run("git status", _seat(tmp_path, "devpulse"), grant=False))
+
+    def test_a_caller_with_no_passport_is_refused_and_told_so(self, tmp_path):
+        result = self._run("git status", str(tmp_path), grant=False)
+
+        _assert_blocked(result)
+        assert "could not be named" in json.loads(result["stdout"])["reason"]
+
+    def test_quoted_text_naming_git_is_not_an_invocation(self, tmp_path):
+        _assert_allowed(self._run('drone @ai_mail email @x "S" "run git log"', _seat(tmp_path, "canary"), grant=False))
+
+    def test_a_write_from_the_admin_seat_is_still_refused(self, tmp_path):
+        _assert_blocked(self._run("git " + "push", _seat(tmp_path, "devpulse"), grant=True))
+
+
+class TestTheFilesThatSwitchTheGatesAreTheAdminSeats:
+    """DPLAN-0356 item 1: any branch could write its own .aipass/hooks.json (and so run with no gates),
+    and ~/.aipass/trusted_projects.json was named by no gate at all. Both lanes, admin seat only."""
+
+    def _protected(self) -> list[str]:
+        return [
+            str(_REPO / ".aipass" / "hooks.json"),
+            str(_REPO / "src" / "aipass" / "canary" / ".aipass" / "hooks.json"),
+            str(Path.home() / ".aipass" / "trusted_projects.json"),
+            str(_REPO / ".claude" / "settings.local.json"),
+            str(_REPO / "src" / "aipass" / "hooks" / ".live-current"),
+            str(_REPO / "src" / "aipass" / "hooks" / ".live-20260930T000000Z" / "handlers" / "x.py"),
+        ]
+
+    def test_the_tool_lane_refuses_each_off_the_admin_seat(self, tmp_path):
+        canary = _seat(tmp_path, "canary")
+        for path in self._protected():
+            result = _edit(path, canary, grant=False, tool="Write")
+            _assert_blocked(result)
+            assert "Only the admin seat" in json.loads(result["stdout"])["reason"], path
+
+    def test_the_bash_lane_refuses_each_off_the_admin_seat(self, tmp_path):
+        canary = _seat(tmp_path, "canary")
+        for path in self._protected():
+            for command in (f"echo x > {path}", f"sed -i s/a/b/ {path}", f"cp other.json {path}"):
+                with patch(_RAIL, return_value=False):
+                    result = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": canary})
+                _assert_blocked(result)
+
+    def test_the_verified_admin_seat_writes_them(self):
+        for path in self._protected():
+            _assert_allowed(_edit(path, DEVPULSE_CWD, grant=True, tool="Write"))
+
+    def test_an_external_projects_own_config_is_trusts_business_not_this_gates(self, tmp_path):
+        _assert_allowed(_edit(str(tmp_path / ".aipass" / "hooks.json"), str(tmp_path), grant=False, tool="Write"))
+
+    def test_reading_them_is_not_a_write(self, tmp_path):
+        for path in self._protected()[:3]:
+            with patch(_RAIL, return_value=False):
+                result = handle({"tool_name": "Bash", "tool_input": {"command": f"cat {path}"}, "cwd": str(tmp_path)})
+            _assert_allowed(result)
+
+    def test_a_reader_that_cannot_name_the_changed_paths_refuses(self, tmp_path):
+        with (
+            patch("aipass.hooks.apps.modules.shell_reader.mutated_paths", side_effect=ValueError("unparseable")),
+            patch(_RAIL, return_value=False),
+        ):
+            result = handle({"tool_name": "Bash", "tool_input": {"command": "x notes.txt"}, "cwd": str(tmp_path)})
+        _assert_blocked(result)
+        assert "could not check" in json.loads(result["stdout"])["reason"]
+
+
+def _canary_bash(command: str, cwd: str) -> dict:
+    with patch(_RAIL, return_value=False):
+        return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd})
+
+
+@pytest.fixture
+def trust_home(tmp_path, monkeypatch):
+    """A home of its own holding a trust registry, so a hard link to it is made in tmp, never on this machine."""
+    home = tmp_path / "home"
+    (home / ".aipass").mkdir(parents=True)
+    (home / ".aipass" / "trusted_projects.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home / ".aipass" / "trusted_projects.json"
+
+
+class TestAProtectedFileIsProtectedUnderEveryName:
+    """DPLAN-0356 phase 3, R1 (red team, CRITICAL): the files were matched by NAME.
+
+    A hard link in a seat's own directory is a second name for the trust
+    registry; before 2.0.0 of protected_paths a write through it was allowed.
+    """
+
+    def test_a_write_through_a_hard_link_is_refused_on_both_lanes(self, tmp_path, trust_home):
+        seat = Path(_seat(tmp_path, "canary"))
+        os.link(trust_home, seat / "mine.json")
+
+        _assert_blocked(_canary_bash("echo x > mine.json", str(seat)))
+        _assert_blocked(_edit(str(seat / "mine.json"), str(seat), grant=False, tool="Write"))
+
+    def test_an_ordinary_file_with_two_names_is_not_protected(self, tmp_path, trust_home):
+        seat = Path(_seat(tmp_path, "canary"))
+        (seat / "a.json").write_text("{}", encoding="utf-8")
+        os.link(seat / "a.json", seat / "b.json")
+
+        _assert_allowed(_canary_bash("echo x > b.json", str(seat)))
+
+    def test_making_a_hard_link_to_one_is_refused_in_shell_and_interpreter_forms(self, tmp_path, trust_home):
+        seat = _seat(tmp_path, "canary")
+        for command in (
+            f"ln {trust_home} mine.json",
+            f"python3 -c \"import os; os.link('{trust_home}', 'mine.json')\"",
+        ):
+            _assert_blocked(_canary_bash(command, seat))
+
+    def test_the_admin_seat_still_links_it(self, tmp_path, trust_home):
+        with patch(_RAIL, return_value=True):
+            result = handle(
+                {"tool_name": "Bash", "tool_input": {"command": f"ln {trust_home} x.json"}, "cwd": DEVPULSE_CWD}
+            )
+        _assert_allowed(result)
+
+
+class TestTheProtectedLaneRefusesDeletesAndMovesOnItsOwn:
+    """DPLAN-0356 phase 3, R2 (red team, CRITICAL): the protected lane watched write verbs only.
+
+    A delete or a move away depended on rm_gate knowing the verb. git_gate now
+    refuses each by itself — these run git_gate alone, no rm_gate behind it.
+    """
+
+    def test_a_delete_a_move_away_and_a_move_over_are_each_refused(self, tmp_path, trust_home):
+        seat = _seat(tmp_path, "canary")
+        for command in (
+            f"unlink {trust_home}",
+            f"shred -u {trust_home}",
+            f"mv {trust_home} {tmp_path / 'elsewhere.json'}",
+            f"mv new.json {trust_home}",
+            f"python3 -c \"import os; os.remove('{trust_home}')\"",
+        ):
+            result = _canary_bash(command, seat)
+            _assert_blocked(result)
+            assert "is protected" in json.loads(result["stdout"])["reason"], command
+
+    def test_moving_the_directory_that_holds_one_is_refused(self, tmp_path, trust_home):
+        _assert_blocked(_canary_bash(f"mv {trust_home.parent} {tmp_path / 'y'}", _seat(tmp_path, "canary")))
+
+    def test_moving_an_ordinary_file_is_allowed(self, tmp_path, trust_home):
+        _assert_allowed(_canary_bash("mv old.json new.json", _seat(tmp_path, "canary")))
+
+
+class TestGitFromInsideAProgramIsRawGit:
+    """DPLAN-0356 phase 3, R5 (red team, HIGH): git and gh launched from an interpreter subprocess."""
+
+    def test_each_launch_spelling_is_refused_off_the_admin_seat(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        for command in (
+            "python3 -c \"import subprocess; subprocess.run(['git', 'push'])\"",
+            "python3 -c \"import os; os.system('gh pr create')\"",
+            "node -e \"require('child_process').execSync('git push')\"",
+            'perl -e \'system("git", "push")\'',
+        ):
+            result = _canary_bash(command, seat)
+            _assert_blocked(result)
+            assert "inside an interpreter" in json.loads(result["stdout"])["reason"], command
+
+    def test_a_program_that_only_prints_the_word_is_allowed(self, tmp_path):
+        _assert_allowed(_canary_bash("python3 -c \"print('git push')\"", _seat(tmp_path, "canary")))
+
+
+class TestGitHubWritesWithoutGh:
+    """DPLAN-0356 phase 3, R6 (red team, MEDIUM): the gh credential and HTTP writes to api.github.com."""
+
+    def test_reading_the_credential_is_refused_off_the_admin_seat(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        for command in (
+            "gh auth token",
+            "gh auth status --show-token",
+            "secret-tool lookup service gh:github.com",
+            "python3 -c \"import keyring; print(keyring.get_password('gh:github.com', ''))\"",
+        ):
+            result = _canary_bash(command, seat)
+            _assert_blocked(result)
+            assert "GitHub credential" in json.loads(result["stdout"])["reason"], command
+
+    def test_a_non_get_or_a_body_to_the_api_is_refused(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        for command in (
+            "curl -X POST https://api.github.com/repos/o/r/issues",
+            "curl -d '{}' https://api.github.com/repos/o/r/issues",
+            "http PATCH api.github.com/repos/o/r title=x",
+        ):
+            result = _canary_bash(command, seat)
+            _assert_blocked(result)
+            assert "GitHub API" in json.loads(result["stdout"])["reason"], command
+
+    def test_a_get_to_the_api_and_a_post_elsewhere_are_allowed(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        _assert_allowed(_canary_bash("curl https://api.github.com/repos/o/r", seat))
+        _assert_allowed(_canary_bash("curl -X POST https://example.com/hook -d x", seat))
+
+
+class TestProtectedPathsAreDefaultDeny:
+    """DPLAN-0356 phase 4, P2 (final review, CRITICAL): a write verb nobody listed passed every fence.
+
+    Off the admin seat a protected path may be an operand only of a read-only program.
+    Since protected_paths 2.1.0 the set holds AIPASS_HOME's .git/ and every sealed registry.
+    """
+
+    def _members(self) -> list[str]:
+        return [
+            str(Path.home() / ".aipass" / "trusted_projects.json"),
+            str(_REPO / ".git" / "config"),
+            str(_REPO / ".git" / "refs" / "heads" / "main"),
+            str(_REPO / "AIPASS_REGISTRY.json"),
+        ]
+
+    def test_a_program_nobody_listed_is_refused_naming_one(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        for path in self._members():
+            for command in (f"vim {path}", f"unknownwriter --in-place {path}", f"tool --out={path}"):
+                result = _canary_bash(command, seat)
+                _assert_blocked(result)
+                assert "is protected" in json.loads(result["stdout"])["reason"], command
+
+    def test_a_read_only_program_may_name_one(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        for path in self._members():
+            for command in (f"cat {path}", f"grep x {path}", f"sha256sum {path}", f"sudo cat {path}"):
+                _assert_allowed(_canary_bash(command, seat))
+        _assert_allowed(_canary_bash("drone @git status", seat))
+
+    def test_a_redirect_into_one_is_refused_even_from_a_read_only_program(self, tmp_path):
+        target = self._members()[3]
+        _assert_blocked(_canary_bash(f"cat notes.txt > {target}", _seat(tmp_path, "canary")))
+
+    def test_the_admin_seat_is_not_default_denied(self):
+        with patch(_RAIL, return_value=True):
+            result = handle(
+                {"tool_name": "Bash", "tool_input": {"command": f"vim {self._members()[3]}"}, "cwd": DEVPULSE_CWD}
+            )
+        _assert_allowed(result)

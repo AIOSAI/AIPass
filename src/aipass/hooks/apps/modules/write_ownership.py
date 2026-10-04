@@ -1,25 +1,27 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 1.0.0
+# Version: 2.0.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-09-18
+# Modified: 2026-09-30
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
 
 The owner's ruling, 2026-09-18 22:17 (devpulse 1d041cfc), after @memory's rollover
-was found writing Vera Studio's .trinity files:
+was found writing Vera Studio's .trinity files, narrowed on 2026-09-30 (DPLAN-0356
+item 5, one identity rail):
 
 - An agent is sandboxed to its own files: the files in its directory.
-- @devpulse edits anywhere, system-wide. The one seat (the verified admin rail,
-  modules/admin_seat, never a name).
-- @seedgo and @spawn edit any file inside AIPass and NEVER beyond it.
-- A project's manager (its registry ``owner`` row: @vera in Vera Studio, like
-  @devpulse in AIPass) edits her own project's files, within her project only.
-- Everyone else: own files only. Reading is allowed; writing another's, never.
+- The verified admin seat (modules/admin_seat's 5-leg grant, @devpulse) edits
+  anywhere. It is the ONLY exemption, and a grant, never a name.
+- Until 2026-09-30 three more lanes stood on names and rows: @seedgo and @spawn
+  wrote across AIPass (TRUSTED_CROSS_WRITERS, a directory name), and a project's
+  manager row wrote across its project. A directory name and a registry flag
+  decide nothing now; those seats write their own branch like every other.
+- Reading is allowed; writing another's, never.
 
 Until this module the gate drew those lines from path SHAPES: a project was any
 directory holding a ``*_REGISTRY.json``, a branch was whatever sat at
@@ -42,13 +44,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.modules import admin_seat
 from aipass.hooks.apps.modules.bash_writes import HELD_BY_INTERPRETER
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-#: Trusted AIPass-wide, and only inside the project whose registry is AIPASS_REGISTRY.json.
-TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
 AIPASS_REGISTRY = "AIPASS_REGISTRY.json"
 # A project root is the nearest ancestor holding a *_REGISTRY.json, the marker
 # @ai_mail's find_project_root uses (handlers/paths.py): the file fence and the mail
@@ -61,8 +62,8 @@ AIPASS_REGISTRY = "AIPASS_REGISTRY.json"
 PROJECT_MARKER = "*_REGISTRY.json"
 
 _WHO = (
-    "Who writes where (the owner's ruling, 2026-09-18): each agent its own branch; a project's manager "
-    "(its registry owner) that whole project; @seedgo and @spawn all of AIPass; @devpulse everywhere."
+    "Who writes where (the owner's rulings, 2026-09-18 and 2026-09-30): each agent its own branch; "
+    "the verified admin seat (@devpulse) everywhere. A name or a manager row grants nothing."
 )
 
 
@@ -196,6 +197,8 @@ def ownership_refusal(
 
     Crossings are not decided here: the caller refuses them first and lets only
     the admin seat through. A target in no project at all (a temp file) is nobody's.
+    Within a project the one exemption is the verified admin grant, asked only
+    when a write would otherwise be refused (the rail does file I/O).
     *how* names the shell verb for the scripted lane; an interpreter's held paths
     are never convicted here, because a read cannot be told from a write and
     reading another branch is allowed.
@@ -206,13 +209,19 @@ def ownership_refusal(
         return None
     package = package_of(Path(cwd))
     seat = branch_at(caller, Path(cwd), package)
-    if seat is None or seat.manager:
-        return None
-    if seat.name in TRUSTED_CROSS_WRITERS and (caller is None or caller.is_aipass):
+    if seat is None:
         return None
     owner = branch_at(caller, target, package)
     if owner is not None and owner.path == seat.path:
         return None
+    refusal = _refusal(caller, seat, owner, target, how)
+    if refusal is None or admin_seat.is_admin_seat(cwd):
+        return None
+    return refusal
+
+
+def _refusal(caller: Project | None, seat: Branch, owner: Branch | None, target: Path, how: str) -> str | None:
+    """The refusal text for a write by *seat* that lands outside it, or None when the target is nobody's."""
     lane = f" ({how})" if how else ""
     if owner is not None:
         verb = "email" if owner.manager else "dispatch"

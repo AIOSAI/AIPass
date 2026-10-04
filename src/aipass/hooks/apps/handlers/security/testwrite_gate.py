@@ -1,14 +1,16 @@
 # =================== AIPass ====================
 # Name: testwrite_gate.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Blocks agent creation of NEW test files (PreToolUse) + the test template pointer (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-09-01
-# Modified: 2026-09-21
+# Modified: 2026-09-30
 # =============================================
 
 """Enforces the owner's 2026-09-01 ruling: agents do not create tests for now.
+
+Failure mode: a crash refuses the write it was checking; the engine refuses on import error and timeout.
 
 The ruling (devpulse DPLAN-0323): while @seedgo's test_quality v5 pack lands,
 agents are stripped of self-directed test creation. The corpus that ruling is
@@ -97,6 +99,13 @@ def _is_admin_seat(cwd: str) -> bool:
         return False
 
 
+GATE_CRASHED = (
+    "testwrite_gate could not check this call ({error}), so it is refused: a gate that cannot read a call "
+    "does not let it through.\n"
+    'Mail @hooks and @devpulse: drone @ai_mail email @hooks "Gate broken: testwrite_gate" "<what you ran, and this text>"'
+)
+
+
 def _block(reason: str) -> dict:
     """Build the refusal both lanes print."""
     return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": _SOUND}
@@ -142,13 +151,9 @@ def _targets(tool_name: str, tool_input: dict, cwd: str) -> list[Path]:
         command = tool_input.get("command", "")
         if not command:
             return []
-        try:
-            return [target for target, _why in testwrite_targets_bash(command, cwd)]
-        except Exception as exc:
-            # A parser that cannot read a command has learned nothing about it.
-            # It must not convict on that, and it must not go quiet either.
-            logger.warning("[HOOKS] testwrite_gate: bash write-target scan failed (allowing): %s", exc)
-            return []
+        # A parser that cannot read a command raises into handle()'s crash refusal:
+        # the gate refuses what it cannot read (DPLAN-0356 item 2; it allowed until 1.4.0).
+        return [target for target, _why in testwrite_targets_bash(command, cwd)]
 
     file_path = tool_input.get("file_path", "")
     if not file_path:
@@ -290,11 +295,10 @@ def handle(hook_data: dict) -> dict:
     Returns:
         Result dict with stdout (block JSON or empty) and exit_code.
     """
+    tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
+    if tool_name != "Bash" and tool_name not in EDIT_TOOLS:
+        return _ALLOW
     try:
-        tool_name = hook_data.get("tool_name", "")
-        if tool_name != "Bash" and tool_name not in EDIT_TOOLS:
-            return _ALLOW
-
         tool_input = hook_data.get("tool_input", {}) or {}
         cwd = hook_data.get("cwd", "") or os.getcwd()
         lane = "scripted" if tool_name == "Bash" else "tool"
@@ -353,12 +357,12 @@ def handle(hook_data: dict) -> dict:
 
         return _ALLOW
 
-    except Exception as exc:
-        # Crash isolation: a gate that dies must not take the write with it. The
-        # fail-CLOSED ruling covers a policy this gate could not READ; it does not
-        # cover a defect in this gate, which is ours and must be loud, not a wall.
-        logger.error("[HOOKS] testwrite_gate: unexpected error (allowing): %s", exc)
-        return _ALLOW
+    except Exception as exc:  # fail closed on the write this gate guards (DPLAN-0356 item 2)
+        # Until 2026-09-30 a defect here allowed the write ("loud, not a wall").
+        # The owner's ruling turned every gate's crash into a refusal: the gate
+        # is broken, and nothing it guards runs until it is fixed.
+        logger.error("[HOOKS] testwrite_gate: crashed on %s, refusing it: %s", tool_name, exc)
+        return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
 
 
 # ---------------------------------------------------------------------------
