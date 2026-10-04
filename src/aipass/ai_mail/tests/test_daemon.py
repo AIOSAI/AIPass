@@ -3,7 +3,7 @@
 # Description: Tests for dispatch daemon handler
 # Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-09-29
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/dispatch/daemon.py -- config loading, state management, inbox scanning."""
@@ -16,7 +16,7 @@ import os
 import sys
 import pytest
 from datetime import datetime, date, timedelta
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import aipass.ai_mail.apps.handlers.dispatch.daemon as daemon_mod
 from aipass.ai_mail.apps.handlers.dispatch.daemon import (
@@ -36,7 +36,6 @@ from aipass.ai_mail.apps.handlers.dispatch.daemon import (
     poll_cycle,
     _write_pid_file,
     _remove_pid_file,
-    _read_session_type,
     _is_branch_occupied,
     spawn_agent,
     run_daemon,
@@ -1230,51 +1229,10 @@ def test_remove_pid_file_corrupt(tmp_path, monkeypatch):
     assert not pid_file.exists()
 
 
-# ---- _read_session_type tests -----------------------------------
-
-
-def test_read_session_type_found(monkeypatch):
-    """Returns the AIPASS_SESSION_TYPE value when found in /proc."""
-    monkeypatch.setattr(sys, "platform", "linux")
-    environ_data = b"HOME=/home/user\0AIPASS_SESSION_TYPE=daemon\0PATH=/usr/bin"
-
-    with patch("builtins.open", mock_open(read_data=environ_data)):
-        result = _read_session_type("12345")
-
-    assert result == "daemon"
-
-
-def test_read_session_type_not_found(monkeypatch):
-    """Returns 'interactive' when AIPASS_SESSION_TYPE is not in environ."""
-    monkeypatch.setattr(sys, "platform", "linux")
-    environ_data = b"HOME=/home/user\0PATH=/usr/bin"
-
-    with patch("builtins.open", mock_open(read_data=environ_data)):
-        result = _read_session_type("12345")
-
-    assert result == "interactive"
-
-
-def test_read_session_type_non_linux(monkeypatch):
-    """Returns 'interactive' on non-Linux platforms."""
-    monkeypatch.setattr(sys, "platform", "darwin")
-
-    result = _read_session_type("12345")
-
-    assert result == "interactive"
-
-
-def test_read_session_type_oserror(monkeypatch):
-    """Returns 'interactive' on OSError when reading /proc."""
-    monkeypatch.setattr(sys, "platform", "linux")
-
-    with patch("builtins.open", side_effect=OSError("No such file")):
-        result = _read_session_type("12345")
-
-    assert result == "interactive"
-
-
 # ---- _is_branch_occupied tests -----------------------------------
+# The daemon has used wake's _is_branch_occupied and its process readers since
+# leg 12; their own tests, the darwin lanes among them, live in test_wake.py
+# (ai_mail, leg 12; todo 39).
 
 
 def test_is_branch_occupied_no_claude_processes(tmp_path):
@@ -1327,7 +1285,7 @@ def test_is_branch_occupied_claude_in_same_dir_interactive(tmp_path, monkeypatch
         ),
         patch("os.readlink", return_value=str(tmp_path.resolve())),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._read_session_type",
+            "aipass.ai_mail.apps.handlers.dispatch.wake._read_session_type",
             return_value="interactive",
         ),
     ):
@@ -1351,7 +1309,7 @@ def test_is_branch_occupied_claude_in_same_dir_daemon(tmp_path, monkeypatch):
         ),
         patch("os.readlink", return_value=str(tmp_path.resolve())),
         patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon._read_session_type",
+            "aipass.ai_mail.apps.handlers.dispatch.wake._read_session_type",
             return_value="daemon",
         ),
     ):
@@ -1361,10 +1319,15 @@ def test_is_branch_occupied_claude_in_same_dir_daemon(tmp_path, monkeypatch):
 
 
 def test_is_branch_occupied_pgrep_failure(tmp_path):
-    """Returns False when pgrep raises an exception."""
+    """Returns False when pgrep cannot run.
+
+    Since leg 12 this is wake's body, which catches what subprocess.run raises
+    for a missing or failing tool (OSError, SubprocessError) and nothing wider;
+    the daemon's copy caught every Exception (ai_mail, leg 12).
+    """
     with patch(
         "aipass.ai_mail.apps.handlers.dispatch.daemon.subprocess.run",
-        side_effect=Exception("pgrep unavailable"),
+        side_effect=OSError("pgrep unavailable"),
     ):
         result = _is_branch_occupied(tmp_path)
 
@@ -2013,6 +1976,39 @@ def test_is_registered_sender_empty_branches(tmp_path, monkeypatch):
     monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", reg_file)
 
     assert _is_registered_sender("@flow") is False
+
+
+def test_an_auto_execute_dispatch_is_refused_when_the_registry_cannot_be_read(tmp_path, monkeypatch):
+    """An unreadable registry cannot vouch for a sender, so no auto-execute spawn.
+
+    Before leg 12 _is_registered_sender answered True on an unreadable registry
+    (fail open) and spawn_agent ran an auto_execute dispatch from any sender. A
+    missing registry still answers True, as pinned above (ai_mail, leg 12).
+    """
+    reg_file = tmp_path / "AIPASS_REGISTRY.json"
+    reg_file.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", reg_file)
+    branch_path = tmp_path / "branch"
+    (branch_path / "logs").mkdir(parents=True)
+    message = {"from": "@evil", "id": "msg1", "subject": "Run this", "auto_execute": True}
+    state = {"daily_counts": {}, "session_cycles": {}}
+
+    with (
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.subprocess.Popen") as popen,
+        patch(
+            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            return_value=(True, "Lock acquired"),
+        ),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as log_dispatch,
+        patch("aipass.ai_mail.apps.handlers.notify.send_notification") as notify,
+    ):
+        result = spawn_agent(branch_path, "@testbranch", message, {"max_turns_per_wake": 5}, state)
+
+    assert result is False
+    popen.assert_not_called()
+    log_dispatch.assert_not_called()
+    notify.assert_not_called()
+    assert state["daily_counts"] == {}
 
 
 # ---- spawn_agent sender auth tests (DPLAN-0159 S2) ----------------

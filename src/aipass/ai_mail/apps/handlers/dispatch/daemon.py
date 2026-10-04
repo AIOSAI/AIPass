@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Dispatch Daemon Handler
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-02-17
-# Modified: 2026-09-18
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -34,7 +34,11 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.dispatch.status import log_dispatch
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.dispatch.test_token import scan_and_ack_test_emails
-from aipass.ai_mail.apps.handlers.dispatch.wake import DEFAULT_MODEL
+
+# The occupancy check with its process readers (pgrep, /proc, lsof, ps), and
+# _read_json, were copied here from wake and live there alone since leg 12, so
+# one body answers for both the daemon and the wake (ai_mail, leg 12; todo 39).
+from aipass.ai_mail.apps.handlers.dispatch.wake import DEFAULT_MODEL, _is_branch_occupied, _read_json
 
 
 # Infrastructure paths
@@ -63,18 +67,6 @@ def _handle_signal(signum, _frame):
 
 signal.signal(signal.SIGTERM, _handle_signal)
 signal.signal(signal.SIGINT, _handle_signal)
-
-
-def _read_json(filepath: Path) -> Optional[Dict[str, Any]]:
-    """Read and parse a JSON file, returning None on failure."""
-    if not filepath.exists():
-        return None
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("[daemon] Failed to read JSON %s: %s", filepath, e)
-        return None
 
 
 def _write_json(filepath: Path, data: Dict[str, Any]) -> bool:
@@ -340,10 +332,19 @@ def get_registered_branches() -> list:
 
 
 def _is_registered_sender(sender: str) -> bool:
-    """Check if sender email exists in the branch registry (DPLAN-0159 S2)."""
+    """Check if sender email exists in the branch registry (DPLAN-0159 S2).
+
+    A missing registry still answers True (a fresh checkout lists nobody to
+    poll). One that exists and cannot be read answers False: it cannot vouch
+    for any sender, and before leg 12 it failed open and let spawn_agent run
+    an auto_execute dispatch from anyone (ai_mail, leg 12; todo 44).
+    """
     registry = _read_json(BRANCH_REGISTRY)
     if registry is None:
-        return True  # fail open if registry unreadable
+        if BRANCH_REGISTRY.exists():
+            logger.warning("[daemon] Registry %s unreadable — %s not vouched for", BRANCH_REGISTRY, sender)
+            return False
+        return True
     for branch in registry.get("branches", []):
         if branch.get("email") == sender:
             return True
@@ -564,104 +565,6 @@ def spawn_agent(
 def is_protected_branch(branch_email: str) -> bool:
     """Check if a branch is protected from auto-dispatch."""
     return branch_email == "@devpulse"
-
-
-def _get_pid_cwd(pid_str: str) -> Optional[str]:
-    """Get the cwd of a process. Cross-platform: Linux /proc, macOS lsof."""
-    if sys.platform == "linux":
-        try:
-            return os.readlink(f"/proc/{pid_str}/cwd")
-        except (OSError, PermissionError):
-            logger.info("[daemon] Cannot read cwd for PID %s", pid_str)
-            return None
-    if sys.platform == "darwin":
-        return _get_pid_cwd_darwin(pid_str)
-    logger.info("[daemon] Cannot determine cwd for PID %s on %s", pid_str, sys.platform)
-    return None
-
-
-def _get_pid_cwd_darwin(pid_str: str) -> Optional[str]:
-    """macOS: get process cwd via lsof."""
-    try:
-        result = subprocess.run(
-            ["lsof", "-a", "-p", pid_str, "-d", "cwd", "-Fn"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[daemon] Cannot read cwd for PID %s on macOS", pid_str)
-        return None
-    if result.returncode != 0:
-        return None
-    for line in result.stdout.strip().split("\n"):
-        if line.startswith("n/"):
-            return line[1:]
-    return None
-
-
-def _read_session_type(pid_str: str) -> str:
-    """Read AIPASS_SESSION_TYPE from process environment. Returns 'interactive' if unset."""
-    if sys.platform == "linux":
-        try:
-            with open(f"/proc/{pid_str}/environ", "rb") as f:
-                data = f.read()
-            for entry in data.split(b"\0"):
-                if entry.startswith(b"AIPASS_SESSION_TYPE="):
-                    return entry.split(b"=", 1)[1].decode("utf-8")
-        except (OSError, PermissionError):
-            logger.info("[daemon] Cannot read session type for PID %s", pid_str)
-        return "interactive"
-    if sys.platform == "darwin":
-        return _read_session_type_darwin(pid_str)
-    return "interactive"
-
-
-def _read_session_type_darwin(pid_str: str) -> str:
-    """macOS: read AIPASS_SESSION_TYPE from ps environment output."""
-    try:
-        result = subprocess.run(
-            ["ps", "-p", pid_str, "-wwE", "-o", "command="],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[daemon] Cannot read session type for PID %s on macOS", pid_str)
-        return "interactive"
-    if result.returncode != 0:
-        return "interactive"
-    for token in result.stdout.split():
-        if token.startswith("AIPASS_SESSION_TYPE="):
-            return token.split("=", 1)[1]
-    return "interactive"
-
-
-# Session types that should NOT block dispatch (idle/background sessions)
-_NON_BLOCKING_SESSION_TYPES = {"dispatched", "daemon"}
-
-
-def _is_branch_occupied(branch_path: Path) -> bool:
-    """Check if an interactive Claude session is running in this branch."""
-    resolved = str(branch_path.resolve())
-    try:
-        result = subprocess.run(["pgrep", "-x", "claude"], capture_output=True, text=True, timeout=5)
-        if result.returncode != 0:
-            return False
-        for pid_str in result.stdout.strip().split("\n"):
-            pid_str = pid_str.strip()
-            if not pid_str:
-                continue
-            cwd = _get_pid_cwd(pid_str)
-            if cwd is None:
-                continue
-            if str(Path(cwd).resolve()) == resolved:
-                session_type = _read_session_type(pid_str)
-                if session_type not in _NON_BLOCKING_SESSION_TYPES:
-                    return True
-    except Exception:
-        logger.info("[daemon] Failed to check branch occupancy for %s", branch_path)
-    return False
 
 
 def poll_cycle(config: Dict[str, Any], state: Dict[str, Any]) -> int:

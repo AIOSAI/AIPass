@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: read.py
 # Description: Registry Read Handler
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2025-11-15
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -152,6 +152,16 @@ def get_branch_by_email(email: str) -> Optional[Dict]:
     return None
 
 
+class RegistryUnreadable(Exception):
+    """A registry exists and cannot be read, so who it names is unknown.
+
+    Not the same answer as "names nobody": read as empty, the resolvers walk on
+    to the next source and can serve another project's citizen of the same
+    name. Raised so each resolver refuses and says which registry it was
+    (ai_mail, leg 12).
+    """
+
+
 def _branches_from_registry(reg_file: Path) -> Dict[str, str]:
     """Extract email->absolute-path mappings from one sealed registry file.
 
@@ -164,14 +174,20 @@ def _branches_from_registry(reg_file: Path) -> Dict[str, str]:
 
     Returns:
         Dict mapping email address to absolute path string.
-        Empty dict if the file is unreadable or holds no usable branches.
+        Empty dict if the file holds no usable branches.
+
+    Raises:
+        RegistryUnreadable: the file cannot be opened or is not a JSON object.
+            Before leg 12 this answered {} and the walks climbed on to a
+            namesake (ai_mail, leg 12).
     """
     try:
         with open(reg_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception as exc:
-        logger.warning("[registry] failed reading %s: %s", reg_file, exc)
-        return {}
+    except (OSError, ValueError) as exc:
+        raise RegistryUnreadable(f"{reg_file.name} could not be read ({reg_file}): {exc}") from exc
+    if not isinstance(data, dict):
+        raise RegistryUnreadable(f"{reg_file.name} could not be read ({reg_file}): not a JSON object")
 
     result: Dict[str, str] = {}
     branches = data.get("branches", [])
@@ -192,6 +208,24 @@ def _branches_from_registry(reg_file: Path) -> Dict[str, str]:
         if email and path:
             result[email] = path
     return result
+
+
+def check_registry_readable(registry_path: Path) -> None:
+    """Raise when a registry exists and cannot be read; a missing one passes.
+
+    For callers that hold a map from get_all_branches, whose [] cannot tell an
+    unreadable AIPass registry from an empty one. Delivery asks this before it
+    widens to the project and external tiers, where an AIPass name read as
+    absent would be served to a namesake (ai_mail, leg 12).
+
+    Args:
+        registry_path: The registry file to check.
+
+    Raises:
+        RegistryUnreadable: the file exists and cannot be read as a registry.
+    """
+    if registry_path.exists():
+        _branches_from_registry(registry_path)
 
 
 # Discovery: exactly one level under this directory, dot-prefixed components
@@ -434,6 +468,12 @@ def get_project_tree_branches(repo_root: Path) -> Dict[str, str]:
     Returns:
         Dict mapping email address to absolute path string.
         Empty dict when there is no projects/ tree.
+
+    Raises:
+        RegistryUnreadable: any hosted project's registry cannot be read. One
+            bad registry drops the whole sweep: a partial map could serve a
+            sibling's namesake for a citizen of the unreadable project
+            (ai_mail, leg 12).
     """
     root = Path(repo_root)
     projects = root / RESIDENT_PROJECTS_DIR
@@ -500,7 +540,13 @@ def get_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
 
     Returns:
         Dict mapping email address to absolute path string.
-        Empty dict if no registry found or on error.
+        Empty dict if no registry found.
+
+    Raises:
+        RegistryUnreadable: the first registry found cannot be read. The walk
+            stops there: climbing on would answer for another project, and its
+            namesake would be served in place of the caller's own citizen
+            (ai_mail, leg 12).
     """
     current = Path(caller_cwd).resolve()
     for _ in range(10):

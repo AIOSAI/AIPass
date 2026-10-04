@@ -3,7 +3,7 @@
 # Description: Tests for wake dispatch handler
 # Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py and wake_dashboard.py."""
@@ -256,6 +256,21 @@ def test_read_session_type_non_linux(monkeypatch):
     """Non-linux, non-darwin platform returns 'interactive' immediately."""
     monkeypatch.setattr("sys.platform", "win32")
     assert _read_session_type("999") == "interactive"
+
+
+def test_read_session_type_unreadable_environ(monkeypatch):
+    """Linux: an environ that cannot be opened answers 'interactive', the blocking class.
+
+    Moved from test_daemon.py when the daemon took wake's reader (ai_mail,
+    leg 12; todo 39). The open is made to raise, so no host /proc is read.
+    """
+    monkeypatch.setattr("sys.platform", "linux")
+
+    def _no_environ(*args, **kwargs):
+        raise OSError("no such file")
+
+    monkeypatch.setattr("builtins.open", _no_environ)
+    assert _read_session_type("12345") == "interactive"
 
 
 def test_read_session_type_darwin_found(monkeypatch):
@@ -1085,6 +1100,67 @@ class TestWakeBranch:
         status, ok = wake_branch("@nonexistent")
         assert ok is False
         assert any(s[0] == "fail" and "resolve" in s[1] for s in status.steps)
+
+    def test_an_unreadable_registry_refuses_rather_than_waking_an_external_namesake(self, tmp_path, monkeypatch):
+        """A scheduled wake never lands on another root's citizen because the AIPass registry cannot be read.
+
+        Before leg 12 an unreadable AIPASS_REGISTRY.json read as no registry, and
+        resolution fell through to the external tier, which served a declared
+        root's @testbranch, so the wake spawned the namesake. Now the resolve step
+        fails and names the registry (ai_mail, leg 12).
+        """
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        namesake = tmp_path / "Elsewhere" / "testbranch"
+        namesake.mkdir(parents=True)
+        external = [{"email": "@testbranch", "path": str(namesake)}]
+        monkeypatch.setattr(wake_mod, "_external_citizens", lambda root: external)
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", scheduled=True, sender="@daemon")
+
+        assert ok is False
+        resolve = status.find_step("resolve")
+        assert resolve is not None
+        assert resolve[0] == "fail"
+        assert resolve[2].startswith("@testbranch not resolved: AIPASS_REGISTRY.json could not be read")
+        assert calls["popen"] == [] and calls["tmux"] == []
+
+    @pytest.mark.parametrize("where", ["caller_project", "hosted_project"])
+    def test_an_unreadable_project_registry_refuses_rather_than_waking_a_namesake(self, tmp_path, monkeypatch, where):
+        """A project registry that cannot be read stops resolution before the external tier.
+
+        @vera lives in Lab, and Lab's registry is not JSON. Before leg 12 step 2
+        (the caller's project) and step 3 (the admin sweep of projects/) logged
+        the failure and went on, and the external tier served another root's
+        @vera. Now the resolve step fails and names Lab's registry (ai_mail,
+        leg 12).
+        """
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        lab = tmp_path / "projects" / "lab"
+        (lab / "vera").mkdir(parents=True)
+        (lab / "LAB_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        namesake = tmp_path / "Elsewhere" / "vera"
+        namesake.mkdir(parents=True)
+        external = [{"email": "@vera", "path": str(namesake)}]
+        monkeypatch.setattr(wake_mod, "_external_citizens", lambda root: external)
+        if where == "caller_project":
+            monkeypatch.setenv("AIPASS_CALLER_CWD", str(lab / "vera"))
+        else:
+            monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@vera", admin=where == "hosted_project")
+
+        assert ok is False
+        resolve = status.find_step("resolve")
+        assert resolve is not None
+        assert resolve[0] == "fail"
+        assert resolve[2].startswith("@vera not resolved: LAB_REGISTRY.json could not be read")
+        assert calls["popen"] == [] and calls["tmux"] == []
 
     # --- manager check ---
 
@@ -2139,6 +2215,17 @@ class TestIsManager:
         (branch / ".trinity").mkdir(parents=True)
         (branch / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
         monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (branch, e))
+        assert wake_mod.is_manager("@corrupt") is True
+
+    def test_an_unreadable_registry_is_treated_as_a_manager(self, repo_root):
+        """Fail closed: a seat that cannot be resolved has an unknown class, so True.
+
+        resolve_branch raises on an unreadable AIPASS_REGISTRY.json since leg 12;
+        is_manager answers as for an unreadable passport. Green from its first
+        run on the cured tree; its proof is the mutant that answers False
+        (ai_mail, leg 12).
+        """
+        (repo_root / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
         assert wake_mod.is_manager("@corrupt") is True
 
     def test_manager_gate_log_does_not_claim_mail_it_did_not_send(self):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.4.3
+# Version: 3.4.4
 # Created: 2025-12-02
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -650,10 +650,26 @@ def deliver_email_to_branch(
     branches = {b["email"]: b["path"] for b in all_branches}
 
     if to_branch not in branches:
+        # get_all_branches answers [] for an unreadable registry too. Before the
+        # map widens, an AIPass name must not be read as absent and served to a
+        # project's or another root's namesake (ai_mail, leg 12).
+        from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, check_registry_readable
+
+        try:
+            check_registry_readable(_REPO_ROOT / "AIPASS_REGISTRY.json")
+        except RegistryUnreadable as e:
+            logger.warning("[delivery] AIPass registry unreadable for %s: %s", to_branch, e)
+            return False, f"AIPass registry unreadable, {to_branch} not resolved: {e}"
         # Check caller's project registry for local branches (e.g. @strategy in Vera Studio)
         caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
         if caller_cwd:
-            caller_branches = _load_caller_project_branches(caller_cwd)
+            try:
+                caller_branches = _load_caller_project_branches(caller_cwd)
+            except RegistryUnreadable as e:
+                # The caller's own project cannot say who it names; the tiers
+                # below would serve a namesake from another project (ai_mail, leg 12).
+                logger.warning("[delivery] caller's project registry unreadable for %s: %s", to_branch, e)
+                return False, f"Caller's project registry unreadable, {to_branch} not resolved: {e}"
             branches.update(caller_branches)
 
     if to_branch not in branches:
@@ -662,9 +678,15 @@ def deliver_email_to_branch(
         from aipass.ai_mail.apps.handlers.users import verified_caller
 
         if verified_caller.is_verified_admin_caller():
-            from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
+            from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, get_project_tree_branches
 
-            branches.update(get_project_tree_branches(_REPO_ROOT))
+            try:
+                branches.update(get_project_tree_branches(_REPO_ROOT))
+            except RegistryUnreadable as e:
+                # A hosted registry that cannot be read may hold this citizen;
+                # the external tier would serve its namesake (ai_mail, leg 12).
+                logger.warning("[delivery] hosted project registry unreadable for %s: %s", to_branch, e)
+                return False, f"Hosted project registry unreadable, {to_branch} not resolved: {e}"
 
     via_external = False
     if to_branch not in branches:

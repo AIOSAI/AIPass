@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.3.1
+# Version: 3.3.2
 # Created: 2026-03-02
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -636,7 +636,15 @@ def is_manager(branch_email: str) -> bool:
         bool: True when a readable passport says citizen_class == "manager", or
         when the passport exists and cannot be read.
     """
-    resolved = resolve_branch(branch_email)
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+    try:
+        resolved = resolve_branch(branch_email)
+    except RegistryUnreadable as exc:
+        # Which seat this is cannot be known, so its class cannot either: fail
+        # closed, as for an unreadable passport (ai_mail, leg 12).
+        logger.warning("[wake] %s unresolvable — treated as a manager: %s", branch_email, exc)
+        return True
     if not resolved:
         return False
     branch_path, _ = resolved
@@ -700,11 +708,22 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
             never claimed here) may see step 3, the projects/* sweep. Left
             False, this function behaves exactly as it did before phase 5:
             no widening for anyone unverified.
+
+    Raises:
+        RegistryUnreadable: the AIPass registry, the caller's project registry
+            or (admin) a hosted one exists and cannot be read. Its two callers,
+            wake_branch and is_manager, catch it at their own door (ai_mail,
+            leg 12).
     """
     email = f"@{branch_email.lstrip('@').lower()}"
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
 
-    # Step 1: AIPass registry (local branches)
+    # Step 1: AIPass registry (local branches). One that exists and cannot be
+    # read refuses: read as absent, steps 2-4 could serve another project's
+    # namesake, and the daemon wakes with no caller cwd (ai_mail, leg 12).
     registry = _read_json(BRANCH_REGISTRY)
+    if registry is None and BRANCH_REGISTRY.exists():
+        raise RegistryUnreadable(f"{BRANCH_REGISTRY.name} could not be read ({BRANCH_REGISTRY})")
     if registry is not None:
         for branch in registry.get("branches", []):
             if branch.get("email", "").lower() == email:
@@ -727,6 +746,10 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
                 branch_path = Path(branch_path_str)
                 if branch_path.exists():
                     return branch_path, email
+        except RegistryUnreadable:
+            # The caller's own project cannot say who it names: refuse rather
+            # than let steps 3-4 serve a namesake (ai_mail, leg 12).
+            raise
         except Exception as e:
             logger.warning("[wake] resolve_branch caller registry fallback failed: %s", e)
 
@@ -744,6 +767,10 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
                 if branch_path.exists():
                     logger.info("[wake] %s resolved via projects/ sweep — admin bridge", email)
                     return branch_path, email
+        except RegistryUnreadable:
+            # A hosted registry that cannot be read may hold this citizen; the
+            # external tier would serve its namesake (ai_mail, leg 12).
+            raise
         except Exception as e:
             logger.warning("[wake] resolve_branch projects sweep failed: %s", e)
 
@@ -1001,8 +1028,16 @@ def wake_branch(
         logger.warning("[wake] BLOCKED %s — system paused", branch_email)
         return status, False
 
-    # Step 2: Resolve branch
-    result = resolve_branch(branch_email, admin=admin)
+    # Step 2: Resolve branch. An unreadable registry fails this step by name
+    # rather than waking whoever a later source names (ai_mail, leg 12).
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+    try:
+        result = resolve_branch(branch_email, admin=admin)
+    except RegistryUnreadable as exc:
+        status.fail("resolve", f"{branch_email} not resolved: {exc}")
+        logger.warning("[wake] %s not resolved: %s", branch_email, exc)
+        return status, False
     if result is None:
         status.fail("resolve", f"Branch not found: {branch_email}")
         return status, False

@@ -3,7 +3,7 @@
 # Description: Tests for email delivery handler
 # Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py."""
@@ -769,3 +769,89 @@ def test_verified_admin_still_crosses_to_the_external_tier(external_world, monke
     assert (success, error) == (True, "")
     inbox = json.loads((external_world["vera"] / ".ai_mail.local" / "inbox.json").read_text(encoding="utf-8"))
     assert [m["from"] for m in inbox["messages"]] == ["@devpulse"]
+
+
+def test_an_unreadable_caller_registry_refuses_rather_than_serving_a_namesake(external_world, monkeypatch):
+    """A project whose registry cannot be read never has its mail served to another project's namesake.
+
+    Lab has its own @vera, and its LAB_REGISTRY.json is not JSON. Before leg 12
+    the caller's registry answered {} on that, the walk climbed on, and the
+    external tier served Vera-Studio's @vera; a verified admin is exempt from the
+    boundary, so the mail meant for Lab's @vera landed in Vera-Studio. Now
+    delivery refuses and names the registry (ai_mail, leg 12).
+    """
+    lab = external_world["tmp"] / "Lab"
+    lab_vera = lab / "src" / "lab" / "vera"
+    lab_vera.mkdir(parents=True)
+    (lab / "LAB_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(lab_vera))
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+
+    with patch(
+        "aipass.ai_mail.apps.handlers.users.verified_caller.verify_admin_caller",
+        return_value=(True, "admin grant verified"),
+    ):
+        success, error = deliver_email_to_branch("@vera", _make_email_data(sender="@devpulse", recipient="@vera"))
+
+    assert success is False
+    assert error.startswith("Caller's project registry unreadable, @vera not resolved: LAB_REGISTRY.json ")
+    assert not (external_world["vera"] / ".ai_mail.local").exists(), "the namesake must not be served"
+
+
+def test_an_unreadable_hosted_registry_refuses_the_admin_rather_than_serving_a_namesake(external_world, monkeypatch):
+    """The admin sweep never hands a hosted project's mail to another root's namesake.
+
+    projects/lab hosts its own @vera and its registry is not JSON. Before leg 12
+    the sweep skipped it, the external tier served Vera-Studio's @vera, and the
+    verified admin is exempt from the boundary, so the mail landed there. Green
+    from its first run on the cured tree; its proof is the mutant that skips the
+    registry again (ai_mail, leg 12).
+    """
+    lab = external_world["tmp"] / "AIPass" / "projects" / "lab"
+    (lab / "vera").mkdir(parents=True)
+    (lab / "LAB_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(external_world["devpulse"]))
+
+    with patch(
+        "aipass.ai_mail.apps.handlers.users.verified_caller.verify_admin_caller",
+        return_value=(True, "admin grant verified"),
+    ):
+        success, error = deliver_email_to_branch("@vera", _make_email_data(sender="@devpulse", recipient="@vera"))
+
+    assert success is False
+    assert error.startswith("Hosted project registry unreadable, @vera not resolved: LAB_REGISTRY.json ")
+    assert not (external_world["vera"] / ".ai_mail.local").exists(), "the namesake must not be served"
+
+
+def test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_namesake(external_world, monkeypatch):
+    """Mail for an AIPass citizen never lands on a hosted project's citizen of the same name.
+
+    AIPASS_REGISTRY.json is not JSON, so get_all_branches answers [] (stood in
+    here: the real one reads this checkout's registry). Before leg 12 the admin
+    sweep then found projects/lab's @target and the verified admin, exempt from
+    the boundary, had the mail delivered there. Now delivery refuses and names
+    the AIPass registry (ai_mail, leg 12).
+    """
+    home = external_world["tmp"] / "AIPass"
+    (home / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    lab_target = home / "projects" / "lab" / "target"
+    lab_target.mkdir(parents=True)
+    (home / "projects" / "lab" / "LAB_REGISTRY.json").write_text(
+        json.dumps({"branches": [{"name": "target", "email": "@target", "path": str(lab_target)}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(delivery_mod, "get_all_branches", lambda *a, **kw: [])
+    # No caller cwd: from the admin seat's cwd the caller-project walk already
+    # reaches AIPASS_REGISTRY.json and refuses; this is the lane with no walk.
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+
+    with patch(
+        "aipass.ai_mail.apps.handlers.users.verified_caller.verify_admin_caller",
+        return_value=(True, "admin grant verified"),
+    ):
+        success, error = deliver_email_to_branch("@target", _make_email_data(sender="@devpulse", recipient="@target"))
+
+    assert success is False
+    assert error.startswith("AIPass registry unreadable, @target not resolved: AIPASS_REGISTRY.json ")
+    assert not (lab_target / ".ai_mail.local").exists(), "the namesake must not be served"

@@ -3,7 +3,7 @@
 # Description: Tests for the verified-admin cross-project bridge + reply return path (FPLAN-0401 ph5/5b)
 # Version: 1.1.2
 # Created: 2026-08-12
-# Modified: 2026-09-29
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the cross-project bridge across wake.py and registry/read.py."""
@@ -92,12 +92,16 @@ class TestProjectTreeBranches:
         """A repo with no projects/ tree yields nothing and does not raise."""
         assert get_project_tree_branches(tmp_path) == {}
 
-    def test_unreadable_registry_is_skipped_not_fatal(self, repo):
-        """One corrupt registry must not hide the healthy ones."""
+    def test_an_unreadable_registry_drops_the_sweep_and_names_it(self, repo):
+        """One corrupt registry stops the sweep, by name.
+
+        Until leg 12 it was skipped and the healthy ones answered; a citizen of
+        the skipped project then fell to the external tier, which could serve a
+        namesake. A dropped map refuses honestly (ai_mail, leg 12).
+        """
         (repo / "projects" / "baud" / "BAUD_REGISTRY.json").write_text("{not json", encoding="utf-8")
-        found = get_project_tree_branches(repo)
-        assert "@earmark" in found
-        assert "@baud" not in found
+        with pytest.raises(reg.RegistryUnreadable, match=r"^BAUD_REGISTRY\.json could not be read "):
+            get_project_tree_branches(repo)
 
     def test_does_not_reach_outside_the_projects_tree(self, repo):
         """Only projects/*/ — a registry elsewhere in the repo is not swept in."""
