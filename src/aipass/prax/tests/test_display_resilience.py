@@ -24,9 +24,8 @@
 # 2. One unrenderable event must not kill the consumer. Even with (1) fixed, the
 #    loop has to survive whatever the next producer sends.
 #
-# Rendering goes through a REAL Rich console — the shared conftest installs a
-# MagicMock console that records the call but never renders, so it cannot fail
-# on either defect.
+# Rendering goes through the product's own Rich console, read back with capsys —
+# a recording mock never renders, so it could not fail on either defect.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — handle_command and _run_monitor, covered by tests/test_monitor_module.py
@@ -46,6 +45,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.console import Console
 
+from aipass.prax.apps.handlers.monitoring import unified_stream
 from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
 
 # ---------------------------------------------------------------------------
@@ -53,18 +53,18 @@ from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
 # ---------------------------------------------------------------------------
 
 
-def _render(call):
-    """Run ``call(unified_stream)`` against a real Rich console, return output."""
-    module = importlib.import_module("aipass.prax.apps.handlers.monitoring.unified_stream")
-    buffer = io.StringIO()
-    real_console = Console(file=buffer, width=200, no_color=True, highlight=False, markup=True)
-    original = getattr(module, "console")
-    setattr(module, "console", real_console)
-    try:
-        call(module)
-    finally:
-        setattr(module, "console", original)
-    return buffer.getvalue()
+@pytest.fixture
+def render(monkeypatch, capsys):
+    """Run ``call(unified_stream)`` through the product's own console, return what it printed."""
+    monkeypatch.setattr(unified_stream, "json_handler", MagicMock())
+    monkeypatch.setattr(unified_stream, "logger", MagicMock())
+
+    def _render(call) -> str:
+        capsys.readouterr()
+        call(unified_stream)
+        return capsys.readouterr().out
+
+    return _render
 
 
 # The exact line that killed the live monitor (service log, 2026-08-11 11:29:04).
@@ -82,35 +82,39 @@ EATEN_MESSAGE = "[event_queue] The live monitor display queue is full"
 class TestEventTextIsUntrustedMarkup:
     """Whatever a branch logs must render, never raise and never vanish."""
 
+    @pytest.fixture(autouse=True)
+    def _keep_render(self, render):
+        self._render = render
+
     def test_closing_tag_in_message_does_not_raise(self):
         """A tailed line containing [/usr/bin] renders instead of killing the render."""
-        output = _render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
+        output = self._render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
         assert "/usr/bin" in output
 
     def test_closing_tag_keeps_its_brackets(self):
         """The path is shown as written — brackets included, nothing swallowed."""
-        output = _render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
+        output = self._render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
         assert "[/usr/bin]" in output
 
     def test_lowercase_tag_in_message_survives(self):
         """[event_queue] is a valid-looking Rich tag; it must still reach the screen."""
-        output = _render(lambda m: m.print_event("log", "PRAX", EATEN_MESSAGE, "warning"))
+        output = self._render(lambda m: m.print_event("log", "PRAX", EATEN_MESSAGE, "warning"))
         assert "[event_queue]" in output
 
     def test_branch_label_still_visible(self):
         """Escaping must not cost the bracketed branch column."""
-        output = _render(lambda m: m.print_event("log", "SEEDGO", "audit complete", "info"))
+        output = self._render(lambda m: m.print_event("log", "SEEDGO", "audit complete", "info"))
         assert "[SEEDGO" in output
         assert "audit complete" in output
 
     def test_lowercase_branch_label_survives(self):
         """A label Rich would read as a tag keeps its brackets (uppercase was luck)."""
-        output = _render(lambda m: m.print_event("log", "commons/feed", "post", "info"))
+        output = self._render(lambda m: m.print_event("log", "commons/feed", "post", "info"))
         assert "COMMONS/FEED" in output
 
     def test_hook_event_message_is_escaped(self):
         """print_hook_event takes the same untrusted text."""
-        output = _render(lambda m: m.print_hook_event("HOOKS", CRASHING_MESSAGE, "fired"))
+        output = self._render(lambda m: m.print_hook_event("HOOKS", CRASHING_MESSAGE, "fired"))
         assert "[/usr/bin]" in output
 
     def test_hook_event_says_which_branch_fired(self):
@@ -121,18 +125,18 @@ class TestEventTextIsUntrustedMarkup:
         in Mission Control read the same whether it came from hooks, drone or an
         external project — the one column that tells them apart was dropped.
         """
-        output = _render(lambda m: m.print_hook_event("SEEDGO", "cadence:fired loader=global", "fired"))
+        output = self._render(lambda m: m.print_hook_event("SEEDGO", "cadence:fired loader=global", "fired"))
         assert "SEEDGO" in output
         assert "cadence:fired loader=global" in output
 
     def test_command_separator_is_escaped(self):
         """A command string can carry brackets too."""
-        output = _render(lambda m: m.print_command_separator("DRONE", CRASHING_MESSAGE, "DEVPULSE", "PRAX"))
+        output = self._render(lambda m: m.print_command_separator("DRONE", CRASHING_MESSAGE, "DEVPULSE", "PRAX"))
         assert "[/usr/bin]" in output
 
     def test_command_separator_keeps_attribution(self):
         """Escaping must not cost the CALLER → TARGET line."""
-        output = _render(lambda m: m.print_command_separator("DRONE", "audit", "DEVPULSE", "PRAX"))
+        output = self._render(lambda m: m.print_command_separator("DRONE", "audit", "DEVPULSE", "PRAX"))
         assert "DEVPULSE" in output
         assert "PRAX" in output
 

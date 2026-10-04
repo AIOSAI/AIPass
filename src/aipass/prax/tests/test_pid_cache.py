@@ -12,28 +12,27 @@
 # seedgo: no-test-needed(json_structure) — refresh's log_operation("pid_cache_refresh") record, covered by that row
 
 import json
-import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-_HANDLER_MOCKS = {
-    "aipass.prax.apps.handlers.json": MagicMock(),
-    "aipass.prax.apps.handlers.json.json_handler": MagicMock(),
-}
+import pytest
+
+from aipass.prax.apps.handlers.monitoring import pid_cache
+
+
+@pytest.fixture(autouse=True)
+def _pid_cache_fresh(monkeypatch):
+    """Double the collaborators where pid_cache binds them and give each test an empty cache."""
+    monkeypatch.setattr(pid_cache, "json_handler", MagicMock())
+    monkeypatch.setattr(pid_cache, "logger", MagicMock())
+    monkeypatch.setattr(pid_cache, "_pid_cache", {})
+    monkeypatch.setattr(pid_cache, "_pid_cache_last_refresh", 0.0)
 
 
 def _import_pid_cache():
-    """Import (or reload) the pid_cache module with handler mocks."""
-    fresh = {k: MagicMock() for k in _HANDLER_MOCKS}
-    with patch.dict(sys.modules, fresh):
-        import importlib
-
-        if "aipass.prax.apps.handlers.monitoring.pid_cache" in sys.modules:
-            mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.monitoring.pid_cache"])
-        else:
-            mod = importlib.import_module("aipass.prax.apps.handlers.monitoring.pid_cache")
-        return mod
+    """The pid_cache module, bound at the top of this file."""
+    return pid_cache
 
 
 class TestParseLockPid:
@@ -122,15 +121,30 @@ class TestParseLockPid:
 class TestRefresh:
     """Test PID cache refresh from registry."""
 
-    def test_skips_when_within_ttl(self, monkeypatch):
-        """Cache refresh is skipped if within TTL window."""
+    def test_skips_when_within_ttl(self, tmp_path, monkeypatch):
+        """Cache refresh is skipped if within TTL window.
+
+        The registry lists a branch, so only the TTL stands between the call and
+        a scan: without it the guard could be gone and the test still pass.
+        """
         mod = _import_pid_cache()
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": [{"name": "flow"}]}), encoding="utf-8")
         with mod._pid_cache_lock:
             monkeypatch.setattr(mod, "_pid_cache_last_refresh", time.time())
 
         with patch.object(mod, "parse_lock_pid") as mock_parse:
-            mod.refresh()
+            mod.refresh(repo_root=tmp_path)
             mock_parse.assert_not_called()
+
+    def test_a_scan_replaces_the_cache_rather_than_adding_to_it(self, tmp_path):
+        """A branch whose lock is gone must drop out of the mapping on the next scan."""
+        mod = _import_pid_cache()
+        mod._pid_cache["STALE"] = 4242
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+
+        mod.refresh(repo_root=tmp_path)
+
+        assert mod._pid_cache == {}
 
     def test_handles_missing_registry(self, tmp_path, monkeypatch):
         """No registry means refresh returns early — quietly, and without scanning.

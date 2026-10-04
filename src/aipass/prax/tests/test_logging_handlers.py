@@ -3,7 +3,7 @@
 # Description: Tests for prax logging handler modules
 # Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
@@ -837,7 +837,7 @@ class TestEnhancedGetLogger:
             assert result.propagate is True
             mock_setup.setup_individual_logger.assert_not_called()
 
-    def test_debug_prints_when_enabled(self, mock_prax_infrastructure):
+    def test_debug_prints_when_enabled(self, mock_prax_infrastructure, capsys):
         """Writes to stderr when debug prints are enabled."""
         mock_config = MagicMock()
         mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
@@ -859,12 +859,12 @@ class TestEnhancedGetLogger:
             sys.modules.pop("aipass.prax.apps.handlers.logging.override", None)
             import aipass.prax.apps.handlers.logging.override as ov
 
-            with patch("sys.stderr") as mock_stderr:
-                ov.enhanced_getLogger("debug_test")
-                assert [c.args for c in mock_stderr.write.call_args_list] == [
-                    ("[DEBUG] enhanced_getLogger called with name: debug_test\n",),
-                    ("[DEBUG] Detected calling module: unknown_module\n",),
-                ]
+            capsys.readouterr()
+            ov.enhanced_getLogger("debug_test")
+            assert capsys.readouterr().err == (
+                "[DEBUG] enhanced_getLogger called with name: debug_test\n"
+                "[DEBUG] Detected calling module: unknown_module\n"
+            )
 
 
 # =============================================

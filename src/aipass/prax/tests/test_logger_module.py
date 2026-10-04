@@ -51,9 +51,6 @@ HANDLER_DEPS = [
     "aipass.prax.apps.handlers.registry.load",
     "aipass.prax.apps.handlers.config.load",
     "aipass.prax.apps.handlers.json",
-    "aipass.cli.apps.modules",
-    "aipass.cli.apps.modules.display",
-    "aipass.cli.apps.modules.console",
 ]
 
 
@@ -124,18 +121,8 @@ def _build_handler_mocks(tmp_path):
     mock_json_handler.log_operation = MagicMock(return_value=True)
     json_mod.json_handler = mock_json_handler
 
-    # CLI modules
-    cli = mocks["aipass.cli.apps.modules"]
-    mock_console = MagicMock()
-    mock_console.print = MagicMock()
-    cli.console = mock_console
-
-    cli_display = mocks["aipass.cli.apps.modules.display"]
-    cli_display.console = mock_console
-
-    cli_console_mod = mocks["aipass.cli.apps.modules.console"]
-    cli_console_mod.print = MagicMock()
-
+    # The cli package is not doubled: logger.py prints through the real console
+    # and the tests read it with capsys (prax, leg 11).
     return mocks
 
 
@@ -452,9 +439,9 @@ class TestInitializeLoggingSystem:
 
         mock_lifecycle.run_initialize.assert_called_once_with("prax_logger")
 
-    def test_prints_initialization_message(self, monkeypatch, tmp_path):
+    def test_prints_initialization_message(self, monkeypatch, tmp_path, capsys):
         """initialize_logging_system prints init and completion messages."""
-        mod, mocks = _inject_and_import(monkeypatch, tmp_path)
+        mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
 
         mock_lifecycle = MagicMock()
         mock_lifecycle.run_initialize = MagicMock(
@@ -470,12 +457,13 @@ class TestInitializeLoggingSystem:
 
         _inject_trigger(monkeypatch)
 
+        capsys.readouterr()
         mod.initialize_logging_system()
 
-        console = mocks["aipass.cli.apps.modules"].console
-        calls = [str(c) for c in console.print.call_args_list]
-        assert any("Initializing" in c for c in calls)
-        assert any("initialized" in c.lower() for c in calls)
+        assert capsys.readouterr().out.splitlines() == [
+            "[prax_logger] Initializing system-wide logging...",
+            "[prax_logger] System initialized - 10 modules, individual logging",
+        ]
 
     def test_fires_the_lifecycle_event_after_run_initialize(self, monkeypatch, tmp_path):
         """seedgo trigger.md Pattern 9: the explicit system lifecycle doors
@@ -491,20 +479,23 @@ class TestInitializeLoggingSystem:
 
         trigger.fire.assert_called_once_with("logging_system_initialized", modules_count=42)
 
-    def test_a_failed_fire_does_not_fail_the_initialize(self, monkeypatch, tmp_path):
+    def test_a_failed_fire_does_not_fail_the_initialize(self, monkeypatch, tmp_path, capsys):
         """These doors must still work on a host where trigger cannot import or
         inotify is exhausted — the guard the removed startup fire carried."""
-        mod, mocks = _inject_and_import(monkeypatch, tmp_path)
+        mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
         mock_lifecycle = MagicMock()
         mock_lifecycle.run_initialize = MagicMock(return_value={"modules_count": 7})
         monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.logging.lifecycle", mock_lifecycle)
         trigger = _inject_trigger(monkeypatch)
         trigger.fire.side_effect = OSError("inotify watch limit reached")
 
+        capsys.readouterr()
         mod.initialize_logging_system()  # must not raise
 
-        console = mocks["aipass.cli.apps.modules"].console
-        assert any("initialized" in str(c).lower() for c in console.print.call_args_list)
+        assert (
+            capsys.readouterr().out.splitlines()[-1]
+            == "[prax_logger] System initialized - 7 modules, individual logging"
+        )
 
 
 # =============================================
@@ -533,9 +524,9 @@ class TestShutdownLoggingSystem:
 
         mock_lifecycle.run_shutdown.assert_called_once_with("prax_logger")
 
-    def test_prints_shutdown_messages(self, monkeypatch, tmp_path):
+    def test_prints_shutdown_messages(self, monkeypatch, tmp_path, capsys):
         """shutdown_logging_system prints shutdown and completion messages."""
-        mod, mocks = _inject_and_import(monkeypatch, tmp_path)
+        mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
 
         mock_lifecycle = MagicMock()
         mock_lifecycle.run_shutdown = MagicMock()
@@ -547,12 +538,13 @@ class TestShutdownLoggingSystem:
 
         _inject_trigger(monkeypatch)
 
+        capsys.readouterr()
         mod.shutdown_logging_system()
 
-        console = mocks["aipass.cli.apps.modules"].console
-        calls = [str(c) for c in console.print.call_args_list]
-        assert any("Shutting down" in c for c in calls)
-        assert any("complete" in c.lower() for c in calls)
+        assert capsys.readouterr().out.splitlines() == [
+            "[prax_logger] Shutting down logging system...",
+            "[prax_logger] Shutdown complete",
+        ]
 
     def test_fires_the_lifecycle_event_after_run_shutdown(self, monkeypatch, tmp_path):
         """The other half of the Pattern 9 pair. Fired last, so the event says
@@ -714,54 +706,36 @@ class TestModuleConstants:
 class TestPrintIntrospection:
     """Tests for print_introspection() — displays module info."""
 
-    def test_prints_handler_info(self, monkeypatch, tmp_path):
+    def test_prints_handler_info(self, monkeypatch, tmp_path, capsys):
         """print_introspection prints handler connection details."""
-        mod, mocks = _inject_and_import(monkeypatch, tmp_path)
+        mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
 
+        capsys.readouterr()
         mod.print_introspection()
 
-        console = mocks["aipass.cli.apps.modules.display"].console
-        calls = [str(c) for c in console.print.call_args_list]
-        assert any("Connected Handlers" in c for c in calls)
+        assert "Connected Handlers:" in capsys.readouterr().out.splitlines()
 
-    def test_prints_logger_module_name(self, monkeypatch, tmp_path):
+    def test_prints_logger_module_name(self, monkeypatch, tmp_path, capsys):
         """print_introspection mentions the logger module."""
-        mod, mocks = _inject_and_import(monkeypatch, tmp_path)
+        mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
 
+        capsys.readouterr()
         mod.print_introspection()
 
-        console = mocks["aipass.cli.apps.modules.display"].console
-        calls = [str(c) for c in console.print.call_args_list]
-        assert any("logger" in c.lower() for c in calls)
+        assert capsys.readouterr().out.splitlines()[1] == "logger Module"
 
-    def test_fallback_to_rich_when_cli_unavailable(self, monkeypatch, tmp_path):
+    def test_fallback_to_rich_when_cli_unavailable(self, monkeypatch, tmp_path, capsys):
         """print_introspection falls back to rich Console if CLI import fails."""
-        mod, mocks = _inject_and_import(monkeypatch, tmp_path)
+        mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
 
-        # Make the CLI display import raise ImportError
-        cli_display_mock = mocks["aipass.cli.apps.modules.display"]
-        cli_display_mock.console = MagicMock(side_effect=ImportError("no CLI"))
+        # A None entry makes the import inside print_introspection raise ImportError.
+        monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules.display", None)
 
-        # Remove the display module so the import inside print_introspection fails
-        monkeypatch.delitem(sys.modules, "aipass.cli.apps.modules.display", raising=False)
+        capsys.readouterr()
+        mod.print_introspection()  # must not raise
 
-        # Should not raise — falls back to rich.console.Console
-        with patch("rich.console.Console") as mock_rich:
-            mock_rich_instance = MagicMock()
-            mock_rich.return_value = mock_rich_instance
-
-            # Force re-import to pick up removed module
-            sys.modules.pop(MODULE_NAME, None)
-            import importlib
-            import aipass.prax.apps.modules.logger as fresh_mod
-
-            importlib.reload(fresh_mod)
-
-            fresh_mod.print_introspection()
-
-            mock_rich.assert_called_once_with()
-            # The menu reaches the fallback console: its title line is the second print.
-            assert mock_rich_instance.print.call_args_list[1].args == ("[bold cyan]logger Module[/bold cyan]",)
+        # The menu reaches the fallback console: its title line is the second line.
+        assert capsys.readouterr().out.splitlines()[1] == "logger Module"
 
 
 # =============================================

@@ -23,10 +23,30 @@ import json
 import sys
 import types
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+from aipass.prax.apps.modules import dashboard as dashboard_module
+
+# The dashboard module and the handler modules it was built on, as imported once
+# at collection. Their logger and json service are doubled before every test.
+_DASHBOARD_MODULES = [dashboard_module] + [
+    module
+    for name, module in sorted(sys.modules.items())
+    if name.startswith("aipass.prax.apps.handlers.dashboard") and isinstance(module, types.ModuleType)
+]
+
+
+@pytest.fixture(autouse=True)
+def _dashboard_quiet(monkeypatch):
+    """What the reload under the conftest stubs used to give each test: a logger
+    and a json service that write nothing (prax, leg 11)."""
+    for module in _DASHBOARD_MODULES:
+        for name in ("logger", "json_handler"):
+            if hasattr(module, name):
+                monkeypatch.setattr(module, name, MagicMock())
 
 
 MODULE_PATH = "aipass.prax.apps.handlers.dashboard.operations"
@@ -1415,20 +1435,47 @@ DASHBOARD_MODULE_PATH = "aipass.prax.apps.modules.dashboard"
 
 
 def _load_dashboard_module() -> types.ModuleType:
-    """Import (or reimport) the dashboard module under active mocks."""
-    for mod_key in list(sys.modules.keys()):
-        if mod_key.startswith("aipass.prax.apps.handlers.dashboard"):
-            sys.modules.pop(mod_key, None)
-    sys.modules.pop(DASHBOARD_MODULE_PATH, None)
-    import aipass.prax.apps.modules.dashboard as mod
-
-    importlib.reload(mod)
-    return mod
+    """The dashboard module imported once at the top, never reloaded (prax, leg 11).
+    The autouse _dashboard_quiet fixture has doubled its logger and json service."""
+    return dashboard_module
 
 
-def _printed_lines(mod: types.ModuleType) -> list:
-    """Every line the mocked console was asked to print (bare print() calls dropped)."""
-    return [str(call[0][0]) for call in mod.console.print.call_args_list if call[0]]
+class _Screen:
+    """What the real console showed, read with capsys (prax, leg 11).
+
+    printed holds every plain line of stdout and stderr other than error() and
+    warning() lines, which are kept apart without their prefix. Each read() adds
+    what was written since the last one."""
+
+    def __init__(self, capsys):
+        self._capsys = capsys
+        self.out = ""
+        self.printed: list[str] = []
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+
+    def read(self) -> "_Screen":
+        out, err = self._capsys.readouterr()
+        self.out += out
+        for line in (out + err).splitlines():
+            if line.startswith("❌ "):
+                self.errors.append(line[len("❌ ") :])
+            elif line.startswith("⚠️  "):
+                self.warnings.append(line[len("⚠️  ") :])
+            else:
+                self.printed.append(line)
+        return self
+
+    def assert_one_error(self, message: str) -> None:
+        assert self.read().errors == [message]
+
+    def assert_one_warning(self, message: str) -> None:
+        assert self.read().warnings == [message]
+
+
+@pytest.fixture
+def screen(capsys) -> _Screen:
+    return _Screen(capsys)
 
 
 class TestDashboardModuleUpdateSection:
@@ -1462,6 +1509,12 @@ class TestDashboardModuleUpdateSection:
 class TestPrintStatus:
     """Tests for print_status -- CLI status display."""
 
+    _screen: _Screen
+
+    @pytest.fixture(autouse=True)
+    def _keep_screen(self, screen):
+        self._screen = screen
+
     def test_prints_branch_dashboard_status(self, tmp_path, monkeypatch):
         """Status prints the branch count and one exists/missing line per branch."""
         mod = _load_dashboard_module()
@@ -1476,11 +1529,11 @@ class TestPrintStatus:
 
         mod.print_status()
 
-        printed = _printed_lines(mod)
-        assert "[bold]Dashboard Status (2 branches)[/bold]" in printed
-        assert "  flow: [green]exists[/green]" in printed
-        assert "  ai_mail: [red]missing[/red]" in printed
-        mod.error.assert_not_called()
+        printed = self._screen.read().printed
+        assert "Dashboard Status (2 branches)" in printed
+        assert "  flow: exists" in printed
+        assert "  ai_mail: missing" in printed
+        assert self._screen.read().errors == []
 
     def test_handles_error_loading_branches(self, monkeypatch):
         """get_branch_paths blowing up prints the reason via error() and returns before the table."""
@@ -1494,8 +1547,8 @@ class TestPrintStatus:
 
         mod.print_status()
 
-        mod.error.assert_called_once_with("Error loading branches: registry not found")
-        assert _printed_lines(mod) == []
+        self._screen.assert_one_error("Error loading branches: registry not found")
+        assert self._screen.read().printed == []
 
 
 # =============================================
@@ -1506,15 +1559,22 @@ class TestPrintStatus:
 class TestPrintTemplate:
     """Tests for print_template -- CLI template display."""
 
+    _screen: _Screen
+
+    @pytest.fixture(autouse=True)
+    def _keep_screen(self, screen):
+        self._screen = screen
+
     def test_prints_template_without_error(self):
         """The block printed under the heading round-trips back to DASHBOARD_TEMPLATE."""
         mod = _load_dashboard_module()
 
         mod.print_template()
 
-        printed = _printed_lines(mod)
-        assert "[bold]Dashboard Template Structure[/bold]" in printed
-        assert json.loads(printed[-1]) == mod.DASHBOARD_TEMPLATE
+        screen = self._screen.read()
+        assert "Dashboard Template Structure" in screen.printed
+        block = screen.out.split("=" * 50 + "\n", 1)[1]
+        assert json.loads(block) == mod.DASHBOARD_TEMPLATE
 
 
 # =============================================
@@ -1525,12 +1585,18 @@ class TestPrintTemplate:
 class TestDashboardPrintIntrospection:
     """Tests for print_introspection -- CLI module info display."""
 
+    _screen: _Screen
+
+    @pytest.fixture(autouse=True)
+    def _keep_screen(self, screen):
+        self._screen = screen
+
     def test_introspection_lists_template_sections(self):
         """Introspection runs and names every section of the template."""
         mod = _load_dashboard_module()
         mod.print_introspection()
 
-        printed = _printed_lines(mod)
+        printed = self._screen.read().printed
         assert len(printed) > 3
         for section in mod.DASHBOARD_TEMPLATE["sections"]:
             assert any(section in line for line in printed), f"section {section} not listed"
@@ -1544,12 +1610,18 @@ class TestDashboardPrintIntrospection:
 class TestDashboardPrintHelp:
     """Tests for print_help -- CLI help output."""
 
+    _screen: _Screen
+
+    @pytest.fixture(autouse=True)
+    def _keep_screen(self, screen):
+        self._screen = screen
+
     def test_help_lists_commands(self):
         """Help runs and names every subcommand the dispatch table accepts."""
         mod = _load_dashboard_module()
         mod.print_help()
 
-        printed = _printed_lines(mod)
+        printed = self._screen.read().printed
         assert len(printed) > 5
         for command in ("status", "template", "refresh", "push-template", "diff-template", "template-status"):
             assert any(line.strip().startswith(command) for line in printed), f"{command} not documented"
@@ -1681,6 +1753,12 @@ class TestDashboardHandleCommand:
 class TestHandleRefresh:
     """Tests for _handle_refresh -- refresh command handler."""
 
+    _screen: _Screen
+
+    @pytest.fixture(autouse=True)
+    def _keep_screen(self, screen):
+        self._screen = screen
+
     def test_refresh_all(self, monkeypatch):
         """--all reports the updated count and never marks the command failed."""
         mod = _load_dashboard_module()
@@ -1692,10 +1770,10 @@ class TestHandleRefresh:
 
         mod.handle_command("dashboard", ["refresh", "--all"])
 
-        printed = _printed_lines(mod)
-        assert "[dim]Refreshing all branch dashboards...[/dim]" in printed
-        assert "[green]Refreshed 3 branches[/green]" in printed
-        mod.error.assert_not_called()
+        printed = self._screen.read().printed
+        assert "Refreshing all branch dashboards..." in printed
+        assert "Refreshed 3 branches" in printed
+        assert self._screen.read().errors == []
 
     def test_refresh_all_partial(self, monkeypatch):
         """A partial refresh reports through error(), not warning() -- stale branches fail the command."""
@@ -1713,14 +1791,14 @@ class TestHandleRefresh:
 
         mod.handle_command("dashboard", ["refresh", "--all"])
 
-        assert "[dim]Refreshing all branch dashboards...[/dim]" in _printed_lines(mod)
+        assert "Refreshing all branch dashboards..." in self._screen.read().printed
         # error(), not warning(): only error() sets the failure flag main() reads
         # for its exit code, so a partial refresh must not exit 0.
-        assert [call.args[0] for call in mod.error.call_args_list] == [
+        assert self._screen.read().errors == [
             "Refreshed 2 branches, 1 failed",
             "branch X failed",
         ]
-        mod.warning.assert_not_called()
+        assert self._screen.read().warnings == []
 
     def test_refresh_all_failure(self, monkeypatch):
         """A failed refresh reports the headline and every error through error()."""
@@ -1738,8 +1816,8 @@ class TestHandleRefresh:
 
         mod.handle_command("dashboard", ["refresh", "--all"])
 
-        assert "[dim]Refreshing all branch dashboards...[/dim]" in _printed_lines(mod)
-        assert [call.args[0] for call in mod.error.call_args_list] == ["Refresh failed", "total failure"]
+        assert "Refreshing all branch dashboards..." in self._screen.read().printed
+        assert self._screen.read().errors == ["Refresh failed", "total failure"]
 
     def test_refresh_specific_branch_success(self, tmp_path, monkeypatch):
         """@branch names the resolved branch in both the progress and the result line."""
@@ -1753,10 +1831,10 @@ class TestHandleRefresh:
 
         mod.handle_command("dashboard", ["refresh", "@flow"])
 
-        printed = _printed_lines(mod)
-        assert "[dim]Refreshing FLOW dashboard...[/dim]" in printed
-        assert "[green]Refreshed FLOW[/green]" in printed
-        mod.error.assert_not_called()
+        printed = self._screen.read().printed
+        assert "Refreshing FLOW dashboard..." in printed
+        assert "Refreshed FLOW" in printed
+        assert self._screen.read().errors == []
 
     def test_refresh_specific_branch_failure(self, tmp_path, monkeypatch):
         """A failed single-branch refresh reports the handler's reason through error()."""
@@ -1770,8 +1848,8 @@ class TestHandleRefresh:
 
         mod.handle_command("dashboard", ["refresh", "@flow"])
 
-        assert "[dim]Refreshing FLOW dashboard...[/dim]" in _printed_lines(mod)
-        mod.error.assert_called_once_with("Failed: disk full")
+        assert "Refreshing FLOW dashboard..." in self._screen.read().printed
+        self._screen.assert_one_error("Failed: disk full")
 
     def test_refresh_specific_branch_not_found(self, monkeypatch):
         """An unresolvable @branch reports the lookup failure and never starts a refresh."""
@@ -1785,8 +1863,8 @@ class TestHandleRefresh:
 
         mod.handle_command("dashboard", ["refresh", "@ghost"])
 
-        mod.error.assert_called_once_with("not found in registry")
-        assert _printed_lines(mod) == []
+        self._screen.assert_one_error("not found in registry")
+        assert self._screen.read().printed == []
 
     def test_refresh_cwd_success(self, tmp_path, monkeypatch):
         """No args names the CWD directory, uppercased, as the branch being refreshed."""
@@ -1809,10 +1887,10 @@ class TestHandleRefresh:
         with _patch("pathlib.Path.cwd", return_value=tmp_path):
             mod.handle_command("dashboard", ["refresh"])
 
-        printed = _printed_lines(mod)
-        assert f"[dim]Refreshing {tmp_path.name.upper()} dashboard...[/dim]" in printed
-        assert "[green]Refreshed PRAX[/green]" in printed
-        mod.error.assert_not_called()
+        printed = self._screen.read().printed
+        assert f"Refreshing {tmp_path.name.upper()} dashboard..." in printed
+        assert "Refreshed PRAX" in printed
+        assert self._screen.read().errors == []
 
     def test_refresh_cwd_failure(self, tmp_path, monkeypatch):
         """A failed CWD refresh reports the handler's reason through error()."""
@@ -1831,8 +1909,8 @@ class TestHandleRefresh:
         with _patch("pathlib.Path.cwd", return_value=tmp_path):
             mod.handle_command("dashboard", ["refresh"])
 
-        assert f"[dim]Refreshing {tmp_path.name.upper()} dashboard...[/dim]" in _printed_lines(mod)
-        mod.error.assert_called_once_with("Failed: no dashboard")
+        assert f"Refreshing {tmp_path.name.upper()} dashboard..." in self._screen.read().printed
+        self._screen.assert_one_error("Failed: no dashboard")
 
     def test_bare_refresh_refreshes_the_callers_branch_not_prax(self, tmp_path, monkeypatch):
         """drone runs prax with cwd at prax, so the caller's branch comes from AIPASS_CALLER_CWD.
@@ -1860,7 +1938,7 @@ class TestHandleRefresh:
             mod.handle_command("dashboard", ["refresh"])
 
         assert refreshed == [flow]
-        assert "[green]Refreshed FLOW[/green]" in _printed_lines(mod)
+        assert "Refreshed FLOW" in self._screen.read().printed
 
     def test_bare_refresh_with_no_caller_directory_refuses_by_name(self, monkeypatch):
         """No caller variable and a deleted cwd: say how to name the branch, refresh nothing."""
@@ -1875,7 +1953,7 @@ class TestHandleRefresh:
             mod.handle_command("dashboard", ["refresh"])
 
         assert refreshed == []
-        mod.error.assert_called_once_with(
+        self._screen.assert_one_error(
             "No caller directory, so no branch to refresh. Name it: drone @prax dashboard refresh @branch"
         )
 
@@ -1887,6 +1965,12 @@ class TestHandleRefresh:
 
 class TestHandlePushTemplate:
     """Tests for _handle_push_template -- push template handler."""
+
+    _screen: _Screen
+
+    @pytest.fixture(autouse=True)
+    def _keep_screen(self, screen):
+        self._screen = screen
 
     def test_push_template_with_changes(self, monkeypatch):
         """Push prints the four counters and every action of every changed branch."""
@@ -1911,17 +1995,17 @@ class TestHandlePushTemplate:
 
         mod.handle_command("dashboard", ["push-template"])
 
-        printed = _printed_lines(mod)
-        assert "[bold]Dashboard Template PUSH Results[/bold]" in printed
+        printed = self._screen.read().printed
+        assert "Dashboard Template PUSH Results" in printed
         assert "  Branches scanned:  5" in printed
         assert "  Branches updated:  2" in printed
         assert "  Branches created:  1" in printed
         assert "  Branches skipped:  2" in printed
-        assert "[yellow]Changes (1 branches):[/yellow]" in printed
-        assert "\n  [bold]FLOW:[/bold]" in printed
+        assert "Changes (1 branches):" in printed
+        assert printed[printed.index("  FLOW:") - 1] == ""
         assert "    - removed bulletin_board" in printed
-        assert "[green]All branches are up to date with template.[/green]" not in printed
-        mod.error.assert_not_called()
+        assert "All branches are up to date with template." not in printed
+        assert self._screen.read().errors == []
 
     def test_push_template_dry_run(self, monkeypatch):
         """Dry run flag is forwarded to push_dashboard_template."""
@@ -1962,11 +2046,11 @@ class TestHandlePushTemplate:
 
         mod.handle_command("dashboard", ["push-template"])
 
-        printed = _printed_lines(mod)
+        printed = self._screen.read().printed
         assert "  Branches scanned:  3" in printed
         assert "  Branches updated:  1" in printed
-        assert "[green]All branches are up to date with template.[/green]" not in printed
-        assert [call.args[0] for call in mod.error.call_args_list] == [
+        assert "All branches are up to date with template." not in printed
+        assert self._screen.read().errors == [
             "Errors (1)",
             "! branch X: permission denied",
         ]
@@ -1989,12 +2073,12 @@ class TestHandlePushTemplate:
 
         mod.handle_command("dashboard", ["push-template"])
 
-        printed = _printed_lines(mod)
+        printed = self._screen.read().printed
         assert "  Branches scanned:  3" in printed
         assert "  Branches skipped:  3" in printed
-        assert "[green]All branches are up to date with template.[/green]" in printed
+        assert "All branches are up to date with template." in printed
         assert not any("Changes (" in line for line in printed)
-        mod.error.assert_not_called()
+        assert self._screen.read().errors == []
 
 
 # =============================================
@@ -2004,6 +2088,12 @@ class TestHandlePushTemplate:
 
 class TestHandleDiffTemplate:
     """Tests for _handle_diff_template -- diff template handler."""
+
+    _screen: _Screen
+
+    @pytest.fixture(autouse=True)
+    def _keep_screen(self, screen):
+        self._screen = screen
 
     def test_diff_template_error(self, monkeypatch):
         """An 'error' key is surfaced verbatim through error() and stops before the summary."""
@@ -2016,8 +2106,8 @@ class TestHandleDiffTemplate:
 
         mod.handle_command("dashboard", ["diff-template"])
 
-        mod.error.assert_called_once_with("template not found")
-        assert _printed_lines(mod) == []
+        self._screen.assert_one_error("template not found")
+        assert self._screen.read().printed == []
 
     def test_diff_template_with_branch_flag(self, monkeypatch):
         """--branch flag filters diff to single branch."""
@@ -2044,7 +2134,7 @@ class TestHandleDiffTemplate:
         """--branch without name prints error."""
         mod = _load_dashboard_module()
         mod.handle_command("dashboard", ["diff-template", "--branch"])
-        mod.error.assert_called_once_with("--branch requires a branch name")
+        self._screen.assert_one_error("--branch requires a branch name")
 
     def test_diff_template_with_changes(self, monkeypatch):
         """Summary counters, per-branch additions/removals/modifications; up-to-date branches are skipped."""
@@ -2075,17 +2165,17 @@ class TestHandleDiffTemplate:
 
         mod.handle_command("dashboard", ["diff-template"])
 
-        printed = _printed_lines(mod)
+        printed = self._screen.read().printed
         assert "  Needs update: 1" in printed
         assert "  Up to date:   1" in printed
         assert "  Missing:      1" in printed
-        assert "\n  [yellow]FLOW (needs_update)[/yellow]" in printed
-        assert "    [green]+ + memory[/green]" in printed
-        assert "    [yellow]~ ~ ai_mail.new default changed[/yellow]" in printed
-        assert "\n  [red]MISSING (missing)[/red]" in printed
+        assert printed[printed.index("  FLOW (needs_update)") - 1] == ""
+        assert "    + + memory" in printed
+        assert "    ~ ~ ai_mail.new default changed" in printed
+        assert printed[printed.index("  MISSING (missing)") - 1] == ""
         assert not any("GOOD" in line for line in printed), "up_to_date branches are skipped"
-        mod.error.assert_called_once_with("Invalid JSON: 1")
-        mod.warning.assert_called_once_with("  - - bulletin_board")
+        self._screen.assert_one_error("Invalid JSON: 1")
+        self._screen.assert_one_warning("  - - bulletin_board")
 
 
 # =============================================
@@ -2095,6 +2185,12 @@ class TestHandleDiffTemplate:
 
 class TestHandleTemplateStatus:
     """Tests for _handle_template_status -- template status display."""
+
+    _screen: _Screen
+
+    @pytest.fixture(autouse=True)
+    def _keep_screen(self, screen):
+        self._screen = screen
 
     @pytest.mark.parametrize(
         ("pushed", "expected_line"),
@@ -2123,7 +2219,7 @@ class TestHandleTemplateStatus:
 
         mod.handle_command("dashboard", ["template-status"])
 
-        printed = _printed_lines(mod)
+        printed = self._screen.read().printed
         assert any("Schema version:  3.0.0" in line for line in printed)
         assert any(expected_line in line for line in printed), f"missing: {expected_line}"
 
@@ -2147,12 +2243,12 @@ class TestHandleTemplateStatus:
 
         mod.handle_command("dashboard", ["template-status"])
 
-        printed = _printed_lines(mod)
+        printed = self._screen.read().printed
         assert "  Templates dir:   /path/to/templates" in printed
         assert "  Template file:   found" not in printed
         assert "  Schema version:  None" in printed
         assert "  Last push:       never" in printed
-        mod.warning.assert_called_once_with("Template file: MISSING")
+        self._screen.assert_one_warning("Template file: MISSING")
 
     def test_template_status_no_push(self, monkeypatch):
         """A never-pushed template prints 'never' and omits the branches-pushed line entirely."""
@@ -2174,14 +2270,14 @@ class TestHandleTemplateStatus:
 
         mod.handle_command("dashboard", ["template-status"])
 
-        printed = _printed_lines(mod)
+        printed = self._screen.read().printed
         assert "  Template file:   found" in printed
         assert "  Schema version:  1.0.0" in printed
         assert "  Last updated:    2026-01-01" in printed
         assert "  Updated by:      dev" in printed
         assert "  Last push:       never" in printed
         assert not any("Branches pushed" in line for line in printed)
-        mod.warning.assert_not_called()
+        assert self._screen.read().warnings == []
 
 
 # =============================================

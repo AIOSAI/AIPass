@@ -264,6 +264,37 @@
       "reason": "prax, leg 10 (file-wide: this checker passes no line). Three families, each a with-block undone at its end. Path.home: _get_watch_directories reads ~/.claude/projects and ~/.codex/sessions, and without the patch the test would walk the operator's live session trees; it answers tmp_path. time.sleep: the monitor loops pace themselves with time.sleep(0.1/0.5); the doubles end the loop (KeyboardInterrupt) or count turns, and a clock seam would be a door for the tests alone. sys.stdin.isatty and builtins.input: the interactive prompt reads the terminal; the tests choose the TTY branch and feed lines or EOF, where a reader seam would be a door for the tests alone."
     },
     {
+      "file": "tests/test_monitoring_handlers.py",
+      "standard": "mock_console",
+      "lines": [911],
+      "reason": "prax, leg 11, under devpulse's console ruling (b): the colour is the claim (error level red, SEEDGO green, an unknown branch white), and it exists nowhere but inside print_event's console call (a dict lookup into the markup string). capsys strips it. A real Console on a buffer with colour forced, set by monkeypatch for the three colour tests alone; every other test in the file reads the real console with capsys."
+    },
+    {
+      "file": "tests/test_rate_tracker.py",
+      "standard": "stdlib_patch",
+      "reason": "prax, leg 11 (file-wide: this checker passes no line; the patches are at 89, 104, 127). The subject is the growth rate between two scans, which scan_rates measures with time.time(). The tests move the clock 10 s forward for the second scan, in a with-block undone at its end; waiting 10 real seconds is the only alternative, and a clock seam in rate_tracker would be a door for the tests alone."
+    },
+    {
+      "file": "tests/test_repo_root.py",
+      "standard": "stdlib_patch",
+      "reason": "prax, leg 11 (file-wide: this checker passes no line; the one patch is at 588). The subject is that a path that will not resolve (resolve raising OSError, as a deleted cwd does) answers None and never takes down the caller's import. No platform makes Path.resolve raise on demand under tmp_path; monkeypatch undoes it at the test's end."
+    },
+    {
+      "file": "tests/test_log_watcher.py",
+      "standard": "stdlib_patch",
+      "reason": "prax, leg 11 (file-wide: this checker passes no line; the one patch is at 928). The subject is initialize_positions surviving a .log file whose stat fails. The wrapper raises only for .log paths and returns the real stat for every other path, in a with-block; no platform makes stat fail on demand on a file that exists."
+    },
+    {
+      "file": "tests/test_json_handler.py",
+      "standard": "stdlib_patch",
+      "reason": "prax, leg 11 (file-wide: this checker passes no line; the patches are at 358, 375, 393). The subject is the atomic write's retry on a Windows sharing violation: os.replace raising PermissionError while another process holds the target. Linux never raises it, so the double raises it a set number of times and then does the real replace; monkeypatch undoes it at the test's end."
+    },
+    {
+      "file": "tests/test_logging_handlers.py",
+      "standard": "stdlib_patch",
+      "reason": "prax, leg 11 (file-wide: this checker passes no line; the patches are at 159-160 and 1164-1165). The subject is the handler surviving a rollover that fails on a full or locked disk; doRollover is made to raise the test's own OSError, in a with-block. No platform fails a rollover on demand under tmp_path. The sys.stderr patch at 862 was cured to capsys this leg."
+    },
+    {
       "file": "tests/test_instance_lock.py",
       "standard": "stdlib_patch",
       "reason": "prax, leg 10 (file-wide: this checker passes no line; the patches are at 62-107 and 171). The subject is try_acquire's liveness verdict, which branches on sys.platform and asks os.kill(pid, 0) on POSIX. The patches pin each branch on every CI platform and assert the pid passed; a real os.kill would signal a real process, and a platform or kill seam in the lock would be a door for the tests alone. Line 171 makes the /proc boot-id read fail the way a platform without /proc does. Each patch is a with-block, undone at its end."

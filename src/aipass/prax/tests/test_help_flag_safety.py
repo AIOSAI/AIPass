@@ -32,11 +32,21 @@
 import contextlib
 import importlib
 import sys
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.prax.apps import prax as prax_entry
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+
+
+@pytest.fixture
+def prax_entry_point(monkeypatch):
+    """prax.py imported once at the top and never reloaded, its logger doubled.
+    Its error() is the real one, so a refusal is read off stderr with capsys
+    (prax, leg 11)."""
+    monkeypatch.setattr(prax_entry, "logger", MagicMock())
+    return prax_entry
 
 
 LOG_AUDIT_PATH = "aipass.prax.apps.modules.log_audit"
@@ -150,9 +160,9 @@ class TestUnknownArgumentIsRefused:
     caller's `&&` reads as success.
     """
 
-    def test_an_unknown_top_level_flag_never_reaches_the_self_map(self, mock_prax_infrastructure):
+    def test_an_unknown_top_level_flag_never_reaches_the_self_map(self, prax_entry_point, capsys):
         """The refusal comes first: no self-map, no help, exit 1, token named."""
-        mod = _load(PRAX_PATH)
+        mod = prax_entry_point
 
         with (
             patch("sys.argv", ["prax", "--definitely-not-a-flag"]),
@@ -164,17 +174,17 @@ class TestUnknownArgumentIsRefused:
         assert exit_code == 1
         self_map.assert_not_called()
         help_fn.assert_not_called()
-        refusals = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
+        refusals = capsys.readouterr().err.splitlines()
         assert any("--definitely-not-a-flag" in call for call in refusals), refusals
 
-    def test_a_near_miss_flag_is_offered_the_one_it_meant(self, mock_prax_infrastructure):
+    def test_a_near_miss_flag_is_offered_the_one_it_meant(self, prax_entry_point, capsys):
         """A typo gets a pointer, not a lecture."""
-        mod = _load(PRAX_PATH)
+        mod = prax_entry_point
 
         with patch("sys.argv", ["prax", "--verison"]), patch.object(mod, "print_introspection"):
             assert mod.main() == 1
 
-        refusals = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
+        refusals = capsys.readouterr().err.splitlines()
         assert any("--version" in call for call in refusals), refusals
 
     def test_a_flag_prax_does_define_still_answers_zero(self):
@@ -196,27 +206,27 @@ class TestUnknownArgumentIsRefused:
         assert refusal.value.verb == "log-audit"
         assert refusal.value.token == "not_a_real_subarg_xyz"
 
-    def test_the_router_turns_a_refused_sub_argument_into_exit_one(self, mock_prax_infrastructure):
+    def test_the_router_turns_a_refused_sub_argument_into_exit_one(self, prax_entry_point, capsys):
         """End to end: exit 1, and the caller is told WHICH token was refused.
 
         route_command's blanket `except Exception` would also produce exit 1,
         but it renders "Handler failed: ..." — a refusal reported as a crash.
         The named re-raise is what keeps the token in the message.
         """
-        mod = _load(PRAX_PATH)
+        mod = prax_entry_point
 
         with patch("sys.argv", ["prax", "log-audit", "not_a_real_subarg_xyz"]):
             assert mod.main() == 1
 
-        rendered = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
+        rendered = capsys.readouterr().err.splitlines()
         assert any("not_a_real_subarg_xyz" in call for call in rendered), rendered
         assert not any("Handler failed" in call for call in rendered), rendered
 
 
 class TestACrashedHandlerIsNotAnUnknownCommand:
-    def test_a_handler_that_raises_is_reported_as_a_failure_not_an_unknown_command(self, mock_prax_infrastructure):
+    def test_a_handler_that_raises_is_reported_as_a_failure_not_an_unknown_command(self, prax_entry_point, capsys):
         """route_command returned False after error(), so a crash also read "Unknown command" (mutant: return False)."""
-        mod = _load(PRAX_PATH)
+        mod = prax_entry_point
 
         def crashing_handler(command, args):
             raise RuntimeError("registry is unreachable")
@@ -227,7 +237,7 @@ class TestACrashedHandlerIsNotAnUnknownCommand:
         ):
             mod.main()
 
-        rendered = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
+        rendered = capsys.readouterr().err.splitlines()
         assert any("Handler failed: registry is unreachable" in call for call in rendered), rendered
         assert not any("Unknown command" in call for call in rendered), rendered
 

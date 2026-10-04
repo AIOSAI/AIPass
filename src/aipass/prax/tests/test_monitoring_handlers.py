@@ -21,12 +21,17 @@
 # seedgo: no-test-needed(through_the_command) — print_hook_event(), covered by tests/test_display_resilience.py
 
 import importlib
+import io
 import json
 import sys
 from pathlib import Path, PurePosixPath
 from unittest.mock import MagicMock, mock_open as _mock_file_open, patch
 
+import pytest
+from rich.console import Console
+
 from aipass.prax.apps.handlers import repo_root as repo_root_mod
+from aipass.prax.apps.handlers.monitoring import unified_stream
 
 # The detector is fed POSIX-spelled strings through a mocked Path, so none of
 # these reach a disk. Built from parts under a root with no home directory in
@@ -885,167 +890,148 @@ class TestGetHelpText:
 # =============================================
 
 
-def _import_unified_stream():
-    """Import unified_stream with fresh module state."""
-    mod_name = "aipass.prax.apps.handlers.monitoring.unified_stream"
-    sys.modules.pop(mod_name, None)
-    return importlib.import_module(mod_name)
+@pytest.fixture
+def stream_log(monkeypatch) -> MagicMock:
+    """unified_stream is imported once at the top and prints through the real
+    console, read with capsys (prax, leg 11). Its logger and json service are
+    doubled where it binds them, so no test writes live state."""
+    log_ops = MagicMock()
+    monkeypatch.setattr(unified_stream, "json_handler", log_ops)
+    monkeypatch.setattr(unified_stream, "logger", MagicMock())
+    return log_ops
 
 
+def _colour_console(monkeypatch) -> io.StringIO:
+    """A real Console on a buffer with colour forced, for this test alone.
+
+    The colour is the claim here and it exists only inside the console call
+    (a dict lookup in print_event), and capsys strips it (prax, leg 11)."""
+    buffer = io.StringIO()
+    console = Console(file=buffer, force_terminal=True, color_system="standard", width=200)
+    monkeypatch.setattr(unified_stream, "console", console)
+    return buffer
+
+
+@pytest.mark.usefixtures("stream_log")
 class TestPrintEvent:
     """Tests for print_event()."""
 
-    def test_includes_branch_name(self):
+    def test_includes_branch_name(self, capsys):
         """One line reaches the console and it carries the branch name."""
-        mod = _import_unified_stream()
-        mod.print_event("log", "SEEDGO", "audit complete")
+        unified_stream.print_event("log", "SEEDGO", "audit complete")
         # The line carries a host clock, so the count and the label are the claim.
-        assert mod.console.print.call_count == 1
-        (line,), kwargs = mod.console.print.call_args
-        assert kwargs == {}
-        assert "SEEDGO" in line
+        lines = capsys.readouterr().out.splitlines()
+        assert len(lines) == 1
+        assert "[SEEDGO" in lines[0]
 
-    def test_includes_message(self):
+    def test_includes_message(self, capsys):
         """Output should include the event message."""
-        mod = _import_unified_stream()
-        mod.print_event("system", "CLI", "started successfully")
-        call_args = mod.console.print.call_args[0][0]
-        assert "started successfully" in call_args
+        unified_stream.print_event("system", "CLI", "started successfully")
+        assert capsys.readouterr().out.rstrip("\n").endswith(" started successfully")
 
-    def test_with_pid(self):
+    def test_with_pid(self, capsys):
         """Output should include PID when provided."""
-        mod = _import_unified_stream()
-        mod.print_event("file", "PRAX", "changed", pid=12345)
-        call_args = mod.console.print.call_args[0][0]
-        assert "12345" in call_args
+        unified_stream.print_event("file", "PRAX", "changed", pid=12345)
+        assert "[PRAX:12345" in capsys.readouterr().out
 
-    def test_error_level_coloring(self):
+    def test_error_level_coloring(self, monkeypatch):
         """Error-level messages should use red color."""
-        mod = _import_unified_stream()
-        mod.print_event("log", "FLOW", "something broke", level="error")
-        call_args = mod.console.print.call_args[0][0]
-        assert "red" in call_args
+        buffer = _colour_console(monkeypatch)
+        unified_stream.print_event("log", "FLOW", "something broke", level="error")
+        assert "\x1b[31msomething broke\x1b[0m" in buffer.getvalue()
 
-    def test_logs_operation(self):
+    def test_logs_operation(self, stream_log):
         """print_event should log via json_handler."""
-        mod = _import_unified_stream()
-        mod.print_event("file", "PRAX", "test message")
-        mod.json_handler.log_operation.assert_called_with(
+        unified_stream.print_event("file", "PRAX", "test message")
+        stream_log.log_operation.assert_called_with(
             "stream_output",
             {"event_type": "file", "branch": "PRAX", "level": "info"},
         )
 
-    def test_branch_color_lookup(self):
+    def test_branch_color_lookup(self, monkeypatch):
         """Should use branch-specific color from BRANCH_COLORS."""
-        mod = _import_unified_stream()
-        mod.print_event("file", "SEEDGO", "test")
-        call_args = mod.console.print.call_args[0][0]
-        assert "green" in call_args  # SEEDGO -> green
+        buffer = _colour_console(monkeypatch)
+        unified_stream.print_event("file", "SEEDGO", "test")
+        assert "\x1b[32mSEEDGO " in buffer.getvalue()  # SEEDGO -> green
 
-    def test_unknown_branch_uses_white(self):
+    def test_unknown_branch_uses_white(self, monkeypatch):
         """Unknown branches should use white as default color."""
-        mod = _import_unified_stream()
-        mod.print_event("file", "XYZUNKNOWN", "test")
-        call_args = mod.console.print.call_args[0][0]
-        assert "white" in call_args
+        buffer = _colour_console(monkeypatch)
+        unified_stream.print_event("file", "XYZUNKNOWN", "test")
+        assert "\x1b[37mXYZUNKNOWN " in buffer.getvalue()
 
 
+@pytest.mark.usefixtures("stream_log")
 class TestPrintCommandSeparator:
     """Tests for print_command_separator()."""
 
-    def test_prints_separator(self):
-        """print_command_separator should call console.print multiple times."""
-        mod = _import_unified_stream()
-        mod.print_command_separator("PRAX", "seedgo audit")
-        assert mod.console.print.call_count >= 3  # blank line + header + separator
+    def test_prints_separator(self, capsys):
+        """A blank line, a rule, the command, a rule: no context line without caller or target."""
+        unified_stream.print_command_separator("PRAX", "seedgo audit")
+        assert capsys.readouterr().out.splitlines() == ["", "─" * 60, "▶ seedgo audit", "─" * 60]
 
-    def test_includes_command(self):
+    def test_includes_command(self, capsys):
         """Output should include the command text."""
-        mod = _import_unified_stream()
-        mod.print_command_separator("CLI", "deploy --force")
-        calls = [str(c) for c in mod.console.print.call_args_list]
-        combined = " ".join(calls)
-        assert "deploy --force" in combined
+        unified_stream.print_command_separator("CLI", "deploy --force")
+        assert "▶ deploy --force" in capsys.readouterr().out.splitlines()
 
-    def test_with_caller(self):
+    def test_with_caller(self, capsys):
         """Output should include caller when provided."""
-        mod = _import_unified_stream()
-        mod.print_command_separator("SEEDGO", "audit PRAX", caller="DRONE")
-        calls = [str(c) for c in mod.console.print.call_args_list]
-        combined = " ".join(calls)
-        assert "DRONE" in combined
+        unified_stream.print_command_separator("SEEDGO", "audit PRAX", caller="DRONE")
+        assert "  DRONE" in capsys.readouterr().out.splitlines()
 
-    def test_with_target(self):
+    def test_with_target(self, capsys):
         """Output should include target when provided."""
-        mod = _import_unified_stream()
-        mod.print_command_separator("SEEDGO", "audit", target="FLOW")
-        calls = [str(c) for c in mod.console.print.call_args_list]
-        combined = " ".join(calls)
-        assert "FLOW" in combined
+        unified_stream.print_command_separator("SEEDGO", "audit", target="FLOW")
+        assert "  → FLOW" in capsys.readouterr().out.splitlines()
 
-    def test_without_caller_or_target(self):
+    def test_without_caller_or_target(self, capsys):
         """Should work without caller or target (no context line crash)."""
-        mod = _import_unified_stream()
-        # Should not raise
-        mod.print_command_separator("PRAX", "status")
-        assert mod.console.print.call_count >= 3
+        unified_stream.print_command_separator("PRAX", "status")
+        assert len(capsys.readouterr().out.splitlines()) == 4
 
 
+@pytest.mark.usefixtures("stream_log")
 class TestPrintStatus:
     """Tests for print_status()."""
 
-    def test_prints_status(self):
-        """print_status should call console.print with status info."""
-        mod = _import_unified_stream()
-        mod.print_status(["PRAX", "CLI"], verbosity=1)
-        assert mod.console.print.called
+    def test_prints_status(self, capsys):
+        """print_status prints its heading."""
+        unified_stream.print_status(["PRAX", "CLI"], verbosity=1)
+        assert "Current Status:" in capsys.readouterr().out.splitlines()
 
-    def test_includes_branch_names(self):
+    def test_includes_branch_names(self, capsys):
         """Status output should list watched branches."""
-        mod = _import_unified_stream()
-        mod.print_status(["SEEDGO", "FLOW"], verbosity=0)
-        calls = [str(c) for c in mod.console.print.call_args_list]
-        combined = " ".join(calls)
-        assert "SEEDGO" in combined
-        assert "FLOW" in combined
+        unified_stream.print_status(["SEEDGO", "FLOW"], verbosity=0)
+        assert "  Watching: SEEDGO, FLOW" in capsys.readouterr().out.splitlines()
 
-    def test_empty_branches_shows_all(self):
+    def test_empty_branches_shows_all(self, capsys):
         """Empty branch list should show 'All branches'."""
-        mod = _import_unified_stream()
-        mod.print_status([], verbosity=0)
-        calls = [str(c) for c in mod.console.print.call_args_list]
-        combined = " ".join(calls)
-        assert "All branches" in combined
+        unified_stream.print_status([], verbosity=0)
+        assert "  Watching: All branches" in capsys.readouterr().out.splitlines()
 
-    def test_includes_verbosity(self):
+    def test_includes_verbosity(self, capsys):
         """Status output should include verbosity level."""
-        mod = _import_unified_stream()
-        mod.print_status(["PRAX"], verbosity=2)
-        calls = [str(c) for c in mod.console.print.call_args_list]
-        combined = " ".join(calls)
-        assert "2" in combined
+        unified_stream.print_status(["PRAX"], verbosity=2)
+        assert "  Verbosity: 2" in capsys.readouterr().out.splitlines()
 
-    def test_with_filters(self):
+    def test_with_filters(self, capsys):
         """Status output should show filter details when provided."""
-        mod = _import_unified_stream()
         filters = {
             "file_types": [".py", ".json"],
             "log_levels": ["error", "warning"],
             "exclude_patterns": ["__pycache__"],
         }
-        mod.print_status(["PRAX"], verbosity=1, filters=filters)
-        calls = [str(c) for c in mod.console.print.call_args_list]
-        combined = " ".join(calls)
-        assert ".py" in combined
-        assert "error" in combined
-        assert "__pycache__" in combined
+        unified_stream.print_status(["PRAX"], verbosity=1, filters=filters)
+        lines = capsys.readouterr().out.splitlines()
+        assert "    File types: .py, .json" in lines
+        assert "    Log levels: error, warning" in lines
+        assert "    Excluded: __pycache__" in lines
 
-    def test_without_filters(self):
+    def test_without_filters(self, capsys):
         """Should work without filters (no crash)."""
-        mod = _import_unified_stream()
-        # Should not raise
-        mod.print_status(["PRAX"], verbosity=0, filters=None)
-        assert mod.console.print.called
+        unified_stream.print_status(["PRAX"], verbosity=0, filters=None)
+        assert "  Filters:" not in capsys.readouterr().out.splitlines()
 
 
 # =============================================

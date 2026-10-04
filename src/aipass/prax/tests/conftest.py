@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for prax tests
 # Version: 2.3.0
 # Created: 2025-11-08
-# Modified: 2026-09-29
+# Modified: 2026-10-03
 # =============================================
 
 """Shared pytest fixtures for prax tests.
@@ -182,27 +182,17 @@ def mock_prax_infrastructure(monkeypatch):
     mock_json_mod = MagicMock()
     mock_json_mod.json_handler = mock_json_handler
 
-    # Mock CLI modules
-    mock_cli = MagicMock()
-    mock_console = MagicMock()
-    mock_console.print = MagicMock()
-    mock_cli.console = mock_console
-    mock_cli.header = MagicMock()
-    mock_cli.error = MagicMock()
-    mock_cli.warning = MagicMock()
-
-    # Inject mocks into sys.modules
+    # Inject mocks into sys.modules. The cli package is not stubbed: the product
+    # prints through the real console, which the width and trigger fixtures above
+    # make safe, and tests read it with capsys (prax, leg 11).
     monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", mock_logger_mod)
     monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.json", mock_json_mod)
     monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.json.json_handler", mock_json_handler)
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", mock_cli)
 
     # Store mocks for test access
     class Mocks:
         logger = mock_logger
         json_handler = mock_json_handler
-        console = mock_console
-        cli = mock_cli
 
     return Mocks
 
