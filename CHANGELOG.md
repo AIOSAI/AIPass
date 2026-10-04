@@ -73,6 +73,8 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **canary: dead local-layout import fallback removed; fleet green leg 1** (DPLAN-0354, a8902c56). The fallback was unreachable and retried a failed module under the wrong name. The reload test became a child-interpreter probe; all 8 test files meet File_Top. Audit 98.01 → 99.97.
+- **commons: a malformed registry (bad branches field or a non-dict entry) refuses the caller lookup; fleet green legs 7 and 8** (DPLAN-0354, 2494a48c, 3e4ca417). Both used to read as "no match" and fall through to the AIPass namesake.
 - **commons: an unreadable caller registry no longer serves an AIPass namesake's identity; fleet green leg 6** (DPLAN-0354, 4e084c8a). An unusable `AIPASS_CALLER_CWD` or an unreadable registry answered an empty list, and the name lookup then served the AIPass citizen of the same name. Both now raise, and the caller lookup refuses with `CallerLookupFailed`.
 - **skills: tests no longer replace stdlib names process-wide or fire the real bus; fleet green leg 3** (DPLAN-0354, ea34a05b). A `_host_platform()` seam and a per-test audit-hook guard replace the `sys.platform` and `open` patches; creator events go to a recorder.
 - **cli: an error inside a routed command now fails the command; fleet green leg 3** (DPLAN-0354, 6620b70d). Module discovery executed each module file a second time, so the routed display was a copy with its own failure flag and the command exited 0. Modules are now imported by dotted name; `display demo` still exits 0 because its sample error is an exhibit.
