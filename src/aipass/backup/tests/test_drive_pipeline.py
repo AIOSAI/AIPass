@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.0.4
+# Version: 3.0.5
 # Created: 2026-06-12
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -383,6 +383,30 @@ class TestDriveClient:
         drive_api.return_value = {"id": "folder_trash", "trashed": True}
 
         assert client._verify_folder_id("folder_trash") is False
+
+    def test_verify_folder_id_answers_none_when_drive_gave_no_answer(self, drive_api: MagicMock) -> None:
+        """No answer is not 'trashed': None, so a caller can tell the two apart."""
+        client = drive_client.DriveClient()
+        client._drive_service = MagicMock(name="drive_service")
+        drive_api.return_value = None
+
+        assert client._verify_folder_id("folder_unknown") is None
+
+    def test_verify_folder_id_answers_none_when_the_request_raises(self, drive_api: MagicMock) -> None:
+        """A request that raises is 'could not ask' too: None, and the cause is logged."""
+        client = drive_client.DriveClient()
+        client._drive_service = MagicMock(name="drive_service")
+        client._drive_service.files.side_effect = RuntimeError("service gone")
+
+        assert client._verify_folder_id("folder_unknown") is None
+        assert drive_api.call_count == 0
+
+    def test_verify_folder_id_answers_none_with_no_service(self) -> None:
+        """No Drive service means nothing was asked: None, not a verdict on the folder."""
+        client = drive_client.DriveClient()
+        client._drive_service = None
+
+        assert client._verify_folder_id("folder_unknown") is None
 
     def test_api_call_hands_the_request_to_the_gateway_with_a_budget_of_three(self, drive_api: MagicMock) -> None:
         """_api_call hands the request straight to the gateway, with the retry budget."""

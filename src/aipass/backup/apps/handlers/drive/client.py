@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: Google Drive client — auth, folders, file lookup via @api gateway
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-04-16
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Google Drive client.
@@ -133,19 +133,25 @@ class DriveClient:
 
     # -- folder ops ----------------------------------------------------------
 
-    def _verify_folder_id(self, folder_id: str) -> bool:
-        """Check that a folder exists and is not trashed."""
+    def _verify_folder_id(self, folder_id: str) -> bool | None:
+        """Check that a folder exists and is not trashed.
+
+        True: Drive says it exists and is not trashed. False: Drive says it is
+        trashed. None: Drive could not be asked (no service, no answer, or the
+        request raised). Every caller reads None like False and searches again;
+        the searches refuse to create on no answer.
+        """
         if not self.drive_service:
-            return False
+            return None
         try:
             request = self.drive_service.files().get(fileId=folder_id, fields="id,trashed")
             result = self._api_call(request)
             if result is None:
-                return False
+                return None
             return not result.get("trashed", True)
         except Exception as exc:
             logger.info(f"Failed to verify folder {folder_id}: {exc}")
-            return False
+            return None
 
     def get_or_create_backup_folder(self) -> str | None:
         """Get or create the root 'AIPass Backups' folder.

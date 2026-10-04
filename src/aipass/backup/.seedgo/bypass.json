@@ -64,6 +64,24 @@
       "standard": "unused_function",
       "reason": "new_result factory is public API surface for result creation",
       "pattern": "unused function"
+    },
+    {
+      "file": "apps/handlers/drive/client.py",
+      "standard": "logged_fallback",
+      "lines": [112, 154, 195, 287, 369],
+      "reason": "Checker reads failure guards as the success path. Success is True (112), True/False (154) or a folder id str (195, 287, 369); every other return of the same False/None is itself a no-service/no-answer failure. Decision of @backup, fleet green leg 5."
+    },
+    {
+      "file": "apps/handlers/drive/share.py",
+      "standard": "logged_fallback",
+      "lines": [81],
+      "reason": "_revoke_public_access returns True only on success; its two other False returns are the could-not-list and could-not-delete failures the docstring names. Checker reads failure guards as the success path. Decision of @backup, fleet green leg 5."
+    },
+    {
+      "file": "apps/handlers/drive/tracker.py",
+      "standard": "logged_fallback",
+      "lines": [103, 117],
+      "reason": "needs_upload answers True on a path it cannot relativise or stat, on purpose and named in its docstring: the upload that follows reports the real failure, where False would skip the file silently on every run. Decision of @backup, fleet green leg 5."
     }
   ],
   "notes": {
