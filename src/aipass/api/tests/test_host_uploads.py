@@ -804,7 +804,7 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
         By name on purpose: FastAPI never raises a validation error with an
         empty list, so no request reaches this input, and a public door would
         exist for this test alone. HELD on through_the_command (api, fleet green
-        leg 9).
+        leg 9), now a line bypass with this reason (api, fleet green leg 11).
         """
         assert host_server._validation_sentence([]) != ""
 

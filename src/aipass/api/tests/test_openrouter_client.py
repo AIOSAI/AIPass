@@ -39,6 +39,7 @@ _MOD = "aipass.api.apps.modules.openrouter_client"
 # The real exception, taken before any test replaces models with an autospec stub,
 # whose class attributes are mocks an except clause cannot match (api, fleet green leg 3).
 _MODELS_UNAVAILABLE = openrouter_client.models.ModelsUnavailable
+_KEY_UNAVAILABLE = openrouter_client.keys.KeyUnavailable
 
 
 # =============================================
@@ -593,10 +594,41 @@ def test_list_models_an_endpoint_with_no_models_is_found_zero(
 @patch(f"{_MOD}.header")
 def test_handle_command_propagates_exception(mock_header, mock_jh, mock_keys):
     """handle_command re-raises exceptions from downstream handlers."""
+    mock_keys.KeyUnavailable = _KEY_UNAVAILABLE
     mock_keys.get_api_key.side_effect = RuntimeError("handler failed")
 
     with pytest.raises(RuntimeError, match="handler failed"):
         openrouter_client.handle_command("test", [])
+
+
+@pytest.mark.parametrize("command", ["test", "models", "status"])
+@patch(f"{_MOD}.error")
+@patch(f"{_MOD}.keys", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
+@patch(f"{_MOD}.header")
+def test_an_unreadable_secrets_file_is_named_not_shrugged_at(mock_header, mock_jh, mock_keys, mock_error, command):
+    """test, models and status show KeyUnavailable's reason instead of a diagnosis of "no key".
+
+    (api, fleet green leg 11)
+    """
+    mock_keys.KeyUnavailable = _KEY_UNAVAILABLE
+    mock_keys.get_api_key.side_effect = _KEY_UNAVAILABLE("The secrets file could not be read (refused)")
+
+    assert openrouter_client.handle_command(command, []) is True
+
+    mock_error.assert_called_once_with("The secrets file could not be read (refused)")
+    mock_keys.diagnose_key.assert_not_called()
+
+
+@patch(f"{_MOD}.error")
+@patch(f"{_MOD}.header")
+def test_make_call_shows_the_reason_when_the_secrets_file_is_unreadable(mock_header, mock_error):
+    """make_call shows the KeyUnavailable that get_response lets through (api, fleet green leg 11)."""
+    unreadable = _KEY_UNAVAILABLE("The secrets file could not be read (refused)")
+    with patch.object(openrouter_client.client, "get_response", side_effect=unreadable):
+        openrouter_client.make_call(["What is AI?", "--model", "test/model"])
+
+    mock_error.assert_called_once_with("The secrets file could not be read (refused)")
 
 
 # =============================================

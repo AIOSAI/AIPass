@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: openrouter_client.py
 # Description: OpenRouter Client Module
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2025-11-15
 # Modified: 2026-10-03
 # =============================================
@@ -156,7 +156,11 @@ def test_connection():
     console.print("[dim]Testing connection...[/dim]")
 
     # Get API key via handler
-    api_key = keys.get_api_key("openrouter")
+    try:
+        api_key = keys.get_api_key("openrouter")
+    except keys.KeyUnavailable as e:
+        error(str(e))
+        return
 
     if not api_key:
         diagnosis = keys.diagnose_key("openrouter")
@@ -209,7 +213,7 @@ def make_call(args: List[str]):
 
     try:
         response = client.get_response(prompt, caller="cli", model=model)
-    except client.OpenRouterUnavailable as e:
+    except (client.OpenRouterUnavailable, keys.KeyUnavailable) as e:
         error(str(e))
         return
 
@@ -229,7 +233,11 @@ def list_models(args: List[str] | None = None):
     show_all = args and "--all" in args
 
     # Get API key via handler
-    api_key = keys.get_api_key("openrouter")
+    try:
+        api_key = keys.get_api_key("openrouter")
+    except keys.KeyUnavailable as e:
+        error(str(e))
+        return
 
     if not api_key:
         diagnosis = keys.diagnose_key("openrouter")
@@ -290,7 +298,11 @@ def check_status():
     console.print()
 
     # Key status
-    api_key = keys.get_api_key("openrouter")
+    try:
+        api_key = keys.get_api_key("openrouter")
+    except keys.KeyUnavailable as e:
+        error(str(e))
+        return
 
     if api_key:
         masked = api_key[:8] + "..." + api_key[-4:]
@@ -344,6 +356,7 @@ def get_response(prompt: str, caller: str | None = None, model: str | None = Non
     Raises:
         client.OpenRouterUnavailable: the SDK refused to build a client or a
         response could not be read; the reason travels (api, fleet green leg 10)
+        keys.KeyUnavailable: the secrets file could not be read (api, fleet green leg 11)
 
     Example:
         >>> from aipass.api.apps.modules.openrouter_client import get_response

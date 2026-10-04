@@ -28,7 +28,8 @@ import pytest
 # paths (a replace the platform refuses, a dump that cannot encode) cannot be
 # reached through cleanup_old_data, which only writes a store it has just read
 # and parsed. A public writer would be a door for these tests alone, so the
-# through_the_command row stands HELD on it (api, fleet green leg 9).
+# through_the_command row stood HELD on it (api, fleet green leg 9) and is
+# now closed by a line bypass carrying this reason (api, fleet green leg 11).
 from aipass.api.apps.handlers.usage.cleanup import (  # seedgo test_coverage detection
     _write_json,
     cleanup_old_data,

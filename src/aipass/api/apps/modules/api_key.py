@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api_key.py
 # Description: API Key Management Module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2025-11-15
-# Modified: 2026-08-11
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -126,7 +126,11 @@ def get_key(args: List[str]):
     console.print()
 
     # Call handler to get key
-    api_key = keys.get_api_key(provider_name)
+    try:
+        api_key = keys.get_api_key(provider_name)
+    except keys.KeyUnavailable as e:
+        error(str(e))
+        return
 
     if api_key:
         success(f"API key retrieved for {provider_name}")
@@ -144,7 +148,11 @@ def validate_key(args: List[str]):
     console.print()
 
     # Get key from handler
-    api_key = keys.get_api_key(provider_name)
+    try:
+        api_key = keys.get_api_key(provider_name)
+    except keys.KeyUnavailable as e:
+        error(str(e))
+        return
 
     if not api_key:
         error(f"No API key found for {provider_name}")
@@ -253,7 +261,11 @@ def get_secret_cmd(args: List[str]):
 
 
 def fetch_api_key(provider: str = "openrouter"):
-    """Retrieve a validated API key for a provider from secrets."""
+    """Retrieve a validated API key for a provider from secrets.
+
+    Raises:
+        keys.KeyUnavailable: the secrets file could not be read (api, fleet green leg 11).
+    """
     return keys.get_api_key(provider)
 
 

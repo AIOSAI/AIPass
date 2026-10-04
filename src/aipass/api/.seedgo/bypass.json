@@ -191,6 +191,42 @@
       "file": "tests/test_host_api.py",
       "standard": "stdlib_patch",
       "reason": "FILE-WIDE, the checker passes no line. One shutil.which answering nothing on PATH, so the route's missing-binary answer does not depend on whether the runner has baud installed (api, fleet green leg 10)."
+    },
+    {
+      "file": "apps/handlers/openrouter/provision.py",
+      "standard": "logged_fallback",
+      "lines": [227, 282],
+      "reason": "Provisioning is non-blocking by design: the failure is logged at error with its reason, and the one caller, client.get_response step 1b, discards the answer inside its deliberate catch, so a raise would only move the fallback. devpulse's ruling of 10-03 (leg 11 dispatch); no product change (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/test_host_attach.py",
+      "standard": "through_the_command",
+      "lines": [1513, 2274],
+      "reason": "1513: the fake PTY's resize validates with the product's own _require_dimension, so the double refuses exactly what the real session refuses; a copied validator would drift, and a public one would be a door for the double alone. 2274: _acquire_controlling_tty's off-POSIX refusal is reached by no caller (all sit behind PTY_AVAILABLE) and runs in a forked child; its injected defaults are the only way in. Both were HELD since leg 8 (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/test_host_perf.py",
+      "standard": "through_the_command",
+      "lines": [920, 945, 946, 949],
+      "reason": "920: the close order of the two PTY ends on a failed spawn is visible only through _spawn_pty's close_fd seam. 945-949: an over-release of the session semaphore is an accounting bug no request can produce; the test uses the module's own bounded semaphore, since a stand-in would pass with the module downgraded. A public door would exist for these tests alone. HELD since leg 9 (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/test_cleanup.py",
+      "standard": "through_the_command",
+      "lines": [33],
+      "reason": "_write_json is imported by name: its parent mkdir and its two failure paths cannot be reached through cleanup_old_data, which only writes a store it has just read and parsed. A public writer would be a door for these tests alone. HELD since leg 9 (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/test_caller_detection.py",
+      "standard": "through_the_command",
+      "lines": [28],
+      "reason": "The flow and prax detection is pinned through get_caller_info (TestGetCallerInfo). The helpers stay imported by name for their fallback branch, where parts.index raises, which a stack frame's filename (a str turned into a Path) cannot produce; _create_fallback_info is reached only there. HELD since leg 9 (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/test_host_uploads.py",
+      "standard": "through_the_command",
+      "lines": [809],
+      "reason": "_validation_sentence([]): FastAPI never raises a validation error with an empty list, so no request reaches this input, and a public door would exist for this test alone. HELD since leg 9 (api, fleet green leg 11)."
     }
   ],
   "notes": {

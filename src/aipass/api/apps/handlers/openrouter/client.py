@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: OpenRouter Client Handler
-# Version: 3.1.0
+# Version: 3.1.1
 # Created: 2025-11-15
 # Modified: 2026-10-03
 # =============================================
@@ -325,6 +325,8 @@ def get_response(
     Raises:
         OpenRouterUnavailable: from create_client or extract_response, let through
         so the caller can show the reason (api, fleet green leg 10)
+        KeyUnavailable: from get_api_key, the secrets file could not be read
+        (api, fleet green leg 11)
 
     Example:
         >>> response = get_response("What is Python?", caller="cli", model="anthropic/claude-3.5-sonnet")

@@ -3,7 +3,7 @@
 # Description: Tests for API Key Management Module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-10-03
 # =============================================
 
 """Tests for apps/modules/api_key.py, the API key management module."""
@@ -516,10 +516,32 @@ def test_print_introspection_shows_handlers(mock_header, mock_console):
 @patch(PATCH_HEADER)
 def test_handle_command_propagates_exception(mock_header, mock_console, mock_jh, mock_keys):
     """handle_command re-raises exceptions from downstream handlers."""
+    mock_keys.KeyUnavailable = keys_handler.KeyUnavailable
     mock_keys.get_api_key.side_effect = RuntimeError("handler failed")
 
     with pytest.raises(RuntimeError, match="handler failed"):
         api_key.handle_command("get-key", ["openrouter"])
+
+
+@pytest.mark.parametrize("command", ["get-key", "validate"])
+@patch(PATCH_ERROR)
+@patch(PATCH_SUCCESS)
+@patch(PATCH_KEYS)
+@patch(PATCH_JSON_HANDLER)
+@patch(PATCH_CONSOLE)
+@patch(PATCH_HEADER)
+def test_an_unreadable_secrets_file_is_named(
+    mock_header, mock_console, mock_jh, mock_keys, mock_success, mock_error, command
+):
+    """get-key and validate show KeyUnavailable's reason, not "no key found" (api, fleet green leg 11)."""
+    mock_keys.KeyUnavailable = keys_handler.KeyUnavailable
+    mock_keys.get_api_key.side_effect = keys_handler.KeyUnavailable("The secrets file could not be read (refused)")
+
+    assert api_key.handle_command(command, ["openrouter"]) is True
+
+    mock_error.assert_called_once_with("The secrets file could not be read (refused)")
+    mock_keys.validate_key.assert_not_called()
+    mock_success.assert_not_called()
 
 
 # =============================================

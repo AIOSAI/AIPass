@@ -88,6 +88,34 @@ class TestGetApiKey:
 
         assert result is None
 
+    @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
+    def test_an_unreadable_secrets_file_raises_naming_only_the_error(self, mock_jh, tmp_path, monkeypatch):
+        """A secrets file that does not read raises KeyUnavailable, with no byte of the file in it.
+
+        It used to answer None, which read the same as "no key set". The
+        reason is what the interpreter itself raises on the same read, asked
+        here with the test's own hands (api, fleet green leg 11).
+        """
+        secrets_dir = tmp_path / ".secrets" / "aipass"
+        secrets_dir.mkdir(parents=True)
+        env_file = secrets_dir / ".env"
+        env_file.write_bytes(b"OPENROUTER_API_KEY=\xff\xfeQZ\n")
+        try:
+            env_file.read_text(encoding="utf-8")
+        except Exception as own:
+            expected = getattr(own, "strerror", None) or type(own).__name__
+        else:
+            pytest.fail("the stand-in file read cleanly; it cannot stand for an unreadable one")
+
+        _home_at(monkeypatch, tmp_path)
+        with pytest.raises(api_key.keys.KeyUnavailable) as caught:
+            api_key.fetch_api_key("openrouter")
+
+        assert str(caught.value) == f"The secrets file could not be read ({expected})"
+        assert caught.value.__cause__ is None
+        assert caught.value.__suppress_context__ is True
+        mock_jh.log_operation.assert_not_called()
+
 
 # =============================================
 # 2. validate_key() tests
