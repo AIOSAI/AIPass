@@ -227,6 +227,24 @@
       "standard": "through_the_command",
       "lines": [809],
       "reason": "_validation_sentence([]): FastAPI never raises a validation error with an empty list, so no request reaches this input, and a public door would exist for this test alone. HELD since leg 9 (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/test_host_read_lane.py",
+      "standard": "through_the_command",
+      "lines": [153, 155, 890, 891, 1001, 1017, 1041, 1072],
+      "reason": "The git-changes ReadCache (host_git._changes) cleared around each case (153, 155), its stored entry aged past the TTL (890, 891), its entries and failures inspected after a refusal and a recovery (1001, 1072), and its single-flight lock counted (1017, 1041). A cache reset or inspection between tests is not a route the product has, and a public one would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch) (api, fleet green leg 12)."
+    },
+    {
+      "file": "tests/test_host_fleet.py",
+      "standard": "through_the_command",
+      "lines": [1187, 1190, 1411, 1414],
+      "reason": "host_machine._vitals and host_lock._state cleared around the cases that read them, so one case's cached answer is never served to the next. A cache reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch) (api, fleet green leg 12)."
+    },
+    {
+      "file": "tests/conftest.py",
+      "standard": "through_the_command",
+      "lines": [234, 236],
+      "reason": "_refusals._reset_refusals() empties the refusal memory around every test, so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12)."
     }
   ],
   "notes": {
