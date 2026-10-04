@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_programs.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Which programs only read, and which only take data — the default-deny tables (DPLAN-0356 phase 4)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-01
+# Modified: 2026-10-04
 # =============================================
 
 """The tables that invert the gates: what is KNOWN safe, so everything else is not (DPLAN-0356 phase 4).
@@ -39,6 +39,8 @@ READ_ONLY_PROGRAMS = frozenset(
         "cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "jq", "wc", "stat",
         "ls", "dir", "tree", "diff", "cmp", "file", "du", "realpath", "readlink", "basename", "dirname",
         "sha256sum", "sha1sum", "sha512sum", "md5sum", "b2sum", "cksum", "test", "[", "drone",
+        # A directory change writes nothing (trigger a837a4c7: `cd <dir> && pytest` was refused as a write).
+        "cd", "pushd", "popd",
     }
 )  # fmt: skip
 

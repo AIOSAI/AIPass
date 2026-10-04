@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-10-01
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -1015,6 +1015,20 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
         memory = (seat / ".trinity" / "local.json").as_posix()
         assert _blocked(_run(str(seat), command=f"unknownwriter {memory}"))
         assert _run(str(seat), command=f"jq . {memory}")["exit_code"] == 0
+
+    @pytest.mark.parametrize("cd", ["cd", "pushd"])
+    def test_a_cd_into_another_branch_is_a_read_not_a_write(self, registered_projects: dict, grant_withheld, cd):
+        """Trigger a837a4c7, 54 hits from 10-01: `cd <AIPass>/src/aipass && ...` was refused, cd's directory
+        read as a write. Only the cd is cured: pytest naming another branch's directory stays that branch's."""
+        seat = Path(registered_projects["hooks"])
+        other = Path(registered_projects["memory"]).as_posix()
+        for command in (f"{cd} {seat.parent.as_posix()} && pytest hooks/tests -q", f"{cd} {other} && popd"):
+            result = _run(registered_projects["hooks"], command=command)
+            assert result["exit_code"] == 0, result["stdout"]
+
+    def test_a_cd_does_not_carry_a_delete_past_the_fence(self, registered_projects: dict, grant_withheld):
+        other = Path(registered_projects["memory"]).as_posix()
+        assert _blocked(_run(registered_projects["hooks"], command=f"cd {other} && rm apps/x.py"))
 
     def test_drone_and_own_branch_work_still_pass(self, registered_projects: dict):
         seat = registered_projects["hooks"]
