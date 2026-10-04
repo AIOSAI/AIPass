@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_identity.py
 # Description: Unit tests for identity module and identity_ops handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/commons_identity.py and apps/handlers/identity/identity_ops.py."""
@@ -627,8 +627,12 @@ def test_branches_from_registry_dict_shape(tmp_path: Path, monkeypatch: pytest.M
     assert result["name"] == "VERA"
 
 
-def test_branches_from_registry_malformed_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
-    """A corrupt registry is reported and skipped, never raised."""
+def test_a_corrupt_caller_registry_raises_instead_of_answering_not_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path
+):
+    """Defect: a corrupt registry was skipped, so the lookup answered None, the same as no match."""
+    import json as json_mod
+
     project = tmp_path / "Vera-Studio"
     project.mkdir()
     branch_dir = project / "src" / "vera"
@@ -637,9 +641,70 @@ def test_branches_from_registry_malformed_json(tmp_path: Path, monkeypatch: pyte
     (project / "VERA-STUDIO_REGISTRY.json").write_text("{not json", encoding="utf-8")
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    result = _id_mod.get_branch_info_from_registry(branch_dir)
+    with pytest.raises(json_mod.JSONDecodeError):
+        _id_mod.get_branch_info_from_registry(branch_dir)
 
-    assert result is None
+
+@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.identity.identity_ops._ensure_agent_registered")
+def test_get_caller_branch_refuses_a_corrupt_caller_registry_instead_of_serving_the_aipass_namesake(
+    mock_register: MagicMock,
+    mock_json: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    aipass_registry: Path,
+):
+    """Defect: the corrupt registry was skipped and AIPASS_CALLER_BRANCH served AIPass's @drone."""
+    import json as json_mod
+
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project, name="DRONE", email="@vera-drone")
+    (project / "VERA-STUDIO_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "drone")
+
+    with pytest.raises(_ops.CallerLookupFailed, match="Caller lookup failed") as raised:
+        _ops.get_caller_branch()
+
+    assert isinstance(raised.value.__cause__, json_mod.JSONDecodeError)
+    mock_register.assert_not_called()
+    mock_json.log_operation.assert_not_called()
+
+
+@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.identity.identity_ops._ensure_agent_registered")
+def test_get_caller_branch_refuses_an_unusable_caller_cwd_instead_of_serving_the_aipass_namesake(
+    mock_register: MagicMock,
+    mock_json: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    aipass_registry: Path,
+):
+    """Defect: a caller cwd that would not resolve was skipped and AIPASS_CALLER_BRANCH served AIPass's @drone."""
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project, name="DRONE", email="@vera-drone")
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "drone")
+    unusable = OSError("caller cwd unusable")
+
+    # Bound as identity_ops' own Path, so pathlib stays whole for every other
+    # module; find_branch_root is replaced so the denial lands on the walk for
+    # the caller's registries alone. type(Path()): Path subclasses need 3.12.
+    class _DeniedResolvePath(type(Path())):
+        def resolve(self, strict: bool = False):
+            raise unusable
+
+    monkeypatch.setattr(_ops, "Path", _DeniedResolvePath)
+    monkeypatch.setattr(_ops, "find_branch_root", lambda start_path: branch_dir)
+
+    with pytest.raises(_ops.CallerLookupFailed, match="Caller lookup failed: caller cwd unusable") as raised:
+        _ops.get_caller_branch()
+
+    assert raised.value.__cause__ is unusable
+    mock_register.assert_not_called()
+    mock_json.log_operation.assert_not_called()
 
 
 # ===========================================================================

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: identity_ops.py
 # Description: Identity operations handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -154,7 +154,14 @@ def _find_caller_registries() -> List[Path]:
     lowercase counter would otherwise answer an identity lookup.
 
     Returns:
-        List of registry paths from the nearest matching directory, or [].
+        List of registry paths from the nearest matching directory, or []
+        when AIPASS_CALLER_CWD is unset or no directory holds a registry.
+
+    Raises:
+        OSError: AIPASS_CALLER_CWD would not resolve. Logged, then raised:
+            an empty list would let get_caller_branch fall through to the
+            AIPass registry by name and serve a namesake's identity
+            (commons' decision, DPLAN-0354 leg 6).
     """
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
     if not caller_cwd:
@@ -164,7 +171,7 @@ def _find_caller_registries() -> List[Path]:
         caller_path = Path(caller_cwd).resolve()
     except OSError as exc:
         logger.warning(f"[commons.identity] Unusable AIPASS_CALLER_CWD '{caller_cwd}': {exc}")
-        return []
+        raise
 
     primary = BRANCH_REGISTRY_PATH.resolve() if BRANCH_REGISTRY_PATH.exists() else None
 
@@ -196,7 +203,14 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, Any]]:
 
     Returns:
         List of branch dicts (dict-shaped registries are flattened to
-        their values), or [] if the file is missing or unreadable.
+        their values), or [] if the file is missing or its branches
+        field is malformed.
+
+    Raises:
+        OSError, json.JSONDecodeError: the file exists but cannot be read
+            or parsed. Logged, then raised: an empty list reads as "no
+            match", and get_caller_branch would then serve the AIPass
+            namesake by name (commons' decision, DPLAN-0354 leg 6).
     """
     if not registry_path.exists():
         return []
@@ -206,7 +220,7 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, Any]]:
             registry = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning(f"[commons.identity] Unreadable registry {registry_path.name}: {exc}")
-        return []
+        raise
 
     raw_branches = registry.get("branches", [])
     if isinstance(raw_branches, dict):
@@ -262,6 +276,11 @@ def _search_registries(matcher: Callable[[Path], Optional[Dict[str, Any]]]) -> O
 
     Returns:
         The first branch dict any registry matched, or None.
+
+    Raises:
+        OSError, json.JSONDecodeError: a registry that exists could not be
+            read, or AIPASS_CALLER_CWD would not resolve. get_caller_branch,
+            the one product caller, turns both into CallerLookupFailed.
     """
     found = matcher(BRANCH_REGISTRY_PATH)
     if found:
