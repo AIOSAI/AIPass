@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import List, Tuple
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from aipass.flow.apps.handlers.registry import monitor_ops
 from aipass.flow.apps.handlers.template import get_template as template_mod
 from aipass.flow.apps.modules import registry_monitor
@@ -77,26 +79,33 @@ class TestHandleWalkError:
         """PermissionError should not trigger a warning log.
 
         Mutant: if not isinstance(error, PermissionError): -> if isinstance(error, OSError): reddens this.
-        """
-        mod = monitor_ops
-        with patch.object(mod, "_fire_event", return_value=True):
-            restricted = tmp_path / "restricted"
-            restricted.mkdir()
-            _make_plan_file(tmp_path, "0001")
 
-            os.chmod(str(restricted), 0o000)
-            try:
-                result = mod.scan_plan_files_impl(
-                    ecosystem_root=tmp_path,
-                    load_registry=lambda: {"plans": {}},
-                )
-                # The scan still finds the readable plan, and says nothing
-                # about the directory it was refused.
-                assert result["added"] == ["0001"]
-                warned = [str(c) for c in mock_logger.warning.call_args_list]
-                assert not any("Error during scan" in w for w in warned), warned
-            finally:
-                os.chmod(str(restricted), 0o755)
+        Windows ignores permission bits and root reads through them, so on
+        either host chmod 000 refuses nothing and this world cannot be built:
+        the test skips there (TEST_TEMPLATE rule 23).
+        """
+        if os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0):
+            pytest.skip("chmod 000 refuses no directory on Windows or to root")
+        else:
+            mod = monitor_ops
+            with patch.object(mod, "_fire_event", return_value=True):
+                restricted = tmp_path / "restricted"
+                restricted.mkdir()
+                _make_plan_file(tmp_path, "0001")
+
+                os.chmod(str(restricted), 0o000)
+                try:
+                    result = mod.scan_plan_files_impl(
+                        ecosystem_root=tmp_path,
+                        load_registry=lambda: {"plans": {}},
+                    )
+                    # The scan still finds the readable plan, and says nothing
+                    # about the directory it was refused.
+                    assert result["added"] == ["0001"]
+                    warned = [str(c) for c in mock_logger.warning.call_args_list]
+                    assert not any("Error during scan" in w for w in warned), warned
+                finally:
+                    os.chmod(str(restricted), 0o755)
 
     def test_generic_os_error_logs_warning(self, tmp_path, mock_logger):
         """Non-PermissionError OSError should be logged as warning."""

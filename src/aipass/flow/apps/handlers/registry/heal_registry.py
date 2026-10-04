@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: heal_registry.py
 # Description: Registry Doctrine Self-Heal Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-29
 # Modified: 2026-10-04
 # =============================================
@@ -142,8 +142,12 @@ def _heal_not_a_plan_rows(
         )
         logger.warning(f"[{MODULE_NAME}] Closed {prefix}-{number}, registry only: its file is not a plan: {file_path}")
 
-    if actions:
-        save_registry_fn(registry, registry_file=registry_file)
+    # save_registry answers False rather than raising. Each sweep runs in its
+    # own try in heal_registry_doctrine_impl, so this raise is logged as that
+    # sweep's failure instead of reporting rows never written (flow's
+    # decision, leg 10). The same holds at every save in this file.
+    if actions and not save_registry_fn(registry, registry_file=registry_file):
+        raise OSError(f"could not save {registry_file}: no row was closed")
     return actions
 
 
@@ -245,7 +249,8 @@ def _heal_missing_file_plans(
     if closed_count == 0:
         return []
 
-    save_registry_fn(registry, registry_file=registry_file)
+    if not save_registry_fn(registry, registry_file=registry_file):
+        raise OSError(f"could not save {registry_file}: no missing-file row was closed")
 
     actions: List[Dict[str, Any]] = []
     for number in sorted(open_before):
@@ -494,7 +499,8 @@ def _heal_wrong_prefix_rows(
                 action = "removed_orphaned_wrong_prefix_row"
 
             del host_registry["plans"][number]
-            save_registry_fn(host_registry, registry_file=host_registry_file)
+            if not save_registry_fn(host_registry, registry_file=host_registry_file):
+                raise OSError(f"could not save {host_registry_file}: row '{number}' is still there")
 
             actions.append(
                 {
@@ -757,8 +763,8 @@ def _heal_orphan_locations(
             )
             logger.info(f"[{MODULE_NAME}] {plan_id}: location re-attributed {raw_location} -> {seat}")
 
-        if dirty:
-            save_registry_fn(registry, registry_file)
+        if dirty and not save_registry_fn(registry, registry_file):
+            raise OSError(f"could not save {registry_file}: no location was re-attributed")
 
     if quarantined:
         logger.warning(

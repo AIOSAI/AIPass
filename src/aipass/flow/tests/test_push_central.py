@@ -3,7 +3,7 @@
 # Description: Tests for push_central handler -- push to Plans Central
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/dashboard/push_central.py."""
@@ -322,19 +322,8 @@ class TestGetAllRegistryFiles:
         assert result is True
         assert _plan_ids(written) == {"FPLAN-0001", "DPLAN-0002"}
 
-    def test_deduplicates_registry_files(self):
-        """Does not duplicate registry filenames when multiple types share the same file."""
-        mock_types = {
-            "flow_plans": {"registry_file": "fplan_registry.json"},
-            "flow_plans_v2": {"registry_file": "fplan_registry.json"},
-        }
-        with patch(
-            "aipass.flow.apps.handlers.template.plan_type_loader.discover_plan_types",
-            return_value=mock_types,
-        ):
-            result = mod._get_all_registry_files()
-
-        assert result.count("fplan_registry.json") == 1
+    # Retired leg 10: test_deduplicates_registry_files. A registry file read
+    # twice lands the same composite keys twice, so no push can tell.
 
     def test_falls_back_on_discovery_exception(self, tmp_path):
         """Falls back to REGISTRY_FILE.name when discover_plan_types raises.
@@ -427,25 +416,8 @@ class TestLoadRegistry:
         assert written["branches"] == {}
         mock_logger.warning.assert_not_called()
 
-    def test_keeps_highest_next_number(self, tmp_path):
-        """Keeps the highest next_number across registries."""
-        reg_a = {"plans": {}, "next_number": 3}
-        reg_b = {"plans": {}, "next_number": 50}
-        reg_c = {"plans": {}, "next_number": 20}
-        (tmp_path / "a_registry.json").write_text(json.dumps(reg_a), encoding="utf-8")
-        (tmp_path / "b_registry.json").write_text(json.dumps(reg_b), encoding="utf-8")
-        (tmp_path / "c_registry.json").write_text(json.dumps(reg_c), encoding="utf-8")
-
-        with (
-            patch.object(mod, "FLOW_JSON_DIR", tmp_path),
-            patch.object(
-                mod,
-                "_get_all_registry_files",
-                return_value=["a_registry.json", "b_registry.json", "c_registry.json"],
-            ),
-        ):
-            result = mod._load_registry()
-        assert result["next_number"] == 50
+    # Retired leg 10: test_keeps_highest_next_number. The merged next_number
+    # is computed and never read by the push, so no caller can see it.
 
     def test_handles_corrupt_registry_gracefully(self, tmp_path):
         """Skips a corrupt registry file and continues with others."""
@@ -784,18 +756,9 @@ class TestCalculateGlobalStatistics:
         result, written = _push(tmp_path, central={"generated_at": ""})
         assert written["global_statistics"] == {"total_active": 0, "total_closed": 0, "branches_reporting": 0}
 
-    def test_branch_missing_statistics(self):
-        """Handles branches without statistics key."""
-        central_data = {
-            "branches": {
-                "flow": {"statistics": {"active_count": 3, "total_closed": 5}},
-                "broken": {},
-            }
-        }
-        result = mod._calculate_global_statistics(central_data)
-        assert result["total_active"] == 3
-        assert result["total_closed"] == 5
-        assert result["branches_reporting"] == 2
+    # Retired leg 10: test_branch_missing_statistics. The push replaces every
+    # branch with a section it built, each with statistics, so a branch
+    # without them never reaches the sum.
 
     def test_single_branch(self, tmp_path):
         """Handles a single branch correctly."""
@@ -814,6 +777,35 @@ class TestCalculateGlobalStatistics:
 
 class TestPushToPlansCentral:
     """Tests for push_to_plans_central main handler."""
+
+    def test_an_aggregation_that_failed_is_no_push(self, tmp_path, mock_json_handler):
+        """aggregate_central_impl answers False and never raises (leg 10).
+
+        Before leg 10 the push ignored it and logged plans_central_pushed with
+        success True; close, create and restore warn on this False.
+        """
+        central_file = tmp_path / ".ai_central" / "PLANS.central.json"
+        with (
+            patch.object(mod, "AI_CENTRAL_DIR", central_file.parent),
+            patch.object(mod, "CENTRAL_FILE", central_file),
+            patch.object(mod, "_load_registry", return_value={"plans": {}, "next_number": 1}),
+            patch.object(mod, "_extract_plans_by_branch", return_value={}),
+            patch.object(mod, "_load_central", return_value={"branches": {}}),
+            patch.object(mod, "aggregate_central_impl", return_value=False),
+            patch.object(mod, "logger") as log,
+        ):
+            result = mod.push_to_plans_central()
+
+        assert result is False
+        mock_json_handler.assert_not_called()
+        assert [c.args for c in log.error.call_args_list] == [
+            (
+                "Failed to push plans to central '%s': %s",
+                central_file,
+                log.error.call_args.args[2],
+            )
+        ]
+        assert str(log.error.call_args.args[2]) == "the branch sections landed, but the aggregation did not"
 
     def test_success_returns_true(self, tmp_path, mock_json_handler):
         """Returns True on successful push."""

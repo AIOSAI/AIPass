@@ -129,6 +129,27 @@ class TestRestoreSuccess:
         assert result["restored_location"] == str(tmp_path)
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
+    def test_an_unsaved_restore_fails_and_says_so(self, tmp_path):
+        """save_registry answers False, never raises: the plan is still closed (leg 10)."""
+        plan_file = tmp_path / "FPLAN-0001.md"
+        plan_file.write_text("# Plan", encoding="utf-8")
+        registry = {"plans": {"0001": {"status": "closed", "file_path": str(plan_file), "location": str(tmp_path)}}}
+        deps = _make_deps(load_registry=MagicMock(return_value=registry), save_registry=MagicMock(return_value=False))
+
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+            result = restore_plan_impl(plan_num="1", **deps)
+
+        assert result["success"] is False
+        assert result["messages"][-1] == {
+            "type": "error",
+            "error_type": "general",
+            "plan_key": "0001",
+            "details": "could not save the registry, so the plan is still closed. Run restore again.",
+            "prefix": "FPLAN",
+        }
+        mock_trigger.fire.assert_not_called()
+        deps["update_dashboard_local"].assert_not_called()
+
     def test_registry_saved_after_restore(self, tmp_path):
         fn = restore_plan_impl
         plan_file = tmp_path / "FPLAN-0001.md"
@@ -634,6 +655,31 @@ class TestRecoverPlanFromBackup:
         saved_reg = save.call_args[0][0]
         assert "0042" in saved_reg["plans"]
         assert saved_reg["plans"]["0042"]["status"] == "closed"
+
+    def test_an_unsaved_registry_is_no_recovery(self, tmp_path):
+        """save_registry answers False, never raises: the row does not exist (leg 10).
+
+        Before leg 10 this answered (True, "Recovered ...") and restore_plan_impl
+        then read the missing row.
+        """
+        fn = recover_plan_from_backup
+        backup_dir = tmp_path / "processed_plans"
+        backup_dir.mkdir()
+        (backup_dir / "FPLAN-0042.md").write_text("# Plan\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
+        save = MagicMock(return_value=False)
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir),
+            patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", tmp_path / "flow"),
+        ):
+            ok, msg = fn("0042", load_registry=MagicMock(return_value={"plans": {}}), save_registry=save)
+
+        assert ok is False
+        assert msg == (
+            f"Copied FPLAN-0042.md to {tmp_path / 'FPLAN-0042.md'}, but could not save the registry, "
+            "so no row names it: FPLAN-0042 was not recovered"
+        )
 
     def test_a_registry_that_cannot_be_loaded_leaves_no_copy_behind(self, tmp_path):
         """The load runs before the copy, so its raise leaves nothing on disk.

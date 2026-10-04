@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: close_ops.py
 # Description: Plan Closure Implementation Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-08
 # Modified: 2026-10-04
 # =============================================
@@ -381,9 +381,13 @@ def close_plan_impl(
             plan_info["status"] = "closed"
             plan_info["closed"] = datetime.now(timezone.utc).isoformat()
             if reg_file:
-                save_registry(registry, registry_file=reg_file)
+                saved = save_registry(registry, registry_file=reg_file)
             else:
-                save_registry(registry)
+                saved = save_registry(registry)
+            # save_registry answers False rather than raising, so the except
+            # below never saw a failed save (flow's decision, leg 10).
+            if not saved:
+                raise OSError("the registry was not saved; the plan is still open and nothing was archived")
             logger.info(f"[{MODULE_NAME}] Marked {plan_label} as closed")
         except Exception as e:
             logger.error(f"[{MODULE_NAME}] Failed to mark plan as closed: {e}")
@@ -411,9 +415,12 @@ def close_plan_impl(
                 plan_info["cleanup_completed"] = True
                 plan_info["cleanup_date"] = datetime.now(timezone.utc).isoformat()
                 if reg_file:
-                    save_registry(registry, registry_file=reg_file)
+                    saved = save_registry(registry, registry_file=reg_file)
                 else:
-                    save_registry(registry)
+                    saved = save_registry(registry)
+                if not saved:
+                    warn = "  Archived, but could not save the registry: the row reads unarchived"
+                    messages.append({"type": "warning", "text": warn})
                 if plan_file.parent != PROCESSED_PLANS_DIR:
                     logger.info(f"[{MODULE_NAME}] Archived {plan_label} to processed_plans")
                     messages.append({"type": "dim", "text": "  Plan archived to processed_plans/"})

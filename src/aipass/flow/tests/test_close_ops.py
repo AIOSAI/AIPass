@@ -18,12 +18,8 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
-import aipass.flow.apps.handlers.plan.append_closed_plan as append_closed_plan
 import aipass.flow.apps.handlers.plan.close_ops as close_ops
 from aipass.flow.apps.handlers.plan.close_ops import (
-    _extract_prefix,
-    _find_unregistered_plan_file,
-    _self_heal_unregistered_plan,
     close_all_plans_impl,
     close_plan_impl,
 )
@@ -172,46 +168,29 @@ def _make_deps(**overrides) -> dict:
 
 
 class TestExtractPrefix:
-    def test_fplan_prefix(self):
-        fn = _extract_prefix
-        assert fn("FPLAN-0001") == "FPLAN"
+    """_extract_prefix, reached through canonical_plan_id, its public caller (leg 10).
 
-    def test_dplan_prefix(self):
-        fn = _extract_prefix
-        assert fn("DPLAN-0004") == "DPLAN"
+    The prefix is read off the row's file name: only a [A-Z]+PLAN prefix
+    counts, case-blind and stripped, and it comes back upper case.
+    """
 
-    def test_lowercase_normalised_to_upper(self):
-        fn = _extract_prefix
-        assert fn("fplan-0099") == "FPLAN"
-
-    def test_mixed_case(self):
-        fn = _extract_prefix
-        assert fn("Dplan-0002") == "DPLAN"
-
-    def test_bare_number_returns_none(self):
-        fn = _extract_prefix
-        assert fn("0001") is None
-
-    def test_bare_number_no_dash_returns_none(self):
-        fn = _extract_prefix
-        assert fn("42") is None
-
-    def test_empty_string_returns_none(self):
-        fn = _extract_prefix
-        assert fn("") is None
-
-    def test_prefix_without_plan_suffix_returns_none(self):
-        """Only strings with PLAN in the prefix match."""
-        fn = _extract_prefix
-        assert fn("FOO-0001") is None
-
-    def test_whitespace_stripped(self):
-        fn = _extract_prefix
-        assert fn("  FPLAN-0001  ") == "FPLAN"
-
-    def test_custom_plan_type_prefix(self):
-        fn = _extract_prefix
-        assert fn("XYZPLAN-0010") == "XYZPLAN"
+    @pytest.mark.parametrize(
+        ("file_name", "expected"),
+        [
+            ("FPLAN-0001", "FPLAN-1"),
+            ("DPLAN-0004", "DPLAN-1"),
+            ("fplan-0099", "FPLAN-1"),
+            ("Dplan-0002", "DPLAN-1"),
+            ("0001", None),
+            ("42", None),
+            ("", None),
+            ("FOO-0001", None),
+            ("  FPLAN-0001  ", "FPLAN-1"),
+            ("XYZPLAN-0010", "XYZPLAN-1"),
+        ],
+    )
+    def test_the_prefix_read_off_the_file_name(self, file_name, expected):
+        assert canonical_plan_id("1", {"file_path": file_name}) == expected
 
 
 # ═══════════════════════════════════════════════════════════
@@ -429,6 +408,74 @@ class TestCloseNeverArchivesAFileThatIsNotAPlan:
         mock_bg.assert_called_once_with()  # one runner for the one plan archived
 
 
+class TestAFailedSaveIsSaidNotSwallowed:
+    """Leg 10: save_registry answers False when it could not write, and never raises.
+
+    Close ignored that False at three saves: it said "closed" with the registry
+    unwritten, and "archived" with the row still reading unarchived.
+    """
+
+    @staticmethod
+    def _close(tmp_path, row: dict, deps: dict) -> dict:
+        deps["load_registry"].return_value = {"plans": {"1": row}}
+        with (
+            patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
+            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+        ):
+            return close_plan_impl(plan_num="1", spawn_background=False, **deps)
+
+    @staticmethod
+    def _plan(tmp_path) -> Path:
+        plan = tmp_path / "FPLAN-0001_real_2026-10-04.md"
+        plan.write_text("# FPLAN-0001: real\nnotes\n", encoding="utf-8")
+        return plan
+
+    def test_an_unsaved_close_fails_and_archives_nothing(self, tmp_path):
+        plan = self._plan(tmp_path)
+        row = {"status": "open", "subject": "real", "location": str(tmp_path), "file_path": str(plan)}
+        deps = _make_deps(save_registry=MagicMock(return_value=False))
+
+        result = self._close(tmp_path, row, deps)
+
+        assert result["success"] is False
+        assert result["messages"][-1] == {
+            "type": "error_text",
+            "text": "  Failed to update registry: the registry was not saved; "
+            "the plan is still open and nothing was archived",
+        }
+        deps["archive_plan_fn"].assert_not_called()
+
+    def test_an_unsaved_archive_mark_is_said(self, tmp_path):
+        """The close itself saved; the archive mark after it did not."""
+        plan = self._plan(tmp_path)
+        row = {"status": "open", "subject": "real", "location": str(tmp_path), "file_path": str(plan)}
+        deps = _make_deps(save_registry=MagicMock(side_effect=[True, False]))
+
+        result = self._close(tmp_path, row, deps)
+
+        assert result["success"] is True
+        deps["archive_plan_fn"].assert_called_once_with(plan)
+        assert {
+            "type": "warning",
+            "text": "  Archived, but could not save the registry: the row reads unarchived",
+        } in result["messages"]
+
+    def test_an_unsaved_orphan_cleanup_is_said(self, tmp_path):
+        plan = self._plan(tmp_path)
+        row = {"status": "closed", "closed": "2026-10-04", "file_path": str(plan)}
+        deps = _make_deps(save_registry=MagicMock(return_value=False))
+
+        result = self._close(tmp_path, row, deps)
+
+        deps["archive_plan_fn"].assert_called_once_with(plan)
+        assert {
+            "type": "warning",
+            "text": "  Archived, but could not save the registry: the row reads unarchived",
+        } in result["messages"]
+
+
 class TestClosePlanImplDryRun:
     """Dry run previews without acting."""
 
@@ -603,7 +650,7 @@ class TestClosePlanImplSuccess:
     def test_closed_plans_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
         """A denial past the budget: exactly the budget of attempts, the close
         still succeeds (the append is non-critical) but reports the failed
-        append, and the helper's PermissionError is chained to the last denial.
+        append with its reason.
         """
 
         closed_plans = tmp_path / "CLOSED_PLANS.local.json"
@@ -641,17 +688,10 @@ class TestClosePlanImplSuccess:
         assert delays[0] > 0
         assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
         assert f"({sum(delays):.2f}s waited)" in warned
-
-        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
-        with (
-            patch(f"{_APPEND}.os.open", side_effect=fake_open),
-            patch(f"{_APPEND}._sleep"),
-            pytest.raises(PermissionError) as excinfo,
-        ):
-            append_closed_plan._acquire_append_lock(lock)
-
-        assert excinfo.value.__cause__ is raised[-1]
-        assert len(attempts) == budget
+        # Retired leg 10: the direct call to _acquire_append_lock that pinned
+        # its PermissionError's __cause__. Close reports the append failure as
+        # text only, so no caller can see the chain; the message above is what
+        # reaches anyone.
 
 
 class TestTemplateDetectionNeverDeletes:
@@ -955,66 +995,77 @@ class TestCloseAllException:
 
 
 class TestFindUnregisteredPlanFile:
-    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
-    def test_finds_matching_file(self, mock_flow_root, tmp_path):
-        find_fn = _find_unregistered_plan_file
-        mock_flow_root.parent = tmp_path
-        branch_dir = tmp_path / "somebranch"
-        branch_dir.mkdir()
-        plan_file = branch_dir / "DPLAN-0176_design_topic_2026-05-10.md"
-        plan_file.write_text("# DPLAN-0176: design topic", encoding="utf-8")
+    """_find_unregistered_plan_file, reached through close (leg 10).
 
-        result = find_fn("DPLAN", "0176")
-        assert result is not None
-        assert result.name == "DPLAN-0176_design_topic_2026-05-10.md"
+    A plan no registry row names is looked for on disk, registered and
+    archived. What close finds is what it hands the (stubbed) archive; a file
+    it must not find ends in not_found with nothing archived. Every skipped
+    copy carries a real plan header, so only the skip can keep it out.
+    """
 
-    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
-    def test_a_report_named_like_the_plan_is_never_found(self, mock_flow_root, tmp_path):
+    @staticmethod
+    def _found_by_close(plan_id: str, aipass_root: Path) -> Path | None:
+        deps = _make_deps(
+            normalize_plan_number=MagicMock(side_effect=lambda x: str(x).split("-")[-1]),
+            validate_plan_exists=MagicMock(return_value=(False, "not in the registry")),
+        )
+        deps["load_registry"].return_value = {"plans": {}}
+        with (
+            patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT", aipass_root / "flow"),
+            patch("aipass.flow.apps.handlers.plan.close_helpers._load_template_registry", return_value={"types": {}}),
+            patch("aipass.flow.apps.handlers.plan.close_helpers.json_handler", spec=True),
+            patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
+            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+        ):
+            result = close_plan_impl(plan_num=plan_id, spawn_background=False, **deps)
+        archived = deps["archive_plan_fn"].call_args
+        assert (archived is None) == (result["success"] is False)
+        # A file close must not find is not registered either: no row is saved.
+        assert deps["save_registry"].called == (archived is not None)
+        return archived.args[0] if archived else None
+
+    @staticmethod
+    def _plan(directory: Path, name: str) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        plan = directory / name
+        plan.write_text(f"# {name.split('_')[0]}: a plan\n", encoding="utf-8")
+        return plan
+
+    def test_finds_matching_file(self, tmp_path):
+        plan_file = self._plan(tmp_path / "somebranch", "DPLAN-0176_design_topic_2026-05-10.md")
+
+        assert self._found_by_close("DPLAN-0176", tmp_path) == plan_file
+
+    def test_a_report_named_like_the_plan_is_never_found(self, tmp_path):
         """Leg 7: close would register and archive hooks' DPLAN-0356_ph2_report.md as the plan.
 
         Mutant: the is_plan_file gate off reddens this (leg7 C1)."""
-        mock_flow_root.parent = tmp_path
         report = tmp_path / "hooks" / "docs.local" / "DPLAN-0356_ph2_report.md"
         report.parent.mkdir(parents=True)
         report.write_text("DPLAN-0356 phase 2 DONE\n", encoding="utf-8")
 
-        assert _find_unregistered_plan_file("DPLAN", "0356") is None
+        assert self._found_by_close("DPLAN-0356", tmp_path) is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
-    def test_skips_backup_directory(self, mock_flow_root, tmp_path):
-        find_fn = _find_unregistered_plan_file
-        mock_flow_root.parent = tmp_path
-        backup_dir = tmp_path / ".backup" / "processed_plans"
-        backup_dir.mkdir(parents=True)
-        (backup_dir / "FPLAN-0099_old_2026-01-01.md").write_text("# Old", encoding="utf-8")
+    def test_skips_backup_directory(self, tmp_path):
+        self._plan(tmp_path / ".backup" / "processed_plans", "FPLAN-0099_old_2026-01-01.md")
 
-        result = find_fn("FPLAN", "0099")
-        assert result is None
+        assert self._found_by_close("FPLAN-0099", tmp_path) is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
-    def test_skips_archive_directory(self, mock_flow_root, tmp_path):
-        find_fn = _find_unregistered_plan_file
-        mock_flow_root.parent = tmp_path
-        archive_dir = tmp_path / "branch" / ".archive"
-        archive_dir.mkdir(parents=True)
-        (archive_dir / "FPLAN-0050_archived_2026-02-01.md").write_text("# Archived", encoding="utf-8")
+    def test_skips_archive_directory(self, tmp_path):
+        self._plan(tmp_path / "branch" / ".archive", "FPLAN-0050_archived_2026-02-01.md")
 
-        result = find_fn("FPLAN", "0050")
-        assert result is None
+        assert self._found_by_close("FPLAN-0050", tmp_path) is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
-    def test_a_dropbox_copy_is_never_found(self, mock_flow_root, tmp_path):
+    def test_a_dropbox_copy_is_never_found(self, tmp_path):
         """A dropbox is a sandbox nothing looks into; close would register and close the copy.
         Mutant: dropping "dropbox" from skip_parts reddens this."""
-        mock_flow_root.parent = tmp_path
-        dropbox_dir = tmp_path / "hooks" / "dropbox"
-        dropbox_dir.mkdir(parents=True)
-        (dropbox_dir / "DPLAN-0335_handed_over_2026-09-27.md").write_text("# Copy", encoding="utf-8")
+        self._plan(tmp_path / "hooks" / "dropbox", "DPLAN-0335_handed_over_2026-09-27.md")
 
-        assert _find_unregistered_plan_file("DPLAN", "0335") is None
+        assert self._found_by_close("DPLAN-0335", tmp_path) is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
-    def test_a_checkout_inside_a_dropbox_still_finds_its_plans(self, mock_flow_root, tmp_path):
+    def test_a_checkout_inside_a_dropbox_still_finds_its_plans(self, tmp_path):
         """The skip reads the parts below the scan root, never the whole path.
 
         A checkout that itself lives under a directory named dropbox (or .backup)
@@ -1022,48 +1073,26 @@ class TestFindUnregisteredPlanFile:
         Mutant: `match.relative_to(aipass_root).parts` -> `match.parts` reddens this.
         """
         aipass_root = tmp_path / "dropbox" / "aipass"
-        mock_flow_root.parent = aipass_root
-        (aipass_root / "somebranch" / "dropbox").mkdir(parents=True)
-        plan = aipass_root / "somebranch" / "DPLAN-0336_live_2026-09-28.md"
-        plan.write_text("# DPLAN-0336: live", encoding="utf-8")
-        copy = aipass_root / "somebranch" / "dropbox" / "DPLAN-0337_copy_2026-09-28.md"
-        copy.write_text("# DPLAN-0337: copy", encoding="utf-8")
+        plan = self._plan(aipass_root / "somebranch", "DPLAN-0336_live_2026-09-28.md")
+        self._plan(aipass_root / "somebranch" / "dropbox", "DPLAN-0337_copy_2026-09-28.md")
 
-        assert _find_unregistered_plan_file("DPLAN", "0336") == plan
-        assert _find_unregistered_plan_file("DPLAN", "0337") is None
+        assert self._found_by_close("DPLAN-0336", aipass_root) == plan
+        assert self._found_by_close("DPLAN-0337", aipass_root) is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
-    def test_skips_processed_plans_directory(self, mock_flow_root, tmp_path):
-        find_fn = _find_unregistered_plan_file
-        mock_flow_root.parent = tmp_path
-        proc_dir = tmp_path / "processed_plans"
-        proc_dir.mkdir()
-        (proc_dir / "FPLAN-0077_done_2026-03-01.md").write_text("# Done", encoding="utf-8")
+    def test_skips_processed_plans_directory(self, tmp_path):
+        self._plan(tmp_path / "processed_plans", "FPLAN-0077_done_2026-03-01.md")
 
-        result = find_fn("FPLAN", "0077")
-        assert result is None
+        assert self._found_by_close("FPLAN-0077", tmp_path) is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
-    def test_returns_none_when_no_match(self, mock_flow_root, tmp_path):
-        find_fn = _find_unregistered_plan_file
-        mock_flow_root.parent = tmp_path
-        branch_dir = tmp_path / "branch"
-        branch_dir.mkdir()
-        (branch_dir / "FPLAN-0001_other_2026-01-01.md").write_text("# Other", encoding="utf-8")
+    def test_returns_none_when_no_match(self, tmp_path):
+        self._plan(tmp_path / "branch", "FPLAN-0001_other_2026-01-01.md")
 
-        result = find_fn("FPLAN", "9999")
-        assert result is None
+        assert self._found_by_close("FPLAN-9999", tmp_path) is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
-    def test_skips_git_directory(self, mock_flow_root, tmp_path):
-        find_fn = _find_unregistered_plan_file
-        mock_flow_root.parent = tmp_path
-        git_dir = tmp_path / ".git" / "refs"
-        git_dir.mkdir(parents=True)
-        (git_dir / "FPLAN-0010_gitfile_2026-01-01.md").write_text("# Git", encoding="utf-8")
+    def test_skips_git_directory(self, tmp_path):
+        self._plan(tmp_path / ".git" / "refs", "FPLAN-0010_gitfile_2026-01-01.md")
 
-        result = find_fn("FPLAN", "0010")
-        assert result is None
+        assert self._found_by_close("FPLAN-0010", tmp_path) is None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1072,160 +1101,108 @@ class TestFindUnregisteredPlanFile:
 
 
 class TestSelfHealNoCollision:
-    def test_registers_with_original_key(self, tmp_path):
-        heal_fn = _self_heal_unregistered_plan
-        plan_file = tmp_path / "DPLAN-0176_design_topic_2026-05-10.md"
-        plan_file.write_text("# Plan", encoding="utf-8")
-        registry = {"plans": {}, "next_number": 175}
-        save_fn = MagicMock()
-        load_fn = MagicMock()
-        messages = []
+    """_self_heal_unregistered_plan, reached through close (leg 10).
 
-        with patch(
-            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
-            return_value={"types": {}},
+    Close self-heals only a plan no row names; a same-number row means no
+    self-heal there, so the bump on a collision is pinned through the heal
+    (test_heal_registry TestNumberCollision).
+    """
+
+    @staticmethod
+    def _close_unregistered(plan_id: str, plan_file: Path, next_number: int, types=None, other=None):
+        """Close a plan whose file exists and no row names: (result, registries saved, loads)."""
+        saved: list = []
+        loads: list = []
+
+        def load(registry_file=None):
+            loads.append(registry_file)
+            rows = (other or {}).get(registry_file, {})
+            return {"plans": json.loads(json.dumps(rows)), "next_number": next_number}
+
+        def save(registry, registry_file=None):
+            saved.append((registry_file, json.loads(json.dumps(registry))))
+            return True
+
+        deps = _make_deps(
+            normalize_plan_number=MagicMock(side_effect=lambda x: str(x).split("-")[-1]),
+            validate_plan_exists=MagicMock(return_value=(False, "not in the registry")),
+            load_registry=MagicMock(side_effect=load),
+            save_registry=MagicMock(side_effect=save),
+        )
+        with (
+            patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT", plan_file.parent / "flow"),
+            patch(
+                "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
+                return_value={"types": types or {}},
+            ),
+            patch("aipass.flow.apps.handlers.plan.close_helpers.json_handler", spec=True),
+            patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
+            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
         ):
-            actual_key, updated_reg = heal_fn(
-                "DPLAN", "0176", plan_file, registry, "dplan_registry.json", save_fn, load_fn, messages
-            )
+            result = close_plan_impl(plan_num=plan_id, spawn_background=False, **deps)
+        return result, saved, loads
 
-        assert actual_key == "0176"
-        assert "0176" in updated_reg["plans"]
-        assert updated_reg["plans"]["0176"]["self_healed"] is True
-        assert updated_reg["plans"]["0176"]["status"] == "open"
+    def test_registers_with_original_key(self, tmp_path):
+        plan_file = tmp_path / "DPLAN-0176_design_topic_2026-05-10.md"
+        plan_file.write_text("# DPLAN-0176: design topic", encoding="utf-8")
+
+        result, saved, _loads = self._close_unregistered("DPLAN-0176", plan_file, next_number=175)
+
+        assert result["success"] is True
+        registry_file, registered = saved[0]  # the self-heal's save, before the close's
+        assert registry_file == "dplan_registry.json"
+        assert registered["plans"]["0176"]["self_healed"] is True
+        assert registered["plans"]["0176"]["status"] == "open"
+        assert registered["plans"]["0176"]["file_path"] == str(plan_file)
         # 177, not the 175 this pinned until leg 7: a row at 0176 beside
         # next_number 175 hands 0176 out again two creates later (live:
         # DPLAN row 0358 beside next_number 358, 2026-10-04).
-        assert updated_reg["next_number"] == 177
-        save_fn.assert_called_once_with(registry, registry_file="dplan_registry.json")
+        assert registered["next_number"] == 177
 
     def test_extracts_subject_from_filename(self, tmp_path):
-        heal_fn = _self_heal_unregistered_plan
         plan_file = tmp_path / "FPLAN-0042_my_great_feature_2026-04-01.md"
-        plan_file.write_text("# Plan", encoding="utf-8")
-        registry = {"plans": {}, "next_number": 40}
-        messages = []
+        plan_file.write_text("# FPLAN-0042: my great feature", encoding="utf-8")
 
-        with patch(
-            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
-            return_value={"types": {}},
-        ):
-            actual_key, updated_reg = heal_fn(
-                "FPLAN", "0042", plan_file, registry, "fplan_registry.json", MagicMock(), MagicMock(), messages
-            )
+        _result, saved, _loads = self._close_unregistered("FPLAN-0042", plan_file, next_number=40)
 
-        assert updated_reg["plans"][actual_key]["subject"] == "my great feature"
+        assert saved[0][1]["plans"]["0042"]["subject"] == "my great feature"
 
     def test_emits_self_heal_warning_message(self, tmp_path):
-        heal_fn = _self_heal_unregistered_plan
         plan_file = tmp_path / "FPLAN-0001_test_2026-01-01.md"
-        plan_file.write_text("# Plan", encoding="utf-8")
-        registry = {"plans": {}, "next_number": 1}
-        messages = []
+        plan_file.write_text("# FPLAN-0001: test", encoding="utf-8")
 
-        with patch(
-            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
-            return_value={"types": {}},
-        ):
-            heal_fn("FPLAN", "0001", plan_file, registry, "fplan_registry.json", MagicMock(), MagicMock(), messages)
+        result, _saved, _loads = self._close_unregistered("FPLAN-0001", plan_file, next_number=1)
 
-        assert any("self-heal" in m.get("text", "").lower() for m in messages)
-        assert any("Registered" in m.get("text", "") for m in messages)
+        assert any("self-heal" in m.get("text", "").lower() for m in result["messages"])
+        assert any("Registered FPLAN-0001" in m.get("text", "") for m in result["messages"])
 
-
-class TestSelfHealSamePrefixCollision:
-    def test_bumps_to_next_number(self, tmp_path):
-        heal_fn = _self_heal_unregistered_plan
-        plan_file = tmp_path / "FPLAN-0005_colliding_2026-03-01.md"
-        plan_file.write_text("# Plan", encoding="utf-8")
-        registry = {
-            "plans": {"0005": {"status": "closed", "subject": "existing"}},
-            "next_number": 10,
-        }
-        messages = []
-
-        with patch(
-            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
-            return_value={"types": {}},
-        ):
-            actual_key, updated_reg = heal_fn(
-                "FPLAN", "0005", plan_file, registry, "fplan_registry.json", MagicMock(), MagicMock(), messages
-            )
-
-        assert actual_key == "0010"
-        assert "0010" in updated_reg["plans"]
-        assert "0005" in updated_reg["plans"]
-        assert updated_reg["next_number"] == 11
-        assert any("Bumping" in m.get("text", "") for m in messages)
-
-    def test_the_bump_never_lands_on_a_held_row(self, tmp_path):
-        """next_number 10 beside a row at 0010: the bump takes 0011 and 0010 survives (leg 7).
-
-        Mutant: the bump read from next_number alone reddens this (leg7 C2, L1b)."""
-        plan_file = tmp_path / "FPLAN-0005_colliding_2026-03-01.md"
-        plan_file.write_text("# FPLAN-0005: colliding", encoding="utf-8")
-        held = {"status": "open", "subject": "held"}
-        registry = {"plans": {"0005": {"status": "closed", "subject": "existing"}, "0010": held}, "next_number": 10}
-
-        with patch(
-            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
-            return_value={"types": {}},
-        ):
-            actual_key, updated_reg = _self_heal_unregistered_plan(
-                "FPLAN", "0005", plan_file, registry, "fplan_registry.json", MagicMock(), MagicMock(), []
-            )
-
-        assert actual_key == "0011"
-        assert updated_reg["plans"]["0010"] is held
-        assert updated_reg["next_number"] == 12
-
-
-class TestSelfHealCrossPrefixCollision:
     def test_notes_cross_prefix_collision(self, tmp_path):
-        heal_fn = _self_heal_unregistered_plan
         plan_file = tmp_path / "DPLAN-0013_design_2026-03-01.md"
-        plan_file.write_text("# Plan", encoding="utf-8")
-        registry = {"plans": {}, "next_number": 13}
-        save_fn = MagicMock()
-        other_registry = {"plans": {"0013": {"status": "closed", "subject": "fplan thing"}}}
-        load_fn = MagicMock(return_value=other_registry)
-        messages = []
+        plan_file.write_text("# DPLAN-0013: design", encoding="utf-8")
 
-        with patch(
-            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
-            return_value={
-                "types": {
-                    "flow_plans": {"prefix": "FPLAN"},
-                    "dev_plans": {"prefix": "DPLAN"},
-                }
-            },
-        ):
-            actual_key, updated_reg = heal_fn(
-                "DPLAN", "0013", plan_file, registry, "dplan_registry.json", save_fn, load_fn, messages
-            )
+        result, saved, _loads = self._close_unregistered(
+            "DPLAN-0013",
+            plan_file,
+            next_number=13,
+            types={"flow_plans": {"prefix": "FPLAN"}, "dev_plans": {"prefix": "DPLAN"}},
+            other={"fplan_registry.json": {"0013": {"status": "closed", "subject": "fplan thing"}}},
+        )
 
-        assert actual_key == "0013"
-        assert any("FPLAN-0013 also exists" in m.get("text", "") for m in messages)
+        assert "0013" in saved[0][1]["plans"]
+        assert any("FPLAN-0013 also exists" in m.get("text", "") for m in result["messages"])
 
-    def test_skips_own_prefix_in_cross_check(self, tmp_path):
-        heal_fn = _self_heal_unregistered_plan
-        plan_file = tmp_path / "FPLAN-0020_test_2026-03-01.md"
-        plan_file.write_text("# Plan", encoding="utf-8")
-        registry = {"plans": {}, "next_number": 20}
-        load_fn = MagicMock()
-        messages = []
+    # Retired leg 10: test_skips_own_prefix_in_cross_check. Close loads the
+    # plan's own registry itself, so whether the cross check skips it is
+    # invisible through close; a note against its own registry cannot arise,
+    # since no row there names the number.
 
-        with patch(
-            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
-            return_value={
-                "types": {
-                    "flow_plans": {"prefix": "FPLAN"},
-                }
-            },
-        ):
-            heal_fn("FPLAN", "0020", plan_file, registry, "fplan_registry.json", MagicMock(), load_fn, messages)
 
-        load_fn.assert_not_called()
+# Moved leg 10: TestSelfHealSamePrefixCollision. A same-number collision
+# reaches the self-heal only through the heal, so both pins (the bump to
+# next_number, and the bump never landing on a held row) live in
+# test_heal_registry TestNumberCollision.
 
 
 # ═══════════════════════════════════════════════════════════

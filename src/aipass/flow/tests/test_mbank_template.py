@@ -3,7 +3,7 @@
 # Description: Tests for mbank/process.py and template handler functions
 # Version: 1.0.0
 # Created: 2026-09-20
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for mbank/process.py and template handler functions."""
@@ -28,7 +28,6 @@ from aipass.flow.apps.handlers.mbank.process import (
 from aipass.flow.apps.handlers.template import plan_type_loader as loader
 from aipass.flow.apps.handlers.template.get_template import (
     TEMPLATES_DIR,
-    _substitute_placeholders,
     get_template,
 )
 from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types
@@ -815,21 +814,11 @@ class TestGetTemplate:
 
         assert result == "FPLAN-0002 {not_a_placeholder}"
 
-    def test_missing_placeholder_value_passes_through(self):
-        """An optional placeholder with no supplied value must not raise.
-
-        VERA field report: stamping weekly_update died with
-        ``Failed to load template weekly_update: createIfEmpty``. A template
-        that loaded when it was registered must still load when it is stamped,
-        so a known placeholder name with no value degrades to the literal token
-        instead of raising KeyError and killing the whole template.
-        """
-        result = _substitute_placeholders(
-            "{plan_number} {subject} {tag}",
-            {"subject": "Weekly"},  # every other known name deliberately absent
-        )
-
-        assert result == "{plan_number} Weekly {tag}"
+    # Retired leg 10: test_missing_placeholder_value_passes_through. get_template,
+    # the one caller, supplies every name in PLACEHOLDER_NAMES, so a known name
+    # without a value never reaches the substitution. VERA's createIfEmpty
+    # report (a brace form that is no placeholder) stays pinned above through
+    # get_template.
 
     def test_registered_weekly_update_template_stamps(self):
         """The shipped weekly_update SOP loads end-to-end from its real path.

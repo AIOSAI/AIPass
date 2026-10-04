@@ -3,7 +3,7 @@
 # Description: Tests for mbank/process.py — additional coverage
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""
@@ -323,24 +323,39 @@ class TestArchivePlan:
         assert mock_logger.error.call_args.args[1] == plan_file
 
     def test_archive_returns_false_when_dest_not_verified(self, tmp_path):
-        """Return False when destination file does not exist after move."""
+        """Return False when destination file does not exist after move.
+
+        The real shutil moves the file on disk; the product's own constant is
+        the seam, a processed dir whose every child answers "not there", so
+        the verification is the only thing between the move and a True (leg 10).
+        """
         plan_file = tmp_path / "FPLAN-0500.md"
         plan_file.write_text("content", encoding="utf-8")
         processed_dir = tmp_path / "processed"
 
-        def fake_move(src: str, _: str) -> None:
-            """Simulate a move that deletes source but never creates destination."""
-            import os
+        class _Unverified:
+            """A destination the move reaches but the check cannot see."""
 
-            os.remove(src)
+            def __init__(self, real: Path) -> None:
+                self.real = real
 
-        with (
-            patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir),
-            patch("aipass.flow.apps.handlers.mbank.process.shutil.move", side_effect=fake_move),
-        ):
+            def __str__(self) -> str:
+                return str(self.real)
+
+            def exists(self) -> bool:
+                return False
+
+        unverifiable_dir = MagicMock()
+        unverifiable_dir.mkdir.side_effect = lambda **kw: processed_dir.mkdir(**kw)
+        unverifiable_dir.__truediv__.side_effect = lambda name: _Unverified(processed_dir / name)
+
+        with patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", unverifiable_dir):
             result = archive_plan(plan_file)
 
         assert result is False
+        # The move did happen on disk; only the verification refused to call it done.
+        assert (processed_dir / "FPLAN-0500.md").read_text(encoding="utf-8") == "content"
+        assert not plan_file.exists()
 
 
 # ===================================================================
@@ -422,7 +437,7 @@ class TestSaveFlowRegistryAdditional:
         before = {"next_number": 2, "plans": {"1": {"status": "closed"}}}
         reg_file.write_text(json.dumps(before), encoding="utf-8")
         lock = reg_file.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
+        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
         with (
             patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
@@ -448,16 +463,12 @@ class TestSaveFlowRegistryAdditional:
         assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
         assert f"({sum(delays):.2f}s waited)" in str(excinfo.value)
 
-        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
-        with (
-            patch(f"{_PROC}.os.open", side_effect=fake_open),
-            patch(f"{_PROC}._sleep"),
-            pytest.raises(PermissionError) as helper_exc,
-        ):
-            proc._acquire_lock(lock)
-
-        assert helper_exc.value.__cause__ is raised[-1]
-        assert len(attempts) == budget
+        # The helper's own raise rides out of save_flow_registry as the context
+        # of its wrapper, chained to the last denial (reached through the
+        # public saver since leg 10, not by calling the lock helper).
+        helper_exc = excinfo.value.__context__
+        assert isinstance(helper_exc, PermissionError)
+        assert helper_exc.__cause__ is raised[-1]
 
     def test_lock_create_error_is_reported_as_itself(self, tmp_path, mock_logger, platform_create_answer):
         """A lock create that fails with neither contention nor denial names its own cause.
@@ -564,10 +575,13 @@ class TestCleanupTempFilesAdditional:
 
     def test_scan_error_returns_error_key(self, tmp_path):
         """When scanning the directory raises, return scan_error key."""
-        with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", tmp_path):
-            # Make .exists() return True but .glob() raise
-            with patch.object(Path, "glob", side_effect=PermissionError("no access")):
-                result = cleanup_temp_files()
+        # The product's own constant is the seam: a memory dir that exists but
+        # cannot be listed. pathlib itself stays whole (leg 10).
+        unlistable = MagicMock(spec=Path)
+        unlistable.exists.return_value = True
+        unlistable.glob.side_effect = PermissionError("no access")
+        with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", unlistable):
+            result = cleanup_temp_files()
 
         assert "scan_error" in result
         assert result["files_found"] == 0

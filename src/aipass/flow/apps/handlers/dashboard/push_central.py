@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push_central.py
 # Description: Push to Plans Central Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-21
-# Modified: 2025-11-21
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -273,7 +273,11 @@ def push_to_plans_central() -> bool:
         with open(CENTRAL_FILE, "w", encoding="utf-8") as f:
             json.dump(central_data, f, indent=2, ensure_ascii=False)
 
-        aggregate_central_impl(heal=True, central_file=CENTRAL_FILE, central_dir=AI_CENTRAL_DIR)
+        # aggregate_central_impl answers False when it could not aggregate or
+        # save: the branch sections landed, the top-level lists did not, so the
+        # push is not done and the except below says so (flow's decision, leg 10).
+        if not aggregate_central_impl(heal=True, central_file=CENTRAL_FILE, central_dir=AI_CENTRAL_DIR):
+            raise OSError("the branch sections landed, but the aggregation did not")
 
         total_active = sum(len(s.get("active_plans", [])) for s in branch_sections.values())
         json_handler.log_operation(

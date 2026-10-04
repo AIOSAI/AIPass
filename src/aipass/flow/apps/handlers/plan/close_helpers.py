@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: close_helpers.py
 # Description: Plan Closure Helper Functions
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-05-16
 # Modified: 2026-10-04
 # =============================================
@@ -206,7 +206,10 @@ def _self_heal_unregistered_plan(
     # without moving it on left DPLAN next_number at 358 beside row 0358,
     # and the next create would have issued 0358 again (leg 7).
     registry["next_number"] = next_free_number(registry)
-    save_registry_fn(registry, registry_file=reg_file)
+    # save_registry answers False rather than raising; a row it never wrote
+    # is no registration (flow's decision, leg 10).
+    if not save_registry_fn(registry, registry_file=reg_file):
+        raise OSError(f"could not save {reg_file}: {prefix}-{actual_key} was not registered")
 
     messages.append(
         {
@@ -246,10 +249,14 @@ def _cleanup_orphaned_plan(
             plan_info["cleanup_completed"] = True
             plan_info["cleanup_date"] = datetime.now(timezone.utc).isoformat()
             if reg_file:
-                save_registry(registry, registry_file=reg_file)
+                saved = save_registry(registry, registry_file=reg_file)
             else:
-                save_registry(registry)
+                saved = save_registry(registry)
             messages.append({"type": "success", "text": "  Orphaned file archived successfully"})
+            if not saved:
+                messages.append(
+                    {"type": "warning", "text": "  Archived, but could not save the registry: the row reads unarchived"}
+                )
         else:
             logger.warning(f"[{MODULE_NAME}] Failed to archive orphaned file for {plan_label}: {plan_file}")
             messages.append({"type": "error_text", "text": "  Failed to move orphaned file — manual cleanup required"})
