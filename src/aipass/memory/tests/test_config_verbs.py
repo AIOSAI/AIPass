@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config_verbs.py
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default) and the todo verbs
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-08-16
-# Modified: 2026-10-02
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/rollover_config.py — the config verbs and the todo verbs, through apps/modules/rollover.py."""
@@ -44,7 +44,6 @@
 # seedgo: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch() itself, tests/test_config_loader.py
 # seedgo: no-test-needed(covered_elsewhere) — get_count_ceilings() arithmetic, pinned in tests/test_config_loader.py
 
-import copy
 import importlib
 import json
 import re
@@ -54,6 +53,11 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
+# The real display module, imported once at the top: nothing in the suite
+# stands it in, conftest imports it the same way, and its consoles are patched
+# at the edge (their width) per test.
+from aipass.cli.apps.modules import display
 
 # The registry these tests address, MINTED per test in tmp_path.
 # AIPASS_REGISTRY.json is machine-managed and gitignored: on a fresh clone it
@@ -105,7 +109,6 @@ def _pin_console_width(monkeypatch: pytest.MonkeyPatch) -> None:
     for whoever ran next. `_width` starts as None and restores as None, and it
     is the attribute Console.size honours last.
     """
-    display = importlib.import_module("aipass.cli.apps.modules.display")
     for console_obj in (display.CONSOLE, display.err_console):
         monkeypatch.setattr(console_obj, "_width", _CONSOLE_WIDTH)
 
@@ -142,10 +145,11 @@ def _real_verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
 
       * The config is built from config_loader.DEFAULT_CONFIG -- the in-tree
         regeneration seed, kept in lockstep with the operator file by S193
-        doctrine -- and written by the real _write_config_file. A hand-formatted
-        copy would make the no-op-set byte-identity test assert against this
-        file's formatting instead of the writer's.
-      * per_branch is filled by the real materialize_per_branch() reading the
+        doctrine -- and written by the real writer, through load()'s
+        regeneration of a missing file. A hand-formatted copy would make the
+        no-op-set byte-identity test assert against this file's formatting
+        instead of the writer's.
+      * per_branch is filled by the real push_defaults_to_per_branch() reading the
         minted registry, so the fixture and the engine cannot disagree about
         the seeded shape.
       * BOTH registry doors are shut. detector._read_registry reads
@@ -180,9 +184,12 @@ def _real_verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
     monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
     monkeypatch.setattr(detector, "config_loader", config_loader)
 
-    config = copy.deepcopy(config_loader.DEFAULT_CONFIG)
-    config["rollover"]["per_branch"] = config_loader.materialize_per_branch()
-    assert config_loader._write_config_file(config), "fixture could not write its own config"
+    # Minted through the public doors, in the order a fresh install meets them:
+    # load() on a missing file regenerates DEFAULT_CONFIG, and the push fills
+    # per_branch from the minted registry. Both write only the tmp path above.
+    config_loader.load()
+    pushed = config_loader.push_defaults_to_per_branch()
+    assert pushed["success"], f"fixture could not write its own config: {pushed}"
 
     _evict(monkeypatch, _ROLLOVER_MODULE)
     rollover = importlib.import_module(_ROLLOVER_MODULE)
@@ -1315,7 +1322,6 @@ class TestRolloverTodoPad:
 
     def test_the_phrase_survives_a_narrow_pipe(self, verbs, pad, capsys, monkeypatch) -> None:
         """@hooks greps raw stdout. At 40 columns a hard wrap would land between 'for' and 'rollover'."""
-        display = importlib.import_module("aipass.cli.apps.modules.display")
         monkeypatch.setattr(display.CONSOLE, "_width", 40)
         capsys.readouterr()
         _run_rollover(verbs, "check", "--branch", "@memory")
@@ -1324,7 +1330,6 @@ class TestRolloverTodoPad:
     def test_check_labels_the_classic_file_list_fleet_wide(self, verbs, pad, capsys, monkeypatch) -> None:
         """--branch scopes the pad line only. The classic list is the fleet walk (scope unchanged) and says so,
         with "ready for rollover" whole on its first line even on a 40-column pipe (@hooks greps it)."""
-        display = importlib.import_module("aipass.cli.apps.modules.display")
         monkeypatch.setattr(display.CONSOLE, "_width", 40)
         triggers = ["CANARY.local 16/15", "memory.local 16/15"]
         monkeypatch.setattr(
@@ -1487,7 +1492,6 @@ class TestTodoVerbs:
 
         backlog = tmp_path / ".backup" / "todo" / "memory" / "backlog.json"
         assert todo_roll.backlog_path_for("memory") == backlog
-        display = importlib.import_module("aipass.cli.apps.modules.display")
         yield SimpleNamespace(
             module=module, local=local, backlog=backlog, branch=branch, root=tmp_path, display=display, verbs=verbs
         )

@@ -669,6 +669,12 @@
     {
       "file": "apps/handlers/monitor/registry_scope.py",
       "standard": "logged_fallback",
+      "lines": [470],
+      "reason": "declared_roots: an unreadable AIPASS_ROOTS.json answers [] (no external roots), logged at error. Never None: ai_mail registry/read.py 474 and drone registry_handler.py 458 loop over the answer outside their try. Not a raise: detector.py 298 (read_scope, feeding health and lint) calls it bare. No caller writes [] out as truth. Rollover's write scope (_read_registry), the push, the todo lane and the normalizer all exclude the external tier. read_scope only reports, and an external name then answers 'Unknown branch', never another branch. Leg 12 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/registry_scope.py",
+      "standard": "logged_fallback",
       "lines": [207, 467],
       "reason": "Both lines are FileNotFoundError: an absent passport declares nothing (None), and an absent declared-roots file declares no roots ([]). That is the answer for an absent file, not a failure value; the unreadable roots branch (470) is not covered here. Leg 8 of DPLAN-0354, @memory's decision; lines moved in leg 10."
     },
@@ -743,6 +749,22 @@
       "standard": "state_leak",
       "lines": [153, 184, 205, 212, 219],
       "reason": "Parked tier: the owner's ruling of 2026-08-14 keeps this file as it was, and it skips, so these pops never run. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_rollover_pipeline.py",
+      "standard": "import_site",
+      "reason": "File-wide by devpulse's leg 12 ruling: each harness (_import_orchestrator, _import_extractor, _import_rollover_module, _import_normalize, _import_line_counter) stands fake handler modules in through monkeypatch.setitem and evicts through monkeypatch, so teardown removes every one. The fakes keep the run off live state: execute_rollover writes .trinity, the backups and the stores; the json package's json_handler writes operation logs; the detector walks the live fleet. The in-function imports bind under conftest's per-test prax/json/trigger stand-ins; at the top of the file they would bind the real logger at collection. The importlib fetches (161/162, 269, 1892, 1919, 2363, 2408, 3237) take the REAL module from the cache for the same reason and patch it at the edge. A lines rule closes a line here (measured on 86, leg 12); file-wide is the ruling. Leg 12 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_config_verbs.py",
+      "standard": "import_site",
+      "reason": "File-wide by devpulse's leg 12 ruling: the fixture evicts conftest's json package stand-in through monkeypatch (_evict records each one) and re-imports the REAL config_loader, detector and rollover so the code under test is real; teardown puts the stand-ins back. The other fetches take real modules (todo_roll, todo_report, memory_files, entry_limits, memory, config_content, rollover_config) from the cache under conftest's per-test prax/json stand-ins and patch them at the edge; a top-of-file import would bind the real json shim and logger at collection, and those write operation logs. The display fetches (108 and three in tests) were cured in leg 12: display is imported at the top. Leg 12 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_config_verbs.py",
+      "standard": "through_the_command",
+      "lines": [171],
+      "reason": "Ruling (c): reads config_loader._CONFIG_PATH once, BEFORE the fixture repoints it at tmp, so TestOperatorConfigIsolation can prove the operator file is untouched. The contract: every config verb writes the file at _CONFIG_PATH. The far side is memory_json/custom_config/memory.config.json, the live operator config. No public name carries the path, and no door was added for the test. Leg 12 of DPLAN-0354."
     },
     {
       "file": "tests/test_rollover.py",

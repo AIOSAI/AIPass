@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rollover_pipeline.py
 # Description: Rollover pipeline — orchestrator, extractor, rollover module, normalize, line counter
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-04
 # Category: memory/tests
 # =============================================
 
@@ -43,7 +43,6 @@ from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers import write_fence
-from aipass.memory.apps.handlers.rollover import extractor as rollover_extractor
 
 
 # ---------------------------------------------------------------------------
@@ -129,10 +128,12 @@ def _import_extractor(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.memory_files", mock_memory_files)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.config_loader", mock_config_loader)
 
-    sys.modules.pop("aipass.memory.apps.handlers.rollover.extractor", None)
+    # Through monkeypatch, like the orchestrator above: the copy imported over
+    # these mocks leaves with the test (leg 12 - a bare pop left it cached).
+    monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.rollover.extractor", raising=False)
     parent = sys.modules.get("aipass.memory.apps.handlers.rollover")
-    if parent is not None and hasattr(parent, "extractor"):
-        delattr(parent, "extractor")
+    if parent is not None:
+        monkeypatch.delattr(parent, "extractor", raising=False)
 
     from aipass.memory.apps.handlers.rollover import extractor
 
@@ -160,27 +161,13 @@ def _import_rollover_module(monkeypatch):
     real_rollover_config = importlib.import_module("aipass.memory.apps.modules.rollover_config")
     real_rollover_json = importlib.import_module("aipass.memory.apps.modules.rollover_json")
 
-    # rich
-    mock_panel = MagicMock()
-    mock_box = MagicMock()
-    rich_panel_mod = MagicMock()
-    rich_panel_mod.Panel = mock_panel
-    rich_box_mod = MagicMock()
-    rich_box_mod.box = mock_box
-    monkeypatch.setitem(sys.modules, "rich.panel", rich_panel_mod)
-    monkeypatch.setitem(sys.modules, "rich", MagicMock())
-
-    # aipass.cli console / error / warning
-    mock_console = MagicMock()
+    # aipass.cli and rich are the REAL packages (leg 12 of DPLAN-0354): the
+    # console only prints, and the tests read what it printed with capsys.
+    # error() and warning() are replaced at the use site, on each module that
+    # bound them, because error() marks the process's command as failed; the
+    # re-imported rollover below is patched the same way.
     mock_error = MagicMock()
     mock_warning = MagicMock()
-    cli_modules_mod = MagicMock()
-    cli_modules_mod.console = mock_console
-    cli_modules_mod.error = mock_error
-    cli_modules_mod.warning = mock_warning
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules_mod)
 
     # aipass.memory handler sub-packages
     mock_detector = MagicMock()
@@ -236,19 +223,17 @@ def _import_rollover_module(monkeypatch):
     # Patched attribute by attribute rather than through the sys.modules
     # stand-in, because `_refuse` reads `error` from ITS OWN globals - without
     # these the mock error() never hears the refusal. monkeypatch restores each.
-    monkeypatch.setattr(real_rollover_config, "console", mock_console)
     monkeypatch.setattr(real_rollover_config, "error", mock_error)
     monkeypatch.setattr(real_rollover_config, "detector", mock_detector)
-    # And the same two on rollover_json, which is where `_emit` reads `console`
-    # and `_refuse` reads `error` now — a patch on rollover_config no longer
-    # reaches either of them. No `detector` there: that module never took one.
-    monkeypatch.setattr(real_rollover_json, "console", mock_console)
+    # And error on rollover_json, which is where `_refuse` reads it now — a
+    # patch on rollover_config no longer reaches it. No `detector` there: that
+    # module never took one. `console` stays the real one on both.
     monkeypatch.setattr(real_rollover_json, "error", mock_error)
 
     # Recorded first, the way test_rollover.py's _import_rollover evicts. This re-import binds rollover
-    # to the MagicMock cli; a bare pop and a bare delattr left that module cached AND named by the
-    # modules package after teardown, so test_contracts' in-process `rollover <bogus>` on the same
-    # worker exited 0 instead of 2 (-n 3 --dist loadscope, 2026-09-15).
+    # to the stand-in handlers, and its error() is the mock; a bare pop and a bare delattr left that
+    # module cached AND named by the modules package after teardown, so test_contracts' in-process
+    # `rollover <bogus>` on the same worker exited 0 instead of 2 (-n 3 --dist loadscope, 2026-09-15).
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.modules.rollover", None)
     del sys.modules["aipass.memory.apps.modules.rollover"]
     parent = sys.modules.get("aipass.memory.apps.modules")
@@ -258,8 +243,10 @@ def _import_rollover_module(monkeypatch):
 
     from aipass.memory.apps.modules import rollover
 
+    monkeypatch.setattr(rollover, "error", mock_error)
+    monkeypatch.setattr(rollover, "warning", mock_warning)
+
     return rollover, {
-        "console": mock_console,
         "error": mock_error,
         "warning": mock_warning,
         "detector": mock_detector,
@@ -269,7 +256,7 @@ def _import_rollover_module(monkeypatch):
 
 
 class TestPipelineRolloverImportIsUndoneAtTeardown:
-    """The rollover module _import_rollover_module binds to a MagicMock cli must not outlive its test.
+    """The rollover module _import_rollover_module binds to stand-ins and a mock error() must not outlive its test.
 
     It did: under -n 3 --dist loadscope a worker ran TestRunRollover, then test_contracts'
     in-process `rollover <bogus>` routed through the mock error() and exited 0 instead of 2.
@@ -309,10 +296,10 @@ def _import_normalize(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
 
-    sys.modules.pop("aipass.memory.apps.handlers.schema.normalize", None)
+    monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.schema.normalize", raising=False)
     parent = sys.modules.get("aipass.memory.apps.handlers.schema")
-    if parent is not None and hasattr(parent, "normalize"):
-        delattr(parent, "normalize")
+    if parent is not None:
+        monkeypatch.delattr(parent, "normalize", raising=False)
 
     from aipass.memory.apps.handlers.schema import normalize
 
@@ -338,10 +325,10 @@ def _import_line_counter(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.memory_files", mock_memory_files)
 
-    sys.modules.pop("aipass.memory.apps.handlers.tracking.line_counter", None)
+    monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.tracking.line_counter", raising=False)
     parent = sys.modules.get("aipass.memory.apps.handlers.tracking")
-    if parent is not None and hasattr(parent, "line_counter"):
-        delattr(parent, "line_counter")
+    if parent is not None:
+        monkeypatch.delattr(parent, "line_counter", raising=False)
 
     from aipass.memory.apps.handlers.tracking import line_counter
 
@@ -1585,7 +1572,7 @@ class TestRunRollover:
         result = rollover.run_rollover()
         assert result is True
 
-    def test_the_run_says_its_file_list_is_fleet_wide(self, monkeypatch):
+    def test_the_run_says_its_file_list_is_fleet_wide(self, monkeypatch, capsys):
         """`run --branch @x` reads as scoped; only the pad follows it, and the run says so where it happens."""
         rollover, mocks = _import_rollover_module(monkeypatch)
         mocks["orchestrator"].execute_rollover.return_value = {
@@ -1599,7 +1586,7 @@ class TestRunRollover:
 
         rollover.run_rollover("@memory")
 
-        printed = " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        printed = capsys.readouterr().out
         assert "files ready for rollover (fleet-wide)" in printed, printed
         assert rollover.FLEET_WIDE_RUN_NOTE in printed, printed
 
@@ -1655,7 +1642,7 @@ class TestRunRollover:
         rollover.run_rollover()
         mocks["error"].assert_called_once_with("BAD.local.json - embedding: model not found")
 
-    def test_a_run_where_everything_failed_still_states_its_score(self, monkeypatch):
+    def test_a_run_where_everything_failed_still_states_its_score(self, monkeypatch, capsys):
         """0/1 is a result. Printing nothing lets a total failure read as a quiet run.
 
         The completion line was gated on `success_count > 0`, so a rollover in
@@ -1675,7 +1662,7 @@ class TestRunRollover:
 
         rollover.run_rollover()
 
-        printed = " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        printed = capsys.readouterr().out
         assert "0/3" in printed, printed
 
 
@@ -1755,7 +1742,7 @@ class TestCheckTriggers:
         rollover.check_triggers()
         mocks["error"].assert_called_once_with("Failed to check triggers: Cannot read registry")
 
-    def test_undrainable_files_are_listed_without_the_ready_phrase(self, monkeypatch):
+    def test_undrainable_files_are_listed_without_the_ready_phrase(self, monkeypatch, capsys):
         """@hooks' PreCompact fires a fleet run on 'ready for rollover', and no run can move these files."""
         rollover, mocks = _import_rollover_module(monkeypatch)
         stuck = "VERA.local (250/15 key_learnings held as a dict, not a list (schema 2.0.0))"
@@ -1763,7 +1750,7 @@ class TestCheckTriggers:
 
         rollover.check_triggers()
 
-        printed = " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        printed = capsys.readouterr().out
         warned = " ".join(str(c) for c in mocks["warning"].call_args_list)
         assert stuck in warned and "cannot drain" in warned, warned
         assert "ready for rollover" not in (printed + warned).lower()
@@ -1958,79 +1945,102 @@ class TestValveLoggingIsBounded:
     """
 
     @staticmethod
-    def _run(entries, limit, head):
-        """Substitute the extractor's logger and read the calls off it.
+    def _run(monkeypatch, tmp_path, entries, limit):
+        """Drive the valve through public extract_items on a tmp key_learnings file.
 
+        The extractor's logger is substituted and the calls read off it.
         Neither caplog nor a real logging.Handler works here: the suite runs
         with prax mocked, so `extractor.logger` is not a live Logger and
         addHandler silently does nothing — a capture-based assertion would
         pass vacuously, reading zero emitted lines as zero warnings. Replacing
         the logger measures the calls the code actually made.
+
+        `entries` must already be newest-first: extract_items re-sorts by
+        number first and warns when it has to, so an unsorted array would add
+        a line that is not the valve's.
         """
-
+        ext, mocks = _import_extractor(monkeypatch)
+        data = {"document_metadata": {"schema_version": "3.0.0", "status": {}}, "key_learnings": entries}
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(json.dumps(data), encoding="utf-8")
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {tmp_path.name.lower(): {"local": {"key_learnings": {"count": limit}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
         fake = MagicMock()
-        with patch.object(rollover_extractor, "logger", fake):
-            kept = rollover_extractor._extract_tail_excess(entries, limit, head, "key_learnings", "victim")
+        monkeypatch.setattr(ext, "logger", fake)
 
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True, result
         warnings = [c.args[0] for c in fake.warning.call_args_list]
         debugs = [c.args[0] for c in fake.debug.call_args_list]
-        return kept, warnings, debugs
+        return result.get("extracted", []), warnings, debugs
 
     @staticmethod
-    def _misplaced(n):
-        """n entries that all trip the valve: dated today, numbered above head."""
-        today = datetime.now().strftime("%Y-%m-%d")
-        return [{"number": 1000 + i, "date": today, "value": "x" * 800} for i in range(n)]
+    def _misplaced(n, below):
+        """n entries that all trip the valve: dated today under a head that is not.
 
-    def test_one_warning_per_array_not_one_per_entry(self):
-        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
-        _kept, warnings, _debugs = self._run(entries, 15, 65)
+        Numbered below `below` so the array stays newest-first — the "numbered
+        above head" half cannot survive extract_items' re-sort, so the date half
+        is the one a real run reaches.
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        return [{"number": below - 1 - i, "date": today, "value": "x" * 800} for i in range(n)]
+
+    _HEAD = {"number": 1000, "date": "2026-01-01", "value": "head"}
+
+    def test_one_warning_per_array_not_one_per_entry(self, monkeypatch, tmp_path):
+        entries = [self._HEAD] + self._misplaced(96, 1000)
+        _kept, warnings, _debugs = self._run(monkeypatch, tmp_path, entries, 15)
         assert len(warnings) == 1
 
-    def test_the_refused_count_is_in_the_summary(self):
-        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
-        _kept, warnings, _debugs = self._run(entries, 15, 65)
+    def test_the_refused_count_is_in_the_summary(self, monkeypatch, tmp_path):
+        entries = [self._HEAD] + self._misplaced(96, 1000)
+        _kept, warnings, _debugs = self._run(monkeypatch, tmp_path, entries, 15)
         assert "82 of 82" in warnings[0]
 
-    def test_per_entry_detail_survives_at_debug(self):
-        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
-        _kept, _warnings, debugs = self._run(entries, 15, 65)
+    def test_per_entry_detail_survives_at_debug(self, monkeypatch, tmp_path):
+        entries = [self._HEAD] + self._misplaced(96, 1000)
+        _kept, _warnings, debugs = self._run(monkeypatch, tmp_path, entries, 15)
         assert len(debugs) == 82
 
-    def test_nothing_drained_names_the_skip_loop(self):
+    def test_nothing_drained_names_the_skip_loop(self, monkeypatch, tmp_path):
         """The alarm worth having: over limit + nothing archivable = the
         detector re-fires on this file forever. It used to be invisible,
         buried in the very wall of lines it produced."""
-        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
-        _kept, warnings, _debugs = self._run(entries, 15, 65)
+        entries = [self._HEAD] + self._misplaced(96, 1000)
+        _kept, warnings, _debugs = self._run(monkeypatch, tmp_path, entries, 15)
         assert "NOTHING DRAINED" in warnings[0]
 
-    def test_a_partial_refusal_is_not_called_a_skip_loop(self):
+    def test_a_partial_refusal_is_not_called_a_skip_loop(self, monkeypatch, tmp_path):
         """Some drained means the lane still moves — warn, but do not alarm.
 
         Mutant (2026-09-27, killed): `excess` computed one short of `len(entries) - limit`.
         """
-        old = [{"number": 60 - i, "date": "2026-01-01", "value": "old"} for i in range(40)]
+        old = [{"number": 999 - i, "date": "2026-01-01", "value": "old"} for i in range(40)]
         # Misplaced entries at the very END so they land inside the candidate
         # tail alongside genuinely-old ones — the mixed case.
-        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + old + self._misplaced(5)
-        kept, warnings, _debugs = self._run(entries, 15, 65)
+        entries = [self._HEAD] + old + self._misplaced(5, 960)
+        kept, warnings, _debugs = self._run(monkeypatch, tmp_path, entries, 15)
         assert len(kept) == 26
         assert len(warnings) == 1
         assert "NOTHING DRAINED" not in warnings[0]
 
-    def test_no_refusals_logs_nothing(self):
+    def test_no_refusals_logs_nothing(self, monkeypatch, tmp_path):
         """Mutant (2026-09-27, killed): `excess` computed one short of `len(entries) - limit`."""
         entries = [{"number": 100 - i, "date": "2026-01-01", "value": "v"} for i in range(40)]
-        kept, warnings, debugs = self._run(entries, 15, 100)
+        kept, warnings, debugs = self._run(monkeypatch, tmp_path, entries, 15)
         assert len(kept) == 25
         assert warnings == []
         assert debugs == []
 
-    def test_the_valve_still_holds_every_misplaced_entry_back(self):
+    def test_the_valve_still_holds_every_misplaced_entry_back(self, monkeypatch, tmp_path):
         """Log volume changed; the protection must not have."""
-        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
-        kept, _warnings, _debugs = self._run(entries, 15, 65)
+        entries = [self._HEAD] + self._misplaced(96, 1000)
+        kept, _warnings, _debugs = self._run(monkeypatch, tmp_path, entries, 15)
         assert kept == []
 
 
@@ -2140,7 +2150,7 @@ class TestASkippedTriggerIsNotSilentlyDropped:
 class TestASkippedTriggerIsVisibleOnScreen:
     """The handler counting it is only half — the operator has to be able to read it."""
 
-    def test_the_skip_and_its_reason_are_printed(self, monkeypatch):
+    def test_the_skip_and_its_reason_are_printed(self, monkeypatch, capsys):
         rollover, mocks = _import_rollover_module(monkeypatch)
         mocks["orchestrator"].execute_rollover.return_value = {
             "success": True,
@@ -2153,11 +2163,11 @@ class TestASkippedTriggerIsVisibleOnScreen:
 
         rollover.run_rollover()
 
-        printed = " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        printed = capsys.readouterr().out
         assert "0/1" in printed, printed
         assert "guinea.local" in printed and "skipped" in printed, printed
 
-    def test_a_run_with_no_skips_prints_no_skip_line(self, monkeypatch):
+    def test_a_run_with_no_skips_prints_no_skip_line(self, monkeypatch, capsys):
         """The absence of a category must not print an empty heading."""
         rollover, mocks = _import_rollover_module(monkeypatch)
         mocks["orchestrator"].execute_rollover.return_value = {
@@ -2171,7 +2181,9 @@ class TestASkippedTriggerIsVisibleOnScreen:
 
         rollover.run_rollover()
 
-        assert "skipped" not in " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        printed = capsys.readouterr().out
+        assert "0/1" not in printed and "1/1" in printed, printed
+        assert "skipped" not in printed, printed
 
     def test_an_empty_run_prints_the_undrainable_files(self, monkeypatch):
         """No triggers used to end on 'No files need rollover' with VERA at 250/15 unsaid."""
