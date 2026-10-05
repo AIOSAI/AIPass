@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_registry_gate.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for registry_gate security handler
 # Branch: hooks
 # Created: 2026-07-10
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/security/registry_gate.py."""
@@ -183,7 +183,7 @@ class TestFindRegistryName:
 
 
 class TestHandleBash:
-    CWD = "/home/patrick/Projects/AIPass/src/aipass/hooks"
+    CWD = "/srv/aipass/src/aipass/hooks"  # only the shape matters: the gate matches registry names, not the seat
 
     def _bash(self, command: str) -> dict:
         return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.CWD})
@@ -263,7 +263,7 @@ class TestHandleBash:
 
 
 class TestHandleEditTools:
-    CWD = "/home/patrick/Projects/AIPass/src/aipass/hooks"
+    CWD = "/srv/aipass/src/aipass/hooks"  # only the shape matters: the gate matches registry names, not the seat
 
     def _edit(self, tool_name: str, file_path: str) -> dict:
         return handle({"tool_name": tool_name, "tool_input": {"file_path": file_path}, "cwd": self.CWD})

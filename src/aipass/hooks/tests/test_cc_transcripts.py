@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_cc_transcripts.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for the CC transcript reader
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-18
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/cc_transcripts.py."""
@@ -72,10 +72,12 @@ class TestManglingRule:
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            ("/home/patrick/Projects/AIPass/src/aipass/hooks", "-home-patrick-Projects-AIPass-src-aipass-hooks"),
+            # Measured 2026-10-04 by Claude Code 2.1.289's own cP(), copied verbatim from its bundle into
+            # node; the same code gave the old oracle for the old path, so the measure is the CLI's.
+            ("/srv/aipass/src/aipass/hooks", "-srv-aipass-src-aipass-hooks"),
             # A Windows path: the colon and both backslashes are just
             # non-alphanumerics. There is NO drive-letter special case.
-            ("C:\\Users\\p\\ai_mail", "C--Users-p-ai-mail"),
+            ("C:\\Work\\aipass\\ai_mail", "C--Work-aipass-ai-mail"),
             ("", ""),
             ("/tmp/é–ø/x", "-tmp-----x"),
             # Non-BMP: JS sees a SURROGATE PAIR and writes TWO dashes.
@@ -92,8 +94,10 @@ class TestManglingRule:
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            ("/home/patrick/Projects/AIPass/src/aipass/hooks", "tmdi4s"),
-            ("C:\\Users\\p\\ai_mail", "htazyh"),
+            # Measured 2026-10-04 by 2.1.289's own Le()/Hee() in node (it gives tmdi4s, the old oracle, for the
+            # old developer path): a neutral path, so no person's home ships in a public test.
+            ("/srv/aipass/src/aipass/hooks", "nn2k9g"),
+            ("C:\\Work\\aipass\\ai_mail", "vlvg33"),
             ("", "0"),
             ("/tmp/é–ø/x", "cac2i8"),
             ("/a/\U0001d518nicode/b", "u24wth"),

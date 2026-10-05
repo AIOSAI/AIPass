@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.8.1
+# Version: 1.8.2
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-09-30
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -723,30 +723,26 @@ class TestTrinityWriteOverLimitWarnOnly:
 class TestTrinityWriteNonTrinity:
     """Write to non-.trinity file -> passes through unchanged."""
 
-    def test_non_trinity_py_passthrough(self):
+    def test_non_trinity_py_passthrough(self, tmp_path):
         """Write to a .py file -> no .trinity check, passes to diagnostics gate."""
+        seat = tmp_path / "src" / "aipass" / "hooks"
         result = handle(
             {
                 "tool_name": "Write",
-                "tool_input": {
-                    "file_path": "/home/patrick/Projects/AIPass/src/aipass/hooks/apps/test.py",
-                    "content": "print('hello')",
-                },
-                "cwd": "/home/patrick/Projects/AIPass/src/aipass/hooks",
+                "tool_input": {"file_path": str(seat / "apps" / "test.py"), "content": "print('hello')"},
+                "cwd": str(seat),
             }
         )
         assert result["exit_code"] == 0
 
-    def test_non_trinity_json_passthrough(self):
+    def test_non_trinity_json_passthrough(self, tmp_path):
         """Write to a non-.trinity .json file -> allowed."""
+        seat = tmp_path / "src" / "aipass" / "hooks"
         result = handle(
             {
                 "tool_name": "Write",
-                "tool_input": {
-                    "file_path": "/home/patrick/Projects/AIPass/src/aipass/hooks/apps/config.json",
-                    "content": '{"key": "value"}',
-                },
-                "cwd": "/home/patrick/Projects/AIPass/src/aipass/hooks",
+                "tool_input": {"file_path": str(seat / "apps" / "config.json"), "content": '{"key": "value"}'},
+                "cwd": str(seat),
             }
         )
         assert result["exit_code"] == 0
