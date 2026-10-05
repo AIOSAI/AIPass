@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-30
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/engine.py and the hook dispatch it drives."""
