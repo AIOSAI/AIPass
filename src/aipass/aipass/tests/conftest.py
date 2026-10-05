@@ -1,11 +1,12 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for aipass tests — json and profile redirects, console width, command state
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-05-04
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.3.0 (2026-10-05): tools_on_path writes PATH so shutil.which answers for real (DPLAN-0354 leg 8)
 #   - v1.2.0 (2026-09-28): header_events recorder keeps cli's header off the real trigger bus (DPLAN-0354 leg 3)
 #   - v1.1.0 (2026-09-27): template C1/C2 fixtures; unused mock_json_handler removed (DPLAN-0354)
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
@@ -99,6 +100,33 @@ def isolate_profile_store(tmp_path_factory) -> Generator[Path, None, None]:
 def sample_test_data() -> dict:
     """Provides sample test data."""
     return {"test_key": "test_value", "sample_data": "example"}
+
+
+@pytest.fixture
+def tools_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Set PATH to one tmp directory holding an executable stub per name given.
+
+    shutil.which reads PATH, so the product's own lookup answers for real and
+    nothing of the stdlib is patched (fleet green leg 8). No names: an empty
+    directory, so every lookup answers None. Where the platform keeps PATHEXT
+    (Windows), which only finds a name carrying one of its extensions, so the
+    stub takes the first; the platform decides that, inside the test.
+    Returns the directory.
+    """
+
+    def put(*names: str) -> Path:
+        bin_dir = tmp_path / "path_bin"
+        bin_dir.mkdir(exist_ok=True)
+        pathext = os.environ.get("PATHEXT", "")
+        suffix = pathext.split(os.pathsep)[0].lower() if pathext else ""
+        for name in names:
+            stub = bin_dir / f"{name}{suffix}"
+            stub.write_text("", encoding="utf-8")
+            stub.chmod(stub.stat().st_mode | 0o111)  # no effect where the platform has no mode bit
+        monkeypatch.setenv("PATH", str(bin_dir))
+        return bin_dir
+
+    return put
 
 
 @pytest.fixture(autouse=True, scope="session")

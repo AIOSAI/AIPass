@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_init_flow.py
 # Description: Tests for aipass init_flow Phase 3
-# Version: 1.2.6
+# Version: 1.2.7
 # Created: 2026-04-16
-# Modified: 2026-09-29
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
@@ -753,25 +753,25 @@ class TestStages:
             result = stage_5_tool_choice(non_interactive=True, cli_override="codex")
         assert result["cli"] == "codex"
 
-    def test_stage_5_claude_present_no_prompt(self, tmp_local_json) -> None:
-        """When claude is on PATH, no install prompt is shown."""
+    def test_stage_5_claude_present_no_prompt(self, tmp_local_json, tools_on_path) -> None:
+        """When claude is on PATH, no install prompt is shown. PATH holds a claude stub."""
         mock_profile_mod = MagicMock()
         mock_profile_mod.get_user_profile.return_value = {}
-        with patch(f"{_MOD}.shutil.which", return_value="/usr/bin/claude"):
-            with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
-                with patch(f"{_MOD}._handle_missing_claude") as mock_handle:
-                    result = stage_5_tool_choice(non_interactive=True)
+        tools_on_path("claude")
+        with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
+            with patch(f"{_MOD}._handle_missing_claude") as mock_handle:
+                result = stage_5_tool_choice(non_interactive=True)
         mock_handle.assert_not_called()
         assert result["cli"] == "claude"
 
     @patch(f"{_MOD}._choose", return_value="default")
     @patch(f"{_MOD}._install_claude_code", return_value=True)
     @patch(f"{_MOD}._prompt", return_value="Y")
-    @patch(f"{_MOD}.shutil.which", return_value=None)
     def test_stage_5_claude_missing_interactive_yes(
-        self, _which, _prompt, mock_install, _choose, tmp_local_json
+        self, _prompt, mock_install, _choose, tmp_local_json, tools_on_path
     ) -> None:
-        """Missing claude + interactive + yes → installer invoked."""
+        """Missing claude + interactive + yes → installer invoked. PATH is an empty directory."""
+        tools_on_path()
         mock_profile_mod = MagicMock()
         mock_profile_mod.get_user_profile.return_value = {}
         with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
@@ -782,25 +782,30 @@ class TestStages:
     @patch(f"{_MOD}._choose", return_value="default")
     @patch(f"{_MOD}._install_claude_code")
     @patch(f"{_MOD}._prompt", return_value="n")
-    @patch(f"{_MOD}.shutil.which", return_value=None)
     def test_stage_5_claude_missing_interactive_no(
-        self, _which, _prompt, mock_install, _choose, tmp_local_json
+        self, mock_prompt, mock_install, _choose, tmp_local_json, tools_on_path
     ) -> None:
-        """Missing claude + interactive + no → no install, continues."""
+        """Missing claude + interactive + no → asked, no install, continues. PATH is an empty directory.
+
+        Mutant: claude never counted missing -> red at the prompt assert (leg 8; before it, the
+        test asserted only that nothing installed, which a stage that never asks also passes).
+        """
+        tools_on_path()
         mock_profile_mod = MagicMock()
         mock_profile_mod.get_user_profile.return_value = {}
         with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
             result = stage_5_tool_choice(non_interactive=False, cli_override="claude")
+        mock_prompt.assert_called_once()
         mock_install.assert_not_called()
         assert result["cli"] == "claude"
 
     @patch(f"{_MOD}.warning")
     @patch(f"{_MOD}._install_claude_code")
-    @patch(f"{_MOD}.shutil.which", return_value=None)
     def test_stage_5_claude_missing_non_interactive_warns(
-        self, _which, mock_install, mock_warn, tmp_local_json
+        self, mock_install, mock_warn, tmp_local_json, tools_on_path
     ) -> None:
-        """Missing claude + non-interactive → warning, no install."""
+        """Missing claude + non-interactive → warning, no install. PATH is an empty directory."""
+        tools_on_path()
         mock_profile_mod = MagicMock()
         mock_profile_mod.get_user_profile.return_value = {}
         with patch.dict("sys.modules", {"aipass.aipass.apps.modules.profile": mock_profile_mod}):
@@ -834,17 +839,23 @@ class TestStages:
             result = stage_7_ping_sweep()
         assert "ping_results" in result
 
-    def test_stage_8_smoke_test_both_found(self, tmp_local_json) -> None:
-        """smoke test passes when both drone and aipass are on PATH."""
-        with patch(f"{_MOD}.shutil.which", return_value="/usr/bin/drone"):
-            result = stage_8_smoke_test()
-        assert result["drone"] == "/usr/bin/drone"
+    def test_stage_8_smoke_test_both_found(self, tmp_local_json, tools_on_path) -> None:
+        """smoke test reports where drone and aipass sit on PATH (stubs in a tmp directory).
 
-    def test_stage_8_smoke_test_missing(self, tmp_local_json) -> None:
-        """Warnings emitted when binaries not found."""
+        Compared as Path objects, by parent and stem: Windows gives the stub a PATHEXT suffix.
+        """
+        bin_dir = tools_on_path("drone", "aipass")
+        result = stage_8_smoke_test()
+        for name in ("drone", "aipass"):
+            found = result[name]
+            assert found is not None, f"{name} not found on PATH"
+            assert (Path(found).parent, Path(found).stem) == (bin_dir, name)
+
+    def test_stage_8_smoke_test_missing(self, tmp_local_json, tools_on_path) -> None:
+        """Warnings emitted when binaries not found. PATH is an empty directory."""
+        tools_on_path()
         with patch(f"{_MOD}.warning"):
-            with patch(f"{_MOD}.shutil.which", return_value=None):
-                result = stage_8_smoke_test()
+            result = stage_8_smoke_test()
         assert result["drone"] is None
         assert result["aipass"] is None
 
@@ -1437,11 +1448,11 @@ class TestTemplateSelector:
                     handle_command("init", ["test-proj"])
         mock_scaffold.assert_called_once_with(["test-proj"])
 
-    def test_pip_hints_say_clone(self, tmp_local_json) -> None:
-        """in-product hints say clone/setup.sh, not pip."""
+    def test_pip_hints_say_clone(self, tmp_local_json, tools_on_path) -> None:
+        """in-product hints say clone/setup.sh, not pip. PATH is an empty directory."""
+        tools_on_path()
         with patch(f"{_MOD}.warning") as mock_warn:
-            with patch(f"{_MOD}.shutil.which", return_value=None):
-                stage_8_smoke_test()
+            stage_8_smoke_test()
         # THE FLOOR (v5 unentered_assert, 2026-09-08). A stage 8 that stopped
         # warning at all - or one that never reached the hint - made this a
         # silent pass, which is precisely the regression it guards.

@@ -216,7 +216,7 @@
     {
       "file": "tests/test_install.py",
       "standard": "through_the_command",
-      "lines": [22, 254, 1067, 1099],
+      "lines": [22, 254, 1064, 1096],
       "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), runs doctor (_run_doctor_preflight) and launches the chat (_end_in_chat, which prompts _ask_permission_mode and builds _build_install_prompt); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone; _registry_user_name and _print_next_steps sit behind the chat launch. Every helper is pinned with the far side stubbed. 254: _pid_alive's Windows tasklist branch is unreachable from acquire_install_lock on a POSIX host; it is handed platform and runner instead."
     },
     {

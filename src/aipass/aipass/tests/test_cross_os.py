@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cross_os.py
 # Description: Tests for cross-OS gap registry parser + doctor/init integration
-# Version: 1.1.6
+# Version: 1.1.7
 # Created: 2026-07-02
-# Modified: 2026-09-29
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/cross_os/gap_registry.py and the handlers it drives."""
@@ -19,6 +19,7 @@
 
 import contextlib
 import platform
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -219,11 +220,21 @@ class TestFindAndFilter:
         assert [g.number for g in gaps] == ["7", "9"]
 
     def test_default_platform_uses_sys_platform(self, tmp_path) -> None:
+        """No platform handed: the answer is the one for the interpreter's own platform.
+
+        The interpreter is asked inside the test, so each CI lane pins its own
+        platform with nothing patched. The doc holds a distinct answer for each
+        family (linux 9; darwin 7, 9; win32 1, 7, 9), asserted below, so the
+        comparison is never vacuous on any lane.
+        Mutant: the default made "win32" -> red here, at the first assert.
+        Mutant: the default made "linux" -> red on the Windows and macOS lanes;
+        it survives on Linux, where test_filter_win32_gets_win_and_all covers the filter.
+        """
         _write_doc(tmp_path)
-        with patch(f"{_HANDLER_MOD}.sys") as mock_sys:
-            mock_sys.platform = "win32"
-            gaps = gaps_for_platform(start=tmp_path)
-        assert [g.number for g in gaps] == ["1", "7", "9"]
+        own = [g.number for g in gaps_for_platform(sys.platform, start=tmp_path)]
+        assert [g.number for g in gaps_for_platform(start=tmp_path)] == own
+        answers = {tuple(g.number for g in gaps_for_platform(p, start=tmp_path)) for p in ("linux", "darwin", "win32")}
+        assert answers == {("9",), ("7", "9"), ("1", "7", "9")}
 
 
 # =============================================================================

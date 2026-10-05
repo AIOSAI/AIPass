@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.2.7
+# Version: 1.2.8
 # Created: 2026-07-05
-# Modified: 2026-09-29
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -95,17 +95,17 @@ class TestLooksLikeAipassTree:
 class TestResolveHome:
     """Resolving the install home from flags, env, and defaults."""
 
-    def test_here_returns_cwd(self, tmp_path: Path) -> None:
-        """--here resolves to the current working directory."""
-        with patch(f"{_MOD}.Path.cwd", return_value=tmp_path):
-            assert _resolve_home(None, here=True, non_interactive=False) == tmp_path.resolve()
+    def test_here_returns_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--here resolves to the current working directory, the real one (monkeypatch.chdir)."""
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_home(None, here=True, non_interactive=False) == tmp_path.resolve()
 
     def test_explicit_path(self, tmp_path: Path) -> None:
         """An explicit --path is expanded and resolved."""
         target = tmp_path / "tools" / "aipass"
         assert _resolve_home(str(target), here=False, non_interactive=False) == target.resolve()
 
-    def test_non_interactive_defaults(self, tmp_path: Path) -> None:
+    def test_non_interactive_defaults(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """From an ordinary directory, non-interactive still falls back to DEFAULT_HOME.
 
         cwd is pinned explicitly here. It was implicit before 2026-09-07 and the
@@ -113,11 +113,11 @@ class TestResolveHome:
         not matter -- once cwd became load-bearing (FPLAN-0492 wave 6) the
         unstated dependency turned into a failure.
         """
+        monkeypatch.chdir(tmp_path)
         with patch.dict("os.environ", {"AIPASS_HOME": ""}, clear=False):
-            with patch(f"{_MOD}.Path.cwd", return_value=tmp_path):
-                assert _resolve_home(None, here=False, non_interactive=True) == DEFAULT_HOME.resolve()
+            assert _resolve_home(None, here=False, non_interactive=True) == DEFAULT_HOME.resolve()
 
-    def test_non_interactive_honours_an_aipass_cwd(self, tmp_path: Path) -> None:
+    def test_non_interactive_honours_an_aipass_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Standing in an AIPass tree, a headless install targets THAT tree.
 
         The defect this pins (banked from the passport 2.0 train): running
@@ -125,9 +125,9 @@ class TestResolveHome:
         ~/AIPass instead, silently ignoring where the user was standing.
         """
         (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
         with patch.dict("os.environ", {"AIPASS_HOME": ""}, clear=False):
-            with patch(f"{_MOD}.Path.cwd", return_value=tmp_path):
-                assert _resolve_home(None, here=False, non_interactive=True) == tmp_path.resolve()
+            assert _resolve_home(None, here=False, non_interactive=True) == tmp_path.resolve()
 
     def test_uses_valid_env(self, tmp_path: Path) -> None:
         """A valid AIPASS_HOME pointing at a real tree is honoured."""
@@ -135,13 +135,13 @@ class TestResolveHome:
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}, clear=False):
             assert _resolve_home(None, here=False, non_interactive=True) == tmp_path.resolve()
 
-    def test_ignores_invalid_env(self, tmp_path: Path) -> None:
+    def test_ignores_invalid_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """An AIPASS_HOME that is not an AIPass tree is ignored for the default."""
         elsewhere = tmp_path / "not_a_tree"
         elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}, clear=False):
-            with patch(f"{_MOD}.Path.cwd", return_value=elsewhere):
-                assert _resolve_home(None, here=False, non_interactive=True) == DEFAULT_HOME.resolve()
+            assert _resolve_home(None, here=False, non_interactive=True) == DEFAULT_HOME.resolve()
 
 
 class TestInstallLock:
@@ -271,14 +271,15 @@ class TestCloneRepo:
             assert _clone_repo(tmp_path, dry_run=False) is False
             run.assert_not_called()
 
-    def test_missing_git(self, tmp_path: Path) -> None:
-        """Absent git means clone fails cleanly without calling subprocess."""
-        with patch(f"{_MOD}.shutil.which", return_value=None), patch(f"{_MOD}.subprocess.run") as run:
+    def test_missing_git(self, tmp_path: Path, tools_on_path) -> None:
+        """Absent git means clone fails cleanly without calling subprocess. PATH holds no git."""
+        tools_on_path()
+        with patch(f"{_MOD}.subprocess.run") as run:
             assert _clone_repo(tmp_path / "home", dry_run=False) is False
             run.assert_not_called()
 
-    def test_success(self, tmp_path: Path) -> None:
-        """A zero-exit git clone returns success, and clones exactly once.
+    def test_success(self, tmp_path: Path, tools_on_path) -> None:
+        """A zero-exit git clone returns success, and clones exactly once. PATH holds a git.
 
         A branch read-back follows the clone, so this pins the CLONE call
         rather than the total call count — the old assert_called_once() was
@@ -287,21 +288,17 @@ class TestCloneRepo:
         Mutant: `"--depth", "1", ` dropped from the clone argv -> red.
         """
         home = tmp_path / "home"
-        with (
-            patch(f"{_MOD}.shutil.which", return_value="/usr/bin/git"),
-            patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run,
-        ):
+        tools_on_path("git")
+        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run:
             assert _clone_repo(home, dry_run=False) is True
             clone_calls = [c for c in run.call_args_list if "clone" in c.args[0]]
             assert len(clone_calls) == 1
             assert clone_calls[0].args[0] == ["git", "clone", "--depth", "1", REPO_URL, str(home)]
 
-    def test_nonzero_exit(self, tmp_path: Path) -> None:
-        """A non-zero git clone exit reports failure."""
-        with (
-            patch(f"{_MOD}.shutil.which", return_value="/usr/bin/git"),
-            patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=1)),
-        ):
+    def test_nonzero_exit(self, tmp_path: Path, tools_on_path) -> None:
+        """A non-zero git clone exit reports failure. PATH holds a git, so the lookup is not the cause."""
+        tools_on_path("git")
+        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=1)):
             assert _clone_repo(tmp_path / "home", dry_run=False) is False
 
 
