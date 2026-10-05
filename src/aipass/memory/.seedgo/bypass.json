@@ -775,8 +775,8 @@
     {
       "file": "tests/test_rollover.py",
       "standard": "import_site",
-      "lines": [134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 163, 164, 207],
-      "reason": "The stub is the cure (ruling (a)). rollover.py imports these at import time, and each far side writes. orchestrator.execute_rollover writes .trinity, the backups and the vector stores. memory_watcher.check_and_rollover runs that same rollover. detector's walk recreates a missing .trinity file. todo_report.roll_pad writes the .backup todo backlogs. plans_processor.process_plans embeds and writes the flow_plans store. 134-137 register the REAL cli flag helpers under the stand-in package, which has no __path__. 139/140 are the parent packages. 207 is the deliberate re-import of rollover against them. Leg 11 of DPLAN-0354."
+      "lines": [134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 163, 164, 199, 207],
+      "reason": "The stub is the cure (ruling (a)). rollover.py imports these at import time, and each far side writes. orchestrator.execute_rollover writes .trinity, the backups and the vector stores. memory_watcher.check_and_rollover runs that same rollover. detector's walk recreates a missing .trinity file. todo_report.roll_pad writes the .backup todo backlogs. plans_processor.process_plans embeds and writes the flow_plans store. 134-137 register the REAL cli flag helpers under the stand-in package, which has no __path__. 139/140 are the parent packages. 199 is the eviction of the cached rollover (del under the module constant _ROLLOVER_MODULE, after setitem so teardown restores it) that the re-import at 207 needs; the checker read the constant key from seedgo leg 17 on, and devpulse added the line on 2026-10-05 as part of this same ruling. 207 is the deliberate re-import of rollover against them. Leg 11 of DPLAN-0354."
     },
     {
       "file": "tests/test_marker7_memory_lane.py",
