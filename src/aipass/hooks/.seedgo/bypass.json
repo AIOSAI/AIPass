@@ -1540,6 +1540,18 @@
     {
       "file": "tests/test_session_boot.py",
       "standard": "stdlib_patch",
+      "lines": [229, 242, 267, 282, 314, 341, 355, 372, 386, 487, 501, 511, 522, 533, 546, 557, 569, 585, 656, 720, 740, 756, 816, 854, 942, 956, 988, 1001, 1014, 1029, 1047, 1069, 1092, 1164, 1182, 1194, 1208, 1222, 1235, 1699, 1785, 1879],
+      "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1516 and 1529): patch(f\"{_MOD}.os.execvp\"). The far side is a real exec: os.execvp replaces the test process with tmux (new-session / attach-session), claude or drone, so no run may reach it. Every public door of session_boot (boot(), main()) ends in that exec, so no door is safe; and no seam may stand on an exec, because on 10-05 (leg 7) a def-time seam let string-form patches miss and one run exec'd real tmux. The patch is the only guard, held at call time."
+    },
+    {
+      "file": "tests/test_session_boot.py",
+      "standard": "stdlib_patch",
+      "lines": [406, 425, 435],
+      "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1505): patch(f\"{_MOD}.os.kill\"). The far side is a real signal: _stop_session sends SIGTERM to the session's pid, a live claude process of this machine, so no run may reach it. Its only public door is boot()'s menu, which also ends in an exec, so no door is safe; and no seam may stand on a kill, by the same 10-05 incident. The patch is the only guard, held at call time."
+    },
+    {
+      "file": "tests/test_session_boot.py",
+      "standard": "stdlib_patch",
       "lines": [2002],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): Path.home patched to raise (unresolvable home), not an exec; no portable in-process way to make the real Path.home raise."
     },

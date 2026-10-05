@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_boot.py
-# Version: 1.0.3
+# Version: 1.0.4
 # Description: Tests for session boot wrapper (menu-based attach/start/close)
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py."""
@@ -66,13 +66,13 @@ def _no_real_tmux_lookup(request):
 
 
 class TestResolveClaudeBinary:
-    def test_found_on_path(self):
-        with patch(f"{_MOD}.shutil.which", return_value="/usr/local/bin/claude"):
-            assert session_boot._resolve_claude_binary() == "/usr/local/bin/claude"
+    def test_found_on_path(self, tmp_path, monkeypatch):
+        bin_dir = _on_path(tmp_path, monkeypatch, "claude")
+        assert Path(session_boot._resolve_claude_binary()).parent == bin_dir
 
-    def test_not_found_fallback(self):
-        with patch(f"{_MOD}.shutil.which", return_value=None):
-            assert session_boot._resolve_claude_binary() == "claude"
+    def test_not_found_fallback(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PATH", str(tmp_path))
+        assert session_boot._resolve_claude_binary() == "claude"
 
 
 class TestFindTmux:
@@ -2007,3 +2007,20 @@ class TestHomeResolutionIsPortable:
         """A presence check answers True or False — never takes the menu down."""
         monkeypatch.setattr(cc_sessions, "CC_SESSIONS_DIR", Path("<no-home>") / ".claude" / "sessions")
         assert session_boot._is_session_file_present(4321) is False
+
+
+def _on_path(tmp_path: Path, monkeypatch, name: str) -> Path:
+    """PATH set to a directory under tmp_path holding name, so the product's own shutil.which answers for real.
+
+    Both a bare name (POSIX, mode bit set) and name.exe (Windows, found through PATHEXT) are laid down; the platform
+    picks its own. The stubs are empty and never run. Returns the directory.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for spelling in (name, f"{name}.exe"):
+        stub = bin_dir / spelling
+        stub.write_text("", encoding="utf-8")
+        stub.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setenv("PATHEXT", ".EXE")
+    return bin_dir
