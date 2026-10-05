@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for Drone (adapted from universal template)
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-03-27
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
@@ -72,6 +72,31 @@ class TestMainVersion:
         with patch("sys.argv", ["drone", "-V"]):
             result = main()
         assert result == 0
+
+
+class TestMainPassportFault:
+    """After routing, main() says a recorded passport fault once on stderr; the exit code stays the route's."""
+
+    _LINE = (
+        "drone: passport /p/.trinity/passport.json could not be read (JSONDecodeError: Expecting value); "
+        "registry /p/AIPASS_REGISTRY.json was used without its credential check"
+    )
+
+    def test_a_recorded_fault_is_printed_once_after_routing(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """The reader's line, exactly, on stderr; mutant killed: the print dropped."""
+        with patch("sys.argv", ["drone", "--version"]), patch(f"{_DRONE}.passport_fault", return_value=self._LINE):
+            result = main()
+        captured = capsys.readouterr()
+        assert result == 0
+        assert captured.err == self._LINE + "\n"
+        assert "drone v" in captured.out
+
+    def test_no_fault_prints_nothing(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """None from the reader adds nothing to stderr."""
+        with patch("sys.argv", ["drone", "--version"]), patch(f"{_DRONE}.passport_fault", return_value=None):
+            result = main()
+        assert result == 0
+        assert capsys.readouterr().err == ""
 
 
 class TestMainHelp:
@@ -372,10 +397,10 @@ class TestMainCustomCommand:
         assert result == 1
 
     def test_a_command_registry_that_cannot_load_exits_1_naming_it(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """A failed command-registry heal is a named failure, not a traceback; mutant: the router's catch removed."""
+        """A command registry that cannot load is named, not a traceback; mutant: the router's catch removed."""
 
         def unreadable() -> dict:
-            raise OSError("registry unreadable")
+            raise RegistryError("registry unreadable")
 
         with (
             patch("sys.argv", ["drone", "audit", "aipass"]),

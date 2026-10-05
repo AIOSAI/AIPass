@@ -190,12 +190,12 @@
       "file": "apps/drone.py",
       "standard": "logged_fallback",
       "lines": [
-        629,
         651,
-        655,
-        723
+        673,
+        677,
+        745
       ],
-      "reason": "main() is the process exit status: 1 is the failure answer to the OS on every path that returns it (routing refused, unknown command, registry unreadable at 629 and 651, an unhandled systems error at 655, a module that raised at 723), and success is 0. Each handler prints the error to stderr before it. The handler prints the error to stderr before it. The checker counts the other `return 1`s as a success path because they are not error() calls; they are failures too. Callers: the console script entry only (sys.exit(main())). Fleet green leg 6, drone's decision.",
+      "reason": "main() is the process exit status: 1 is the failure answer to the OS on every path that returns it (routing refused, unknown command, registry unreadable at 651 and 673, an unhandled systems error at 677, a module that raised at 745), and success is 0. Each handler prints the error to stderr before it. A passport fault (leg 7) is printed after routing by the _reports_passport_fault wrapper and never changes the code. The checker counts the other `return 1`s as a success path because they are not error() calls; they are failures too. Callers: the console script entry only (sys.exit(main())). Fleet green leg 6, drone's decision.",
       "anchor": "return 1"
     },
     {
@@ -232,16 +232,26 @@
       "lines": [
         60
       ],
-      "reason": "_validate_branch_path is a security check that fails closed: False = not proven inside the project root, whether it escapes or could not be resolved (logged WARNING with SECURITY). Both callers act on that and nothing else: resolver.py:176 refuses the branch, registry_handler.py:346 drops it from the loaded registry. True on an unresolvable path would open the gate; a raise would drop the whole registry for one bad entry. Known imprecision: resolver's refusal text says 'escapes project root' for both. Fleet green leg 6, drone's decision.",
+      "reason": "_validate_branch_path is a security check that fails closed: False = not proven inside the project root, whether it escapes or could not be resolved (logged WARNING with SECURITY). Both callers act on that and nothing else: resolver.py:176 refuses the branch, registry_handler.py:392 drops it from the loaded registry. True on an unresolvable path would open the gate; a raise would drop the whole registry for one bad entry. Known imprecision: resolver's refusal text says 'escapes project root' for both. Fleet green leg 6, drone's decision.",
       "anchor": "return False"
+    },
+    {
+      "file": "apps/handlers/registry_handler.py",
+      "standard": "logged_fallback",
+      "lines": [
+        148,
+        183
+      ],
+      "reason": "_registry_matches_credential, option C (accept loudly). True here means 'do not skip this registry', never 'the ids matched'. 148, the registry could not be read: load_registry() reads the same file and raises RegistryCorruptError or RegistryPermissionError naming it; skipping would resolve another registry further up in silence. 183, the passport could not be read: False would send find_registry() to another project's registry in silence, and a raise would stop every drone command under that passport, the mail to ask for help included. The fault is recorded for passport_fault() and drone.py main() prints it once on stderr after routing. Caller: find_registry() only. Fleet green leg 7, drone's decision.",
+      "anchor": "return True"
     },
     {
       "file": "apps/handlers/command_registry/ops.py",
       "standard": "logged_fallback",
       "lines": [
-        156
+        164
       ],
-      "reason": "save_registry: True = written, False = not written; every False is a failure (invalid structure, OSError here, logged ERROR) and the success path returns True only. Callers add_command/update_command/remove_command (196, 223, 254) report False as a failed save; load_registry's three self-heal saves (93, 102, 109) carry on with the in-memory registry, the save's own ERROR log standing. Fleet green leg 6, drone's decision.",
+      "reason": "save_registry: True = written, False = not written; every False is a failure (invalid structure, OSError here, logged ERROR) and the success path returns True only. Callers add_command/remove_command/update_command (204, 231, 262) report False as a failed save; load_registry's three self-heal saves (99, 110, 117: a missing file, a file that is not JSON, JSON that is not a dict; an existing file it cannot read raises since leg 7) carry on with the in-memory registry, the save's own ERROR log standing. Fleet green leg 6, drone's decision.",
       "anchor": "return False"
     },
     {

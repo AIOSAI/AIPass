@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_handler.py
 # Description: Registry loading, lookup and credential verification
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-14
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py: registry loading, lookup and credential verification."""
@@ -485,6 +485,73 @@ class TestRegistryMatchesCredential:
         assert find_registry() == path
 
 
+class TestPassportFault:
+    """Option C (fleet green leg 7): a PASSPORT fault is accepted and named; a REGISTRY fault is not a passport fault.
+
+    Every file lives under tmp_path; the caller's location comes through the
+    router_handler._working_directory seam, never a chdir.
+    """
+
+    @staticmethod
+    def _stand_in(tmp_path: Path, monkeypatch) -> Path:
+        """A project dir the caller stands in, an AIPASS_HOME elsewhere, and no fault recorded yet."""
+        project = tmp_path / "project"
+        project.mkdir()
+        home = tmp_path / "home"
+        home.mkdir()
+        _write_registry(home, _minimal_registry())
+        monkeypatch.setenv("AIPASS_HOME", str(home))
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        monkeypatch.setattr(router_handler, "_working_directory", lambda: project)
+        monkeypatch.setattr(registry_handler, "_PASSPORT_FAULT", None)
+        return project
+
+    def test_broken_passport_is_accepted_and_named(self, tmp_path: Path, monkeypatch):
+        """The cwd registry is kept and the reader names passport and registry.
+
+        Mutants killed: split inverted, record dropped, record handed the registry as the passport.
+        """
+        project = self._stand_in(tmp_path, monkeypatch)
+        registry = _write_registry(project, _minimal_registry(metadata_id="reg-A"))
+        passport = _write_passport(project, {})
+        passport.write_text("{not json", encoding="utf-8")
+
+        assert find_registry() == registry
+        fault = registry_handler.passport_fault() or ""
+        assert fault.startswith(f"drone: passport {passport} could not be read (")
+        assert fault.endswith(f"); registry {registry} was used without its credential check")
+
+    def test_verify_records_the_same_fault(self, tmp_path: Path, monkeypatch):
+        """A set registry path skips the pre-check; _verify_registry_credential records the same line.
+
+        Mutant killed: _verify's record dropped.
+        """
+        project = self._stand_in(tmp_path, monkeypatch)
+        registry = _write_registry(project, _minimal_registry(metadata_id="reg-A"))
+        passport = _write_passport(project, {})
+        passport.write_text("{not json", encoding="utf-8")
+        set_registry_path(registry)
+
+        loaded = load_registry()
+        assert "alpha" in loaded["branches"]
+        fault = registry_handler.passport_fault() or ""
+        assert fault.startswith(f"drone: passport {passport} could not be read (")
+        assert fault.endswith(f"registry {registry} was used without its credential check")
+
+    def test_broken_registry_is_no_passport_fault(self, tmp_path: Path, monkeypatch):
+        """A registry of broken JSON is kept, records nothing, and load_registry() names it by raising."""
+        project = self._stand_in(tmp_path, monkeypatch)
+        registry = project / "AIPASS_REGISTRY.json"
+        registry.write_text("{not json", encoding="utf-8")
+        _write_passport(project, {"citizenship": {"registry_id": "reg-A"}})
+
+        assert find_registry() == registry
+        assert registry_handler.passport_fault() is None
+        with pytest.raises(RegistryCorruptError):
+            load_registry()
+        assert registry_handler.passport_fault() is None
+
+
 class TestCredentialCheckWithNoCurrentDirectory:
     """A process whose cwd was deleted has no location, and that is not an error.
 
@@ -551,16 +618,19 @@ class TestCredentialCheckWithNoCurrentDirectory:
         assert log.info.call_args[0][1] == path
 
     def test_an_unreadable_registry_is_still_a_warning(self, registry_dir: Path, monkeypatch):
-        """The broad except keeps its job; mutant killed: the pre-check failure warning removed."""
+        """A registry fault keeps its WARNING and records no passport fault; mutant killed: the warning removed."""
         unreadable = registry_dir / "AIPASS_REGISTRY.json"
         unreadable.mkdir()  # a directory by the registry's name: open() fails on every OS
         monkeypatch.chdir(registry_dir)
+        monkeypatch.setattr(registry_handler, "_PASSPORT_FAULT", None)
 
         with patch.object(registry_handler, "logger") as log:
             found = find_registry()
 
         assert found == unreadable
-        assert log.warning.call_args[0][:2] == ("Credential pre-check failed for %s: %s", unreadable)
+        assert log.warning.called
+        assert log.warning.call_args[0][:2] == ("Credential pre-check could not read registry %s: %s", unreadable)
+        assert registry_handler.passport_fault() is None
 
     def test_the_walk_that_calls_it_reaches_it_at_all(self, monkeypatch):
         """The credential fix is worthless if its CALLER raises first.

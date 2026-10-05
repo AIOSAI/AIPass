@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_activation.py
 # Description: Tests for command activation, listing, removal, and custom execution
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-17
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/drone.py: activate, list, remove, target, and running a custom command."""
@@ -29,7 +29,7 @@ from aipass.drone.apps.handlers.executor import CommandResult
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.drone import main
 from aipass.drone.apps.handlers.registry_handler import reset_registry_path, set_registry_path
-from aipass.drone.apps.modules import BranchNotFoundError
+from aipass.drone.apps.modules import BranchNotFoundError, RegistryError
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +515,7 @@ class TestHandleCustomCommand:
         "unknown command", also exit 1: only stderr tells the two apart)."""
 
         def unreadable() -> dict[str, Any]:
-            raise OSError("registry unreadable")
+            raise RegistryError("registry unreadable")
 
         monkeypatch.setattr(lookup, "load_registry", unreadable)
 

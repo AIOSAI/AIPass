@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ops.py
 # Description: Registry CRUD operations for custom command shortcuts
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-10-04
 # =============================================
 
 """Registry CRUD Operations for Custom Commands.
@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from aipass.prax import logger
+from aipass.drone.apps.handlers.exceptions import RegistryError
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.module_root import module_file
 
@@ -84,6 +85,11 @@ def load_registry() -> dict[str, Any]:
 
     Returns:
         Registry dict with ``commands`` and ``metadata`` keys.
+
+    Raises:
+        RegistryError: the file exists and could not be read. Recreating it
+            would write an empty registry over commands that are only
+            unreadable, not gone (fleet green leg 7, drone's decision).
     """
     path = _registry_path()
 
@@ -96,7 +102,9 @@ def load_registry() -> dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
-    except (json.JSONDecodeError, OSError) as exc:
+    except OSError as exc:
+        raise RegistryError(f"command registry {path} could not be read ({type(exc).__name__}: {exc})") from exc
+    except json.JSONDecodeError as exc:
         logger.warning("[%s] Corrupt registry, recreating: %s", MODULE_NAME, exc)
         registry = _empty_registry()
         save_registry(registry)

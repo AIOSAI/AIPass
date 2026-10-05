@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_commands.py
 # Description: Tests for the custom command registry
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/commands.py and the command registry handlers it drives."""
@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from aipass.drone.apps.handlers.command_registry import ops, lookup
+from aipass.drone.apps.modules import RegistryError
 from aipass.drone.apps.modules.commands import handle_command, list_all
 
 
@@ -47,6 +48,48 @@ def _seed_registry(registry_file: Path, commands: dict[str, Any] | None = None) 
         },
     }
     registry_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+@pytest.fixture
+def unreadable_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ops' own ``open`` refuses every read; writes go to the real open.
+
+    The stand-in is a module global of ops only, never the builtin, so nothing
+    else in the process is touched. No mode bit: the refusal is this test's.
+    """
+    real_open = open
+
+    def refusing_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if "r" in mode:
+            raise OSError("stand-in: this registry cannot be read")
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(ops, "open", refusing_open, raising=False)
+
+
+class TestUnreadableRegistry:
+    """An existing registry that cannot be read raises naming it; a missing one is still created (fleet green leg 7)."""
+
+    def test_an_existing_unreadable_registry_raises_and_is_not_overwritten(
+        self, isolated_registry: Path, unreadable_reads: None
+    ) -> None:
+        """Mutant killed: the raise replaced by the old recreate (an empty registry saved over the commands)."""
+        _seed_registry(isolated_registry, {"audit": {"name": "audit", "target": "@seedgo"}})
+        before = isolated_registry.read_text(encoding="utf-8")
+
+        with pytest.raises(RegistryError) as raised:
+            ops.load_registry()
+
+        assert str(isolated_registry) in str(raised.value)
+        assert "stand-in: this registry cannot be read" in str(raised.value)
+        assert isolated_registry.read_text(encoding="utf-8") == before
+
+    def test_control_a_missing_registry_is_created(self, isolated_registry: Path, unreadable_reads: None) -> None:
+        """Control: under the same stand-in, a file that does not exist is recreated, never refused."""
+        registry = ops.load_registry()
+
+        assert registry["commands"] == {}
+        assert json.loads(isolated_registry.read_bytes())["commands"] == {}
 
 
 # ===================================================================
@@ -304,11 +347,11 @@ class TestMultiWordMatching:
         """A registry that cannot load raises, never reads as "no match"; mutant: the except returns None."""
 
         def unreadable() -> dict[str, Any]:
-            raise OSError("registry unreadable")
+            raise RegistryError("registry unreadable")
 
         monkeypatch.setattr(lookup, "load_registry", unreadable)
 
-        with pytest.raises(OSError, match="registry unreadable"):
+        with pytest.raises(RegistryError, match="registry unreadable"):
             lookup.match_command(["audit"])
 
     def test_exact_match_no_remaining(self, isolated_registry: Path) -> None:

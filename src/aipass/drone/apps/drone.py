@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.2.5
+# Version: 1.2.6
 # Created: 2026-03-05
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -13,11 +13,12 @@ Routes commands to registered branches and internal modules.
 Standard branch entry point (apps/drone.py pattern).
 """
 
+import functools
 import importlib
 import os
 import sys
 from pathlib import Path
-from typing import List
+from typing import Callable, List
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -42,6 +43,7 @@ from aipass.drone.apps.modules.module_registry import (
     route_module_command,
     get_module_help,
 )
+from aipass.drone.apps.modules.config import passport_fault
 
 VERSION = "1.1.0"
 MODULES_DIR = Path(__file__).parent / "modules"
@@ -49,6 +51,25 @@ MODULES_DIR = Path(__file__).parent / "modules"
 # Interactive mode — commands/branches that bypass capture + timeout for live terminal output.
 INTERACTIVE_COMMANDS = ("monitor", "audit", "watchdog", "status")
 INTERACTIVE_BRANCHES = ("cli", "backup")
+
+
+def _reports_passport_fault(route: Callable[[], int]) -> Callable[[], int]:
+    """Wrap main() so that, after routing, a passport fault is said once on stderr.
+
+    The exit code is the route's own; a passport fault never changes it.
+    sys.stderr.write, not Rich: the line is one fact and must not wrap when piped.
+    """
+
+    @functools.wraps(route)
+    def routed() -> int:
+        """Run the route, say the passport fault if one was recorded, return the route's code."""
+        code = route()
+        fault = passport_fault()
+        if fault is not None:
+            sys.stderr.write(fault + "\n")
+        return code
+
+    return routed
 
 
 def _extract_timeout(args: list[str]) -> tuple[list[str], int | None]:
@@ -615,6 +636,7 @@ def _handle_target(args: List[str]) -> int:
 # =============================================================================
 
 
+@_reports_passport_fault
 def main() -> int:
     """Main entry point - routes commands or shows help."""
     args = sys.argv[1:]
