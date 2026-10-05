@@ -3,7 +3,7 @@
 # Description: Agent Status Dashboard Write-Through
 # Version: 0.2.0
 # Created: 2026-02-25
-# Modified: 2026-09-24
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -24,14 +24,13 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from aipass.prax.apps.modules.logger import get_direct_logger
-
-logger = get_direct_logger()
-
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
+
+logger = get_direct_logger()
 
 
 # =============================================================================
@@ -58,6 +57,9 @@ def _get_aipass_registry() -> Path:
 
 
 STALE_THRESHOLD_MINUTES = 120
+
+# Only Linux has a proc filesystem to read; elsewhere a PID cannot be checked.
+PROC_ROOT: Optional[Path] = Path("/proc") if sys.platform == "linux" else None
 
 
 # =============================================================================
@@ -95,30 +97,36 @@ def _get_all_branches() -> List[Dict[str, Any]]:
         return []
 
 
-def _is_pid_alive(pid: int) -> bool:
+def _is_pid_alive(pid: int, proc_root: Optional[Path]) -> Optional[bool]:
     """
-    Check if a process is still running by reading /proc/{pid}/cmdline.
+    Check if a process is still running by reading <proc_root>/<pid>/cmdline.
 
     Args:
         pid: Process ID to check
+        proc_root: The proc filesystem, PROC_ROOT; None where the platform has none
 
     Returns:
-        True if process exists and looks like a claude agent
+        True if the process exists and looks like a claude agent, False if it
+        does not exist, None when nobody could answer: no proc filesystem on
+        this platform, or the read raised. False there filed a live agent as a
+        dead_process; a holder that cannot be checked reads unchecked, never
+        dead (drone's lock_handler ruling of 10-04, applied by devpulse; prax,
+        leg 16).
     """
+    if proc_root is None:
+        return None
     try:
-        if sys.platform != "linux":
-            return False
-        cmdline_path = Path(f"/proc/{pid}/cmdline")
+        cmdline_path = proc_root / str(pid) / "cmdline"
         if not cmdline_path.exists():
             return False
         cmdline = cmdline_path.read_bytes().decode("utf-8", errors="replace")
         return "claude" in cmdline.lower()
-    except (PermissionError, OSError) as e:
-        logger.warning("Failed to check PID %d status: %s", pid, e)
-        return False
+    except OSError as e:
+        logger.warning("Failed to check PID %d status, so it is reported unchecked: %s", pid, e)
+        return None
 
 
-def _read_lock_file(lock_path: Path) -> Dict[str, Any]:
+def _read_lock_file(lock_path: Path) -> Optional[Dict[str, Any]]:
     """
     Read a dispatch lock file.
 
@@ -126,7 +134,9 @@ def _read_lock_file(lock_path: Path) -> Dict[str, Any]:
         lock_path: Path to .dispatch.lock file
 
     Returns:
-        Lock data dict with pid, timestamp, branch — or empty dict on failure
+        Lock data dict with pid, timestamp, branch; {} when there is no lock;
+        None when a lock exists and cannot be read. {} there hid a dispatch
+        from the dashboard as if no agent held the branch (prax, leg 16).
     """
     try:
         if not lock_path.exists():
@@ -134,7 +144,7 @@ def _read_lock_file(lock_path: Path) -> Dict[str, Any]:
         return json.loads(lock_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Failed to read lock file %s: %s", lock_path, e)
-        return {}
+        return None
 
 
 def _calculate_runtime_minutes(timestamp_str: str) -> float:
@@ -156,12 +166,15 @@ def _calculate_runtime_minutes(timestamp_str: str) -> float:
         return 0.0
 
 
-def _scan_active_agents() -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def _scan_active_agents(proc_root: Optional[Path]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Scan all branches for active dispatch agents.
 
-    Reads .dispatch.lock files, validates PIDs against /proc, and
-    classifies agents as active or stale based on runtime.
+    Reads .dispatch.lock files, validates PIDs against proc_root, and
+    classifies agents as active or stale based on runtime. An agent whose PID
+    could not be checked is filed with pid_checked False: under active with
+    status unchecked, or under stale as overtime past the threshold, never as
+    dead_process (prax, leg 16).
 
     Returns:
         Tuple of (active_agents, stale_agents) — each a list of dicts
@@ -175,6 +188,10 @@ def _scan_active_agents() -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         lock_path = branch["path"] / "ai_mail.local" / ".dispatch.lock"
         lock_data = _read_lock_file(lock_path)
 
+        if lock_data is None:
+            # A lock is there but unreadable: shown for a look, never hidden
+            stale_agents.append({"branch": branch["name"], "status": "unreadable_lock", "pid_checked": False})
+            continue
         if not lock_data:
             continue
 
@@ -182,8 +199,9 @@ def _scan_active_agents() -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         timestamp = lock_data.get("timestamp", "")
         runtime_minutes = _calculate_runtime_minutes(timestamp)
 
-        # Validate PID is still alive
-        if not _is_pid_alive(pid):
+        # Validate PID is still alive; None is a PID nobody could check
+        alive = _is_pid_alive(pid, proc_root)
+        if alive is False:
             # Stale lock — process died without cleanup
             stale_agents.append(
                 {
@@ -192,6 +210,7 @@ def _scan_active_agents() -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
                     "started": timestamp,
                     "runtime_minutes": round(runtime_minutes, 1),
                     "status": "dead_process",
+                    "pid_checked": True,
                 }
             )
             continue
@@ -201,12 +220,15 @@ def _scan_active_agents() -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
             "pid": pid,
             "started": timestamp,
             "runtime_minutes": round(runtime_minutes, 1),
+            "pid_checked": alive is True,
         }
 
         if runtime_minutes > STALE_THRESHOLD_MINUTES:
             agent_info["status"] = "overtime"
             stale_agents.append(agent_info)
         else:
+            if alive is None:
+                agent_info["status"] = "unchecked"
             active_agents.append(agent_info)
 
     return active_agents, stale_agents
@@ -217,18 +239,23 @@ def _scan_active_agents() -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
 # =============================================================================
 
 
-def build_agent_status_section() -> Dict[str, Any]:
+def build_agent_status_section(proc_root: Optional[Path] = PROC_ROOT) -> Dict[str, Any]:
     """
     Build the agent_status dashboard section data.
 
     Scans for active dispatch agents and returns section dict ready for
     write_section().
 
+    Args:
+        proc_root: Where PIDs are checked, PROC_ROOT (None where the platform
+            has no proc filesystem). A parameter so the tests hand in a proc
+            tree under tmp_path rather than reading this machine's (prax, leg 16).
+
     Returns:
         Dict with managed_by, active_agents, agent_count, stale_agents,
         last_updated
     """
-    active_agents, stale_agents = _scan_active_agents()
+    active_agents, stale_agents = _scan_active_agents(proc_root)
 
     return {
         "managed_by": "prax",

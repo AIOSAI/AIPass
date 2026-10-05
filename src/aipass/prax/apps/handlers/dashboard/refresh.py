@@ -3,7 +3,7 @@
 # Description: Dashboard Refresh Handler
 # Version: 0.7.0
 # Created: 2026-02-25
-# Modified: 2026-09-15
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -20,8 +20,6 @@ from typing import Dict, List
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 
-logger = get_direct_logger()
-
 # Same-package imports allowed
 from .operations import cap_subject, create_fresh_dashboard, save_dashboard
 from .status import calculate_quick_status, merge_quick_status, read_existing_quick_status
@@ -32,6 +30,8 @@ from ..central.reader import read_all_centrals
 from aipass.prax.apps.handlers.json import json_handler
 from .template_pusher import DEPRECATED_SECTIONS
 from aipass.prax.apps.handlers.repo_root import find_repo_root
+
+logger = get_direct_logger()
 
 # Sections managed by the refresh path — everything else is write-through only
 REFRESH_MANAGED_SECTIONS = {"ai_mail", "flow", "memory"}
@@ -341,6 +341,23 @@ def _prune_deprecated_sections(dashboard: Dict) -> None:
         sections.pop(key, None)
 
 
+def _merge_over_disk(branch_path: Path, computed: Dict) -> Dict:
+    """The computed quick_status merged over the block already on disk.
+
+    An unreadable dashboard loses the keys other services wrote, so the merged
+    block carries previous_unreadable True and the owner reads the loss in the
+    file, not only in the log; a readable or absent dashboard drops the key
+    (prax, leg 16).
+    """
+    existing = read_existing_quick_status(branch_path)
+    merged = merge_quick_status(existing, computed)
+    if existing is None:
+        merged["previous_unreadable"] = True
+    else:
+        merged.pop("previous_unreadable", None)
+    return merged
+
+
 def _preserve_write_through_sections(dashboard: Dict, branch_path: Path, branch_name: str) -> None:
     """Preserve write-through sections not managed by refresh."""
     existing_path = branch_path / "DASHBOARD.local.json"
@@ -417,9 +434,8 @@ def refresh_all_dashboards() -> Dict:
             # section fed the counts, and that misled a measurement (2026-09-11).
             # Merged over what is already on disk: the dashboard was rebuilt from
             # the template, so other services' keys live only in the old file.
-            dashboard["quick_status"] = merge_quick_status(
-                read_existing_quick_status(branch_path),
-                _calculate_quick_status(dashboard["sections"], branch_path),
+            dashboard["quick_status"] = _merge_over_disk(
+                branch_path, _calculate_quick_status(dashboard["sections"], branch_path)
             )
             dashboard["sections"].pop("ai_mail", None)
 
@@ -487,9 +503,8 @@ def refresh_single_dashboard(branch_path: Path) -> Dict:
         _preserve_write_through_sections(dashboard, branch_path, branch_name)
         _prune_deprecated_sections(dashboard)
 
-        dashboard["quick_status"] = merge_quick_status(
-            read_existing_quick_status(branch_path),
-            _calculate_quick_status(dashboard["sections"], branch_path),
+        dashboard["quick_status"] = _merge_over_disk(
+            branch_path, _calculate_quick_status(dashboard["sections"], branch_path)
         )
         dashboard["sections"].pop("ai_mail", None)
 

@@ -3,7 +3,7 @@
 # Description: Dashboard Status Calculation Handler
 # Version: 0.4.0
 # Created: 2026-02-25
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -119,11 +119,15 @@ def merge_quick_status(existing: "Dict | None", computed: Dict) -> Dict:
     return merged
 
 
-def read_existing_quick_status(branch_path: "Path | None") -> Dict:
+def read_existing_quick_status(branch_path: "Path | None") -> "Dict | None":
     """Read the quick_status block already on disk, for merging into a fresh build.
 
     The refresh path builds each dashboard from the template, so the previous
     block is gone before the merge can see it. This fetches it back.
+
+    Returns {} when there is no dashboard or no block, and None when the file
+    exists but cannot be read: the keys other services wrote are lost then,
+    and refresh says so in the file (prax, leg 16).
     """
     if not branch_path:
         return {}
@@ -136,11 +140,11 @@ def read_existing_quick_status(branch_path: "Path | None") -> Dict:
         logger.warning(
             "Could not read the existing dashboard at %s (%s), so keys written by other services "
             "cannot be preserved on this refresh. prax's own counters are still correct and the "
-            "file is rewritten, not deleted.",
+            "file is rewritten with previous_unreadable in its quick_status, not deleted.",
             dashboard_path,
             type(exc).__name__,
         )
-        return {}
+        return None
     block = data.get("quick_status", {})
     return block if isinstance(block, dict) else {}
 

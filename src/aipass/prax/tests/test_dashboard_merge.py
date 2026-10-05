@@ -3,7 +3,7 @@
 # Description: quick_status has many writers — none may delete another's key
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/dashboard/status.py, refresh.py, operations.py, template_pusher.py and template_differ.py."""
@@ -171,6 +171,39 @@ class TestForeignKeysSurviveEveryWriter:
         quick = _read_quick_status(branch)
         assert quick["todo_count"] == 7
         assert quick["summary"] == "1 new emails, 1 opened, todos unreadable"
+
+    def _refreshed(self, branch):
+        with patch.object(refresh, "read_all_centrals", return_value={}):
+            refresh.refresh_single_dashboard(branch)
+        return _read_quick_status(branch)
+
+    def test_an_unreadable_dashboard_says_its_keys_were_lost(self, tmp_path):
+        """An unreadable dashboard merged as {}: the foreign keys went with only a log line (prax, leg 16)."""
+        branch = _seed_branch(tmp_path, {})
+        (branch / "DASHBOARD.local.json").write_text("<<<not json>>>", encoding="utf-8")
+
+        quick = self._refreshed(branch)
+
+        assert quick.get("previous_unreadable") is True
+        assert (quick["new_mail"], quick["opened_mail"], quick["todo_count"]) == (1, 1, 2)
+
+    def test_a_missing_dashboard_has_no_loss_to_report(self, tmp_path):
+        branch = _seed_branch(tmp_path, {})
+        (branch / "DASHBOARD.local.json").unlink()
+
+        quick = self._refreshed(branch)
+
+        assert "previous_unreadable" not in quick
+        assert quick["new_mail"] == 1
+
+    def test_a_readable_dashboard_keeps_its_keys_and_clears_an_old_loss(self, tmp_path):
+        """The flag of an earlier unreadable refresh does not outlive a readable one."""
+        branch = _seed_branch(tmp_path, {"commons_mentions": 4, "previous_unreadable": True})
+
+        quick = self._refreshed(branch)
+
+        assert quick.get("commons_mentions") == 4
+        assert "previous_unreadable" not in quick
 
     def test_canary_plain_assignment_drops_the_key(self):
         """Proof the assertions above can fail: replacing the block is the bug."""
