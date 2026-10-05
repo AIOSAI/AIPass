@@ -3,7 +3,7 @@
 # Description: Tests for aipass feedback — toggle alias for @hooks feedback pulse
 # Version: 1.1.4
 # Created: 2026-07-18
-# Modified: 2026-09-30
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/feedback.py and the feedback toggle command it drives."""

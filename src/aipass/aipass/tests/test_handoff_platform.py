@@ -3,7 +3,7 @@
 # Description: Tests for handoff_platform handler
 # Version: 1.1.6
 # Created: 2026-05-12
-# Modified: 2026-09-30
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/handoff_platform/__init__.py and the handoff module it drives."""
