@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_file_top_check.py
 # Description: file_top_check — test template v1 items 5, 6 and 7, the top of a test file
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/file_top_check.py."""
@@ -207,9 +207,10 @@ class TestEverySubRuleReportsItself:
         """checklist._format_failure prints the FIRST failed check and counts the rest.
 
         Three checks would show one sub-rule and hide two, so the three lines
-        live in one message instead.
+        live in one message instead. The file holds a test, or it would be a
+        plugin and owe no item 6 (leg 17).
         """
-        path = _write(tmp_path, "import pytest\n")
+        path = _write(tmp_path, "import pytest\n\n\ndef test_x():\n    assert pytest\n")
 
         message = file_top_check.check_module(str(path))["checks"][0]["message"]
 
@@ -235,6 +236,54 @@ class TestConftestIsJudgedOnItemFiveOnly:
     def test_the_conftest_name_is_what_decides_it(self):
         assert file_top_check.is_conftest("tests/conftest.py") is True
         assert file_top_check.is_conftest("tests/test_conftest_thing.py") is False
+
+
+class TestATestPluginIsExcusedItemSix:
+    """hooks tests/winhome_sim.py: a pytest plugin under tests/ holding no tests (seedgo, fleet green leg 17).
+
+    Item 6 asks for the SUBJECT as a path and a plugin has none, the conftest
+    reasoning; items 5 and 7 still bind. Told apart by the AST, never the name.
+    """
+
+    PLUGIN = '\n"""A pytest plugin that\nsimulates a Windows home."""\n'
+    HOOK = "\nimport pytest\n\n\ndef pytest_configure(config):\n    return None\n"
+
+    def _said(self, tmp_path, text):
+        """check_module's (passed, message) for *text* written as tests/winhome_sim.py."""
+        result = file_top_check.check_module(str(_write(tmp_path, text, name="winhome_sim.py")))
+        return result["passed"], result["checks"][0]["message"]
+
+    def test_a_file_with_no_tests_answers_items_five_and_seven_only(self, tmp_path):
+        """A two-line docstring naming no path is no finding in a plugin."""
+        passed, said = self._said(tmp_path, HEADER + self.PLUGIN + DECLARED_PASS + self.HOOK)
+
+        assert passed is True, said
+
+    def test_one_test_function_takes_the_excuse_away(self, tmp_path):
+        """The mutant's target: a file holding a test has a subject to name."""
+        body = HEADER + self.PLUGIN + DECLARED_PASS + self.HOOK + "\n\ndef test_x():\n    assert True\n"
+
+        passed, said = self._said(tmp_path, body)
+
+        assert passed is False
+        assert "item 6 subject docstring: 2 lines, not 1" in said
+
+    def test_one_test_class_takes_the_excuse_away(self, tmp_path):
+        """pytest collects a Test* class too."""
+        test_class = "\n\nclass TestX:\n    def test_y(self):\n        pass\n"
+        body = HEADER + self.PLUGIN + DECLARED_PASS + self.HOOK + test_class
+
+        passed, said = self._said(tmp_path, body)
+
+        assert passed is False
+        assert "item 6 subject docstring: 2 lines, not 1" in said
+
+    def test_a_plugin_still_owes_the_declared_pass(self, tmp_path):
+        """Item 7 binds a plugin: what it does not test, and what covers that."""
+        passed, said = self._said(tmp_path, HEADER + self.PLUGIN + self.HOOK)
+
+        assert passed is False
+        assert "item 7" in said
 
     def test_a_clean_conftest_says_which_items_did_not_reach_it(self, tmp_path):
         path = _write(tmp_path, HEADER.replace("test_thing.py", "conftest.py") + BODY, name="conftest.py")

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for checker sub-functions in encapsulation, imports, introspection, modules
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -1478,6 +1478,12 @@ class TestCliCheckAllowsRelayingACapturedSubprocessStream:
     still a violation. It also requires the streams to CORRESPOND — writing a
     captured stderr to stdout stays red, because that is a real routing bug this
     check should keep catching.
+
+    The pin that read live drone/apps/drone.py through this raw rule was retired
+    in fleet green leg 17 (seedgo's call): it judged another branch's working
+    tree without that branch's bypass rules, so drone's answered line 69 read red
+    here while the audit and the checklist read it green. Drone's real file is
+    the audit's to judge; the relay forms it was written for are pinned below.
     """
 
     def _lines(self, source):
@@ -1523,16 +1529,6 @@ class TestCliCheckAllowsRelayingACapturedSubprocessStream:
 
     def test_a_trailing_comment_does_not_hide_a_real_violation(self):
         assert self._lines('        sys.stdout.write("hello")  # relay') != []
-
-    def test_the_real_drone_entry_point_has_no_raw_write_violations(self):
-        from pathlib import Path
-
-        target = Path(__file__).resolve().parents[2] / "drone" / "apps" / "drone.py"
-        if not target.exists():
-            import pytest
-
-            pytest.skip("drone.py not on disk")
-        assert self._lines(target.read_text(encoding="utf-8")) == []
 
 
 class TestJsonStructureExemptsPreLoggingBootstrapModules:

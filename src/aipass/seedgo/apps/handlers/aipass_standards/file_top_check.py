@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_top_check.py
 # Description: Test File Top Standards Checker Handler
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -245,7 +245,22 @@ def is_conftest(module_path: str) -> bool:
     return Path(module_path).name == "conftest.py"
 
 
-def scan(source: str, conftest: bool = False) -> List[str]:
+def holds_tests(tree: ast.Module) -> bool:
+    """Whether pytest would collect anything here: a top-level ``test*`` function or ``Test*`` class.
+
+    A file under tests/ that holds neither is a test plugin (hooks
+    tests/winhome_sim.py) and, like a conftest, has no subject for item 6 to
+    name (seedgo, fleet green leg 17). Read from the AST, never the file name.
+    """
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
+            return True
+        if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            return True
+    return False
+
+
+def scan(source: str, conftest: bool = False, excuse_plugin: bool = False) -> List[str]:
     """Every finding for one test file's top, in template order.
 
     A file that does not parse yields nothing: ruff already convicts the
@@ -265,7 +280,10 @@ def scan(source: str, conftest: bool = False) -> List[str]:
     findings = _header_findings(lines, doc_line)
     findings += _order_findings(doc_line, pass_line)
     if not conftest:
-        findings += _docstring_findings(tree, doc_line)
+        # excuse_plugin: the per-file lane asks it (check_module); a scan of
+        # bare source keeps judging item 6, as every scan-level pin expects.
+        if not (excuse_plugin and not holds_tests(tree)):
+            findings += _docstring_findings(tree, doc_line)
         findings += _declared_pass_findings(lines, pass_line)
     return findings
 
@@ -318,7 +336,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
 
     conftest = is_conftest(module_path)
-    findings = scan(source, conftest=conftest)
+    findings = scan(source, conftest=conftest, excuse_plugin=True)
 
     if not findings:
         return _result(True, _one_check(True, _clean_message(conftest)), 100)

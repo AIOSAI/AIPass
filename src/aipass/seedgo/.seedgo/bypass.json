@@ -330,8 +330,8 @@
     {
       "file": "tests/test_checkers_batch7.py",
       "standard": "through_the_command",
-      "lines": [2253],
-      "reason": "No public route (fleet green leg 15): json_structure_check._resolve_relative resolves relative imports for the bootstrap chain, which check_module reaches only for a file inside a real aipass source root. Named in the leg 15 reply to @devpulse as the checker asks."
+      "lines": [2249],
+      "reason": "No public route (fleet green leg 15; re-pinned -4 leg 17): json_structure_check._resolve_relative resolves relative imports for the bootstrap chain, which check_module reaches only for a file inside a real aipass source root. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_checkers_batch8.py",

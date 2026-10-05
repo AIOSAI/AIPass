@@ -355,3 +355,45 @@ class TestALineRuleAcquitsItsLineAlone:
 
         assert said.count(stdlib_patch_check.CURE) == 2
         assert said.startswith("test_specimen.py:2 time.time replaces time process-wide")
+
+
+class TestAnFStringTargetWithAModuleConstantHead:
+    """``patch(f"{_MOD}.shutil.which")`` was unresolved, counted and never judged (seedgo, fleet green leg 17).
+
+    An f-string whose every field is a name bound ONCE at module level to a
+    string constant reads as the joined string; any other shape stays
+    unresolved and counted. patch.object and setattr forms are held unchanged by
+    TestAStdlibClassReachedThroughAProductBinding above.
+    """
+
+    HEAD = f'_MOD = "{WATCHDOG}.agent"\n'
+
+    def test_a_stdlib_tail_is_scored_as_the_test_wrote_it(self):
+        """The same verdict the constant form gets, at the call's line."""
+        body = 'def test_it():\n    patch(f"{_MOD}.Path.resolve")\n'
+
+        assert _scored(self.HEAD + body) == [(3, 'f"{_MOD}.Path.resolve"', "pathlib")]
+
+    def test_a_product_tail_is_acquitted_like_the_constant_form(self):
+        """agent.TranscriptScanner is the product's own class: nothing scored, nothing unread."""
+        source = self.HEAD + 'def test_it():\n    patch(f"{_MOD}.TranscriptScanner.tick")\n'
+
+        assert stdlib_patch_check.scan(source) == ([], 0)
+
+    def test_a_head_bound_inside_the_function_stays_unresolved(self):
+        """A local name is not the module's constant: counted, never guessed."""
+        source = f'def test_it():\n    _MOD = "{WATCHDOG}.agent"\n    patch(f"{{_MOD}}.Path.resolve")\n'
+
+        assert stdlib_patch_check.scan(source) == ([], 1)
+
+    def test_a_head_bound_twice_at_module_level_stays_unresolved(self):
+        """Two bindings, two possible strings: counted, never guessed."""
+        source = self.HEAD + '_MOD = "os"\ndef test_it():\n    patch(f"{_MOD}.Path.resolve")\n'
+
+        assert stdlib_patch_check.scan(source) == ([], 1)
+
+    def test_two_fields_are_joined_in_order(self):
+        """Constant parts and fields keep their order: '{_A}.{_B}' is not '{_B}.{_A}'."""
+        source = f'_A = "{WATCHDOG}"\n_B = "agent.Path"\ndef test_it():\n    patch(f"{{_A}}.{{_B}}.resolve")\n'
+
+        assert _scored(source) == [(4, 'f"{_A}.{_B}.resolve"', "pathlib")]

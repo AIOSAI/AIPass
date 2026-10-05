@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: import_site_check.py
 # Description: Import Site Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-21
-# Modified: 2026-09-21
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -47,13 +47,15 @@ The ``check_branch_info`` backlog line retired with that ruling: an unscored
 grey line was the workaround for a corpus that handed this checker no files,
 and the scored row is the record now.
 
-One known limit, stated rather than hidden: the aipass module has to be named
-in the statement itself. ``key = "aipass.prax"`` followed by
-``sys.modules[key] = stub`` is not convicted, because the checker reads one
-statement and not the function's dataflow. Measured 2026-09-21, no fleet test
-file does this; the shape would be caught the moment one does only by widening
-to every sys.modules write, product or not, which would convict a test
-stubbing a third-party module it has every right to stub.
+What is read, and the limit that remains, stated rather than hidden. The
+aipass module is named in the statement itself, or (seedgo, fleet green leg
+17) as the key of ``sys.modules[KEY] = ...`` / ``del sys.modules[KEY]`` where
+``KEY`` is bound ONCE at module level to a string naming an aipass module
+(``module_constants.string_constants``). A name bound inside the function,
+bound twice, or used as an argument to ``pop``/``setitem`` is not read: the
+checker reads one statement and a module's constants, not dataflow. Widening
+to every sys.modules write, product or not, would convict a test stubbing a
+third-party module it has every right to stub.
 """
 
 import ast
@@ -61,6 +63,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards import module_constants
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -174,15 +177,31 @@ def _stub_mechanism(node: ast.AST, inside_function: bool) -> str | None:
     return None
 
 
+def _keyed_by_product_constant(node: ast.AST, constants: Dict[str, str]) -> bool:
+    """True when a ``sys.modules[NAME]`` target's NAME is a module constant naming aipass.
+
+    ``constants`` is ``module_constants.string_constants``: names bound once at
+    module level to a string (seedgo, fleet green leg 17). Only a subscript key
+    is read, nothing wider.
+    """
+    targets = getattr(node, "targets", [])
+    for target in targets:
+        if isinstance(target, ast.Subscript) and _is_sys_modules(target.value) and isinstance(target.slice, ast.Name):
+            if _root_of(constants.get(target.slice.id)) == PRODUCT_ROOT:
+                return True
+    return False
+
+
 def _stubs(tree: ast.Module) -> List[Tuple[int, str]]:
     """Every sys.modules write or in-function reload that names a product module."""
     found: List[Tuple[int, str]] = []
+    constants = module_constants.string_constants(tree)
 
     def walk(node: ast.AST, inside: bool) -> None:
         """Descend, carrying whether a function body has been entered."""
         for child in ast.iter_child_nodes(node):
             mechanism = _stub_mechanism(child, inside)
-            if mechanism is not None and _names_product(child):
+            if mechanism is not None and (_names_product(child) or _keyed_by_product_constant(child, constants)):
                 found.append((getattr(child, "lineno", 0), mechanism))
             walk(child, inside or isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)))
 

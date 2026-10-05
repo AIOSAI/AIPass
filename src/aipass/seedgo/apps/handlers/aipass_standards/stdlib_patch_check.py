@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: stdlib_patch_check.py
 # Description: Stdlib Patch Standards Checker Handler
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-09-22
 # Modified: 2026-10-05
 # =============================================
@@ -99,6 +99,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards import module_constants
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -255,10 +256,16 @@ def _through_product(segments: List[str]) -> str | None:
     return ""
 
 
-def _resolve(target: ast.AST, imports: Dict[str, str]) -> str:
-    """The target as a fully dotted path, or "" when nothing can resolve it."""
+def _resolve(target: ast.AST, imports: Dict[str, str], constants: Dict[str, str]) -> str:
+    """The target as a fully dotted path, or "" when nothing can resolve it.
+
+    An f-string resolves when every field is a module-level string constant
+    (``module_constants.joined_text``; seedgo, fleet green leg 17).
+    """
     if isinstance(target, ast.Constant) and isinstance(target.value, str):
         return target.value
+    if isinstance(target, ast.JoinedStr):
+        return module_constants.joined_text(target, constants)
     written = _dotted(target)
     if not written:
         return ""
@@ -268,7 +275,7 @@ def _resolve(target: ast.AST, imports: Dict[str, str]) -> str:
     return f"{imports[head]}.{rest}" if rest else imports[head]
 
 
-def _target(node: ast.Call, imports: Dict[str, str]) -> Tuple[str, str]:
+def _target(node: ast.Call, imports: Dict[str, str], constants: Dict[str, str], source: str) -> Tuple[str, str]:
     """(as written, fully dotted) for a patch call's target, its attribute included.
 
     ``patch.object(sys, "argv", ...)`` and ``monkeypatch.setattr(sys, "argv",
@@ -276,11 +283,14 @@ def _target(node: ast.Call, imports: Dict[str, str]) -> Tuple[str, str]:
     first alone judged them as a patch of all of ``sys`` while the string form
     ``"sys.argv"`` was acquitted (cli and daemon, seedgo fleet green leg 9). The
     attribute is joined only onto a stdlib object: a product module's binding
-    keeps the verdict it had.
+    keeps the verdict it had. An f-string is shown as its source text.
     """
     first = node.args[0]
-    written = str(_dotted(first) or getattr(first, "value", ""))
-    chain = _resolve(first, imports)
+    if isinstance(first, ast.JoinedStr):
+        written = ast.get_source_segment(source, first) or ""
+    else:
+        written = str(_dotted(first) or getattr(first, "value", ""))
+    chain = _resolve(first, imports, constants)
     second = node.args[1] if len(node.args) > 1 else None
     attribute = second.value if isinstance(second, ast.Constant) and isinstance(second.value, str) else ""
     if attribute and _tail_name(node.func) in ("object", "setattr") and not isinstance(first, ast.Constant):
@@ -322,12 +332,13 @@ def scan(source: str) -> Tuple[List[Tuple[int, str, str]], int]:
         return [], 0
 
     imports = _imports(tree)
+    constants = module_constants.string_constants(tree)
     scored: List[Tuple[int, str, str]] = []
     unresolved = 0
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or _tail_name(node.func) not in _PATCH_VERBS or not node.args:
             continue
-        written, chain = _target(node, imports)
+        written, chain = _target(node, imports, constants, source)
         if not chain:
             unresolved += 1
             continue

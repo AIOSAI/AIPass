@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_import_site_check.py
 # Description: import_site_check — test template v1 item 8, product imports at the top of a test file
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-21
-# Modified: 2026-09-23
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/import_site_check.py."""
@@ -191,7 +191,10 @@ class TestTheStubMechanismIsConvicted:
         assert _shapes(source) == []
 
     def test_a_product_module_named_through_a_variable_is_missed(self):
-        """The known limit, pinned so it cannot be lost: one statement, not dataflow."""
+        """The known limit, pinned so it cannot be lost: a name bound inside the function is not read.
+
+        A module-level constant key is read since leg 17 (TestAModuleConstantKeyIsRead).
+        """
         source = 'def test_x():\n    key = "aipass.prax"\n    sys.modules[key] = stub\n'
 
         assert _shapes(source) == []
@@ -293,3 +296,24 @@ class TestThroughTheChecklistCommand:
         out = capsys.readouterr().out
         assert "✓ import_site" in out
         assert import_site_check.FIX_IMPORT not in out
+
+
+class TestAModuleConstantKeyIsRead:
+    """``KEY = "aipass.prax"`` then ``sys.modules[KEY] = stub`` (seedgo, fleet green leg 17).
+
+    A subscript key that is a name bound once at module level to a string
+    naming an aipass module reads as that string. Nothing wider.
+    """
+
+    def test_a_module_level_constant_key_is_convicted_at_the_write(self):
+        source = 'KEY = "aipass.prax"\n\n\ndef test_x():\n    sys.modules[KEY] = stub\n'
+
+        assert [(line, shape) for line, shape, _fix in import_site_check.scan(source)] == [
+            (5, "sys.modules stub (sys.modules[...] = ...)")
+        ]
+
+    def test_a_key_naming_a_third_party_module_is_not(self):
+        """Stubbing a module the product does not own is the test's right."""
+        source = 'KEY = "requests"\n\n\ndef test_x():\n    sys.modules[KEY] = stub\n'
+
+        assert _shapes(source) == []
