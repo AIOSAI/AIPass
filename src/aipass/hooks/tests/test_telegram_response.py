@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_telegram_response.py
-# Version: 2.0.5
+# Version: 2.0.6
 # Description: Tests for telegram_response notification handler
 # Branch: hooks
 # Layer: tests
@@ -94,6 +94,13 @@ def _mirrored_user(tmp_path: Path, content: object) -> str | None:
     assert turn is not None and turn.endswith("Reply")
     head = turn.removesuffix("Reply").strip()
     return head.removeprefix("You: ") if head else None
+
+
+def _record_waits(monkeypatch) -> list[float]:
+    """The retry waits telegram_response asks for, recorded through its _sleep seam; nothing sleeps."""
+    waits: list[float] = []
+    monkeypatch.setattr(f"{MOD}._sleep", waits.append)
+    return waits
 
 
 def _make_pending(tmp_path: Path, name: str = "bot-123.json", **overrides) -> Path:
@@ -201,19 +208,19 @@ class TestFindPendingFile:
         assert result is not None
         assert result.name == "bot-42.json"
 
-    def test_cwd_relative_match(self, tmp_path):
+    def test_cwd_relative_match(self, tmp_path, monkeypatch):
         pending_dir = tmp_path / "telegram_pending"
         pending_dir.mkdir()
         work = tmp_path / "project"
-        work.mkdir()
+        (work / "subdir").mkdir(parents=True)
         data = {"timestamp": time.time(), "work_dir": str(work)}
         (pending_dir / "bot-7.json").write_text(json.dumps(data), encoding="utf-8")
+        monkeypatch.chdir(work / "subdir")
 
         with (
             patch(LOGGER_PATCH),
             patch(f"{MOD}.PENDING_DIR", pending_dir),
             patch.dict("os.environ", _kept_redirect(), clear=True),
-            patch(f"{MOD}.Path.cwd", return_value=work / "subdir"),
         ):
             result = find_pending_file()
 
@@ -856,8 +863,9 @@ class TestEditTelegramMessage:
 class TestHandleIntegration:
     """Full handle() flow integration tests."""
 
-    def test_happy_path_send_and_advance(self, tmp_path):
+    def test_happy_path_send_and_advance(self, tmp_path, monkeypatch):
         """Full flow: pending exists -> extract -> send -> advance cursor."""
+        monkeypatch.chdir(tmp_path)
         transcript = tmp_path / "transcript.jsonl"
         lines = [
             _jsonl_line("user", "Hello"),
@@ -881,7 +889,6 @@ class TestHandleIntegration:
             patch(f"{MOD}.find_pending_file", return_value=pending_file),
             patch(f"{MOD}.urlopen", return_value=_mock_urlopen_ok()),
             patch(f"{MOD}._check_log_streamer_active", return_value=False),
-            patch(f"{MOD}.Path.cwd", return_value=tmp_path),
             patch(f"{MOD}._write_delivery_log"),
         ):
             result = handle(
@@ -898,8 +905,10 @@ class TestHandleIntegration:
         assert updated["delivered"] is True
         assert updated["transcript_line_after"] == 2
 
-    def test_send_fails_pending_kept(self, tmp_path):
+    def test_send_fails_pending_kept(self, tmp_path, monkeypatch):
         """When delivery fails, pending file is kept for retry."""
+        monkeypatch.chdir(tmp_path)
+        waits = _record_waits(monkeypatch)
         transcript = tmp_path / "transcript.jsonl"
         lines = [
             _jsonl_line("user", "Hello"),
@@ -923,8 +932,6 @@ class TestHandleIntegration:
             patch(f"{MOD}.find_pending_file", return_value=pending_file),
             patch(f"{MOD}.urlopen", side_effect=Exception("network down")),
             patch(f"{MOD}._check_log_streamer_active", return_value=False),
-            patch(f"{MOD}.time.sleep"),
-            patch(f"{MOD}.Path.cwd", return_value=tmp_path),
             patch(f"{MOD}._write_delivery_log"),
         ):
             result = handle(
@@ -939,9 +946,12 @@ class TestHandleIntegration:
         assert pending_file.exists()
         updated = json.loads(pending_file.read_text(encoding="utf-8"))
         assert "delivered" not in updated
+        assert waits == [1.0, 2.0]
 
-    def test_no_response_text_pending_kept(self, tmp_path):
+    def test_no_response_text_pending_kept(self, tmp_path, monkeypatch):
         """When no response text is extracted, pending is kept."""
+        monkeypatch.chdir(tmp_path)
+        waits = _record_waits(monkeypatch)
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text("", encoding="utf-8")  # empty transcript
 
@@ -960,8 +970,6 @@ class TestHandleIntegration:
             patch(LOGGER_PATCH),
             patch(f"{MOD}.find_pending_file", return_value=pending_file),
             patch(f"{MOD}._check_log_streamer_active", return_value=False),
-            patch(f"{MOD}.time.sleep"),
-            patch(f"{MOD}.Path.cwd", return_value=tmp_path),
         ):
             result = handle(
                 {
@@ -974,9 +982,12 @@ class TestHandleIntegration:
 
         assert result == {"stdout": "", "exit_code": 0}
         assert pending_file.exists()
+        assert waits == [0.2, 0.5]
 
-    def test_jsonl_retry_mechanism(self, tmp_path):
+    def test_jsonl_retry_mechanism(self, tmp_path, monkeypatch):
         """JSONL extraction retries on flush-race (empty first attempt)."""
+        monkeypatch.chdir(tmp_path)
+        waits = _record_waits(monkeypatch)
         transcript = tmp_path / "transcript.jsonl"
         lines = [
             _jsonl_line("user", "Hello"),
@@ -1011,8 +1022,6 @@ class TestHandleIntegration:
             patch(f"{MOD}.extract_assistant_response", side_effect=mock_extract),
             patch(f"{MOD}.urlopen", return_value=_mock_urlopen_ok()),
             patch(f"{MOD}._check_log_streamer_active", return_value=False),
-            patch(f"{MOD}.time.sleep"),
-            patch(f"{MOD}.Path.cwd", return_value=tmp_path),
             patch(f"{MOD}._write_delivery_log"),
         ):
             result = handle(
@@ -1028,9 +1037,12 @@ class TestHandleIntegration:
         assert pending_file.exists()
         updated = json.loads(pending_file.read_text(encoding="utf-8"))
         assert updated["delivered"] is True
+        assert waits == [0.2]
 
-    def test_fallback_to_last_assistant_message(self, tmp_path):
+    def test_fallback_to_last_assistant_message(self, tmp_path, monkeypatch):
         """When JSONL extraction fails, falls back to last_assistant_message from hook_data."""
+        monkeypatch.chdir(tmp_path)
+        waits = _record_waits(monkeypatch)
         pending_dir = tmp_path / "telegram_pending"
         pending_dir.mkdir()
         pending_data = {
@@ -1047,8 +1059,6 @@ class TestHandleIntegration:
             patch(f"{MOD}.find_pending_file", return_value=pending_file),
             patch(f"{MOD}.urlopen", return_value=_mock_urlopen_ok()),
             patch(f"{MOD}._check_log_streamer_active", return_value=False),
-            patch(f"{MOD}.time.sleep"),
-            patch(f"{MOD}.Path.cwd", return_value=tmp_path),
             patch(f"{MOD}._write_delivery_log"),
         ):
             result = handle(
@@ -1062,9 +1072,12 @@ class TestHandleIntegration:
 
         assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert not pending_file.exists()
+        assert waits == []
 
-    def test_already_delivered_skips_fallback(self, tmp_path):
+    def test_already_delivered_skips_fallback(self, tmp_path, monkeypatch):
         """After first delivery, last_assistant_message fallback is skipped."""
+        monkeypatch.chdir(tmp_path)
+        waits = _record_waits(monkeypatch)
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text("", encoding="utf-8")
 
@@ -1085,8 +1098,6 @@ class TestHandleIntegration:
             patch(LOGGER_PATCH),
             patch(f"{MOD}.find_pending_file", return_value=pending_file),
             patch(f"{MOD}._check_log_streamer_active", return_value=False),
-            patch(f"{MOD}.time.sleep"),
-            patch(f"{MOD}.Path.cwd", return_value=tmp_path),
         ):
             result = handle(
                 {
@@ -1099,6 +1110,7 @@ class TestHandleIntegration:
 
         assert result == {"stdout": "", "exit_code": 0}
         assert pending_file.exists()
+        assert waits == [0.2, 0.5]
 
     def test_missing_chat_id_cleans_pending(self, tmp_path):
         """Pending with missing chat_id is cleaned up."""
@@ -1157,27 +1169,29 @@ class TestSendWithRetry:
         assert result["ok"] is True
         assert mock_send.call_count == 1
 
-    def test_success_on_retry(self):
+    def test_success_on_retry(self, monkeypatch):
+        waits = _record_waits(monkeypatch)
         with (
             patch(LOGGER_PATCH),
             patch(f"{MOD}.send_to_telegram", side_effect=[_fail_result(), _ok_result()]) as mock_send,
-            patch(f"{MOD}.time.sleep"),
         ):
             result = _send_with_retry("tok:ABC", 123, "Hello")
 
         assert result["ok"] is True
         assert mock_send.call_count == 2
+        assert waits == [1.0]
 
-    def test_all_retries_fail(self):
+    def test_all_retries_fail(self, monkeypatch):
+        waits = _record_waits(monkeypatch)
         with (
             patch(LOGGER_PATCH),
             patch(f"{MOD}.send_to_telegram", return_value=_fail_result()) as mock_send,
-            patch(f"{MOD}.time.sleep"),
         ):
             result = _send_with_retry("tok:ABC", 123, "Hello", retries=3)
 
         assert result["ok"] is False
         assert mock_send.call_count == 3
+        assert waits == [1.0, 2.0]
 
 
 # ===========================================================================
@@ -1188,17 +1202,23 @@ class TestSendWithRetry:
 class TestPrependBranchPrefix:
     """Branch prefix added to response text."""
 
-    def test_adds_branch_prefix(self, tmp_path):
-        with patch(LOGGER_PATCH), patch(f"{MOD}.Path.cwd", return_value=tmp_path / "hooks"):
+    def test_adds_branch_prefix(self, tmp_path, monkeypatch):
+        (tmp_path / "flow").mkdir()
+        monkeypatch.chdir(tmp_path / "flow")
+        with patch(LOGGER_PATCH):
             result = _prepend_branch_prefix("Hello")
 
-        assert result == "@hooks\n\nHello"
+        assert result == "@flow\n\nHello"
 
     def test_cwd_failure_returns_original(self):
-        with patch(LOGGER_PATCH), patch(f"{MOD}.Path.cwd", side_effect=OSError("no cwd")):
-            result = _prepend_branch_prefix("Hello")
+        def unreadable() -> Path:
+            raise OSError("no cwd")
+
+        with patch(LOGGER_PATCH) as log:
+            result = _prepend_branch_prefix("Hello", cwd=unreadable)
 
         assert result == "Hello"
+        log.info.assert_called_once_with("[HOOKS] telegram: could not resolve CWD for branch prefix")
 
 
 # ===========================================================================
@@ -1824,20 +1844,20 @@ class TestFindPendingFileMirror:
 
         assert result == mirror_dir / "bot-42.json"
 
-    def test_mirror_dir_cwd_match(self, tmp_path):
+    def test_mirror_dir_cwd_match(self, tmp_path, monkeypatch):
         mirror_dir = tmp_path / "telegram_bots"
         mirror_dir.mkdir()
         work = tmp_path / "project"
-        work.mkdir()
+        (work / "subdir").mkdir(parents=True)
         data = {"timestamp": time.time(), "work_dir": str(work), "mirror": True}
         (mirror_dir / "bot-7.json").write_text(json.dumps(data), encoding="utf-8")
+        monkeypatch.chdir(work / "subdir")
 
         with (
             patch(LOGGER_PATCH),
             patch(f"{MOD}.MIRROR_DIR", mirror_dir),
             patch(f"{MOD}.PENDING_DIR", tmp_path / "nonexistent"),
             patch.dict("os.environ", _kept_redirect(), clear=True),
-            patch(f"{MOD}.Path.cwd", return_value=work / "subdir"),
         ):
             result = find_pending_file()
 
@@ -1853,8 +1873,9 @@ class TestFindPendingFileMirror:
 class TestHandleMirrorIntegration:
     """Full handle() flow for mirror sessions."""
 
-    def test_mirror_user_typed_directly_delivered(self, tmp_path):
+    def test_mirror_user_typed_directly_delivered(self, tmp_path, monkeypatch):
         """User types directly in terminal — mirror delivers to TG."""
+        monkeypatch.chdir(tmp_path)
         transcript = tmp_path / "transcript.jsonl"
         lines = [
             _jsonl_line("user", "Old question"),
@@ -1888,7 +1909,6 @@ class TestHandleMirrorIntegration:
             patch(f"{MOD}.find_pending_file", return_value=mirror_file),
             patch(f"{MOD}._send_with_retry", side_effect=capture_send),
             patch(f"{MOD}._check_log_streamer_active", return_value=False),
-            patch(f"{MOD}.Path.cwd", return_value=tmp_path),
             patch(f"{MOD}._write_delivery_log"),
         ):
             result = handle(
@@ -1904,8 +1924,10 @@ class TestHandleMirrorIntegration:
         assert "You: What is this?" in sent_texts[0]
         assert "This is the answer." in sent_texts[0]
 
-    def test_mirror_tg_injected_no_double_send(self, tmp_path):
+    def test_mirror_tg_injected_no_double_send(self, tmp_path, monkeypatch):
         """TG-injected turn — cursor advancement prevents re-delivery."""
+        monkeypatch.chdir(tmp_path)
+        waits = _record_waits(monkeypatch)
         transcript = tmp_path / "transcript.jsonl"
         lines = [
             _jsonl_line("user", "Injected from TG"),
@@ -1931,8 +1953,6 @@ class TestHandleMirrorIntegration:
             patch(LOGGER_PATCH),
             patch(f"{MOD}.find_pending_file", return_value=mirror_file),
             patch(f"{MOD}._check_log_streamer_active", return_value=False),
-            patch(f"{MOD}.time.sleep"),
-            patch(f"{MOD}.Path.cwd", return_value=tmp_path),
         ):
             result = handle(
                 {
@@ -1944,9 +1964,11 @@ class TestHandleMirrorIntegration:
 
         assert result == {"stdout": "", "exit_code": 0}
         assert mirror_file.exists()
+        assert waits == [0.2, 0.5]
 
-    def test_mirror_cursor_advances_no_redelivery(self, tmp_path):
+    def test_mirror_cursor_advances_no_redelivery(self, tmp_path, monkeypatch):
         """Cursor advances after mirror delivery — old turns not re-sent."""
+        monkeypatch.chdir(tmp_path)
         transcript = tmp_path / "transcript.jsonl"
         lines = [
             _jsonl_line("user", "Question"),
@@ -1972,7 +1994,6 @@ class TestHandleMirrorIntegration:
             patch(f"{MOD}.find_pending_file", return_value=mirror_file),
             patch(f"{MOD}._send_with_retry", return_value=_ok_result()),
             patch(f"{MOD}._check_log_streamer_active", return_value=False),
-            patch(f"{MOD}.Path.cwd", return_value=tmp_path),
             patch(f"{MOD}._write_delivery_log"),
         ):
             handle(
@@ -2010,8 +2031,9 @@ class TestHandleMirrorIntegration:
 
         assert mirror_file.exists()
 
-    def test_mirror_no_processing_message_sends_fresh(self, tmp_path):
+    def test_mirror_no_processing_message_sends_fresh(self, tmp_path, monkeypatch):
         """Mirror sessions have no processing_message_id — always send fresh."""
+        monkeypatch.chdir(tmp_path)
         transcript = tmp_path / "transcript.jsonl"
         lines = [
             _jsonl_line("user", "Hello"),
@@ -2038,7 +2060,6 @@ class TestHandleMirrorIntegration:
             patch(f"{MOD}._send_with_retry", return_value=_ok_result()) as mock_send,
             patch(f"{MOD}.edit_telegram_message") as mock_edit,
             patch(f"{MOD}._check_log_streamer_active", return_value=False),
-            patch(f"{MOD}.Path.cwd", return_value=tmp_path),
             patch(f"{MOD}._write_delivery_log"),
         ):
             handle(

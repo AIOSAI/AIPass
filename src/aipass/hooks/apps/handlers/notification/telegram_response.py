@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: telegram_response.py
-# Version: 2.1.2
+# Version: 2.1.3
 # Description: Telegram response delivery on Stop event (ported from Dev-Pass)
 # Branch: hooks
 # Layer: apps/handlers/notification
@@ -539,6 +539,16 @@ def edit_telegram_message(bot_token: str, chat_id: int, message_id: int, text: s
         return {"ok": False}
 
 
+def _sleep(seconds: float) -> None:
+    """The retry waits' one clock: the send backoff and the JSONL and mirror extraction retries.
+
+    A seam: test_telegram_response is the reason it exists. Its retry tests reach these waits through
+    handle(), whose signature is the hook's, and record the delays here in place of patching time.sleep,
+    which every reader in the process shares. Hooks' decision, fleet green leg 12.
+    """
+    time.sleep(seconds)
+
+
 def _send_with_retry(bot_token: str, chat_id: int, text: str, retries: int = 3) -> dict:
     """Send with retry and exponential backoff. Returns dict with ok, message_id, text."""
     for attempt in range(retries):
@@ -548,7 +558,7 @@ def _send_with_retry(bot_token: str, chat_id: int, text: str, retries: int = 3) 
         if attempt < retries - 1:
             delay = 1.0 * (2**attempt)
             logger.info("[HOOKS] telegram: send retry %d/%d after %.0fs", attempt + 2, retries, delay)
-            time.sleep(delay)
+            _sleep(delay)
     return {"ok": False}
 
 
@@ -642,7 +652,7 @@ def _extract_response(hook_data: dict, transcript_path: str, pending_data: dict)
             if attempt < 2:
                 delay = [0.2, 0.5][attempt]
                 logger.info("[HOOKS] telegram: JSONL retry %.1fs (attempt %d/3)", delay, attempt + 1)
-                time.sleep(delay)
+                _sleep(delay)
 
     if not response_text and not pending_data.get("delivered"):
         response_text = (hook_data.get("last_assistant_message") or "").strip()
@@ -665,14 +675,20 @@ def _extract_mirror_response(transcript_path: str, pending_data: dict) -> str | 
         if attempt < 2:
             delay = [0.2, 0.5][attempt]
             logger.info("[HOOKS] telegram: mirror retry %.1fs (attempt %d/3)", delay, attempt + 1)
-            time.sleep(delay)
+            _sleep(delay)
     return None
 
 
-def _prepend_branch_prefix(text: str) -> str:
-    """Prepend @branch identifier so user knows which branch responded."""
+def _prepend_branch_prefix(text: str, cwd=None) -> str:
+    """Prepend @branch identifier so user knows which branch responded.
+
+    cwd is a seam, looked up at the call: handle() passes nothing and the real Path.cwd answers.
+    test_telegram_response's unreadable-cwd test hands one that raises OSError, because a cwd that
+    cannot be read cannot be made on every platform (Windows refuses to delete the directory it
+    stands in). Hooks' decision, fleet green leg 12.
+    """
     try:
-        branch_name = Path.cwd().name
+        branch_name = (cwd or Path.cwd)().name
         return f"@{branch_name}\n\n{text}"
     except OSError:
         logger.info("[HOOKS] telegram: could not resolve CWD for branch prefix")

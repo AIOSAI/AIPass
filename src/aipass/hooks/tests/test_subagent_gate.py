@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_subagent_gate.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Tests for subagent_gate security handler
 # Branch: hooks
 # Created: 2026-05-22
@@ -284,11 +284,13 @@ class TestSubagentGateBudget:
         mock_root.return_value = repo
         mock_modified.return_value = [str(repo / "src" / "aipass" / "hooks" / "apps" / f"f{i}.py") for i in range(8)]
         ticks = iter(range(0, 1000, 12))
-        with patch(f"{_GATE}.time.monotonic", side_effect=lambda: next(ticks)):
+        with patch(f"{_GATE}._now", side_effect=lambda: next(ticks)):
             result = handle({"agent_type": "general-purpose", "cwd": str(repo / "src" / "aipass" / "hooks")})
         assert result["exit_code"] == 0
         assert mock_seedgo.call_count < 8
-        assert "unchecked" in caplog.text
+        # Budget 35 from tick 0, a read every 12: f0 and f1 are checked, f2 onward has under 3s left.
+        assert "6 of 8 modified file(s) unchecked" in caplog.text
+        assert "f2.py, f3.py, f4.py, f5.py, f6.py, f7.py" in caplog.text
 
     @patch(f"{_GATE}._check_hook_readme_accountability", return_value=None)
     @patch(f"{_GATE}._run_seedgo_checklist")

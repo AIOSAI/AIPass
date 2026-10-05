@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: subagent_gate.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Checks modified Python files against seedgo standards on SubagentStop
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-22
-# Modified: 2026-09-30
+# Modified: 2026-10-05
 # =============================================
 
 """Checks modified Python files against seedgo standards and blocks on violations.
@@ -162,6 +162,15 @@ def _check_hook_readme_accountability(cwd: str, repo_root: Path) -> str | None:
     return None
 
 
+def _now() -> float:
+    """The budget's clock, looked up at each read.
+
+    A seam: test_subagent_gate's budget test is the reason it exists. It hands ticks here in place of
+    patching time.monotonic, which every reader in the process shares. Hooks' decision, fleet green leg 12.
+    """
+    return time.monotonic()
+
+
 def _check_within_budget(modified: list[str], repo_root: Path) -> tuple[dict[str, list[str]], list[str]]:
     """Checklist each file until the budget runs out; return (violations by name, unchecked names).
 
@@ -172,10 +181,10 @@ def _check_within_budget(modified: list[str], repo_root: Path) -> tuple[dict[str
     """
     violations: dict[str, list[str]] = {}
     unchecked: list[str] = []
-    deadline = time.monotonic() + _CHECK_BUDGET_SECONDS
+    deadline = _now() + _CHECK_BUDGET_SECONDS
     for f in modified:
         name = Path(f).name
-        remaining = deadline - time.monotonic()
+        remaining = deadline - _now()
         if remaining < _MIN_USEFUL_SECONDS:
             unchecked.append(name)
             continue
