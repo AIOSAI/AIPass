@@ -3,7 +3,7 @@
 # Description: Tests for lock_ops handler — atomic lock file management
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/runner/lock_ops.py."""
@@ -23,9 +23,6 @@ from aipass.flow.apps.handlers.runner import lock_ops
 # ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.handlers.runner.lock_ops"
 
-# Captured before any test patches os.open: the stand-in below delegates here.
-_REAL_OS_OPEN = os.open
-
 
 def _unlink_answer(path: Path) -> OSError | None:
     """Unlink ``path`` with the test's own hands and keep what the platform answers.
@@ -41,14 +38,16 @@ def _unlink_answer(path: Path) -> OSError | None:
 
 
 def _deny_exclusive_creates(lock_path: Path, denials: int | None, after: int = 0):
-    """An os.open stand-in that answers the way Windows does mid-release.
+    """A stand-in for lock_ops' _create_exclusive seam that answers the way
+    Windows does mid-release.
 
     On Windows an exclusive create against a lock file another writer is still
     removing (delete-pending) raises PermissionError, not FileExistsError. Linux
     unlinks the name at once and can never show that, so it is manufactured
-    here: exclusive creates of ``lock_path`` pass through for the first
-    ``after`` calls, are then denied ``denials`` times (None = never clears),
-    then delegate to the real os.open. Every other open is untouched.
+    and handed in through the product's own seam, so os.open stays whole for
+    every other reader: creates of ``lock_path`` reach the real exclusive
+    create for the first ``after`` calls, are then denied ``denials`` times
+    (None = never clears), then reach the real create again.
 
     Returns:
         (side_effect, attempts, raised): attempts counts every exclusive create
@@ -57,17 +56,17 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None, after: int = 0
     attempts: list[int] = []
     raised: list[PermissionError] = []
 
-    def fake_open(path, flags, *args, **kwargs):
-        if flags & os.O_EXCL and str(path) == str(lock_path):
+    def fake_create(path):
+        if str(path) == str(lock_path):
             attempts.append(len(attempts) + 1)
             index = len(attempts) - after
             if index > 0 and (denials is None or index <= denials):
                 denial = PermissionError(13, "Access is denied")
                 raised.append(denial)
                 raise denial
-        return _REAL_OS_OPEN(path, flags, *args, **kwargs)
+        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
-    return fake_open, attempts, raised
+    return fake_create, attempts, raised
 
 
 def _age(lock: Path) -> None:
@@ -119,8 +118,13 @@ class TestTryCreateLock:
         lock = tmp_path / ".test.lock"
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
-            result = mod.try_create_lock(lock)
+        with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
+            # A create that gave up on the denial is the failure this test is
+            # about, so it is said by name rather than escaping the test.
+            try:
+                result = mod.try_create_lock(lock)
+            except PermissionError as exc:
+                raise AssertionError(f"the lock did not land: {exc}") from exc
 
         assert result is True
         assert len(attempts) == 2
@@ -139,7 +143,7 @@ class TestTryCreateLock:
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
         with (
-            patch(f"{_MOD}.os.open", side_effect=fake_open),
+            patch(f"{_MOD}._create_exclusive", side_effect=fake_open),
             patch(f"{_MOD}._sleep") as sleep,
             pytest.raises(PermissionError) as excinfo,
         ):
@@ -162,18 +166,26 @@ class TestTryCreateLock:
         assert f"({sum(delays):.2f}s waited)" in str(excinfo.value)
 
     def test_file_exists_still_returns_false_at_once(self, tmp_path):
-        """FileExistsError is NOT retried: acquire_lock's stale check reads the holder next."""
+        """FileExistsError is NOT retried: acquire_lock's stale check reads the holder next.
+
+        The held lock is a real file, so the FileExistsError is the platform's
+        own, with no stand-in (leg 11). No wait means no second attempt.
+        """
         mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("12345", encoding="utf-8")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=0)
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
-            result = mod.try_create_lock(lock)
+        with patch(f"{_MOD}._sleep") as sleep:
+            # A retried FileExistsError spends the budget and then raises; that
+            # is the failure this test is about, so it is said by name.
+            try:
+                result = mod.try_create_lock(lock)
+            except PermissionError as exc:
+                raise AssertionError(f"a held lock was retried to the budget: {exc}") from exc
 
         assert result is False
-        assert len(attempts) == 1
         sleep.assert_not_called()
+        assert lock.read_text(encoding="utf-8") == "12345"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -423,10 +435,13 @@ class TestAcquireLock:
 
         with (
             patch(f"{_MOD}._pid_alive", return_value=False),
-            patch(f"{_MOD}.os.open", side_effect=fake_open),
+            patch(f"{_MOD}._create_exclusive", side_effect=fake_open),
             patch(f"{_MOD}._sleep") as sleep,
         ):
-            result = mod.acquire_lock(lock)
+            try:
+                result = mod.acquire_lock(lock)
+            except PermissionError as exc:
+                raise AssertionError(f"the lock did not land: {exc}") from exc
 
         assert result is True
         assert len(attempts) == 3
@@ -443,7 +458,7 @@ class TestAcquireLock:
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
         with (
-            patch(f"{_MOD}.os.open", side_effect=fake_open),
+            patch(f"{_MOD}._create_exclusive", side_effect=fake_open),
             patch(f"{_MOD}._sleep") as sleep,
             pytest.raises(PermissionError) as excinfo,
         ):

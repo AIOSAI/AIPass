@@ -3,7 +3,7 @@
 # Description: Tests for mbank/process.py — additional coverage
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""
@@ -34,9 +34,6 @@ from aipass.flow.apps.handlers.mbank.process import (
 
 _PROC = "aipass.flow.apps.handlers.mbank.process"
 
-# Captured before any test patches os.open: the stand-in below delegates here.
-_REAL_OS_OPEN = os.open
-
 
 def _move_answer(source: Path, destination: Path) -> OSError | None:
     """Move ``source`` with the test's own hands and keep what the platform answers.
@@ -65,13 +62,15 @@ def _mkdir_answer(path: Path) -> OSError | None:
 
 
 def _deny_exclusive_creates(lock_path: Path, denials: int | None):
-    """An os.open stand-in that answers the way Windows does mid-release.
+    """A stand-in for process's _create_exclusive seam that answers the way
+    Windows does mid-release.
 
     Windows answers an exclusive create against a lock another writer is still
     removing (delete-pending) with PermissionError, not FileExistsError; Linux
-    cannot show that, so it is manufactured. The first ``denials`` exclusive
-    creates of ``lock_path`` are denied (None = never clears); everything else
-    reaches the real os.open.
+    cannot show that, so it is manufactured, handed in through the product's
+    own seam so os.open stays whole for every other reader. The first
+    ``denials`` creates of ``lock_path`` are denied (None = never clears);
+    after that the real exclusive create is made on disk.
 
     Returns:
         (side_effect, attempts, raised): attempts counts every exclusive create
@@ -80,16 +79,16 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     attempts: list[int] = []
     raised: list[PermissionError] = []
 
-    def fake_open(path, flags, *args, **kwargs):
-        if flags & os.O_EXCL and str(path) == str(lock_path):
+    def fake_create(path):
+        if str(path) == str(lock_path):
             attempts.append(len(attempts) + 1)
             if denials is None or len(attempts) <= denials:
                 denial = PermissionError(13, "Access is denied")
                 raised.append(denial)
                 raise denial
-        return _REAL_OS_OPEN(path, flags, *args, **kwargs)
+        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
-    return fake_open, attempts, raised
+    return fake_create, attempts, raised
 
 
 # ===================================================================
@@ -415,10 +414,16 @@ class TestSaveFlowRegistryAdditional:
 
         with (
             patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
-            patch(f"{_PROC}.os.open", side_effect=fake_open),
+            patch(f"{_PROC}._create_exclusive", side_effect=fake_open),
             patch(f"{_PROC}._sleep") as sleep,
         ):
-            save_flow_registry(data, registry_file=reg_file.name)
+            # A save that refuses is the failure this test is about, so it is
+            # said as one: a lock that gave up on the denial fails here by
+            # name, not by its own error escaping the test.
+            try:
+                save_flow_registry(data, registry_file=reg_file.name)
+            except Exception as exc:  # save_flow_registry raises bare Exception
+                raise AssertionError(f"the save did not land: {exc}") from exc
 
         assert len(attempts) == 2
         sleep.assert_called_once()
@@ -441,7 +446,7 @@ class TestSaveFlowRegistryAdditional:
 
         with (
             patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
-            patch(f"{_PROC}.os.open", side_effect=fake_open),
+            patch(f"{_PROC}._create_exclusive", side_effect=fake_open),
             patch(f"{_PROC}._sleep") as sleep,
             pytest.raises(Exception) as excinfo,
         ):

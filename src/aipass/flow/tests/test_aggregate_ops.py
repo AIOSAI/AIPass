@@ -3,7 +3,7 @@
 # Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
 # Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/plan/aggregate_ops.py."""
@@ -30,18 +30,17 @@ _MOD = "aipass.flow.apps.handlers.plan.aggregate_ops"
 # so a patch on aggregate_ops itself bites nothing and the real event fires.
 _BUS = "aipass.trigger.apps.modules.core.trigger"
 
-# Captured before any test patches os.open: the stand-in below delegates here.
-_REAL_OS_OPEN = os.open
-
 
 def _deny_exclusive_creates(lock_path: Path, denials: int | None):
-    """An os.open stand-in that answers the way Windows does mid-release.
+    """A stand-in for aggregate_ops' _create_exclusive seam that answers the
+    way Windows does mid-release.
 
     Windows answers an exclusive create against a lock another writer is still
     removing (delete-pending) with PermissionError, not FileExistsError; Linux
-    cannot show that, so it is manufactured. The first ``denials`` exclusive
-    creates of ``lock_path`` are denied (None = never clears); everything else
-    reaches the real os.open.
+    cannot show that, so it is manufactured, handed in through the product's
+    own seam so os.open stays whole for every other reader. The first
+    ``denials`` creates of ``lock_path`` are denied (None = never clears);
+    after that the real exclusive create is made on disk.
 
     Returns:
         (side_effect, attempts, raised): attempts counts every exclusive create
@@ -50,16 +49,16 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     attempts: list[int] = []
     raised: list[PermissionError] = []
 
-    def fake_open(path, flags, *args, **kwargs):
-        if flags & os.O_EXCL and str(path) == str(lock_path):
+    def fake_create(path):
+        if str(path) == str(lock_path):
             attempts.append(len(attempts) + 1)
             if denials is None or len(attempts) <= denials:
                 denial = PermissionError(13, "Access is denied")
                 raised.append(denial)
                 raise denial
-        return _REAL_OS_OPEN(path, flags, *args, **kwargs)
+        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
-    return fake_open, attempts, raised
+    return fake_create, attempts, raised
 
 
 # ─── Import helpers ──────────────────────────────────────
@@ -194,7 +193,7 @@ class TestSaveBranchRegistry:
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
         data = {"plans": {"3": {"status": "closed"}}, "next_number": 4}
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
+        with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = save_branch_registry(reg_file, data)
 
         assert result is True
@@ -216,7 +215,7 @@ class TestSaveBranchRegistry:
         lock = reg_file.with_suffix(".lock")
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
+        with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = mod.save_branch_registry(reg_file, {"plans": {"1": {}}})
 
         assert result is False
@@ -544,7 +543,7 @@ class TestSaveCentral:
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
         data = {"active_plans": [{"plan_id": "FPLAN-0001"}], "branches": {}}
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
+        with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = save_central(central_file, central_dir, data)
 
         assert result is True
@@ -567,7 +566,7 @@ class TestSaveCentral:
         lock = central_file.with_suffix(".lock")
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
+        with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = mod.save_central(central_file, central_dir, {"active_plans": [{}], "branches": {}})
 
         assert result is False

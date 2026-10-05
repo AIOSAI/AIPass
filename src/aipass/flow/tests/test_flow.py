@@ -3,7 +3,7 @@
 # Description: Tests for flow.py CLI entry point
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/flow.py."""
@@ -12,6 +12,8 @@
 # seedgo: no-test-needed(ruff) — that flow.py parses and imports
 # seedgo: no-test-needed(stdlib) — the `if __name__ == "__main__":` guard's sys.exit() and os._exit() calls
 
+import importlib
+import sys
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -34,6 +36,35 @@ from aipass.flow.apps.flow import (
 # ---------------------------------------------------------------------------
 
 _FLOW = "aipass.flow.apps.flow"
+# The package discover_modules builds every module name under.
+_MODULES_PKG = "aipass.flow.apps.modules"
+
+
+def _stand_in(monkeypatch: pytest.MonkeyPatch, stem: str, module: ModuleType | None) -> str:
+    """Put ``module`` where the import system looks for ``<package>.<stem>``.
+
+    The real importlib.import_module answers it from sys.modules; None makes
+    the real import raise ModuleNotFoundError. monkeypatch undoes the entry
+    after the test, so nothing leaks (leg 11, in place of replacing
+    importlib.import_module for the whole process).
+
+    Returns:
+        The full module name discover_modules builds for ``stem``.
+    """
+    name = f"{_MODULES_PKG}.{stem}"
+    monkeypatch.setitem(sys.modules, name, module)
+    return name
+
+
+def _import_refusal(name: str) -> str:
+    """Ask the interpreter what importing ``name`` raises, in the test's own hands.
+
+    Returns:
+        The text of the ModuleNotFoundError the real import raised.
+    """
+    with pytest.raises(ModuleNotFoundError) as refused:
+        importlib.import_module(name)
+    return str(refused.value)
 
 
 def _make_module(
@@ -72,98 +103,83 @@ class TestDiscoverModules:
             result = discover_modules()
         assert result == []
 
-    def test_discovers_module_with_handle_command(self, tmp_path: Path) -> None:
-        """Discovers .py files that expose handle_command()."""
-        # Create a fake .py file in the modules dir
+    def test_discovers_module_with_handle_command(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Discovers .py files that expose handle_command(): the module the real
+        import answers for the name built from the file is the one returned.
+        """
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "good_mod.py").write_text("# stub", encoding="utf-8")
-
         fake_module = _make_module("good_mod")
+        _stand_in(monkeypatch, "good_mod", fake_module)
 
-        with (
-            patch(f"{_FLOW}.MODULES_DIR", modules_dir),
-            patch(f"{_FLOW}.importlib.import_module", return_value=fake_module),
-        ):
+        with patch(f"{_FLOW}.MODULES_DIR", modules_dir):
             result = discover_modules()
 
-        assert len(result) == 1
-        assert result[0] is fake_module
+        assert result == [fake_module]
 
-    def test_skips_module_without_handle_command(self, tmp_path: Path) -> None:
-        """Skips modules that lack handle_command()."""
+    def test_skips_module_without_handle_command(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Skips a module the import answers when it lacks handle_command()."""
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "no_handle.py").write_text("# stub", encoding="utf-8")
+        _stand_in(monkeypatch, "no_handle", _make_module("no_handle", has_handle=False))
 
-        fake_module = _make_module("no_handle", has_handle=False)
-
-        with (
-            patch(f"{_FLOW}.MODULES_DIR", modules_dir),
-            patch(f"{_FLOW}.importlib.import_module", return_value=fake_module),
-        ):
+        with patch(f"{_FLOW}.MODULES_DIR", modules_dir):
             result = discover_modules()
 
         assert result == []
 
-    def test_skips_underscore_files(self, tmp_path: Path) -> None:
-        """Ignores files starting with underscore (e.g., __init__.py)."""
+    def test_skips_underscore_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ignores files starting with underscore (e.g., __init__.py).
+
+        Each underscore name has a module with handle_command standing where
+        the import would find it, so only the skip keeps them out.
+        """
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "__init__.py").write_text("# init", encoding="utf-8")
         (modules_dir / "_private.py").write_text("# private", encoding="utf-8")
+        _stand_in(monkeypatch, "__init__", _make_module("__init__"))
+        _stand_in(monkeypatch, "_private", _make_module("_private"))
 
-        import_mock = MagicMock()
-
-        with (
-            patch(f"{_FLOW}.MODULES_DIR", modules_dir),
-            patch(f"{_FLOW}.importlib.import_module", import_mock),
-        ):
+        with patch(f"{_FLOW}.MODULES_DIR", modules_dir):
             result = discover_modules()
 
         assert result == []
-        import_mock.assert_not_called()
 
-    def test_handles_import_error_gracefully(self, tmp_path: Path) -> None:
-        """Logs error and continues when a module fails to import."""
+    def test_handles_import_error_gracefully(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_logger: MagicMock
+    ) -> None:
+        """Logs the import's own error and continues when a module fails to import."""
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "bad_mod.py").write_text("# broken", encoding="utf-8")
+        name = _stand_in(monkeypatch, "bad_mod", None)
+        refusal = _import_refusal(name)
 
-        with (
-            patch(f"{_FLOW}.MODULES_DIR", modules_dir),
-            patch(
-                f"{_FLOW}.importlib.import_module",
-                side_effect=ImportError("boom"),
-            ),
-        ):
+        with patch(f"{_FLOW}.MODULES_DIR", modules_dir):
             result = discover_modules()
 
         assert result == []
+        logged = [c.args[0] for c in mock_logger.error.call_args_list]
+        assert logged == [f"[FLOW] Failed to load module {name}: {refusal}"]
 
-    def test_discovers_multiple_modules(self, tmp_path: Path) -> None:
-        """Discovers all valid modules in the directory."""
+    def test_discovers_multiple_modules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Discovers all valid modules in the directory, each under its own name."""
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "alpha.py").write_text("# stub", encoding="utf-8")
         (modules_dir / "beta.py").write_text("# stub", encoding="utf-8")
-
         mod_a = _make_module("alpha")
         mod_b = _make_module("beta")
+        _stand_in(monkeypatch, "alpha", mod_a)
+        _stand_in(monkeypatch, "beta", mod_b)
 
-        def _fake_import(name: str) -> ModuleType:
-            """Route import calls to pre-built fake modules."""
-            if "alpha" in name:
-                return mod_a
-            return mod_b
-
-        with (
-            patch(f"{_FLOW}.MODULES_DIR", modules_dir),
-            patch(f"{_FLOW}.importlib.import_module", side_effect=_fake_import),
-        ):
+        with patch(f"{_FLOW}.MODULES_DIR", modules_dir):
             result = discover_modules()
 
-        assert len(result) == 2
+        assert sorted(result, key=lambda m: m.__name__) == [mod_a, mod_b]
 
 
 # ===========================================================================

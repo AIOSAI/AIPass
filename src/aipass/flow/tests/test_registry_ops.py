@@ -3,7 +3,7 @@
 # Description: Tests for registry_ops handler — template registry CRUD
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/template/registry_ops.py and the plan registry save it drives."""
@@ -71,18 +71,17 @@ _MOD = "aipass.flow.apps.handlers.template.registry_ops"
 # class of its own. Its lock cases ride in TestSaveRegistry below.
 _PLAN_REG_MOD = "aipass.flow.apps.handlers.registry.save_registry"
 
-# Captured before any test patches os.open: the stand-in below delegates here.
-_REAL_OS_OPEN = os.open
-
 
 def _deny_exclusive_creates(lock_path: Path, denials: int | None):
-    """An os.open stand-in that answers the way Windows does mid-release.
+    """A stand-in for save_registry's _create_exclusive seam that answers the
+    way Windows does mid-release.
 
     Windows answers an exclusive create against a lock another writer is still
     removing (delete-pending) with PermissionError, not FileExistsError; Linux
-    cannot show that, so it is manufactured. The first ``denials`` exclusive
-    creates of ``lock_path`` are denied (None = never clears); everything else
-    reaches the real os.open.
+    cannot show that, so it is manufactured, handed in through the product's
+    own seam so os.open stays whole for every other reader. The first
+    ``denials`` creates of ``lock_path`` are denied (None = never clears);
+    after that the real exclusive create is made on disk.
 
     Returns:
         (side_effect, attempts, raised): attempts counts every exclusive create
@@ -91,16 +90,16 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     attempts: list[int] = []
     raised: list[PermissionError] = []
 
-    def fake_open(path, flags, *args, **kwargs):
-        if flags & os.O_EXCL and str(path) == str(lock_path):
+    def fake_create(path):
+        if str(path) == str(lock_path):
             attempts.append(len(attempts) + 1)
             if denials is None or len(attempts) <= denials:
                 denial = PermissionError(13, "Access is denied")
                 raised.append(denial)
                 raise denial
-        return _REAL_OS_OPEN(path, flags, *args, **kwargs)
+        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
-    return fake_open, attempts, raised
+    return fake_create, attempts, raised
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +418,7 @@ class TestSaveRegistry:
         data = {"plans": {"7": {"subject": "landed", "status": "open"}}, "next_number": 8}
 
         with (
-            patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
+            patch(f"{_PLAN_REG_MOD}._create_exclusive", side_effect=fake_open),
             patch(f"{_PLAN_REG_MOD}._sleep") as sleep,
         ):
             result = plan_reg.save_registry(data, registry_file="fplan_registry.json")
@@ -447,7 +446,7 @@ class TestSaveRegistry:
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
         with (
-            patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
+            patch(f"{_PLAN_REG_MOD}._create_exclusive", side_effect=fake_open),
             patch(f"{_PLAN_REG_MOD}._sleep") as sleep,
         ):
             result = plan_reg.save_registry({"plans": {"1": {}}, "next_number": 2}, registry_file=target.name)

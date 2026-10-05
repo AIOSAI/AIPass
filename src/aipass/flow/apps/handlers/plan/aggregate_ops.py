@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_ops.py
 # Description: Central Plans Aggregation Implementation Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -47,6 +47,19 @@ def _sleep(seconds: float) -> None:
     time.sleep(seconds)
 
 
+def _create_exclusive(lock_path: Path) -> int:
+    """os.open(lock_path, O_CREAT | O_EXCL | O_WRONLY): the lock's one create.
+
+    It stands alone because this create is where platforms answer differently:
+    Windows answers a lock another writer is still removing (delete pending)
+    with PermissionError, which a retry wins, and Linux cannot produce that.
+    The tests (test_aggregate_ops, the branch-registry and central denial
+    tests) hand the denial in through this name rather than replacing os.open
+    for the whole process (flow's decision, leg 11).
+    """
+    return os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+
+
 def _acquire_lock(lock_path: Path) -> bool:
     """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff.
 
@@ -65,7 +78,7 @@ def _acquire_lock(lock_path: Path) -> bool:
     waited = 0.0
     for attempt in range(_LOCK_RETRIES):
         try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            fd = _create_exclusive(lock_path)
             os.write(fd, str(os.getpid()).encode())
             os.close(fd)
             return True

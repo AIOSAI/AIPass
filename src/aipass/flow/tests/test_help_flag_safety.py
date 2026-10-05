@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/cli/help_flags.py -- whole-sequence help detection (DPLAN-0291 rule E)
 # Version: 1.0.0
 # Created: 2026-08-13
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the flow command modules that call it."""
@@ -327,17 +327,14 @@ class TestUnflaggedModulesHelpSafety:
         non-empty argument list (and no arguments prints introspection), so the
         gate is patched open here to reach the lock call at all.
         """
-        import os
-
         lock = tmp_path / ".post_close_runner.lock"
-        real_open = os.open
         attempts: list[str] = []
 
-        def fake_open(path, flags, *args, **kwargs):
-            if flags & os.O_EXCL and str(path) == str(lock):
-                attempts.append(str(path))
-                raise PermissionError(13, "Access is denied")
-            return real_open(path, flags, *args, **kwargs)
+        # The denial is handed in through lock_ops' own create seam (leg 11),
+        # so os.open stays whole for every other reader.
+        def fake_create(path):
+            attempts.append(str(path))
+            raise PermissionError(13, "Access is denied")
 
         with (
             patch(f"{_POST}.LOCK_FILE", lock),
@@ -346,7 +343,7 @@ class TestUnflaggedModulesHelpSafety:
             patch(f"{_POST}.release_lock") as release,
             patch(f"{_POST}.error") as error_fn,
             patch(f"{_POST}.warning") as warning_fn,
-            patch("aipass.flow.apps.handlers.runner.lock_ops.os.open", side_effect=fake_open),
+            patch("aipass.flow.apps.handlers.runner.lock_ops._create_exclusive", side_effect=fake_create),
             patch("aipass.flow.apps.handlers.runner.lock_ops._sleep") as sleep,
         ):
             handled = post_close_runner.handle_command("post", ["run"])
@@ -365,7 +362,7 @@ class TestUnflaggedModulesHelpSafety:
         reported = re.search(r"still denied after (\d+) attempts", error_fn.call_args.args[0])
         assert reported, error_fn.call_args.args[0]
         assert int(reported.group(1)) > 1
-        assert len(attempts) == int(reported.group(1))
+        assert attempts == [str(lock)] * int(reported.group(1))
         # One backoff wait after every denied attempt, the last included.
         assert sleep.call_count == len(attempts)
 

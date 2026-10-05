@@ -3,7 +3,7 @@
 # Description: Tests for close_ops handler — plan closure business logic
 # Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
@@ -76,18 +76,17 @@ class TestABareNumberNeverClosesTheNamesakeOfAnUnreadableRegistry:
 
 _APPEND = "aipass.flow.apps.handlers.plan.append_closed_plan"
 
-# Captured before any test patches os.open: the stand-in below delegates here.
-_REAL_OS_OPEN = os.open
-
 
 def _deny_exclusive_creates(lock_path: Path, denials: int | None):
-    """An os.open stand-in that answers the way Windows does mid-release.
+    """A stand-in for the append's _create_exclusive seam that answers the way
+    Windows does mid-release.
 
     Windows answers an exclusive create against a lock another writer is still
     removing (delete-pending) with PermissionError, not FileExistsError; Linux
-    cannot show that, so it is manufactured. The first ``denials`` exclusive
-    creates of ``lock_path`` are denied (None = never clears); everything else
-    reaches the real os.open.
+    cannot show that, so it is manufactured, handed in through the product's
+    own seam so os.open stays whole for every other reader. The first
+    ``denials`` creates of ``lock_path`` are denied (None = never clears);
+    after that the real exclusive create is made on disk.
 
     Returns:
         (side_effect, attempts, raised): attempts counts every exclusive create
@@ -96,16 +95,16 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     attempts: list[int] = []
     raised: list[PermissionError] = []
 
-    def fake_open(path, flags, *args, **kwargs):
-        if flags & os.O_EXCL and str(path) == str(lock_path):
+    def fake_create(path):
+        if str(path) == str(lock_path):
             attempts.append(len(attempts) + 1)
             if denials is None or len(attempts) <= denials:
                 denial = PermissionError(13, "Access is denied")
                 raised.append(denial)
                 raise denial
-        return _REAL_OS_OPEN(path, flags, *args, **kwargs)
+        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
-    return fake_open, attempts, raised
+    return fake_create, attempts, raised
 
 
 def _under(path: PurePath, root: PurePath) -> bool:
@@ -595,7 +594,7 @@ class TestClosePlanImplSuccess:
     @staticmethod
     def _close_with_real_append(tmp_path, fake_open, sleep):
         """Close FPLAN-0001 in tmp_path with the REAL CLOSED_PLANS append, a
-        stand-in os.open and ``sleep`` recording the backoff's waits; returns
+        stand-in for its exclusive create and ``sleep`` recording the backoff's waits; returns
         close_plan_impl's result.
         """
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
@@ -619,7 +618,7 @@ class TestClosePlanImplSuccess:
             patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None),
             patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess"),
             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
-            patch(f"{_APPEND}.os.open", side_effect=fake_open),
+            patch(f"{_APPEND}._create_exclusive", side_effect=fake_open),
             patch(f"{_APPEND}._sleep", sleep),
         ):
             return close_plan_impl(plan_num="1", **deps)
@@ -639,12 +638,14 @@ class TestClosePlanImplSuccess:
         result = self._close_with_real_append(tmp_path, fake_open, sleep)
 
         assert result["success"] is True
+        # The result first: the entry landed and no failed append was said.
+        assert not any("CLOSED_PLANS" in m.get("text", "") for m in result["messages"])
+        assert closed_plans.exists()
+        entries = json.loads(closed_plans.read_text(encoding="utf-8"))["closed_plans"]
+        assert [e["plan_id"] for e in entries] == ["FPLAN-1"]
         assert len(attempts) == 2
         sleep.assert_called_once()
         assert sleep.call_args.args[0] > 0
-        entries = json.loads(closed_plans.read_text(encoding="utf-8"))["closed_plans"]
-        assert [e["plan_id"] for e in entries] == ["FPLAN-1"]
-        assert not any("CLOSED_PLANS" in m.get("text", "") for m in result["messages"])
         assert not lock.exists()
 
     def test_closed_plans_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
