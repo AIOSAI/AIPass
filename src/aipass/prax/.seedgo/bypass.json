@@ -301,6 +301,13 @@
       "reason": "prax, leg 15 (97, moved from 95 by the leg 16 imports). The same [] is both the branches to scan and the branches to write to, so an unreadable registry writes the empty agent list to no dashboard; the failure is logged as a warning beside it. prax, leg 16: 126 is _is_pid_alive's None, named in its docstring, the same answer as no proc filesystem, both meaning unchecked, and the scan files it as unchecked, never dead. 325: _write_section_to_all_branches answers 0 dashboards updated when the write raised, which is the truth, logged at error. 365: push_agent_status_dashboard answers False, its docstring's total failure, logged at error."
     },
     {
+      "file": "apps/handlers/dashboard/agent_status_writer.py",
+      "standard": "host_portability",
+      "lines": [62],
+      "reason": "prax, leg 17, prax's decision under devpulse's ruling. PROC_ROOT is Path(\"/proc\") only where sys.platform == \"linux\", else None, and the guard is on the same line; every reader off Linux gets None and _is_pid_alive answers unchecked (leg 16). The checker acquits a guard on the line above, not an inline conditional; devpulse has taken that gap to seedgo, and when it closes this entry is dead and is retired.",
+      "anchor": "Path(\"/proc\") if sys.platform == \"linux\" else None"
+    },
+    {
       "file": "apps/handlers/dashboard/status.py",
       "standard": "logged_fallback",
       "lines": [272],
