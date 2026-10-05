@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: retry.py
 # Description: Google API retry logic with SSL error handling
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-03-14
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -61,6 +61,7 @@ def api_call_with_retry(
     request: Any,
     max_retries: int = 3,
     rebuild_service_fn: Optional[Callable] = None,
+    sleep: Optional[Callable[[float], Any]] = None,
 ) -> Any:
     """Execute a Google API request with exponential backoff on SSL errors.
 
@@ -70,6 +71,12 @@ def api_call_with_retry(
         rebuild_service_fn: Optional callback to rebuild the service
             on SSL failure (e.g. to get a fresh connection).
             Called with no arguments, return value is ignored.
+        sleep: What waits out each backoff, handed the wait in seconds.
+            None, the default every caller uses, is time.sleep, looked up
+            at the call so a patch of the name still reaches it. The seam
+            exists so the tests can read the waits (1, 2, 4...) without
+            replacing time.sleep for the whole process (api, fleet green
+            leg 13).
 
     Returns:
         The API response.
@@ -85,7 +92,7 @@ def api_call_with_retry(
             if attempt < max_retries and is_ssl_error(e):
                 wait = 2**attempt
                 json_handler.log_operation("api_retry_attempted", {"attempt": attempt + 1, "wait_seconds": wait})
-                time.sleep(wait)
+                (sleep or time.sleep)(wait)
                 if rebuild_service_fn:
                     rebuild_service_fn()
                 continue

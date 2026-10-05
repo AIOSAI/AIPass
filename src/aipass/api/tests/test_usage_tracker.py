@@ -3,7 +3,7 @@
 # Description: Tests for usage tracker module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/usage_tracker.py, API usage monitoring orchestration."""
@@ -22,6 +22,8 @@
 # seedgo: no-test-needed(covered_elsewhere) — the cleanup handler's file pruning; tests/test_cleanup.py
 # seedgo: no-test-needed(covered_elsewhere) — the tracking handler's storage; tests/test_tracking.py
 
+import json
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -36,6 +38,22 @@ from aipass.api.apps.modules.usage_tracker import handle_command as _hc  # noqa:
 PATCH_ROOT = "aipass.api.apps.modules.usage_tracker"
 # cleanup_data imports the bus inside the function, so the name it reads is the bus's home.
 TRIGGER_HOME = "aipass.trigger.apps.modules.core.trigger"
+
+# Generation timestamps far on either side of any retention window.
+_LONG_AGO = "2000-01-01T00:00:00"
+_FAR_AHEAD = "2999-12-31T00:00:00"
+
+
+def _usage_store(tmp_path: Path, generations: dict) -> Path:
+    """Write a usage store under tmp_path in the shape cleanup_old_data reads, and return its path."""
+    store = tmp_path / "usage_tracker_data.json"
+    store.write_text(json.dumps({"data": {"generation_tracking": generations}}), encoding="utf-8")
+    return store
+
+
+def _generations_on_disk(store: Path) -> dict:
+    """The generation_tracking map as it stands on disk now."""
+    return json.loads(store.read_text(encoding="utf-8"))["data"]["generation_tracking"]
 
 
 # =============================================
@@ -313,93 +331,92 @@ def test_show_caller_usage_no_args(mock_agg, mock_header, mock_error):
 # =============================================
 
 
-@patch(f"{PATCH_ROOT}.Path")
 @patch(f"{PATCH_ROOT}.error")
 @patch(f"{PATCH_ROOT}.success")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.cleanup", autospec=True)
 @patch(TRIGGER_HOME)
-def test_cleanup_success(mock_trigger, mock_cleanup_handler, mock_header, mock_success, mock_error, mock_path_cls):
-    """cleanup_data calls success() with count when handler returns > 0."""
-    mock_cleanup_handler.cleanup_old_data.return_value = 5
-    mock_data_path = MagicMock()
-    mock_data_path.exists.return_value = True
-    _api_json_dir = mock_path_cls.return_value.resolve.return_value.parent.parent.parent
-    _api_json_dir.__truediv__.return_value.__truediv__.return_value = mock_data_path
+def test_cleanup_success(mock_trigger, mock_header, mock_success, mock_error, tmp_path):
+    """Through the real cleanup handler: the old entry leaves the store on disk and the count is printed.
 
-    usage_tracker.cleanup_data(["45"])
+    The store is handed through the data_path seam, under tmp_path, where a patch
+    of pathlib.Path on the module used to steer it (api, fleet green leg 13).
+    """
+    store = _usage_store(tmp_path, {"gen-old": {"timestamp": _LONG_AGO}, "gen-recent": {"timestamp": _FAR_AHEAD}})
 
-    mock_cleanup_handler.cleanup_old_data.assert_called_once()
-    mock_success.assert_called_once_with("Cleaned up 5 entries older than 45 days")
+    usage_tracker.cleanup_data(["45"], data_path=store)
+
+    assert _generations_on_disk(store) == {"gen-recent": {"timestamp": _FAR_AHEAD}}
+    mock_success.assert_called_once_with("Cleaned up 1 entries older than 45 days")
     mock_error.assert_not_called()
-    mock_trigger.fire.assert_called_once_with("usage_data_cleaned", days=45, data_path=str(mock_data_path))
+    mock_trigger.fire.assert_called_once_with("usage_data_cleaned", days=45, data_path=str(store))
 
 
-@patch(f"{PATCH_ROOT}.Path")
 @patch(f"{PATCH_ROOT}.warning")
 @patch(f"{PATCH_ROOT}.success")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.cleanup", autospec=True)
-def test_cleanup_nothing_to_clean(mock_cleanup_handler, mock_header, mock_success, mock_warning, mock_path_cls):
-    """cleanup_data calls success() with 'nothing to clean' when handler returns 0."""
-    mock_cleanup_handler.cleanup_old_data.return_value = 0
-    mock_data_path = MagicMock()
-    mock_data_path.exists.return_value = True
-    _api_json_dir = mock_path_cls.return_value.resolve.return_value.parent.parent.parent
-    _api_json_dir.__truediv__.return_value.__truediv__.return_value = mock_data_path
+def test_cleanup_nothing_to_clean(mock_header, mock_success, mock_warning, tmp_path):
+    """Through the real cleanup handler: nothing old leaves the store byte-equal and says so."""
+    store = _usage_store(tmp_path, {"gen-recent": {"timestamp": _FAR_AHEAD}})
+    before = store.read_bytes()
 
-    usage_tracker.cleanup_data(["30"])
+    usage_tracker.cleanup_data(["30"], data_path=store)
 
-    mock_cleanup_handler.cleanup_old_data.assert_called_once()
+    assert store.read_bytes() == before
     mock_success.assert_called_once_with("Nothing to clean — no entries older than 30 days")
+    mock_warning.assert_not_called()
 
 
-@patch(f"{PATCH_ROOT}.Path")
+@patch(f"{PATCH_ROOT}.warning")
+@patch(f"{PATCH_ROOT}.success")
+@patch(f"{PATCH_ROOT}.header")
+def test_cleanup_without_a_store_warns_and_writes_nothing(mock_header, mock_success, mock_warning, tmp_path):
+    """Through the real cleanup handler: no store means the warning, no success, no file made.
+
+    (api, fleet green leg 13)
+    """
+    store = tmp_path / "usage_tracker_data.json"
+
+    usage_tracker.cleanup_data(["30"], data_path=store)
+
+    mock_warning.assert_called_once_with("No usage data file found — nothing to clean")
+    mock_success.assert_not_called()
+    assert not store.exists()
+
+
 @patch(f"{PATCH_ROOT}.error")
 @patch(f"{PATCH_ROOT}.success")
 @patch(f"{PATCH_ROOT}.header")
 @patch(f"{PATCH_ROOT}.cleanup", autospec=True)
 @patch(TRIGGER_HOME)
-def test_cleanup_default_30_days(
-    mock_trigger, mock_cleanup_handler, mock_header, mock_success, mock_error, mock_path_cls
-):
-    """cleanup_data defaults to 30 days when no args provided."""
+def test_cleanup_default_30_days(mock_trigger, mock_cleanup_handler, mock_header, mock_success, mock_error, tmp_path):
+    """Orchestration alone, cleanup patched: no args means 30 days, handed to the handler with the store."""
     mock_cleanup_handler.cleanup_old_data.return_value = 3
-    mock_data_path = MagicMock()
-    mock_data_path.exists.return_value = True
-    _api_json_dir = mock_path_cls.return_value.resolve.return_value.parent.parent.parent
-    _api_json_dir.__truediv__.return_value.__truediv__.return_value = mock_data_path
+    store = _usage_store(tmp_path, {})
 
-    usage_tracker.cleanup_data([])
+    usage_tracker.cleanup_data([], data_path=store)
 
     mock_header.assert_called_once_with("Cleanup Old Data (retain 30 days)")
-    args, kwargs = mock_cleanup_handler.cleanup_old_data.call_args
-    assert args[1] == 30
+    mock_cleanup_handler.cleanup_old_data.assert_called_once_with(store, 30)
     mock_success.assert_called_once_with("Cleaned up 3 entries older than 30 days")
-    mock_trigger.fire.assert_called_once_with("usage_data_cleaned", days=30, data_path=str(mock_data_path))
+    mock_trigger.fire.assert_called_once_with("usage_data_cleaned", days=30, data_path=str(store))
 
 
-@patch(f"{PATCH_ROOT}.Path")
 @patch(f"{PATCH_ROOT}.error")
 @patch(f"{PATCH_ROOT}.success")
 @patch(f"{PATCH_ROOT}.header")
 @patch(f"{PATCH_ROOT}.cleanup", autospec=True)
 @patch(TRIGGER_HOME)
-def test_cleanup_custom_days(mock_trigger, mock_cleanup_handler, mock_header, mock_success, mock_error, mock_path_cls):
-    """cleanup_data parses custom days from args."""
+def test_cleanup_custom_days(mock_trigger, mock_cleanup_handler, mock_header, mock_success, mock_error, tmp_path):
+    """Orchestration alone, cleanup patched: the days argument reaches the handler."""
     mock_cleanup_handler.cleanup_old_data.return_value = 7
-    mock_data_path = MagicMock()
-    mock_data_path.exists.return_value = True
-    _api_json_dir = mock_path_cls.return_value.resolve.return_value.parent.parent.parent
-    _api_json_dir.__truediv__.return_value.__truediv__.return_value = mock_data_path
+    store = _usage_store(tmp_path, {})
 
-    usage_tracker.cleanup_data(["90"])
+    usage_tracker.cleanup_data(["90"], data_path=store)
 
     mock_header.assert_called_once_with("Cleanup Old Data (retain 90 days)")
-    args, kwargs = mock_cleanup_handler.cleanup_old_data.call_args
-    assert args[1] == 90
+    mock_cleanup_handler.cleanup_old_data.assert_called_once_with(store, 90)
     mock_success.assert_called_once_with("Cleaned up 7 entries older than 90 days")
-    mock_trigger.fire.assert_called_once_with("usage_data_cleaned", days=90, data_path=str(mock_data_path))
+    mock_trigger.fire.assert_called_once_with("usage_data_cleaned", days=90, data_path=str(store))
 
 
 # =============================================
