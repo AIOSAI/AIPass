@@ -83,12 +83,8 @@ src/aipass/seedgo/apps/standards/aipass/pack.json
 # Registry lock (spawn's writer lock; one machine's state, recreated on use)
 .AIPASS_REGISTRY.lock
 
-# Claude Code local state (settings.local.json is ignored by .claude/.gitignore, beside the file)
-.claude/hooks/__pycache__/
-.claude/hooks/.last_diagnostics_file
+# Claude Code local state: every .claude/ rule lives in .claude/.gitignore, beside the files.
 .diagnostics_state.json
-.claude/hooks/probes/last_ping.jsonl
-.claude/worktrees/
 
 # Disabled files (AIPass convention: rename with (disabled) instead of delete)
 *(disabled)
