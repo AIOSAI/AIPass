@@ -8,10 +8,6 @@
   },
   "bypass": [
     {
-      "standard": "dead_code",
-      "reason": "All 15 handler files under apps/handlers/ are invoked dynamically by engine._run_handler (engine.py:60-66) via importlib.import_module + getattr on handler path strings from .aipass/hooks.json. They are never statically imported by design. Each handler verified wired in hooks.json AND fired in engine.jsonl (DPLAN-0191). Follow-up for @seedgo: teach dead_code checker about importlib dynamic dispatch patterns."
-    },
-    {
       "file": "apps/handlers/bridges/claude.py",
       "standard": "dead_code",
       "reason": "Bridge called externally by provider settings subprocess — no internal import. Verified wired in ~/.claude/settings.json hook entries."
@@ -1534,6 +1530,36 @@
       "standard": "through_the_command",
       "lines": [28, 1614],
       "reason": "Fleet green leg 9, hooks' decision. _run_hook, ruling (c): dispatch() runs a command hook as a shell subprocess (a spawn); contract: exit code, stdout, stderr and elapsed_ms answered, TIMEOUT and OSError answered as exit -1, never raised. _run_handler, ruling (c): on a timeout dispatch()'s far side speaks the timeout through the sound player (a spawn); contract: a handler outside aipass.* is refused before import, a hung handler answers TIMEOUT at its timeout, a raising one answers exit -1. _log, ruling (b): the JSONL diagnostics writer, one JSON object appended per line, a failed write never raises; dispatch writes the same file, and line 1614's hasattr pin is the json-handler shape the module keeps. _matches is read through dispatch() (_fires), _cc_len through a test-own UTF-16 count."
+    },
+    {
+      "file": "tests/test_session_boot.py",
+      "standard": "stdlib_patch",
+      "lines": [1505, 1516, 1529],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): real SIGTERM / real exec of tmux; no seam on exec or kill; on 10-05 leg 7 a def-time seam let the string-form patches miss and one run exec'd real tmux."
+    },
+    {
+      "file": "tests/test_session_boot.py",
+      "standard": "stdlib_patch",
+      "lines": [2002],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10): Path.home patched to raise (unresolvable home), not an exec; no portable in-process way to make the real Path.home raise."
+    },
+    {
+      "file": "tests/test_cc_sessions.py",
+      "standard": "stdlib_patch",
+      "lines": [152, 156],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): os.kill, a real signal."
+    },
+    {
+      "file": "tests/test_cc_sessions.py",
+      "standard": "stdlib_patch",
+      "lines": [152, 185, 189],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10): sys.platform emulation; Windows pinned for real by CI's Windows lane."
+    },
+    {
+      "file": "tests/test_edit_gate_bash.py",
+      "standard": "stdlib_patch",
+      "lines": [974],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
     },
     {
       "file": "tests/test_session_boot.py",
