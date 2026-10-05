@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_function_check.py
 # Description: Unused Function Standards Checker Handler
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-03-22
-# Modified: 2026-10-03
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -72,10 +72,20 @@ DOTTED_PATH = re.compile(
 
 
 def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
-    """Return True if any path component is in the skip set, file is disabled,
-    or the path is excluded via .seedgoignore / the global default."""
+    """Return True if any path component is in the skip set, the top-level
+    directory's name opens with a dot, the file is disabled, or the path is
+    excluded via .seedgoignore / the global default.
+
+    Parts are read relative to ``branch_root``, never the whole path, so a branch
+    that itself stands under a directory named ``tests`` or ``.live-x`` is still
+    read. The dot rule (seedgo, fleet green leg 16): hooks keeps promoted engine
+    copies under ``.live-<stamp>/`` at its root, and a row charged to a copy can
+    never be cured; no branch keeps its own code in a dot directory.
+    """
+    parts = path.relative_to(branch_root).parts
     return (
-        any(part in SKIP_DIRS for part in path.parts)
+        any(part in SKIP_DIRS for part in parts)
+        or (len(parts) > 1 and parts[0].startswith("."))
         or is_disabled_file(path.name)
         or is_seedgo_ignored(str(path), branch_root, ignore_entries)
     )

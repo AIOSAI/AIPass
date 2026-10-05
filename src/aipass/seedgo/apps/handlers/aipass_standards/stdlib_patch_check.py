@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stdlib_patch_check.py
 # Description: Stdlib Patch Standards Checker Handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -393,6 +393,11 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
 
     scored, unresolved = scan(source)
+    # A rule with `lines` acquits those rows alone (seedgo, fleet green leg 16):
+    # the file-level ask above passes no line, so a lines rule never matched it.
+    scored = [
+        row for row in scored if not is_bypassed(module_path, STANDARD_KEY, line=row[0], bypass_rules=bypass_rules)
+    ]
     if not scored:
         return _result(True, _one_check(True, _clean_message(unresolved)), 100)
 

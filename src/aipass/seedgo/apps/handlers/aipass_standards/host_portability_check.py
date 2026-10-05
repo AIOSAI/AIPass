@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-09-12
-# Modified: 2026-10-03
+# Modified: 2026-10-05
 # =============================================
 
 """Host Portability Standards Checker Handler.
@@ -270,6 +270,21 @@ def _platform_branch_lines(tree: ast.Module, predicates: frozenset) -> Set[int]:
         if isinstance(node, ast.If) and _is_platform_test(node.test, predicates):
             lines.update(_collect_child_linenos(node))
     return lines
+
+
+def _platform_true_operands(tree: ast.Module, predicates: frozenset) -> Set[int]:
+    """``id()`` of every node in the ``X`` of an inline ``X if <platform test> else Y``.
+
+    Nodes, not lines (seedgo, fleet green leg 16): both operands usually share
+    one line, and ``Y`` runs where the platform is not the one tested, so it
+    stays judged. A module-level constant has no function for
+    :func:`_function_tests_platform` to read, so this is its only acquittal.
+    """
+    ids: Set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.IfExp) and _is_platform_test(node.test, predicates):
+            ids.update(id(child) for child in ast.walk(node.body))
+    return ids
 
 
 def _function_tests_platform(func: ast.AST) -> bool:
@@ -572,19 +587,21 @@ def _fs_operands(node: ast.Call) -> List[ast.expr]:
     return operands
 
 
-def _proc_nominations(tree: ast.Module) -> List[Tuple[int, str]]:
+def _proc_nominations(tree: ast.Module, guarded: Set[int]) -> List[Tuple[int, str]]:
     """Every ``/proc`` literal that reaches a filesystem call, directly or through a name.
 
     A ``Path(...)`` bound to a name is judged where the name is USED, not where
     it is built, because building a Path touches nothing: telegram
     base_bot.py:2721 builds ``Path(f"/proc/{pid}/fd")`` outside its try and
     lists it inside ``except OSError``, and the constructor line was a false row.
+    A call whose ``id()`` is in ``guarded`` (:func:`_platform_true_operands`) is
+    not nominated.
     """
     bound, bound_values = _proc_bindings(tree)
     found: List[Tuple[int, str]] = []
     seen: Set[Tuple[int, str]] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or id(node) in bound_values or not _is_fs_call(node):
+        if not isinstance(node, ast.Call) or id(node) in bound_values or id(node) in guarded or not _is_fs_call(node):
             continue
         for arg in _fs_operands(node):
             text = _proc_literal(arg) or (bound.get(arg.id, "") if isinstance(arg, ast.Name) else "")
@@ -598,7 +615,7 @@ def _proc_nominations(tree: ast.Module) -> List[Tuple[int, str]]:
 
 def _proc_violations(tree: ast.Module, skipped: Set[int], predicates: frozenset) -> List[Tuple[int, str]]:
     """Arm A: unguarded reads of the Linux-only /proc filesystem."""
-    nominations = _proc_nominations(tree)
+    nominations = _proc_nominations(tree, _platform_true_operands(tree, predicates))
     if not nominations:
         return []
 

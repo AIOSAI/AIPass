@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -96,7 +96,10 @@ def test_naming_check_module_with_bypass(tmp_path):
 
 
 def test_json_structure_check_returns_expected_keys(tmp_path):
-    """A file outside modules/ and handlers/ is declined at 100. Mutant: case (d) fails in json_structure_check.py — killed."""
+    """A file outside modules/ and handlers/ is declined at 100.
+
+    Mutant: case (d) fails in json_structure_check.py — killed.
+    """
     py_file = tmp_path / "sample.py"
     py_file.write_text(
         '"""Sample."""\nimport json\n',
@@ -1242,6 +1245,40 @@ def test_the_openat2_twin_acquits_and_the_walk_fallback_convicts(tmp_path):
 
     assert _lines(violations) == [23]
     assert "Linux-only" in violations[0][1]
+
+
+_INLINE_GUARD_HEAD = "import sys\nfrom pathlib import Path\n\n"
+
+
+def test_a_module_level_inline_platform_guard_acquits_its_true_side(tmp_path):
+    """prax agent_status_writer.py:62 -- PROC_ROOT = Path("/proc") if linux else None.
+
+    An ast.IfExp outside any function: the /proc literal runs only where the
+    platform is Linux (seedgo, fleet green leg 16). Green-only before its mutant.
+    """
+    source = _INLINE_GUARD_HEAD + 'PROC_ROOT = Path("/proc") if sys.platform == "linux" else None\n'
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert violations == []
+
+
+def test_a_proc_literal_on_the_else_side_of_an_inline_guard_stays_convicted(tmp_path):
+    """The orelse operand runs where the platform is NOT Linux, so it is judged."""
+    source = _INLINE_GUARD_HEAD + 'ROOT = Path.home() if sys.platform == "linux" else Path("/proc")\n'
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert _lines(violations) == [4]
+
+
+def test_a_function_level_inline_platform_guard_keeps_its_acquittal(tmp_path):
+    """Inside a function the whole-function platform read already acquits (unchanged)."""
+    source = _INLINE_GUARD_HEAD + 'def root():\n    return Path("/proc") if sys.platform == "linux" else None\n'
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert violations == []
 
 
 def test_a_proc_read_in_a_pty_gated_class_is_still_convicted(tmp_path):

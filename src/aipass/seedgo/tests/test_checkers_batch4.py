@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-29
-# Modified: 2026-10-03
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
@@ -657,3 +657,29 @@ def test_a_name_in_fstring_text_is_not_a_reference(tmp_path, request, tokenizer,
 
     assert result["score"] == 0, result
     assert [row["name"] for row in result["checks"][0]["unused"]] == ["helper"], result
+
+
+def _charged_with_a_live_copy(root):
+    """(file, name) of every row check_branch charges: apps/m.py and its .live-* copy define g."""
+    body = "def g():\n    return 1\n"
+    (root / "apps").mkdir(parents=True)
+    (root / "apps" / "m.py").write_text(body, encoding="utf-8")
+    copy = root / ".live-20260101T000000Z"
+    copy.mkdir()
+    (copy / "m.py").write_text(body, encoding="utf-8")
+    checks = unused_function_check.check_branch(str(root))["checks"]
+    return [(Path(row["file"]), row["name"]) for row in checks[0].get("unused", [])]
+
+
+def test_a_top_level_dot_directory_copy_is_not_charged(tmp_path):
+    """hooks keeps promoted engine copies under .live-<stamp>/ (seedgo, fleet green leg 16).
+
+    A copy is not edited, so a row charged to it can never be cured: g is
+    reported once, for apps/m.py.
+    """
+    assert _charged_with_a_live_copy(tmp_path / "branchroot") == [(Path("apps", "m.py"), "g")]
+
+
+def test_a_root_standing_inside_a_dotted_directory_is_still_read(tmp_path):
+    """The skip reads the parts relative to the branch root, never the whole path."""
+    assert _charged_with_a_live_copy(tmp_path / ".live-x" / "branchroot") == [(Path("apps", "m.py"), "g")]

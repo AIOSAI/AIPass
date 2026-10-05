@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_stdlib_patch_check.py
 # Description: stdlib_patch_check — crack class Q, a patch that replaces work the product owns
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/stdlib_patch_check.py."""
@@ -318,3 +318,40 @@ class TestTheBypass:
             )["score"]
             == 100
         )
+
+
+class TestALineRuleAcquitsItsLineAlone:
+    """A rule with ``lines`` acquits those rows and no others (seedgo, fleet green leg 16).
+
+    check_module asked is_bypassed once with no line, and a lines rule asked
+    with no line answers False, so every line rule for this standard was inert:
+    hooks wrote three in good faith and the checker never read them.
+    """
+
+    BODY = "def test_a():\n    patch('time.time')\ndef test_b():\n    patch('json.dump')\n"
+
+    def _message(self, tmp_path, lines):
+        """What check_module says under a rule naming *lines* of the two-patch file."""
+        path = _write(tmp_path, self.BODY)
+        rule = {"standard": "stdlib_patch", "file": str(path), "lines": lines}
+        return stdlib_patch_check.check_module(str(path), bypass_rules=[rule])["checks"][0]["message"]
+
+    def test_a_rule_naming_one_hit_leaves_the_other(self, tmp_path):
+        """Two scored patches at lines 2 and 4; a rule for 2 leaves only 4."""
+        said = self._message(tmp_path, [2])
+
+        assert said == f"test_specimen.py:4 json.dump replaces json process-wide - {stdlib_patch_check.CURE}"
+
+    def test_a_rule_naming_every_hit_passes_the_file(self, tmp_path):
+        """With both rows acquitted nothing is left to charge."""
+        path = _write(tmp_path, self.BODY)
+        rule = {"standard": "stdlib_patch", "file": str(path), "lines": [2, 4]}
+
+        assert stdlib_patch_check.check_module(str(path), bypass_rules=[rule])["score"] == 100
+
+    def test_a_rule_naming_a_line_that_is_no_hit_changes_nothing(self, tmp_path):
+        """Line 3 holds no patch: both rows stay charged."""
+        said = self._message(tmp_path, [3])
+
+        assert said.count(stdlib_patch_check.CURE) == 2
+        assert said.startswith("test_specimen.py:2 time.time replaces time process-wide")

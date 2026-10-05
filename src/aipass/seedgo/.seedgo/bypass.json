@@ -258,8 +258,8 @@
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "windows_compat",
-      "lines": [1157, 1164],
-      "reason": "Test input (fleet green leg 15): the 'aplay' lines are a quoted specimen of hooks apps/sound.py written to tmp as host_portability's input; nothing here runs aplay."
+      "lines": [1160, 1167],
+      "reason": "Test input (fleet green leg 15; re-pinned +3 leg 16): the 'aplay' lines are a quoted specimen of hooks apps/sound.py written to tmp as host_portability's input; nothing here runs aplay."
     },
     {
       "file": "tests/test_posix_literal_nominator.py",
@@ -312,8 +312,8 @@
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "through_the_command",
-      "lines": [867],
-      "reason": "No public route (fleet green leg 15): json_handler_check._is_canonical_shim is the sha256 gate itself; check_branch reaches it only through a whole branch tree. Named in the leg 15 reply to @devpulse as the checker asks."
+      "lines": [870],
+      "reason": "No public route (fleet green leg 15; re-pinned +3 leg 16): json_handler_check._is_canonical_shim is the sha256 gate itself; check_branch reaches it only through a whole branch tree. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_audit_tests_core.py",
