@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_transcripts.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: CC-native transcript reader — the chats, not the processes
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-18
-# Modified: 2026-08-23
+# Modified: 2026-10-04
 # =============================================
 
 """CC-native transcript reader — what conversations exist in a branch.
@@ -72,7 +72,7 @@ def _mangle(path_text: str) -> str:
     """CC's own path-to-dirname rule, applied to a raw path string.
 
     Every non-alphanumeric becomes a dash — including the colon and backslashes
-    of a Windows path, which is why C:\\Users\\p becomes C--Users-p. There is no
+    of a Windows path, which is why C:\\Work\\aipass\\ai_mail becomes C--Work-aipass-ai-mail. There is no
     drive-letter special case in the CLI, so there is none here.
     """
     # Walk UTF-16 code units, not Python code points. JavaScript's regex sees a
