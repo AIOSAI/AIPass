@@ -42,6 +42,7 @@ The table below carries every other row.
 | dead_code | branch_level | production | Unreachable functions and dead imports |
 | debug_print | all_files | everywhere | No debug print/pprint statements |
 | deep_nesting | all_files | everywhere | Max nesting depth 4 (AST-measured) |
+| developer_home | all_files | everywhere | No developer's home directory (`/home/<x>`, `/Users/<x>`, `C:\Users\<x>`, any slash) naming a real login in any text file — comments and prose included; `TEXT_FILES = True` lets the checklist judge non-`.py` text, and `drone @seedgo home-paths scan` gates the whole tracked tree in CI (owner 2026-10-04) |
 | docs_page | entry_point | production | Every docs/*.md in one shape: a README back-link and one H1, a purpose paragraph, depth ≤3, links resolve, size under the context pack's cap, and no retired defect register by name — plus advisory story and defect-prose lines |
 | documentation | all_files | production | Docstrings on public functions |
 | encapsulation | all_files | production | No cross-branch imports, proper isolation |

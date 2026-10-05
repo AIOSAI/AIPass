@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verdicts.py
 # Description: Which checkers judge a file in the per-file checklist, and how a failure reads
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-03
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Which checkers judge a file in the per-file checklist, and how a failure reads.
@@ -30,6 +30,20 @@ def is_entry_point(file_path: str) -> bool:
     return p.parent.name == "apps"
 
 
+def reads_text_file(checker, file_path: str) -> bool:
+    """Whether a ``TEXT_FILES = True`` checker judges this non-.py file.
+
+    The checker says which kinds it reads through its own ``is_text_target``;
+    a TEXT_FILES checker that exports none reads nothing beyond ``.py``, so a
+    missing hook can only narrow the lane, never widen it.
+    """
+    # Literally True: a stand-in object whose every attribute is truthy declares nothing.
+    if getattr(checker, "TEXT_FILES", False) is not True:
+        return False
+    is_text_target = getattr(checker, "is_text_target", None)
+    return bool(is_text_target and is_text_target(file_path))
+
+
 def is_applicable(checker, file_path: str) -> bool:
     """Determine if a checker applies to the given file.
 
@@ -42,7 +56,8 @@ def is_applicable(checker, file_path: str) -> bool:
 
     Then AUDIT_SCOPE — where a result is reported:
       - "entry_point" (default) -> only apps/{name}.py files
-      - "all_files"             -> any .py file
+      - "all_files"             -> any .py file; a non-.py text file only for a
+                                   ``TEXT_FILES = True`` checker (:func:`reads_text_file`)
       - "branch_level"          -> normally skipped, but eligible if checker
                                    also implements check_module() for per-file use
     """
@@ -61,7 +76,7 @@ def is_applicable(checker, file_path: str) -> bool:
         return False
 
     if scope == "all_files":
-        return file_path.endswith(".py")
+        return file_path.endswith(".py") or reads_text_file(checker, file_path)
 
     # Default: entry_point scope
     return is_entry_point(file_path)

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch10.py
-# Description: Unit tests for hardcoded_path_check, startup_budget_check, the two ratchets, router_assert, oversize_test_file
-# Version: 1.4.4
+# Description: Tests for hardcoded_path, developer_home, startup_budget, the ratchets, router_assert, oversize_test_file
+# Version: 1.5.0
 # Created: 2026-06-18
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/hardcoded_path_check.py and batch-10 checkers."""
@@ -14,6 +14,7 @@
 # seedgo: no-test-needed(ruff) — that every checker module in this batch parses and imports
 # seedgo: no-test-needed(stdlib) — re's matching itself; the patterns are pinned by what they catch here
 
+import hashlib
 import json
 
 import pytest
@@ -53,42 +54,42 @@ class TestScanFile:
     """Tests for the _scan_file helper, reached through the public check_module."""
 
     def test_posix_home_detected(self, tmp_path):
-        content = 'ROOT = "/home/patrick/Projects/AIPass"\n'
+        content = 'ROOT = "/home/someone/Projects/AIPass"\n'
         said = _scanned(tmp_path, content)
         assert said.startswith("1 hardcoded path(s): L1: POSIX home path (")
 
     def test_macos_home_detected(self, tmp_path):
-        content = 'ROOT = "/Users/patrick/Projects/AIPass"\n'
+        content = 'ROOT = "/Users/carol/Projects/AIPass"\n'
         said = _scanned(tmp_path, content)
         assert said.startswith("1 hardcoded path(s): L1: macOS home path (")
 
     def test_windows_home_detected(self, tmp_path):
-        content = 'ROOT = "C:\\\\Users\\\\patrick\\\\Projects"\n'
+        content = 'ROOT = "C:\\\\Users\\\\someone\\\\Projects"\n'
         said = _scanned(tmp_path, content)
         assert said.startswith("1 hardcoded path(s): L1: Windows home path (")
 
     def test_dash_encoded_posix_detected(self, tmp_path):
-        content = 'dirs = ["-home-patrick-Projects-AIPass"]\n'
+        content = 'dirs = ["-home-someone-Projects-AIPass"]\n'
         said = _scanned(tmp_path, content)
         assert said.startswith("1 hardcoded path(s): L1: dash-encoded POSIX home (")
 
     def test_dash_encoded_macos_detected(self, tmp_path):
-        content = 'dirs = ["-Users-patrick-Projects-AIPass"]\n'
+        content = 'dirs = ["-Users-carol-Projects-AIPass"]\n'
         said = _scanned(tmp_path, content)
         assert said.startswith("1 hardcoded path(s): L1: dash-encoded macOS home (")
 
     def test_comment_skipped(self, tmp_path):
-        content = '# ROOT = "/home/patrick/Projects/AIPass"\n'
+        content = '# ROOT = "/home/someone/Projects/AIPass"\n'
         said = _scanned(tmp_path, content)
         assert said == "No hardcoded absolute home paths found"
 
     def test_indented_comment_skipped(self, tmp_path):
-        content = '    # path = "/home/patrick/test"\n'
+        content = '    # path = "/home/someone/test"\n'
         said = _scanned(tmp_path, content)
         assert said == "No hardcoded absolute home paths found"
 
     def test_docstring_skipped(self, tmp_path):
-        content = '"""\nExample: /home/patrick/Projects\n"""\nx = 1\n'
+        content = '"""\nExample: /home/someone/Projects\n"""\nx = 1\n'
         said = _scanned(tmp_path, content)
         assert said == "No hardcoded absolute home paths found"
 
@@ -108,7 +109,7 @@ class TestScanFile:
         assert said.startswith("3 hardcoded path(s): ")
 
     def test_line_numbers_correct(self, tmp_path):
-        content = 'clean = 1\nbad = "/home/patrick/x"\nalso_clean = 2\n'
+        content = 'clean = 1\nbad = "/home/someone/x"\nalso_clean = 2\n'
         said = _scanned(tmp_path, content)
         assert said.startswith("1 hardcoded path(s): L2: ")
 
@@ -131,14 +132,14 @@ class TestCheckModule:
 
     def test_violation_fails(self, tmp_path):
         f = tmp_path / "bad.py"
-        f.write_text('ROOT = "/home/patrick/Projects/AIPass"\n', encoding="utf-8")
+        f.write_text('ROOT = "/home/someone/Projects/AIPass"\n', encoding="utf-8")
         result = hardcoded_path_check.check_module(str(f))
         assert result["passed"] is False
         assert result["score"] == 0
 
     def test_bypass_whole_standard(self, tmp_path):
         f = tmp_path / "bypassed.py"
-        f.write_text('ROOT = "/home/patrick/Projects/AIPass"\n', encoding="utf-8")
+        f.write_text('ROOT = "/home/someone/Projects/AIPass"\n', encoding="utf-8")
         rules = [{"standard": "hardcoded_path", "file": "bypassed.py"}]
         result = hardcoded_path_check.check_module(str(f), bypass_rules=rules)
         assert result["passed"] is True
@@ -155,7 +156,7 @@ class TestCheckModule:
 
     def test_init_py_skipped(self, tmp_path):
         f = tmp_path / "__init__.py"
-        f.write_text('X = "/home/patrick/nope"\n', encoding="utf-8")
+        f.write_text('X = "/home/someone/nope"\n', encoding="utf-8")
         result = hardcoded_path_check.check_module(str(f))
         assert result["passed"] is True
         assert "skipped" in result["checks"][0]["message"].lower()
@@ -167,7 +168,7 @@ class TestCheckModule:
 
     def test_non_python_skipped(self, tmp_path):
         f = tmp_path / "readme.md"
-        f.write_text("/home/patrick/whatever\n", encoding="utf-8")
+        f.write_text("/home/someone/whatever\n", encoding="utf-8")
         result = hardcoded_path_check.check_module(str(f))
         assert result["passed"] is True
 
@@ -202,18 +203,18 @@ class TestInDocstring:
         Reached through check_module, not _in_docstring (seedgo, fleet green
         leg 8): a path on either line is still reported.
         """
-        lines = ['"""Docstring at /home/pat/a."""', 'x = "/home/pat/y"']
+        lines = ['"""Docstring at /home/someone/a."""', 'x = "/home/someone/y"']
         said = _scanned(tmp_path, "\n".join(lines) + "\n")
         assert said.startswith("2 hardcoded path(s): L1: POSIX home path ("), said
         assert "L2: POSIX home path (" in said, said
 
     def test_multiline_docstring(self, tmp_path):
-        lines = ['"""', "/home/patrick/inside", '"""', "/home/patrick/outside"]
+        lines = ['"""', "/home/someone/inside", '"""', "/home/someone/outside"]
         said = _scanned(tmp_path, "\n".join(lines) + "\n")
         assert said.startswith("1 hardcoded path(s): L4: POSIX home path (")
 
     def test_single_quote_docstring(self, tmp_path):
-        lines = ["'''", "/home/patrick/inside", "'''", "/home/patrick/outside"]
+        lines = ["'''", "/home/someone/inside", "'''", "/home/someone/outside"]
         said = _scanned(tmp_path, "\n".join(lines) + "\n")
         assert said.startswith("1 hardcoded path(s): L4: POSIX home path (")
 
@@ -1139,20 +1140,17 @@ class TestRatchetScope:
 
         assert sorted(result["counts"]) == sorted(near)
 
-    def test_the_pattern_is_the_name_this_files_fixtures_carry(self):
+    def test_the_pattern_is_the_owners_name_by_a_digest_the_module_does_not_hold(self):
         """An oracle the module does not control: every other case reads the name
         off the module, so a wrong name would agree with itself and pass them all.
 
-        This file is exempt precisely because hardcoded_path's inputs above are
-        home paths with the real name in them, and they stay by the ruling. The
-        ratchet's pattern must find them -- fifteen lines on the day it landed.
+        It used to count the real name in hardcoded_path's inputs above; those
+        inputs name nobody now (the owner, 2026-10-04: no home path of his in the
+        public tree). A sha256 of the name pins it without spelling it here.
         """
-        with open(__file__, encoding="utf-8") as handle:
-            own = handle.read()
+        digest = hashlib.sha256(names.OWNER_NAME.encode("utf-8")).hexdigest()
 
-        found = [hit for hit in names.scan_text("fixtures.py", own) if hit.rule == names.RULE_NAME]
-
-        assert len(found) >= 10, f"the pattern finds {len(found)} of this file's fixture lines"
+        assert digest == "23ddda4810068cc44360dffd31b6c5a9ad13fb9e6a69c9354a5d1b07f1b9843f"
 
     def test_every_exemption_is_named_in_the_checks_doc(self):
         """The brief: the exemptions are built in AND named in the check's doc."""
@@ -1582,3 +1580,240 @@ class TestOversizeTestFileLanes:
         Reddens the moment the declaration changes.
         """
         assert oversize.APPLIES_TO == applicability.TESTS
+
+
+# =============================================
+# developer_home — no developer's home directory in a tracked text file (dispatch 79b012ed item 4)
+# =============================================
+
+# Module scope, never inside a test (template item 8). Here and not at the top because two
+# bypass rules pin this file's earlier lines by number; an import above them would move them.
+import shutil
+import subprocess
+
+from aipass.seedgo.apps import seedgo as seedgo_entry
+from aipass.seedgo.apps.handlers.aipass_standards import developer_home_check as home
+from aipass.seedgo.apps.modules import checklist
+
+# Every spelling of one person's home: POSIX, POSIX with no separator, macOS, and Windows
+# with one backslash, the doubled backslashes source and JSON carry, a slash, lower case.
+_HOME_SPELLINGS = (
+    "/home/jdoe/",
+    "/home/jdoe",
+    "/Users/jdoe/",
+    "C:\\Users\\jdoe\\",
+    "C:\\\\Users\\\\jdoe\\\\",
+    "C:/Users/jdoe/",
+    "c:\\users\\jdoe\\",
+)
+_TEXT_KINDS = ("notes.md", "data.json", "mod.py", "ci.yml", "script")
+
+
+def _home_said(tmp_path, name: str, content, rules=None) -> dict:
+    """What the public check_module says about a file named *name* holding *content*."""
+    sample = tmp_path / name
+    if isinstance(content, bytes):
+        sample.write_bytes(content)
+    else:
+        sample.write_text(content, encoding="utf-8")
+    return home.check_module(str(sample), bypass_rules=rules)
+
+
+class TestDeveloperHomeConvicts:
+    """Every spelling, in every text kind, and in prose as in code."""
+
+    @pytest.mark.parametrize("kind", _TEXT_KINDS)
+    @pytest.mark.parametrize("spelling", _HOME_SPELLINGS)
+    def test_each_spelling_convicts_in_each_text_kind(self, tmp_path, kind, spelling):
+        expected = spelling.rstrip("/\\")
+
+        result = _home_said(tmp_path, kind, f"first line\nkept in {spelling} for now\n")
+
+        assert result["passed"] is False
+        assert result["checks"][0]["message"] == f"1 developer home path(s): L2: {expected}"
+
+    def test_a_home_in_a_comment_or_a_docstring_still_convicts(self, tmp_path):
+        source = '"""Cached under /home/jdoe/.cache."""\n# see /Users/jdoe/notes\nX = 1\n'
+
+        message = _home_said(tmp_path, "mod.py", source)["checks"][0]["message"]
+
+        assert message == "2 developer home path(s): L1: /home/jdoe; L2: /Users/jdoe"
+
+
+class TestDeveloperHomeAcquits:
+    """The segments that name nobody, the shapes that are not homes, the files it declines."""
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "/home/user/x",
+            "/home/someone/x",
+            "/Users/carol/x",
+            "/home/<user>/x",
+            "/home/<home>/x",
+            "/home/{name}/x",
+            "/home/$USER/x",
+            "C:\\Users\\%USERNAME%\\x",
+            "/home/runner/work",
+            "/home/j/x",
+            "it lives under /home/user.",
+            "/tmp/pytest-of-jdoe/pytest-0/x",
+            "https://example.com/home/jdoe/x",
+        ],
+    )
+    def test_a_segment_naming_nobody_passes(self, tmp_path, line):
+        result = _home_said(tmp_path, "notes.md", f"{line}\n")
+
+        assert result["passed"] is True
+        assert result["checks"][0]["message"] == "No developer home paths found"
+
+    @pytest.mark.parametrize("name, content", [("pic.png", "/home/jdoe/\n"), ("notes.md", b"/home/jdoe/\0\n")])
+    def test_a_non_text_kind_or_a_nul_byte_is_declined_unread(self, tmp_path, name, content):
+        result = _home_said(tmp_path, name, content)
+
+        assert result["passed"] is True
+        assert result["checks"][0]["declined"] is True
+
+    def test_a_line_bypass_acquits_that_line_only(self, tmp_path):
+        rules = [{"file": "notes.md", "standard": "developer_home", "lines": [1], "reason": "fixture"}]
+
+        result = _home_said(tmp_path, "notes.md", "/home/jdoe/a\nok\n/home/jdoe/b\n", rules)
+
+        assert result["checks"][0]["message"] == "1 developer home path(s): L3: /home/jdoe"
+
+    def test_a_whole_file_bypass_acquits_the_file(self, tmp_path):
+        rules = [{"file": "notes.md", "standard": "developer_home", "reason": "fixture"}]
+
+        result = _home_said(tmp_path, "notes.md", "/home/jdoe/a\n", rules)
+
+        assert (result["passed"], result["checks"][0]["name"]) == (True, "Bypassed")
+
+    def test_a_missing_file_fails(self, tmp_path):
+        assert home.check_module(str(tmp_path / "gone.md"))["passed"] is False
+
+
+def _tree(root, files: dict) -> list:
+    """Write *files* (rel -> text) under *root*; the rel list a caller hands the runner."""
+    for rel, text in files.items():
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    return list(files)
+
+
+class TestDeveloperHomeTree:
+    """scan_tracked: the CI runner over a whole tracked tree."""
+
+    def test_a_hit_is_red_and_named_rel_and_line(self, tmp_path):
+        files = _tree(tmp_path, {"docs/a.md": "ok\nunder /home/jdoe/x\n", "pic.png": "/home/jdoe/\n", "b.txt": "ok\n"})
+
+        result = home.scan_tracked(tmp_path, files=files)
+
+        assert result["passed"] is False
+        assert result["hits"] == [("docs/a.md", 2, "/home/jdoe")]
+        assert result["files_read"] == 2
+
+    def test_a_clean_tree_is_green(self, tmp_path):
+        files = _tree(tmp_path, {"docs/a.md": "under /home/<user>/x\n", "b.txt": "ok\n"})
+
+        result = home.scan_tracked(tmp_path, files=files)
+
+        assert (result["passed"], result["hits"], result["errors"]) == (True, [], [])
+
+    def test_the_owning_branchs_line_rule_acquits_that_line(self, tmp_path):
+        branch = tmp_path / "src" / "aipass" / "alpha"
+        rule = {"file": "docs/a.md", "standard": "developer_home", "lines": [1], "reason": "fixture"}
+        _tree(branch, {".seedgo/bypass.json": json.dumps({"bypass": [rule]})})
+        files = _tree(tmp_path, {"src/aipass/alpha/docs/a.md": "/home/jdoe/a\n/home/jdoe/b\n"})
+
+        result = home.scan_tracked(tmp_path, files=files)
+
+        assert result["hits"] == [("src/aipass/alpha/docs/a.md", 2, "/home/jdoe")]
+
+    def test_a_listed_file_that_cannot_be_read_is_red(self, monkeypatch, tmp_path):
+        files = _tree(tmp_path, {"locked.md": "ok\n", "open.md": "ok\n"})
+        real = home.Path.read_bytes
+
+        def locked(self):
+            if self.name == "locked.md":
+                raise PermissionError("locked")
+            return real(self)
+
+        monkeypatch.setattr(home.Path, "read_bytes", locked)
+
+        result = home.scan_tracked(tmp_path, files=files)
+
+        assert result["passed"] is False
+        assert [error.split(":")[0] for error in result["errors"]] == ["locked.md"]
+
+    def test_a_tree_git_cannot_list_is_red_not_clean(self, tmp_path):
+        result = home.scan_tracked(tmp_path / "nowhere")
+
+        assert result["passed"] is False
+        assert result["hits"] == [] and len(result["errors"]) == 1
+
+
+class TestDeveloperHomeChecklist:
+    """The per-file lane now judges a text file for a TEXT_FILES checker."""
+
+    def test_a_markdown_file_with_a_home_fails_under_developer_home(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(checklist, "is_throwaway_path", lambda path: str(tmp_path) not in str(path))
+        page = tmp_path / "notes.md"
+        page.write_text("kept in /home/jdoe/x\n", encoding="utf-8")
+
+        results = checklist.run_checklist(str(page))
+
+        assert results == [
+            {"standard": "developer_home", "passed": False, "detail": "1 developer home path(s): L1: /home/jdoe"}
+        ]
+
+    def test_a_png_is_still_not_a_python_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(checklist, "is_throwaway_path", lambda path: str(tmp_path) not in str(path))
+        picture = tmp_path / "pic.png"
+        picture.write_text("/home/jdoe/\n", encoding="utf-8")
+
+        results = checklist.run_checklist(str(picture))
+
+        assert results == [{"standard": "(skip)", "passed": True, "detail": "Not a Python file"}]
+
+
+def _git_repo(root, files: dict) -> None:
+    """A real repository with *files* tracked: the verb asks git, as CI will."""
+    if shutil.which("git") is None:
+        pytest.skip("git is not on PATH")
+    subprocess.run(["git", "init", "-q", str(root)], check=True, timeout=60)
+    _tree(root, files)
+    subprocess.run(["git", "-C", str(root), "add", *files], check=True, timeout=60)
+
+
+class TestDeveloperHomeVerb:
+    """`seedgo home-paths scan <root>`: the exit code is the CI gate."""
+
+    def test_a_red_repo_exits_non_zero_and_prints_rel_line(self, tmp_path, monkeypatch, capsys):
+        _git_repo(tmp_path, {"docs/red.md": "ok\nkept in /home/jdoe/x\n"})
+        monkeypatch.setattr("sys.argv", ["seedgo", "home-paths", "scan", str(tmp_path)])
+
+        code = seedgo_entry.main()
+
+        out, _err = capsys.readouterr()
+        assert code != 0
+        assert "docs/red.md:2: /home/jdoe" in out
+
+    def test_a_clean_repo_exits_zero(self, tmp_path, monkeypatch, capsys):
+        _git_repo(tmp_path, {"docs/clean.md": "kept in /home/<user>/x\n"})
+        monkeypatch.setattr("sys.argv", ["seedgo", "home-paths", "scan", str(tmp_path)])
+
+        code = seedgo_entry.main()
+
+        out, _err = capsys.readouterr()
+        assert code == 0
+        assert "0 developer home path(s)" in out
+
+    def test_an_unknown_flag_is_refused_with_seven(self, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["seedgo", "home-paths", "scan", "--bogus"])
+
+        code = seedgo_entry.main()
+
+        _out, err = capsys.readouterr()
+        assert code == 7
+        assert "--bogus" in err

@@ -234,8 +234,20 @@
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "hardcoded_path",
-      "lines": [56, 61, 71, 76, 81, 86, 91, 101, 106, 111, 134, 141, 149, 158, 170, 176, 205, 211, 216, 716, 718, 809, 833, 834, 835],
-      "reason": "Test input, not paths the tests use: the hardcoded_path and literal-path cases hold home-path strings (/home/patrick/, /Users/carol/, C:\\Users\\...) as checker input. Line-level; replaces the no-standard rule removed 2026-09-25 (survey row #12). Lines re-pinned in fleet green leg 15: the file had moved under the old list, so all 25 fixture lines convicted again (the list is _scan_file's own answer for the file, every hit a fixture)."
+      "lines": [57, 62, 72, 77, 82, 87, 92, 102, 107, 112, 135, 142, 150, 159, 171, 177, 206, 212, 217, 717, 719, 810, 834, 835, 836, 1601, 1603, 1604, 1606, 1636, 1649, 1650, 1651, 1657, 1661, 1670, 1680, 1687, 1708, 1727, 1762, 1773, 1793],
+      "reason": "Test input, not paths the tests use: the hardcoded_path and literal-path cases hold home-path strings (/home/<user>/, /Users/carol/, C:\\Users\\...) as checker input. Line-level; replaces the no-standard rule removed 2026-09-25 (survey row #12). Lines re-pinned in fleet green leg 15 and again 2026-10-04 (one import added above them): the list is _scan_file's own answer for the file, every hit a fixture. Extended 2026-10-04 (dispatch 79b012ed item 4) with _scan_file's answer for the appended developer_home classes (L1601 on): that standard's own inputs."
+    },
+    {
+      "file": "tests/test_checkers_batch10.py",
+      "standard": "developer_home",
+      "lines": [1601, 1602, 1603, 1604, 1606, 1607, 1636, 1640, 1670, 1680, 1682, 1687, 1708, 1713, 1727, 1731, 1762, 1767, 1773, 1793, 1800],
+      "reason": "The standard's own inputs, not anybody's home: the developer_home classes (L1601 on) write each home spelling with an invented login into tmp_path files for the checker, the tree runner, the checklist and the verb to convict. The list is developer_home's own scan_text answer for the file, computed by calling it (2026-10-04, dispatch 79b012ed item 4)."
+    },
+    {
+      "file": "tests/test_checkers_batch10.py",
+      "standard": "windows_compat",
+      "lines": [1660],
+      "reason": "A control, not a path the test touches: '/tmp/pytest-of-.../x' is a string written into a tmp_path file to pin that a pytest temp path is not a home path (developer_home, 2026-10-04); nothing opens it."
     },
     {
       "file": "tests/test_checkers_batch8.py",

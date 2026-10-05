@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-15
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -145,7 +145,9 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
     if not Path(resolved).exists():
         return [{"standard": "(error)", "passed": False, "detail": f"File not found: {resolved}"}]
 
-    if not resolved.endswith(".py"):
+    # A non-.py file is judged only by a TEXT_FILES checker that reads its kind
+    # (verdicts.reads_text_file); with none, the answer is the one it always was.
+    if not resolved.endswith(".py") and not _text_checkers_for(resolved, pack_name):
         return [{"standard": "(skip)", "passed": True, "detail": "Not a Python file"}]
 
     if is_throwaway_path(resolved):
@@ -208,6 +210,16 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
 
     json_handler.log_operation("checklist_completed", {"file": str(file_path), "standards_run": len(results)})
     return results
+
+
+def _text_checkers_for(file_path: str, pack_name: str) -> List[str]:
+    """The pack's checkers that judge this non-.py file (TEXT_FILES and its kind)."""
+    pack_path = _resolve_pack_path(pack_name)
+    if pack_path is None:
+        return []
+    return [
+        name for name, checker in sorted(discover_checkers(pack_path).items()) if _is_applicable(checker, file_path)
+    ]
 
 
 def _resolve_pack_path(pack_name: str) -> Optional[Path]:
@@ -513,6 +525,7 @@ def print_help() -> None:
     console.print("[yellow]SCOPE RULES:[/yellow]")
     console.print('  Checkers with [cyan]AUDIT_SCOPE = "entry_point"[/cyan] only run on apps/{name}.py files')
     console.print('  Checkers with [cyan]AUDIT_SCOPE = "all_files"[/cyan] run on any .py file')
+    console.print("  A non-.py text file is judged only by checkers declaring [cyan]TEXT_FILES = True[/cyan]")
     console.print('  Checkers with [cyan]AUDIT_SCOPE = "branch_level"[/cyan] are skipped (need full branch)')
     console.print("  Skipped branch-level rows that apply to the file are named on one closing line, not counted")
     console.print()

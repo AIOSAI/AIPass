@@ -48,7 +48,8 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 80  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
+EXPECTED_STANDARDS = 81  # +1 on 2026-10-04: developer_home (no developer home path in tracked text; public repo).
+#                          +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
 #                          oversize_test_file, import_site and through_the_command became scored rows.
 #                          A branch with no test files reports them not_applicable, so the count holds there too.
 #                          +1 the same day: named_encoding, test template v1 item 21.

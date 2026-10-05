@@ -92,6 +92,10 @@ jobs:
           # defect. Installing the declared extra lets pyright resolve them so the
           # audit measures real type-correctness (and matches a local audit).
           pip install -e ".[dev,memory]"
+      # Public repo: no developer's home path in any tracked text file (the owner,
+      # 2026-10-04). Reads git ls-files; exit 1 on a hit, 2 when it could not measure.
+      - name: No developer home path in tracked files
+        run: python -m aipass.seedgo.apps.seedgo home-paths scan
       - name: Run seedgo standards audit
         run: python .github/scripts/seedgo_audit.py
 

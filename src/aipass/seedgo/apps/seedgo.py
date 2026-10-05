@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seedgo.py
 # Description: SEEDGO - Standards Platform for AIPass
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-03-05
-# Modified: 2026-09-15
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -153,7 +153,8 @@ def print_introspection() -> None:
     console.print("  [green]drone @seedgo standards_query[/green]       [dim]# Browse standards content[/dim]")
     console.print("  [green]drone @seedgo audit aipass[/green]          [dim]# Run compliance audit[/dim]")
     console.print("  [green]drone @seedgo checklist <file>[/green]      [dim]# Per-standard checklist on a file[/dim]")
-    console.print("  [green]drone @seedgo --help[/green]                [dim]# Full usage guide[/dim]")
+    console.print("  [green]drone @seedgo home-paths scan[/green]       [dim]# Home paths in the tracked tree[/dim]")
+    console.print("  [green]drone @seedgo --help[/green]              [dim]# Full usage guide[/dim]")
     console.print()
 
 
@@ -297,6 +298,10 @@ def print_help() -> None:
         "  [green]drone @seedgo inbox_audit[/green]                    "
         "[dim]# Flag malformed mail ids across every inbox[/dim]"
     )
+    console.print(
+        "  [green]drone @seedgo home-paths scan[/green]                "
+        "[dim]# No developer home path in a tracked text file (the CI gate)[/dim]"
+    )
     console.print()
 
     console.print("─" * 70)
@@ -321,7 +326,7 @@ def print_help() -> None:
     console.print(
         "[dim]Commands: audit, audit-tests, test-inventory, shadow-cycle, standards_audit, standards_query,"
         " standard, checklist, diagnostics, diagnostics_audit, proof, proof_query, test_map, readme,"
-        " readme_update, permissions, inbox_audit, --help[/dim]"
+        " readme_update, permissions, inbox_audit, home-paths, --help[/dim]"
     )
     console.print()
 

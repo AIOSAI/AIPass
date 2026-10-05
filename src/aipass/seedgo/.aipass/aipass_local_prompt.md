@@ -23,6 +23,7 @@ seedgo bypass prune @branch [--dry-run]          # Remove bypass rules that matc
 seedgo tests template-status / template bump     # Test template v1: receipts vs gold (--confirm writes)
 seedgo shadow-cycle run                          # The three weekly v5 passes
 seedgo permissions / inbox_audit                 # Settings sweep / mailbox hygiene
+seedgo home-paths scan [<root>]                  # developer_home over the tracked tree — the CI gate, red exits 1
 seedgo readme update @branch                     # README auto-update
 ```
 
