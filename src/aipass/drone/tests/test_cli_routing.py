@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for Drone (adapted from universal template)
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-03-27
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
@@ -289,31 +289,46 @@ class TestMainAtTarget:
 
 
 class TestMainModuleRouting:
-    """drone bare module name routing."""
+    """drone bare module name routing.
 
-    def test_discovered_module_bool_true(self) -> None:
-        """Discovered module returning True yields exit 0."""
-        mock_mod = type(sys)("fake_mod")
-        mock_mod.handle_command = lambda cmd, args: True
+    The stand-in module goes where the import system looks, sys.modules under
+    the real dotted name, and the real importlib.import_module answers it.
+    monkeypatch puts the real config module back when each test ends.
+    """
+
+    _CONFIG = "aipass.drone.apps.modules.config"
+
+    def _stand_in(self, monkeypatch: pytest.MonkeyPatch, answer: Any) -> list[tuple[Any, Any]]:
+        """Register a module under config's real name; its handle_command records each call and gives ``answer``."""
+        calls: list[tuple[Any, Any]] = []
+
+        def handle_command(cmd: Any, args: Any) -> Any:
+            calls.append((cmd, args))
+            return answer
+
+        mod = type(sys)(self._CONFIG)
+        mod.handle_command = handle_command
+        monkeypatch.setitem(sys.modules, self._CONFIG, mod)
+        return calls
+
+    def test_discovered_module_bool_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Discovered module returning True yields exit 0; mutant killed: the bool answer inverted."""
+        calls = self._stand_in(monkeypatch, True)
 
         with (
-            patch("sys.argv", ["drone", "config", "list"]),
+            patch("sys.argv", ["drone", "config", "list", "--all"]),
             patch(
                 f"{_DRONE}._discover_modules",
                 return_value=[("config", "Config module")],
             ),
-            patch(
-                f"{_DRONE}.importlib.import_module",
-                return_value=mock_mod,
-            ),
         ):
             result = main()
         assert result == 0
+        assert calls == [("list", ["--all"])]
 
-    def test_discovered_module_bool_false(self) -> None:
-        """Discovered module returning False yields exit 1."""
-        mock_mod = type(sys)("fake_mod")
-        mock_mod.handle_command = lambda cmd, args: False
+    def test_discovered_module_bool_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Discovered module returning False yields exit 1; mutant killed: the bool answer inverted."""
+        calls = self._stand_in(monkeypatch, False)
 
         with (
             patch("sys.argv", ["drone", "config", "broken"]),
@@ -321,22 +336,19 @@ class TestMainModuleRouting:
                 f"{_DRONE}._discover_modules",
                 return_value=[("config", "Config module")],
             ),
-            patch(
-                f"{_DRONE}.importlib.import_module",
-                return_value=mock_mod,
-            ),
         ):
             result = main()
         assert result == 1
+        assert calls == [("broken", None)]
 
-    def test_discovered_module_dict_result(self) -> None:
-        """Discovered module returning dict uses stdout/stderr/exit_code."""
-        mock_mod = type(sys)("fake_mod")
-        mock_mod.handle_command = lambda cmd, args: {
-            "stdout": "output",
-            "stderr": "",
-            "exit_code": 0,
-        }
+    def test_discovered_module_dict_result(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A dict result is relayed: its stdout written and its exit_code returned.
+
+        Mutant killed: the dict's exit_code replaced by 0.
+        """
+        self._stand_in(monkeypatch, {"stdout": "output", "stderr": "", "exit_code": 3})
 
         with (
             patch("sys.argv", ["drone", "config", "list"]),
@@ -344,29 +356,31 @@ class TestMainModuleRouting:
                 f"{_DRONE}._discover_modules",
                 return_value=[("config", "Config module")],
             ),
-            patch(
-                f"{_DRONE}.importlib.import_module",
-                return_value=mock_mod,
-            ),
         ):
             result = main()
-        assert result == 0
+        assert result == 3
+        assert capsys.readouterr().out == "output"
 
-    def test_discovered_module_exception(self) -> None:
-        """Module raising exception returns 1."""
+    def test_discovered_module_exception(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A module that cannot import returns 1 and is named on stderr; mutant killed: the except returns 0.
+
+        None in sys.modules is the import system's own "halted" answer: the real
+        import_module raises ImportError for it.
+        """
+        monkeypatch.setitem(sys.modules, self._CONFIG, None)
+
         with (
             patch("sys.argv", ["drone", "config", "list"]),
             patch(
                 f"{_DRONE}._discover_modules",
                 return_value=[("config", "Config module")],
             ),
-            patch(
-                f"{_DRONE}.importlib.import_module",
-                side_effect=ImportError("nope"),
-            ),
         ):
             result = main()
         assert result == 1
+        assert "drone: module 'config' error:" in capsys.readouterr().err
 
 
 class TestMainCustomCommand:
