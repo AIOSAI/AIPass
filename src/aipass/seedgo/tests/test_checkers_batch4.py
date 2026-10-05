@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-29
 # Modified: 2026-10-05
 # =============================================
@@ -683,3 +683,41 @@ def test_a_top_level_dot_directory_copy_is_not_charged(tmp_path):
 def test_a_root_standing_inside_a_dotted_directory_is_still_read(tmp_path):
     """The skip reads the parts relative to the branch root, never the whole path."""
     assert _charged_with_a_live_copy(tmp_path / ".live-x" / "branchroot") == [(Path("apps", "m.py"), "g")]
+
+
+def _charged_names(root: Path, files: dict[str, str]) -> list[str]:
+    """Sorted names check_branch charges for a branch made of ``files``."""
+    for relative, body in files.items():
+        _write_file(root / relative, body)
+    return sorted(row["name"] for row in unused_function_check.check_branch(str(root))["checks"][0].get("unused", []))
+
+
+def test_one_pass_over_the_corpus_counts_as_the_per_name_scans_did(tmp_path):
+    """Words and definition lines are counted once per branch (seedgo, fleet green leg 18).
+
+    The per-name scans held 398 of 1033 profiled seconds of seedgo's own
+    audit. ``run`` is not used by ``run_all``, ``async def`` with two spaces
+    is still idle's definition line, and helper is called from another file.
+    Green on the per-name scans too: its proof is its mutants.
+    """
+    body = (
+        "async def  idle():\n    return run_all()\n\n\n"
+        "def run_all():\n    return 1\n\n\n"
+        "def run():\n    return 2\n\n\n"
+        "def  helper():\n    return 3\n"
+    )
+    files = {"apps/a.py": body, "apps/b.py": "x = helper()\n"}
+    assert _charged_names(tmp_path / "branchroot", files) == ["idle", "run"]
+
+
+def test_a_name_with_a_mark_no_word_pattern_reads_is_still_counted(tmp_path):
+    """A name holding a character ``\\w`` does not match is counted by its own scan.
+
+    U+093F is a combining vowel sign: valid in an identifier, not a word
+    character, so the one-pass count would split the name and charge it while
+    it is called (seedgo, fleet green leg 18). Green on the per-name scans too:
+    its proof is its mutant.
+    """
+    name = "aिb"
+    files = {"apps/a.py": f"def {name}():\n    return 1\n", "apps/b.py": f"x = {name}()\n"}
+    assert _charged_names(tmp_path / "branchroot", files) == []

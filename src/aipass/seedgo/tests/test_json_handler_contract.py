@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_json_handler_contract.py
 # Description: Fleet-wide contract suite over every branch json_handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-09-01
-# Modified: 2026-10-03
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for every branch's apps/handlers/json/json_handler.py, one contract over the fleet."""
@@ -1393,15 +1393,20 @@ def shipped_python_files(root: Path) -> list[Path]:
         root: The directory walked, :data:`PACKAGE_ROOT` in the suite.
 
     Returns:
-        The files outside every :data:`UNSHIPPED_PARTS` directory.
+        The files outside every :data:`UNSHIPPED_PARTS` directory and every
+        directory whose name starts with a dot.
 
     A directory is pruned by its own name before the walk enters it, so a
     dropbox is never listed, and ``root`` itself is never judged: a checkout
-    standing under a directory named ``dropbox`` is still read whole.
+    standing under a directory named ``dropbox`` is still read whole. A dot
+    directory is pruned the same way (seedgo, fleet green leg 18): hooks'
+    ``.live-<stamp>`` rollback snapshots are on no import path.
     """
     found = []
     for directory, subdirectories, files in os.walk(root):
-        subdirectories[:] = [name for name in subdirectories if name not in UNSHIPPED_PARTS]
+        subdirectories[:] = [
+            name for name in subdirectories if name not in UNSHIPPED_PARTS and not name.startswith(".")
+        ]
         found.extend(Path(directory) / name for name in files if name.endswith(".py"))
     return sorted(found)
 
@@ -1782,6 +1787,25 @@ def test_the_package_walk_skips_a_dropbox_and_an_archive_but_not_a_root_beneath_
     """
     root = tmp_path / "dropbox" / "package"
     for relative in ("live.py", "dropbox/stray.py", ".archive/old.py", "branch/__pycache__/cached.py"):
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_text("", encoding="utf-8")
+    assert shipped_python_files(root) == [root / "live.py"]
+
+
+def test_the_package_walk_skips_a_dot_directory_but_not_a_root_beneath_one(tmp_path: Path):
+    """A dot-prefixed directory below the root is never listed; the root is read whole.
+
+    hooks keeps rollback snapshots as ``hooks/.live-<stamp>/``, copies of its
+    handlers that no import path answers, and the walk listed them: the retry
+    contracts then built ``aipass.hooks..live-...`` and went red nineteen
+    times (seedgo, fleet green leg 18). A directory whose own name starts with
+    a dot is pruned like the names of :data:`UNSHIPPED_PARTS`, judged relative
+    to the walked root, so a root that itself stands inside ``.live-x`` is
+    still read. Red first on the walk that pruned by name alone: it listed
+    ``.live-y/copy.py``.
+    """
+    root = tmp_path / ".live-x" / "package"
+    for relative in ("live.py", ".live-y/copy.py", "branch/.live-z/deep.py"):
         (root / relative).parent.mkdir(parents=True, exist_ok=True)
         (root / relative).write_text("", encoding="utf-8")
     assert shipped_python_files(root) == [root / "live.py"]

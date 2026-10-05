@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: unused_function_check.py
 # Description: Unused Function Standards Checker Handler
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-03-22
 # Modified: 2026-10-05
 # =============================================
@@ -397,6 +397,33 @@ def _count_def_lines(func_name: str, corpus: str) -> int:
     return len(pattern.findall(corpus))
 
 
+# A maximal run of word characters. For a name made only of them, `\bNAME\b`
+# matches exactly the runs equal to NAME, so one pass counts every name.
+_WORD = re.compile(r"\w+")
+
+# Every place a definition line starts, overlapping allowed: the zero-width
+# lookahead reads `def NAME` inside `async def NAME` once, as the per-name
+# alternation did.
+_DEF = re.compile(r"(?=\bdef\s+(\w+))")
+
+
+def _corpus_counts(corpus: str) -> tuple[dict[str, int], dict[str, int]]:
+    """(word counts, definition-line counts) for the corpus, in one pass each.
+
+    The per-name scans re-read the whole corpus twice per function: 398 of
+    1033 profiled seconds of seedgo's own audit (fleet green leg 18). A name
+    holding a character ``\\w`` does not match is not answered here; the
+    caller scans for it by name.
+    """
+    words: dict[str, int] = {}
+    for word in _WORD.findall(corpus):
+        words[word] = words.get(word, 0) + 1
+    defs: dict[str, int] = {}
+    for name in _DEF.findall(corpus):
+        defs[name] = defs.get(name, 0) + 1
+    return words, defs
+
+
 # -- Branch-level check (audit pipeline entry) --------------------------------
 
 
@@ -499,13 +526,18 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     # Phase 4: For each function, check if it has references beyond its definition
     unused_functions: list[dict] = []
+    word_counts, def_counts = _corpus_counts(corpus)
 
     for func_name, lineno, py_file in all_functions:
         if is_bypassed(str(py_file), "unused_function", lineno, bypass_rules, name=func_name):
             continue
 
-        total_refs = _count_references_in_corpus(func_name, corpus)
-        def_count = _count_def_lines(func_name, corpus)
+        if _WORD.fullmatch(func_name):
+            total_refs = word_counts.get(func_name, 0)
+            def_count = def_counts.get(func_name, 0)
+        else:
+            total_refs = _count_references_in_corpus(func_name, corpus)
+            def_count = _count_def_lines(func_name, corpus)
         call_refs = total_refs - def_count
 
         if call_refs <= 0:
