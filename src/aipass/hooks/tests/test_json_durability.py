@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_json_durability.py
-# Version: 2.0.2
+# Version: 2.0.3
 # Description: Torn-write durability tests for hooks' arbitrary-path json module
 # Branch: hooks
 # Layer: tests
@@ -32,6 +32,7 @@
 # seedgo: no-test-needed(documentation) — that read_json_file / write_json_file carry docstrings
 
 import json
+import os
 import re
 import threading
 from pathlib import Path
@@ -48,17 +49,21 @@ WRITE_TEXT = re.compile(r"\.write_text\(")
 
 
 class TestAtomicHelper:
-    """The mechanism itself."""
+    """The mechanism, reached through write_json_file, its one public door (fleet green leg 9).
+
+    The test that only pinned write_json_file -> _atomic_write_json routing is retired:
+    test_stages_temp_in_target_directory pins the staged move through the door itself.
+    """
 
     def test_creates_document_that_did_not_exist(self, tmp_path: Path):
         target = tmp_path / "fresh.json"
-        json_files._atomic_write_json(target, {"a": 1})
+        json_files.write_json_file(target, {"a": 1})
         assert json.loads(target.read_text(encoding="utf-8")) == {"a": 1}
 
     def test_replaces_existing_document(self, tmp_path: Path):
         target = tmp_path / "existing.json"
         target.write_text('{"old": true}\n', encoding="utf-8")
-        json_files._atomic_write_json(target, {"new": True})
+        json_files.write_json_file(target, {"new": True})
         assert json.loads(target.read_text(encoding="utf-8")) == {"new": True}
 
     def test_leaves_no_staged_file_behind(self, tmp_path: Path):
@@ -67,7 +72,7 @@ class TestAtomicHelper:
         directory = tmp_path / "documents"
         directory.mkdir()
         target = directory / "clean.json"
-        json_files._atomic_write_json(target, {"a": 1})
+        json_files.write_json_file(target, {"a": 1})
         assert list(directory.glob("*.tmp")) == []
         assert [p.name for p in directory.iterdir()] == ["clean.json"]
 
@@ -76,19 +81,22 @@ class TestAtomicHelper:
         target = tmp_path / "nested" / "doc.json"
         target.parent.mkdir()
         seen: dict = {}
-        real_replace = json_files._replace_with_retry
 
         def at_the_move(source, destination):
-            # The staged file as it stands on disk the moment before it is moved in.
+            # The staged file as it stands on disk the moment before it is moved in;
+            # the recorder then makes the move with its own hands.
             seen["staged"] = Path(source)
             seen["on_disk"] = Path(source).is_file()
-            return real_replace(source, destination)
+            seen["destination"] = Path(destination)
+            os.replace(source, destination)
 
         # The product's own mover, not tempfile.mkstemp (fleet green leg 7, stdlib_patch).
         monkeypatch.setattr(json_files, "_replace_with_retry", at_the_move)
-        json_files._atomic_write_json(target, {"a": 1})
+        json_files.write_json_file(target, {"a": 1})
         assert seen["on_disk"] is True
         assert seen["staged"].parent == target.parent
+        assert seen["destination"] == target
+        assert json.loads(target.read_text(encoding="utf-8")) == {"a": 1}
 
     def test_failed_write_leaves_original_intact_and_cleans_temp(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         target = tmp_path / "precious.json"
@@ -99,7 +107,7 @@ class TestAtomicHelper:
 
         monkeypatch.setattr(json_files, "_replace_with_retry", boom)
         with pytest.raises(OSError):
-            json_files._atomic_write_json(target, {"replacement": True})
+            json_files.write_json_file(target, {"replacement": True})
 
         assert json.loads(target.read_text(encoding="utf-8")) == {"original": True}
         assert list(tmp_path.glob("*.tmp")) == []
@@ -107,19 +115,8 @@ class TestAtomicHelper:
     def test_helper_raises_it_does_not_swallow(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """No new silent catch — a failed write must reach the caller."""
         monkeypatch.setattr(json_files, "_replace_with_retry", lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
-        with pytest.raises(OSError):
-            json_files._atomic_write_json(tmp_path / "x.json", {"a": 1})
-
-
-class TestEveryWriteSiteRouted:
-    """The write site this branch still owns."""
-
-    def test_write_json_file_routes_through_helper(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """Writes the trust registry and the alerts file."""
-        calls: list = []
-        monkeypatch.setattr(json_files, "_atomic_write_json", lambda *a, **k: calls.append(a))
-        json_files.write_json_file(tmp_path / "registry.json", {"projects": {}})
-        assert len(calls) == 1
+        with pytest.raises(OSError, match="nope"):
+            json_files.write_json_file(tmp_path / "x.json", {"a": 1})
 
 
 class TestSourceGuard:

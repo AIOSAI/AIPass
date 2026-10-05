@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.0.1
+# Version: 2.0.2
 # Description: Tests for hook engine dispatch logic
 # Branch: hooks
 # Layer: tests
@@ -30,7 +30,6 @@ from aipass.hooks.apps.modules.engine import (
     HELP_COMMANDS as eng_cmds,
     dispatch,
     run_event,
-    _matches,
     _run_handler,
     _run_hook,
     _log,
@@ -39,7 +38,7 @@ from aipass.hooks.apps.modules.hooksound import HELP_COMMANDS as hs_cmds
 from aipass.hooks.apps.modules.hookstatus import HELP_COMMANDS as hst_cmds
 from aipass.hooks.apps.handlers.config import trust_registry
 from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE
-from aipass.hooks.apps.handlers.config.output_merge import CONTEXT_LIMIT, _cc_len
+from aipass.hooks.apps.handlers.config.output_merge import CONTEXT_LIMIT
 from aipass.hooks.apps.handlers.config.gates import FAIL_CLOSED
 from aipass.hooks.apps.handlers.config.loader import find_project_config
 from aipass.hooks.apps.handlers.config.trust_registry import enroll
@@ -61,39 +60,51 @@ def _no_real_trust_banners():
         yield
 
 
+def _fires(matcher: str, value: str) -> bool:
+    """Whether dispatch() runs a handler hook with this matcher on an event whose tool_name is value."""
+    module = MagicMock()
+    module.handle.return_value = {"exit_code": 0, "stdout": ""}
+    hook = {"enabled": True, "handler": "aipass.hooks.apps.handlers.probe.handle", "matcher": matcher}
+    config = {"hooks_enabled": True, "Probe": {"probe": hook}}
+    with patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=module):
+        dispatch("Probe", json.dumps({"tool_name": value}) if value else "{}", config)
+    return module.handle.called
+
+
 class TestMatches:
-    """Tests for _matches() matcher logic."""
+    """Matcher logic, read as whether dispatch() runs the hook."""
 
-    def test_empty_matcher_always_matches(self):
-        assert _matches("", "Edit") is True
+    def test_empty_matcher_always_matches(self, mock_logger):
+        assert _fires("", "Edit") is True
 
-    def test_empty_matcher_matches_empty_value(self):
-        assert _matches("", "") is True
+    def test_empty_matcher_matches_empty_value(self, mock_logger):
+        assert _fires("", "") is True
 
-    def test_single_match(self):
-        assert _matches("Edit", "Edit") is True
+    def test_single_match(self, mock_logger):
+        assert _fires("Edit", "Edit") is True
 
-    def test_single_no_match(self):
-        assert _matches("Edit", "Bash") is False
+    def test_single_no_match(self, mock_logger):
+        assert _fires("Edit", "Bash") is False
 
-    def test_pipe_delimited_match_first(self):
-        assert _matches("Edit|Write|MultiEdit", "Edit") is True
+    def test_pipe_delimited_match_first(self, mock_logger):
+        assert _fires("Edit|Write|MultiEdit", "Edit") is True
 
-    def test_pipe_delimited_match_middle(self):
-        assert _matches("Edit|Write|MultiEdit", "Write") is True
+    def test_pipe_delimited_match_middle(self, mock_logger):
+        assert _fires("Edit|Write|MultiEdit", "Write") is True
 
-    def test_pipe_delimited_match_last(self):
-        assert _matches("Edit|Write|MultiEdit", "MultiEdit") is True
+    def test_pipe_delimited_match_last(self, mock_logger):
+        assert _fires("Edit|Write|MultiEdit", "MultiEdit") is True
 
-    def test_pipe_delimited_no_match(self):
-        assert _matches("Edit|Write|MultiEdit", "Bash") is False
+    def test_pipe_delimited_no_match(self, mock_logger):
+        assert _fires("Edit|Write|MultiEdit", "Bash") is False
 
-    def test_partial_name_does_not_match(self):
-        assert _matches("Edit", "MultiEdit") is False
+    def test_partial_name_does_not_match(self, mock_logger):
+        assert _fires("Edit", "MultiEdit") is False
+        assert _fires("MultiEdit", "Edit") is False
 
-    def test_manual_auto_compact(self):
-        assert _matches("manual|auto", "manual") is True
-        assert _matches("manual|auto", "auto") is True
+    def test_manual_auto_compact(self, mock_logger):
+        assert _fires("manual|auto", "manual") is True
+        assert _fires("manual|auto", "auto") is True
 
 
 class TestRunHook:
@@ -1670,7 +1681,7 @@ class TestOneDocumentPerEvent:
             doc = json.loads(_post_tool_use(outputs))
         context = doc["hookSpecificOutput"]["additionalContext"]
         assert context == regroup
-        assert _cc_len(context) <= CONTEXT_LIMIT == 10_000
+        assert len(context.encode("utf-16-le")) // 2 <= CONTEXT_LIMIT == 10_000
         dropped = [c.args for c in log.warning.call_args_list if "DROPPED" in c.args[0]]
         assert len(dropped) == 1 and dropped[0][2] == "auto_fix_diagnostics" and dropped[0][3] == 2000
 

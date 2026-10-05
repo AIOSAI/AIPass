@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -17,6 +17,8 @@
 
 import json
 from unittest.mock import patch
+
+import pytest
 
 from aipass.hooks.apps.modules import wire_verify
 
@@ -57,171 +59,137 @@ GOOD_PROJECT = {
 }
 
 
+# The parser, the index and the per-event check are read through verify_wiring's
+# result (fleet green leg 9, through the command). The PreToolUse bridge every
+# provider below carries keeps the guarded-tools check (R7) quiet, so each result
+# holds only what the event under test produced.
+_ENABLED = {"enabled": True, "handler": "x.handle"}
+_PRETOOL = {"PreToolUse": [_provider_entry("PreToolUse")]}
+_PRETOOL_INFO = "PreToolUse: provider-only event (no project config section)"
+
+
+def _verify(tmp_path, provider: dict, project: dict) -> dict:
+    """verify_wiring's answer for `provider` (plus the PreToolUse bridge) against `project`."""
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"hooks": {**_PRETOOL, **provider}}), encoding="utf-8")
+    return wire_verify.verify_wiring(provider_path=settings, project_config={"hooks_enabled": True, **project})
+
+
+def _never_fires(event: str, hook: str) -> str:
+    return f"{event}:{hook}: enabled in project config but no provider bridge entry — handler never fires"
+
+
 class TestExtractBridgeArg:
-    def test_filtered_arg(self):
-        entry = _provider_entry("UserPromptSubmit:tier0_kernel")
-        assert wire_verify._extract_bridge_arg(entry) == "UserPromptSubmit:tier0_kernel"
+    def test_filtered_arg(self, tmp_path):
+        provider = {"UserPromptSubmit": [_provider_entry("UserPromptSubmit:tier0_kernel")]}
+        result = _verify(tmp_path, provider, {"UserPromptSubmit": {"tier0_kernel": _ENABLED}})
+        assert result == {"errors": [], "warnings": [], "info": [_PRETOOL_INFO], "ok": True}
 
-    def test_unfiltered_arg(self):
-        entry = _provider_entry("Stop")
-        assert wire_verify._extract_bridge_arg(entry) == "Stop"
+    def test_unfiltered_arg(self, tmp_path):
+        result = _verify(tmp_path, {"Stop": [_provider_entry("Stop")]}, {"Stop": {"stop_sound": _ENABLED}})
+        assert result["info"] == ["Stop: unfiltered bridge, 1 enabled hooks OK", _PRETOOL_INFO]
+        assert result["errors"] == []
 
-    def test_no_bridge_marker(self):
-        entry = {"hooks": [{"command": "echo hello"}]}
-        assert wire_verify._extract_bridge_arg(entry) is None
-
-    def test_empty_hooks(self):
-        assert wire_verify._extract_bridge_arg({"hooks": []}) is None
-
-    def test_no_hooks_key(self):
-        assert wire_verify._extract_bridge_arg({}) is None
+    @pytest.mark.parametrize(
+        "entry",
+        [{"hooks": [{"command": "echo hello"}]}, {"hooks": []}, {}],
+        ids=["no_bridge_marker", "empty_hooks", "no_hooks_key"],
+    )
+    def test_an_entry_without_a_bridge_wires_nothing(self, tmp_path, entry):
+        result = _verify(tmp_path, {"Stop": [entry]}, {"Stop": {"stop_sound": _ENABLED}})
+        assert result["errors"] == [_never_fires("Stop", "stop_sound")]
 
 
 class TestBuildProviderIndex:
-    def test_builds_filtered_index(self):
+    # test_builds_unfiltered_index is retired: TestExtractBridgeArg::test_unfiltered_arg pins the same answer.
+
+    def test_builds_filtered_index(self, tmp_path):
         provider = {
             "UserPromptSubmit": [
                 _provider_entry("UserPromptSubmit:identity_injector"),
                 _provider_entry("UserPromptSubmit:branch_prompt"),
             ],
         }
-        errors = []
-        idx = wire_verify._build_provider_index(provider, errors)
-        assert errors == []
-        assert idx["UserPromptSubmit"]["filtered"]["identity_injector"] == {"": 1}
-        assert idx["UserPromptSubmit"]["filtered"]["branch_prompt"] == {"": 1}
-        assert idx["UserPromptSubmit"]["unfiltered"] == 0
+        project = {"UserPromptSubmit": {"identity_injector": _ENABLED, "branch_prompt": _ENABLED}}
+        result = _verify(tmp_path, provider, project)
+        assert (result["errors"], result["warnings"]) == ([], [])
 
-    def test_builds_unfiltered_index(self):
-        provider = {"Stop": [_provider_entry("Stop")]}
-        errors = []
-        idx = wire_verify._build_provider_index(provider, errors)
-        assert idx["Stop"]["unfiltered"] == 1
-        assert idx["Stop"]["filtered"] == {}
+    def test_empty_array_errors(self, tmp_path):
+        result = _verify(tmp_path, {"SessionStart": []}, {"SessionStart": {"cadence_reset": _ENABLED}})
+        # One error: an empty array is reported once, and the event is then skipped, not called unwired.
+        assert result["errors"] == ["SessionStart: provider entry exists but hooks array is EMPTY — nothing fires"]
 
-    def test_empty_array_errors(self):
-        provider = {"SessionStart": []}
-        errors = []
-        idx = wire_verify._build_provider_index(provider, errors)
-        assert len(errors) == 1
-        assert "EMPTY" in errors[0]
-        assert idx["SessionStart"]["empty"] is True
+    def test_duplicate_filtered_counted(self, tmp_path):
+        provider = {"PreCompact": [_provider_entry("PreCompact:pre_compact")] * 2}
+        result = _verify(tmp_path, provider, {"PreCompact": {"pre_compact": _ENABLED}})
+        assert result["warnings"] == ["PreCompact:pre_compact: 2 duplicate provider entries (matcher=none)"]
+        assert result["errors"] == []
 
-    def test_duplicate_filtered_counted(self):
-        provider = {
-            "PreCompact": [
-                _provider_entry("PreCompact:pre_compact"),
-                _provider_entry("PreCompact:pre_compact"),
-            ],
-        }
-        errors = []
-        idx = wire_verify._build_provider_index(provider, errors)
-        assert idx["PreCompact"]["filtered"]["pre_compact"] == {"": 2}
-
-    def test_distinct_matchers_not_duplicate(self):
+    def test_distinct_matchers_not_duplicate(self, tmp_path):
         provider = {
             "PreCompact": [
                 _provider_entry("PreCompact:pre_compact", matcher="manual"),
                 _provider_entry("PreCompact:pre_compact", matcher="auto"),
+                _provider_entry("PreCompact:pre_compact", matcher="auto"),
             ],
         }
-        errors = []
-        idx = wire_verify._build_provider_index(provider, errors)
-        assert idx["PreCompact"]["filtered"]["pre_compact"] == {"manual": 1, "auto": 1}
+        result = _verify(tmp_path, provider, {"PreCompact": {"pre_compact": _ENABLED}})
+        assert result["warnings"] == ["PreCompact:pre_compact: 2 duplicate provider entries (matcher=auto)"]
 
 
 class TestCheckEventWiring:
-    def test_unfiltered_ok(self):
-        pidx = {"filtered": {}, "unfiltered": 1, "empty": False}
-        hooks_group = {"stop_sound": {"enabled": True, "handler": "x"}}
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("Stop", hooks_group, pidx, errors, warnings, info)
-        assert errors == []
-        assert any("unfiltered" in i for i in info)
+    # Retired as covered (fleet green leg 9): test_unfiltered_ok by TestExtractBridgeArg::test_unfiltered_arg,
+    # test_distinct_matchers_no_warning by TestBuildProviderIndex::test_distinct_matchers_not_duplicate,
+    # test_empty_provider_skipped by TestBuildProviderIndex::test_empty_array_errors.
 
-    def test_missing_provider_event(self):
-        hooks_group = {"cadence_reset": {"enabled": True, "handler": "x"}}
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("SessionStart", hooks_group, None, errors, warnings, info)
-        assert len(errors) == 1
-        assert "NO provider event entry" in errors[0]
+    def test_missing_provider_event(self, tmp_path):
+        result = _verify(tmp_path, {}, {"SessionStart": {"cadence_reset": _ENABLED}})
+        assert result["errors"] == [
+            "SessionStart: 1 enabled handler(s) in project config but NO provider event entry — handlers never fire"
+        ]
 
-    def test_missing_per_hook_entry(self):
-        pidx = {"filtered": {"identity_injector": {"": 1}}, "unfiltered": 0, "empty": False}
-        hooks_group = {
-            "identity_injector": {"enabled": True, "handler": "x"},
-            "presence_gate": {"enabled": True, "handler": "y"},
+    def test_missing_per_hook_entry(self, tmp_path):
+        provider = {"UserPromptSubmit": [_provider_entry("UserPromptSubmit:identity_injector")]}
+        project = {"UserPromptSubmit": {"identity_injector": _ENABLED, "presence_gate": _ENABLED}}
+        result = _verify(tmp_path, provider, project)
+        assert result["errors"] == [_never_fires("UserPromptSubmit", "presence_gate")]
+
+    def test_duplicate_per_hook_warns(self, tmp_path):
+        provider = {"UserPromptSubmit": [_provider_entry("UserPromptSubmit:branch_prompt")] * 3}
+        result = _verify(tmp_path, provider, {"UserPromptSubmit": {"branch_prompt": _ENABLED}})
+        assert result["warnings"] == ["UserPromptSubmit:branch_prompt: 3 duplicate provider entries (matcher=none)"]
+
+    def test_orphaned_provider_entry(self, tmp_path):
+        provider = {"UserPromptSubmit": [_provider_entry("UserPromptSubmit:ghost_hook")]}
+        result = _verify(tmp_path, provider, {"UserPromptSubmit": {"real_hook": _ENABLED}})
+        assert result["warnings"] == [
+            "UserPromptSubmit:ghost_hook: provider entry exists but no handler in project config (orphaned)"
+        ]
+        assert result["errors"] == [_never_fires("UserPromptSubmit", "real_hook")]
+
+    def test_disabled_hooks_skipped(self, tmp_path):
+        project = {"UserPromptSubmit": {"disabled_hook": {"enabled": False, "handler": "x"}}}
+        assert _verify(tmp_path, {}, project)["errors"] == []
+
+    def test_duplicate_unfiltered_warns(self, tmp_path):
+        result = _verify(tmp_path, {"Stop": [_provider_entry("Stop")] * 3}, {"Stop": {"stop_sound": _ENABLED}})
+        assert result["warnings"] == ["Stop: 3 duplicate unfiltered provider entries"]
+
+    def test_provider_wired_false_still_errors(self, tmp_path):
+        provider = {"UserPromptSubmit": [_provider_entry("UserPromptSubmit:identity_injector")]}
+        project = {
+            "UserPromptSubmit": {
+                "identity_injector": _ENABLED,
+                "presence_gate": {"enabled": True, "handler": "y", "provider_wired": False},
+            }
         }
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("UserPromptSubmit", hooks_group, pidx, errors, warnings, info)
-        assert len(errors) == 1
-        assert "presence_gate" in errors[0]
-        assert "never fires" in errors[0]
+        assert _verify(tmp_path, provider, project)["errors"] == [_never_fires("UserPromptSubmit", "presence_gate")]
 
-    def test_duplicate_per_hook_warns(self):
-        pidx = {"filtered": {"pre_compact": {"": 2}}, "unfiltered": 0, "empty": False}
-        hooks_group = {"pre_compact": {"enabled": True, "handler": "x"}}
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("PreCompact", hooks_group, pidx, errors, warnings, info)
-        assert errors == []
-        assert len(warnings) == 1
-        assert "duplicate" in warnings[0]
-
-    def test_distinct_matchers_no_warning(self):
-        pidx = {"filtered": {"pre_compact": {"manual": 1, "auto": 1}}, "unfiltered": 0, "empty": False}
-        hooks_group = {"pre_compact": {"enabled": True, "handler": "x"}}
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("PreCompact", hooks_group, pidx, errors, warnings, info)
-        assert errors == []
-        assert warnings == []
-
-    def test_orphaned_provider_entry(self):
-        pidx = {"filtered": {"ghost_hook": {"": 1}}, "unfiltered": 0, "empty": False}
-        hooks_group = {"real_hook": {"enabled": True, "handler": "x"}}
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("UserPromptSubmit", hooks_group, pidx, errors, warnings, info)
-        assert any("orphaned" in w for w in warnings)
-
-    def test_disabled_hooks_skipped(self):
-        pidx = {"filtered": {}, "unfiltered": 0, "empty": False}
-        hooks_group = {"disabled_hook": {"enabled": False, "handler": "x"}}
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("UserPromptSubmit", hooks_group, pidx, errors, warnings, info)
-        assert errors == []
-
-    def test_empty_provider_skipped(self):
-        pidx = {"filtered": {}, "unfiltered": 0, "empty": True}
-        hooks_group = {"cadence_reset": {"enabled": True, "handler": "x"}}
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("SessionStart", hooks_group, pidx, errors, warnings, info)
-        assert errors == []
-
-    def test_duplicate_unfiltered_warns(self):
-        pidx = {"filtered": {}, "unfiltered": 3, "empty": False}
-        hooks_group = {"stop_sound": {"enabled": True, "handler": "x"}}
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("Stop", hooks_group, pidx, errors, warnings, info)
-        assert len(warnings) == 1
-        assert "duplicate unfiltered" in warnings[0]
-
-    def test_provider_wired_false_still_errors(self):
-        pidx = {"filtered": {"identity_injector": {"": 1}}, "unfiltered": 0, "empty": False}
-        hooks_group = {
-            "identity_injector": {"enabled": True, "handler": "x"},
-            "presence_gate": {"enabled": True, "handler": "y", "provider_wired": False},
-        }
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("UserPromptSubmit", hooks_group, pidx, errors, warnings, info)
-        assert any("presence_gate" in e for e in errors)
-
-    def test_provider_wired_false_no_event_still_errors(self):
-        hooks_group = {
-            "presence_gate": {"enabled": True, "handler": "y", "provider_wired": False},
-        }
-        errors, warnings, info = [], [], []
-        wire_verify._check_event_wiring("UserPromptSubmit", hooks_group, None, errors, warnings, info)
-        assert len(errors) == 1
-        assert "NO provider event entry" in errors[0]
+    def test_provider_wired_false_no_event_still_errors(self, tmp_path):
+        project = {"UserPromptSubmit": {"presence_gate": {"enabled": True, "handler": "y", "provider_wired": False}}}
+        assert _verify(tmp_path, {}, project)["errors"] == [
+            "UserPromptSubmit: 1 enabled handler(s) in project config but NO provider event entry — handlers never fire"
+        ]
 
 
 class TestEveryGuardedToolReachesTheBridge:
@@ -361,21 +329,25 @@ class TestVerifyWiring:
 
 
 class TestReadProviderHooks:
+    # Read through verify_wiring (fleet green leg 9). test_missing_file_returns_empty is retired:
+    # TestVerifyWiring::test_missing_provider_file pins the same answer.
+
     def test_reads_file(self, tmp_path):
         settings = tmp_path / "settings.json"
         settings.write_text(json.dumps({"hooks": {"Stop": []}}), encoding="utf-8")
-        result = wire_verify._read_provider_hooks(settings)
-        assert "Stop" in result
-
-    def test_missing_file_returns_empty(self, tmp_path):
-        result = wire_verify._read_provider_hooks(tmp_path / "missing.json")
-        assert result == {}
+        result = wire_verify.verify_wiring(provider_path=settings, project_config={"hooks_enabled": True})
+        assert "Stop: provider entry exists but hooks array is EMPTY — nothing fires" in result["errors"]
 
     def test_malformed_json_returns_empty(self, tmp_path):
         settings = tmp_path / "settings.json"
         settings.write_text("not json{{{", encoding="utf-8")
-        result = wire_verify._read_provider_hooks(settings)
-        assert result == {}
+        result = wire_verify.verify_wiring(provider_path=settings, project_config=GOOD_PROJECT)
+        assert result == {
+            "errors": ["No provider hooks found in ~/.claude/settings.json"],
+            "warnings": [],
+            "info": [],
+            "ok": False,
+        }
 
 
 class TestHandleCommand:
@@ -438,7 +410,9 @@ class TestRenderResults:
         text loses that colour, so the glyph that differs (✓ against ✗) is pinned.
         Proof the pin bites: a mutant that swaps the pass line's ✓ for ✗.
         """
-        wire_verify._render_results({"ok": True, "errors": [], "warnings": [], "info": ["x"]})
+        passed = {"ok": True, "errors": [], "warnings": [], "info": ["x"]}
+        with patch.object(wire_verify, "verify_wiring", return_value=passed):
+            assert wire_verify.handle_command("verify", []) is True
         err = capsys.readouterr().err
         assert "✓ Wire check passed" in err
         assert "✗" not in err
@@ -451,7 +425,9 @@ class TestRenderResults:
         glyph (✗ against ✓) and the word ERROR are what still tell it from a pass.
         Proof the pin bites: a mutant that swaps the fail line's ✗ for ✓.
         """
-        wire_verify._render_results({"ok": False, "errors": ["bad"], "warnings": [], "info": []})
+        failed = {"ok": False, "errors": ["bad"], "warnings": [], "info": []}
+        with patch.object(wire_verify, "verify_wiring", return_value=failed), pytest.raises(SystemExit):
+            wire_verify.handle_command("verify", [])
         err = capsys.readouterr().err
         assert "✗ Wire check FAILED" in err
         assert "✓" not in err

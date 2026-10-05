@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_cc_sessions.py
-# Version: 1.0.3
+# Version: 1.0.4
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
@@ -100,13 +100,21 @@ class TestGetPpidPortable:
     # on failure". Windows has no `ps`, so None IS the contract there, not a
     # miss; pinned per platform after the Windows matrix went red on 2c8271a7
     # (assert None == 5516).
+    # The first two are read through resolve_session_pid (fleet green leg 9): only our
+    # parent holds a session file, so the walk finds it exactly when the lookup answers.
+    @staticmethod
+    def _resolved_with_parent_file(tmp_path):
+        (tmp_path / f"{os.getppid()}.json").write_text(json.dumps({"pid": os.getppid()}), encoding="utf-8")
+        with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
+            return cc_sessions.resolve_session_pid()
+
     @pytest.mark.skipif(sys.platform == "win32", reason="ps-based; Linux + macOS only by contract")
-    def test_reports_our_real_parent(self):
-        assert cc_sessions._get_ppid_portable(os.getpid()) == os.getppid()
+    def test_reports_our_real_parent(self, tmp_path):
+        assert self._resolved_with_parent_file(tmp_path) == os.getppid()
 
     @pytest.mark.skipif(sys.platform != "win32", reason="the documented Windows answer")
-    def test_windows_answers_none_by_contract(self):
-        assert cc_sessions._get_ppid_portable(os.getpid()) is None
+    def test_windows_answers_none_by_contract(self, tmp_path):
+        assert self._resolved_with_parent_file(tmp_path) is None
 
     def test_dead_pid_returns_none(self):
         assert cc_sessions._get_ppid_portable(999999999) is None
@@ -140,13 +148,13 @@ class TestIsPidAlive:
     def test_pid_one(self, tmp_path, capsys):
         assert self._status(tmp_path, capsys, 1) == "stale"
 
-    def test_permission_error_treated_as_alive(self):
+    def test_permission_error_treated_as_alive(self, tmp_path, capsys):
         with patch("sys.platform", "linux"), patch("os.kill", side_effect=PermissionError("denied")):
-            assert cc_sessions._is_pid_alive(42) is True
+            assert self._status(tmp_path, capsys, 42) == "live"
 
-    def test_oserror_treated_as_dead(self):
+    def test_oserror_treated_as_dead(self, tmp_path, capsys):
         with patch("os.kill", side_effect=OSError("unknown")):
-            assert cc_sessions._is_pid_alive(42) is False
+            assert self._status(tmp_path, capsys, 42) == "stale"
 
 
 class TestProcStartTicks:
@@ -172,9 +180,10 @@ class TestProcStartTicks:
         expected = raw.rsplit(")", 1)[1].split()[19]
         assert self._kept(tmp_path, expected) is True
 
-    def test_non_linux_returns_none(self):
+    def test_non_linux_returns_none(self, tmp_path):
+        # No start read means liveness only: the mismatched procStart no longer drops it.
         with patch("sys.platform", "win32"):
-            assert cc_sessions._proc_start_ticks(os.getpid()) is None
+            assert self._kept(tmp_path, "not-a-tick") is True
 
     def test_missing_pid_returns_none(self):
         with patch("sys.platform", "linux"):

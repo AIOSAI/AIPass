@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_presence_gate.py
-# Version: 1.0.4
+# Version: 1.0.5
 # Description: Tests for the presence gate handler
 # Branch: hooks
 # Layer: tests
@@ -85,27 +85,41 @@ def _blocking():
     return patch.object(presence_gate, "_OBSERVE_ONLY", False)
 
 
+def _refused_branch(hook_data: dict, occupant: dict) -> str:
+    """The branch a refusal names: the words before ' is already live' in handle()'s reason."""
+    _, serve = _make_mocks(our_pid=1000, occupant=occupant)
+    with (
+        _blocking(),
+        patch.dict(os.environ, {**_kept_redirect(), "AIPASS_SESSION_TYPE": "interactive"}, clear=True),
+        serve(),
+    ):
+        result = presence_gate.handle(hook_data)
+    return json.loads(result["stdout"])["reason"].split(" is already live")[0]
+
+
 class TestResolveBranch:
-    def test_uses_hook_data_cwd(self, tmp_path):
+    """The branch is read through the refusal handle() writes (fleet green leg 9, through the command)."""
+
+    def test_uses_hook_data_cwd(self, tmp_path, live_occupant):
         branch_dir = tmp_path / "devpulse"
         branch_dir.mkdir()
         (branch_dir / ".trinity").mkdir()
-        assert presence_gate._resolve_branch({"cwd": str(branch_dir)}) == "devpulse"
+        assert _refused_branch({"cwd": str(branch_dir)}, live_occupant) == "devpulse"
 
-    def test_walks_up_to_branch_root(self, tmp_path):
+    def test_walks_up_to_branch_root(self, tmp_path, live_occupant):
         branch_dir = tmp_path / "hooks"
         (branch_dir / "apps" / "modules").mkdir(parents=True)
         sub = branch_dir / "apps" / "modules"
-        assert presence_gate._resolve_branch({"cwd": str(sub)}) == "hooks"
+        assert _refused_branch({"cwd": str(sub)}, live_occupant) == "hooks"
 
-    def test_stops_at_repo_root(self, tmp_path):
+    def test_stops_at_repo_root(self, tmp_path, live_occupant):
         (tmp_path / ".git").mkdir()
-        assert presence_gate._resolve_branch({"cwd": str(tmp_path)}) == tmp_path.name
+        assert _refused_branch({"cwd": str(tmp_path)}, live_occupant) == tmp_path.name
 
-    def test_fallback_to_path_cwd_when_no_cwd_in_hook_data(self, tmp_path, monkeypatch):
+    def test_fallback_to_path_cwd_when_no_cwd_in_hook_data(self, tmp_path, monkeypatch, live_occupant):
         (tmp_path / ".git").mkdir()
         monkeypatch.chdir(tmp_path)
-        assert presence_gate._resolve_branch({}) == tmp_path.name
+        assert _refused_branch({}, live_occupant) == tmp_path.name
 
 
 class TestHandle:
@@ -448,17 +462,37 @@ class TestTwoSeatsCannotDeadlockEachOther:
             assert presence_gate.handle({"cwd": str(tmp_path)})["exit_code"] == 2
 
 
+def _exit_for_our_start(tmp_path: Path, our_start: object, their_start: object) -> int:
+    """handle()'s exit code when our seat started at `our_start` and the occupant's at `their_start`."""
+    occupant = {"pid": 5000, "sessionId": "occ", "cwd": str(tmp_path), "kind": "interactive", "startedAt": their_start}
+    ours = {"pid": 1000, "sessionId": "ours", "cwd": str(tmp_path), "kind": "interactive"}
+    if our_start is not None:
+        ours["startedAt"] = our_start
+    _, serve = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
+    with (
+        _blocking(),
+        patch.dict(os.environ, {**_kept_redirect(), "AIPASS_SESSION_TYPE": "interactive"}, clear=True),
+        serve(),
+    ):
+        return presence_gate.handle({"cwd": str(tmp_path)})["exit_code"]
+
+
 class TestSessionStart:
-    def test_reads_epoch_milliseconds(self):
-        assert presence_gate._session_start({"startedAt": 1_000_000_000_000}) == 1_000_000_000.0
+    """A start is read through incumbency, the only answer handle() gives from it (fleet green leg 9)."""
 
-    def test_reads_iso_string(self):
-        got = presence_gate._session_start({"startedAt": "2026-08-18T12:00:00Z"})
-        assert got is not None and got > 0
+    def test_reads_epoch_milliseconds(self, tmp_path):
+        # 1_000_000_000_000 ms is 2001-09-09T01:46:40Z: one second either side of the occupant decides it.
+        assert _exit_for_our_start(tmp_path, 1_000_000_000_000, "2001-09-09T01:46:41Z") == 0
+        assert _exit_for_our_start(tmp_path, 1_000_000_000_000, "2001-09-09T01:46:39Z") == 2
 
-    def test_missing_start_is_none_not_zero(self):
+    def test_reads_iso_string(self, tmp_path):
+        # 1_787_054_401_000 ms is 2026-08-18T12:00:01Z.
+        assert _exit_for_our_start(tmp_path, "2026-08-18T12:00:00Z", 1_787_054_401_000) == 0
+        assert _exit_for_our_start(tmp_path, "2026-08-18T12:00:02Z", 1_787_054_401_000) == 2
+
+    def test_missing_start_is_none_not_zero(self, tmp_path):
         """Zero would rank us as the oldest thing alive."""
-        assert presence_gate._session_start({}) is None
+        assert _exit_for_our_start(tmp_path, None, 1_000_000_000_000) == 2
 
-    def test_garbage_start_is_none(self):
-        assert presence_gate._session_start({"startedAt": "not a time"}) is None
+    def test_garbage_start_is_none(self, tmp_path):
+        assert _exit_for_our_start(tmp_path, "not a time", 1_000_000_000_000) == 2

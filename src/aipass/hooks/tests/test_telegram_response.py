@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_telegram_response.py
-# Version: 2.0.4
+# Version: 2.0.5
 # Description: Tests for telegram_response notification handler
 # Branch: hooks
 # Layer: tests
@@ -26,8 +26,6 @@ from unittest.mock import MagicMock, patch
 from aipass.hooks.apps.handlers.notification.telegram_response import (
     _advance_pending,
     _deliver_chunks,
-    _extract_user_text,
-    _is_expired,
     _prepend_branch_prefix,
     _send_with_retry,
     _write_delivery_log,
@@ -70,6 +68,32 @@ def _jsonl_line(entry_type: str, text: str = "", *, sidechain: bool = False, too
     if sidechain:
         entry["isSidechain"] = True
     return json.dumps(entry)
+
+
+def _found(tmp_path: Path, data: dict) -> bool:
+    """Whether find_pending_file hands back a pending file holding data: an expired one is passed over."""
+    pending_dir = tmp_path / "telegram_pending"
+    pending_dir.mkdir(exist_ok=True)
+    (pending_dir / "bot-1.json").write_text(json.dumps(data), encoding="utf-8")
+    with (
+        patch(LOGGER_PATCH),
+        patch(f"{MOD}.PENDING_DIR", pending_dir),
+        patch(f"{MOD}.MIRROR_DIR", tmp_path / "no_mirror"),
+        patch.dict("os.environ", {"AIPASS_BOT_ID": "1"}),
+    ):
+        return find_pending_file() is not None
+
+
+def _mirrored_user(tmp_path: Path, content: object) -> str | None:
+    """The user line extract_mirror_turn shows for a user entry holding content, None when it shows none."""
+    transcript = tmp_path / "mirror.jsonl"
+    user = json.dumps({"type": "user", "message": {"content": content}})
+    transcript.write_text(f"{user}\n{_jsonl_line('assistant', 'Reply')}\n", encoding="utf-8")
+    with patch(LOGGER_PATCH):
+        turn = extract_mirror_turn(str(transcript))
+    assert turn is not None and turn.endswith("Reply")
+    head = turn.removesuffix("Reply").strip()
+    return head.removeprefix("You: ") if head else None
 
 
 def _make_pending(tmp_path: Path, name: str = "bot-123.json", **overrides) -> Path:
@@ -261,58 +285,43 @@ class TestFindPendingFile:
 
 
 class TestIsExpired:
-    """TTL + tmux-alive expiry logic."""
+    """TTL + tmux-alive expiry logic, read as whether find_pending_file still hands the file back."""
 
-    def test_fresh_not_expired(self):
-        with patch(LOGGER_PATCH):
-            assert _is_expired({"timestamp": time.time()}) is False
+    def test_fresh_not_expired(self, tmp_path):
+        assert _found(tmp_path, {"timestamp": time.time()}) is True
 
-    def test_old_no_tmux_expired(self):
-        with patch(LOGGER_PATCH), patch(f"{MOD}.subprocess.run") as mock_run:
+    def test_old_no_tmux_expired(self, tmp_path):
+        with patch(f"{MOD}.subprocess.run") as mock_run:
             mock_run.side_effect = OSError("no tmux")
-            assert _is_expired({"timestamp": time.time() - 7200}) is True
+            assert _found(tmp_path, {"timestamp": time.time() - 7200, "session_name": "s"}) is False
 
-    def test_old_tmux_alive_not_expired(self):
+    def test_old_tmux_alive_not_expired(self, tmp_path):
         tmux_result = MagicMock()
         tmux_result.returncode = 0
 
-        with patch(LOGGER_PATCH), patch(f"{MOD}.subprocess.run", return_value=tmux_result):
-            result = _is_expired(
-                {
-                    "timestamp": time.time() - 7200,
-                    "session_name": "my-session",
-                }
-            )
-
-        assert result is False
-
-    def test_old_tmux_dead_expired(self):
-        tmux_result = MagicMock()
-        tmux_result.returncode = 1
-
-        with patch(LOGGER_PATCH), patch(f"{MOD}.subprocess.run", return_value=tmux_result):
-            result = _is_expired(
-                {
-                    "timestamp": time.time() - 7200,
-                    "session_name": "dead-session",
-                }
-            )
+        with patch(f"{MOD}.subprocess.run", return_value=tmux_result):
+            result = _found(tmp_path, {"timestamp": time.time() - 7200, "session_name": "my-session"})
 
         assert result is True
 
-    def test_string_timestamp_handling(self):
-        with patch(LOGGER_PATCH):
-            assert _is_expired({"timestamp": str(time.time())}) is False
+    def test_old_tmux_dead_expired(self, tmp_path):
+        tmux_result = MagicMock()
+        tmux_result.returncode = 1
 
-    def test_invalid_string_timestamp_treated_as_zero(self):
-        with patch(LOGGER_PATCH), patch(f"{MOD}.subprocess.run") as mock_run:
-            mock_run.side_effect = OSError("no tmux")
-            assert _is_expired({"timestamp": "not-a-number"}) is True
+        with patch(f"{MOD}.subprocess.run", return_value=tmux_result):
+            result = _found(tmp_path, {"timestamp": time.time() - 7200, "session_name": "dead-session"})
 
-    def test_no_session_name_old_expired(self):
+        assert result is False
+
+    def test_string_timestamp_handling(self, tmp_path):
+        assert _found(tmp_path, {"timestamp": str(time.time())}) is True
+
+    def test_invalid_string_timestamp_treated_as_zero(self, tmp_path):
+        assert _found(tmp_path, {"timestamp": "not-a-number"}) is False
+
+    def test_no_session_name_old_expired(self, tmp_path):
         """Old entry with no session_name -> expired (tmux check skipped)."""
-        with patch(LOGGER_PATCH):
-            assert _is_expired({"timestamp": time.time() - 7200}) is True
+        assert _found(tmp_path, {"timestamp": time.time() - 7200}) is False
 
 
 # ===========================================================================
@@ -1572,13 +1581,11 @@ class TestWriteDeliveryLog:
 class TestIsExpiredMirror:
     """Mirror files are never expired."""
 
-    def test_mirror_file_never_expired(self):
-        with patch(LOGGER_PATCH):
-            assert _is_expired({"timestamp": 0, "mirror": True}) is False
+    def test_mirror_file_never_expired(self, tmp_path):
+        assert _found(tmp_path, {"timestamp": 0, "mirror": True}) is True
 
-    def test_mirror_file_old_timestamp_not_expired(self):
-        with patch(LOGGER_PATCH):
-            assert _is_expired({"timestamp": 1000, "mirror": True}) is False
+    def test_mirror_file_old_timestamp_not_expired(self, tmp_path):
+        assert _found(tmp_path, {"timestamp": 1000, "mirror": True}) is True
 
 
 # ===========================================================================
@@ -1587,31 +1594,31 @@ class TestIsExpiredMirror:
 
 
 class TestExtractUserText:
-    """User message text extraction."""
+    """User message text extraction, read as the "You:" line extract_mirror_turn shows."""
 
-    def test_text_block(self):
+    def test_text_block(self, tmp_path):
         content = [{"type": "text", "text": "Hello world"}]
-        assert _extract_user_text(content) == "Hello world"
+        assert _mirrored_user(tmp_path, content) == "Hello world"
 
-    def test_tool_result_only_returns_none(self):
+    def test_tool_result_only_returns_none(self, tmp_path):
         content = [{"type": "tool_result", "content": "ok"}]
-        assert _extract_user_text(content) is None
+        assert _mirrored_user(tmp_path, content) is None
 
-    def test_string_content(self):
-        assert _extract_user_text("Hello") == "Hello"
+    def test_string_content(self, tmp_path):
+        assert _mirrored_user(tmp_path, " Hello ") == "Hello"
 
-    def test_empty_string_returns_none(self):
-        assert _extract_user_text("") is None
+    def test_empty_string_returns_none(self, tmp_path):
+        assert _mirrored_user(tmp_path, "") is None
 
-    def test_empty_list_returns_none(self):
-        assert _extract_user_text([]) is None
+    def test_empty_list_returns_none(self, tmp_path):
+        assert _mirrored_user(tmp_path, []) is None
 
-    def test_non_list_non_string_returns_none(self):
-        assert _extract_user_text(42) is None  # type: ignore[arg-type]
+    def test_non_list_non_string_returns_none(self, tmp_path):
+        assert _mirrored_user(tmp_path, 42) is None
 
-    def test_mixed_text_and_tool_result(self):
+    def test_mixed_text_and_tool_result(self, tmp_path):
         content = [{"type": "text", "text": "Question"}, {"type": "tool_result", "content": "ok"}]
-        assert _extract_user_text(content) == "Question"
+        assert _mirrored_user(tmp_path, content) == "Question"
 
 
 # ===========================================================================

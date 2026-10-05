@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_cc_transcripts.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Tests for the CC transcript reader
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-18
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/cc_transcripts.py."""
@@ -28,6 +28,11 @@ from pathlib import Path
 import pytest
 
 from aipass.hooks.apps.modules import cc_transcripts
+
+
+def _dashed(text: str) -> str:
+    """The CLI's dpo() for a path of BMP characters: every non-alphanumeric becomes a dash."""
+    return re.sub(r"[^A-Za-z0-9]", "-", text)
 
 
 def write_transcript(root: Path, cwd: Path, session_id: str, title: str, messages: int, age: float = 0) -> Path:
@@ -89,7 +94,9 @@ class TestManglingRule:
 
     def test_underscore_becomes_dash(self, tmp_path):
         """ai_mail is the branch that proves it — a naive '/'->'-' misses it."""
-        assert "_" not in cc_transcripts._mangle(str(tmp_path / "x" / "ai_mail"))
+        name = cc_transcripts.project_dir_for(tmp_path / "x" / "ai_mail").name
+        assert "_" not in name
+        assert name.endswith("-x-ai-mail")
 
     @pytest.mark.parametrize(
         "raw,expected",
@@ -117,7 +124,7 @@ class TestProjectDirFor:
         target = tmp_path / "Projects" / "AIPass" / "ai_mail"
         target.mkdir(parents=True)
         got = cc_transcripts.project_dir_for(target)
-        assert got.name == cc_transcripts._mangle(str(target.resolve()))
+        assert got.name == _dashed(str(target.resolve()))
         assert got.parent == tmp_path
 
     def test_every_character_maps_one_to_one(self, monkeypatch, tmp_path):
@@ -137,15 +144,15 @@ class TestProjectDirFor:
         monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", tmp_path)
         raw = "/x/" + "deep/" * 60 + "branch"
         name = cc_transcripts.project_dir_for(raw).name
-        assert len(name) > cc_transcripts._NAME_LIMIT
-        assert name.endswith("-" + cc_transcripts._cc_path_hash(str(Path(raw).resolve())))
-        assert name[: cc_transcripts._NAME_LIMIT] == cc_transcripts._mangle(str(Path(raw).resolve()))[:200]
+        resolved = str(Path(raw).resolve())
+        assert len(_dashed(resolved)) > 200  # the CLI's limit, read from its bundle (see TestManglingRule)
+        assert name == _dashed(resolved)[:200] + "-" + cc_transcripts._cc_path_hash(resolved)
 
     def test_short_path_is_not_hashed(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", tmp_path)
         target = tmp_path / "short"
         target.mkdir()
-        assert cc_transcripts.project_dir_for(target).name == cc_transcripts._mangle(str(target.resolve()))
+        assert cc_transcripts.project_dir_for(target).name == _dashed(str(target.resolve()))
 
 
 class TestRecentChats:

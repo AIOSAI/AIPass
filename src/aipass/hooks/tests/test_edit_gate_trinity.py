@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.8.3
+# Version: 1.8.4
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
@@ -19,6 +19,8 @@ import json
 import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from aipass.hooks.apps.handlers.security import edit_gate
 from aipass.hooks.apps.handlers.security.edit_gate import handle
@@ -718,20 +720,33 @@ class TestTripwireWatchesEveryTrinityInTheProject:
     def test_outside_a_project_only_the_seat_is_watched(self, tmp_path, monkeypatch):
         """No registry marker means no project boundary, and a fence that cannot find one never invents it."""
         monkeypatch.setattr(edit_gate, "_TRIPWIRE_DIR", tmp_path)
-        loose = tmp_path / "loose"
-        (loose / ".trinity").mkdir(parents=True)
-        (loose / ".trinity" / "local.json").write_text(json.dumps({"sessions": []}), encoding="utf-8")
+        docs = {}
+        for name in ("loose", "neighbour"):
+            (tmp_path / name / ".trinity").mkdir(parents=True)
+            docs[name] = tmp_path / name / ".trinity" / "local.json"
+            docs[name].write_text(json.dumps({"sessions": []}), encoding="utf-8")
 
-        watched = edit_gate._watched_trinity_dirs(str(loose))
+        def write(name):
+            return lambda: docs[name].write_text(json.dumps({"sessions": [{"summary": "new"}]}), encoding="utf-8")
 
-        assert watched == [loose / ".trinity"]
+        assert self._around(tmp_path / "loose", write("neighbour")) == self.SILENT
+        result = self._around(tmp_path / "loose", write("loose"))
+        assert result != self.SILENT, "a write into the seat's own memory went unreported"
+        assert str(docs["loose"]) in self._context(result)
 
-    def test_the_seat_is_always_first_in_the_watch_list(self, tmp_path, monkeypatch):
+    def test_the_seat_and_its_neighbours_are_watched_from_any_seat(self, tmp_path, monkeypatch):
+        """Read through tripwire's report, which lists changes sorted by path, so the watch list's
+        own order (the seat first) shows in no public answer and is not pinned (fleet green leg 9)."""
         seats = self._project(tmp_path, monkeypatch)
-        watched = edit_gate._watched_trinity_dirs(str(seats["memory"]))
+        for name in ("memory", "hooks"):
+            doc = seats[name] / ".trinity" / "local.json"
 
-        assert watched[0] == seats["memory"] / ".trinity"
-        assert seats["hooks"] / ".trinity" in watched
+            def write(doc=doc):
+                doc.write_text(json.dumps({"sessions": [{"summary": "new"}]}), encoding="utf-8")
+
+            result = self._around(seats["memory"], write)
+            assert result != self.SILENT, f"a write into {name}'s memory went unreported"
+            assert str(doc) in self._context(result)
 
 
 class TestTrinityWriteOverLimitWarnOnly:
@@ -2404,19 +2419,35 @@ class TestTodosAdvisoryIsThrottled:
     per-edit emission wrote 209 identical lines from one seat and tripped
     @trigger's repeat-signature escalation."""
 
+    # Read through handle()'s answer to a Write of the todos (fleet green leg 9): the advisory
+    # the model gets, or "" where the call is let through with nothing to say.
+
+    @pytest.fixture(autouse=True)
+    def _seat(self, tmp_path):
+        self.file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        self.cwd = str(tmp_path / "src" / "aipass" / "hooks")
+
     @staticmethod
     def _over_cap():
         return {"todos": [{"task": f"todo {i}"} for i in range(12)]}
 
-    def _advisory(self, turn):
+    def _written(self, doc, turn):
         with (
             _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)),
             patch.object(cadence, "current_turn", return_value=turn),
         ):
-            return edit_gate._todos_count_advisory(self._over_cap(), "hooks")
+            result = handle(_hook_data(self.file_path, json.dumps(doc), cwd=self.cwd))
+        if result == {"stdout": "", "exit_code": 0}:
+            return ""
+        return _advisory_context(result)
+
+    def _advisory(self, turn):
+        return self._written(self._over_cap(), turn)
 
     def test_first_edit_still_advises(self):
-        assert "todos over limit" in self._advisory(1)
+        advisory = self._advisory(1)
+        assert "todos over limit" in advisory
+        assert "12/10" in advisory
 
     def test_the_next_edit_in_the_same_turn_is_silent(self):
         self._advisory(1)
@@ -2448,11 +2479,7 @@ class TestTodosAdvisoryIsThrottled:
     def test_under_cap_is_silent_and_spends_no_throttle(self):
         """A quiet branch must not burn its one emission on nothing — the next
         real over-cap edit has to advise immediately."""
-        with (
-            _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)),
-            patch.object(cadence, "current_turn", return_value=1),
-        ):
-            assert edit_gate._todos_count_advisory({"todos": [{"task": "one"}]}, "hooks") == ""
+        assert self._written({"todos": [{"task": "one"}]}, 1) == ""
         assert "todos over limit" in self._advisory(1)
 
 
@@ -2874,7 +2901,7 @@ class TestCarriedDriftIsNotRefused:
 
 
 class TestAuthoredVsCarriedUnit:
-    """Unit-level, because handle() cannot see this half fail.
+    """The authored half alone: @memory's changed_entries answers nothing here.
 
     Mutation found the gap (2026-08-30): making _missing_field_violations
     return NOTHING left all 115 end-to-end tests green. The union in
@@ -2883,31 +2910,47 @@ class TestAuthoredVsCarriedUnit:
     that proves "authored drift is refused" passes for the wrong reason and
     would keep passing if this checker were deleted outright. The overlap is
     deliberate; a test suite that cannot tell the two halves apart is not.
+    These go through handle() with @memory's half (another branch, the edge)
+    standing in silent, so only this gate's own checker can refuse (fleet green leg 9).
     """
 
-    def test_a_new_missing_field_entry_is_refused(self):
+    @staticmethod
+    def _refused_lines(tmp_path, before: dict, after: dict) -> list[str]:
+        """The missing-field lines of handle()'s refusal for writing `after` over `before`; [] when allowed."""
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        _write_before(file_path, before)
+        memory_half = _mock_entry_limits(_LIMITS_TODOS)
+        memory_half.changed_entries = lambda *args, **kwargs: []
+        with _imports_via_seam(_fence_real(memory_half)):
+            result = handle(_hook_data(file_path, json.dumps(after), cwd=str(tmp_path / "src" / "aipass" / "hooks")))
+        if result == {"stdout": "", "exit_code": 0}:
+            return []
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        return [line for line in reason.splitlines() if "field —" in line]
+
+    def test_a_new_missing_field_entry_is_refused(self, tmp_path):
         """The authored half, isolated from @memory's overlapping refusal."""
         before = {"key_learnings": []}
         after = {"key_learnings": [{"number": 1, "date": "2026-08-30", "learning": "renamed field"}]}
 
-        hits = edit_gate._missing_field_violations(before, after, _LIMITS_TODOS)
+        hits = self._refused_lines(tmp_path, before, after)
 
-        assert len(hits) == 1, "a newly authored entry with no 'value' field was not refused"
-        assert hits[0]["reason"] == "missing_field"
-        assert hits[0]["field"] == "value"
-        assert hits[0]["key"] == "0", "keys are rendered as strings — @memory's six-key contract"
+        # The key renders as "0", a string: @memory's six-key contract.
+        assert hits == [
+            "  key_learnings [0]: no 'value' field — cannot be measured against its 200-char cap. "
+            "Rename the field to 'value' (the canonical name)."
+        ], "a newly authored entry with no 'value' field was not refused"
 
-    def test_an_identical_on_disk_entry_is_carried(self):
+    def test_an_identical_on_disk_entry_is_carried(self, tmp_path):
         """Byte-identical to disk: this write did not author it."""
         legacy = {"number": 1, "date": "2026-08-01", "learning": "renamed field"}
 
-        hits = edit_gate._missing_field_violations(
-            {"key_learnings": [legacy]}, {"key_learnings": [legacy]}, _LIMITS_TODOS
-        )
+        hits = self._refused_lines(tmp_path, {"key_learnings": [legacy]}, {"key_learnings": [legacy]})
 
         assert hits == [], "a write was refused for an entry it carried unchanged"
 
-    def test_carrying_one_does_not_license_authoring_another(self):
+    def test_carrying_one_does_not_license_authoring_another(self, tmp_path):
         """The mixed case names the new entry and only the new entry.
 
         This is the test the two survivors could not have been caught without:
@@ -2917,14 +2960,12 @@ class TestAuthoredVsCarriedUnit:
         legacy = {"number": 1, "date": "2026-08-01", "learning": "carried"}
         fresh = {"number": 2, "date": "2026-08-30", "learning": "authored in the same shape"}
 
-        hits = edit_gate._missing_field_violations(
-            {"key_learnings": [legacy]}, {"key_learnings": [fresh, legacy]}, _LIMITS_TODOS
-        )
+        hits = self._refused_lines(tmp_path, {"key_learnings": [legacy]}, {"key_learnings": [fresh, legacy]})
 
         assert len(hits) == 1, f"expected exactly the authored entry to be refused, got {hits}"
-        assert hits[0]["key"] == "0", "the refusal named the carried entry's position, not the authored one"
+        assert hits[0].startswith("  key_learnings [0]: "), "the refusal named the carried entry's position"
 
-    def test_a_prepend_does_not_reauthor_the_whole_file(self):
+    def test_a_prepend_does_not_reauthor_the_whole_file(self, tmp_path):
         """Identity is the entry text, never its index.
 
         A prepend shifts every position down. An index-keyed diff reads the
@@ -2937,9 +2978,7 @@ class TestAuthoredVsCarriedUnit:
         ]
         clean_head = {"number": 3, "date": "2026-08-30", "value": "measurable"}
 
-        hits = edit_gate._missing_field_violations(
-            {"key_learnings": carried}, {"key_learnings": [clean_head, *carried]}, _LIMITS_TODOS
-        )
+        hits = self._refused_lines(tmp_path, {"key_learnings": carried}, {"key_learnings": [clean_head, *carried]})
 
         assert hits == [], f"a prepend re-authored entries it only shifted: {hits}"
 
