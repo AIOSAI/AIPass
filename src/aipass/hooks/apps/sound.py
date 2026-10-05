@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sound.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Shared sound utilities — Piper TTS and WAV playback with mute support
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-22
-# Modified: 2026-08-18
+# Modified: 2026-10-05
 # =============================================
 
 """Shared sound functions for hook handlers. Checks mute flag before playing."""
@@ -68,8 +68,17 @@ def unmute() -> bool:
     return False
 
 
-def speak(text: str) -> None:
-    """Generate speech via Piper TTS and play it. Skips if muted."""
+def speak(text: str, tmp_dir: str | None = None) -> None:
+    """Generate speech via Piper TTS and play it. Skips if muted.
+
+    Args:
+        text: What to say.
+        tmp_dir: Where the wav is staged; None is tempfile's own default. A seam:
+            the tests are the reason it exists, so they hand in a directory of
+            their own in place of patching tempfile, which replaces it
+            process-wide. Every caller passes nothing. The decision is hooks',
+            fleet green leg 7.
+    """
     if is_muted():
         return
 
@@ -77,7 +86,7 @@ def speak(text: str) -> None:
         return
 
     try:
-        wav_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        wav_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=tmp_dir)
         wav_path = wav_file.name
         wav_file.close()
 

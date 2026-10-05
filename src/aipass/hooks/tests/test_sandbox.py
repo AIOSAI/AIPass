@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_sandbox.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for sandbox wrapper module
 # Branch: hooks
 # Created: 2026-06-09
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/sandbox.py."""
@@ -78,45 +78,64 @@ class TestBuildSrtConfig:
             build_srt_config({})
 
 
+def _path_holding(monkeypatch, tmp_path: Path, *names: str) -> Path:
+    """PATH is one tmp directory holding exactly `names`, as the real which() reads it.
+
+    No shutil.which patch (fleet green leg 7, stdlib_patch). Each name is written
+    bare and as .exe and marked executable: POSIX's which() wants the mode bit,
+    Windows' answers by PATHEXT instead. So the asserts read found or not found
+    and the directory it was found in, never the path's spelling.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in names:
+        for spelled in (name, f"{name}.exe"):
+            exe = bin_dir / spelled
+            exe.write_text("", encoding="utf-8")
+            exe.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    return bin_dir
+
+
+def _home_at(monkeypatch, home: Path) -> None:
+    """The real Path.home() answers from HOME on POSIX and USERPROFILE on Windows."""
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+
 class TestFindNode:
     """Node.js binary discovery."""
 
-    def test_finds_node_on_path(self):
-        with patch("aipass.hooks.apps.modules.sandbox.shutil.which", return_value="/usr/bin/node"):
-            assert _find_node() == "/usr/bin/node"
+    def test_finds_node_on_path(self, monkeypatch, tmp_path):
+        bin_dir = _path_holding(monkeypatch, tmp_path, "node")
+        assert Path(_find_node()).parent.resolve() == bin_dir.resolve()
 
-    def test_raises_when_not_found(self):
-        with (
-            patch("aipass.hooks.apps.modules.sandbox.shutil.which", return_value=None),
-            pytest.raises(FileNotFoundError, match="node not found"),
-        ):
+    def test_raises_when_not_found(self, monkeypatch, tmp_path):
+        _path_holding(monkeypatch, tmp_path)
+        with pytest.raises(FileNotFoundError, match="node not found"):
             _find_node()
 
 
 class TestFindRg:
     """Ripgrep binary discovery."""
 
-    def test_finds_rg_on_path(self):
-        with patch("aipass.hooks.apps.modules.sandbox.shutil.which", return_value="/usr/bin/rg"):
-            assert _find_rg() == "/usr/bin/rg"
+    def test_finds_rg_on_path(self, monkeypatch, tmp_path):
+        bin_dir = _path_holding(monkeypatch, tmp_path, "rg")
+        assert Path(_find_rg()).parent.resolve() == bin_dir.resolve()
 
-    def test_falls_back_to_local_bin(self, tmp_path):
+    def test_falls_back_to_local_bin(self, monkeypatch, tmp_path):
         fake_rg = tmp_path / ".local" / "bin" / "rg"
         fake_rg.parent.mkdir(parents=True)
         fake_rg.touch()
+        _path_holding(monkeypatch, tmp_path)
+        _home_at(monkeypatch, tmp_path)
 
-        with (
-            patch("aipass.hooks.apps.modules.sandbox.shutil.which", return_value=None),
-            patch("aipass.hooks.apps.modules.sandbox.Path.home", return_value=tmp_path),
-        ):
-            assert _find_rg() == str(fake_rg)
+        assert Path(_find_rg()) == fake_rg
 
-    def test_raises_when_not_found(self, tmp_path):
-        with (
-            patch("aipass.hooks.apps.modules.sandbox.shutil.which", return_value=None),
-            patch("aipass.hooks.apps.modules.sandbox.Path.home", return_value=tmp_path),
-            pytest.raises(FileNotFoundError, match="ripgrep"),
-        ):
+    def test_raises_when_not_found(self, monkeypatch, tmp_path):
+        _path_holding(monkeypatch, tmp_path)
+        _home_at(monkeypatch, tmp_path)
+        with pytest.raises(FileNotFoundError, match="ripgrep"):
             _find_rg()
 
 
@@ -283,12 +302,10 @@ class TestSrtResolveCwd:
             assert _srt_resolve_cwd() == "/var/tmp"
 
     def test_falls_back_to_tempdir(self, tmp_path):
-        with (
-            patch("aipass.hooks.apps.modules.sandbox._VAR_TMP") as mock_var,
-            patch("aipass.hooks.apps.modules.sandbox.tempfile.gettempdir", return_value=str(tmp_path)),
-        ):
+        with patch("aipass.hooks.apps.modules.sandbox._VAR_TMP") as mock_var:
             mock_var.is_dir.return_value = False
-            assert _srt_resolve_cwd() == str(tmp_path)
+            # The fallback's answer through the seam, not a tempfile patch (fleet green leg 7).
+            assert _srt_resolve_cwd(gettempdir=lambda: str(tmp_path)) == str(tmp_path)
 
 
 class TestBuildPolicy:
@@ -406,14 +423,14 @@ class TestBuildPolicy:
             assert secret in policy["deny_write"]
             assert str(repo_root / ".ai_central") in policy["allow_write"]
 
-    def test_claude_project_dir_included(self, tmp_path):
+    def test_claude_project_dir_included(self, tmp_path, monkeypatch):
         branch = self._make_branch(tmp_path, "seedgo")
         encoded = str(branch.resolve()).replace("/", "-")
         claude_proj = tmp_path / ".claude" / "projects" / encoded
         claude_proj.mkdir(parents=True)
+        _home_at(monkeypatch, tmp_path)
 
-        with patch("aipass.hooks.apps.modules.sandbox.Path.home", return_value=tmp_path):
-            policy = build_policy(branch)
+        policy = build_policy(branch)
 
         assert str(claude_proj) in policy["allow_write"]
 

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_json_durability.py
-# Version: 2.0.1
+# Version: 2.0.2
 # Description: Torn-write durability tests for hooks' arbitrary-path json module
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-16
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/json/files.py's torn-write durability."""
@@ -76,15 +76,19 @@ class TestAtomicHelper:
         target = tmp_path / "nested" / "doc.json"
         target.parent.mkdir()
         seen: dict = {}
-        real_mkstemp = json_files.tempfile.mkstemp
+        real_replace = json_files._replace_with_retry
 
-        def spy(*args, **kwargs):
-            seen["dir"] = kwargs.get("dir")
-            return real_mkstemp(*args, **kwargs)
+        def at_the_move(source, destination):
+            # The staged file as it stands on disk the moment before it is moved in.
+            seen["staged"] = Path(source)
+            seen["on_disk"] = Path(source).is_file()
+            return real_replace(source, destination)
 
-        monkeypatch.setattr(json_files.tempfile, "mkstemp", spy)
+        # The product's own mover, not tempfile.mkstemp (fleet green leg 7, stdlib_patch).
+        monkeypatch.setattr(json_files, "_replace_with_retry", at_the_move)
         json_files._atomic_write_json(target, {"a": 1})
-        assert Path(seen["dir"]) == target.parent
+        assert seen["on_disk"] is True
+        assert seen["staged"].parent == target.parent
 
     def test_failed_write_leaves_original_intact_and_cleans_temp(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         target = tmp_path / "precious.json"
@@ -93,7 +97,7 @@ class TestAtomicHelper:
         def boom(*args, **kwargs):
             raise OSError("disk full")
 
-        monkeypatch.setattr(json_files.os, "replace", boom)
+        monkeypatch.setattr(json_files, "_replace_with_retry", boom)
         with pytest.raises(OSError):
             json_files._atomic_write_json(target, {"replacement": True})
 
@@ -102,7 +106,7 @@ class TestAtomicHelper:
 
     def test_helper_raises_it_does_not_swallow(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """No new silent catch — a failed write must reach the caller."""
-        monkeypatch.setattr(json_files.os, "replace", lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
+        monkeypatch.setattr(json_files, "_replace_with_retry", lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
         with pytest.raises(OSError):
             json_files._atomic_write_json(tmp_path / "x.json", {"a": 1})
 

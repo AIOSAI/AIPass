@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.6.0
+# Version: 1.6.1
 # Description: Tests for cadence module (DPLAN-0200); branch overrides 1.4.0, prompt key 1.5.0, beat display 1.6.0
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/cadence.py."""
@@ -1022,28 +1022,31 @@ class TestPostCompactDeterminism:
                 assert state["turn"] == 0, f"Expected turn 0 after reset from {prev_turn}"
                 assert result is True, f"navmap should fire after reset from turn {prev_turn}"
 
-    def test_compact_handler_calls_reset_with_hook_data(self, tmp_path):
+    def test_compact_handler_calls_reset_with_hook_data(self, tmp_path, monkeypatch):
         """compact resets the cadence counter and files the git answer under ## Git.
 
         _get_git_info is stood in by a recorder so no real git process starts; the
         ## Git assert is proven by a mutant on compact.handle (see the fleet green report).
+        The real cadence runs with its guard dir under tmp_path (fleet green leg 7: no
+        importlib patch): the reset is read off the disk, the session id from hook_data
+        in the state file's name and the caller in the window stamp.
         """
+        monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        (tmp_path / "aipass-cadence-test-123.json").write_text(json.dumps({"turn": 7}), encoding="utf-8")
         hook_data = {"cwd": str(tmp_path / "fake"), "session_id": "test-123"}
         git_answer = "Git branch: recorded-branch\nUncommitted changes: 3 files"
 
-        # The recorder is entered first: patch() resolves its target through
-        # importlib.import_module, which the second patch replaces.
-        with (
-            patch(
-                "aipass.hooks.apps.handlers.lifecycle.compact._get_git_info",
-                return_value=git_answer,
-            ) as git_recorder,
-            patch("importlib.import_module") as mock_import,
-        ):
-            mock_cadence = mock_import.return_value
+        with patch(
+            "aipass.hooks.apps.handlers.lifecycle.compact._get_git_info",
+            return_value=git_answer,
+        ) as git_recorder:
             result = _compact_handle(hook_data)
 
-        mock_cadence.reset_counter.assert_called_once_with(hook_data=hook_data, caller="compact")
+        state = json.loads((tmp_path / "aipass-cadence-test-123.json").read_text(encoding="utf-8"))
+        assert state["turn"] == -1
+        window = json.loads((tmp_path / "aipass-window-opened-test-123.json").read_text(encoding="utf-8"))
+        assert window["caller"] == "compact"
         git_recorder.assert_called_once_with()
         assert f"## Git\n{git_answer}" in result["stdout"].split("\n\n")
         assert result["exit_code"] == 0
@@ -1457,8 +1460,14 @@ class TestShouldFireAdvisory:
             assert cadence.should_fire_advisory("todos_count") is True
 
     def test_unwritable_state_still_fires(self):
-        """Losing the advisory is worse than repeating it."""
-        with self._at_turn(1), patch.object(cadence.Path, "write_text", side_effect=OSError("read-only")):
+        """Losing the advisory is worse than repeating it.
+
+        The state cannot be written because a file stands where the guard dir
+        should be: the platform refuses the write, no pathlib patch (fleet green leg 7).
+        """
+        blocker = self.tmp / "blocker"
+        blocker.write_text("", encoding="utf-8")
+        with self._at_turn(1), patch.object(cadence, "_GUARD_DIR", blocker):
             assert cadence.should_fire_advisory("todos_count") is True
 
 
@@ -1531,21 +1540,28 @@ class TestFailOpenIsLoud:
         assert "CLAUDE_CODE_SESSION_ID" in (degraded_reason() or "")
 
     def test_an_unreadable_state_file_warns_with_the_cause(self, tmp_path, caplog):
-        def _boom(*_args, **_kwargs):
-            raise OSError("state dir is read-only")
+        """A file stands where the guard dir should be, so the state cannot be opened.
+
+        No builtins.open patch (fleet green leg 7): the test asks the platform what
+        opening that path raises and asserts the warning carries the same words.
+        """
+        blocker = tmp_path / "blocker"
+        blocker.write_text("", encoding="utf-8")
+        with pytest.raises(OSError) as raised:
+            open(blocker / "aipass-cadence-test-session.json", encoding="utf-8").close()
 
         with (
-            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch(f"{MODULE}._GUARD_DIR", blocker),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
             patch(f"{MODULE}._CONFIG_PATH", self._config(tmp_path)),
-            patch("builtins.open", _boom),
         ):
             assert should_fire("tier0") is True
             assert should_fire("navmap") is False
 
-        text = caplog.text
-        assert "DEGRADED loader=tier0 fires" in text
-        assert "state dir is read-only" in text
+        # The cause rides in the DEGRADED warning itself, not only in the state-access line beside it.
+        degraded = [r.getMessage() for r in caplog.records if "DEGRADED loader=tier0 fires" in r.getMessage()]
+        assert len(degraded) == 1
+        assert str(raised.value.strerror) in degraded[0]
 
     def test_a_healthy_turn_says_nothing_at_warning(self, tmp_path, caplog):
         with (

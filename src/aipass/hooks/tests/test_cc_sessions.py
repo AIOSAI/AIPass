@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cc_sessions.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
@@ -24,21 +24,27 @@ from aipass.hooks.apps.modules import cc_sessions
 
 
 class TestResolveSessionPid:
-    """The ppid walk that answers "which PID is my seat" (moved from presence.py)."""
+    """The ppid walk that answers "which PID is my seat" (moved from presence.py).
+
+    The walk starts from the real os.getpid(): the fixture ancestry is written
+    with the test process's own pid (fleet green leg 7, no os.getpid patch), and
+    the ancestors are numbers no other key in the map can collide with.
+    """
 
     def test_finds_session_file_ancestor(self):
-        ppid_map = {100: 90, 90: 80}
+        me = os.getpid()
+        parent, seat = me + 1, me + 2
+        ppid_map = {me: parent, parent: seat}
         with (
-            patch("os.getpid", return_value=100),
-            patch.object(cc_sessions, "_has_session_file", side_effect=lambda p: p == 80),
+            patch.object(cc_sessions, "_has_session_file", side_effect=lambda p: p == seat),
             patch.object(cc_sessions, "_get_ppid_portable", side_effect=lambda p: ppid_map.get(p)),
         ):
-            assert cc_sessions.resolve_session_pid() == 80
+            assert cc_sessions.resolve_session_pid() == seat
 
     def test_no_session_file_ancestor_returns_none(self):
-        ppid_map = {100: 90, 90: 80, 80: 1}
+        me = os.getpid()
+        ppid_map = {me: me + 1, me + 1: me + 2, me + 2: 1}
         with (
-            patch("os.getpid", return_value=100),
             patch.object(cc_sessions, "_has_session_file", return_value=False),
             patch.object(cc_sessions, "_get_ppid_portable", side_effect=lambda p: ppid_map.get(p)),
         ):
@@ -46,18 +52,15 @@ class TestResolveSessionPid:
 
     def test_ppid_failure_returns_none(self):
         with (
-            patch("os.getpid", return_value=100),
             patch.object(cc_sessions, "_has_session_file", return_value=False),
             patch.object(cc_sessions, "_get_ppid_portable", return_value=None),
         ):
             assert cc_sessions.resolve_session_pid() is None
 
     def test_direct_session_process(self):
-        with (
-            patch("os.getpid", return_value=100),
-            patch.object(cc_sessions, "_has_session_file", side_effect=lambda p: p == 100),
-        ):
-            assert cc_sessions.resolve_session_pid() == 100
+        me = os.getpid()
+        with patch.object(cc_sessions, "_has_session_file", side_effect=lambda p: p == me):
+            assert cc_sessions.resolve_session_pid() == me
 
 
 class TestHasSessionFile:

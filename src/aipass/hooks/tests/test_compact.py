@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compact.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for compact lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-27
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/lifecycle/compact.py."""
@@ -15,7 +15,7 @@
 # seedgo: no-test-needed(generated) — the logger.info lines on each except path; the text is the exception's own
 
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -89,9 +89,10 @@ class TestCompactHandler:
         assert "Recovery Protocol" in result["stdout"]
         assert "STATUS.local.md" not in result["stdout"]
 
-    def test_empty_hook_data(self):
+    def test_empty_hook_data(self, tmp_path, monkeypatch):
+        # No cwd in the hook data: the real cwd is read, an empty directory (fleet green leg 7).
+        monkeypatch.chdir(tmp_path)
         with patch("aipass.hooks.apps.handlers.lifecycle.compact._get_git_info", return_value=None):
-            with patch("pathlib.Path.cwd", return_value=MagicMock(parts=("/", "tmp"))):
-                result = handle({})
+            result = handle({})
 
         assert result["exit_code"] == 0

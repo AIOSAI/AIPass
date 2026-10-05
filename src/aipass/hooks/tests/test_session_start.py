@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_start.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for SessionStart cadence reset handler
 # Branch: hooks
 # Created: 2026-07-07
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_start.py."""
@@ -16,6 +16,7 @@
 
 import json
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -119,17 +120,22 @@ class TestSessionStartHandler:
         data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
-    def test_no_stdout_output(self):
-        with patch("importlib.import_module"):
-            result = handle({"source": "startup"})
+    def test_no_stdout_output(self, tmp_path, monkeypatch):
+        """The real cadence runs, its state under tmp_path (fleet green leg 7: no importlib patch)."""
+        monkeypatch.setattr(cadence_mod, "_GUARD_DIR", tmp_path)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "no-stdout")
+        (tmp_path / "aipass-cadence-no-stdout.json").write_text(json.dumps({"turn": 7}), encoding="utf-8")
+        result = handle({"source": "startup"})
 
         assert result["stdout"] == ""
+        assert json.loads((tmp_path / "aipass-cadence-no-stdout.json").read_text(encoding="utf-8"))["turn"] == -1
 
-    def test_cadence_import_failure_does_not_crash(self):
-        with patch("importlib.import_module", side_effect=ImportError("boom")):
-            result = handle({"source": "startup"})
+    def test_cadence_import_failure_does_not_crash(self, monkeypatch):
+        """None under the name in sys.modules makes the real import raise ModuleNotFoundError."""
+        monkeypatch.setitem(sys.modules, cadence_mod.__name__, None)
+        result = handle({"source": "startup"})
 
-        assert result["exit_code"] == 0
+        assert result == {"stdout": "", "exit_code": 0}
 
 
 @pytest.mark.usefixtures("_fresh_cadence")

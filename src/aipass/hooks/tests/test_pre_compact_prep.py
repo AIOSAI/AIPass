@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_pre_compact_prep.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-09-27
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -14,8 +14,12 @@
 # seedgo: no-test-needed(generated) — the logger.info line on each read failure; its text is the exception's own
 # seedgo: no-test-needed(constant) — _DEFAULT_SUMMARY_CAP's value, asserted only as the fallback it is
 
+import contextlib
 import json
+import sys
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -212,6 +216,23 @@ if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
 
+_ENTRY_LIMITS = "aipass.memory.apps.handlers.json.entry_limits"
+
+
+@contextlib.contextmanager
+def _served(module: Any) -> Iterator[None]:
+    """Stand `module` in sys.modules as @memory's entry_limits, where the real import_module looks first.
+
+    importlib itself is never replaced (fleet green leg 7, stdlib_patch). None makes
+    the real import raise ModuleNotFoundError, the stdlib's documented answer.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        if module is not None:
+            module.__spec__ = None  # a MagicMock's __spec__ reads as a module still initializing
+        mp.setitem(sys.modules, _ENTRY_LIMITS, module)
+        yield
+
+
 class TestSummaryCapUsesSupportedDoor:
     """@memory owns the cap. Reading their config file by hardcoded path broke
     silently if they moved it AND ignored per_branch overrides entirely."""
@@ -220,7 +241,7 @@ class TestSummaryCapUsesSupportedDoor:
 
         el = MagicMock()
         el.load_entry_limits.return_value = {"entry_types": {"sessions": {"max_chars": 512}}}
-        with patch("importlib.import_module", return_value=el):
+        with _served(el):
             assert _summary_cap("widget") == 512
         el.load_entry_limits.assert_called_once_with("widget")
 
@@ -232,20 +253,20 @@ class TestSummaryCapUsesSupportedDoor:
         el.load_entry_limits.side_effect = lambda b: {
             "entry_types": {"sessions": {"max_chars": 999 if b == "special" else 300}}
         }
-        with patch("importlib.import_module", return_value=el):
+        with _served(el):
             assert _summary_cap("special") == 999
             assert _summary_cap("ordinary") == 300
 
     def test_falls_back_when_memory_is_unavailable(self):
 
-        with patch("importlib.import_module", side_effect=ImportError("no memory")):
+        with _served(None):
             assert _summary_cap("widget") == _DEFAULT_SUMMARY_CAP
 
     def test_falls_back_on_reshaped_config(self):
 
         el = MagicMock()
         el.load_entry_limits.return_value = {"entry_types": {}}
-        with patch("importlib.import_module", return_value=el):
+        with _served(el):
             assert _summary_cap("widget") == _DEFAULT_SUMMARY_CAP
 
     def test_no_hardcoded_memory_config_path_survives(self):

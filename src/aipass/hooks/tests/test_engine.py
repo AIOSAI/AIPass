@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.0.0
+# Version: 2.0.1
 # Description: Tests for hook engine dispatch logic
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/engine.py and the hook dispatch it drives."""
@@ -838,20 +838,27 @@ class TestErrorResilience:
         A bare-Mock LOG_FILE leaks a real MagicMock/LOG_FILE/ dir into the CWD
         via append_jsonl's Path(...).parent.mkdir - use a real tmp path.
         """
+        # A directory stands where the log file should be, so the platform refuses
+        # the append itself (fleet green leg 7: no builtins.open patch). The test
+        # asks the platform what that open raises and asserts the report carries it.
         log_file = tmp_path / "engine.jsonl"
+        log_file.mkdir()
+        with pytest.raises(OSError) as raised:
+            open(log_file, "a", encoding="utf-8").close()
         # The report goes through diagnostics' own logger, not engine's - the
         # mock_logger fixture patches engine.logger and would be blind here,
         # which is exactly the "assert on the wrong seam" trap.
         with (
-            patch("builtins.open", side_effect=OSError("disk full")),
             patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file),
             patch("aipass.hooks.apps.handlers.config.diagnostics.logger") as diag_logger,
         ):
             _log({"event": "Test"})
 
-        assert not log_file.exists()
+        assert log_file.is_dir() and list(log_file.iterdir()) == []
         assert diag_logger.error.call_count == 1
-        assert "log write failed" in diag_logger.error.call_args[0][0]
+        template, reported = diag_logger.error.call_args[0]
+        assert "log write failed" in template
+        assert reported.strerror == raised.value.strerror
 
     def test_no_mock_named_directory_survives_in_the_branch_root(self):
         """A Mock handed to a filesystem call names a directory after its repr.

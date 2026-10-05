@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_tier0_kernel.py
-# Version: 1.2.2
+# Version: 1.2.3
 # Description: Tests for tier0_kernel prompt handler
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/prompt/tier0_kernel.py."""
@@ -14,14 +14,19 @@
 # seedgo: no-test-needed(generated) — the logger.warning DEGRADED line; its text is the joined failures
 # seedgo: no-test-needed(stdlib) — importlib.import_module resolving the real cadence module
 
+import contextlib
 import importlib
+import sys
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
 from aipass.hooks.apps.modules import grounding_content
 from aipass.hooks.apps.modules.grounding_content import _find_project_dir
 
-_real_import_module = importlib.import_module
 _CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
 
 
@@ -32,18 +37,22 @@ def _mock_cadence(fires: bool = True):
     return mock
 
 
-def _patch_cadence(cadence_mock=None, error=None):
-    """Patch only the cadence import — the handler's own importlib.import_module
-    call (for grounding_content) must still resolve to the real module."""
+@contextlib.contextmanager
+def _patch_cadence(cadence_mock: Any = None, missing: bool = False) -> Iterator[None]:
+    """Stand the cadence module in sys.modules, where the real import_module looks first.
 
-    def _side_effect(name, *args, **kwargs):
-        if name == _CADENCE_MODULE:
-            if error is not None:
-                raise error
-            return cadence_mock
-        return _real_import_module(name, *args, **kwargs)
-
-    return patch("importlib.import_module", side_effect=_side_effect)
+    importlib itself is never replaced (fleet green leg 7, stdlib_patch), so the
+    handler's own import of grounding_content resolves to the real module.
+    missing=True registers None under the name: the real import then raises
+    ModuleNotFoundError, the stdlib's documented answer for a None entry.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        if missing:
+            mp.setitem(sys.modules, _CADENCE_MODULE, None)
+        else:
+            cadence_mock.__spec__ = None  # a MagicMock's __spec__ reads as a module still initializing
+            mp.setitem(sys.modules, _CADENCE_MODULE, cadence_mock)
+        yield
 
 
 class TestTier0KernelHandler:
@@ -115,7 +124,7 @@ class TestTier0KernelHandler:
         monkeypatch.chdir(tmp_path)
 
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}):
-            with _patch_cadence(error=ImportError("no cadence")):
+            with _patch_cadence(missing=True):
                 result = handle({})
 
         assert result["exit_code"] == 0
@@ -290,10 +299,13 @@ class TestCadenceDegradedMode:
 
         project = self._project(tmp_path / "project")
         monkeypatch.chdir(project)
-        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(error=ImportError("no cadence")):
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(missing=True):
+            # Ask the interpreter what a None entry raises; its wording is the stdlib's.
+            with pytest.raises(ImportError) as raised:
+                importlib.import_module(_CADENCE_MODULE)
             result = handle({"cwd": str(project)})
 
-        assert "the cadence module raised ImportError: no cadence" in result["stdout"]
+        assert f"the cadence module raised {type(raised.value).__name__}: {raised.value}" in result["stdout"]
         assert result["stdout"].endswith("KERNEL")
 
     def test_a_healthy_cadence_adds_nothing(self, tmp_path, monkeypatch):

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_sound.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/sound.py."""
@@ -46,20 +46,17 @@ class TestSpeak:
             patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
             patch("aipass.hooks.apps.sound.PIPER_VOICE") as mock_voice,
             patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
-            patch("aipass.hooks.apps.sound.tempfile") as mock_tmp,
-            patch("aipass.hooks.apps.sound.Path") as mock_path,
         ):
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
-            mock_file = MagicMock()
-            mock_file.name = str(tmp_path / "test.wav")
-            mock_tmp.NamedTemporaryFile.return_value = mock_file
             mock_sub.run.return_value = MagicMock(returncode=0)
-            mock_path.return_value.exists.return_value = True
 
-            speak("test text")
+            # The wav is really staged, in the test's own dir through speak's seam (fleet green leg 7).
+            speak("test text", tmp_dir=str(tmp_path))
 
-        wav = str(tmp_path / "test.wav")
+        staged = list(tmp_path.glob("*.wav"))
+        assert len(staged) == 1
+        wav = str(staged[0])
         mock_sub.run.assert_called_once_with(
             [str(mock_bin), "-m", str(mock_voice), "-f", wav],
             input="test text",
@@ -105,18 +102,14 @@ class TestSpeak:
             patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
             patch("aipass.hooks.apps.sound.PIPER_VOICE") as mock_voice,
             patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
-            patch("aipass.hooks.apps.sound.tempfile") as mock_tmp,
             patch("aipass.hooks.apps.sound.logger") as mock_logger,
         ):
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
-            mock_file = MagicMock()
-            mock_file.name = str(tmp_path / "test.wav")
-            mock_tmp.NamedTemporaryFile.return_value = mock_file
             mock_sub.run.side_effect = real_sub.TimeoutExpired("piper", 5)
             mock_sub.TimeoutExpired = real_sub.TimeoutExpired
 
-            speak("test")
+            speak("test", tmp_dir=str(tmp_path))
 
         assert mock_sub.run.call_count == 1
         mock_logger.info.assert_called_once_with("[HOOKS] speak: piper timed out")
@@ -128,16 +121,12 @@ class TestSpeak:
             patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
             patch("aipass.hooks.apps.sound.PIPER_VOICE") as mock_voice,
             patch("aipass.hooks.apps.sound.subprocess.run", side_effect=OSError("broken")),
-            patch("aipass.hooks.apps.sound.tempfile") as mock_tmp,
             patch("aipass.hooks.apps.sound.logger") as mock_logger,
         ):
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
-            mock_file = MagicMock()
-            mock_file.name = str(tmp_path / "test.wav")
-            mock_tmp.NamedTemporaryFile.return_value = mock_file
 
-            speak("test")
+            speak("test", tmp_dir=str(tmp_path))
 
         assert mock_logger.info.call_count == 1
         template, exc = mock_logger.info.call_args[0]

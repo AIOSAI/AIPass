@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for hooks's entry point routing, help and introspection
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-09-03
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/hooks.py, the branch's CLI entry point."""
@@ -38,6 +38,8 @@ from pathlib import Path
 import pytest
 
 from aipass.hooks.apps import hooks as branch_entry
+
+_MODULES_PACKAGE = "aipass.hooks.apps.modules"
 
 
 class _StubModule:
@@ -276,49 +278,38 @@ class TestDiscoverySkipsRetiredModules:
         monkeypatch.setattr(branch_entry, "MODULES_DIR", tmp_path)
         return tmp_path
 
+    @staticmethod
+    def _stand_in(monkeypatch, stem, module):
+        """Serve `module` from sys.modules under the name discovery computes for `stem`.
+
+        The real import_module returns a sys.modules entry before it looks at any
+        file, so a retired stem that discovery failed to skip would come back as
+        this stand-in. importlib itself is never replaced (fleet green leg 7).
+        """
+        monkeypatch.setitem(sys.modules, f"{_MODULES_PACKAGE}.{stem}", module)
+
     def test_a_disabled_module_is_never_imported(self, monkeypatch, tmp_path):
         self._modules_dir(monkeypatch, tmp_path)
         (tmp_path / "presence(disabled).py").write_text("raise AssertionError('imported')\n", encoding="utf-8")
-
-        imported = []
-        monkeypatch.setattr(
-            branch_entry.importlib,
-            "import_module",
-            lambda name: imported.append(name) or pytest.fail(f"imported {name}"),
-        )
+        self._stand_in(monkeypatch, "presence(disabled)", _StubModule())
 
         assert branch_entry.discover_modules() == []
-        assert imported == []
 
     def test_a_live_module_beside_it_still_loads(self, monkeypatch, tmp_path):
         self._modules_dir(monkeypatch, tmp_path)
         (tmp_path / "presence(disabled).py").write_text("", encoding="utf-8")
         (tmp_path / "sessions.py").write_text("", encoding="utf-8")
-
         stub = _StubModule()
-        seen = []
-
-        def fake_import(name):
-            seen.append(name)
-            if name.endswith("sessions"):
-                return stub
-            raise ImportError(name)
-
-        monkeypatch.setattr(branch_entry.importlib, "import_module", fake_import)
+        self._stand_in(monkeypatch, "sessions", stub)
+        self._stand_in(monkeypatch, "presence(disabled)", _StubModule())
 
         assert branch_entry.discover_modules() == [stub]
-        assert all("(disabled)" not in name for name in seen)
 
     def test_the_mark_is_matched_anywhere_in_the_name(self, monkeypatch, tmp_path):
         # The convention writes the mark as a suffix, but a stem like
         # "presence(disabled)_v2" is the same retirement and must not sneak back.
         self._modules_dir(monkeypatch, tmp_path)
         (tmp_path / "presence(disabled)_v2.py").write_text("", encoding="utf-8")
-
-        monkeypatch.setattr(
-            branch_entry.importlib,
-            "import_module",
-            lambda name: pytest.fail(f"imported {name}"),
-        )
+        self._stand_in(monkeypatch, "presence(disabled)_v2", _StubModule())
 
         assert branch_entry.discover_modules() == []

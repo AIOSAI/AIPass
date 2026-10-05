@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_identity.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/prompt/identity.py."""
@@ -20,7 +20,6 @@
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -196,10 +195,10 @@ class TestIdentityHandler:
         assert "test Identity" in result["stdout"]
         assert result["sound"] == "identity"
 
-    def test_empty_hook_data(self, tmp_path):
-
-        with patch("pathlib.Path.cwd", return_value=tmp_path / "nonexistent"):
-            result = handle({})
+    def test_empty_hook_data(self, tmp_path, monkeypatch):
+        # No cwd in the hook data: the real cwd is read, an empty directory (fleet green leg 7).
+        monkeypatch.chdir(tmp_path)
+        result = handle({})
 
         assert result["exit_code"] == 0
         assert result["stdout"] == ""

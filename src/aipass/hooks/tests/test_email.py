@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_email.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Description: Tests for email notification handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-09-27
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/notification/email.py."""
@@ -229,51 +229,45 @@ class TestCountNewEmails:
 class TestFindBranchRoot:
     """Branch root discovery tests."""
 
-    def test_finds_branch_with_trinity(self, tmp_path):
-        trinity = tmp_path / ".trinity"
-        trinity.mkdir()
-        apps = tmp_path / "apps"
-        apps.mkdir()
+    # The walk reads the real cwd: each test stands in its directory with monkeypatch.chdir
+    # (fleet green leg 7, no Path.cwd patch). Paths are compared resolved, because the
+    # real cwd comes back resolved and a temp dir can sit behind a symlink (macOS /var).
 
-        with (
-            patch(
-                "aipass.hooks.apps.handlers.notification.email.Path.cwd",
-                return_value=tmp_path,
-            ),
-            patch(
-                "aipass.hooks.apps.handlers.notification.email._find_repo_root",
-                return_value=tmp_path.parent,
-            ),
+    def test_finds_branch_with_trinity(self, tmp_path, monkeypatch):
+        here = tmp_path.resolve()
+        (here / ".trinity").mkdir()
+        (here / "apps").mkdir()
+        monkeypatch.chdir(here)
+
+        with patch(
+            "aipass.hooks.apps.handlers.notification.email._find_repo_root",
+            return_value=here.parent,
         ):
             result = _find_branch_root()
 
-        assert result == tmp_path
+        assert result == here
 
-    def test_returns_none_when_no_markers(self, tmp_path):
-        with (
-            patch(
-                "aipass.hooks.apps.handlers.notification.email.Path.cwd",
-                return_value=tmp_path / "bare",
-            ),
-            patch(
-                "aipass.hooks.apps.handlers.notification.email._find_repo_root",
-                return_value=None,
-            ),
+    def test_returns_none_when_no_markers(self, tmp_path, monkeypatch):
+        bare = tmp_path.resolve() / "bare"
+        bare.mkdir()
+        monkeypatch.chdir(bare)
+
+        with patch(
+            "aipass.hooks.apps.handlers.notification.email._find_repo_root",
+            return_value=None,
         ):
             result = _find_branch_root()
 
         assert result is None
 
-    def test_returns_none_at_repo_root(self, tmp_path):
-        with (
-            patch(
-                "aipass.hooks.apps.handlers.notification.email.Path.cwd",
-                return_value=tmp_path,
-            ),
-            patch(
-                "aipass.hooks.apps.handlers.notification.email._find_repo_root",
-                return_value=tmp_path,
-            ),
+    def test_returns_none_at_repo_root(self, tmp_path, monkeypatch):
+        here = tmp_path.resolve()
+        (here / ".trinity").mkdir()
+        monkeypatch.chdir(here)
+
+        with patch(
+            "aipass.hooks.apps.handlers.notification.email._find_repo_root",
+            return_value=here,
         ):
             result = _find_branch_root()
 

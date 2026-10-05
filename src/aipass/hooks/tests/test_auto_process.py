@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_process.py
-# Version: 1.3.3
+# Version: 1.3.4
 # Description: Tests for auto_process lifecycle handler (TDPLAN-0005, DPLAN-0294 phase 1b)
 # Branch: hooks
 # Created: 2026-06-06
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_process.py."""
@@ -21,10 +21,17 @@
 # seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
 # seedgo: no-test-needed(documentation) — that the handler's functions carry docstrings
 
+import contextlib
+import importlib
 import logging
 import os
+import sys
 import tempfile
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 from aipass.hooks.apps.handlers.lifecycle import auto_process
 from aipass.hooks.apps.handlers.lifecycle.auto_process import (
@@ -41,6 +48,7 @@ def _kept_redirect() -> dict[str, str]:
 
 
 MODULE = "aipass.hooks.apps.handlers.lifecycle.auto_process"
+_MEMORY_AUTO_PROCESS = "aipass.memory.apps.handlers.intake.auto_process"
 
 
 def _make_mock_module(**spawn_return):
@@ -54,13 +62,29 @@ def _make_mock_module(**spawn_return):
     return mock_module
 
 
+@contextlib.contextmanager
+def _served(module: Any) -> Iterator[None]:
+    """Stand `module` in sys.modules as @memory's auto_process, where the real import_module looks first.
+
+    importlib itself is never replaced (fleet green leg 7, stdlib_patch). Only the
+    exact name the handler imports is served, so reaching the stand-in's
+    spawn_background proves the name too. None makes the real import raise
+    ModuleNotFoundError, the stdlib's documented answer for a None entry.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        if module is not None:
+            module.__spec__ = None  # a MagicMock's __spec__ reads as a module still initializing
+        mp.setitem(sys.modules, _MEMORY_AUTO_PROCESS, module)
+        yield
+
+
 class TestAutoProcessHandler:
     def test_success_returns_exit_code_0(self):
         mock_module = _make_mock_module(success=True, skipped=False, pid=4242)
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with patch(f"{MODULE}._mark_session_ran"):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+                with _served(mock_module):
                     result = handle({})
 
         assert result["exit_code"] == 0
@@ -73,10 +97,10 @@ class TestAutoProcessHandler:
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with patch(f"{MODULE}._mark_session_ran"):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module) as mock_import:
+                with _served(mock_module):
                     handle({})
 
-        mock_import.assert_called_once_with("aipass.memory.apps.handlers.intake.auto_process")
+        # The stand-in is served under @memory's exact name only: its spawn being reached is the name's proof.
         mock_module.spawn_background.assert_called_once()
         mock_module.auto_process.assert_not_called()
 
@@ -85,7 +109,7 @@ class TestAutoProcessHandler:
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with patch(f"{MODULE}._mark_session_ran"):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+                with _served(mock_module):
                     with caplog.at_level(logging.INFO):
                         handle({})
 
@@ -97,7 +121,7 @@ class TestAutoProcessHandler:
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with patch(f"{MODULE}._mark_session_ran"):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+                with _served(mock_module):
                     with caplog.at_level(logging.INFO):
                         result = handle({})
 
@@ -110,7 +134,7 @@ class TestAutoProcessHandler:
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with patch(f"{MODULE}._mark_session_ran"):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+                with _served(mock_module):
                     with caplog.at_level(logging.ERROR):
                         result = handle({})
 
@@ -125,7 +149,7 @@ class TestAutoProcessHandler:
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with patch(f"{MODULE}._mark_session_ran"):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+                with _served(mock_module):
                     with caplog.at_level(logging.INFO):
                         handle({})
 
@@ -134,13 +158,16 @@ class TestAutoProcessHandler:
 
     def test_import_error_surfaces_with_exit_code_1(self, caplog):
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
-            with patch(f"{MODULE}.importlib.import_module", side_effect=ImportError("no module")):
+            with _served(None):
+                # Ask the interpreter what a None entry raises; its wording is the stdlib's.
+                with pytest.raises(ImportError) as raised:
+                    importlib.import_module(_MEMORY_AUTO_PROCESS)
                 with caplog.at_level(logging.ERROR):
                     result = handle({})
 
         assert result["exit_code"] == 1
         assert result["stdout"] == ""
-        assert "no module" in caplog.text
+        assert str(raised.value) in caplog.text
 
     def test_runtime_error_surfaces_with_exit_code_1(self, caplog):
         """spawn_background() promises never to raise — crash isolation does not take promises."""
@@ -148,7 +175,7 @@ class TestAutoProcessHandler:
         mock_module.spawn_background.side_effect = RuntimeError("fork failed")
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
-            with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+            with _served(mock_module):
                 with caplog.at_level(logging.ERROR):
                     result = handle({})
 
@@ -187,7 +214,7 @@ class TestAutoProcessHandler:
             mock_module = _make_mock_module()
             with patch(f"{MODULE}._already_ran_this_session", return_value=False):
                 with patch(f"{MODULE}._mark_session_ran"):
-                    with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+                    with _served(mock_module):
                         result = handle(payload)
             assert result["exit_code"] == 0
             mock_module.spawn_background.assert_called_once()
@@ -199,7 +226,7 @@ class TestAutoProcessHandler:
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with patch(f"{MODULE}._mark_session_ran"):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+                with _served(mock_module):
                     result = handle({"tool_name": "Bash", "cwd": tempfile.gettempdir()})
 
         assert result["exit_code"] == 0
@@ -224,16 +251,16 @@ class TestSessionGuard:
         mock_module = _make_mock_module()
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=True):
-            with patch(f"{MODULE}.importlib.import_module") as mock_import:
+            with _served(mock_module):
                 guarded = handle({})
         assert guarded["exit_code"] == 0
-        mock_import.assert_not_called()
+        mock_module.spawn_background.assert_not_called()
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with patch(f"{MODULE}._mark_session_ran"):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module) as mock_import:
+                with _served(mock_module):
                     handle({})
-        mock_import.assert_called_once()
+        mock_module.spawn_background.assert_called_once()
 
     def test_marks_session_after_a_successful_kick(self):
         """Guard now means kicked-once, not ran-once."""
@@ -241,7 +268,7 @@ class TestSessionGuard:
 
         with patch(f"{MODULE}._mark_session_ran") as mock_mark:
             with patch(f"{MODULE}._already_ran_this_session", return_value=False):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+                with _served(mock_module):
                     handle({})
 
         mock_mark.assert_called_once_with()
@@ -252,7 +279,7 @@ class TestSessionGuard:
 
         with patch(f"{MODULE}._mark_session_ran") as mock_mark:
             with patch(f"{MODULE}._already_ran_this_session", return_value=False):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+                with _served(mock_module):
                     handle({})
 
         mock_mark.assert_called_once_with()
@@ -263,7 +290,7 @@ class TestSessionGuard:
 
         with patch(f"{MODULE}._mark_session_ran") as mock_mark:
             with patch(f"{MODULE}._already_ran_this_session", return_value=False):
-                with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
+                with _served(mock_module):
                     handle({})
 
         mock_mark.assert_not_called()
@@ -271,7 +298,7 @@ class TestSessionGuard:
     def test_does_not_mark_session_on_error(self):
         with patch(f"{MODULE}._mark_session_ran") as mock_mark:
             with patch(f"{MODULE}._already_ran_this_session", return_value=False):
-                with patch(f"{MODULE}.importlib.import_module", side_effect=ImportError("boom")):
+                with _served(None):
                     handle({})
 
         mock_mark.assert_not_called()
@@ -334,7 +361,7 @@ class TestProbeSuppression:
         monkeypatch.setattr(auto_process, "_GUARD_DIR", tmp_path)
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "probe-suppression-on")
         monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")
-        with patch("importlib.import_module", return_value=mock_module):
+        with _served(mock_module):
             result = auto_process.handle({})
 
         mock_module.spawn_background.assert_not_called()
@@ -347,7 +374,7 @@ class TestProbeSuppression:
         monkeypatch.setattr(auto_process, "_GUARD_DIR", tmp_path)
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "probe-suppression-off")
         monkeypatch.delenv("AIPASS_HOOK_PROBE", raising=False)
-        with patch("importlib.import_module", return_value=mock_module):
+        with _served(mock_module):
             auto_process.handle({})
 
         mock_module.spawn_background.assert_called_once_with()
@@ -359,7 +386,7 @@ class TestProbeSuppression:
         monkeypatch.setattr(auto_process, "_GUARD_DIR", tmp_path)
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "probe-guard-check")
         monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")
-        with patch("importlib.import_module", return_value=_make_mock_module()):
+        with _served(_make_mock_module()):
             auto_process.handle({})
 
         assert not (tmp_path / "aipass-auto-process-probe-guard-check").exists()
