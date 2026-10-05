@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-05-04
-# Modified: 2026-09-29
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -25,7 +25,6 @@ import aipass
 import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import (
-    _merge_hooks_json,
     is_throwaway_path,
     init_project,
     update_project,
@@ -1158,61 +1157,77 @@ def test_update_project_union_merge_preserves_user_enabled(tmp_path):
     assert updated["PreToolUse"]["git_gate"]["enabled"] is False
 
 
+def _init_hooks_project(tmp_path: Path) -> tuple[Path, dict]:
+    """A project made by init_project, and the hooks template update merges from.
+
+    The template is read from disk, never restated, so these pins follow the
+    shipped project_hooks.json. Reached through init_project and update_project
+    (fleet green leg 7): the merge has no other door, and both write only
+    under tmp_path.
+    """
+    target = tmp_path / "proj"
+    target.mkdir()
+    result = init_project(target, project_name="merge")
+    if result["aipass_home"] is None:
+        pytest.skip("AIPASS_HOME not detectable in this environment")
+    template_path = Path(result["aipass_home"]) / ".aipass" / "project_hooks.json"
+    return target / ".aipass" / "hooks.json", json.loads(template_path.read_text(encoding="utf-8"))
+
+
 def test_update_project_union_merge_adds_new_hooks(tmp_path):
-    """update adds hooks from template that user doesn't have."""
-    existing = {
-        "hooks_enabled": True,
-        "UserPromptSubmit": {
-            "identity_injector": {"enabled": True, "handler": "old.handler", "matcher": ""},
-        },
-    }
-    template = {
-        "hooks_enabled": True,
-        "UserPromptSubmit": {
-            "identity_injector": {"enabled": True, "handler": "new.handler", "matcher": ""},
-            "brand_new_hook": {"enabled": True, "handler": "brand.new", "matcher": ""},
-        },
-        "Stop": {
-            "stop_sound": {"enabled": True, "handler": "stop.handler", "matcher": ""},
-        },
-    }
+    """update adds back an event and a handler the project does not have.
 
-    merged = _merge_hooks_json(existing, template)
+    Mutant: the template loop of _merge_hooks_json adds nothing -> red.
+    """
+    hooks_json, template = _init_hooks_project(tmp_path)
+    events = [key for key in template if key not in ("_comment", "hooks_enabled")]
+    gone_event, thinned_event = events[0], events[1]
+    gone_handler = next(iter(template[thinned_event]))
+    data = json.loads(hooks_json.read_text(encoding="utf-8"))
+    del data[gone_event]
+    del data[thinned_event][gone_handler]
+    hooks_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
-    assert "brand_new_hook" in merged["UserPromptSubmit"]
-    assert "Stop" in merged
-    assert merged["Stop"]["stop_sound"]["enabled"] is True
+    update_project(target=hooks_json.parent.parent)
+
+    updated = json.loads(hooks_json.read_text(encoding="utf-8"))
+    assert updated.get(gone_event) == template[gone_event]
+    assert updated.get(thinned_event, {}).get(gone_handler) == template[thinned_event][gone_handler]
 
 
-def test_update_project_union_merge_preserves_user_hooks():
-    """User's custom hooks not in template are kept."""
-    existing = {
-        "hooks_enabled": True,
-        "UserPromptSubmit": {
-            "my_custom_hook": {"enabled": True, "handler": "custom.handler", "matcher": ""},
-        },
-    }
-    template = {
-        "hooks_enabled": True,
-        "UserPromptSubmit": {
-            "identity_injector": {"enabled": True, "handler": "std.handler", "matcher": ""},
-        },
-    }
+def test_update_project_union_merge_preserves_user_hooks(tmp_path):
+    """A custom hook the template does not carry is kept beside the template's.
 
-    merged = _merge_hooks_json(existing, template)
+    Mutant: the existing-hooks loop of _merge_hooks_json copies nothing -> red.
+    """
+    hooks_json, template = _init_hooks_project(tmp_path)
+    event = next(key for key in template if key not in ("_comment", "hooks_enabled"))
+    custom = {"enabled": True, "handler": "custom.handler", "matcher": ""}
+    data = json.loads(hooks_json.read_text(encoding="utf-8"))
+    data[event]["my_custom_hook"] = custom
+    hooks_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
-    assert "my_custom_hook" in merged["UserPromptSubmit"]
-    assert "identity_injector" in merged["UserPromptSubmit"]
+    update_project(target=hooks_json.parent.parent)
+
+    updated = json.loads(hooks_json.read_text(encoding="utf-8"))
+    assert updated.get(event, {}).get("my_custom_hook") == custom
+    assert set(template[event]) <= set(updated[event])
 
 
-def test_merge_hooks_json_preserves_hooks_enabled_false():
-    """User's hooks_enabled=false is preserved over template's true."""
-    existing = {"hooks_enabled": False}
-    template = {"hooks_enabled": True, "Stop": {"s": {"enabled": True, "handler": "h", "matcher": ""}}}
+def test_merge_hooks_json_preserves_hooks_enabled_false(tmp_path):
+    """The project's hooks_enabled false outlives the template's true.
 
-    merged = _merge_hooks_json(existing, template)
+    Mutant: hooks_enabled read from the template first -> red.
+    """
+    hooks_json, template = _init_hooks_project(tmp_path)
+    assert template["hooks_enabled"] is True  # the pin needs a template that disagrees
+    data = json.loads(hooks_json.read_text(encoding="utf-8"))
+    data["hooks_enabled"] = False
+    hooks_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
-    assert merged["hooks_enabled"] is False
+    update_project(target=hooks_json.parent.parent)
+
+    assert json.loads(hooks_json.read_text(encoding="utf-8"))["hooks_enabled"] is False
 
 
 def test_update_project_hooks_json_already_current(tmp_path):
