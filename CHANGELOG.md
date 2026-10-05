@@ -6278,7 +6278,7 @@ SSH-signed commits now verifying on GitHub. Details in the sections below
   first", and the wrapper no longer doubles `--permission-mode` when the user
   passes it explicitly. New/updated tests, hooks suite 791 green. (built by @hooks)
 - **Boot-shim installer no longer bakes a hardcoded user path.**
-  `install_boot_shim.sh` hardcoded `/home/patrick/Projects/AIPass/.venv/bin/python`
+  `install_boot_shim.sh` hardcoded one machine's `<home>/Projects/AIPass/.venv/bin/python`
   into the `claude()` shell function — wrong on any other machine or user. It now
   resolves the venv interpreter from the script's own location (POSIX
   `.venv/bin/python`, Windows/git-bash `.venv/Scripts/python.exe`, else PATH

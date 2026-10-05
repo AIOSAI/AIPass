@@ -26,7 +26,8 @@ import sys
 from pathlib import Path
 
 _LOG_FILE = Path("/tmp/aipass_hook_log.jsonl")
-_AIPASS_HOME = os.environ.get("AIPASS_HOME", "/home/patrick/Projects/AIPass")
+# The repo root is two levels above .claude/hooks/; no machine's path is written here.
+_AIPASS_HOME = os.environ.get("AIPASS_HOME", str(Path(__file__).resolve().parents[2]))
 
 
 def _clear_log() -> None:

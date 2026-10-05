@@ -84,6 +84,9 @@ src/aipass/seedgo/apps/standards/aipass/pack.json
 .AIPASS_REGISTRY.lock
 
 # Claude Code local state
+# settings.local.json is the per-machine file (Claude Code merges it over settings.json):
+# personal paths and preferences live there, never in the tracked settings.json.
+.claude/settings.local.json
 .claude/hooks/__pycache__/
 .claude/hooks/.last_diagnostics_file
 .diagnostics_state.json
