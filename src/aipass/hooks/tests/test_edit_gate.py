@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
@@ -502,6 +502,25 @@ class TestEditGateDiagnosticsState:
             result = self._edit_other_file(branch_tree)
         assert result["exit_code"] == 2
 
+    def _errored_at(self, tree: dict, relative: str, text: str, error: dict) -> dict:
+        errored = tree["branch"] / relative
+        errored.parent.mkdir(parents=True, exist_ok=True)
+        errored.write_text(text, encoding="utf-8")
+        ds.save_seat("nosession", str(errored), [error])
+        with patch.object(tree["ds"], "revalidate", return_value=[error]):
+            return self._edit_other_file(tree)
+
+    def test_an_error_on_a_placeholder_line_does_not_block(self, branch_tree: dict):
+        """spawn 94b406f9: a {{ placeholder }} line held every other .py edit for a day."""
+        text = "import os\n\nVALUE = {{ value }}\nOTHER = os.sep\n"
+        error = {"line": 2, "message": "Expected expression"}  # pyright counts from 0: the {{ line
+        assert self._errored_at(branch_tree, "apps/modules/gen.py", text, error)["exit_code"] == 0
+        error = {"line": 3, "message": "Expected expression"}  # the line after it: still the tree's
+        assert self._errored_at(branch_tree, "apps/modules/gen.py", text, error)["exit_code"] == 2
+
+    def test_an_error_in_a_file_under_templates_does_not_block(self, branch_tree: dict):
+        assert self._errored_at(branch_tree, "templates/citizen/x.py", "x: int = 's'\n", LOCAL_ERROR)["exit_code"] == 0
+
     def test_stale_state_is_dropped_when_the_file_is_clean_now(self, branch_tree: dict):
         """Defect 2: a resolving write the hook never saw left a permanent block."""
         branch_tree["write_state"]([LOCAL_ERROR])
@@ -879,6 +898,19 @@ class TestRevalidateParsesPyrightOutput:
         with patch.object(ds.subprocess, "run", return_value=_pyright_result(diagnostics)):
             return ds.revalidate(str(target))
 
+    def test_a_scratch_module_beside_the_session_cwd_does_not_turn_clean_into_unknown(self, tmp_path, monkeypatch):
+        """memory leg 9: pyright ran from the session cwd, where a types.py broke its interpreter."""
+        pytest.importorskip("pyright")
+        seat = tmp_path / "seat"
+        seat.mkdir()
+        (seat / "types.py").write_text("X = 1\n", encoding="utf-8")
+        target = tmp_path / "proj" / "clean.py"
+        target.parent.mkdir()
+        (tmp_path / "proj" / "pyproject.toml").write_text("", encoding="utf-8")
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+        monkeypatch.chdir(seat)
+        assert ds.revalidate(str(target)) == []
+
     def test_clean_file_is_empty_list_not_none(self, tmp_path: Path):
         """[] and None are different answers — this is the distinction that broke."""
         found = self._revalidate(tmp_path, [])
@@ -941,3 +973,61 @@ class TestEveryRefusalIsLogged:
         assert result["exit_code"] == 2
         assert "refused" in caplog.text
         assert "inbox.json" in caplog.text
+
+
+@pytest.fixture
+def engine_home(tmp_path: Path, monkeypatch) -> dict:
+    """An install whose hooks.json wires one handler, which imports a copy of the real loader at the top.
+
+    The copy is in the closure only through that import: the walk has to find it.
+    A second copy beside it is imported by nothing (the control).
+    """
+    home = tmp_path / "home"
+    (home / ".aipass").mkdir(parents=True)
+    wired = {"hooks": {"PreToolUse": [{"handler": "aipass.zz.apps.handlers.gate.handle"}]}}
+    (home / ".aipass" / "hooks.json").write_text(json.dumps(wired), encoding="utf-8")
+    pkg = home / "src" / "aipass" / "zz"
+    for sub in ("apps/handlers", "apps/modules"):
+        (pkg / sub).mkdir(parents=True)
+    (pkg / "apps" / "handlers" / "gate.py").write_text(
+        "from aipass.zz.apps.modules import imported\n\n\ndef handle(data):\n    return imported\n", encoding="utf-8"
+    )
+    real = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "config" / "loader.py"
+    text = real.read_text(encoding="utf-8")
+    for name in ("imported.py", "unimported.py"):
+        (pkg / "apps" / "modules" / name).write_text(text, encoding="utf-8")
+    monkeypatch.setenv("AIPASS_HOME", str(home))
+    return {
+        "seat": str(pkg),
+        "in": pkg / "apps" / "modules" / "imported.py",
+        "out": pkg / "apps" / "modules" / "unimported.py",
+    }
+
+
+def _name_before_import(target: Path, seat: str) -> dict:
+    """The 10-03 shape: a name used one line before the import that defines it."""
+    edit = {
+        "file_path": str(target),
+        "old_string": "import hashlib\n",
+        "new_string": "STAMP = time.time()\nimport hashlib\n",
+    }
+    return handle({"tool_name": "Edit", "tool_input": edit, "cwd": seat})
+
+
+class TestTheEngineClosureIsNotLeftCrashing:
+    """An edit that would leave a module the engine imports raising NameError is refused before it lands.
+
+    The 10-03 incident (leg 5, item 2): one such edit to a live-imported module
+    refused every tool fleet-wide until the owner repaired it by hand.
+    """
+
+    def test_a_name_used_before_its_import_in_a_closure_module_is_refused_with_line_and_rule(self, engine_home):
+        result = _name_before_import(engine_home["in"], engine_home["seat"])
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        line = engine_home["in"].read_text(encoding="utf-8").splitlines().index("import hashlib") + 1
+        assert f"L{line}: F821" in reason
+        assert "time" in reason
+
+    def test_the_same_edit_outside_the_closure_is_not_this_gates_business(self, engine_home):
+        assert _name_before_import(engine_home["out"], engine_home["seat"])["exit_code"] == 0

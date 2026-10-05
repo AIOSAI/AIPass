@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, seedgo checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -228,6 +228,8 @@ def _run_pyright_check(file_path: str, unanswered: list[str] | None = None) -> l
             capture_output=True,
             text=True,
             timeout=15,
+            # The file's project root, not the session cwd a scratch module can shadow (memory leg 9).
+            cwd=importlib.import_module("aipass.hooks.apps.modules.diagnostics_state").pyright_cwd(file_path),
         )
         try:
             data = json.loads(result.stdout)
@@ -423,6 +425,30 @@ def _run_json_checks(file_path: str) -> list[str]:
     return errors
 
 
+def _units(text: str) -> int:
+    """Length the way Claude Code measures it: UTF-16 code units."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _fit(error_text: str, frame: str, file_path: str) -> str:
+    """*error_text* cut so the whole context fits the line past which the model sees only a preview.
+
+    Fleet green leg 5: every one of the 268 captured_ledger_store warnings since
+    09-27 was this hook's context over that line (long SEEDGO rows), so the
+    agent told to fix the errors was shown the start of the list. The cut keeps
+    the frame (count, file, instruction) whole and names where the rest is.
+    """
+    limit = importlib.import_module("aipass.hooks.apps.handlers.config.output_merge").CONTEXT_LIMIT
+    if _units(frame) + _units(error_text) <= limit:
+        return error_text
+    marker = f"\n  … cut to fit what the model is shown whole: drone @seedgo checklist {file_path} has every row"
+    room = limit - _units(frame) - _units(marker)
+    kept = error_text[: max(0, room)]
+    while kept and _units(kept) > room:  # a character outside the BMP counts twice
+        kept = kept[: len(kept) - (_units(kept) - room)]
+    return kept + marker
+
+
 def handle(hook_data: dict) -> dict:
     """Run diagnostics on edited files and surface errors.
 
@@ -461,8 +487,10 @@ def handle(hook_data: dict) -> dict:
                 errors.append(f"TYPE: L{te['line']}: {te['message']}")
 
             ruff_lint_errors = _run_ruff_lint_structured(file_path, unanswered)
-            seat = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state").seat_key(hook_data)
-            _record_diagnostics(seat, file_path, [ruff_lint_errors, type_errors])
+            ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
+            # A template's or a placeholder line's errors are not the tree's (spawn 94b406f9): never recorded.
+            tree = [ds.of_the_tree(file_path, ruff_lint_errors, 1), ds.of_the_tree(file_path, type_errors, 0)]
+            _record_diagnostics(ds.seat_key(hook_data), file_path, tree)
 
         elif file_path.endswith(".json"):
             errors = _run_json_checks(file_path)
@@ -474,14 +502,12 @@ def handle(hook_data: dict) -> dict:
             no_answer = f"NO ANSWER from {'; '.join(unanswered)}: this edit cleared no recorded error"
 
         if errors:
-            error_text = "\n".join(f"  - {e}" for e in errors)
-            context = (
-                f"[AUTO-FIX] {len(errors)} error(s) in {Path(file_path).name}:\n"
-                f"{error_text}\n\n"
-                f"Fix these errors in {Path(file_path).name} now. Do not skip or defer."
-            )
+            head = f"[AUTO-FIX] {len(errors)} error(s) in {Path(file_path).name}:\n"
+            tail = f"\n\nFix these errors in {Path(file_path).name} now. Do not skip or defer."
             if no_answer:
-                context = f"{context}\n{no_answer}"
+                tail = f"{tail}\n{no_answer}"
+            error_text = _fit("\n".join(f"  - {e}" for e in errors), head + tail, file_path)
+            context = f"{head}{error_text}{tail}"
             result = {
                 "hookSpecificOutput": {
                     "hookEventName": "PostToolUse",

@@ -22,14 +22,24 @@ import pytest
 
 import importlib
 
-from aipass.hooks.apps.modules import promote
+from aipass.hooks.apps import hooks as entry
+from aipass.hooks.apps.hooks import handle_command, main, print_help, print_introspection
+from aipass.hooks.apps.modules import engine, injection_ledger, promote
 from aipass.hooks.apps.modules.engine import (
+    BRANCH_ROOT,
+    HELP_COMMANDS as eng_cmds,
     dispatch,
     run_event,
     _matches,
+    _run_handler,
     _run_hook,
     _log,
 )
+from aipass.hooks.apps.modules.hooksound import HELP_COMMANDS as hs_cmds
+from aipass.hooks.apps.modules.hookstatus import HELP_COMMANDS as hst_cmds
+from aipass.hooks.apps.handlers.config import trust_registry
+from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE
+from aipass.hooks.apps.handlers.config.output_merge import CONTEXT_LIMIT, _cc_len
 from aipass.hooks.apps.handlers.config.gates import FAIL_CLOSED
 from aipass.hooks.apps.handlers.config.loader import find_project_config
 from aipass.hooks.apps.handlers.config.trust_registry import enroll
@@ -362,7 +372,7 @@ class TestDispatch:
             mock_banner.return_value = None
             mock_run.return_value = {"exit_code": 0, "stdout": "hi", "stderr": "", "elapsed_ms": 5}
             dispatch("UserPromptSubmit", "{}", config)
-        mock_banner.assert_called_once()
+        mock_banner.assert_called_once_with()  # the banner reads its own state: no argument filters it
 
     def test_trust_break_check_skipped_for_non_prompt_events(self, mock_logger):
         config = {"hooks_enabled": True, "PreToolUse": {"presence_gate": {}}}
@@ -652,8 +662,7 @@ class TestFindProjectConfig:
             patch.dict("os.environ", {"AIPASS_HOME": "/test/path"}),
         ):
             result = find_project_config()
-        assert result is not None
-        assert "/test/path/hook.py" in result["Stop"]["sound"]["command"]
+        assert (result or {}).get("Stop", {}).get("sound", {}).get("command") == "python3 /test/path/hook.py"
 
 
 class TestLog:
@@ -688,40 +697,28 @@ class TestHooksEntryPoint:
     """Tests for hooks.py CLI routing."""
 
     def test_help_returns_zero(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks", "--help"]):
             assert main() == 0
 
     def test_version_returns_zero(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks", "--version"]):
             assert main() == 0
 
     def test_no_args_shows_help(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks"]):
             assert main() == 0
 
     def test_unknown_command_returns_one(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks", "nonexistent_command"]):
             assert main() == 1
 
     def test_print_introspection_prints_output(self, capsys):
-        from aipass.hooks.apps.hooks import print_introspection
-
         print_introspection()
         captured = capsys.readouterr()
         assert "HOOKS" in captured.out
         assert "Discovered Modules" in captured.out
 
     def test_handle_command_returns_bool(self):
-        from aipass.hooks.apps.hooks import handle_command
-
         result = handle_command("nonexistent", [])
         assert result is False
 
@@ -737,8 +734,6 @@ class TestHooksEntryPoint:
         the exit-0 defect FPLAN-0507 had just cured. Patch the name hookstatus
         actually calls, and pin the cured outcome.
         """
-        from aipass.hooks.apps.hooks import handle_command
-
         with (
             patch("aipass.hooks.apps.modules.hookstatus.find_project_config", return_value=None),
             pytest.raises(SystemExit) as exit_info,
@@ -748,8 +743,6 @@ class TestHooksEntryPoint:
 
     def test_log_command_prints_the_log_tail_to_stderr(self, tmp_path, capsys):
         """Green from its first run; its proof is a mutant on the printed line."""
-        from aipass.hooks.apps.hooks import handle_command
-
         log_file = tmp_path / "engine.jsonl"
         log_file.write_text('{"event": "first"}\n{"event": "second"}\n', encoding="utf-8")
         with patch("aipass.hooks.apps.handlers.config.diagnostics.LOG_FILE", log_file):
@@ -761,14 +754,10 @@ class TestHooksEntryPoint:
         assert "No engine log found" not in err
 
     def test_short_help_flag(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks", "-h"]):
             assert main() == 0
 
     def test_help_word(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks", "help"]):
             assert main() == 0
 
@@ -820,8 +809,6 @@ class TestErrorResilience:
         BEFORE the call, so a run without the guard fails without touching the
         live file.
         """
-        from aipass.hooks.apps.handlers.config import trust_registry
-
         registry = trust_registry.REGISTRY_PATH
         assert registry != Path.home() / ".aipass" / "trusted_projects.json"
         assert not registry.exists()
@@ -925,10 +912,10 @@ class TestInfrastructureMocking:
         assert dispatch.__globals__["logger"] is mock_logger
 
     def test_mock_subprocess_fixture(self, mock_subprocess):
-        assert mock_subprocess is not None
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
         _run_hook("test", "")
         mock_subprocess.assert_called_once()
+        assert mock_subprocess.call_args.args == ("test",)  # the fixture stands where _run_hook spawns
 
     def test_hooks_config_file_fixture(self, hooks_config_file):
         assert hooks_config_file.exists()
@@ -1009,8 +996,6 @@ class TestConftest:
         assert result["stdout"] == "x"
 
     def test_reimport_after_mock(self, mock_logger):
-        from aipass.hooks.apps.modules import engine
-
         assert hasattr(engine, "dispatch")
 
 
@@ -1018,16 +1003,12 @@ class TestCliRouting:
     """Additional CLI routing tests for print_help and output capture."""
 
     def test_print_help_writes_output(self, capsys):
-        from aipass.hooks.apps.hooks import print_help
-
         print_help()
         captured = capsys.readouterr()
         assert "HOOKS" in captured.out
         assert "drone @hooks" in captured.out
 
     def test_print_help_surfaces_subcommands(self, capsys):
-        from aipass.hooks.apps.hooks import print_help
-
         print_help()
         captured = capsys.readouterr()
         assert "hooksound on" in captured.out
@@ -1036,8 +1017,6 @@ class TestCliRouting:
         assert "log" in captured.out
 
     def test_print_help_has_examples_section(self, capsys):
-        from aipass.hooks.apps.hooks import print_help
-
         print_help()
         captured = capsys.readouterr()
         assert "EXAMPLES" in captured.out
@@ -1045,19 +1024,12 @@ class TestCliRouting:
         assert "drone @hooks hooksound off" in captured.out
 
     def test_print_help_has_usage_section(self, capsys):
-        from aipass.hooks.apps.hooks import print_help
-
         print_help()
         captured = capsys.readouterr()
         assert "USAGE" in captured.out
         assert "drone @hooks <command>" in captured.out
 
     def test_help_commands_auto_discovered(self, capsys):
-        from aipass.hooks.apps.hooks import print_help
-        from aipass.hooks.apps.modules.hooksound import HELP_COMMANDS as hs_cmds
-        from aipass.hooks.apps.modules.hookstatus import HELP_COMMANDS as hst_cmds
-        from aipass.hooks.apps.modules.engine import HELP_COMMANDS as eng_cmds
-
         print_help()
         captured = capsys.readouterr()
         # The floor, per module and not in total. Auto-discovery is the claim,
@@ -1071,8 +1043,6 @@ class TestCliRouting:
             assert cmd in captured.out
 
     def test_output_capture_status(self, capsys):
-        from aipass.hooks.apps.hooks import handle_command
-
         with (
             patch("aipass.hooks.apps.modules.hookstatus.find_project_config", return_value=None),
             patch(
@@ -1099,19 +1069,13 @@ class TestCliRouting:
         """
         import re
 
-        from aipass.hooks.apps import hooks as entry
-
-        header = re.search(
-            r"^# Version:\s*(\S+)",
-            Path(entry.__file__).read_text(encoding="utf-8"),
-            re.MULTILINE,
-        )
-        assert header is not None, "apps/hooks.py has no '# Version:' header line"
+        versions = re.findall(r"^# Version:\s*(\S+)", Path(entry.__file__).read_text(encoding="utf-8"), re.MULTILINE)
+        assert len(versions) == 1, f"apps/hooks.py needs one '# Version:' header line, has {versions}"
 
         with patch("sys.argv", ["hooks", "--version"]):
             entry.main()
         captured = capsys.readouterr()
-        assert header.group(1) in captured.out
+        assert versions[0] in captured.out
 
 
 class TestConfigDataContracts:
@@ -1147,9 +1111,6 @@ class TestPathContracts:
         A type check is blind to a BRANCH_ROOT pointing at the caller's
         directory; a landmark under it is not.
         """
-        from aipass.hooks.apps.modules.engine import BRANCH_ROOT
-        from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE
-
         assert BRANCH_ROOT.name == "hooks"
         assert (BRANCH_ROOT / "apps" / "modules" / "engine.py").is_file()
         assert LOG_FILE == BRANCH_ROOT / "logs" / "engine.jsonl"
@@ -1206,9 +1167,6 @@ class TestMockInfrastructure:
         assert "aipass.hooks.apps.modules.engine" in sys.modules
 
     def test_reimport_after_mock(self, mock_logger):
-        import importlib
-        from aipass.hooks.apps.modules import engine
-
         importlib.reload(engine)
         assert hasattr(engine, "dispatch")
         assert hasattr(engine, "_matches")
@@ -1240,15 +1198,11 @@ class TestLayerATrustEnforcement:
         assert refused == [("PreToolUse", "evil_cmd")]
 
     def test_handler_namespace_enforced(self, mock_logger):
-        from aipass.hooks.apps.modules.engine import _run_handler
-
         result = _run_handler("evil.payload.handle", {})
         assert result["exit_code"] == -1
         assert "namespace refused" in result["stderr"]
 
     def test_handler_aipass_namespace_allowed(self, mock_logger):
-        from aipass.hooks.apps.modules.engine import _run_handler
-
         mock_handler = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
         mock_module = MagicMock()
         mock_module.handle = mock_handler
@@ -1370,8 +1324,6 @@ class TestRunHandlerTimeout:
     daemon thread and joins with a timeout instead of calling it inline."""
 
     def test_handler_completes_within_timeout(self, mock_logger):
-        from aipass.hooks.apps.modules.engine import _run_handler
-
         mock_handler = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
         mock_module = MagicMock()
         mock_module.handle = mock_handler
@@ -1381,29 +1333,31 @@ class TestRunHandlerTimeout:
         assert result["stdout"] == "ok"
 
     def test_handler_exceeding_timeout_returns_timeout_marker(self, mock_logger):
-        import time as time_module
+        import threading
 
-        from aipass.hooks.apps.modules.engine import _run_handler
+        released = threading.Event()
 
         def _slow_handler(_data):
-            time_module.sleep(1.3)
+            released.wait(10)  # held until the test has its answer: past any timeout, without a sleep
             return {"exit_code": 0, "stdout": "too late"}
 
         mock_module = MagicMock()
         mock_module.handle = _slow_handler
         with patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=mock_module):
             result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
+        released.set()
         assert result["exit_code"] == -1
         assert result["stderr"] == "TIMEOUT"
 
     def test_handler_timeout_does_not_block_caller(self, mock_logger):
         """Regression: the caller must return promptly even if the handler thread never finishes."""
+        import threading
         import time as time_module
 
-        from aipass.hooks.apps.modules.engine import _run_handler
+        released = threading.Event()
 
         def _hangs_much_longer_than_timeout(_data):
-            time_module.sleep(3)
+            released.wait(30)  # never finishes while the caller is measured
             return {"exit_code": 0, "stdout": "should never see this"}
 
         mock_module = MagicMock()
@@ -1412,20 +1366,17 @@ class TestRunHandlerTimeout:
             start = time_module.monotonic()
             result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
             elapsed = time_module.monotonic() - start
+        released.set()
         assert elapsed < 2.0
         assert result["stderr"] == "TIMEOUT"
 
     def test_default_handler_timeout_is_30(self):
         import inspect
 
-        from aipass.hooks.apps.modules.engine import _run_handler
-
         sig = inspect.signature(_run_handler)
         assert sig.parameters["timeout_s"].default == 30
 
     def test_handler_exception_still_surfaces_as_error_not_timeout(self, mock_logger):
-        from aipass.hooks.apps.modules.engine import _run_handler
-
         def _boom(_data):
             raise RuntimeError("handler blew up")
 
@@ -1552,11 +1503,12 @@ class TestDispatchHandlerTimeout:
         }
         with (
             patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
-            patch("aipass.hooks.apps.sound.speak"),
+            patch("aipass.hooks.apps.sound.speak") as mock_speak,
         ):
             mock_run.return_value = {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 30000}
             result = dispatch("UserPromptSubmit", "{}", config)
         assert result == ("", 0)
+        mock_speak.assert_called_once_with("hung handler timed out")
 
     def test_command_type_timeout_also_fails_loud(self, mock_logger):
         """The fail-loud path is shared by both hook types — command-type timeouts already
@@ -1608,8 +1560,6 @@ class TestJsonHandlerNotApplicable:
         assert [json.loads(line)["event"] for line in lines] == ["A", "B"]
 
     def test_log_get_path(self):
-        from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE
-
         assert LOG_FILE.name == "engine.jsonl"
         assert "logs" in str(LOG_FILE)
 
@@ -1642,8 +1592,6 @@ class TestJsonHandlerNotApplicable:
         assert entry["event"] == "PreToolUse"
 
     def test_log_ensure_module(self):
-        from aipass.hooks.apps.modules import engine
-
         assert hasattr(engine, "_log")
         assert callable(engine._log)
 
@@ -1709,8 +1657,6 @@ class TestOneDocumentPerEvent:
 
     def test_over_the_limit_the_regroup_part_wins_and_the_drop_is_logged(self, mock_logger):
         """auto_fix runs FIRST, so handler order alone would have kept it and cut the re-ground."""
-        from aipass.hooks.apps.handlers.config.output_merge import CONTEXT_LIMIT, _cc_len
-
         regroup = "R" * 9000
         outputs = {"auto_fix_diagnostics": _context("D" * 2000), "post_compact_regrounding": _context(regroup)}
         with patch(f"{_MERGE}.logger") as log:
@@ -1788,8 +1734,6 @@ class TestInjectionLedger:
 
     @pytest.fixture
     def ledger(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.modules import injection_ledger
-
         monkeypatch.setattr(injection_ledger.ledger_store, "_LEDGER_DIR", tmp_path)
         transcript = tmp_path / "transcript.jsonl"
         transcript.write_text("x" * 321, encoding="utf-8")
@@ -2037,6 +1981,7 @@ def _load_by_path(name: str, path: Path):
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None, f"{path} is not loadable as a module"
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -2045,25 +1990,22 @@ def _load_by_path(name: str, path: Path):
 class TestTheBridgeFailsClosed:
     """DPLAN-0356 item 2: an engine that cannot import made Python exit 1, and Claude Code ran the tool."""
 
-    def _main(self, event: str, monkeypatch, capsys) -> tuple[int, str]:
+    def _bridge(self, event: str, monkeypatch):
         bridge = _load_by_path("bridge_under_test", _BRIDGE)
         monkeypatch.setattr("sys.argv", ["claude.py", event])
         monkeypatch.setattr("sys.stdin", __import__("io").StringIO("{}"))
         monkeypatch.setattr(bridge, "_mount", MagicMock(side_effect=SyntaxError("half-edited engine")))
-        code = 0
-        try:
-            bridge.main()
-        except SystemExit as exc:
-            code = exc.code or 0
-        return code, capsys.readouterr().out
+        return bridge
 
     def test_pre_tool_use_is_refused(self, monkeypatch, capsys, mock_logger):
-        code, out = self._main("PreToolUse", monkeypatch, capsys)
-        assert code == 2
-        assert json.loads(out)["reason"].startswith("HOOKS BROKEN")
+        with pytest.raises(SystemExit) as refused:
+            self._bridge("PreToolUse", monkeypatch).main()
+        assert refused.value.code == 2
+        assert json.loads(capsys.readouterr().out)["reason"].startswith("HOOKS BROKEN")
 
     def test_every_other_event_passes(self, monkeypatch, capsys, mock_logger):
-        assert self._main("UserPromptSubmit:branch_prompt", monkeypatch, capsys) == (0, "")
+        self._bridge("UserPromptSubmit:branch_prompt", monkeypatch).main()  # returns: no SystemExit, so exit 0
+        assert capsys.readouterr().out == ""
 
 
 class TestPromote:

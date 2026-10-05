@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: telegram_response.py
-# Version: 2.1.0
+# Version: 2.1.1
 # Description: Telegram response delivery on Stop event (ported from Dev-Pass)
 # Branch: hooks
 # Layer: apps/handlers/notification
 # Created: 2026-06-15
-# Modified: 2026-08-14
+# Modified: 2026-10-04
 # =============================================
 
 """Telegram response delivery on Stop event.
@@ -613,7 +613,7 @@ def handle(hook_data: dict) -> dict:
         chunks, bot_token, chat_id, processing_message_id, logs_were_active, streaming
     )
 
-    _write_delivery_log(response_text, chunks, chunk_results, session_id)
+    _write_delivery_log(response_text, chunk_results, session_id)
 
     if all_sent:
         _advance_pending(pending_file, pending_data, transcript_path)
@@ -756,7 +756,7 @@ def _advance_pending(pending_file: Path, pending_data: dict, transcript_path: st
             pending_file.unlink(missing_ok=True)
 
 
-def _write_delivery_log(intended_text: str, chunks: list[str], chunk_results: list[dict], session_id: str) -> None:
+def _write_delivery_log(intended_text: str, chunk_results: list[dict], session_id: str) -> None:
     """Write JSONL record documenting what was delivered to Telegram."""
     intended_sha = hashlib.sha256(intended_text.encode("utf-8")).hexdigest()[:16]
 

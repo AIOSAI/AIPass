@@ -79,7 +79,7 @@ class TestManglingRule:
             # non-alphanumerics. There is NO drive-letter special case.
             ("C:\\Work\\aipass\\ai_mail", "C--Work-aipass-ai-mail"),
             ("", ""),
-            ("/tmp/é–ø/x", "-tmp-----x"),
+            ("/srv/é–ø/x", "-srv-----x"),  # measured 10-04 22:15 with the same cP(); /tmp gave the old oracle
             # Non-BMP: JS sees a SURROGATE PAIR and writes TWO dashes.
             ("/a/\U0001d518nicode/b", "-a---nicode-b"),
         ],
@@ -99,7 +99,7 @@ class TestManglingRule:
             ("/srv/aipass/src/aipass/hooks", "nn2k9g"),
             ("C:\\Work\\aipass\\ai_mail", "vlvg33"),
             ("", "0"),
-            ("/tmp/é–ø/x", "cac2i8"),
+            ("/srv/é–ø/x", "yc66z4"),  # measured 10-04 22:15 with the same Le(); /tmp gave the old cac2i8
             ("/a/\U0001d518nicode/b", "u24wth"),
             ("/x/" + "deep/" * 60 + "branch", "z99g94"),
         ],

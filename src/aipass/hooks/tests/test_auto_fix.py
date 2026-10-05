@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_fix.py
-# Version: 1.2.2
+# Version: 1.3.0
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_fix.py."""
@@ -129,6 +129,22 @@ class TestAutofixPython:
         assert "SYNTAX" in parsed["hookSpecificOutput"]["additionalContext"]
         assert "1 error(s)" in parsed["systemMessage"]
         assert result.get("sound") == "auto fix diagnostics"
+
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist")
+    def test_a_long_error_list_fits_what_the_model_is_shown_whole(
+        self, mock_seedgo, mock_py, mock_ruff, mock_pyright, tmp_path
+    ):
+        """All 268 captured_ledger_store warnings since 09-27: this context over Claude Code's 10,000-unit line."""
+        mock_seedgo.return_value = [f"through_the_command: row {n} " + "x" * 400 for n in range(60)]
+        result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "long.py")}})
+        context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+        assert len(context.encode("utf-16-le")) // 2 <= 10_000
+        assert context.startswith("[AUTO-FIX] 60 error(s) in long.py")
+        assert "Do not skip or defer." in context
+        assert f"drone @seedgo checklist {tmp_path / 'long.py'} has every row" in context
 
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
@@ -317,6 +333,19 @@ class TestAutoFixSubprocessChecks:
         errors = _run_pyright_check(spell(tmp_path / ".claude" / "hooks" / "myhook.py"))
         assert errors is None
         mock_run.assert_not_called()
+
+    def test_pyright_judges_from_the_files_project_not_a_cwd_a_scratch_module_shadows(self, tmp_path, monkeypatch):
+        """memory leg 9: a scratch types.py beside the session cwd broke the interpreter pyright runs under."""
+        pytest.importorskip("pyright")
+        seat = tmp_path / "seat"
+        seat.mkdir()
+        (seat / "types.py").write_text("X = 1\n", encoding="utf-8")
+        target = tmp_path / "proj" / "pkg" / "clean.py"
+        target.parent.mkdir(parents=True)
+        (tmp_path / "proj" / "pyproject.toml").write_text("", encoding="utf-8")
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+        monkeypatch.chdir(seat)
+        assert _run_pyright_check(str(target)) == []
 
     @patch("subprocess.run")
     def test_run_seedgo_checklist_returns_violations(self, mock_run):

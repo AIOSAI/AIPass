@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_post_compact_regrounding.py
-# Version: 1.2.1
+# Version: 1.2.2
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -698,8 +698,7 @@ class TestRegroupBudget752:
         assert post_compact_regrounding.REGROUP_FIRE_BUDGET < 10_000
         # `__doc__` is `str | None`, and a module stripped of its docstring must
         # fail this claim rather than type-error the file on the `in`.
-        assert post_compact_regrounding.__doc__ is not None
-        assert "sgr = 1e4" in post_compact_regrounding.__doc__
+        assert "sgr = 1e4" in (post_compact_regrounding.__doc__ or "")
 
     def test_a_manager_seat_at_todays_sizes_never_exceeds_the_budget(self, tmp_path):
 

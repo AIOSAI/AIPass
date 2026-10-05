@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for hooks's entry point routing, help and introspection
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-09-03
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/hooks.py, the branch's CLI entry point."""
@@ -257,7 +257,7 @@ def test_branch_name_is_set_at_import_time(monkeypatch):
     """
     monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
 
-    reloaded = importlib.reload(sys.modules["aipass.hooks.apps.hooks"])
+    reloaded = importlib.reload(branch_entry)
 
     assert os.environ["AIPASS_BRANCH_NAME"] == "hooks"
     assert reloaded.discover_modules is not None

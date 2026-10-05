@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_sound.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/sound.py."""
@@ -233,8 +233,9 @@ class TestMuteWritePair:
         assert unmute() is False
 
     def test_mute_is_idempotent(self, tmp_path, monkeypatch):
+        """Muting an already-muted seat: the flag is there before the call, and stays."""
         flag = self._isolated(tmp_path, monkeypatch)
-        assert mute() is True
+        flag.touch()
         assert mute() is True
         assert flag.exists()
 

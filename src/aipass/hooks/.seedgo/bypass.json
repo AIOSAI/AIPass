@@ -1380,6 +1380,167 @@
       "file": "apps/modules/write_ownership.py",
       "standard": "modules",
       "reason": "Not a drone command surface: the who-may-write-whose-files reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook. print_introspection states the rule; a CLI verdict would read the operator's cwd as a seat."
+    },
+    {
+      "file": "apps/handlers/security/edit_gate.py",
+      "standard": "logged_fallback",
+      "lines": [682, 744, 812, 1092, 1155],
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 682 _allowed_fields: the refusal's wording only, the refusal stands. 744: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 812: the todos advisory text, never a verdict. 1092 _seat_trinity and 1155 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through (the old 1049 and 1080) were cured fail-closed in leg 5."
+    },
+    {
+      "file": "apps/handlers/security/subagent_gate.py",
+      "standard": "logged_fallback",
+      "lines": [73],
+      "reason": "Fleet green leg 5: _get_cwd_branch, a cwd outside src/<pkg>/<branch> has no branch to check. SubagentStop guards no write, and a block there traps the sub-agent in a stop loop (documented in the module)."
+    },
+    {
+      "file": "apps/handlers/security/presence_gate.py",
+      "standard": "logged_fallback",
+      "lines": [106, 127],
+      "reason": "Fleet green leg 5: 106 _format_session_age is display text only. 127 _session_start: None means 'cannot rank', which the docstring states and the caller treats as never younger, so no seat gains standing from an unreadable start."
+    },
+    {
+      "file": "apps/modules/bash_writes.py",
+      "standard": "logged_fallback",
+      "lines": [627],
+      "reason": "Fleet green leg 5: a word Path() cannot construct (a NUL byte) names no file the OS can write; NOT_CAUGHT says so, and the shell itself refuses such a path."
+    },
+    {
+      "file": "apps/modules/testgate_policy.py",
+      "standard": "logged_fallback",
+      "lines": [117, 126],
+      "reason": "Fleet green leg 5: find_policy_file's None is answered by load_policy with _missing(), a fail-closed Policy that refuses every new test file. Nothing is allowed on doubt."
+    },
+    {
+      "file": "apps/modules/engine_closure.py",
+      "standard": "logged_fallback",
+      "lines": [199],
+      "reason": "Fleet green leg 5, item 2: None is 'ruff could not run' and the success path never returns it (a list, [] when clean); the docstring names it. The edit is allowed and logged because two layers stand behind this one (the promoted copy, the fail-closed engine), and refusing every edit to 119 closure files on a missing linter would lock out the repair too."
+    },
+    {
+      "file": "apps/modules/diagnostics_state.py",
+      "standard": "logged_fallback",
+      "lines": [252, 255, 258, 261],
+      "reason": "Fleet green leg 5: revalidate's None is 'unknown' (pyright missing, timed out, unparseable, failed) and its docstring says it must never be read as clean; the success path returns a list. edit_gate keeps the recorded errors on None, so the fence stays as it was: fail-closed."
+    },
+    {
+      "file": "apps/modules/cc_sessions.py",
+      "standard": "logged_fallback",
+      "lines": [170, 203, 209, 212, 215, 238, 321],
+      "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). 203 and 212 answer 'alive' on doubt: the gate keeps refusing the newer seat. 209 is the real answer (ESRCH = dead). 215: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, both handled; any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block (ruling a, DPLAN-0310). 170 start ticks and 321 session_start: None is 'cannot rank', never younger. 238: display text."
+    },
+    {
+      "file": "apps/modules/cadence.py",
+      "standard": "logged_fallback",
+      "lines": [157, 332, 503, 508, 604, 804, 898, 958, 1051],
+      "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value (turn 0, 'never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
+    },
+    {
+      "file": "apps/modules/context_window.py",
+      "standard": "logged_fallback",
+      "lines": [57],
+      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write."
+    },
+    {
+      "file": "apps/modules/cc_transcripts.py",
+      "standard": "logged_fallback",
+      "lines": [209, 251],
+      "reason": "Fleet green leg 5: the recent-chats listing a session boot displays. An unlistable or unstattable transcript shows as no chat; guards no write."
+    },
+    {
+      "file": "apps/modules/alert_dismiss.py",
+      "standard": "logged_fallback",
+      "lines": [63, 78],
+      "reason": "Fleet green leg 5: the dismiss verb prints the failure in red to the operator who ran it and logs an error; False is the verb's 'not dismissed'. Not silent, guards no write."
+    },
+    {
+      "file": "apps/modules/release_notice.py",
+      "standard": "logged_fallback",
+      "lines": [59, 76, 98],
+      "reason": "Fleet green leg 5: the manager-only release notice (advisory). No root, no passport or an unreadable passport means no notice; guards no write. 76 gained its log line in leg 5 (it was silent)."
+    },
+    {
+      "file": "apps/modules/injection_ledger.py",
+      "standard": "logged_fallback",
+      "lines": [73],
+      "reason": "Fleet green leg 5: _automated is tri-state by its signature (bool | None); None records the ledger line without the flag, as its comment says."
+    },
+    {
+      "file": "apps/handlers/lifecycle/compact.py",
+      "standard": "logged_fallback",
+      "lines": [56],
+      "reason": "Fleet green leg 5: an injector's content (the last session); None injects nothing. Injectors are skipped on error by doctrine; guards no write."
+    },
+    {
+      "file": "apps/handlers/lifecycle/pre_compact_prep.py",
+      "standard": "logged_fallback",
+      "lines": [62, 132, 196, 229],
+      "reason": "Fleet green leg 5: 62 and 132 are counts for the compact snapshot, None renders as unknown, never zero. 196 and 229: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
+    },
+    {
+      "file": "apps/handlers/lifecycle/session_boot.py",
+      "standard": "logged_fallback",
+      "lines": [152, 221, 373, 984],
+      "reason": "Fleet green leg 5: boot display (tmux name, age, pinned CLI version) and the dispatch-lock read for the boot banner. Guards no write."
+    },
+    {
+      "file": "apps/handlers/config/output_merge.py",
+      "standard": "logged_fallback",
+      "lines": [58],
+      "reason": "Fleet green leg 5: _as_object's None is 'not a JSON object', and the merge keeps that stdout as text. A block is decided by the engine from exit code 2, before any merge."
+    },
+    {
+      "file": "apps/handlers/prompt/persistent_alert.py",
+      "standard": "logged_fallback",
+      "lines": [63],
+      "reason": "Fleet green leg 5: an injector; an unreadable alerts.json shows no alert this turn (logged). Injectors are skipped on error by doctrine; guards no write."
+    },
+    {
+      "file": "apps/handlers/notification/email.py",
+      "standard": "logged_fallback",
+      "lines": [77],
+      "reason": "Fleet green leg 5: the new-mail count for a notification; an unreadable inbox notifies nothing (logged). The inbox itself is read by drone @ai_mail inbox, not by this count."
+    },
+    {
+      "file": "apps/handlers/notification/telegram_response.py",
+      "standard": "logged_fallback",
+      "lines": [158, 339],
+      "reason": "Fleet green leg 5: an unreadable transcript relays nothing to Telegram, logged at ERROR. A notification, guards no write."
+    },
+    {
+      "file": "tests/test_json_durability.py",
+      "standard": "silent_catch",
+      "reason": "Fleet green leg 5, file-wide because silent_catch passes no line (the checklist says so). The three catches, lines 244, 249 and 258 today, are in a reader thread polling a file under concurrent os.replace. 249 and 258 are not silent: each appends to local_failures, which the test asserts empty. 244 is Windows share mode refusing the open while a replace is in flight; it is deliberately not counted as a read. A log call per poll would write thousands of lines from a hot loop."
+    },
+    {
+      "file": "apps/modules/protected_paths.py",
+      "standard": "modules",
+      "reason": "Fleet green leg 5: a module, not a handler. It is the business rule (which files switch the gates) and handlers/security/git_gate.py reaches it at call time; it is no drone verb because its answer depends on the asking seat's cwd and admin grant, which a CLI run would read as the operator's. Same profile and reason as write_ownership.py's modules row."
+    },
+    {
+      "file": "apps/modules/promote.py",
+      "standard": "introspection",
+      "reason": "Fleet green leg 5: the bare verb IS the action. `drone @hooks promote` with no arguments promotes, as @devpulse runs it; a no-args introspection gate would turn every promotion into a help screen. Introspection is on --help, and `promote status` reads the live name."
+    },
+    {
+      "file": "apps/modules/promote.py",
+      "standard": "modules",
+      "reason": "Fleet green leg 5: promote.py:188 writes the one-line pointer's scratch file (a name, not JSON) and os.replace makes it the pointer in one rename, so a hook process reads the old name or the new, never half. json_handler serves JSON documents; a pointer is not one."
+    },
+    {
+      "file": "apps/modules/engine_closure.py",
+      "standard": "modules",
+      "reason": "Fleet green leg 5: the 'direct file operation' is read_text of a Python source file for ast.parse (the closure is computed by reading, never importing). Source code is not a JSON document json_handler could serve. handle_command and print_introspection are present."
+    },
+    {
+      "file": "apps/modules/diagnostics_state.py",
+      "standard": "modules",
+      "reason": "Fleet green leg 5: of_the_tree reads the errored Python source to see whether an error's line holds a {{ placeholder. Source code is not JSON; the seat state itself is written atomically by save_seat (temp + os.replace). handle_command and print_introspection are present."
+    },
+    {
+      "file": "apps/modules/engine_closure.py",
+      "standard": "json_structure",
+      "reason": "Reads the root .aipass/hooks.json read-only with stdlib json to learn which handlers are wired, and ruff's JSON report. Writes nothing, logs no operation; same profile as write_ownership/admin_seat."
     }
   ],
   "notes": {

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.3.1
+# Version: 2.3.2
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -22,7 +22,6 @@ test runs: the repo-root conftest REFUSES a run that reaches a shim-bound
 Then per test by ``mock_infrastructure``, so each test gets its own tmp_path.
 """
 
-import importlib
 import json
 import os
 import shutil
@@ -37,8 +36,10 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import pytest
 
 from aipass.cli.apps.modules import display
-from aipass.hooks.apps.handlers.config import diagnostics
+from aipass.hooks.apps.handlers.config import diagnostics, trust_registry
 from aipass.hooks.apps.handlers.json import json_handler
+from aipass.hooks.apps.modules import cadence
+from aipass.hooks.apps.modules import diagnostics_state as ds
 
 collect_ignore_glob = [".archive/*"]
 
@@ -131,7 +132,6 @@ def isolated_trust_registry(tmp_path_factory, monkeypatch) -> Path:
     Returns:
         The sandbox registry path (absent until something writes it).
     """
-    trust_registry = importlib.import_module("aipass.hooks.apps.handlers.config.trust_registry")
     sandbox = tmp_path_factory.mktemp("trust_registry") / "trusted_projects.json"
     monkeypatch.setattr(trust_registry, "REGISTRY_PATH", sandbox)
     return sandbox
@@ -209,7 +209,6 @@ def isolated_cadence_state(tmp_path_factory, monkeypatch):
 
     Tests that exercise cadence itself patch _GUARD_DIR on top of this.
     """
-    cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
     monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path_factory.mktemp("cadence_state"))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "pytest-session")
 
@@ -228,7 +227,6 @@ def isolated_diagnostics_state(tmp_path_factory, monkeypatch):
     STATE_DIR under the system temp, and the version 1 file (LEGACY_FILE) is removed by
     the next write: both point into one sandbox, and auto_fix writes through them.
     """
-    ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
     sandbox = tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json"
     monkeypatch.setattr(ds, "LEGACY_FILE", sandbox)
     monkeypatch.setattr(ds, "STATE_DIR", sandbox.parent / "seats")

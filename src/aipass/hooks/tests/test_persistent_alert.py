@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_persistent_alert.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/prompt/persistent_alert.py and apps/modules/alert_dismiss.py."""
@@ -312,8 +312,6 @@ class TestAlertSound:
         are fresh processes each time) so sound fired on every prompt. Guard file persists
         across separate handle() calls even after re-importing the module fresh."""
         import importlib
-
-        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()

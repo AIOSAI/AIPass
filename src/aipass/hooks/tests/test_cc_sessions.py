@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cc_sessions.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
@@ -512,7 +512,7 @@ class TestOccupantSelectionIsKindAware:
 
     @staticmethod
     def _s(pid, kind, started_ms):
-        return {"pid": pid, "kind": kind, "startedAt": started_ms, "cwd": "/tmp/branch"}
+        return {"pid": pid, "kind": kind, "startedAt": started_ms, "cwd": "branch"}
 
     @staticmethod
     def _occupant_pid(cwd, **kwargs):
@@ -569,7 +569,7 @@ class TestOccupantSelectionIsKindAware:
             assert self._occupant_pid(str(tmp_path / "branch")) == 3
 
     def test_unknown_start_never_displaces_a_seat_whose_age_is_known(self, tmp_path):
-        undated = {"pid": 1, "kind": "interactive", "cwd": "/tmp/branch"}
+        undated = {"pid": 1, "kind": "interactive", "cwd": "branch"}
         dated = self._s(2, "interactive", 1_000_000_900_000)
         with self._live(undated, dated):
             assert self._occupant_pid(str(tmp_path / "branch")) == 2

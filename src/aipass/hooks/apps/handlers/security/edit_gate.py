@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.18.1
+# Version: 1.19.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
@@ -99,8 +99,7 @@ def _import_module(name: str) -> Any:
     in place of patching importlib.import_module, which replaces it process-wide.
     It changes no verdict. The decision is hooks', leg 4.
     """
-    load = importlib.import_module
-    return load(name)
+    return importlib.import_module(name)
 
 
 def _ownership() -> Any:
@@ -1042,11 +1041,12 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         try:
             before = json.loads(current_text) if current_text is not None else {}
         except ValueError as exc:
-            # Already broken on disk and this edit parses: it is the repair, so no caps against it.
+            # Already broken on disk and this edit parses: it is the repair, judged as a new file. Until
+            # leg 5 it returned None here and the repair carried whatever it held past every cap.
             logger.warning(
                 "[HOOKS] edit_gate: %s did not parse before this %s, which repairs it: %s", fp, tool_name, exc
             )
-            return None
+            before = {}
 
         block = _check_newest_first(before, after)
         if block:
@@ -1075,9 +1075,12 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
                 return {"stdout": json.dumps(output), "exit_code": 0}
 
         return None
-    except Exception as exc:
-        logger.warning("[HOOKS] edit_gate: .trinity size check failed (allowing): %s", exc)
-        return None
+    except Exception as exc:  # fail closed (leg 5): an unreadable memory file passed every cap here
+        logger.warning("[HOOKS] edit_gate: .trinity check could not run, refusing: %s", exc)
+        return _refuse(
+            f"{fp.name} could not be checked against its caps ({type(exc).__name__}: {exc}), so the write is "
+            "refused: a memory file the gate cannot read is not one it has measured. Make it readable, then retry."
+        )
 
 
 def _seat_trinity(cwd: str) -> Path | None:
@@ -1291,6 +1294,13 @@ def handle(hook_data: dict) -> dict:
         if not file_path.endswith(".py"):
             return {"stdout": "", "exit_code": 0}
 
+        # A file the hook engine imports must not be left crashing at import (leg 5, item 2; the 10-03 incident).
+        home = _import_module("aipass.hooks.apps.handlers.config.loader").aipass_home()
+        crash = _import_module("aipass.hooks.apps.modules.engine_closure")
+        block = crash.crash_refusal(fp, tool_name, tool_input, _resolve_after_text, home)
+        if block:
+            return _refuse(block)
+
         # Each seat reads its own diagnostics state alone (devpulse's decision A, leg 4).
         ds = _import_module("aipass.hooks.apps.modules.diagnostics_state")
         seat = ds.seat_key(hook_data)
@@ -1322,7 +1332,7 @@ def handle(hook_data: dict) -> dict:
         # The block must describe what is true now, not what was true when auto_fix
         # last ran. Any resolving write the hook did not observe — a Bash heredoc, an
         # external editor — used to leave the state behind and block forever.
-        fresh = ds.revalidate(errored)
+        fresh = ds.of_the_tree(errored, ds.revalidate(errored), 0)  # pyright counts from 0
         if fresh is not None:
             if not fresh:
                 ds.clear_seat(seat)

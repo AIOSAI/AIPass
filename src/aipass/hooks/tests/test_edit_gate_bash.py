@@ -15,6 +15,7 @@
 
 import json
 import os
+import shutil
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import patch
 
@@ -579,8 +580,8 @@ class TestTheVerbIsReadTheSameOnEveryHost:
 class TestBashWritesParser:
     """Unit-level reading of the parser, independent of the fence."""
 
-    def test_unbalanced_quotes_fall_back_rather_than_going_quiet(self):
-        targets = write_targets("echo 'unterminated > /tmp/x.json", "/tmp")
+    def test_unbalanced_quotes_fall_back_rather_than_going_quiet(self, tmp_path: Path):
+        targets = write_targets("echo 'unterminated > x.json", str(tmp_path))
         assert any(str(t).endswith("x.json") for t, _ in targets)
 
     def test_a_variable_path_is_skipped_not_guessed(self, tmp_path: Path):
@@ -617,6 +618,24 @@ class TestBashWritesParser:
         joined = " ".join(bash_writes.NOT_CAUGHT)
         for named in ("symlink", "xargs", "chmod", "git", "pipe", "no separator", "joined", "sponge"):
             assert named in joined
+
+    def test_no_usable_cwd_raises_rather_than_reading_no_writes(self, tmp_path: Path, monkeypatch):
+        """Fleet green leg 5: with no cwd to resolve against, the reader answered [] ("writes nothing").
+
+        Every gate read that as nothing to judge and let a relative write through. It
+        now raises, and each gate's crash refusal refuses the call. The platform is
+        asked inside the test: Windows refuses to remove a process's cwd, and then
+        the cwd stays usable and the command is read as before.
+        """
+        gone = tmp_path / "gone"
+        gone.mkdir()
+        monkeypatch.chdir(gone)
+        shutil.rmtree(gone, ignore_errors=True)  # the platform answers by whether the directory is still there
+        if not gone.exists():
+            with pytest.raises(OSError):
+                bash_writes.write_targets_by_segment("echo hi > out.txt", "")
+        else:
+            assert write_targets("echo hi > out.txt", "") == [(gone / "out.txt", "redirection (>)")]
 
 
 class TestEveryLineIsACommand:
@@ -828,9 +847,9 @@ class TestBothSpellingsAreRead:
         separator reading had replaced the escape reading rather than joining
         it, this filename would have become two tokens on every OS.
         """
-        readings = bash_writes._readings(r"cp a\ b.txt /tmp/dest.txt")
+        readings = bash_writes._readings(r"cp a\ b.txt dest.txt")
 
-        assert ["cp", "a b.txt", "/tmp/dest.txt"] in readings, f"escape reading lost: {readings}"
+        assert ["cp", "a b.txt", "dest.txt"] in readings, f"escape reading lost: {readings}"
 
     def test_separator_reading_is_produced_too(self, tmp_path: Path):
         """The reading that was missing entirely until 2026-08-31."""
@@ -1051,6 +1070,28 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
         existing = Path(registered_projects["memory"]) / "existing.py"
         existing.write_text("x = 1\n", encoding="utf-8")
         assert _blocked(_run(registered_projects["hooks"], command=f"rm {existing.as_posix()}"))
+
+    def test_a_project_whose_directory_cannot_be_listed_is_refused_not_read_as_none(
+        self, registered_projects: dict, grant_withheld, tmp_path: Path
+    ):
+        """Fleet green leg 5: glob answered [] for a writable directory it could not list, so the registry
+        inside was read as no project and a crossing into it passed. Mode 0o300 keeps write and enter,
+        drops list. Where the platform still lists it (Windows, root) the crossing rule refuses instead:
+        the test asks os.scandir with its own hands and asserts the refusal either way."""
+        locked = tmp_path / "Projects" / "Locked"
+        locked.mkdir(parents=True)
+        (locked / "LOCKED_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        locked.chmod(0o300)
+        try:
+            command = f"cp x {(locked / 'new.py').as_posix()}"
+            assert _blocked(_run(registered_projects["hooks"], command=command))
+            assert (
+                _run(registered_projects["hooks"], command=f"cp x {(scratch / 'new.py').as_posix()}")["exit_code"] == 0
+            ), "control: a listable directory in no project stays nobody's"
+        finally:
+            locked.chmod(0o700)
 
     def test_drone_and_own_branch_work_still_pass(self, registered_projects: dict):
         seat = registered_projects["hooks"]

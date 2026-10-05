@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: diagnostics_state.py
-# Version: 2.0.0
+# Version: 2.1.0
 # Description: Post-edit diagnostics state per seat — location, meaning, and live re-validation
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-13
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Owns what the diagnostics state means: one file per seat since leg 4 (see load_seat).
@@ -178,6 +178,55 @@ def all_cross_file(errors: list) -> bool:
     return all(is_cross_file_error(e) for e in errors)
 
 
+def of_the_tree(file_path: str, errors: list[dict] | None, base: int) -> list[dict] | None:
+    """*errors* less those that are not diagnostics of the tree: a template's, or a placeholder line's.
+
+    A file under a ``templates/`` directory is text a generator fills in, and a line
+    holding ``{{`` is a placeholder; neither is code the tree runs. Spawn's leg 10 was
+    refused every .py edit for a day on test_cli_routing.py:25 in its citizen template
+    (spawn 94b406f9, fleet green leg 5 queued defect a).
+
+    Args:
+        file_path: The file the errors are in.
+        errors: {line, message} entries, or None (no answer, passed through as None).
+        base: The first line's number in this checker's count: ruff 1, pyright 0.
+
+    Returns:
+        The errors that are the tree's, None when *errors* is None.
+    """
+    if errors is None:
+        return None
+    if "templates" in Path(file_path).parts:
+        return []
+    try:
+        lines = Path(file_path).read_text(encoding="utf-8").splitlines()
+    except (OSError, ValueError) as exc:
+        logger.info("[HOOKS] diagnostics_state: %s unreadable, its errors kept as found: %s", file_path, exc)
+        return errors
+    kept = []
+    for error in errors:
+        index = int(error.get("line", 0)) - base
+        if 0 <= index < len(lines) and "{{" in lines[index]:
+            continue
+        kept.append(error)
+    return kept
+
+
+def pyright_cwd(file_path: str) -> str:
+    """The directory pyright runs from for *file_path*: its project root, never the session's cwd.
+
+    The interpreter's ``-m`` puts the cwd first on sys.path, so a scratch ``types.py`` beside a
+    session's cwd broke the interpreter before pyright started, and the run came back
+    "unknown" (memory leg 9, fleet green leg 5). The project root is the nearest
+    ancestor holding a pyproject.toml or pyrightconfig.json, else the file's directory.
+    """
+    start = Path(file_path).resolve().parent
+    for candidate in [start, *start.parents]:
+        if (candidate / "pyproject.toml").is_file() or (candidate / "pyrightconfig.json").is_file():
+            return str(candidate)
+    return str(start)
+
+
 def revalidate(file_path: str) -> list[dict] | None:
     """Re-run pyright on *file_path* and return its current errors.
 
@@ -195,6 +244,7 @@ def revalidate(file_path: str) -> list[dict] | None:
             capture_output=True,
             text=True,
             timeout=_PYRIGHT_TIMEOUT_SECONDS,
+            cwd=pyright_cwd(file_path),
         )
         data = json.loads(result.stdout)
     except FileNotFoundError:

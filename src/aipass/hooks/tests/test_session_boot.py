@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_boot.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Tests for session boot wrapper (menu-based attach/start/close)
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py."""
@@ -215,7 +215,7 @@ class TestNameFlag:
 class TestSessionLabel:
     def test_formats_label(self):
         session = {"pid": 1234, "sessionId": "abcdef1234", "kind": "interactive"}
-        label = session_boot._session_label(session, "hooks")
+        label = session_boot._session_label(session)
         assert "1234" in label
         assert "abcdef12" in label
         assert "interactive" in label
@@ -700,7 +700,7 @@ class TestMultipleLiveSessions:
         ):
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["exit_code"] == 0
-        cmd = mock_exec.call_args[0][3]
+        cmd = mock_exec.call_args[0][2]
         assert "--resume" in cmd and "newest" in cmd
 
     def test_n_stops_stoppable_then_starts(self, tmp_path):
@@ -868,18 +868,18 @@ class TestSessionLabelAutoName:
             "kind": "bg",
             "name": "chroma review",
         }
-        label = session_boot._session_label(session, "hooks")
+        label = session_boot._session_label(session)
         assert '"chroma review"' in label
         assert "abc12345" in label
 
     def test_interactive_label_no_name(self):
         session = {"pid": 1234, "sessionId": "abc12345", "kind": "interactive"}
-        label = session_boot._session_label(session, "hooks")
+        label = session_boot._session_label(session)
         assert '"' not in label
 
     def test_bg_label_no_name_field(self):
         session = {"pid": 1234, "sessionId": "abc12345", "kind": "bg"}
-        label = session_boot._session_label(session, "hooks")
+        label = session_boot._session_label(session)
         assert '"' not in label
 
 
@@ -941,9 +941,7 @@ class TestExecInTmux:
             patch.object(session_boot, "_tmux_session_exists", return_value=False),
             patch(f"{_MOD}.os.execvp") as mock_exec,
         ):
-            session_boot._exec_in_tmux(
-                "hooks", "abc12345", "/usr/local/bin/claude", ["/usr/local/bin/claude", "--continue"]
-            )
+            session_boot._exec_in_tmux("hooks", "abc12345", ["/usr/local/bin/claude", "--continue"])
         args = mock_exec.call_args[0]
         assert args[0] == "tmux"
         assert "new-session" in args[1]
@@ -957,7 +955,7 @@ class TestExecInTmux:
             patch(f"{_MOD}.subprocess.run") as mock_run,
             patch(f"{_MOD}.os.execvp"),
         ):
-            session_boot._exec_in_tmux("hooks", "", "/usr/local/bin/claude", ["/usr/local/bin/claude"])
+            session_boot._exec_in_tmux("hooks", "", ["/usr/local/bin/claude"])
         kill_calls = [c for c in mock_run.call_args_list if "kill-session" in str(c)]
         assert len(kill_calls) == 1
 
@@ -1291,7 +1289,7 @@ class TestPickerOffersChatsNotProcesses:
         assert "The one he wanted" in menu
         assert "61 msgs" in menu
 
-        cmd = mock_exec.call_args[0][3]
+        cmd = mock_exec.call_args[0][2]
         assert "--resume" in cmd and "dead-chat" in cmd
 
     def test_bg_leftovers_are_named_leftovers_not_chats(self, tmp_path, fake_projects, capsys):
@@ -1313,7 +1311,7 @@ class TestPickerOffersChatsNotProcesses:
             {"pid": 2, "sessionId": "bg-b", "cwd": str(tmp_path), "kind": "bg"},
         ]
         result, mock_exec = self._boot(tmp_path, live, "")
-        cmd = mock_exec.call_args[0][3]
+        cmd = mock_exec.call_args[0][2]
         assert "newest" in cmd
 
     def test_a_held_chat_attaches_it_does_not_spawn_a_second_brain(self, tmp_path, fake_projects):
@@ -1351,7 +1349,7 @@ class TestPickerOffersChatsNotProcesses:
             {"pid": 2, "sessionId": "bg-b", "cwd": str(tmp_path), "kind": "bg"},
         ]
         result, mock_exec = self._boot(tmp_path, live, "")
-        assert "--continue" in mock_exec.call_args[0][3]
+        assert "--continue" in mock_exec.call_args[0][2]
 
 
 class TestChatLine:
@@ -1517,7 +1515,7 @@ class TestTmuxLookupsSurviveAMachineWithoutTmux:
             patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")),
             patch.object(session_boot.os, "execvp") as mock_exec,
         ):
-            result = session_boot._exec_in_tmux("hooks", "", "/usr/local/bin/claude", ["/usr/local/bin/claude"])
+            result = session_boot._exec_in_tmux("hooks", "", ["/usr/local/bin/claude"])
         assert result["action"] == "started"
         mock_exec.assert_called_once()
 
@@ -1641,7 +1639,7 @@ class TestSessionPointerDoors:
         ):
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["exit_code"] == 0
-        cmd = mock_exec.call_args[0][3]
+        cmd = mock_exec.call_args[0][2]
         assert "--resume" in cmd and "ptr-sid-1" in cmd
         assert "--continue" not in cmd
 
@@ -1660,7 +1658,7 @@ class TestSessionPointerDoors:
         ):
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["exit_code"] == 0
-        assert "--continue" in mock_exec.call_args[0][3]
+        assert "--continue" in mock_exec.call_args[0][2]
 
     def test_no_live_enter_with_stale_pointer_falls_back(self, tmp_path, monkeypatch):
         """A pointer whose transcript is gone must degrade to --continue —
@@ -1681,7 +1679,7 @@ class TestSessionPointerDoors:
         ):
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["exit_code"] == 0
-        cmd = mock_exec.call_args[0][3]
+        cmd = mock_exec.call_args[0][2]
         assert "--continue" in cmd
         assert "ptr-gone" not in cmd
 
@@ -1730,7 +1728,7 @@ class TestSessionPointerDoors:
         ):
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["exit_code"] == 0
-        cmd = mock_exec.call_args[0][3]
+        cmd = mock_exec.call_args[0][2]
         assert "--resume" in cmd and "older-ptr" in cmd
         assert "newest" not in cmd
 
@@ -1757,7 +1755,7 @@ class TestSessionPointerDoors:
         ):
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["exit_code"] == 0
-        cmd = mock_exec.call_args[0][3]
+        cmd = mock_exec.call_args[0][2]
         picked = cmd[cmd.index("--resume") + 1]
         pointer = sp.read_pointer(Path(tmp_path))
         assert pointer is not None and pointer["session_id"] == picked
@@ -1903,7 +1901,7 @@ class TestDispatchedGuard:
         ):
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["exit_code"] == 0
-        assert "--continue" in mock_exec.call_args[0][3]
+        assert "--continue" in mock_exec.call_args[0][2]
         assert lock.exists()
 
     def test_reclaim_stops_the_job_then_resumes_its_chat(self, tmp_path, monkeypatch):
@@ -1933,7 +1931,7 @@ class TestDispatchedGuard:
         ):
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["exit_code"] == 0
-        cmd = mock_exec.call_args[0][3]
+        cmd = mock_exec.call_args[0][2]
         assert "--resume" in cmd and "job-sid-9" in cmd
 
     def test_reclaim_refuses_when_the_lock_stays(self, tmp_path, monkeypatch):

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-10-01
+# Modified: 2026-10-04
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -746,14 +746,19 @@ def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], li
         (segment tokens, hits) pairs, in command order. Segments that name no
         target are included with an empty hit list, so a caller can see the
         shape of the whole command rather than only its writing half.
+
+    Raises:
+        OSError: No cwd was handed in and the process has none (2.2.0, fleet green
+            leg 5). It answered [] here, "writes nothing", and every gate let the
+            relative write through; now each gate's crash refusal refuses the call.
     """
     if not command or not command.strip():
         return []
     try:
         base = Path(cwd) if cwd else Path.cwd()
     except OSError as exc:
-        logger.info("[HOOKS] bash_writes: no usable cwd (%s)", exc)
-        return []
+        logger.warning("[HOOKS] bash_writes: no usable cwd, the command cannot be read: %s", exc)
+        raise
 
     # Two texts, deliberately: heredoc bodies are stripped for the SYNTAX read
     # (a quoted command in a mail body is not a command) and kept for the

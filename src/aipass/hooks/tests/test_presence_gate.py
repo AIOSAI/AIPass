@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_presence_gate.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Tests for the presence gate handler
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-29
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/security/presence_gate.py."""
@@ -91,10 +91,10 @@ class TestResolveBranch:
         (tmp_path / ".git").mkdir()
         assert presence_gate._resolve_branch({"cwd": str(tmp_path)}) == tmp_path.name
 
-    def test_fallback_to_path_cwd_when_no_cwd_in_hook_data(self):
-        result = presence_gate._resolve_branch({})
-        assert isinstance(result, str)
-        assert len(result) > 0
+    def test_fallback_to_path_cwd_when_no_cwd_in_hook_data(self, tmp_path, monkeypatch):
+        (tmp_path / ".git").mkdir()
+        monkeypatch.chdir(tmp_path)
+        assert presence_gate._resolve_branch({}) == tmp_path.name
 
 
 class TestHandle:

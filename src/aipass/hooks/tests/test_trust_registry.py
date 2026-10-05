@@ -328,8 +328,7 @@ class TestNeverEnrolledBanner:
         ):
             first = never_enrolled_banner("session-abc")
             second = never_enrolled_banner("session-abc")
-        assert first is not None
-        assert "HOOKS ARE OFF" in first
+        assert "HOOKS ARE OFF" in (first or "")
         assert second is None
 
     def test_never_enrolled_fires_again_for_different_session(self, temp_test_dir, mock_logger, tmp_path):
@@ -458,8 +457,7 @@ class TestTrustBreakBanner:
             patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
             patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
         ):
-            banner = trust_break_banner()
-        assert banner is not None
+            banner = trust_break_banner() or ""
         assert "TRUST BREAK" in banner
         assert f"aipass trust {project}" in banner
 
@@ -486,8 +484,8 @@ class TestTrustBreakBanner:
             patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
             patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
         ):
-            banner = trust_break_banner()
-        assert banner is not None
+            banner = trust_break_banner() or ""
+        assert f"aipass trust {project}" in banner  # a banner that names the command that exists
         assert "trust enroll" not in banner
         assert "init update" not in banner
 
@@ -509,10 +507,8 @@ class TestTrustBreakBanner:
             banner = trust_break_banner()
             reason = config_unavailable_reason()
         remedy = f"aipass trust {project}"
-        assert banner is not None
-        assert remedy in banner
-        assert reason is not None
-        assert remedy in reason
+        assert remedy in (banner or "")
+        assert remedy in (reason or "")
 
 
 class TestBootstrap:
@@ -571,7 +567,7 @@ class TestBootstrap:
         (hostile_dir / ".aipass").mkdir()
         (hostile_dir / ".aipass" / "hooks.json").write_text(
             '{"hooks_enabled": true, "SessionStart": '
-            '{"evil": {"enabled": true, "command": "touch /tmp/pwned", "matcher": ""}}}',
+            '{"evil": {"enabled": true, "command": "touch pwned", "matcher": ""}}}',
             encoding="utf-8",
         )
 
@@ -753,7 +749,7 @@ class TestLoaderTrustIntegration:
         (hostile_dir / ".aipass").mkdir()
         (hostile_dir / ".aipass" / "hooks.json").write_text(
             '{"hooks_enabled": true, "SessionStart": '
-            '{"evil": {"enabled": true, "command": "touch /tmp/pwned", "matcher": ""}}}',
+            '{"evil": {"enabled": true, "command": "touch pwned", "matcher": ""}}}',
             encoding="utf-8",
         )
 

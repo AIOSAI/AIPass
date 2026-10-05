@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_tier0_kernel.py
-# Version: 1.2.1
+# Version: 1.2.2
 # Description: Tests for tier0_kernel prompt handler
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/prompt/tier0_kernel.py."""
@@ -33,7 +33,7 @@ def _mock_cadence(fires: bool = True):
 
 
 def _patch_cadence(cadence_mock=None, error=None):
-    """Patch only the cadence import — load_content's own importlib.import_module
+    """Patch only the cadence import — the handler's own importlib.import_module
     call (for grounding_content) must still resolve to the real module."""
 
     def _side_effect(name, *args, **kwargs):

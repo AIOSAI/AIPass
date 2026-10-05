@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
@@ -39,7 +39,9 @@ rollover) never passes through a tool call, so no hook sees it. That fence is th
 service's own to carry.
 """
 
+import fnmatch
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -130,6 +132,10 @@ def _branches(data: object, root: Path) -> tuple[Branch, ...] | None:
     return tuple(rows)
 
 
+class ProjectUnreadable(OSError):
+    """A directory on the project walk could not be listed: whose file a write lands in is unknown."""
+
+
 def project_of(start: Path) -> Project | None:
     """The project *start* stands in: the nearest ancestor (itself included) holding a project registry.
 
@@ -137,16 +143,25 @@ def project_of(start: Path) -> Project | None:
     directory, and starting one level up reads a write INTO a project root as a
     write into the tree that contains it. None when no project is found — a fence
     that cannot locate a boundary must not invent one.
+
+    Raises:
+        ProjectUnreadable: A directory on the walk cannot be listed (2.2.0, fleet
+            green leg 5). ``glob`` answered [] there, so a registry in a writable
+            but unlistable directory was read as "no project" and the crossing and
+            project-level fences went quiet. Every edit_gate caller turns the raise
+            into its crash refusal; the tripwire logs it and reports nothing.
     """
     current = _resolved(start)
     if current is None:
         return None
     for candidate in [current, *current.parents]:
+        if not candidate.is_dir():  # a file, or a target not yet written: nothing to list (glob's [] there)
+            continue
         try:
-            markers = sorted(candidate.glob(PROJECT_MARKER))
+            with os.scandir(candidate) as entries:
+                markers = sorted(Path(e.path) for e in entries if fnmatch.fnmatch(e.name, PROJECT_MARKER))
         except OSError as exc:
-            logger.info("[HOOKS] write_ownership: project marker scan failed at %s: %s", candidate, exc)
-            return None
+            raise ProjectUnreadable(f"{candidate} cannot be listed, so its registry cannot be read: {exc}") from exc
         for marker in markers:
             data = _read(marker)
             if isinstance(data, dict) and data and "branches" not in data:

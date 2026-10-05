@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 from aipass.hooks.apps.handlers.security import edit_gate
 from aipass.hooks.apps.handlers.security.edit_gate import handle
 from aipass.hooks.apps.modules import cadence
+from aipass.memory.apps.handlers.json import entry_limits as memory_entry_limits
 
 
 _TEST_LIMITS_WARN = {
@@ -103,7 +104,7 @@ def _advisory_context(result):
 
 def _mock_entry_limits(limits):
     """Create a mock module with controlled limits and real changed_entries."""
-    el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+    el = memory_entry_limits
     mock_module = MagicMock()
     mock_module.load_entry_limits.return_value = limits
     mock_module.changed_entries = el.changed_entries
@@ -244,6 +245,43 @@ class TestTrinityWriteClean:
 
 class TestTrinityWriteOverLimitEnforced:
     """Write with over-limit entry + enforce=True -> blocked."""
+
+    def test_a_file_already_broken_on_disk_still_has_its_caps_checked(self, tmp_path):
+        """Fleet green leg 5: an unparseable file on disk returned None (allow) before any cap was read, so the
+        repairing Write carried whatever it held. The repair now passes the caps as if the file were new."""
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        Path(file_path).write_text("{not json", encoding="utf-8")
+        content = json.dumps({"key_learnings": {"learn_1": "x" * 201}})
+
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+            result = handle(_hook_data(file_path, content, cwd=str(tmp_path / "src" / "aipass" / "hooks")))
+
+        assert result["exit_code"] == 2
+        assert "key_learnings" in json.loads(result["stdout"])["reason"]
+
+    def test_a_file_the_gate_cannot_read_is_refused_not_allowed(self, tmp_path):
+        """Fleet green leg 5: the catch-all around the caps check allowed the write when the current file could
+        not be read (mode 0o200: writable, not readable). Where the platform still reads it (Windows, root), the
+        cap refuses instead: the test opens the file with its own hands and asserts the refusal either way."""
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        Path(file_path).write_text("{}", encoding="utf-8")
+        content = json.dumps({"key_learnings": {"learn_1": "x" * 201}})
+        Path(file_path).chmod(0o200)
+        try:
+            try:
+                Path(file_path).read_text(encoding="utf-8")
+                unreadable = False
+            except OSError as exc:
+                logging.getLogger(__name__).info("the platform refuses the read, as the gate will see: %s", exc)
+                unreadable = True
+            with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+                result = handle(_hook_data(file_path, content, cwd=str(tmp_path / "src" / "aipass" / "hooks")))
+        finally:
+            Path(file_path).chmod(0o600)
+
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert ("could not be checked" in reason) if unreadable else ("key_learnings" in reason)
 
     def test_block_over_limit_key_learning(self, tmp_path):
         """key_learning value 201 chars vs 200 cap -> blocked."""
@@ -1489,7 +1527,7 @@ class TestTrinityTodosCountAdvisory:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(15)]})
 
-        el_real = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        el_real = memory_entry_limits
         entry_limits_mock = MagicMock()
         entry_limits_mock.load_entry_limits.return_value = _TEST_LIMITS_WARN
         entry_limits_mock.changed_entries = el_real.changed_entries
@@ -2136,7 +2174,7 @@ class TestSectionCountGuard:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(30)]})
 
-        el_real = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        el_real = memory_entry_limits
         entry_limits_mock = MagicMock()
         entry_limits_mock.load_entry_limits.return_value = _TEST_LIMITS_WARN
         entry_limits_mock.changed_entries = el_real.changed_entries

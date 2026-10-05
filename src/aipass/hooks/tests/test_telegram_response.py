@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_telegram_response.py
-# Version: 2.0.2
+# Version: 2.0.3
 # Description: Tests for telegram_response notification handler
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-15
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/notification/telegram_response.py."""
@@ -369,10 +369,7 @@ class TestExtractAssistantResponse:
             result = extract_assistant_response(str(transcript))
 
         # Last real user message is "First real question"; assistants after it (non-sidechain)
-        assert result is not None
-        assert "First answer" in result
-        assert "Continuation of first answer" in result
-        assert "Sidechain assistant response" not in result
+        assert result == "First answer\n\nContinuation of first answer"
 
     def test_start_line_offset(self, tmp_path):
         """Layer 3: transcript_line_after skips earlier entries."""
@@ -405,9 +402,7 @@ class TestExtractAssistantResponse:
             result = extract_assistant_response(str(transcript))
 
         # The last real user message is "Real question", so we get everything after it
-        assert result is not None
-        assert "Starting work..." in result
-        assert "Done with the work" in result
+        assert result == "Starting work...\n\nDone with the work"
 
     def test_no_user_message_returns_none(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
@@ -569,8 +564,7 @@ class TestCursorAheadOfTranscript:
         with patch(LOGGER_PATCH):
             result = extract_mirror_turn(str(transcript), start_line=10409)
 
-        assert result is not None
-        assert "Answer" in result
+        assert result == "You: Question\n\nAnswer"
 
 
 # ===========================================================================
@@ -1503,7 +1497,6 @@ class TestWriteDeliveryLog:
         with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=log_path):
             _write_delivery_log(
                 "hello",
-                ["hello"],
                 [{"idx": 0, "method": "send", "ok": True, "message_id": 1, "text": "hello"}],
                 "session123",
             )
@@ -1521,7 +1514,6 @@ class TestWriteDeliveryLog:
         with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=log_path):
             _write_delivery_log(
                 "**bold text**",
-                ["**bold text**"],
                 [{"idx": 0, "method": "send", "ok": True, "message_id": 1, "text": "bold text"}],
                 "session123",
             )
@@ -1536,7 +1528,6 @@ class TestWriteDeliveryLog:
         with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=log_path):
             _write_delivery_log(
                 "hello",
-                ["hello"],
                 [{"idx": 0, "method": "send", "ok": False, "text": ""}],
                 "sess",
             )
@@ -1566,7 +1557,7 @@ class TestWriteDeliveryLog:
             patch(f"{MOD}._get_delivery_log", return_value=log_path),
             patch(f"{MOD}.append_jsonl", side_effect=OSError("disk full")),
         ):
-            _write_delivery_log("hi", ["hi"], [{"idx": 0, "ok": True, "text": "hi"}], "s")
+            _write_delivery_log("hi", [{"idx": 0, "ok": True, "text": "hi"}], "s")
 
         assert mock_logger.warning.call_count == 1
         assert "delivery log write failed" in mock_logger.warning.call_args[0][0]
@@ -1642,9 +1633,7 @@ class TestExtractMirrorTurn:
         with patch(LOGGER_PATCH):
             result = extract_mirror_turn(str(transcript))
 
-        assert result is not None
-        assert "You: What is AIPass?" in result
-        assert "AIPass is a multi-agent framework." in result
+        assert result == "You: What is AIPass?\n\nAIPass is a multi-agent framework."
 
     def test_multiple_turns_separated_by_divider(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
@@ -1659,12 +1648,7 @@ class TestExtractMirrorTurn:
         with patch(LOGGER_PATCH):
             result = extract_mirror_turn(str(transcript))
 
-        assert result is not None
-        assert "You: First question" in result
-        assert "First answer" in result
-        assert "---" in result
-        assert "You: Second question" in result
-        assert "Second answer" in result
+        assert result == "You: First question\n\nFirst answer\n\n---\n\nYou: Second question\n\nSecond answer"
 
     def test_sidechain_entries_skipped(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
@@ -1678,9 +1662,7 @@ class TestExtractMirrorTurn:
         with patch(LOGGER_PATCH):
             result = extract_mirror_turn(str(transcript))
 
-        assert result is not None
-        assert "Sidechain noise" not in result
-        assert "Real answer" in result
+        assert result == "You: Real question\n\nReal answer"
 
     def test_tool_result_user_messages_skipped(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
@@ -1695,12 +1677,8 @@ class TestExtractMirrorTurn:
         with patch(LOGGER_PATCH):
             result = extract_mirror_turn(str(transcript))
 
-        assert result is not None
-        assert "You: Real question" in result
-        assert "Working on it..." in result
-        assert "Done with the work" in result
         # tool_result should not create a second turn
-        assert "---" not in result
+        assert result == "You: Real question\n\nWorking on it...\n\nDone with the work"
 
     def test_start_line_skips_old_entries(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
@@ -1715,10 +1693,7 @@ class TestExtractMirrorTurn:
         with patch(LOGGER_PATCH):
             result = extract_mirror_turn(str(transcript), start_line=2)
 
-        assert result is not None
-        assert "Old question" not in result
-        assert "New question" in result
-        assert "New answer" in result
+        assert result == "You: New question\n\nNew answer"
 
     def test_no_new_entries_returns_none(self, tmp_path):
         transcript = tmp_path / "transcript.jsonl"
@@ -1751,9 +1726,7 @@ class TestExtractMirrorTurn:
         with patch(LOGGER_PATCH):
             result = extract_mirror_turn(str(transcript))
 
-        assert result is not None
-        assert "You: Question" in result
-        assert "Answer" in result
+        assert result == "You: Question\n\nAnswer"
 
     def test_assistant_only_no_user_text(self, tmp_path):
         """Assistant text after cursor with no user message — still delivered."""
@@ -1766,9 +1739,7 @@ class TestExtractMirrorTurn:
         with patch(LOGGER_PATCH):
             result = extract_mirror_turn(str(transcript))
 
-        assert result is not None
-        assert "Continuation text" in result
-        assert "You:" not in result
+        assert result == "Continuation text"
 
     def test_stale_cursor_clamps_to_latest_turn(self, tmp_path):
         """Cursor ahead of transcript self-heals by clamping to latest turn."""
@@ -1784,9 +1755,7 @@ class TestExtractMirrorTurn:
         with patch(LOGGER_PATCH):
             result = extract_mirror_turn(str(transcript), start_line=50)
 
-        assert result is not None
-        assert "You: Latest question" in result
-        assert "Latest answer" in result
+        assert result == "You: Latest question\n\nLatest answer"
 
     def test_stale_cursor_no_user_msg_delivers_all(self, tmp_path):
         """Stale cursor with no user messages — delivers all assistant text."""
@@ -1799,8 +1768,7 @@ class TestExtractMirrorTurn:
         with patch(LOGGER_PATCH):
             result = extract_mirror_turn(str(transcript), start_line=99)
 
-        assert result is not None
-        assert "Some output" in result
+        assert result == "Some output"
 
 
 # ===========================================================================
@@ -1847,8 +1815,7 @@ class TestFindPendingFileMirror:
         ):
             result = find_pending_file("session-xyz")
 
-        assert result is not None
-        assert str(mirror_dir) in str(result)
+        assert result == mirror_dir / "bot-42.json"
 
     def test_mirror_dir_cwd_match(self, tmp_path):
         mirror_dir = tmp_path / "telegram_bots"

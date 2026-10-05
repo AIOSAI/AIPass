@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_process.py
-# Version: 1.3.2
+# Version: 1.3.3
 # Description: Tests for auto_process lifecycle handler (TDPLAN-0005, DPLAN-0294 phase 1b)
 # Branch: hooks
 # Created: 2026-06-06
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_process.py."""
@@ -281,9 +281,7 @@ class TestSessionGuard:
         with patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "abc-123"}):
             path = _session_guard_path()
 
-        assert path is not None
-        assert "abc-123" in str(path)
-        assert "aipass-auto-process-" in str(path)
+        assert path == auto_process._GUARD_DIR / "aipass-auto-process-abc-123"
 
     def test_guard_path_none_without_session_id(self):
 
