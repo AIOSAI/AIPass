@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine_closure.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: The hook engine's import closure, and the edit check that keeps a NameError out of it
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-04
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Which files the hook engine imports, and a refusal for an edit that would crash one of them.
@@ -41,6 +41,7 @@ import sys
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.loader import aipass_home
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -245,6 +246,13 @@ def handle_command(command: str, args: list) -> bool:
         return False
     if not args:
         print_introspection()
+        return True
+    if wants_help(args):
+        CONSOLE.print("[bold cyan]closure[/bold cyan] — List the hook engine's import closure")
+        CONSOLE.print()
+        CONSOLE.print("  drone @hooks closure list")
+        CONSOLE.print()
+        CONSOLE.print("Prints every file the engine imports, computed now from this install, and the count.")
         return True
     if args[0] != "list":
         print_introspection()

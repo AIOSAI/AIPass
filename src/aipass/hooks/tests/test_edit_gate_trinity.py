@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.8.2
+# Version: 1.8.3
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -435,6 +435,10 @@ class TestRejectionNamesTheCutPoint:
         reason = self._reason(tmp_path, {"sessions": [{"summary": "k" * 301}]})
         assert "a write to a memory file made through Bash is refused" in reason
         assert "not measured" not in reason
+        # The lane the cap does cover is named too (moved here from test_edit_gate's
+        # private _evaluate_limits pins, fleet green leg 8), beside the entry it refused.
+        assert "Caps are measured on Edit/Write" in reason
+        assert "sessions [0]: 301/300 chars (+1)" in reason
 
 
 class TestShellMemoryTripwire:

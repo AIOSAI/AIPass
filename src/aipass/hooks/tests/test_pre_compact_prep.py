@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_pre_compact_prep.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
@@ -26,11 +26,6 @@ import pytest
 
 from aipass.hooks.apps.handlers.lifecycle import pre_compact_prep
 from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import (
-    _DEFAULT_SUMMARY_CAP,
-    _count_active_dispatch_locks,
-    _count_open_plans,
-    _inbox_unread,
-    _summary_cap,
     handle,
 )
 
@@ -146,32 +141,41 @@ class TestHandle:
         assert result == {"stdout": "", "exit_code": 0}
 
 
+def _snapshot(branch_dir, repo_root=None) -> str:
+    """The AUTO-COMPACT SNAPSHOT handle() returns for *branch_dir*.
+
+    The plan, dispatch-lock and inbox counts are read as the snapshot's own
+    parts (fleet green leg 8), not _count_open_plans / _count_active_dispatch_locks
+    / _inbox_unread by name. A part the gate could not read is absent.
+    """
+    with patch(f"{MODULE}._find_repo_root", return_value=repo_root):
+        return handle({"cwd": str(branch_dir)})["stdout"]
+
+
 class TestCountOpenPlans:
     def test_counts_only_matching_location(self, tmp_path):
 
-        branch_dir = tmp_path / "src" / "aipass" / "widget"
-        branch_dir.mkdir(parents=True)
+        branch_dir = _make_branch(tmp_path)
 
         fake_plans = [
             ("0001", {"location": str(branch_dir.resolve())}),
-            ("0002", {"location": "/somewhere/else"}),
+            ("0002", {"location": str(tmp_path / "somewhere" / "else")}),
             ("0003", {"location": str(branch_dir.resolve())}),
         ]
 
         with patch("aipass.flow.apps.handlers.plan.get_open_plans.get_open_plans", return_value=fake_plans):
-            count = _count_open_plans(branch_dir)
+            snapshot = _snapshot(branch_dir)
 
-        assert count == 2
+        assert "2 open plan(s)" in snapshot
 
     def test_returns_none_on_import_failure(self, tmp_path):
 
-        branch_dir = tmp_path / "src" / "aipass" / "widget"
-        branch_dir.mkdir(parents=True)
+        branch_dir = _make_branch(tmp_path)
 
         with patch("aipass.flow.apps.handlers.plan.get_open_plans.get_open_plans", side_effect=RuntimeError("no")):
-            count = _count_open_plans(branch_dir)
+            snapshot = _snapshot(branch_dir)
 
-        assert count is None
+        assert "open plan" not in snapshot
 
 
 class TestCountActiveDispatchLocks:
@@ -189,27 +193,26 @@ class TestCountActiveDispatchLocks:
         }
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
 
-        count = _count_active_dispatch_locks(tmp_path)
-        assert count == 1
+        assert "1 active dispatch(es)" in _snapshot(_make_branch(tmp_path), repo_root=tmp_path)
 
-    def test_returns_none_without_repo_root(self):
+    def test_returns_none_without_repo_root(self, tmp_path):
 
-        assert _count_active_dispatch_locks(None) is None
+        assert "active dispatch" not in _snapshot(_make_branch(tmp_path), repo_root=None)
 
 
 class TestInboxUnread:
     def test_reads_unread_count(self, tmp_path):
 
-        branch_dir = tmp_path / "widget"
+        branch_dir = _make_branch(tmp_path)
         mail_dir = branch_dir / ".ai_mail.local"
         mail_dir.mkdir(parents=True)
         (mail_dir / "inbox.json").write_text(json.dumps({"unread_count": 4}), encoding="utf-8")
 
-        assert _inbox_unread(branch_dir) == 4
+        assert "4 unread" in _snapshot(branch_dir)
 
     def test_returns_none_when_missing(self, tmp_path):
 
-        assert _inbox_unread(tmp_path / "widget") is None
+        assert "unread" not in _snapshot(_make_branch(tmp_path))
 
 
 if __name__ == "__main__":
@@ -237,37 +240,48 @@ class TestSummaryCapUsesSupportedDoor:
     """@memory owns the cap. Reading their config file by hardcoded path broke
     silently if they moved it AND ignored per_branch overrides entirely."""
 
-    def test_reads_through_load_entry_limits(self):
+    # The cap is read as the length of the summary handle() stamps from a
+    # 500-char snapshot (fleet green leg 8), not _summary_cap by name. 300 is
+    # the handler's own default, the declared constant above.
+
+    @staticmethod
+    def _stamped_length(tmp_path, el) -> int:
+        branch_dir = _make_branch(tmp_path, sessions=[])
+        with (
+            _served(el),
+            patch(f"{MODULE}._find_repo_root", return_value=None),
+            patch(f"{MODULE}._build_snapshot", return_value="X" * 500),
+        ):
+            handle({"cwd": str(branch_dir)})
+        data = json.loads((branch_dir / ".trinity" / "local.json").read_text(encoding="utf-8"))
+        return len(data["sessions"][0]["summary"])
+
+    def test_reads_through_load_entry_limits(self, tmp_path):
 
         el = MagicMock()
-        el.load_entry_limits.return_value = {"entry_types": {"sessions": {"max_chars": 512}}}
-        with _served(el):
-            assert _summary_cap("widget") == 512
+        el.load_entry_limits.return_value = {"entry_types": {"sessions": {"max_chars": 120}}}
+        assert self._stamped_length(tmp_path, el) == 120
         el.load_entry_limits.assert_called_once_with("widget")
 
-    def test_passes_the_branch_so_per_branch_overrides_apply(self):
+    def test_passes_the_branch_so_per_branch_overrides_apply(self, tmp_path):
         """The hardcoded read took the global default and would have stamped one
         branch against another branch's cap."""
 
         el = MagicMock()
         el.load_entry_limits.side_effect = lambda b: {
-            "entry_types": {"sessions": {"max_chars": 999 if b == "special" else 300}}
+            "entry_types": {"sessions": {"max_chars": 140 if b == "widget" else 300}}
         }
-        with _served(el):
-            assert _summary_cap("special") == 999
-            assert _summary_cap("ordinary") == 300
+        assert self._stamped_length(tmp_path, el) == 140
 
-    def test_falls_back_when_memory_is_unavailable(self):
+    def test_falls_back_when_memory_is_unavailable(self, tmp_path):
 
-        with _served(None):
-            assert _summary_cap("widget") == _DEFAULT_SUMMARY_CAP
+        assert self._stamped_length(tmp_path, None) == 300
 
-    def test_falls_back_on_reshaped_config(self):
+    def test_falls_back_on_reshaped_config(self, tmp_path):
 
         el = MagicMock()
         el.load_entry_limits.return_value = {"entry_types": {}}
-        with _served(el):
-            assert _summary_cap("widget") == _DEFAULT_SUMMARY_CAP
+        assert self._stamped_length(tmp_path, el) == 300
 
     def test_no_hardcoded_memory_config_path_survives(self):
         """Source guard on CODE, not prose.

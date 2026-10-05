@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_testwrite_gate.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
@@ -61,7 +61,7 @@ from unittest.mock import patch
 import pytest
 
 from aipass.hooks.apps.handlers.security import testwrite_gate
-from aipass.hooks.apps.handlers.security.testwrite_gate import _is_test_run, handle, template_pointer
+from aipass.hooks.apps.handlers.security.testwrite_gate import handle, template_pointer
 from aipass.hooks.apps.modules import bash_writes, testgate_policy, testwrite_targets
 
 _RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller"
@@ -389,8 +389,11 @@ class TestTheAdminSeat:
         minute. The delegation must not become a way in.
         """
         _policy(project)
-        with patch.object(testwrite_gate, "_module", side_effect=ImportError("no admin_seat")):
-            assert testwrite_gate._is_admin_seat(project["admin_seat"]) is False
+        # Only the rail's import is refused (a None entry halts it); the gate's
+        # other call-time imports still load, so the refusal is the rail's.
+        new = str(project["root"] / "src" / "aipass" / "devpulse" / "tests" / "test_new.py")
+        with patch.dict("sys.modules", {"aipass.hooks.apps.modules.admin_seat": None}):
+            assert _blocked(_run(project["admin_seat"], file_path=new))
 
     def test_the_grant_is_not_checked_for_a_write_that_is_not_a_test(self, project: dict):
         """Verification touches the disk; ordinary work must not pay for it."""
@@ -534,13 +537,21 @@ class TestRunningTestsIsNotWritingThem:
         assert _blocked(_run(project["seat"], command=f"true\ntouch {Path(project['new_test']).as_posix()}"))
 
     def test_the_exemption_is_only_the_module_form(self):
-        """A bare script argument named pytest must not buy the exemption."""
-        assert _is_test_run(["python3", "-m", "pytest", "tests/x.py"])
-        assert _is_test_run(["python", "-m", "unittest"])
-        assert not _is_test_run(["python3", "pytest", "tests/x.py"])
-        assert not _is_test_run(["python3", "-c", "import pytest"])
-        assert not _is_test_run(["python3", "-m", "pip", "install", "pytest"])
-        assert not _is_test_run(["python3", "-m"])
+        """A bare script argument named pytest must not buy the exemption.
+
+        Read through testwrite_targets_bash (fleet green leg 8): a run drops the
+        interpreter's target, anything else keeps it.
+        """
+        cwd = str(Path(tempfile.gettempdir()))
+
+        def named(command):
+            return [target.name for target, _why in testwrite_gate.testwrite_targets_bash(command, cwd)]
+
+        assert named("python3 -m pytest tests/test_x.py") == []
+        assert named("python -m unittest tests/test_x.py") == []
+        assert named("python3 pytest tests/test_x.py") == ["test_x.py"]
+        assert named("python3 -m pip install tests/test_x.py") == ["test_x.py"]
+        assert named("python3 -m") == []
 
 
 class TestNamingAPathIsNotWritingIt:

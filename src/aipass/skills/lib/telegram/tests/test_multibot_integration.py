@@ -152,7 +152,7 @@ class TestFindPendingFileV2:
         _write_pending(pending_dir, "bot-mybot42.json", data)
 
         with patch("aipass.hooks.apps.handlers.notification.telegram_response.subprocess.run"):
-            result = tg_hook.find_pending_file("session-xyz")
+            result = tg_hook.find_pending_file()
 
         assert result is not None
         assert result.name == "bot-mybot42.json"
@@ -178,7 +178,7 @@ class TestFindPendingFileV2:
         monkeypatch.chdir(cwd)
 
         with patch("aipass.hooks.apps.handlers.notification.telegram_response.subprocess.run"):
-            result = tg_hook.find_pending_file("session-xyz")
+            result = tg_hook.find_pending_file()
 
         assert result is not None
         assert result.name == "bot-alpha.json"
@@ -191,7 +191,8 @@ class TestFindPendingFileV2:
         unrelated_dir.mkdir()
         monkeypatch.chdir(unrelated_dir)
 
-        # Write a file that won't match by session_id either
+        # The function matches on AIPASS_BOT_ID, then on the cwd under a bot-*.json
+        # work_dir; this file is neither, so nothing may match it
         data = {
             "session_id": "different-session",
             "chat_id": 123,
@@ -200,7 +201,7 @@ class TestFindPendingFileV2:
         }
         _write_pending(pending_dir, "telegram-something.json", data)
 
-        result = tg_hook.find_pending_file("no-match-session")
+        result = tg_hook.find_pending_file()
 
         assert result is None
 
@@ -220,7 +221,7 @@ class TestFindPendingFileV2:
         }
         _write_pending(pending_dir, "telegram-stale_branch.json", data)
 
-        result = tg_hook.find_pending_file("session-xyz")
+        result = tg_hook.find_pending_file()
 
         assert result is None
 

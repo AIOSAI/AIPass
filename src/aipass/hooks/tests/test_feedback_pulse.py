@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_feedback_pulse.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for feedback pulse handler and toggle module
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-18
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/prompt/feedback_pulse.py and apps/modules/feedback.py."""
@@ -16,12 +16,13 @@
 # seedgo: no-test-needed(generated) — json_handler.log_operation's log entry; its shape is json_handler's
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from aipass.hooks.apps.handlers.prompt import feedback_pulse
-from aipass.hooks.apps.handlers.prompt.feedback_pulse import _is_disabled, handle
+from aipass.hooks.apps.handlers.prompt.feedback_pulse import handle
 from aipass.hooks.apps.modules.feedback import handle_command
 
 
@@ -224,24 +225,35 @@ class TestFeedbackPulseHandler:
 
 
 class TestFeedbackPulseToggle:
-    """Tests for the _is_disabled toggle and sentinel file."""
+    """The toggle and its sentinel, read on the turn the pulse fires through handle() (fleet green leg 8)."""
+
+    @staticmethod
+    def _fired_turn(tmp_path: Path, project: Path) -> str:
+        """The stdout of the turn the pulse is due, for a seat standing in *project*."""
+        state = tmp_path / "state"
+        state.mkdir()
+        result = {"stdout": "", "exit_code": 0}
+        with patch.object(feedback_pulse, "_STATE_DIR", state):
+            for _ in range(11):
+                result = handle({"session_id": "toggle", "cwd": str(project)})
+        return result["stdout"]
 
     def test_no_aipass_dir_is_disabled(self, tmp_path):
         # The walk climbs to the drive root, so a real .aipass in any ancestor
         # (e.g. the CI runner's home after windows-setup installs AIPass) leaks
         # into the result — the no-dir case is only constructible by patching.
         with patch.object(feedback_pulse, "_find_aipass_dir", return_value=None):
-            assert feedback_pulse._is_disabled(str(tmp_path)) is True
+            assert self._fired_turn(tmp_path, tmp_path) == ""
 
     def test_aipass_dir_no_sentinel_is_enabled(self, tmp_path):
         (tmp_path / ".aipass").mkdir()
-        assert _is_disabled(str(tmp_path)) is False
+        assert "https://github.com/AIOSAI/AIPass/issues" in self._fired_turn(tmp_path, tmp_path)
 
     def test_sentinel_exists_is_disabled(self, tmp_path):
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
         (aipass_dir / "feedback_off").touch()
-        assert _is_disabled(str(tmp_path)) is True
+        assert self._fired_turn(tmp_path, tmp_path) == ""
 
 
 class TestFeedbackToggleModule:

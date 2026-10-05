@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_post_compact_regrounding.py
-# Version: 1.2.2
+# Version: 1.2.3
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -28,9 +28,8 @@ from unittest.mock import patch
 
 from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 from aipass.hooks.apps.handlers.lifecycle import release_notice as door
-from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import REGROUP_FIRE_BUDGET, _cc_len, _pack
+from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import REGROUP_FIRE_BUDGET
 from aipass.hooks.apps.modules import cadence, release_notice
-from aipass.hooks.apps.modules.release_notice import _is_behind, _stamp_date, _version_tuple
 
 
 class TestPostCompactRegrounding:
@@ -401,7 +400,9 @@ MANAGER_PASSPORT = '{"identity": {"citizen_class": "manager"}}'
 SPECIALIST_PASSPORT = '{"identity": {"citizen_class": "specialist"}}'
 
 
-def _make_project(root, passport_json=MANAGER_PASSPORT, stamped=None, source_repo=False):
+def _make_project(
+    root, passport_json=MANAGER_PASSPORT, stamped=None, source_repo=False, stamped_at="2026-09-01T10:00:00"
+):
     """Build a project tree and return the branch cwd the hook would run in.
 
     root/
@@ -418,7 +419,7 @@ def _make_project(root, passport_json=MANAGER_PASSPORT, stamped=None, source_rep
         aipass_dir = root / ".aipass"
         aipass_dir.mkdir(exist_ok=True)
         (aipass_dir / "scaffold_manifest.json").write_text(
-            json.dumps({"aipass_version": stamped, "stamped_at": "2026-09-01T10:00:00", "files": {}}),
+            json.dumps({"aipass_version": stamped, "stamped_at": stamped_at, "files": {}}),
             encoding="utf-8",
         )
     if source_repo:
@@ -456,9 +457,14 @@ class TestReleaseNoticeModule:
         assert "T10:00:00" not in out
 
     def test_a_non_iso_stamp_is_passed_through_rather_than_guessed_at(self, tmp_path):
-
-        assert _stamp_date("sometime last week") == "sometime last week"
-        assert _stamp_date("2026-09-01T07:55:36.794203+00:00") == "2026-09-01"
+        """Read in the notice (fleet green leg 8), not _stamp_date by name. The loose
+        stamp holds a "T", so a guess that cut at it would print "()"."""
+        loose = _make_project(tmp_path / "loose", stamped="2.8.1", stamped_at="Tuesday last week")
+        iso = _make_project(tmp_path / "iso", stamped="2.8.1", stamped_at="2026-09-01T07:55:36.794203+00:00")
+        assert "(Tuesday last week)" in _notice(loose)
+        iso_notice = _notice(iso)
+        assert "(2026-09-01)" in iso_notice
+        assert "07:55" not in iso_notice
 
     def test_current_scaffold_is_silent(self, tmp_path):
         assert _notice(_make_project(tmp_path / "proj", stamped="2.8.4")) == ""
@@ -530,42 +536,41 @@ class TestReleaseNoticeModule:
         assert snapshot() == before
 
 
-def _parsed_version(text: str) -> tuple[int, ...]:
-    """`_version_tuple` with its None branch asserted away, for the comparisons.
+def _speaks(tmp_path, stamped: str, installed: str) -> bool:
+    """Whether the notice speaks for a scaffold stamped `stamped` under `installed`.
 
-    `_is_behind` takes non-optional tuples while the parser answers
-    `tuple[int, ...] | None`, so handing one straight to the other type-errored
-    this file (10 findings) — and it hid a claim worth making: every spelling in
-    these units must PARSE, not merely compare. The unparseable spellings have
-    their own unit below.
+    The parse and the comparison are read through build_notice (fleet green
+    leg 8), not _version_tuple / _is_behind by name: a parsed stamp speaks only
+    when it is behind, an unparseable one always counts as behind.
     """
-    parsed = _version_tuple(text)
-    assert parsed is not None, f"{text!r} did not parse"
-    return parsed
+    root = tmp_path / f"proj-{stamped or 'empty'}-{installed or 'empty'}"
+    return _notice(_make_project(root, stamped=stamped), installed=installed) != ""
 
 
 class TestReleaseNoticeVersionCompare:
-    def test_short_and_long_forms_of_the_same_version_are_equal(self):
+    def test_short_and_long_forms_of_the_same_version_are_equal(self, tmp_path):
         """Without zero-padding, (2, 8) < (2, 8, 0) and a scaffold stamped '2.8'
         would be reported behind '2.8.0' forever."""
 
-        assert _is_behind(_parsed_version("2.8"), _parsed_version("2.8.0")) is False
-        assert _is_behind(_parsed_version("2.8.0"), _parsed_version("2.8")) is False
+        assert _speaks(tmp_path, "2.8", "2.8.0") is False
+        assert _speaks(tmp_path, "2.8.0", "2.8") is False
 
-    def test_patch_and_minor_bumps_read_as_behind(self):
+    def test_patch_and_minor_bumps_read_as_behind(self, tmp_path):
 
-        assert _is_behind(_parsed_version("2.8.1"), _parsed_version("2.8.4")) is True
-        assert _is_behind(_parsed_version("2.8"), _parsed_version("2.9.0")) is True
-        assert _is_behind(_parsed_version("2.10.0"), _parsed_version("2.9.0")) is False
+        assert _speaks(tmp_path, "2.8.1", "2.8.4") is True
+        assert _speaks(tmp_path, "2.8", "2.9.0") is True
+        assert _speaks(tmp_path, "2.10.0", "2.9.0") is False
 
-    def test_a_prerelease_suffix_parses_to_its_numeric_core(self):
+    def test_a_prerelease_suffix_parses_to_its_numeric_core(self, tmp_path):
+        """Parsed, 2.9.0rc1 is 2.9.0 and current; unparsed it would count as behind."""
 
-        assert _version_tuple("2.9.0rc1") == (2, 9, 0)
+        assert _speaks(tmp_path, "2.9.0rc1", "2.9.0") is False
 
-    def test_a_non_numeric_version_is_unparseable(self):
+    def test_a_non_numeric_version_is_unparseable(self, tmp_path):
+        """An unparseable stamp counts as behind; an unparseable install stays quiet."""
 
-        assert _version_tuple("dev") is None
-        assert _version_tuple("") is None
+        assert _speaks(tmp_path, "dev", "2.9.0") is True
+        assert _speaks(tmp_path, "2.9.0", "") is False
 
 
 class TestReleaseNoticeSessionStartDoor:
@@ -670,15 +675,26 @@ def _section(tag, size):
     return "\n".join(lines)
 
 
+def _units(text: str) -> int:
+    """Length the way Claude Code measures it: UTF-16 code units, not code points.
+
+    The test's own measure (fleet green leg 8), not the handler's _cc_len: the
+    budget pins hold the handler to Claude Code's count, so they count it here.
+    """
+    return len(text.encode("utf-16-le")) // 2
+
+
 class TestRegroupBudget752:
-    def _sequence(self, tmp_path, sizes=None, notice_size=NOTICE_SIZE, events=12, resets=1):
+    def _sequence(self, tmp_path, sizes=None, notice_size=NOTICE_SIZE, events=12, resets=1, branch_text=None):
         """Real cadence (autouse-isolated state), real packer, sized sections.
-        Returns the additionalContext of every non-silent fire, in order."""
+        Returns the additionalContext of every non-silent fire, in order.
+        *branch_text*, when given, is the branch section verbatim instead of a sized one."""
 
         sizes = sizes or TODAYS_SIZES
+        branch = branch_text if branch_text is not None else _section("BRANCH", sizes["branch"])
         with (
             patch.object(cadence, "_turn", None),
-            patch(f"{_GC}.load_branch", return_value=_section("BRANCH", sizes["branch"])),
+            patch(f"{_GC}.load_branch", return_value=branch),
             patch(f"{_GC}.load_identity", return_value=_section("IDENTITY", sizes["identity"])),
             patch(f"{_GC}.load_kernel", return_value=_section("KERNEL", sizes["kernel"])),
             patch(f"{_GC}.load_navmap", return_value=_section("NAVMAP", sizes["navmap"])),
@@ -704,9 +720,9 @@ class TestRegroupBudget752:
 
         fired = self._sequence(tmp_path)
         assert len(fired) > 1, "today's sizes cannot fit one fire - the split is the point"
-        assert sum(_cc_len(f) for f in fired) > 20_000, "the fixture must be at today's scale"
+        assert sum(_units(f) for f in fired) > 20_000, "the fixture must be at today's scale"
         for part, context in enumerate(fired, 1):
-            assert _cc_len(context) <= REGROUP_FIRE_BUDGET, f"part {part} is {_cc_len(context)} units"
+            assert _units(context) <= REGROUP_FIRE_BUDGET, f"part {part} is {_units(context)} units"
 
     def test_nothing_is_lost_across_the_parts(self, tmp_path):
         """VACUITY GUARD for the budget pin: a packer that met the cap by dropping
@@ -761,30 +777,32 @@ class TestRegroupBudget752:
 
         sizes = {"branch": 25_000, "identity": 10, "kernel": 10, "navmap": 10}
         fired = self._sequence(tmp_path, sizes=sizes, notice_size=0)
-        assert all(_cc_len(f) <= REGROUP_FIRE_BUDGET for f in fired)
+        assert all(_units(f) <= REGROUP_FIRE_BUDGET for f in fired)
         stream = "\n".join(fired)
         for line in _section("BRANCH", 25_000).split("\n"):
             assert stream.count(line) == 1
 
-    def test_a_single_line_longer_than_a_part_is_cut_not_dropped(self):
+    # The two below go through handle() with the branch section verbatim (fleet
+    # green leg 8), not _pack by name.
+
+    def test_a_single_line_longer_than_a_part_is_cut_not_dropped(self, tmp_path):
+        """The line is lowercase letters only; every other run of them in a fire
+        (the tiny sections' x padding) is under 100, so the pieces rejoin to it."""
 
         line = "".join(chr(ord("a") + i % 26) for i in range(20_000))
-        parts = _pack([("branch", line)], "INSTRUCTION")
-        assert all(_cc_len(text) <= REGROUP_FIRE_BUDGET for text, _ in parts)
-        rejoined = "".join(
-            text.split("\n\n", 1)[1]
-            .replace("[… continued from the previous re-ground part]\n", "")
-            .replace("\n[… continued in the next re-ground part]", "")
-            for text, _ in parts
-        )
-        assert line in rejoined.replace("INSTRUCTION\n\n", "")
+        sizes = {"branch": 0, "identity": 10, "kernel": 10, "navmap": 10}
+        fired = self._sequence(tmp_path, sizes=sizes, notice_size=0, branch_text=line)
+        assert all(_units(f) <= REGROUP_FIRE_BUDGET for f in fired)
+        letters_only = "".join(ch if "a" <= ch <= "z" else " " for ch in "\n".join(fired))
+        assert "".join(run for run in letters_only.split() if len(run) >= 100) == line
 
-    def test_the_budget_counts_utf16_units_not_code_points(self):
+    def test_the_budget_counts_utf16_units_not_code_points(self, tmp_path):
         """Claude Code compares a JS string length. An emoji is one Python char and
         two JS units, so a packer counting len() would overshoot on emoji-heavy text."""
 
         text = "\n".join("\U0001f600" * 60 for _ in range(100))  # 6,000 code points, 12,000 units
-        assert len(text) < REGROUP_FIRE_BUDGET < _cc_len(text)
-        parts = _pack([("branch", text)], "I")
-        assert len(parts) > 1
-        assert all(_cc_len(p) <= REGROUP_FIRE_BUDGET for p, _ in parts)
+        assert len(text) < REGROUP_FIRE_BUDGET < _units(text)
+        sizes = {"branch": 0, "identity": 10, "kernel": 10, "navmap": 10}
+        fired = self._sequence(tmp_path, sizes=sizes, notice_size=0, branch_text=text)
+        assert len(fired) > 1
+        assert all(_units(f) <= REGROUP_FIRE_BUDGET for f in fired)

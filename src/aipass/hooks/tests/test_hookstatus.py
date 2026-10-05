@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_hookstatus.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for hookstatus module (drone @hooks status)
 # Branch: hooks
 # Created: 2026-05-28
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/hookstatus.py — read-only hook config viewer."""
@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.hooks.apps.modules.hookstatus import _render_status, handle_command, print_introspection
+from aipass.hooks.apps.modules.hookstatus import handle_command, print_introspection
 
 SAMPLE_CONFIG = {
     "hooks_enabled": True,
@@ -40,6 +40,12 @@ MASTER_OFF_CONFIG = {
         "identity_injector": {"enabled": True, "handler": "x.handle", "matcher": ""},
     },
 }
+
+
+def _status_of(config: dict) -> None:
+    """Render through the door (fleet green leg 8): `status` with find_project_config answering *config*."""
+    with patch("aipass.hooks.apps.modules.hookstatus.find_project_config", return_value=config):
+        assert handle_command("status", []) is True
 
 
 class TestHandleCommand:
@@ -100,7 +106,7 @@ class TestConfigPresent:
     def test_counts_enabled_total(self, capsys):
         """Verify footer shows correct enabled/total counts."""
 
-        _render_status(SAMPLE_CONFIG)
+        _status_of(SAMPLE_CONFIG)
 
         output = capsys.readouterr().err
         assert "3 enabled / 5 total" in output
@@ -108,7 +114,7 @@ class TestConfigPresent:
     def test_shows_matcher(self, capsys):
         """Verify matcher values appear in output."""
 
-        _render_status(SAMPLE_CONFIG)
+        _status_of(SAMPLE_CONFIG)
 
         output = capsys.readouterr().err
         assert "Bash|Edit" in output
@@ -116,7 +122,7 @@ class TestConfigPresent:
     def test_shows_event_group_headers(self, capsys):
         """Verify event type section headers appear."""
 
-        _render_status(SAMPLE_CONFIG)
+        _status_of(SAMPLE_CONFIG)
 
         output = capsys.readouterr().err
         assert "UserPromptSubmit" in output
@@ -184,7 +190,7 @@ class TestMasterSwitchOff:
         the words that differ ("OFF", "the gates still run" — DPLAN-0356 R1c) are what is pinned.
         """
 
-        _render_status(MASTER_OFF_CONFIG)
+        _status_of(MASTER_OFF_CONFIG)
 
         output = capsys.readouterr().err
         assert "OFF" in output
@@ -193,7 +199,7 @@ class TestMasterSwitchOff:
     def test_master_off_still_counts_hooks(self, capsys):
         """Verify hook counts still shown even with master OFF."""
 
-        _render_status(MASTER_OFF_CONFIG)
+        _status_of(MASTER_OFF_CONFIG)
 
         output = capsys.readouterr().err
         assert "1 enabled / 1 total" in output

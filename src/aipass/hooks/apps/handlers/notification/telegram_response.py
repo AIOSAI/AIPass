@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: telegram_response.py
-# Version: 2.1.1
+# Version: 2.1.2
 # Description: Telegram response delivery on Stop event (ported from Dev-Pass)
 # Branch: hooks
 # Layer: apps/handlers/notification
 # Created: 2026-06-15
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Telegram response delivery on Stop event.
@@ -104,7 +104,7 @@ def _in_mirror_dir(path: Path) -> bool:
         return False
 
 
-def find_pending_file(session_id: str) -> Path | None:
+def find_pending_file() -> Path | None:
     """Find pending file matching current context via multi-bot matching.
 
     Priority 1: AIPASS_BOT_ID env var -> bot-{bot_id}.json (mirror dir first, then pending)
@@ -567,7 +567,7 @@ def handle(hook_data: dict) -> dict:
     if not session_id:
         return {"stdout": "", "exit_code": 0}
 
-    pending_file = find_pending_file(session_id)
+    pending_file = find_pending_file()
     if not pending_file:
         return {"stdout": "", "exit_code": 0}
 

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_persistent_alert.py
-# Version: 1.1.2
+# Version: 1.1.3
 # Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/prompt/persistent_alert.py and apps/modules/alert_dismiss.py."""
@@ -29,7 +29,7 @@ import pytest
 
 from aipass.hooks.apps.handlers.prompt import persistent_alert
 from aipass.hooks.apps.handlers.prompt.persistent_alert import handle
-from aipass.hooks.apps.modules.alert_dismiss import _dismiss_alert, handle_command
+from aipass.hooks.apps.modules.alert_dismiss import handle_command
 
 _MODULE = "aipass.hooks.apps.handlers.prompt.persistent_alert"
 _CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
@@ -541,7 +541,7 @@ class TestAlertDismiss:
             "aipass.hooks.apps.modules.alert_dismiss._find_aipass_dir",
             return_value=aipass_dir,
         ):
-            result = _dismiss_alert("remove")
+            result = handle_command("dismiss", ["remove"])
 
         assert result is True
         saved = json.loads((aipass_dir / "alerts.json").read_text(encoding="utf-8"))
@@ -554,36 +554,48 @@ class TestAlertDismiss:
         aipass_dir.mkdir()
         _write_alerts(aipass_dir, [_make_alert(alert_id="exists")])
 
-        with patch(
-            "aipass.hooks.apps.modules.alert_dismiss._find_aipass_dir",
-            return_value=aipass_dir,
+        with (
+            patch(
+                "aipass.hooks.apps.modules.alert_dismiss._find_aipass_dir",
+                return_value=aipass_dir,
+            ),
+            pytest.raises(SystemExit) as exited,
         ):
-            result = _dismiss_alert("nope")
+            handle_command("dismiss", ["nope"])
 
-        assert result is False
+        assert exited.value.code == 1
+        saved = json.loads((aipass_dir / "alerts.json").read_text(encoding="utf-8"))
+        assert [a["id"] for a in saved["alerts"]] == ["exists"]
 
     def test_dismiss_no_alerts_file(self, tmp_path):
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
 
-        with patch(
-            "aipass.hooks.apps.modules.alert_dismiss._find_aipass_dir",
-            return_value=aipass_dir,
+        with (
+            patch(
+                "aipass.hooks.apps.modules.alert_dismiss._find_aipass_dir",
+                return_value=aipass_dir,
+            ),
+            pytest.raises(SystemExit) as exited,
         ):
-            result = _dismiss_alert("any")
+            handle_command("dismiss", ["any"])
 
-        assert result is False
+        assert exited.value.code == 1
+        assert not (aipass_dir / "alerts.json").exists()
 
     def test_dismiss_no_aipass_dir(self):
 
-        with patch(
-            "aipass.hooks.apps.modules.alert_dismiss._find_aipass_dir",
-            return_value=None,
+        with (
+            patch(
+                "aipass.hooks.apps.modules.alert_dismiss._find_aipass_dir",
+                return_value=None,
+            ),
+            pytest.raises(SystemExit) as exited,
         ):
-            result = _dismiss_alert("any")
+            handle_command("dismiss", ["any"])
 
-        assert result is False
+        assert exited.value.code == 1
 
     def test_handle_command_routes_dismiss(self, tmp_path):
 
@@ -605,10 +617,14 @@ class TestAlertDismiss:
 
         assert handle_command("status", []) is False
 
-    def test_handle_command_help(self, capsys):
+    def test_handle_command_help(self, tmp_path, capsys):
         """--help prints the help screen and dismisses nothing - not even an id named --help."""
-        with patch("aipass.hooks.apps.modules.alert_dismiss._dismiss_alert") as mock_dismiss:
+        aipass_dir = tmp_path / ".aipass"
+        aipass_dir.mkdir()
+        _write_alerts(aipass_dir, [_make_alert(alert_id="--help")])
+        with patch("aipass.hooks.apps.modules.alert_dismiss._find_aipass_dir", return_value=aipass_dir):
             assert handle_command("dismiss", ["--help"]) is True
 
         assert "dismiss — Remove an alert" in capsys.readouterr().err
-        mock_dismiss.assert_not_called()
+        saved = json.loads((aipass_dir / "alerts.json").read_text(encoding="utf-8"))
+        assert [a["id"] for a in saved["alerts"]] == ["--help"]

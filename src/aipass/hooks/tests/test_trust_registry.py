@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_trust_registry.py
-# Version: 2.0.1
+# Version: 2.0.2
 # Description: Tests for trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: tests
@@ -27,7 +27,6 @@ import pytest
 from aipass.hooks.apps.handlers.config import gates, loader
 from aipass.hooks.apps.modules import engine
 from aipass.hooks.apps.handlers.config.trust_registry import (
-    _hash_file,
     bootstrap,
     enroll,
     is_hash_mismatch,
@@ -66,21 +65,30 @@ def _chdir(where: Path) -> Iterator[None]:
 class TestRegistryHelpers:
     """Unit tests for registry helper functions."""
 
-    def test_hash_file_deterministic(self, temp_test_dir):
-        f = temp_test_dir / "test.json"
-        f.write_text('{"hello": "world"}', encoding="utf-8")
-        h1 = _hash_file(f)
-        h2 = _hash_file(f)
-        assert h1 == h2
-        assert h1.startswith("sha256:")
+    @staticmethod
+    def _enrolled(temp_test_dir: Path, content: str) -> Path:
+        """A project whose hooks.json holds *content*, enrolled in a registry under temp_test_dir.
 
-    def test_hash_file_changes_on_content_change(self, temp_test_dir):
-        f = temp_test_dir / "test.json"
-        f.write_text('{"v": 1}', encoding="utf-8")
-        h1 = _hash_file(f)
-        f.write_text('{"v": 2}', encoding="utf-8")
-        h2 = _hash_file(f)
-        assert h1 != h2
+        The hash is reached through enroll and is_hash_mismatch (fleet green leg 8), not _hash_file by name.
+        """
+        project = temp_test_dir / "proj"
+        (project / ".aipass").mkdir(parents=True)
+        (project / ".aipass" / "hooks.json").write_text(content, encoding="utf-8")
+        assert enroll(str(project)) is True
+        return project
+
+    def test_hash_file_deterministic(self, temp_test_dir, mock_logger):
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", temp_test_dir / "reg.json"):
+            project = self._enrolled(temp_test_dir, '{"hello": "world"}')
+            assert is_hash_mismatch(str(project)) is False
+            entry = read_registry()["projects"][str(project.resolve())]
+        assert entry["config_hash"].startswith("sha256:")
+
+    def test_hash_file_changes_on_content_change(self, temp_test_dir, mock_logger):
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", temp_test_dir / "reg.json"):
+            project = self._enrolled(temp_test_dir, '{"v": 1}')
+            (project / ".aipass" / "hooks.json").write_text('{"v": 2}', encoding="utf-8")
+            assert is_hash_mismatch(str(project)) is True
 
     def test_read_registry_absent(self, temp_test_dir, mock_logger):
         reg_path = temp_test_dir / "nonexistent.json"

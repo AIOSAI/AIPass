@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_email.py
-# Version: 1.3.2
+# Version: 1.3.3
 # Description: Tests for email notification handler
 # Branch: hooks
 # Created: 2026-05-21
@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.hooks.apps.handlers.notification.email import _count_new_emails, _find_branch_root, handle
+from aipass.hooks.apps.handlers.notification.email import handle
 from aipass.hooks.apps.modules import cadence
 
 
@@ -148,6 +148,19 @@ class TestEmailHandler:
         assert "3 new emails" in result["stdout"]
 
 
+def _new_count(branch_root) -> int:
+    """The count the banner reports for *branch_root*, 0 when it stays silent.
+
+    Reached through handle() (fleet green leg 8), not _count_new_emails by name. A zero
+    count is silent by the cadence's rule, so 0 reads as an empty stdout.
+    """
+    with patch("aipass.hooks.apps.handlers.notification.email._find_branch_root", return_value=branch_root):
+        stdout = handle({})["stdout"]
+    if not stdout:
+        return 0
+    return int(stdout.split("You have ", 1)[1].split(" new email", 1)[0])
+
+
 class TestCountNewEmails:
     """Inbox counting logic tests."""
 
@@ -168,7 +181,7 @@ class TestCountNewEmails:
             encoding="utf-8",
         )
 
-        assert _count_new_emails(tmp_path) == 2
+        assert _new_count(tmp_path) == 2
 
     def test_counts_unread_without_status(self, tmp_path):
         inbox_dir = tmp_path / ".ai_mail.local"
@@ -179,7 +192,7 @@ class TestCountNewEmails:
             encoding="utf-8",
         )
 
-        assert _count_new_emails(tmp_path) == 1
+        assert _new_count(tmp_path) == 1
 
     def test_skips_read_messages(self, tmp_path):
         inbox_dir = tmp_path / ".ai_mail.local"
@@ -190,7 +203,7 @@ class TestCountNewEmails:
             encoding="utf-8",
         )
 
-        assert _count_new_emails(tmp_path) == 0
+        assert _new_count(tmp_path) == 0
 
     def test_handles_bare_list_format(self, tmp_path):
         inbox_dir = tmp_path / ".ai_mail.local"
@@ -201,7 +214,7 @@ class TestCountNewEmails:
             encoding="utf-8",
         )
 
-        assert _count_new_emails(tmp_path) == 1
+        assert _new_count(tmp_path) == 1
 
     def test_falls_back_to_legacy_path(self, tmp_path):
         inbox_dir = tmp_path / "ai_mail.local"
@@ -212,10 +225,10 @@ class TestCountNewEmails:
             encoding="utf-8",
         )
 
-        assert _count_new_emails(tmp_path) == 1
+        assert _new_count(tmp_path) == 1
 
     def test_returns_zero_when_no_inbox(self, tmp_path):
-        assert _count_new_emails(tmp_path) == 0
+        assert _new_count(tmp_path) == 0
 
     def test_returns_zero_on_corrupt_json(self, tmp_path):
         inbox_dir = tmp_path / ".ai_mail.local"
@@ -223,7 +236,7 @@ class TestCountNewEmails:
         inbox_file = inbox_dir / "inbox.json"
         inbox_file.write_text("not valid json{{{", encoding="utf-8")
 
-        assert _count_new_emails(tmp_path) == 0
+        assert _new_count(tmp_path) == 0
 
 
 class TestFindBranchRoot:
@@ -233,45 +246,58 @@ class TestFindBranchRoot:
     # (fleet green leg 7, no Path.cwd patch). Paths are compared resolved, because the
     # real cwd comes back resolved and a temp dir can sit behind a symlink (macOS /var).
 
+    # Read through handle() (fleet green leg 8): a found root is the one whose inbox the banner
+    # counts; no root is the logged "no branch root found" and a silent banner.
+
     def test_finds_branch_with_trinity(self, tmp_path, monkeypatch):
         here = tmp_path.resolve()
         (here / ".trinity").mkdir()
         (here / "apps").mkdir()
+        (here / ".ai_mail.local").mkdir()
+        (here / ".ai_mail.local" / "inbox.json").write_text(json.dumps([{"status": "new"}]), encoding="utf-8")
         monkeypatch.chdir(here)
 
         with patch(
             "aipass.hooks.apps.handlers.notification.email._find_repo_root",
             return_value=here.parent,
         ):
-            result = _find_branch_root()
+            result = handle({})
 
-        assert result == here
+        assert "You have 1 new email -" in result["stdout"]
 
     def test_returns_none_when_no_markers(self, tmp_path, monkeypatch):
         bare = tmp_path.resolve() / "bare"
         bare.mkdir()
         monkeypatch.chdir(bare)
 
-        with patch(
-            "aipass.hooks.apps.handlers.notification.email._find_repo_root",
-            return_value=None,
+        with (
+            patch(
+                "aipass.hooks.apps.handlers.notification.email._find_repo_root",
+                return_value=None,
+            ),
+            patch("aipass.hooks.apps.handlers.notification.email.logger") as log,
         ):
-            result = _find_branch_root()
+            result = handle({})
 
-        assert result is None
+        assert result["stdout"] == ""
+        log.info.assert_any_call("[HOOKS] email: no branch root found")
 
     def test_returns_none_at_repo_root(self, tmp_path, monkeypatch):
         here = tmp_path.resolve()
         (here / ".trinity").mkdir()
         monkeypatch.chdir(here)
 
-        with patch(
-            "aipass.hooks.apps.handlers.notification.email._find_repo_root",
-            return_value=here,
+        with (
+            patch(
+                "aipass.hooks.apps.handlers.notification.email._find_repo_root",
+                return_value=here,
+            ),
+            patch("aipass.hooks.apps.handlers.notification.email.logger") as log,
         ):
-            result = _find_branch_root()
+            result = handle({})
 
-        assert result is None
+        assert result["stdout"] == ""
+        log.info.assert_any_call("[HOOKS] email: no branch root found")
 
 
 class TestEmailCadenceGate:

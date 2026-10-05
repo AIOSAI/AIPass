@@ -1414,7 +1414,7 @@
     {
       "file": "apps/modules/engine_closure.py",
       "standard": "logged_fallback",
-      "lines": [199],
+      "lines": [200],
       "reason": "Fleet green leg 5, item 2: None is 'ruff could not run' and the success path never returns it (a list, [] when clean); the docstring names it. The edit is allowed and logged because two layers stand behind this one (the promoted copy, the fail-closed engine), and refusing every edit to 119 closure files on a missing linter would lock out the repair too."
     },
     {
@@ -1541,6 +1541,36 @@
       "file": "apps/modules/engine_closure.py",
       "standard": "json_structure",
       "reason": "Reads the root .aipass/hooks.json read-only with stdlib json to learn which handlers are wired, and ruff's JSON report. Writes nothing, logs no operation; same profile as write_ownership/admin_seat."
+    },
+    {
+      "file": "tests/test_tier0_kernel.py",
+      "standard": "through_the_command",
+      "lines": [28],
+      "reason": "Fleet green leg 8, ruling (b), hooks' decision: _find_project_dir's contract is that the per-user ~/.aipass is never read as a stamped tree. The handler's stdout cannot show the silent side: tmp_path may sit under a real home or a real stamped tree, and the walk keeps climbing past the fake home, so silence would be a property of the host. The loud side of the same test goes through handle()."
+    },
+    {
+      "file": "tests/test_codex_bridge.py",
+      "standard": "through_the_command",
+      "lines": [20],
+      "reason": "Fleet green leg 8, ruling (c), hooks' decision: the public door is main(), whose far side mounts the promoted .live copy over aipass.hooks.apps in sys.modules (mount.py) and runs the real engine over the live .aipass/hooks.json, writing engine.jsonl and cadence state. _normalize_stdin (Codex input -> tool_input) and _wrap_output (the hookSpecificOutput envelope, block -> deny) are pure, and reaching them by name is the safe door."
+    },
+    {
+      "file": "tests/test_edit_gate_bash.py",
+      "standard": "through_the_command",
+      "lines": [241],
+      "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is that a missing admin rail refuses (the lane goes dark, never open). Isolating that arm needs only the rail's import refused while every other call-time import of the gate runs, which is what edit_gate._import_module (its own import seam, leg 4) is for. A None entry in sys.modules was tried and did not isolate the arm: its 'return True' mutant survived twice. Through this seam, with the grant given, the mutant dies at _blocked."
+    },
+    {
+      "file": "tests/test_temporal.py",
+      "standard": "through_the_command",
+      "lines": [21],
+      "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is the line's shape for a given instant and the hour buckets at their bounds (5/12/17/22). handle() reads the live clock, so the public door can only pin today's hour; fixing the instant means patching temporal.datetime (scored by stdlib_patch) or a now= parameter that would exist only for the test (HELD by the ruling). The pins on _format_line and _part_of_day stay; TestHandle pins the public door's live answer."
+    },
+    {
+      "file": "tests/test_subagent_gate.py",
+      "standard": "through_the_command",
+      "lines": [22],
+      "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is that a .claude/ path is skipped in the backslashed spelling handle() hands the checklist on Windows (compass 458). Through handle() the host chooses the separator, so on POSIX the public door can only ever hand the forward-slash spelling, which test_skip_claude_hooks_from_seedgo_checks pins through handle(). The one import kept is _run_seedgo_checklist, for test_skip_claude_hooks_in_the_windows_spelling alone."
     }
   ],
   "notes": {

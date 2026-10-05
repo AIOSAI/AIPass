@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_telegram_response.py
-# Version: 2.0.3
+# Version: 2.0.4
 # Description: Tests for telegram_response notification handler
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-15
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/notification/telegram_response.py."""
@@ -172,7 +172,7 @@ class TestFindPendingFile:
             patch(f"{MOD}.PENDING_DIR", pending_dir),
             patch.dict("os.environ", {"AIPASS_BOT_ID": "42"}),
         ):
-            result = find_pending_file("session-xyz")
+            result = find_pending_file()
 
         assert result is not None
         assert result.name == "bot-42.json"
@@ -191,7 +191,7 @@ class TestFindPendingFile:
             patch.dict("os.environ", _kept_redirect(), clear=True),
             patch(f"{MOD}.Path.cwd", return_value=work / "subdir"),
         ):
-            result = find_pending_file("session-abc")
+            result = find_pending_file()
 
         assert result is not None
         assert result.name == "bot-7.json"
@@ -200,7 +200,7 @@ class TestFindPendingFile:
         missing = tmp_path / "nonexistent"
 
         with patch(LOGGER_PATCH), patch(f"{MOD}.PENDING_DIR", missing):
-            result = find_pending_file("session-abc")
+            result = find_pending_file()
 
         assert result is None
 
@@ -218,7 +218,7 @@ class TestFindPendingFile:
             patch(f"{MOD}.subprocess.run") as mock_tmux,
         ):
             mock_tmux.side_effect = OSError("no tmux")
-            result = find_pending_file("session-xyz")
+            result = find_pending_file()
 
         assert result is None
 
@@ -233,7 +233,7 @@ class TestFindPendingFile:
             patch(f"{MOD}.PENDING_DIR", pending_dir),
             patch.dict("os.environ", {"AIPASS_BOT_ID": "5"}),
         ):
-            result = find_pending_file("session-abc")
+            result = find_pending_file()
 
         assert result is not None
         assert result.name == "bot-5.json"
@@ -250,7 +250,7 @@ class TestFindPendingFile:
             patch(f"{MOD}.PENDING_DIR", pending_dir),
             patch.dict("os.environ", _kept_redirect(), clear=True),
         ):
-            result = find_pending_file("session-abc")
+            result = find_pending_file()
 
         assert result is None
 
@@ -1791,7 +1791,7 @@ class TestFindPendingFileMirror:
             patch(f"{MOD}.PENDING_DIR", tmp_path / "nonexistent"),
             patch.dict("os.environ", {"AIPASS_BOT_ID": "42"}),
         ):
-            result = find_pending_file("session-xyz")
+            result = find_pending_file()
 
         assert result is not None
         assert result.name == "bot-42.json"
@@ -1813,7 +1813,7 @@ class TestFindPendingFileMirror:
             patch(f"{MOD}.PENDING_DIR", pending_dir),
             patch.dict("os.environ", {"AIPASS_BOT_ID": "42"}),
         ):
-            result = find_pending_file("session-xyz")
+            result = find_pending_file()
 
         assert result == mirror_dir / "bot-42.json"
 
@@ -1832,7 +1832,7 @@ class TestFindPendingFileMirror:
             patch.dict("os.environ", _kept_redirect(), clear=True),
             patch(f"{MOD}.Path.cwd", return_value=work / "subdir"),
         ):
-            result = find_pending_file("session-abc")
+            result = find_pending_file()
 
         assert result is not None
         assert result.name == "bot-7.json"

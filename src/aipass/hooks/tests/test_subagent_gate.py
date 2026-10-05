@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_subagent_gate.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for subagent_gate security handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/security/subagent_gate.py."""
@@ -15,16 +15,54 @@
 # seedgo: no-test-needed(stdlib) — subprocess.run's process launch and time.monotonic's clock, the stdlib's own
 
 import json
-from pathlib import PureWindowsPath
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch, MagicMock
 
-from aipass.hooks.apps.handlers.security.subagent_gate import (
-    _get_cwd_branch,
-    _get_modified_py_files,
-    _get_package_from_cwd,
-    _run_seedgo_checklist,
-    handle,
-)
+from aipass.hooks.apps.handlers.security.subagent_gate import handle
+from aipass.hooks.apps.handlers.security.subagent_gate import _run_seedgo_checklist
+
+
+def _stop_in(repo, cwd, status: str) -> tuple[dict, list]:
+    """One SubagentStop through handle() at `cwd` inside `repo`, and every drone call it made.
+
+    The branch, package and modified-file readings are reached through the gate
+    (fleet green leg 8), not by name. subprocess.run is the sealed edge: `drone
+    @git status` answers `status`, every checklist answers one violation. The
+    README check, which runs only when a modified file survived the filter, is
+    recorded as a ("gate", "readme") call and answers nothing.
+    """
+    calls: list = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if argv[1] == "@git":
+            return MagicMock(stdout=status, returncode=0)
+        return MagicMock(stdout="✗ Missing docstring\n", returncode=0)
+
+    def readme(*_args):
+        calls.append((["gate", "readme"], {}))
+
+    with (
+        patch.dict("os.environ", {"AIPASS_HOME": str(repo)}),
+        patch("subprocess.run", side_effect=run),
+        patch(
+            "aipass.hooks.apps.handlers.security.subagent_gate._check_hook_readme_accountability",
+            side_effect=readme,
+        ),
+    ):
+        result = handle({"agent_type": "general-purpose", "cwd": str(cwd)})
+    return result, calls
+
+
+def _repo_with(tmp_path, name: str, *files: str):
+    """A repo root (a .git directory) holding each of `files`, written empty."""
+    repo = tmp_path / name
+    (repo / ".git").mkdir(parents=True)
+    for rel in files:
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("", encoding="utf-8")
+    return repo
 
 
 class TestSubagentGateHandler:
@@ -73,25 +111,19 @@ class TestSubagentGateHandler:
         assert "bad.py" in parsed["reason"]
         assert result["sound"] == "subagent gate"
 
-    @patch("subprocess.run")
-    def test_skip_claude_hooks_from_modified_files(self, mock_run, tmp_path):
+    def test_skip_claude_hooks_from_modified_files(self, tmp_path):
+        repo = _repo_with(tmp_path, "repo", "src/aipass/hooks/__init__.py", ".claude/hooks/something.py")
+        result, calls = _stop_in(repo, repo / "src" / "aipass" / "hooks", " M .claude/hooks/something.py\n")
+        assert result == {"stdout": "", "exit_code": 0}
+        assert [argv[1] for argv, _kw in calls] == ["@git"]
 
-        src = tmp_path / "src" / "aipass" / "hooks"
-        src.mkdir(parents=True)
-        (tmp_path / ".git").mkdir()
-        mock_run.return_value = MagicMock(stdout=" M .claude/hooks/something.py\n", returncode=0)
-        with patch("aipass.hooks.apps.handlers.security.subagent_gate._find_repo_root", return_value=tmp_path):
-            with patch("aipass.hooks.apps.handlers.security.subagent_gate._get_cwd_branch", return_value="hooks"):
-                files = _get_modified_py_files(str(src), tmp_path)
-        assert files == []
-
-    @patch("subprocess.run")
-    def test_skip_claude_hooks_from_seedgo_checks(self, mock_run, tmp_path):
-        # as_posix keeps the "/.claude/" shape the gate matches on every host.
-        repo = tmp_path / "repo"
-        result = _run_seedgo_checklist(f"{repo.as_posix()}/.claude/hooks/gate.py", repo)
-        assert result == []
-        mock_run.assert_not_called()
+    def test_skip_claude_hooks_from_seedgo_checks(self, tmp_path):
+        """A .claude/ directory below the repo root passes the status filter; the checklist skips it."""
+        nested = "src/aipass/hooks/.claude/hooks/gate.py"
+        repo = _repo_with(tmp_path, "repo", nested)
+        result, calls = _stop_in(repo, repo / "src" / "aipass" / "hooks", f" M {nested}\n")
+        assert result == {"stdout": "", "exit_code": 0}
+        assert [argv[1] for argv, _kw in calls] == ["@git", "readme"]
 
     @patch("subprocess.run")
     def test_skip_claude_hooks_in_the_windows_spelling(self, mock_run, tmp_path):
@@ -171,27 +203,32 @@ class TestSubagentGateHandler:
 class TestSubagentGateExternalProject:
     """Verify subagent gate works for non-AIPass projects (e.g. src/vera_studio/)."""
 
+    # The branch and package are read as the directory `drone @git status` runs in
+    # and the file the block names (fleet green leg 8). tmp_path keeps the paths
+    # OS-native and drive-anchored: .resolve() anchors a synthetic one on Windows.
+
     def test_get_cwd_branch_external_package(self, tmp_path):
-        # Use tmp_path for OS-native, drive-anchored paths — synthetic POSIX
-        # strings break on Windows where .resolve() anchors to the current drive.
-        repo_root = tmp_path / "vera"
-        cwd = repo_root / "src" / "vera_studio" / "quality"
-        cwd.mkdir(parents=True)
-        branch = _get_cwd_branch(str(cwd), repo_root)
-        assert branch == "quality"
+        repo = _repo_with(tmp_path, "vera", "src/vera_studio/quality/bad.py")
+        cwd = repo / "src" / "vera_studio" / "quality"
+        result, calls = _stop_in(repo, cwd, " M src/vera_studio/quality/bad.py\n")
+        assert calls[0][0][1] == "@git"
+        assert Path(calls[0][1]["cwd"]) == cwd
+        assert "bad.py:" in json.loads(result["stdout"])["reason"]
 
     def test_get_cwd_branch_aipass_still_works(self, tmp_path):
-        repo_root = tmp_path / "AIPass"
-        cwd = repo_root / "src" / "aipass" / "hooks"
-        cwd.mkdir(parents=True)
-        branch = _get_cwd_branch(str(cwd), repo_root)
-        assert branch == "hooks"
+        """From a directory below the branch, the status still runs at the branch's top."""
+        repo = _repo_with(tmp_path, "AIPass", "src/aipass/hooks/apps/bad.py")
+        branch = repo / "src" / "aipass" / "hooks"
+        result, calls = _stop_in(repo, branch / "apps", " M src/aipass/hooks/apps/bad.py\n")
+        assert Path(calls[0][1]["cwd"]) == branch
+        assert "bad.py:" in json.loads(result["stdout"])["reason"]
 
     def test_get_package_from_cwd_external(self, tmp_path):
-        projects = tmp_path / "fake" / "projects"
-        assert _get_package_from_cwd(str(projects / "vera" / "src" / "vera_studio" / "quality")) == "vera_studio"
-        assert _get_package_from_cwd(str(projects / "AIPass" / "src" / "aipass" / "hooks")) == "aipass"
-        assert _get_package_from_cwd(str(tmp_path / "fake" / "no-src-here")) == ""
+        """Outside any src/<package>/<branch> the gate reads no status and allows."""
+        repo = _repo_with(tmp_path, "fake", "no-src-here/bad.py")
+        result, calls = _stop_in(repo, repo / "no-src-here", " M no-src-here/bad.py\n")
+        assert result == {"stdout": "", "exit_code": 0}
+        assert calls == []
 
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._check_hook_readme_accountability", return_value=None)
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_seedgo_checklist")

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_auto_process.py
-# Version: 1.3.4
+# Version: 1.3.5
 # Description: Tests for auto_process lifecycle handler (TDPLAN-0005, DPLAN-0294 phase 1b)
 # Branch: hooks
 # Created: 2026-06-06
@@ -34,12 +34,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from aipass.hooks.apps.handlers.lifecycle import auto_process
-from aipass.hooks.apps.handlers.lifecycle.auto_process import (
-    _already_ran_this_session,
-    _mark_session_ran,
-    _session_guard_path,
-    handle,
-)
+from aipass.hooks.apps.handlers.lifecycle.auto_process import handle
 
 
 def _kept_redirect() -> dict[str, str]:
@@ -303,45 +298,54 @@ class TestSessionGuard:
 
         mock_mark.assert_not_called()
 
-    def test_guard_path_uses_session_id(self):
+    # The guard is read through handle() (fleet green leg 8): its file in a tmp
+    # _GUARD_DIR, and whether @memory's stand-in was kicked.
 
-        with patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "abc-123"}):
-            path = _session_guard_path()
+    @staticmethod
+    def _kicks(monkeypatch, guard_dir, session_id: str | None, times: int = 1) -> int:
+        """Run handle() `times` and return how often @memory's spawn was called.
 
-        assert path == auto_process._GUARD_DIR / "aipass-auto-process-abc-123"
+        `guard_dir` is a directory of its own: the test log redirect writes beside it.
+        """
+        guard_dir.mkdir(exist_ok=True)
+        monkeypatch.setattr(auto_process, "_GUARD_DIR", guard_dir)
+        monkeypatch.delenv("AIPASS_HOOK_PROBE", raising=False)
+        if session_id is None:
+            monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        else:
+            monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+        mock_module = _make_mock_module()
+        with _served(mock_module):
+            for _ in range(times):
+                handle({})
+        return mock_module.spawn_background.call_count
 
-    def test_guard_path_none_without_session_id(self):
+    def test_guard_path_uses_session_id(self, monkeypatch, tmp_path):
+        guard = tmp_path / "guard"
+        self._kicks(monkeypatch, guard, "abc-123")
+        assert [p.name for p in guard.iterdir()] == ["aipass-auto-process-abc-123"]
 
-        with patch.dict("os.environ", _kept_redirect(), clear=True):
-            path = _session_guard_path()
+    def test_guard_path_none_without_session_id(self, monkeypatch, tmp_path):
+        guard = tmp_path / "guard"
+        self._kicks(monkeypatch, guard, None)
+        assert list(guard.iterdir()) == []
 
-        assert path is None
+    def test_already_ran_false_without_session_id(self, monkeypatch, tmp_path):
+        assert self._kicks(monkeypatch, tmp_path / "guard", None, times=2) == 2
 
-    def test_already_ran_false_without_session_id(self):
+    def test_already_ran_false_when_guard_missing(self, monkeypatch, tmp_path):
+        assert self._kicks(monkeypatch, tmp_path / "guard", "test-no-file") == 1
 
-        with patch.dict("os.environ", _kept_redirect(), clear=True):
-            assert not _already_ran_this_session()
+    def test_already_ran_true_when_guard_exists(self, monkeypatch, tmp_path):
+        guard = tmp_path / "guard"
+        guard.mkdir()
+        (guard / "aipass-auto-process-test-exists").touch()
+        assert self._kicks(monkeypatch, guard, "test-exists") == 0
 
-    def test_already_ran_false_when_guard_missing(self, tmp_path):
-
-        with patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-no-file"}):
-            with patch(f"{MODULE}._GUARD_DIR", tmp_path):
-                assert not _already_ran_this_session()
-
-    def test_already_ran_true_when_guard_exists(self, tmp_path):
-
-        (tmp_path / "aipass-auto-process-test-exists").touch()
-        with patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-exists"}):
-            with patch(f"{MODULE}._GUARD_DIR", tmp_path):
-                assert _already_ran_this_session()
-
-    def test_mark_creates_guard_file(self, tmp_path):
-
-        with patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-mark"}):
-            with patch(f"{MODULE}._GUARD_DIR", tmp_path):
-                _mark_session_ran()
-
-        assert (tmp_path / "aipass-auto-process-test-mark").exists()
+    def test_mark_creates_guard_file(self, monkeypatch, tmp_path):
+        guard = tmp_path / "guard"
+        assert self._kicks(monkeypatch, guard, "test-mark", times=2) == 1
+        assert (guard / "aipass-auto-process-test-mark").exists()
 
 
 class TestProbeSuppression:

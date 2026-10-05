@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: sandbox.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Sandbox wrapper — launches commands inside srt (kernel FS boundary)
 # Branch: hooks
 # Layer: apps/modules
@@ -20,7 +20,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
@@ -36,7 +35,7 @@ _SRT_RESOLVE = _MODULE_DIR / "_srt_resolve.mjs"
 _VAR_TMP = Path("/var/tmp")
 
 
-def _srt_resolve_cwd(gettempdir: Callable[[], str] = tempfile.gettempdir) -> str:
+def _srt_resolve_cwd() -> str:
     """Return a CWD for the srt resolver that is outside any allow_write path.
 
     srt auto-denies DANGEROUS_FILES (.bashrc, .gitconfig, …) resolved relative
@@ -45,15 +44,12 @@ def _srt_resolve_cwd(gettempdir: Callable[[], str] = tempfile.gettempdir) -> str
     Running the resolver from /var/tmp (never in allow_write) makes srt skip
     those entries entirely — no bwrap args, no mount points, no pollution.
 
-    Args:
-        gettempdir: The fallback's answer, tempfile's own by default. A seam: the
-            tests are the reason it exists, so they hand one in in place of
-            patching tempfile, which replaces it process-wide. The one caller
-            passes nothing. The decision is hooks', fleet green leg 7.
+    The leg 7 gettempdir seam is gone (fleet green leg 8): its tests now read
+    the fallback through resolve_bwrap_command, so nothing passed it.
     """
     if _VAR_TMP.is_dir():
         return str(_VAR_TMP)
-    return gettempdir()
+    return tempfile.gettempdir()
 
 
 HELP_COMMANDS = [

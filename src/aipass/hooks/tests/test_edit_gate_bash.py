@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.4.1
+# Version: 1.4.2
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -13,9 +13,11 @@
 # seedgo: no-test-needed(ruff) — that edit_gate.py and bash_writes.py parse and import
 # seedgo: no-test-needed(constant) — NO_WRITE_VERB's text, the marker testwrite_gate reads
 
+import importlib
 import json
 import os
 import shutil
+import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import patch
 
@@ -50,6 +52,8 @@ from aipass.hooks.apps.modules.bash_writes import write_targets
 # tested on purpose, through _win(), only in the classes that pin it.
 
 _RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller"
+# The parser's call-time import, refused for real through a None entry in sys.modules (fleet green leg 8).
+_BASH_WRITES = "aipass.hooks.apps.modules.bash_writes"
 
 
 @pytest.fixture
@@ -227,8 +231,13 @@ class TestAdminIdentityIsVerifiedNotClaimed:
             result = _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
         assert _blocked(result)
 
-    def test_an_unimportable_rail_fails_closed(self, sibling_projects: dict):
-        """Only the rail is missing. Since 2026-09-18 the fence itself is a call-time import too."""
+    def test_an_unimportable_rail_fails_closed(self, sibling_projects: dict, grant_granted):
+        """Only the rail is missing. Since 2026-09-18 the fence itself is a call-time import too.
+
+        The grant is given (fleet green leg 8), so the dark rail is the only thing that can refuse:
+        without it this pin passed with the rail arm opened. Only the gate's own import seam is
+        refused; a None entry in sys.modules was tried and did not isolate the rail arm.
+        """
         real = edit_gate._import_module
 
         def _no_rail(name: str):
@@ -402,12 +411,18 @@ class TestScriptedLaneDoesNotOverreach:
     def test_an_empty_command_is_allowed(self, sibling_projects: dict):
         assert self._run_plain(sibling_projects, "")["exit_code"] == 0
 
-    def test_a_parser_failure_refuses_the_call(self, sibling_projects: dict):
-        """DPLAN-0356 item 2: a fence that cannot read a command does not let it through."""
-        with patch.object(edit_gate, "_import_module", side_effect=RuntimeError("boom")):
-            result = self._run_plain(sibling_projects, f"sed -i s/a/b/ {sibling_projects['foreign_file']}")
+    def test_a_parser_failure_refuses_the_call(self, sibling_projects: dict, monkeypatch):
+        """DPLAN-0356 item 2: a fence that cannot read a command does not let it through.
+
+        The parser is made unimportable for real (fleet green leg 8); the error the refusal must carry
+        is asked of the interpreter, not named here.
+        """
+        monkeypatch.setitem(sys.modules, _BASH_WRITES, None)
+        with pytest.raises(ImportError) as raised:
+            importlib.import_module(_BASH_WRITES)
+        result = self._run_plain(sibling_projects, f"sed -i s/a/b/ {sibling_projects['foreign_file']}")
         assert result["exit_code"] == 2
-        assert "boom" in json.loads(result["stdout"])["reason"]
+        assert str(raised.value) in json.loads(result["stdout"])["reason"]
 
     def test_a_seat_outside_any_project_is_not_fenced(self, tmp_path: Path):
         """A fence that cannot locate a boundary must not invent one."""
@@ -840,14 +855,15 @@ class TestWindowsSpelledPathsAreStillFenced:
 class TestBothSpellingsAreRead:
     """Parser level: neither dialect may be chosen at the other's expense."""
 
-    def test_posix_escaped_space_survives(self):
+    def test_posix_escaped_space_survives(self, tmp_path: Path):
         """shlex's escape reading is still produced — it is correct for POSIX.
 
         `cp a\\ b.txt dest` names ONE source file with a space in it. If the
         separator reading had replaced the escape reading rather than joining
         it, this filename would have become two tokens on every OS.
         """
-        readings = bash_writes._readings(r"cp a\ b.txt dest.txt")
+        segments = bash_writes.write_targets_by_segment(r"cp a\ b.txt dest.txt", str(tmp_path))
+        readings = [tokens for tokens, _ in segments]
 
         assert ["cp", "a b.txt", "dest.txt"] in readings, f"escape reading lost: {readings}"
 

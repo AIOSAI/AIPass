@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.6.1
+# Version: 1.6.2
 # Description: Tests for cadence module (DPLAN-0200); branch overrides 1.4.0, prompt key 1.5.0, beat display 1.6.0
 # Branch: hooks
 # Created: 2026-06-08
@@ -33,8 +33,6 @@ from aipass.hooks.apps.handlers.prompt.branch_loader import handle as _branch_lo
 from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle as _tier0_kernel_handle
 from aipass.hooks.apps.modules import cadence
 from aipass.hooks.apps.modules.cadence import (
-    _deep_merge,
-    _load_config,
     consume_regroup_pending,
     degraded_reason,
     handle_command,
@@ -641,65 +639,71 @@ class TestRegroupFireLog:
         assert "chars=2" in fmt % tuple(args)
 
 
+def _config_shown(capsys, config_path) -> str:
+    """The merged config as `drone @hooks cadence` prints it (fleet green leg 8: not _load_config by name)."""
+    with patch(f"{MODULE}._CONFIG_PATH", config_path):
+        print_introspection()
+    return capsys.readouterr().err
+
+
 class TestConfig:
     def setup_method(self):
         _reset_module_globals()
 
-    def test_defaults_used_when_no_config_file(self, tmp_path):
-        with patch(f"{MODULE}._CONFIG_PATH", tmp_path / "nonexistent.json"):
-            config = _load_config()
+    def test_defaults_used_when_no_config_file(self, tmp_path, capsys):
+        shown = _config_shown(capsys, tmp_path / "nonexistent.json")
 
-        assert config["enabled"] is True
-        assert config["period"] == 5
-        assert config["loaders"]["branch"]["offset"] == 0
-        assert "global" not in config["loaders"]
+        assert "Enabled: True" in shown
+        assert "Period: 5 turns" in shown
+        assert "Loader 'branch': period=5 offset=0" in shown
+        assert "Loader 'global'" not in shown
 
-    def test_defaults_include_tiered_loaders(self, tmp_path):
+    def test_defaults_include_tiered_loaders(self, tmp_path, capsys):
         """Fresh clone with no cadence_config.json gets tiered cadence out of the box."""
-        with patch(f"{MODULE}._CONFIG_PATH", tmp_path / "nonexistent.json"):
-            config = _load_config()
+        shown = _config_shown(capsys, tmp_path / "nonexistent.json")
 
-        assert config["loaders"]["tier0"]["period"] == 5
-        assert config["loaders"]["navmap"]["period"] == 5
-        assert config["loaders"]["navmap"]["offset"] == 0
+        assert "Loader 'tier0': period=5" in shown
+        assert "Loader 'navmap': period=5 offset=0" in shown
 
-    def test_config_deep_merges_over_defaults(self, tmp_path):
+    def test_config_deep_merges_over_defaults(self, tmp_path, capsys):
         config_file = tmp_path / "cadence.json"
         config_file.write_text(json.dumps({"period": 10, "loaders": {"global": {"offset": 3}}}), encoding="utf-8")
 
-        with patch(f"{MODULE}._CONFIG_PATH", config_file):
-            config = _load_config()
+        shown = _config_shown(capsys, config_file)
 
-        assert config["period"] == 10
-        assert config["loaders"]["global"]["offset"] == 3
-        assert config["loaders"]["branch"]["offset"] == 0
-        assert config["enabled"] is True
+        assert "Period: 10 turns" in shown
+        assert "Loader 'global': period=10 offset=3" in shown
+        assert "Loader 'branch': period=10 offset=0" in shown  # no period of its own: the global one
+        assert "Enabled: True" in shown
 
-    def test_bad_config_falls_back_to_defaults(self, tmp_path):
+    def test_bad_config_falls_back_to_defaults(self, tmp_path, capsys):
         config_file = tmp_path / "cadence.json"
         config_file.write_text("not valid json{{{", encoding="utf-8")
 
-        with patch(f"{MODULE}._CONFIG_PATH", config_file):
-            config = _load_config()
-
-        assert config["period"] == 5
+        assert "Period: 5 turns" in _config_shown(capsys, config_file)
 
 
 class TestDeepMerge:
-    def test_nested_merge(self):
-        base = {"a": 1, "b": {"c": 2, "d": 3}}
-        updates = {"b": {"c": 99}, "e": 4}
-        result = _deep_merge(base, updates)
+    """The merge, read on the config it builds (fleet green leg 8: not _deep_merge by name)."""
 
-        assert result["a"] == 1
-        assert result["b"]["c"] == 99
-        assert result["b"]["d"] == 3
-        assert result["e"] == 4
+    def setup_method(self):
+        _reset_module_globals()
 
-    def test_overwrites_non_dict(self):
-        base = {"a": [1, 2]}
-        result = _deep_merge(base, {"a": [3]})
-        assert result["a"] == [3]
+    def test_nested_merge(self, tmp_path, capsys):
+        config_file = tmp_path / "cadence.json"
+        config_file.write_text(json.dumps({"loaders": {"branch": {"offset": 2}}}), encoding="utf-8")
+
+        shown = _config_shown(capsys, config_file)
+
+        # The key it names is replaced; its sibling inside the same loader is kept.
+        assert "Loader 'branch': period=5 offset=2" in shown
+        assert "Loader 'tier0': period=5 offset=0" in shown
+
+    def test_overwrites_non_dict(self, tmp_path, capsys):
+        config_file = tmp_path / "cadence.json"
+        config_file.write_text(json.dumps({"enabled": False}), encoding="utf-8")
+
+        assert "Enabled: False" in _config_shown(capsys, config_file)
 
 
 class TestPerSessionIsolation:

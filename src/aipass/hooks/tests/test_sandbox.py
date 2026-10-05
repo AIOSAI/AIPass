@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_sandbox.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Tests for sandbox wrapper module
 # Branch: hooks
 # Created: 2026-06-09
@@ -23,9 +23,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.hooks.apps.modules.sandbox import (
-    _find_node,
-    _find_rg,
-    _srt_resolve_cwd,
     build_policy,
     build_srt_config,
     handle_command,
@@ -103,17 +100,35 @@ def _home_at(monkeypatch, home: Path) -> None:
     monkeypatch.setenv("USERPROFILE", str(home))
 
 
+def _resolver_call() -> tuple[list, dict]:
+    """The argv and keywords resolve_bwrap_command hands the srt resolver.
+
+    The finders and the resolver's cwd are read through the public resolver
+    (fleet green leg 8), not by name; subprocess.run is the sealed edge.
+    """
+    fake_result = MagicMock(returncode=0, stdout="bwrap --test", stderr="")
+    with patch("aipass.hooks.apps.modules.sandbox.subprocess.run", return_value=fake_result) as run:
+        resolve_bwrap_command("echo hi", {"network": {}})
+    return run.call_args[0][0], run.call_args[1]
+
+
+def _rg_found() -> Path:
+    """The ripgrep build_srt_config hands srt (fleet green leg 8, not _find_rg by name)."""
+    return Path(build_srt_config({"allow_write": []})["ripgrep"]["command"])
+
+
 class TestFindNode:
     """Node.js binary discovery."""
 
     def test_finds_node_on_path(self, monkeypatch, tmp_path):
         bin_dir = _path_holding(monkeypatch, tmp_path, "node")
-        assert Path(_find_node()).parent.resolve() == bin_dir.resolve()
+        argv, _kwargs = _resolver_call()
+        assert Path(argv[0]).parent.resolve() == bin_dir.resolve()
 
     def test_raises_when_not_found(self, monkeypatch, tmp_path):
         _path_holding(monkeypatch, tmp_path)
         with pytest.raises(FileNotFoundError, match="node not found"):
-            _find_node()
+            _resolver_call()
 
 
 class TestFindRg:
@@ -121,7 +136,7 @@ class TestFindRg:
 
     def test_finds_rg_on_path(self, monkeypatch, tmp_path):
         bin_dir = _path_holding(monkeypatch, tmp_path, "rg")
-        assert Path(_find_rg()).parent.resolve() == bin_dir.resolve()
+        assert _rg_found().parent.resolve() == bin_dir.resolve()
 
     def test_falls_back_to_local_bin(self, monkeypatch, tmp_path):
         fake_rg = tmp_path / ".local" / "bin" / "rg"
@@ -130,13 +145,13 @@ class TestFindRg:
         _path_holding(monkeypatch, tmp_path)
         _home_at(monkeypatch, tmp_path)
 
-        assert Path(_find_rg()) == fake_rg
+        assert _rg_found() == fake_rg
 
     def test_raises_when_not_found(self, monkeypatch, tmp_path):
         _path_holding(monkeypatch, tmp_path)
         _home_at(monkeypatch, tmp_path)
         with pytest.raises(FileNotFoundError, match="ripgrep"):
-            _find_rg()
+            _rg_found()
 
 
 class TestResolveBwrapCommand:
@@ -294,18 +309,23 @@ class TestSandboxLaunch:
 class TestSrtResolveCwd:
     """CWD selection for srt resolver — prevents mask-placeholder pollution."""
 
-    def test_returns_var_tmp_when_available(self):
-        mock_var = MagicMock()
-        mock_var.is_dir.return_value = True
-        mock_var.__str__ = MagicMock(return_value="/var/tmp")
-        with patch("aipass.hooks.apps.modules.sandbox._VAR_TMP", mock_var):
-            assert _srt_resolve_cwd() == "/var/tmp"
+    # Read as the cwd resolve_bwrap_command hands the resolver (fleet green leg 8).
+
+    def test_returns_var_tmp_when_available(self, tmp_path):
+        with (
+            patch("aipass.hooks.apps.modules.sandbox._VAR_TMP", tmp_path),
+            patch("aipass.hooks.apps.modules.sandbox._find_node", return_value="node"),
+        ):
+            _argv, kwargs = _resolver_call()
+        assert Path(kwargs["cwd"]) == tmp_path
 
     def test_falls_back_to_tempdir(self, tmp_path):
-        with patch("aipass.hooks.apps.modules.sandbox._VAR_TMP") as mock_var:
-            mock_var.is_dir.return_value = False
-            # The fallback's answer through the seam, not a tempfile patch (fleet green leg 7).
-            assert _srt_resolve_cwd(gettempdir=lambda: str(tmp_path)) == str(tmp_path)
+        with (
+            patch("aipass.hooks.apps.modules.sandbox._VAR_TMP", tmp_path / "absent"),
+            patch("aipass.hooks.apps.modules.sandbox._find_node", return_value="node"),
+        ):
+            _argv, kwargs = _resolver_call()
+        assert kwargs["cwd"] == tempfile.gettempdir()
 
 
 class TestBuildPolicy:
