@@ -3,7 +3,7 @@
 # Description: Load Module Registry Handler
 # Version: 1.2.0
 # Created: 2025-11-07
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -47,12 +47,14 @@ REGISTRY_FILE = PRAX_JSON_DIR / "prax_registry.json"
 # =============================================
 
 
-def load_module_registry() -> Dict[str, Dict[str, Any]]:
+def load_module_registry() -> Optional[Dict[str, Dict[str, Any]]]:
     """Load module registry from prax_registry.json (system registry)
 
     Returns:
-        Dict mapping module names to module info dicts.
-        Returns empty dict if file doesn't exist or on error.
+        Dict mapping module names to module info dicts. An empty dict when the
+        registry file does not exist yet (never scanned). None when the file
+        exists but cannot be read: a writer that took {} there saved one module
+        over the whole registry (prax, leg 15).
 
     The registry structure is:
     {
@@ -84,7 +86,7 @@ def load_module_registry() -> Dict[str, Dict[str, Any]]:
             return modules
     except Exception as e:
         logger.warning("load: failed to load module registry from '%s': %s", REGISTRY_FILE, e)
-        return {}
+        return None
 
 
 def load_last_scan() -> Optional[Dict[str, Any]]:

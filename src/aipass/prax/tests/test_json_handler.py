@@ -3,7 +3,7 @@
 # Description: Tests for the fleet json service through prax's own shim
 # Version: 2.2.0
 # Created: 2026-03-28
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -834,8 +834,16 @@ class TestRateTrackerKeepsKeysItDoesNotOwn:
         to today and the service's counters wiped. Now each writer sets only its
         own keys — and the bump that follows a save keeps the tracker's files.
         The save is reached through configure and scan_rates, the public door
-        (prax, leg 14).
+        (prax, leg 14). The tracker's clock is frozen at its home on a day
+        after the seeded one, so a re-stamp shows as that day (prax, leg 15).
         """
+
+        class _FrozenDate(date):
+            @classmethod
+            def today(cls):
+                return cls(2030, 6, 15)
+
+        monkeypatch.setattr(rate_tracker, "date", _FrozenDate)
         logs = tmp_path / "scanned_logs"
         logs.mkdir()
         log_file = logs / "a.log"

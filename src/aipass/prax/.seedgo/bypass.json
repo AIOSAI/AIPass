@@ -203,7 +203,7 @@
     {
       "file": "apps/modules/status.py",
       "standard": "logged_fallback",
-      "lines": [132],
+      "lines": [133],
       "reason": "prax, leg 7: True is the handler contract's 'this module owned the command', not an answer. The failure reaches the caller through error() on the line above, which is what marks the run failed for the exit seam in prax.py main(). The checker's error() exemption reads a success-path return, not the handler's own."
     },
     {
@@ -255,7 +255,7 @@
     {
       "file": "tests/test_dashboard_merge.py",
       "standard": "through_the_command",
-      "lines": [187, 188, 189],
+      "lines": [203, 204, 205],
       "reason": "prax, leg 14. These calls were always here; the _load helper hid them from the checker until this leg bound the modules by import. The file's subject is four copies of one quick_status calculator, and the defect it pins is the drift between them, so each copy is called by name in the parametrize table; a public door mixes in the merge and the other writers and could not tell which copy drifted. The other private calls the helper hid (the pusher's structural step, the differ's per-branch diff) now go through push_dashboard_template and diff_dashboard_template on a tmp world."
     },
     {
@@ -263,6 +263,42 @@
       "standard": "through_the_command",
       "lines": [320, 842],
       "reason": "prax, leg 14. 320: the walk on the OTHER platform's dialect (a drive-qualified Windows path, from a Linux run). source_root makes a host Path of its start, so only the pure walk can take that dialect; the host's own dialect goes through source_root in the three tests above it. 842: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
+    },
+    {
+      "file": "apps/handlers/monitoring/instance_lock.py",
+      "standard": "logged_fallback",
+      "lines": [70, 79],
+      "reason": "prax, leg 15. True is the fail-safe answer: a PID the check could not read (70) or may not signal (79, the process exists) is held alive, so try_acquire never steals a lock it could not check and agent_status_writer never marks an unchecked agent dead. The failure is logged beside 70."
+    },
+    {
+      "file": "apps/handlers/discovery/watcher.py",
+      "standard": "logged_fallback",
+      "lines": [456],
+      "reason": "prax, leg 15. Fail-safe True: the liveness check exists to report a death, its one caller (logger.py get_status) ignores the answer, and nothing restarts or is taken on True. The failure is logged as a warning beside it."
+    },
+    {
+      "file": "apps/handlers/monitoring/file_watcher_integration.py",
+      "standard": "logged_fallback",
+      "lines": [108, 158, 165],
+      "reason": "prax, leg 15. Each empty list is said beside it by a WARNING or ERROR naming the cause, and start() treats empty paths as failure (logger.error, returns False). Nothing writes or shows the empty list as the truth."
+    },
+    {
+      "file": "apps/handlers/monitoring/event_queue.py",
+      "standard": "logged_fallback",
+      "lines": [111],
+      "reason": "prax, leg 15. False means the event did not enter the queue, the same answer a duplicate gets, which is the truth; the drop is counted and reported by the rate-limited _report_drops."
+    },
+    {
+      "file": "apps/handlers/dashboard/refresh.py",
+      "standard": "logged_fallback",
+      "lines": [332],
+      "reason": "prax, leg 15. The dashboard is rebuilt from its sources; {} only loses the carried-forward section, which is logged as a WARNING naming the file. A raise would leave a corrupt dashboard that no refresh could heal."
+    },
+    {
+      "file": "apps/handlers/dashboard/agent_status_writer.py",
+      "standard": "logged_fallback",
+      "lines": [95],
+      "reason": "prax, leg 15. The same [] is both the branches to scan and the branches to write to, so an unreadable registry writes the empty agent list to no dashboard; the failure is logged as a warning beside it."
     },
     {
       "file": "tests/test_telegram_relay.py",

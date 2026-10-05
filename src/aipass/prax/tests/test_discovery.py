@@ -3,7 +3,7 @@
 # Description: Unit tests for discovery handlers
 # Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/discovery/filtering.py, scanner.py, scan.py and apps/modules/discover.py."""
@@ -345,6 +345,19 @@ class TestRunScan:
         assert result["removed"] == ["gone"]
         assert result["unchanged"] == 1
         assert result["total"] == 2
+        assert result["previous_unreadable"] is False
+
+    def test_an_unreadable_registry_is_rebuilt_from_the_walk_and_flagged(self, scan_module, monkeypatch):
+        """load answers None for a registry it cannot read (prax, leg 15). The scan
+        saves what it walked, which heals the file, and flags that nothing could
+        be compared."""
+        _walk(scan_module, monkeypatch, before=None, found={"fresh": {}})
+
+        result = scan_module.run_scan()
+
+        assert result["previous_unreadable"] is True
+        assert result["added"] == ["fresh"]
+        assert result["saved"] is not False
 
     def test_saved_registry_is_the_walk_not_a_merge(self, scan_module, saved_registry, monkeypatch):
         """The defect this cures: a module whose file is gone stayed on record
@@ -456,13 +469,41 @@ class TestDiscoverCommandGate:
         monkeypatch.setattr(
             discover_module,
             "run_scan",
-            lambda: {"added": ["fresh"], "removed": [], "unchanged": 3, "total": 4, "saved": True},
+            lambda: {
+                "added": ["fresh"],
+                "removed": [],
+                "unchanged": 3,
+                "total": 4,
+                "saved": True,
+                "previous_unreadable": False,
+            },
         )
 
         assert discover_module.handle_command("discover", ["run"]) is True
         captured = capsys.readouterr()
         assert "  added: fresh" in captured.out.splitlines()
         assert "Registry updated — 4 modules" in captured.out + captured.err
+        assert "could not be read" not in captured.out + captured.err
+
+    def test_a_rebuilt_unreadable_registry_is_said_beside_the_counts(self, discover_module, monkeypatch, capsys):
+        """Every module reads as added when the previous registry was unreadable;
+        the run says so, so the count is not taken for news (prax, leg 15)."""
+        monkeypatch.setattr(
+            discover_module,
+            "run_scan",
+            lambda: {
+                "added": ["a", "b"],
+                "removed": [],
+                "unchanged": 0,
+                "total": 2,
+                "saved": True,
+                "previous_unreadable": True,
+            },
+        )
+
+        assert discover_module.handle_command("discover", ["run"]) is True
+        captured = capsys.readouterr()
+        assert "The previous registry could not be read; it was rebuilt from disk." in captured.out + captured.err
 
     def test_an_unknown_subcommand_is_refused(self, discover_module, monkeypatch):
         """`discover scna` must not be indistinguishable from `discover`."""

@@ -3,7 +3,7 @@
 # Description: PRAX Status Command
 # Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -107,7 +107,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print()
     console.print("[bold cyan]PRAX System Status[/bold cyan]")
     console.print("=" * 60)
-    console.print(f"  Total Modules:   {status['total_modules']}")
+    total = status["total_modules"]
+    console.print(f"  Total Modules:   {'unreadable (see the prax log)' if total is None else total}")
     console.print(f"  Active Loggers:  {status['individual_loggers']}")
     console.print(f"  System Logs Dir: {status['system_logs_dir']}")
     console.print(f"  Module Logs Dir: {status['module_logs_dir']}")

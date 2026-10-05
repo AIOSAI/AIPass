@@ -3,7 +3,7 @@
 # Description: quick_status has many writers — none may delete another's key
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/dashboard/status.py, refresh.py, operations.py, template_pusher.py and template_differ.py."""
@@ -155,6 +155,22 @@ class TestForeignKeysSurviveEveryWriter:
         quick = _read_quick_status(branch)
         assert quick["todo_count"] == 2
         assert quick["new_mail"] == 1
+
+    def test_an_unreadable_todo_list_keeps_the_last_count_and_says_so(self, tmp_path):
+        """A local.json that cannot be read is not zero todos (prax, leg 15).
+
+        The count was written as 0 into the dashboard as if the list were empty;
+        now the last count written stays and the summary says it is unreadable.
+        """
+        branch = _seed_branch(tmp_path, {"new_mail": 0, "todo_count": 7})
+        (branch / ".trinity" / "local.json").write_text("<<<not json>>>", encoding="utf-8")
+
+        with patch.object(refresh, "read_all_centrals", return_value={}):
+            refresh.refresh_single_dashboard(branch)
+
+        quick = _read_quick_status(branch)
+        assert quick["todo_count"] == 7
+        assert quick["summary"] == "1 new emails, 1 opened, todos unreadable"
 
     def test_canary_plain_assignment_drops_the_key(self):
         """Proof the assertions above can fail: replacing the block is the bug."""

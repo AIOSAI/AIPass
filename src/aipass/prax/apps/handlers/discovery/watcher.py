@@ -3,7 +3,7 @@
 # Description: File System Watching
 # Version: 1.6.0
 # Created: 2025-11-26
-# Modified: 2026-10-02
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -176,8 +176,12 @@ class PythonFileWatcher(FileSystemEventHandler):
 
         module_name = py_file.stem
 
-        # Skip if already in registry
+        # Skip if already in registry. None is an unreadable registry: saving
+        # this one module would replace every entry in it (prax, leg 15).
         modules = load_module_registry()
+        if modules is None:
+            logger.warning(f"[watcher] The module registry could not be read, so {py_file} was not registered")
+            return
         if module_name in modules:
             return
 

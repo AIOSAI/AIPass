@@ -3,7 +3,7 @@
 # Description: Tests for registry load and save handlers
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/registry/load.py and apps/handlers/registry/save.py."""
@@ -143,18 +143,20 @@ class TestLoadModuleRegistry:
         load_mod.REGISTRY_FILE.write_text(json.dumps(registry), encoding="utf-8")
 
         result = load_mod.load_module_registry()
+        assert result is not None
         assert len(result) == 2
         assert result["prax"]["relative_path"] == "src/aipass/prax"
         assert result["flow"]["size"] == 2048
 
-    def test_empty_dict_on_corrupt_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        """Corrupt JSON returns an empty dict and says why in a warning."""
+    def test_none_on_corrupt_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """Corrupt JSON answers None, never the {} of a registry with no modules,
+        and says why in a warning (prax, leg 15: a writer took {} for the truth)."""
         _patch_registry_load(monkeypatch, tmp_path)
         load_mod.REGISTRY_FILE.write_text("<<<not json>>>", encoding="utf-8")
 
         result = load_mod.load_module_registry()
 
-        assert result == {}
+        assert result is None
         warning = cast(MagicMock, load_mod.logger).warning
         assert warning.call_count == 1
         form, where, _why = warning.call_args.args
@@ -375,6 +377,7 @@ class TestRegistryRoundTrip:
         _patch_registry_load(monkeypatch, tmp_path)
 
         result = load_mod.load_module_registry()
+        assert result is not None
         assert len(result) == 2
         assert result["alpha"]["relative_path"] == "src/alpha.py"
         assert result["beta"]["size"] == 200

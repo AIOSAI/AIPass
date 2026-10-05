@@ -3,7 +3,7 @@
 # Description: Tests for file system watcher handlers
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-03
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/watcher/monitor.py and apps/handlers/discovery/watcher.py."""
@@ -637,6 +637,40 @@ class TestDispatcherSurvivesHandlerFailure:
         assert asked == [real_file], "the ignore filter was never consulted"
         bus.fire.assert_called_once_with(
             "module_discovered", module_name="keeper", file_path=str(real_file), relative_path="keeper.py"
+        )
+
+    def test_an_unreadable_registry_is_never_overwritten_by_one_new_module(self, tmp_path, monkeypatch):
+        """load_module_registry answers None when the registry cannot be read.
+
+        The handler used to receive {} there, add the one new module and save,
+        so the whole registry was replaced by a single entry (prax, leg 15: the
+        raise rule, compass 486). Now nothing is saved and nothing fires.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: p.parent != tmp_path)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: None)
+        bus = MagicMock()
+        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
+        saves = []
+        monkeypatch.setattr(mod, "save_module_registry", saves.append)
+        log = self._close_the_far_side(mod, monkeypatch, tmp_path)
+
+        real_file = tmp_path / "keeper.py"
+        real_file.write_bytes(b"y = 2\n")
+        handler = mod.PythonFileWatcher()
+        event = MagicMock()
+        event.event_type = "created"
+        event.is_directory = False
+        event.src_path = str(real_file)
+        handler.dispatch(event)
+
+        assert saves == []
+        bus.fire.assert_not_called()
+        # Turned away on purpose, not by a crash the handler's guard swallowed.
+        log.error.assert_not_called()
+        log.warning.assert_called_once_with(
+            f"[watcher] The module registry could not be read, so {real_file} was not registered"
         )
 
     def test_a_file_created_in_a_dropbox_or_an_archive_is_not_registered(self, tmp_path, monkeypatch):

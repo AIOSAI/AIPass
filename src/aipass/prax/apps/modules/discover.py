@@ -3,7 +3,7 @@
 # Description: PRAX Discover Command
 # Version: 1.0.0
 # Created: 2026-09-12
-# Modified: 2026-09-12
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -31,7 +31,7 @@ if sys.platform == "win32":
 
 from aipass.prax.apps.handlers.discovery.scan import run_scan
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, success, error
+from aipass.cli.apps.modules import console, success, error, warning
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.cli.arg_gate import refuse
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
@@ -95,6 +95,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     result = run_scan()
 
     console.print()
+    if result["previous_unreadable"]:
+        # Said beside the counts: with no readable registry to compare against,
+        # every module reads as added (prax, leg 15).
+        warning("The previous registry could not be read; it was rebuilt from disk.")
     console.print(f"  Added:      {len(result['added'])}")
     _print_names("added", result["added"])
     console.print(f"  Removed:    {len(result['removed'])}")

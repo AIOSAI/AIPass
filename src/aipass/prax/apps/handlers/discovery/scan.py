@@ -3,7 +3,7 @@
 # Description: One-shot module discovery scan
 # Version: 1.0.0
 # Created: 2026-09-12
-# Modified: 2026-09-12
+# Modified: 2026-10-04
 # =============================================
 
 """One-shot discovery scan — the registry's only writer that tells the truth.
@@ -53,6 +53,11 @@ def run_scan() -> Dict[str, Any]:
     rediscovery.
     """
     before = load_module_registry()
+    previous_unreadable = before is None
+    if before is None:
+        # Unreadable registry (load logged why): the scan rebuilds it from disk,
+        # which heals it, but nothing can be carried over or compared (prax, leg 15).
+        before = {}
     found = discover_python_modules()
 
     for name, info in found.items():
@@ -69,6 +74,7 @@ def run_scan() -> Dict[str, Any]:
         "unchanged": len(found) - len(added),
         "total": len(found),
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "previous_unreadable": previous_unreadable,
     }
 
     result["saved"] = save_module_registry(
