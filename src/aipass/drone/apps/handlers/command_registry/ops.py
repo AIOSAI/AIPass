@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ops.py
 # Description: Registry CRUD operations for custom command shortcuts
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Registry CRUD Operations for Custom Commands.
@@ -87,9 +87,12 @@ def load_registry() -> dict[str, Any]:
         Registry dict with ``commands`` and ``metadata`` keys.
 
     Raises:
-        RegistryError: the file exists and could not be read. Recreating it
-            would write an empty registry over commands that are only
-            unreadable, not gone (fleet green leg 7, drone's decision).
+        RegistryError: the file exists and could not be read (fleet green
+            leg 7), or it is not JSON, or its JSON is not an object (leg 8;
+            both drone's decisions). Nothing is written: recreating would put
+            an empty registry over commands that are damaged, not gone, and a
+            corrupt registry is one somebody can repair. Only a missing file
+            is created.
     """
     path = _registry_path()
 
@@ -105,18 +108,12 @@ def load_registry() -> dict[str, Any]:
     except OSError as exc:
         raise RegistryError(f"command registry {path} could not be read ({type(exc).__name__}: {exc})") from exc
     except json.JSONDecodeError as exc:
-        logger.warning("[%s] Corrupt registry, recreating: %s", MODULE_NAME, exc)
-        registry = _empty_registry()
-        save_registry(registry)
-        return registry
+        raise RegistryError(f"command registry {path} is not JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise RegistryError(f"command registry {path} is not a JSON object ({type(data).__name__})")
 
     # Auto-heal missing keys
-    if not isinstance(data, dict):
-        logger.warning("[%s] Invalid registry structure, recreating", MODULE_NAME)
-        registry = _empty_registry()
-        save_registry(registry)
-        return registry
-
     if "commands" not in data:
         data["commands"] = {}
     if "metadata" not in data:

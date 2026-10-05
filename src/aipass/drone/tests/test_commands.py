@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_commands.py
 # Description: Tests for the custom command registry
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-17
-# Modified: 2026-10-04
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for apps/modules/commands.py and the command registry handlers it drives."""
@@ -110,25 +110,39 @@ class TestRegistryAutoCreation:
         assert "metadata" in registry
         assert registry["metadata"]["command_count"] == 0
 
-    def test_load_recreates_on_corrupt_json(self, isolated_registry: Path) -> None:
-        """Corrupt JSON triggers auto-recreation."""
-        isolated_registry.write_text("{{{bad json", encoding="utf-8")
+    def test_a_registry_that_is_not_json_raises_and_is_not_overwritten(self, isolated_registry: Path) -> None:
+        """Not JSON raises naming the path and the parser's own text; the file is byte-equal after (fleet green leg 8).
 
-        registry = ops.load_registry()
+        The parser's text (with its line and column) is asked of this interpreter
+        here, never written down. Red first against the old recreate; its mutant
+        is the proof.
+        """
+        broken = b'{"commands": {"audit": '
+        isolated_registry.write_bytes(broken)
+        with pytest.raises(json.JSONDecodeError) as parsed:
+            json.loads(broken.decode("utf-8"))
 
-        assert registry["commands"] == {}
-        assert registry["metadata"]["command_count"] == 0
+        with pytest.raises(RegistryError) as raised:
+            ops.load_registry()
 
-    def test_load_recreates_on_non_dict(self, isolated_registry: Path) -> None:
-        """Non-dict top-level JSON triggers auto-recreation; mutant killed: the rebuilt registry never saved."""
-        isolated_registry.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+        assert str(isolated_registry) in str(raised.value)
+        assert str(parsed.value) in str(raised.value)
+        assert isolated_registry.read_bytes() == broken
 
-        registry = ops.load_registry()
+    def test_a_registry_that_is_not_a_dict_raises_and_is_not_overwritten(self, isolated_registry: Path) -> None:
+        """JSON that is a list raises naming the path and the type; the file is byte-equal after (fleet green leg 8).
 
-        assert registry["commands"] == {}
-        assert registry["metadata"]["command_count"] == 0
-        on_disk = json.loads(isolated_registry.read_text(encoding="utf-8"))
-        assert on_disk["commands"] == {}
+        Red first against the old recreate; its mutant is the proof.
+        """
+        listed = json.dumps([{"name": "audit"}]).encode("utf-8")
+        isolated_registry.write_bytes(listed)
+
+        with pytest.raises(RegistryError) as raised:
+            ops.load_registry()
+
+        assert str(isolated_registry) in str(raised.value)
+        assert str(raised.value).endswith("is not a JSON object (list)")
+        assert isolated_registry.read_bytes() == listed
 
     def test_auto_heals_missing_keys(self, isolated_registry: Path) -> None:
         """Missing 'commands' or 'metadata' keys are auto-healed."""

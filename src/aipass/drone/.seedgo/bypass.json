@@ -16,6 +16,15 @@
       "reason": "Formatter handler — purpose is to format and print Rich output. console.print() is the core function, not a violation."
     },
     {
+      "file": "apps/drone.py",
+      "standard": "cli",
+      "lines": [
+        69
+      ],
+      "reason": "_reports_passport_fault writes the passport fault line with sys.stderr.write: it is one fact and must not wrap when piped, and Rich wraps at 80 columns. The line is a diagnostic about this seat's own passport and goes to stderr so a caller that parses the command's stdout (drone is run by every citizen and by scripts) never sees it in the answer; the cli console prints to stdout and is the wrong channel. cli's help offers no err console that prints plain to stderr without markup or wrapping. Fleet green leg 8, drone's decision.",
+      "anchor": "sys.stderr.write(fault"
+    },
+    {
       "file": "apps/modules/git_module.py",
       "standard": "modules",
       "reason": "handle_command returns dict (not bool) — module doubles as drone adapter for route_module_command() which requires dict return with stdout/stderr/exit_code"
@@ -249,9 +258,9 @@
       "file": "apps/handlers/command_registry/ops.py",
       "standard": "logged_fallback",
       "lines": [
-        164
+        161
       ],
-      "reason": "save_registry: True = written, False = not written; every False is a failure (invalid structure, OSError here, logged ERROR) and the success path returns True only. Callers add_command/remove_command/update_command (204, 231, 262) report False as a failed save; load_registry's three self-heal saves (99, 110, 117: a missing file, a file that is not JSON, JSON that is not a dict; an existing file it cannot read raises since leg 7) carry on with the in-memory registry, the save's own ERROR log standing. Fleet green leg 6, drone's decision.",
+      "reason": "save_registry: True = written, False = not written; every False is a failure (invalid structure, OSError here, logged ERROR) and the success path returns True only. Callers add_command/remove_command/update_command (201, 228, 259) report False as a failed save; load_registry's one self-heal save (102, a missing file only; an existing file that cannot be read, is not JSON or is not an object raises since legs 7 and 8) carries on with the in-memory registry, the save's own ERROR log standing. Fleet green leg 6, drone's decision.",
       "anchor": "return False"
     },
     {
