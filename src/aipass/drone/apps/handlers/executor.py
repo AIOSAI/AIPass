@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: executor.py
 # Description: Safe subprocess execution for branch command routing
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-09
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -19,7 +19,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from typing import IO, List
+from typing import IO, Any, List, cast
 
 from .exceptions import CommandExecutionError
 from aipass.drone.apps.handlers.json import json_handler
@@ -132,6 +132,27 @@ def _poll_pause(seconds: float) -> None:
     (Popen.wait in _stop_process) sleeps on its own and must run to the end.
     """
     time.sleep(seconds)
+
+
+def _spawn(full_cmd: List[str], **kwargs: Any) -> "subprocess.Popen[bytes]":
+    """Start the captured child: subprocess.Popen with the caller's arguments, nothing else.
+
+    A seam, and the tests are the reason: they replace the spawn here. Patching
+    subprocess.Popen through this module's attribute replaced it for every
+    reader in the process while the patch stood (drone, fleet green leg 6).
+    """
+    # cast: with **kwargs typed Any the checker picks Popen's text overload;
+    # the caller passes no text/encoding flag, so the pipes are bytes.
+    return cast("subprocess.Popen[bytes]", subprocess.Popen(full_cmd, **kwargs))
+
+
+def _run_interactive(full_cmd: List[str], **kwargs: Any) -> "subprocess.CompletedProcess[bytes]":
+    """Run the interactive child: subprocess.run with the caller's arguments, nothing else.
+
+    A seam for the same reason as _spawn: the tests replace the run here
+    instead of subprocess.run for the whole process.
+    """
+    return subprocess.run(full_cmd, **kwargs)
 
 
 def _stop_process(proc: "subprocess.Popen[bytes]") -> None:
@@ -348,7 +369,7 @@ def execute_command(
     if interactive:
         try:
             # Inherit stdin/stdout/stderr for live interaction
-            result = subprocess.run(
+            result = _run_interactive(
                 full_cmd,
                 cwd=cwd,
                 shell=False,
@@ -376,7 +397,7 @@ def execute_command(
         # bufsize=0 so each read returns whatever is available NOW: the ARRIVAL
         # TIME of output is what buys an extension, and a buffered reader would
         # hold a trickling child's output back until a block filled.
-        proc = subprocess.Popen(
+        proc = _spawn(
             full_cmd,
             cwd=cwd,
             stdout=subprocess.PIPE,

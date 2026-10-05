@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_executor.py
 # Description: Subprocess executor - capture, stream, timeout and kill paths
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-14
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/handlers/executor.py, the subprocess executor."""
@@ -172,7 +172,7 @@ class TestInteractiveNoTimeout:
 
     def test_no_timeout_kwarg(self, temp_test_dir: Path):
         """subprocess.run is called without a timeout arg in interactive mode."""
-        with patch("aipass.drone.apps.handlers.executor.subprocess.run") as mock_run:
+        with patch("aipass.drone.apps.handlers.executor._run_interactive") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             execute_command(
                 sys.executable,
@@ -232,7 +232,7 @@ class TestOSErrorWrapping:
     def test_oserror_wraps(self, temp_test_dir: Path):
         """An OSError from spawning the child becomes CommandExecutionError."""
         with patch(
-            "aipass.drone.apps.handlers.executor.subprocess.Popen",
+            "aipass.drone.apps.handlers.executor._spawn",
             side_effect=OSError("mock OS failure"),
         ):
             with pytest.raises(CommandExecutionError, match="OS error"):
@@ -245,7 +245,7 @@ class TestOSErrorWrapping:
     def test_oserror_chains_cause(self, temp_test_dir: Path):
         """The original OSError is preserved as __cause__."""
         with patch(
-            "aipass.drone.apps.handlers.executor.subprocess.Popen",
+            "aipass.drone.apps.handlers.executor._spawn",
             side_effect=OSError("mock OS failure"),
         ):
             with pytest.raises(CommandExecutionError) as exc_info:
@@ -272,7 +272,7 @@ class TestKeyboardInterrupt:
     def test_interactive_returns_130(self, temp_test_dir: Path):
         """Interactive mode catches Ctrl+C and returns exit code 130."""
         with patch(
-            "aipass.drone.apps.handlers.executor.subprocess.run",
+            "aipass.drone.apps.handlers.executor._run_interactive",
             side_effect=KeyboardInterrupt,
         ):
             result = execute_command(
@@ -288,7 +288,7 @@ class TestKeyboardInterrupt:
     def test_captured_mode_reraises_keyboard_interrupt(self, temp_test_dir: Path):
         """Captured mode does NOT catch KeyboardInterrupt — it propagates."""
         with patch(
-            "aipass.drone.apps.handlers.executor.subprocess.Popen",
+            "aipass.drone.apps.handlers.executor._spawn",
             side_effect=KeyboardInterrupt,
         ):
             with pytest.raises(KeyboardInterrupt):
@@ -316,7 +316,7 @@ class TestKeyboardInterrupt:
         # Ctrl+C lands in the poll loop's own pause. That pause is the executor's
         # seam, not time.sleep, so the sleeps inside Popen.wait() — the very
         # reaping under test — run for real.
-        with patch("aipass.drone.apps.handlers.executor.subprocess.Popen", side_effect=_spy):
+        with patch("aipass.drone.apps.handlers.executor._spawn", side_effect=_spy):
             with patch("aipass.drone.apps.handlers.executor._poll_pause", side_effect=KeyboardInterrupt):
                 with pytest.raises(KeyboardInterrupt):
                     execute_command(
@@ -447,7 +447,7 @@ class TestShellSecurity:
         the flag on a call that actually happened end to end.
         """
         with patch(
-            "aipass.drone.apps.handlers.executor.subprocess.Popen",
+            "aipass.drone.apps.handlers.executor._spawn",
             wraps=subprocess.Popen,
         ) as mock_popen:
             execute_command(
@@ -460,7 +460,7 @@ class TestShellSecurity:
 
     def test_interactive_mode_shell_false(self, temp_test_dir: Path):
         """Interactive mode calls subprocess.run with shell=False."""
-        with patch("aipass.drone.apps.handlers.executor.subprocess.run") as mock_run:
+        with patch("aipass.drone.apps.handlers.executor._run_interactive") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             execute_command(
                 sys.executable,
@@ -1010,7 +1010,7 @@ class _FakeProc:
 def _time_out(proc: _FakeProc, cwd: Path) -> None:
     """Run execute_command on the scripted child with a zero cap, so the hang guard stops it."""
     with (
-        patch("aipass.drone.apps.handlers.executor.subprocess.Popen", return_value=proc),
+        patch("aipass.drone.apps.handlers.executor._spawn", return_value=proc),
         pytest.raises(CommandExecutionError, match="timed out"),
     ):
         execute_command("fake", [], cwd=str(cwd), timeout=0, extend_on_output=False)

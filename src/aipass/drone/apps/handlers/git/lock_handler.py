@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_handler.py
 # Description: Atomic lock management for git PR workflow
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-03-17
-# Modified: 2026-09-27
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -66,13 +66,16 @@ def _pid_alive_windows(pid: int) -> bool:
 
 def _pid_alive(pid: int) -> bool:
     """Return True if the process is alive. Platform-guarded: Windows uses
-    OpenProcess (os.kill on win32 calls TerminateProcess — kills the target)."""
+    OpenProcess (os.kill on win32 calls TerminateProcess — kills the target).
+
+    A check that fails raises: the Windows check used to answer True
+    ("assuming alive") and any other OSError False ("assuming dead"), so a
+    holder nobody could check read as active or as orphaned, answers a real
+    check gives. The caller reports it as unchecked. Permission denied is an
+    answer, not a failure: the process exists, it belongs to someone else.
+    """
     if sys.platform == "win32":
-        try:
-            return _pid_alive_windows(pid)
-        except Exception as exc:
-            logger.info("_pid_alive: PID %s Windows check failed (assuming alive): %s", pid, exc)
-            return True
+        return _pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -81,9 +84,6 @@ def _pid_alive(pid: int) -> bool:
     except PermissionError:
         logger.info("_pid_alive: PID %s permission denied (alive)", pid)
         return True
-    except OSError as exc:
-        logger.info("_pid_alive: PID %s OSError (assuming dead): %s", pid, exc)
-        return False
     return True
 
 
@@ -259,7 +259,9 @@ def check_lock_status() -> dict:
 
     Returns:
         Dict with locked, branch, started, pid, stale, orphaned,
-        age_seconds, and message.
+        age_seconds, and message. A held lock also carries pid_checked:
+        False when the holder's liveness could not be checked, and its
+        status in the message is then "unchecked", never active or orphaned.
     """
     repo_root = find_repo_root()
     lock_path = repo_root / _LOCK_FILENAME
@@ -306,12 +308,21 @@ def check_lock_status() -> dict:
 
     # Check if PID is still alive (orphan detection)
     orphaned = False
-    if pid and not _pid_alive(pid):
+    pid_checked = True
+    try:
+        alive = _pid_alive(pid) if pid else True
+    except (OSError, AttributeError) as exc:
+        # Neither active nor orphaned: whether the holder lives is unknown.
+        logger.warning("check_lock_status: could not check PID %s: %s", pid, exc)
+        alive, pid_checked = True, False
+    if not alive:
         logger.info("check_lock_status: PID %d not alive — lock is orphaned", pid)
         orphaned = True
 
     status = "active"
-    if orphaned:
+    if not pid_checked:
+        status = "unchecked"
+    elif orphaned:
         status = "orphaned"
     elif stale:
         status = "stale"
@@ -326,6 +337,7 @@ def check_lock_status() -> dict:
         "pid": pid,
         "stale": stale,
         "orphaned": orphaned,
+        "pid_checked": pid_checked,
         "age_seconds": age_seconds,
         "message": message,
     }

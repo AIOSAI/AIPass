@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_module_registry.py
 # Description: module_registry orchestrator - handle_command routing
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-04-05
-# Modified: 2026-09-28
+# Modified: 2026-10-04
 # =============================================
 
 """Tests for apps/modules/module_registry.py and apps/handlers/module_registry_handler.py."""
@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -409,40 +410,23 @@ class TestRouteModuleCommand:
             "stderr": "",
             "exit_code": 0,
         }
-        with (
-            # THE JSON PATCH GOES FIRST AND THAT IS LOAD-BEARING. `patch`
-            # resolves a dotted target through `pkgutil.resolve_name`, which
-            # calls `importlib.import_module` — so once the importlib patch
-            # below is live, the next patch in the same block resolves
-            # `_HANDLER` to `mock_mod` and lands its mock on THAT instead of
-            # on the real handler module. Measured in the other order: the
-            # module's `json_handler` was still the real module inside the
-            # block, so this patch replaced nothing and the test wrote a real
-            # log record. Entered first, it patches the module it names.
-            patch(f"{_HANDLER}.json_handler", autospec=True),
-            patch(
-                f"{_HANDLER}.importlib.import_module",
-                return_value=mock_mod,
-            ),
-        ):
-            result = mrh.route_module_command("fakeint", "status")
+        # The stand-in module is registered under its own fake name, so the
+        # handler's real import_module finds it there. Patching
+        # importlib.import_module through the handler replaced it for the
+        # whole process, `patch`'s own name resolution included.
+        monkeypatch.setitem(sys.modules, "fake.internal.mod", mock_mod)
+        with patch(f"{_HANDLER}.json_handler", autospec=True):
+            result = mrh.route_module_command("fakeint", "status", ["--all"])
         assert result["stdout"] == "done"
-        mock_mod.handle_command.assert_called_once_with("status", None)
+        mock_mod.handle_command.assert_called_once_with("status", ["--all"])
 
     def test_internal_bool_true_converted_to_dict(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Internal module returning True converts to dict with exit_code 0."""
         monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"boolmod": "fake.bool.mod"})
         mock_mod = MagicMock()
         mock_mod.handle_command.return_value = True
-        with (
-            # json_handler FIRST — see test_routes_internal_module_via_import:
-            # a live importlib patch makes the next patch resolve to mock_mod.
-            patch(f"{_HANDLER}.json_handler", autospec=True),
-            patch(
-                f"{_HANDLER}.importlib.import_module",
-                return_value=mock_mod,
-            ),
-        ):
+        monkeypatch.setitem(sys.modules, "fake.bool.mod", mock_mod)
+        with patch(f"{_HANDLER}.json_handler", autospec=True):
             result = mrh.route_module_command("boolmod", "check")
         assert result["exit_code"] == 0
 
@@ -451,15 +435,8 @@ class TestRouteModuleCommand:
         monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"failmod": "fake.fail.mod"})
         mock_mod = MagicMock()
         mock_mod.handle_command.return_value = False
-        with (
-            # json_handler FIRST — see test_routes_internal_module_via_import:
-            # a live importlib patch makes the next patch resolve to mock_mod.
-            patch(f"{_HANDLER}.json_handler", autospec=True),
-            patch(
-                f"{_HANDLER}.importlib.import_module",
-                return_value=mock_mod,
-            ),
-        ):
+        monkeypatch.setitem(sys.modules, "fake.fail.mod", mock_mod)
+        with patch(f"{_HANDLER}.json_handler", autospec=True):
             result = mrh.route_module_command("failmod", "broken")
         assert result["exit_code"] == 1
 
@@ -519,11 +496,8 @@ class TestGetModuleHelp:
         monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"helpint": "fake.help.mod"})
         mock_mod = MagicMock()
         mock_mod.get_help.return_value = "Internal help text"
-        with patch(
-            f"{_HANDLER}.importlib.import_module",
-            return_value=mock_mod,
-        ):
-            result = mrh.get_module_help("helpint", "status")
+        monkeypatch.setitem(sys.modules, "fake.help.mod", mock_mod)
+        result = mrh.get_module_help("helpint", "status")
         assert result == "Internal help text"
         mock_mod.get_help.assert_called_once_with("status")
 
@@ -531,11 +505,8 @@ class TestGetModuleHelp:
         """Internal module without get_help() returns empty string."""
         monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"nohelp": "fake.nohelp.mod"})
         mock_mod = MagicMock(spec=[])
-        with patch(
-            f"{_HANDLER}.importlib.import_module",
-            return_value=mock_mod,
-        ):
-            result = mrh.get_module_help("nohelp")
+        monkeypatch.setitem(sys.modules, "fake.nohelp.mod", mock_mod)
+        result = mrh.get_module_help("nohelp")
         assert result == ""
 
     def test_unknown_module_returns_empty(self) -> None:

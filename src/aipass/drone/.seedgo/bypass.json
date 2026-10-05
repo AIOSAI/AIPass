@@ -176,6 +176,82 @@
       "file": "apps/handlers/git/repo_door.py",
       "standard": "encapsulation",
       "reason": "Same cross-branch rail import as the handlers entry above - @ai_mail owns the verified-caller rail and the admin contract behind it; the door consumes it rather than mirroring it (DPLAN-0344)."
+    },
+    {
+      "file": "apps/handlers/git/lock_handler.py",
+      "standard": "logged_fallback",
+      "lines": [
+        86
+      ],
+      "reason": "_pid_alive: os.kill(pid, 0) raising PermissionError (EPERM) IS the answer 'alive' - the process exists and belongs to another user (POSIX kill(2)). Nothing failed, so True is the true answer, not a fallback. The real fallbacks of this function (the Windows check failing, any other OSError) now raise and check_lock_status reports the holder as unchecked (fleet green leg 6, drone's decision).",
+      "anchor": "return True"
+    },
+    {
+      "file": "apps/drone.py",
+      "standard": "logged_fallback",
+      "lines": [
+        629,
+        651,
+        655,
+        723
+      ],
+      "reason": "main() is the process exit status: 1 is the failure answer to the OS on every path that returns it (routing refused, unknown command, registry unreadable at 629 and 651, an unhandled systems error at 655, a module that raised at 723), and success is 0. Each handler prints the error to stderr before it. The handler prints the error to stderr before it. The checker counts the other `return 1`s as a success path because they are not error() calls; they are failures too. Callers: the console script entry only (sys.exit(main())). Fleet green leg 6, drone's decision.",
+      "anchor": "return 1"
+    },
+    {
+      "file": "apps/modules/resolver.py",
+      "standard": "logged_fallback",
+      "lines": [
+        62,
+        80
+      ],
+      "reason": "handle_command's contract (its docstring): True = the command succeeded, False = it failed. Every False in it is a failure (missing name, branch not found for resolve at 62 and for info at 80) and each not-found prints the refusal to stderr first. Caller: module_registry_handler's in-process route, which maps False to exit 1. The resolver functions other branches call (resolve_branch, ai_mail/flow/memory/trigger) raise BranchNotFoundError and are not this line. Fleet green leg 6, drone's decision.",
+      "anchor": "return False"
+    },
+    {
+      "file": "apps/handlers/module_registry_handler.py",
+      "standard": "logged_fallback",
+      "lines": [
+        148
+      ],
+      "reason": "get_module_info: None for a registered internal module whose adapter fails to import, and None for an unknown name. Every caller tells them apart by what it already knows: drone.py:237 and module_registry.py:106 iterate list_modules() (registered names only) and print '(not available)'; module_registry.py:116 asks is_module() and says 'registered but could not load'. A raise would take the whole services listing down for one broken adapter. Fleet green leg 6, drone's decision.",
+      "anchor": "return None"
+    },
+    {
+      "file": "apps/handlers/router_handler.py",
+      "standard": "logged_fallback",
+      "lines": [
+        162
+      ],
+      "reason": "_project_name_from_registry: None = this registry file yields no project name, whether unreadable (here, logged WARNING) or named exactly '_REGISTRY.json'. Its one caller (detect_caller_signal, line 272) does the same right thing for both: keeps walking up for another registry. The answer to the caller is the same fact either way. Fleet green leg 6, drone's decision.",
+      "anchor": "return None"
+    },
+    {
+      "file": "apps/handlers/registry_handler.py",
+      "standard": "logged_fallback",
+      "lines": [
+        60
+      ],
+      "reason": "_validate_branch_path is a security check that fails closed: False = not proven inside the project root, whether it escapes or could not be resolved (logged WARNING with SECURITY). Both callers act on that and nothing else: resolver.py:176 refuses the branch, registry_handler.py:346 drops it from the loaded registry. True on an unresolvable path would open the gate; a raise would drop the whole registry for one bad entry. Known imprecision: resolver's refusal text says 'escapes project root' for both. Fleet green leg 6, drone's decision.",
+      "anchor": "return False"
+    },
+    {
+      "file": "apps/handlers/command_registry/ops.py",
+      "standard": "logged_fallback",
+      "lines": [
+        156
+      ],
+      "reason": "save_registry: True = written, False = not written; every False is a failure (invalid structure, OSError here, logged ERROR) and the success path returns True only. Callers add_command/update_command/remove_command (196, 223, 254) report False as a failed save; load_registry's three self-heal saves (93, 102, 109) carry on with the in-memory registry, the save's own ERROR log standing. Fleet green leg 6, drone's decision.",
+      "anchor": "return False"
+    },
+    {
+      "file": "apps/handlers/broker/path_resolver.py",
+      "standard": "host_portability",
+      "lines": [
+        115
+      ],
+      "reason": "_fd_path reads /proc/self/fd, and its one caller is _resolve_via_openat2, entered only from resolve_contained after _openat2_available() (line 55: sys.platform == 'linux' and x86_64) said yes. The fence is real, two hops up; the checker acquits a guard one hop away only (ledger rows 491, 510). A platform raise inside _fd_path would be a door for the checker alone: the walk lane never calls it (pinned in tests/test_broker.py with a failing reader). Fleet green leg 6, drone's decision.",
+      "anchor": "/proc/self/fd/"
     }
   ],
   "notes": {

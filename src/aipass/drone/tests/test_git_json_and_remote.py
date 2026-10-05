@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_git_json_and_remote.py
-# Description: The git read doors and their --json, remote, gh tiers, merge-main and the read twins
-# Version: 1.0.5
+# Description: The git read doors and their --json, remote, gh tiers, merge-main, the read twins and lock
+# Version: 1.0.6
 # Created: 2026-08-18
 # Modified: 2026-10-04
 # =============================================
@@ -1441,3 +1441,38 @@ class TestTwinTiersAndHelp:
     def test_each_new_verb_has_its_own_page(self) -> None:
         assert get_help("tracked").startswith("git tracked <path ...> — ")
         assert get_help("export").startswith("git export <ref> <dir> — ")
+
+
+# ---------------------------------------------------------------------------
+# lock: a holder whose liveness could not be checked (fleet green leg 6)
+# ---------------------------------------------------------------------------
+
+_LOCK_MOD = "aipass.drone.apps.handlers.git.lock_handler"
+
+
+class TestLockHolderUnchecked:
+    """`lock` names a holder it could not check as unchecked, never as active or orphaned."""
+
+    @staticmethod
+    def _lock(tmp_path: Path, side_effect: Exception | None) -> dict:
+        lock = {"branch": "@api", "started": "2026-10-04T00:00:00+00:00", "pid": os.getpid()}
+        (tmp_path / ".git_pr.lock").write_text(json.dumps(lock), encoding="utf-8")
+        with (
+            patch(_AUTH, return_value="canary"),
+            patch(f"{_LOCK_MOD}.find_repo_root", return_value=tmp_path),
+            patch(f"{_LOCK_MOD}._pid_alive", side_effect=side_effect, return_value=True),
+        ):
+            return json.loads(handle_command("lock", [])["stdout"])
+
+    def test_a_failed_liveness_check_reads_as_unchecked(self, tmp_path: Path) -> None:
+        """Red first: the Windows check failing answered True ("assuming alive"), so this read as active."""
+        doc = self._lock(tmp_path, OSError("OpenProcess failed"))
+
+        assert (doc["locked"], doc["orphaned"], doc["pid_checked"]) == (True, False, False)
+        assert doc["message"].startswith(f"Lock held by @api (PID {os.getpid()}, unchecked, ")
+
+    def test_a_live_holder_still_reads_as_active(self, tmp_path: Path) -> None:
+        doc = self._lock(tmp_path, None)
+
+        assert (doc["orphaned"], doc["pid_checked"]) == (False, True)
+        assert doc["message"].startswith(f"Lock held by @api (PID {os.getpid()}, stale, ")
