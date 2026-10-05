@@ -2,12 +2,13 @@
 # META DATA HEADER
 # Name: test_cli_and_contracts.py - CLI Routing, Contracts, and Infrastructure Tests
 # Description: main()'s help/introspection/exit-code routing, route_command, and the json shim's contracts
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-28
-# Modified: 2026-09-27
+# Modified: 2026-10-05
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.2.0 (2026-10-05): a help flag anywhere after the verb never runs it; help-aware verbs keep their own help
 #   - v1.1.0 (2026-09-27): fleet green - file top, product imports hoisted, capsys over err_console,
 #     router effects asserted, stdlib-only StringIO test retired
 #   - v1.0.0 (2026-03-28): Initial creation — covers seedgo test_quality gaps
@@ -122,6 +123,54 @@ def test_a_help_flag_prints_the_module_help_and_never_runs_the_verb(module, comm
 
     ran.assert_not_called()
     assert headline in capsys.readouterr().out
+
+
+# ===========================================================================
+# Dispatcher: a help flag anywhere after the verb explains, never executes
+# ===========================================================================
+
+
+@pytest.mark.parametrize(
+    ("argv", "target"),
+    [
+        (["prompt", "--help"], "aipass.commons.apps.modules.engagement.generate_prompt"),
+        (["prompt", "-h"], "aipass.commons.apps.modules.engagement.generate_prompt"),
+        (["comment", "12", "--help"], "aipass.commons.apps.modules.comment.add_comment"),
+        (["post", "general", "Title", "-h"], "aipass.commons.apps.modules.post.create_post"),
+    ],
+)
+def test_a_help_flag_on_an_unguarded_verb_prints_general_help_and_never_runs_it(argv, target):
+    """Until 2026-10-05 main() forwarded the flag, so 'prompt --help' posted a live daily prompt."""
+    with (
+        patch("sys.argv", ["commons", *argv]),
+        patch.object(commons_main, "ensure_database", return_value=True),
+        patch(target) as ran,
+        patch.object(commons_main, "print_help") as mock_ph,
+    ):
+        assert main() == 0
+
+    ran.assert_not_called()
+    mock_ph.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["catchup", "--help"], ["room", "create", "-h"]],
+)
+def test_a_help_aware_verb_gets_its_own_help_with_the_args_it_was_given(argv):
+    """The help-aware modules explain themselves; the dispatcher hands them the arguments unchanged."""
+    module = MagicMock()
+    module.handle_command.return_value = True
+    with (
+        patch("sys.argv", ["commons", *argv]),
+        patch.object(commons_main, "ensure_database", return_value=True),
+        patch.object(commons_main, "discover_modules", return_value=[module]),
+        patch.object(commons_main, "print_help") as mock_ph,
+    ):
+        assert main() == 0
+
+    module.handle_command.assert_called_once_with(argv[0], argv[1:])
+    mock_ph.assert_not_called()
 
 
 # ===========================================================================

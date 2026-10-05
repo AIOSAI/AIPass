@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: room.py
 # Description: Room management orchestration module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -75,7 +75,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "room":
         return False
 
-    if not args:
+    if not args or args[0] in ("--help", "-h"):
         print_introspection()
         return True
 

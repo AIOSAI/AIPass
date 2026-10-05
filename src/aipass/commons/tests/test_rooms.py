@@ -3,12 +3,13 @@
 # Name: test_rooms.py - Room and Space Module Tests
 # Description: Tests for apps/handlers/rooms/room_ops.py and apps/modules/space.py
 # Date: 2026-03-24
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-10-05
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.1.0 (2026-10-05): a bare 'room --help' explains instead of refusing
 #   - v1.0.0 (2026-03-24): Initial creation — rooms handler + space module tests
 #
 # CODE STANDARDS:
@@ -239,6 +240,16 @@ def test_room_create_help_prints_usage_without_creating(mock_create_room: MagicM
 
     assert handled is True
     mock_create_room.assert_not_called()
+
+
+@pytest.mark.parametrize("flag", ["--help", "-h"])
+def test_a_bare_room_help_flag_explains_instead_of_refusing(flag: str, capsys: pytest.CaptureFixture[str]) -> None:
+    """Until 2026-10-05 'room --help' was refused as an unknown subcommand."""
+    assert room_module.handle_command("room", [flag]) is True
+
+    out = capsys.readouterr()
+    assert "Thin router for room management" in out.out
+    assert "Unknown room subcommand" not in out.out + out.err
 
 
 # =============================================================================

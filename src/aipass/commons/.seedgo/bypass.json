@@ -58,62 +58,62 @@
     {
       "file": "apps/modules/capsule.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/database.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/reaction.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/profile.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/trade.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/central.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/space.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/notification.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/comment.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/room.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/artifact.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/post.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/commons.py",
@@ -378,7 +378,7 @@
     {
       "file": "apps/commons.py",
       "standard": "logged_fallback",
-      "lines": [184],
+      "lines": [191],
       "reason": "True here means the command was claimed, not that it succeeded: the reader of stdout closed the pipe, so there is no caller left to tell (commons' decision, DPLAN-0354 leg 5)"
     },
     {
