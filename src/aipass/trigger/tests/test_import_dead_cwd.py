@@ -3,7 +3,7 @@
 # Name: test_import_dead_cwd.py
 # Description: trigger imports without a readable cwd
 # Created: 2026-08-31
-# Modified: 2026-09-29
+# Modified: 2026-10-05
 # Version: 1.3.1
 # Category: trigger/tests
 # =============================================
@@ -277,21 +277,19 @@ def _assert_probe_armed(out: str) -> None:
 # machine, including the one no local run can create.
 
 
-def test_a_vacuous_probe_is_refused_on_the_interpreter_that_could_produce_one(monkeypatch):
-    """3.10 is the ONE interpreter that can go inert, and it gets no exemption.
-
-    The deleted clause read `assert sys.version_info < (3, 11)`, so on 3.10 it
-    returned quietly. This is the pin that convicts its return: faking the
-    version is the only way this host can stand where 3.10 stands.
-    """
-    monkeypatch.setattr(sys, "version_info", (3, 10, 4, "final", 0))
-
-    with pytest.raises(AssertionError):
-        _assert_probe_armed("PROBE_VACUOUS\nIMPORTED\n")
-
-
 def test_a_vacuous_probe_is_refused_on_this_interpreter_too():
-    """The unfaked half, so the pin above cannot pass on the monkeypatch alone."""
+    """A vacuous probe is refused on every interpreter, 3.10 included.
+
+    3.10 is the ONE interpreter that can go inert, and it gets no exemption.
+    A deleted clause read `assert sys.version_info < (3, 11)` and returned
+    quietly there, blessing the vacuity this helper exists to catch.
+
+    This unfaked pin is the proof, on every interpreter CI runs. A restored
+    clause stays green on this host (it is not 3.10), and dies in the CI 3.10
+    lane, here. Until leg 12 a twin faked sys.version_info process-wide to stand
+    where 3.10 stands. The helper reads no version, so that fake changed nothing
+    the judgement read, and the twin is retired (@devpulse's ruling, leg 12).
+    """
     with pytest.raises(AssertionError):
         _assert_probe_armed("PROBE_VACUOUS\nIMPORTED\n")
 
