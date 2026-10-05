@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
 # Description: Regex coverage for git_gate handler (DPLAN-0163, migrated DPLAN-0184)
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-05-03
 # Modified: 2026-10-04
 # =============================================
 
 """Tests for src/aipass/hooks/apps/handlers/security/git_gate.py through handle(), the hook engine's door."""
+
+# 2.2.0: raw git and gh are refused for every seat, the admin seat included (git_gate 5.0.0, the owner's ruling
+# of 2026-10-04). The 2.1.0 rows that let the admin seat read raw and run gh api are gone with the carve-out.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — the re module's matching engine under the gate's patterns
@@ -138,36 +141,49 @@ class TestEscapedQuoteBypass:
         assert _is_blocked(_bash(cmd)) == should_block, f"{'Should block' if should_block else 'Should allow'}: {cmd}"
 
 
+# (command, the drone twin the refusal must name; None = the verb has no twin and says so)
 _READ_VERBS = [
-    "git status",
-    "git log --oneline",
-    "git diff",
-    "git show HEAD",
-    "git ls-files",
-    "git ls-tree HEAD",
-    "git rev-parse --show-toplevel",
-    "git blame README.md",
-    "git grep TODO",
-    "git archive HEAD",
-    "git for-each-ref",
-    "git -C sub/x log",
+    ("git status", "drone @git status"),
+    ("git log --oneline", "drone @git log"),
+    ("git diff", "drone @git diff"),
+    ("git show HEAD", "drone @git show"),
+    ("git ls-files", "drone @git tracked"),
+    ("git ls-tree HEAD", None),
+    ("git rev-parse --show-toplevel", None),
+    ("git blame README.md", "drone @git blame"),
+    ("git grep TODO", None),
+    ("git archive HEAD", "drone @git export"),
+    ("git for-each-ref", None),
+    ("git -C sub/x log", "drone @git log"),
 ]
 
 
-class TestReadVerbsAreTheAdminSeatsAlone:
-    """Raw read verbs run from the verified admin seat only; every other seat reads through drone @git (DPLAN-0356)."""
+def _reason(result: dict) -> str:
+    """The refusal text a blocked result carries."""
+    return json.loads(result["stdout"])["reason"]
 
-    @pytest.mark.parametrize("cmd", _READ_VERBS)
-    def test_the_admin_seat_reads_raw(self, cmd):
-        """The verified admin grant (@ai_mail's rail, patched at that edge) lets a read verb run raw."""
-        with patch(_ADMIN_RAIL, return_value=True):
-            assert not _is_blocked(_bash(cmd)), f"Read verb should be allowed for the admin seat: {cmd}"
 
-    @pytest.mark.parametrize("cmd", _READ_VERBS)
-    def test_every_other_seat_is_refused(self, cmd):
-        """Off the admin seat the same read is refused; its drone @git twin is the door."""
-        with patch(_ADMIN_RAIL, return_value=False):
-            assert _is_blocked(_bash(cmd)), f"Raw read should be refused off the admin seat: {cmd}"
+class TestReadVerbsAreRefusedForEverySeat:
+    """Raw git reads are refused for every seat, the admin seat included (the owner, 2026-10-04; git_gate 5.0.0).
+
+    DPLAN-0356 first let the verified admin seat read raw and refused the rest; the owner withdrew that carve-out:
+    if drone cannot do it, it cannot be done. The @ai_mail admin rail is patched both ways to pin that it is no
+    longer a grant for git — the refusal is the same answer whichever way it leans.
+    """
+
+    @pytest.mark.parametrize("admin", [True, False], ids=["admin-seat", "other-seat"])
+    @pytest.mark.parametrize(("cmd", "twin"), _READ_VERBS, ids=[c for c, _ in _READ_VERBS])
+    def test_raw_read_is_refused(self, cmd, twin, admin):
+        """Every read verb is refused on every seat, and the refusal points at the door: its drone twin, or none."""
+        with patch(_ADMIN_RAIL, return_value=admin):
+            result = _bash(cmd)
+        assert _is_blocked(result), f"Raw read must be refused (admin={admin}): {cmd}"
+        reason = _reason(result)
+        assert "every seat" in reason, f"The refusal must say the rule is for every seat: {cmd}"
+        if twin is None:
+            assert "has no drone twin" in reason, f"A twinless verb must say so: {cmd}"
+        else:
+            assert twin in reason, f"The refusal must name the drone twin {twin!r}: {cmd}"
 
 
 class TestNonAllowlistedGitBlocked:
@@ -219,7 +235,7 @@ class TestDroneNotBlocked:
 
 
 class TestGhBlocking:
-    """gh write subcommands blocked, gh api allowed."""
+    """Raw gh is refused whole: writes, and gh api reads too, for every seat (the owner, 2026-10-04)."""
 
     @pytest.mark.parametrize(
         "cmd",
@@ -237,15 +253,14 @@ class TestGhBlocking:
         """State-changing gh subcommands are blocked."""
         assert _is_blocked(_bash(cmd)), f"Should block: {cmd}"
 
-    @pytest.mark.parametrize(
-        "cmd",
-        [
-            "gh api repos/x/pulls",
-        ],
-    )
-    def test_allows_gh_api(self, cmd):
-        """gh api is allowed for read access."""
-        assert not _is_blocked(_bash(cmd)), f"Should allow: {cmd}"
+    @pytest.mark.parametrize("admin", [True, False], ids=["admin-seat", "other-seat"])
+    @pytest.mark.parametrize("cmd", ["gh api repos/x/pulls", "gh pr list", "gh run view 12"])
+    def test_refuses_gh_reads_on_every_seat(self, cmd, admin):
+        """gh reads were the last raw door left open (gh api GET); they are refused too, the admin seat included."""
+        with patch(_ADMIN_RAIL, return_value=admin):
+            result = _bash(cmd)
+        assert _is_blocked(result), f"Raw gh read must be refused (admin={admin}): {cmd}"
+        assert "every seat" in _reason(result), f"The refusal must say the rule is for every seat: {cmd}"
 
 
 class TestEditBlocking:
