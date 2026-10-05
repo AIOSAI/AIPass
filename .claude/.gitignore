@@ -1,0 +1,4 @@
+# .claude/ is tracked: settings.json, hooks/, provider_manifest.json and the rest ship with a clone.
+# The one per-machine file is settings.local.json (Claude Code merges it over settings.json):
+# personal preferences and personal paths live there, never in the tracked settings.json.
+settings.local.json
