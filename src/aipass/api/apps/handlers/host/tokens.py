@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tokens.py
 # Description: Host API Token Handler — bearer token issue, verify, revoke
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-09-17
+# Modified: 2026-10-06
 # =============================================
 
 """
@@ -328,7 +328,7 @@ def save_tokens(records: List[Dict[str, Any]]) -> str:
 
 
 @contextmanager
-def _store_lock(wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
+def _store_lock(wait: Optional[float] = None) -> Iterator[None]:
     """
     Hold an exclusive write lock on the token store.
 
@@ -343,7 +343,11 @@ def _store_lock(wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
     lock still held, so it is polled the same way, inside the same wait.
 
     Args:
-        wait: Seconds to keep trying before giving up.
+        wait: Seconds to keep trying before giving up. None, what every
+            caller passes, is LOCK_WAIT_SECONDS read at the call rather than
+            bound at def time, so the tests shorten the wait through the
+            public writers without reaching this function by name
+            (api, fleet green leg 14).
 
     Yields:
         None, with the lock held.
@@ -352,6 +356,7 @@ def _store_lock(wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
         OSError: The lock could not be taken within *wait*, because it stayed
             held or because access stayed denied.
     """
+    wait = LOCK_WAIT_SECONDS if wait is None else wait
     path = lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + wait

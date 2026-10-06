@@ -83,7 +83,7 @@
     {
       "file": "apps/handlers/host/tokens.py",
       "standard": "logged_fallback",
-      "lines": [648],
+      "lines": [653],
       "reason": "_is_due answers whether to rewrite a stamp; an unreadable stamp is due by definition (the docstring says so) and is overwritten with a readable one on the same request. True here is the answer, not a stand-in for a failure (api, fleet green leg 9)."
     },
     {

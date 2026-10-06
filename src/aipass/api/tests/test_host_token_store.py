@@ -3,7 +3,7 @@
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-29
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -587,66 +587,141 @@ class TestTheLockIsRealNotDecorative:
         assert host_tokens.verify_token(raw) is None
         assert not host_tokens.lock_path().exists()
 
-    def test_an_access_denial_that_never_clears_still_fails_at_the_deadline(self, store: Path) -> None:
+    def test_a_held_lock_fails_issue_at_the_deadline(self, store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        A fresh lock another writer holds (FILE EXISTS) is waited for, then refused.
+
+        Through issue_token with a real lock file at lock_path(), its mtime now,
+        so it is not stale. The wait is shortened through LOCK_WAIT_SECONDS,
+        read at the call (api, fleet green leg 14); elapsed >= wait with the
+        poll below the wait says the loop polled more than once.
+        """
+        wait = 0.1
+        monkeypatch.setattr(host_tokens, "LOCK_WAIT_SECONDS", wait)
+        monkeypatch.setattr(host_tokens, "LOCK_POLL_SECONDS", 0.01)
+        lock = host_tokens.lock_path()
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_bytes(b"")
+
+        started = time.monotonic()
+        with pytest.raises(OSError) as raised:
+            host_tokens.issue_token("pixel-8", scope="read")
+        elapsed = time.monotonic() - started
+
+        assert elapsed >= wait
+        assert str(raised.value) == f"Token store lock held longer than {wait}s at {lock}"
+        assert raised.value.__cause__ is None
+        assert lock.exists(), "a fresh lock held by another writer was broken"
+
+    def test_an_access_denial_that_never_clears_still_fails_at_the_deadline(
+        self, store: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """
         Waiting out a delete is not forgiving a permissions problem.
 
-        A directory this process cannot write answers the same PermissionError
-        forever. It is polled inside the wait and never past it, and what is
-        raised still carries the denial: fail honestly, never retry forever.
+        Through issue_token, with the lock's directory made unwritable for real.
+        It is polled inside the wait and never past it, and what is raised still
+        carries the denial. Whether the host refuses at all is asked of the host
+        itself: root, and Windows, which ignores a directory's read-only mode,
+        create anyway, and there the issue simply lands (api, fleet green leg 14).
         """
         wait = 0.1
-        lock_file = str(host_tokens.lock_path())
-        real_open = os.open
-        lock_attempts = []
+        monkeypatch.setattr(host_tokens, "LOCK_WAIT_SECONDS", wait)
+        monkeypatch.setattr(host_tokens, "LOCK_POLL_SECONDS", 0.01)
+        lock = host_tokens.lock_path()
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        mode = lock.parent.stat().st_mode
+        lock.parent.chmod(0o500)
+        try:
+            probe = lock.parent / "probe.lock"
+            host_refusals: list = []
+            try:
+                os.close(os.open(str(probe), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+            except PermissionError as refusal:
+                host_refusals.append(refusal)
+            else:
+                probe.unlink()
 
-        def always_denied(path: Any, flags: int, mode: int = 0o777, **kwargs: Any) -> int:
-            if path == lock_file:
-                lock_attempts.append(flags)
-                if len(lock_attempts) > 1000:
-                    raise RuntimeError("the lock loop retried past its deadline")
-                raise PermissionError(13, "Permission denied", path)
-            return real_open(path, flags, mode, **kwargs)
-
-        started = time.monotonic()
-        with patch.object(host_tokens.os, "open", new=always_denied):
-            with pytest.raises(OSError) as raised:
-                with host_tokens._store_lock(wait=wait):
-                    pytest.fail("the lock was reported taken")
-        elapsed = time.monotonic() - started
-
-        assert len(lock_attempts) > 1
-        assert elapsed >= wait
-        assert isinstance(raised.value.__cause__, PermissionError)
-        assert f"{wait}s" in str(raised.value)
+            started = time.monotonic()
+            if host_refusals:
+                host_refusal = host_refusals[0]
+                with pytest.raises(OSError) as raised:
+                    host_tokens.issue_token("pixel-8", scope="read")
+                elapsed = time.monotonic() - started
+                assert elapsed >= wait
+                assert str(raised.value).startswith(f"Token store lock at {lock} still denied access after {wait}s: ")
+                assert type(raised.value.__cause__) is type(host_refusal)
+            else:
+                record, _raw = host_tokens.issue_token("pixel-8", scope="read")
+                assert _record(record["id"])["revoked"] is False
+        finally:
+            lock.parent.chmod(mode)
 
     def test_a_lock_that_cannot_be_removed_is_said_out_loud(self, store: Path) -> None:
         """
-        A release refused ACCESS DENIED has not found the lock already gone.
+        A release refused by the platform has not found the lock already gone.
 
-        The lock is still on disk and every write after it waits for it, so it
-        is a warning, never a debug line claiming it vanished. Still never
-        raised: a release that throws masks whatever the body was doing.
+        Through issue_token: the save stand-in turns the lock into something
+        unlink refuses. POSIX unlinks a held file, so a directory takes its
+        place (IsADirectoryError on Linux, PermissionError on macOS). Windows
+        refuses to unlink a file this process holds open, so there a second
+        handle is kept open past the release instead. The host is asked which
+        by the unlink itself (api, fleet green leg 14). A warning, never a
+        debug line claiming it vanished, and never raised.
         """
-        lock_path = host_tokens.lock_path()
+        lock = host_tokens.lock_path()
+        refusals: list = []
+        held: list = []
 
-        def denied(path: Any, **kwargs: Any) -> None:
-            raise PermissionError(13, "Permission denied", path)
+        def save_and_wedge(*args: Any, **kwargs: Any) -> None:
+            try:
+                os.unlink(str(lock))
+            except PermissionError as refusal:
+                refusals.append(refusal)
+                held.append(open(lock, "rb"))
+            else:
+                lock.mkdir()
 
-        with patch.object(host_tokens.os, "unlink", new=denied), patch(PATCH_TOKENS_LOGGER) as log:
-            host_tokens._drop_lock(lock_path)
+        try:
+            with patch.object(host_tokens, "save_tokens", side_effect=save_and_wedge):
+                with patch(PATCH_TOKENS_LOGGER) as log:
+                    host_tokens.issue_token("pixel-8", scope="read")
+        finally:
+            for handle in held:
+                handle.close()
+            if lock.is_dir():
+                lock.rmdir()
 
+        assert len(held) == len(refusals), "every refused unlink kept its handle open past the release"
         assert log.warning.call_count == 1
         message, *values = log.warning.call_args.args
-        assert str(lock_path) in message % tuple(values)
+        assert str(lock) in message % tuple(values)
 
     def test_a_lock_already_gone_at_release_stays_quiet(self, store: Path) -> None:
-        """The ordinary outcome of a stale-lock break racing a release: debug, not a warning."""
-        with patch(PATCH_TOKENS_LOGGER) as log:
-            host_tokens._drop_lock(host_tokens.lock_path())
+        """
+        The ordinary outcome of a stale-lock break racing a release: debug, not a warning.
+
+        Through issue_token: the save stand-in removes the lock mid-body. Windows
+        refuses to unlink a file this process holds open, so there the state
+        cannot arise and the release removes the lock quietly instead; the host
+        is asked by the unlink itself (api, fleet green leg 14).
+        """
+        lock = host_tokens.lock_path()
+        refusals: list = []
+
+        def save_and_break_the_lock(*args: Any, **kwargs: Any) -> None:
+            try:
+                os.unlink(str(lock))
+            except PermissionError as refusal:
+                refusals.append(refusal)
+
+        with patch.object(host_tokens, "save_tokens", side_effect=save_and_break_the_lock):
+            with patch(PATCH_TOKENS_LOGGER) as log:
+                host_tokens.issue_token("pixel-8", scope="read")
 
         assert log.warning.call_count == 0
-        assert log.debug.call_count == 1
+        assert log.debug.call_count == (0 if refusals else 1)
+        assert not lock.exists()
 
 
 class TestTheLockSurvivesAFailedWrite(object):
