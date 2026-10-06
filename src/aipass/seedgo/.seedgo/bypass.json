@@ -234,8 +234,8 @@
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "hardcoded_path",
-      "lines": [57, 62, 72, 77, 82, 87, 92, 102, 107, 112, 135, 142, 150, 159, 171, 177, 206, 212, 217, 717, 719, 810, 834, 835, 836, 1601, 1603, 1604, 1606, 1636, 1649, 1650, 1651, 1657, 1661, 1670, 1680, 1687, 1708, 1727, 1762, 1773, 1793],
-      "reason": "Test input, not paths the tests use: the hardcoded_path and literal-path cases hold home-path strings (/home/<user>/, /Users/carol/, C:\\Users\\...) as checker input. Line-level; replaces the no-standard rule removed 2026-09-25 (survey row #12). Lines re-pinned in fleet green leg 15 and again 2026-10-04 (one import added above them): the list is _scan_file's own answer for the file, every hit a fixture. Extended 2026-10-04 (dispatch 79b012ed item 4) with _scan_file's answer for the appended developer_home classes (L1601 on): that standard's own inputs."
+      "lines": [57, 62, 72, 77, 82, 87, 92, 102, 107, 112, 135, 142, 150, 159, 171, 177, 206, 212, 217, 717, 719, 810, 834, 835, 836, 1601, 1603, 1604, 1606, 1636, 1649, 1650, 1651, 1657, 1661, 1670, 1680, 1687, 1708, 1727, 1762, 1773, 1793, 1838, 1842],
+      "reason": "Test input, not paths the tests use: the hardcoded_path and literal-path cases hold home-path strings (/home/<user>/, /Users/carol/, C:\\Users\\...) as checker input. Line-level; replaces the no-standard rule removed 2026-09-25 (survey row #12). Lines re-pinned in fleet green leg 15 and again 2026-10-04 (one import added above them): the list is _scan_file's own answer for the file, every hit a fixture. Extended 2026-10-04 (dispatch 79b012ed item 4) with _scan_file's answer for the appended developer_home classes (L1601 on): that standard's own inputs. Extended leg 19 (L1838, L1842): the docstring-table pins' inputs."
     },
     {
       "file": "tests/test_checkers_batch10.py",

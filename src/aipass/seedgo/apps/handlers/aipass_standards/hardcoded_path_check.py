@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: hardcoded_path_check.py
 # Description: Hardcoded Absolute Path Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-06-18
-# Modified: 2026-09-25
+# Modified: 2026-10-06
 # =============================================
 
 """Hardcoded Absolute Path Standards Checker Handler."""
@@ -38,10 +38,17 @@ _COMMENT_RE = re.compile(r"^\s*#")
 _DOCSTRING_DELIMITERS = ('"""', "'''")
 
 
-def _in_docstring(lines: list[str], line_idx: int) -> bool:
-    """Return True if line_idx falls inside a docstring."""
+def _docstring_states(lines: list[str]) -> list[bool]:
+    """Whether each line falls inside a docstring, one pass over the file.
+
+    A delimiter counted twice or more on a stripped line changes nothing;
+    counted once, it flips the state, and the state after a line is that
+    line's answer. Read once per file (seedgo, fleet green leg 19): the
+    per-line walk from line 0 it replaces was 146503 calls of one audit.
+    """
+    states: list[bool] = []
     in_ds = False
-    for i, line in enumerate(lines):
+    for line in lines:
         stripped = line.strip()
         for delim in _DOCSTRING_DELIMITERS:
             count = stripped.count(delim)
@@ -49,9 +56,8 @@ def _in_docstring(lines: list[str], line_idx: int) -> bool:
                 continue
             if count == 1:
                 in_ds = not in_ds
-        if i == line_idx:
-            return in_ds
-    return False
+        states.append(in_ds)
+    return states
 
 
 def _scan_file(content: str) -> list[tuple[int, str, str]]:
@@ -61,12 +67,13 @@ def _scan_file(content: str) -> list[tuple[int, str, str]]:
     """
     violations: list[tuple[int, str, str]] = []
     lines = content.split("\n")
+    in_docstring = _docstring_states(lines)
 
     for idx, line in enumerate(lines):
         lineno = idx + 1
         if _COMMENT_RE.match(line):
             continue
-        if _in_docstring(lines, idx):
+        if in_docstring[idx]:
             continue
         for pattern, desc in _ALL_PATTERNS:
             match = pattern.search(line)

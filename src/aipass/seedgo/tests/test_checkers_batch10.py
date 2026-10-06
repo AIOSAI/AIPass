@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch10.py
 # Description: Tests for hardcoded_path, developer_home, startup_budget, the ratchets, router_assert, oversize_test_file
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-06-18
-# Modified: 2026-10-04
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/hardcoded_path_check.py and batch-10 checkers."""
@@ -1817,3 +1817,27 @@ class TestDeveloperHomeVerb:
         _out, err = capsys.readouterr()
         assert code == 7
         assert "--bogus" in err
+
+
+# ===========================================================================
+# hardcoded_path -- the docstring table, read once per file
+# ===========================================================================
+
+
+class TestTheDocstringTableIsReadOncePerFile:
+    """_scan_file reads one table of docstring states per file (seedgo, fleet green leg 19).
+
+    The walk from line 0 on every candidate line was 146503 calls of one
+    audit. The table keeps the toggle rule: a delimiter counted twice or more
+    on a stripped line changes nothing, counted once it flips the state.
+    Reached through check_module. Green on the per-line walk too: its proof
+    is its mutants.
+    """
+
+    def test_the_line_after_a_one_line_docstring_is_still_scanned(self, tmp_path):
+        said = _scanned(tmp_path, '"""One line."""\np = "/home/someone/a"\n')
+        assert said.startswith("1 hardcoded path(s): L2: POSIX home path ("), said
+
+    def test_a_block_closes_and_the_line_after_it_is_scanned(self, tmp_path):
+        said = _scanned(tmp_path, '"""\n/home/someone/inside\n"""\np = "/home/someone/b"\n')
+        assert said.startswith("1 hardcoded path(s): L4: POSIX home path ("), said
