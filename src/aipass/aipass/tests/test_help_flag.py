@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag.py
 # Description: Tests for the help_flag predicate + per-module help-gate canaries
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-08-13
-# Modified: 2026-09-29
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/help_flag.py and every module's help gate."""
@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import importlib
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
@@ -97,7 +96,10 @@ def _discovered(stem: str):
     return found[stem]
 
 
-# (module stem, command, args that would ACT if the gate missed)
+# (module stem, command, args that would ACT if the gate missed). Only the modules
+# the CLI routes to: discover_modules skips _doctor_fix and _doctor_wire, so no user
+# reaches their handle_command (devpulse's ruling, fleet green leg 9).
+# test_gate_cases_cover_every_routed_module pins this list to discover_modules().
 _GATE_CASES = [
     ("init_flow", "init", ["agent", "--help"]),
     ("init_flow", "init", ["update", "--help"]),
@@ -112,9 +114,20 @@ _GATE_CASES = [
     ("read", "read", ["drone", "--help"]),
     ("handoff", "handoff", ["launch", "--help"]),
     ("help_chat", "help", ["what", "is", "drone", "--help"]),
-    ("_doctor_fix", "doctor_fix", ["--json", "--help"]),
-    ("_doctor_wire", "doctor_wire", ["--fix", "--help"]),
+    ("baud", "baud", ["install", "--help"]),
 ]
+
+
+def test_gate_cases_cover_every_routed_module() -> None:
+    """The canary list is the set of modules the CLI routes to, read from the product, never empty.
+
+    A parametrized loop over an empty or short list asserts nothing for what it
+    misses: before leg 9 the list carried two modules the CLI never routes to and
+    lacked baud, which the CLI does route to.
+    """
+    routed = {module.__name__.rsplit(".", 1)[-1] for module in discover_modules()}
+    assert routed, "discover_modules() found no command module"
+    assert {stem for stem, _command, _args in _GATE_CASES} == routed
 
 
 @pytest.fixture(autouse=True)
@@ -154,9 +167,7 @@ class TestHelpGateCanaries:
         self, stem: str, command: str, args: list[str], _stub_every_doing_path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Mutant: help gate returns True without printing -> red."""
-        # importlib, not _discovered: discover_modules skips the _doctor_fix/_doctor_wire
-        # cases below, whose handle_command the CLI never routes to (reported, leg 5)
-        module = importlib.import_module(f"aipass.aipass.apps.modules.{stem}")
+        module = _discovered(stem)
 
         try:
             handled = module.handle_command(command, list(args))
