@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.0.6
+# Version: 2.0.7
 # Created: 2026-06-09
-# Modified: 2026-09-28
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""
@@ -53,7 +53,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 #: A mode-0 folder does not stop root: the walk would list it and the test would prove nothing.
-_RUNS_AS_ROOT = os.geteuid() == 0
+#: The platform is read first because a skipif does not stop the import, and Windows' os has no geteuid.
+_RUNS_AS_ROOT = sys.platform == "linux" and os.geteuid() == 0
 
 json_handler.log_operation("test_broker_load", {})
 
