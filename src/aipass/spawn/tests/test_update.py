@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_update.py
 # Description: Tests for spawn update orchestrator
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-07
-# Modified: 2026-10-02
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -18,11 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from aipass.spawn.apps.handlers.update_ignore import UpdateIgnoreUnreadable, read_ignore
-from aipass.spawn.apps.handlers.update_ops import (
-    _PASSPORT_HEAL_ALLOWLIST,
-    update_all,
-    update_branch,
-)
+from aipass.spawn.apps.handlers.update_ops import update_all, update_branch
 from aipass.spawn.apps.modules.update import handle_update
 
 # Context kept from the file's original docstring:
@@ -1202,17 +1198,67 @@ class TestPassportHealIsNotAMigration:
         assert "citizenship" not in healed
         assert healed == self.SCHEMA_1_PASSPORT
 
-    def test_every_allowlisted_field_exists_in_both_schemas(self, tmp_path):
-        """The structural reason the test above passes — pinned so it stays the reason."""
-        assert len(_PASSPORT_HEAL_ALLOWLIST) == 3, (
-            f"the heal allowlist holds {_PASSPORT_HEAL_ALLOWLIST} - an emptied one makes this test vacuous "
-            "while the heal above still passes"
-        )
-        for section, key in _PASSPORT_HEAL_ALLOWLIST:
-            assert key in self.SCHEMA_1_PASSPORT.get(section, {}), (
-                f"{section}.{key} is on the heal allowlist but a schema-1.0.0 passport has no such field — "
-                "healing it there would be a migration, and a migration must complete or refuse"
-            )
+    # A template carrying the three healable fields AND 2.0-only ones, so a heal
+    # that reached past the allowlist would show as an added path.
+    TEMPLATE_2_0 = {
+        "document_metadata": {"schema_version": "2.0.0", "version": "2.0.0"},
+        "branch_info": {"email": "@template", "git_branch": "dev"},
+        "citizenship": {"residency": "resident", "citizen_id": ""},
+        "identity": {"traits": ["templated"], "principles": ["Code is truth - fail honestly"]},
+    }
+
+    def _without(self, missing):
+        """SCHEMA_1_PASSPORT with each (section, key) in *missing* removed."""
+        return {
+            section: {k: v for k, v in body.items() if (section, k) not in missing} if isinstance(body, dict) else body
+            for section, body in self.SCHEMA_1_PASSPORT.items()
+        }
+
+    @staticmethod
+    def _paths(document):
+        """Every (section, key) a document holds; a non-dict top-level value is (section,)."""
+        paths = set()
+        for section, body in document.items():
+            if isinstance(body, dict):
+                paths.update((section, key) for key in body)
+            else:
+                paths.add((section,))
+        return paths
+
+    @pytest.mark.parametrize("field", [("branch_info", "email"), ("branch_info", "git_branch"), ("identity", "traits")])
+    def test_a_missing_allowlisted_field_is_healed_and_nothing_else(self, tmp_path, field):
+        """Each field the heal allowlist names is one a schema-1.0.0 passport has, and heals alone.
+
+        Pinned through update_branch, the door every user walks (devpulse's ruling,
+        fleet green leg 10), in place of reading the allowlist tuple. A field
+        dropped from the allowlist leaves its passport unchanged and this case red.
+        """
+        existing = self._without({field})
+
+        result, healed = self._heal(tmp_path, self.TEMPLATE_2_0, existing)
+
+        assert result == "updated"
+        section, key = field
+        assert healed[section][key] == self.TEMPLATE_2_0[section][key]
+        assert healed["document_metadata"]["schema_version"] == "1.0.0"
+        assert self._paths(healed) - self._paths(existing) == {field}
+
+    def test_the_heal_adds_exactly_the_three_allowlisted_fields(self, tmp_path):
+        """The floor: with all three missing, the heal adds those three paths and no other.
+
+        The template also carries 2.0-only fields (citizenship, identity.principles).
+        An allowlist that grew to one of them adds a 2.0-only path here - a half
+        migration of every 1.0 passport; one that shrank or emptied adds fewer.
+        Either way the set comparison is red.
+        """
+        three = {("branch_info", "email"), ("branch_info", "git_branch"), ("identity", "traits")}
+        existing = self._without(three)
+
+        result, healed = self._heal(tmp_path, self.TEMPLATE_2_0, existing)
+
+        assert result == "updated"
+        assert self._paths(healed) - self._paths(existing) == three
+        assert healed["document_metadata"]["schema_version"] == "1.0.0"
 
     def test_a_passport_written_with_escapes_is_left_alone(self, tmp_path):
         """An untouched document must not be rewritten because it is SPELLED differently.
