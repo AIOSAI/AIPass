@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_data_loader.py
 # Description: Data loader tests — inbox and local.json loading, message triage, the real mailbox path
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-04
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/update/data_loader.py, and apps/daemon_wakeup.py's shared inbox path and --help guard."""
