@@ -2,12 +2,13 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for daemon tests - host-state seals, sentinels, console pin
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-06
 # Category: daemon/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.2.0 (2026-10-06): timer seal keeps the real systemctl wrapper behind an empty PATH for systemctl_on_path
 #   - v1.1.0 (2026-09-27): Console width pin + command-state reset (item 20); catches log; unused fixtures removed
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
 #
@@ -122,7 +123,7 @@ def _host_timer_snapshot() -> dict:
 
 
 @pytest.fixture(autouse=True)
-def _seal_timer_host_state(tmp_path):
+def _seal_timer_host_state(tmp_path, request):
     """Make live systemd unreachable from every test in this suite.
 
     Autouse and unconditional. The three seams are the whole surface by which
@@ -134,14 +135,27 @@ def _seal_timer_host_state(tmp_path):
 
     Patched at the MODULE, so _install() and _uninstall() — which look these up
     as globals at call time — get the stand-ins even when they are invoked
-    through the real router with the gate absent. TestRunSystemctl is
-    unaffected: it binds _run_systemctl by direct import at module load, so it
-    still exercises the real function against a patched subprocess.run.
+    through the real router with the gate absent.
+
+    A test that asks for `systemctl_on_path` (test_timer_install.py) keeps the
+    real wrapper, and the seal moves the other door instead: PATH becomes an
+    empty directory, so the only systemctl the wrapper can find is the stub
+    that fixture lays. The live host's systemctl is unreachable either way.
 
     The stand-in returns True, so an unpatched caller sees a successful install
     rather than a confusing failure — the point is that nothing happened, not
     that something failed.
     """
+    if "systemctl_on_path" in request.fixturenames:
+        no_systemctl = tmp_path / "_sealed_empty_path"
+        no_systemctl.mkdir()
+        with (
+            patch.dict(os.environ, {"PATH": str(no_systemctl)}),
+            patch.object(timer_install, "_UNIT_DIR", tmp_path / "_sealed_unit_dir"),
+            patch.object(timer_install, "_STATE_DIR", tmp_path / "_sealed_state_dir"),
+        ):
+            yield None
+        return
     with (
         patch.object(timer_install, "_run_systemctl", MagicMock(return_value=True)) as fake_systemctl,
         patch.object(timer_install, "_UNIT_DIR", tmp_path / "_sealed_unit_dir"),

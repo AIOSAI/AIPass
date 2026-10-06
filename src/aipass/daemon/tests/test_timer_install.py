@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_timer_install.py
 # Description: Tests for the timer_install module (systemd user timer installer)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-25
-# Modified: 2026-09-28
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
@@ -12,17 +12,17 @@
 # seedgo: no-test-needed(stdlib) — shutil.copy2's metadata copy; the copies are asserted on disk, not their mode bits
 # seedgo: no-test-needed(ruff) — that timer_install.py parses and imports; every test here imports it first
 
+import json
 import subprocess
 
 import pytest
-from unittest.mock import call, patch, MagicMock
+from unittest.mock import call, patch
 import sys
 from pathlib import Path
 
 from aipass.daemon.apps.modules.timer_install import (
     handle_command,
     HANDLED_COMMANDS,
-    _run_systemctl,
 )
 
 # install and uninstall are reached the way a user reaches them: through
@@ -105,70 +105,184 @@ class TestHandleCommand:
         assert "USAGE:" in out, "install-timer --help must print a USAGE: block"
 
 
-class TestRunSystemctl:
-    """Tests for the systemctl wrapper."""
+_STUB = """#!{python}
+import json
+import sys
 
-    @patch("subprocess.run")
-    def test_success(self, mock_run):
-        """Successful systemctl returns True."""
-        mock_run.return_value = MagicMock(returncode=0)
-        assert _run_systemctl("status", "daemon-tick.timer") is True
+answers = json.loads({answers!r})
+with open({log!r}, "a", encoding="utf-8") as log:
+    log.write(" ".join(sys.argv[1:]) + "\\n")
+code, said = answers.get(sys.argv[2] if len(sys.argv) > 2 else "", [0, ""])
+if said:
+    print(said, file=sys.stderr)
+sys.exit(code)
+"""
 
-    @patch("subprocess.run")
-    def test_failure_returncode(self, mock_run):
-        """Non-zero returncode returns False."""
-        mock_run.return_value = MagicMock(returncode=1, stderr="unit not found")
-        assert _run_systemctl("start", "daemon-tick.timer") is False
 
-    @patch("subprocess.run")
-    def test_not_loaded_is_true_only_when_the_caller_says_so(self, mock_run, capsys):
-        """Exit 5 (not loaded) answers True with not_loaded_ok and no error; without it, False.
+@pytest.fixture
+def systemctl_on_path(tmp_path, monkeypatch):
+    """Lay a systemctl stub as the only one on PATH; answer the path of the log of every argv it receives.
 
-        Exit 5 here is this stand-in's answer, the one systemctl gives a stop of a
-        unit it does not know (measured by @devpulse, 2026-09-28).
+    Asking for this fixture is what keeps the real _run_systemctl: conftest's
+    seal sees the name, leaves the wrapper alone and empties PATH. The stub is
+    a real executable the wrapper finds and runs, exiting with the code each
+    verb is given in `answers` (verb -> (exit code, stderr line); every other
+    verb exits 0). `answers=None` lays nothing: PATH stays an empty directory,
+    a host with no systemctl.
+
+    The host is asked whether a bare-named stub runs at all, by running it the
+    way the wrapper does; Windows finds no extensionless script on PATH, and
+    where it cannot run that is what the test reports, never a skip.
+    """
+
+    def lay(answers: dict | None) -> Path:
+        log = tmp_path / "systemctl_argv.log"
+        if answers is None:
+            return log
+        bin_dir = tmp_path / "stub_bin"
+        bin_dir.mkdir()
+        stub = bin_dir / "systemctl"
+        stub.write_text(
+            _STUB.format(python=sys.executable, answers=json.dumps(answers), log=str(log)),
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        monkeypatch.setenv("PATH", str(bin_dir))
+        try:
+            subprocess.run(["systemctl", "--user", "probe"], capture_output=True, encoding="utf-8", timeout=15)
+        except OSError as refused:
+            pytest.fail(f"a systemctl stub cannot run from PATH on this host ({sys.platform}): {refused}")
+        log.write_text("", encoding="utf-8")
+        return log
+
+    return lay
+
+
+def _argv(log: Path) -> list:
+    """Every argv the stub received, one call a line, or [] when systemctl was never run."""
+    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+class TestTheCommandsReadSystemctlsAnswers:
+    """install-timer and uninstall-timer against a real systemctl on PATH: each answer the wrapper can give.
+
+    The wrapper is reached through the two commands only. The stub is a real
+    process; the one exception is the timeout, which a stub cannot give inside
+    a suite's time (the wrapper waits 15 s), so that case alone patches
+    subprocess.run, a process edge the stdlib_patch standard acquits.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _units_to_install(self, tmp_path):
+        """The two unit files install-timer copies, under a daemon root of this test's own."""
+        root = tmp_path / "daemon_root"
+        root.mkdir()
+        _units(root)
+        with patch(f"{TI}._DAEMON_ROOT", root):
+            yield
+
+    def test_success_runs_reload_enable_start_in_that_order(self, systemctl_on_path):
+        """Every step exits 0: install-timer answers True and systemctl saw daemon-reload, enable, start.
+
+        Mutant killed: enable and start swapped in _install.
+        """
+        log = systemctl_on_path({})
+        assert handle_command("install-timer", []) is True
+        assert _argv(log) == [
+            "--user daemon-reload",
+            "--user enable daemon-tick.timer",
+            "--user start daemon-tick.timer",
+        ]
+
+    def test_a_non_zero_exit_fails_the_install_and_prints_why(self, systemctl_on_path, capsys):
+        """daemon-reload exits 1 with a stderr line: both print, install exits 1, nothing more is asked."""
+        log = systemctl_on_path({"daemon-reload": [1, "Failed to connect to bus"]})
+        assert _exit_of("install-timer") == 1
+        said = "".join(capsys.readouterr())
+        assert "FAIL: systemctl --user daemon-reload" in said, said
+        assert "Failed to connect to bus" in said, said
+        assert _argv(log) == ["--user daemon-reload"]
+
+    def test_not_loaded_on_a_stop_is_nothing_to_stop(self, systemctl_on_path, tmp_path, capsys):
+        """stop exits 5 (not loaded): uninstall-timer goes on to disable, removes the files and exits 0, with no FAIL.
+
+        Exit 5 is the stub's answer, the one systemctl gives a stop of a unit it
+        does not know (measured by @devpulse, 2026-09-28).
+        Mutant killed: the stop asked without not_loaded_ok.
+        """
+        unit_dir = tmp_path / "_sealed_unit_dir"
+        unit_dir.mkdir()
+        service, timer = _units(unit_dir)
+        log = systemctl_on_path({"stop": [5, "Unit daemon-tick.timer not loaded."]})
+        with patch("aipass.trigger.apps.modules.core.trigger.fire"):
+            assert _exit_of("uninstall-timer") == 0
+        assert _argv(log) == [
+            "--user stop daemon-tick.timer",
+            "--user disable daemon-tick.timer",
+            "--user daemon-reload",
+        ]
+        assert not service.exists() and not timer.exists()
+        assert "FAIL" not in "".join(capsys.readouterr()), "not loaded is nothing to stop, never a failure"
+
+    def test_a_stop_refused_for_another_reason_fails_the_uninstall(self, systemctl_on_path, tmp_path):
+        """stop exits 1: not loaded is exit 5 only, so the uninstall names the stop, exits 1 and keeps the files.
+
         Mutant killed: the exit 5 check reading any non-zero exit as not loaded.
         """
-        mock_run.return_value = MagicMock(returncode=5, stderr="Unit daemon-tick.timer not loaded.")
-        assert _run_systemctl("stop", "daemon-tick.timer", not_loaded_ok=True) is True
-        assert "FAIL" not in "".join(capsys.readouterr()), "not loaded is nothing to stop, never a failure"
-        assert _run_systemctl("stop", "daemon-tick.timer") is False
-        mock_run.return_value = MagicMock(returncode=1, stderr="Access denied")
-        assert _run_systemctl("stop", "daemon-tick.timer", not_loaded_ok=True) is False
+        unit_dir = tmp_path / "_sealed_unit_dir"
+        unit_dir.mkdir()
+        service, timer = _units(unit_dir)
+        log = systemctl_on_path({"stop": [1, "Access denied"]})
+        assert _exit_of("uninstall-timer") == 1
+        assert _argv(log) == ["--user stop daemon-tick.timer"]
+        assert service.exists() and timer.exists()
 
-    @patch("subprocess.run", side_effect=FileNotFoundError)
-    def test_systemctl_not_found(self, mock_run, capsys):
-        """Missing systemctl returns False and says systemd is not there."""
-        assert _run_systemctl("status", "daemon-tick.timer") is False
+    def test_not_loaded_anywhere_but_a_stop_is_a_failure(self, systemctl_on_path, capsys):
+        """enable exits 5: install-timer does not pass not_loaded_ok, so the install fails at enable and never starts.
+
+        Mutant killed: the wrapper reading exit 5 as success without not_loaded_ok.
+        """
+        log = systemctl_on_path({"enable": [5, "Unit daemon-tick.timer not loaded."]})
+        assert _exit_of("install-timer") == 1
+        assert "FAIL: systemctl --user enable daemon-tick.timer" in "".join(capsys.readouterr())
+        assert _argv(log) == ["--user daemon-reload", "--user enable daemon-tick.timer"]
+
+    def test_systemctl_not_found(self, systemctl_on_path, capsys):
+        """No systemctl on PATH: uninstall-timer (not_found_ok) says not installed and exits 0; install-timer fails.
+
+        Only uninstall's stop passes not_found_ok, and its None is how the
+        uninstall tells nothing installed apart from a failed stop. install-timer
+        passes it nowhere, so its daemon-reload is a failure that names systemd.
+        Mutant killed: the not-found arm answering False where None is owed.
+        """
+        systemctl_on_path(None)
+        assert _exit_of("uninstall-timer") == 0
+        said = "".join(capsys.readouterr())
+        assert "Not installed:" in said and "no systemctl on this host" in said, said
+        assert "systemctl not found" not in said, "not found asked for is not an error"
+        assert _exit_of("install-timer") == 1
         said = "".join(capsys.readouterr())
         assert "systemctl not found — systemd not available" in said, said
 
-    def test_not_found_is_none_only_when_the_caller_says_so_and_a_timeout_never_is(self, capsys):
-        """With not_found_ok a missing systemctl answers None and prints no error; a timeout still answers False.
+    def test_a_timeout_is_a_failure_never_not_found(self, systemctl_on_path, capsys):
+        """systemctl times out: install-timer exits 1 naming the timeout, and uninstall's stop is a failure, not None.
 
-        The FileNotFoundError and the TimeoutExpired are this test's own stand-ins.
-        Green from its first run (added after the seam, leg 4b): its proof is its mutants.
-        Mutant killed: not found answering False with not_found_ok.
+        subprocess.run is patched to raise TimeoutExpired: the one answer a stub
+        cannot give quickly, reached through the commands all the same.
+        Mutant killed: the TimeoutExpired branch printing the not-found message.
         Mutant killed: the timeout answering None with not_found_ok.
         """
-        with patch("subprocess.run", side_effect=FileNotFoundError):
-            assert _run_systemctl("stop", "daemon-tick.timer", not_found_ok=True) is None
-        assert "systemctl not found" not in "".join(capsys.readouterr()), "not found asked for is not an error"
+        systemctl_on_path(None)
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="systemctl", timeout=15)):
-            assert _run_systemctl("stop", "daemon-tick.timer", not_found_ok=True) is False
-
-    @patch(
-        "subprocess.run",
-        side_effect=subprocess.TimeoutExpired(cmd="systemctl", timeout=15),
-    )
-    def test_timeout(self, mock_run, capsys):
-        """Timed-out systemctl returns False and names the timeout, not a missing systemd.
-
-        Mutant killed: the TimeoutExpired branch printing the not-found message.
-        """
-        assert _run_systemctl("status", "daemon-tick.timer") is False
-        said = "".join(capsys.readouterr())
-        assert "systemctl timed out" in said, said
-        assert "not found" not in said, f"a timeout reported as a missing systemctl: {said}"
+            # The uninstall first, while no unit file stands: there a None from
+            # the stop reads as nothing installed and exits 0, so only a timeout
+            # answered False exits 1. After the install, copied files would hide it.
+            assert _exit_of("uninstall-timer") == 1
+            assert "uninstall-timer: systemctl --user stop daemon-tick.timer failed" in capsys.readouterr().err
+            assert _exit_of("install-timer") == 1
+            said = "".join(capsys.readouterr())
+            assert "systemctl timed out" in said, said
+            assert "not found" not in said, f"a timeout reported as a missing systemctl: {said}"
 
 
 class TestInstall:
