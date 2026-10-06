@@ -3,7 +3,7 @@
 # Description: Tests for sender identity detection chain
 # Version: 1.2.2
 # Created: 2026-03-10
-# Modified: 2026-10-04
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the sender identity chain in apps/handlers/email/send.py."""
@@ -1023,6 +1023,42 @@ class TestGetContactInfo:
     def test_no_contact_still_returns_none(self, clean_env, tmp_path, monkeypatch):
         """Baseline: an unknown branch name is None, same as before this guard."""
         assert self._caller_named(monkeypatch, tmp_path, "nobody-registered-this") is None
+
+    @staticmethod
+    def _external_caller(monkeypatch, tmp_path, book_text):
+        """An external caller whose name only the address book could vouch for.
+
+        The caller stands outside any branch with an assigned name, so a book that
+        holds no row walks on to synthesis. The book is the one conftest points
+        the contacts module at; *book_text* is written into it verbatim.
+        """
+        book = tmp_path / "contacts" / "contacts.json"
+        book.parent.mkdir(parents=True, exist_ok=True)
+        book.write_text(book_text, encoding="utf-8")
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(outside))
+        monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "assigned")
+        return book
+
+    def test_a_corrupt_book_raises_instead_of_synthesizing_a_citizen(self, clean_env, tmp_path, monkeypatch):
+        """An unreadable book is a fault, not an empty one: no citizen is invented past it."""
+        book = self._external_caller(monkeypatch, tmp_path, "{not json")
+
+        with pytest.raises(RuntimeError) as excinfo:
+            self._caller_named(monkeypatch, tmp_path, "outsider")
+
+        assert str(book) in str(excinfo.value)
+
+    def test_a_readable_book_without_the_row_still_synthesizes(self, clean_env, tmp_path, monkeypatch):
+        """Control: an empty book is an answer, and the external caller is synthesized as before."""
+        self._external_caller(monkeypatch, tmp_path, '{"contacts": {}}')
+
+        result = self._caller_named(monkeypatch, tmp_path, "outsider")
+
+        assert result is not None
+        assert result["type"] == "external"
+        assert result["email"] == "@outsider"
 
 
 # ─── Identity resolution observability (@aipass misattribution, 2026-08-07) ───

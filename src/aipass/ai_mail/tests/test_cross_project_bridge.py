@@ -3,7 +3,7 @@
 # Description: Tests for the verified-admin cross-project bridge + reply return path (FPLAN-0401 ph5/5b)
 # Version: 1.1.2
 # Created: 2026-08-12
-# Modified: 2026-10-04
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the cross-project bridge across wake.py and registry/read.py."""
@@ -408,11 +408,12 @@ class TestIsVerifiedAdminCaller:
         with _admin(False):
             assert is_verified_admin_caller() is False
 
-    def test_a_raising_verifier_is_not_admin(self, monkeypatch):
-        """Fail closed on an unexpected error, never open."""
+    def test_a_raising_verifier_raises_rather_than_answering(self, monkeypatch):
+        """A verifier that faults is not a verdict: the fault reaches the caller, never False."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
-        with patch(f"{_H_VERIFIED}.verify_admin_caller", MagicMock(side_effect=RuntimeError("boom"))):
-            assert is_verified_admin_caller() is False
+        with patch(f"{_H_VERIFIED}.verify_admin_caller", MagicMock(side_effect=RuntimeError("grant unreadable"))):
+            with pytest.raises(RuntimeError, match="grant unreadable"):
+                is_verified_admin_caller()
 
     def test_result_is_not_cached_across_calls(self, monkeypatch):
         """A revoked grant must take effect immediately — caching would fail open."""

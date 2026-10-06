@@ -3,7 +3,7 @@
 # Description: Tests for the contacts address book handler
 # Version: 1.0.3
 # Created: 2026-04-11
-# Modified: 2026-10-04
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/email/contacts.py."""
@@ -54,10 +54,20 @@ def test_load_contacts_missing_file(isolated_contacts):
 
 
 def test_load_contacts_invalid_json(isolated_contacts):
-    """Corrupted contacts.json lists no contacts."""
+    """A corrupt contacts.json raises naming itself; it never lists as empty."""
     isolated_contacts.parent.mkdir(parents=True, exist_ok=True)
     isolated_contacts.write_text("not json", encoding="utf-8")
-    assert all_contacts() == {}
+    with pytest.raises(RuntimeError) as raised:
+        all_contacts()
+    assert str(isolated_contacts) in str(raised.value)
+
+
+def test_register_on_a_corrupt_book_leaves_it_as_found(isolated_contacts, tmp_path):
+    """A register over a corrupt book is its documented failure, False, and no row overwrites the book."""
+    isolated_contacts.parent.mkdir(parents=True, exist_ok=True)
+    isolated_contacts.write_text("not json", encoding="utf-8")
+    assert register_contact("devpulse", "AIPass", str(tmp_path / "devpulse" / ".ai_mail.local" / "inbox.json")) is False
+    assert isolated_contacts.read_text(encoding="utf-8") == "not json"
 
 
 def test_load_contacts_missing_key(isolated_contacts):

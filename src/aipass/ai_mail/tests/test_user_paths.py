@@ -3,7 +3,7 @@
 # Description: Tests for absolute mailbox_path resolution in user functions
 # Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-10-04
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/users/user.py and apps/handlers/paths.py's find_repo_root()."""
@@ -22,7 +22,7 @@
 # 4. Absolute paths in the registry are preserved as-is
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — get_user_by_email()'s broad except on a malformed registry (HELD, DPLAN-0357)
+# seedgo: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
 
 import json
 import pytest
@@ -194,6 +194,21 @@ class TestGetUserByEmailPaths:
             assert mailbox.is_absolute(), f"mailbox_path must be absolute (dict format), got: {result['mailbox_path']}"
             expected = str((repo_root / "src" / "aipass" / "devpulse" / ".ai_mail.local").resolve())
             assert result["mailbox_path"] == expected
+
+    def test_a_missing_registry_answers_none(self, tmp_path):
+        """No registry file is an answer: nobody is known, so nobody is found."""
+        missing = tmp_path / "AIPASS_REGISTRY.json"
+        with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", missing):
+            assert get_user_by_email("@ai_mail") is None
+
+    def test_a_corrupt_registry_raises_naming_itself(self, tmp_path):
+        """A registry that exists and cannot be parsed is a fault, never "no such user"."""
+        broken = tmp_path / "AIPASS_REGISTRY.json"
+        broken.write_text("{not json", encoding="utf-8")
+        with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", broken):
+            with pytest.raises(RegistryUnreadable) as raised:
+                get_user_by_email("@ai_mail")
+        assert str(broken) in str(raised.value)
 
 
 # ─── get_all_users() tests ───────────────────────────────

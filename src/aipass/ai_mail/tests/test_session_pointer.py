@@ -3,7 +3,7 @@
 # Description: Tests for the durable per-branch session pointer
 # Version: 1.0.2
 # Created: 2026-08-20
-# Modified: 2026-10-02
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
@@ -22,7 +22,6 @@ from unittest.mock import MagicMock
 import pytest
 
 import aipass.ai_mail.apps.handlers.dispatch.session_pointer as mod
-import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as dispatch_monitor
 from aipass.ai_mail.apps.handlers.dispatch.session_pointer import (
     mint_session_id,
     pointer_path,
@@ -135,26 +134,12 @@ def test_transcript_file_appends_the_jsonl_name(fake_home, tmp_path):
     assert result.parent == transcript_dir(sample)
 
 
-def test_dispatch_monitor_asks_transcript_dir_and_holds_no_copy(monkeypatch, tmp_path):
-    """dispatch_monitor's projects dir is whatever transcript_dir answers: one encoding, not two.
-
-    The old shape compared transcript_dir with _get_jsonl_projects_dir, which is a
-    call to transcript_dir, so it compared a function with itself and could not
-    fail (devpulse's mutant dropping the underscore rule passed it). What is still
-    true, and worth pinning, is the delegation: a sentinel answered at
-    session_pointer's home must come back unchanged, which a local copy of the
-    encoding would not do.
-
-    Mutant: `return session_pointer.transcript_dir(cwd)` -> `return Path(cwd)` (a
-    local answer) is caught here.
-    """
-    sentinel = tmp_path / "sentinel-projects-dir"
-    asked = []
-    monkeypatch.setattr(mod, "transcript_dir", lambda cwd: asked.append(cwd) or sentinel)
-    cwd = str(tmp_path / "srv" / "branches" / "AIPass" / "src" / "aipass" / "ai_mail")
-
-    assert dispatch_monitor._get_jsonl_projects_dir(cwd) == sentinel
-    assert asked == [cwd]
+# Retired here (ai_mail, leg 17): the test that read dispatch_monitor's private
+# _get_jsonl_projects_dir to pin that it delegates to transcript_dir. No public
+# door reaches that helper with a chosen cwd: its one caller is the monitor's
+# main(), which spawns the agent first. The helper is the one-line delegate its
+# docstring describes, so the encoding's pin lives with transcript_dir, in the
+# tests above, where the one copy of the encoding is.
 
 
 # --- pointer_path ----------------------------------------------------

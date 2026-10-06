@@ -138,7 +138,7 @@
     {
       "file": "tests/test_session_pointer.py",
       "standard": "stdlib_patch",
-      "reason": "Filesystem-failure injection (ai_mail, fleet green leg 11, under @devpulse's leg 11 ruling b): a real filesystem cannot fail on demand, and a seam would be a door for the test alone. stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 11: Path.read_text 268, tempfile.mkstemp 281, Path.mkdir 289, os.replace 312 327, Path.is_file 458 483 and Path.stat 459 (each made to raise, so the pointer's read and atomic-write failure arms run), Path.home 620 (made to raise, the no-home arm)."
+      "reason": "Filesystem-failure injection (ai_mail, fleet green leg 11, under @devpulse's leg 11 ruling b): a real filesystem cannot fail on demand, and a seam would be a door for the test alone. stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 17: Path.read_text 253, tempfile.mkstemp 266, Path.mkdir 274, os.replace 297 312, Path.is_file 443 468 and Path.stat 444 (each made to raise, so the pointer's read and atomic-write failure arms run), Path.home 605 (made to raise, the no-home arm)."
     },
     {
       "file": "tests/test_admin_lane.py",
@@ -313,8 +313,8 @@
     {
       "file": "tests/test_session_pointer.py",
       "standard": "literal_path",
-      "lines": [106],
-      "reason": "(ai_mail, fleet green leg 9) Same as test_dispatch_monitor.py 1567: transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
+      "lines": [105],
+      "reason": "(ai_mail, fleet green leg 9; re-lined leg 17) Same as test_dispatch_monitor.py 1567: transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
     },
     {
       "file": "apps/handlers/dispatch/session_pointer.py",

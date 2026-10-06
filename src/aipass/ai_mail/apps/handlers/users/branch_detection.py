@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2025-11-18
-# Modified: 2026-08-31
+# Modified: 2026-10-06
 # =============================================
 
 """
@@ -60,58 +60,61 @@ def _get_contact_info(branch_name: str) -> Optional[Dict]:
         branch_name: Branch name or email (e.g., 'devpulse' or '@devpulse').
 
     Returns:
-        Synthetic branch info dict compatible with registry format, or None.
+        Synthetic branch info dict compatible with registry format, or None for
+        the three answers: no row (a missing book is no rows), a stale row, a
+        poisoned row.
+
+    Raises:
+        RuntimeError: the book exists and cannot be read. That is a fault, not
+            "no contact": answering None let the caller synthesize a citizen
+            where the fault stood (ai_mail, leg 17).
     """
-    try:
-        from aipass.ai_mail.apps.handlers.email.contacts import get_contact
+    from aipass.ai_mail.apps.handlers.email.contacts import get_contact
 
-        contact = get_contact(branch_name)
-        if not contact:
-            return None
-        inbox_path = Path(contact["inbox"])
-        branch_path = inbox_path.parent.parent  # .ai_mail.local -> branch root
-        if not branch_path.is_dir():
-            # A row whose branch root no longer exists on disk is stale — a
-            # dead pytest tmp_path or a cleaned-up scratchpad probe. Trusting
-            # it here handed callers a "verified" identity backed by a dead
-            # path (found live, 2026-08-16, @devpulse: an unisolated test
-            # suite's poisoned rows were served as real contacts). Fall
-            # through to the next resolution strategy instead.
-            return None
-        name_key = branch_name.lstrip("@").lower()
-
-        # DEFENCE IN DEPTH, and it is here to make poisoning AUDIBLE. The caller
-        # above now asks the registry first, so a contradicting row is no longer
-        # reachable from that lane — but a row claiming a citizen's name while
-        # pointing at a different branch is CORRUPT DATA, not a cache miss, and a
-        # silent fall-through would leave it in the file to surprise the next
-        # reader. Refuse it and say so, loudly enough to be found.
-        registry_entry = _lookup_branch_by_name(name_key)
-        if registry_entry:
-            registry_path = Path(str(registry_entry.get("path", "")))
-            if not registry_path.is_absolute():
-                registry_path = (BRANCH_REGISTRY_PATH.parent / registry_path).resolve()
-            if registry_path != branch_path.resolve():
-                logger.error(
-                    "[identity] POISONED CONTACT ROW: %r claims branch %s but the registry places "
-                    "that citizen at %s. Refusing the row — serving it would hand this caller "
-                    "another citizen's mailbox. Repair the 'inbox' field for %r in contacts.json.",
-                    name_key,
-                    branch_path,
-                    registry_path,
-                    name_key,
-                )
-                return None
-
-        return {
-            "name": name_key.upper(),
-            "email": "@" + name_key,
-            "path": str(branch_path),
-            "project": contact.get("project", ""),
-        }
-    except Exception as e:
-        logger.warning("[identity] _get_contact_info(%s) failed: %s", branch_name, e)
+    contact = get_contact(branch_name)
+    if not contact:
         return None
+    inbox_path = Path(contact["inbox"])
+    branch_path = inbox_path.parent.parent  # .ai_mail.local -> branch root
+    if not branch_path.is_dir():
+        # A row whose branch root no longer exists on disk is stale — a
+        # dead pytest tmp_path or a cleaned-up scratchpad probe. Trusting
+        # it here handed callers a "verified" identity backed by a dead
+        # path (found live, 2026-08-16, @devpulse: an unisolated test
+        # suite's poisoned rows were served as real contacts). Fall
+        # through to the next resolution strategy instead.
+        return None
+    name_key = branch_name.lstrip("@").lower()
+
+    # DEFENCE IN DEPTH, and it is here to make poisoning AUDIBLE. The caller
+    # above now asks the registry first, so a contradicting row is no longer
+    # reachable from that lane — but a row claiming a citizen's name while
+    # pointing at a different branch is CORRUPT DATA, not a cache miss, and a
+    # silent fall-through would leave it in the file to surprise the next
+    # reader. Refuse it and say so, loudly enough to be found.
+    registry_entry = _lookup_branch_by_name(name_key)
+    if registry_entry:
+        registry_path = Path(str(registry_entry.get("path", "")))
+        if not registry_path.is_absolute():
+            registry_path = (BRANCH_REGISTRY_PATH.parent / registry_path).resolve()
+        if registry_path != branch_path.resolve():
+            logger.error(
+                "[identity] POISONED CONTACT ROW: %r claims branch %s but the registry places "
+                "that citizen at %s. Refusing the row — serving it would hand this caller "
+                "another citizen's mailbox. Repair the 'inbox' field for %r in contacts.json.",
+                name_key,
+                branch_path,
+                registry_path,
+                name_key,
+            )
+            return None
+
+    return {
+        "name": name_key.upper(),
+        "email": "@" + name_key,
+        "path": str(branch_path),
+        "project": contact.get("project", ""),
+    }
 
 
 def _find_caller_registry() -> Optional[Path]:
@@ -290,6 +293,11 @@ def detect_branch_from_pwd() -> Optional[Dict]:
 
     Returns:
         Dict with branch info if detected, or None.
+
+    Raises:
+        RuntimeError: a step faulted (an unreadable contacts book, a broken
+            registry). Read as None, a fault answered "no branch" and the
+            caller could not tell the two apart (ai_mail, leg 17).
     """
     json_handler.log_operation("detect_branch_from_pwd", {"cwd": str(Path.cwd())})
 
@@ -371,8 +379,8 @@ def detect_branch_from_pwd() -> Optional[Dict]:
         return _record_resolution(get_branch_info_from_registry(branch_root), strategy, confidence)
 
     except Exception as e:
-        logger.warning("[identity] detect_branch_from_pwd() failed: %s", e)
-        return None
+        logger.error("[identity] detect_branch_from_pwd() failed: %s", e)
+        raise RuntimeError(f"Caller identity could not be resolved: {e}") from e
 
 
 def _rooted(branch: Dict, registry_path: Path) -> Dict:
