@@ -135,6 +135,16 @@ or any patch carrying an `OSError` `side_effect`. That **is** the cure this rule
 teaches, so an arm that could flag it would be teaching a rewrite into something
 it also flags.
 
+**Also not flagged: the platform asked** (fleet green leg 20). After the chmod
+the unit makes the same kind of call with its own hands — `unlink`, `write_text`,
+`write_bytes`, `mkdir` or `open` inside a `try`, in its own body or in a function
+of the same module whose body is that `try` — keeps the answer, and an `if`
+after the chmod reads it. The decision is inside the test, so whichever way the
+host answers, the product is held to the same answer. A probe whose answer no
+`if` reads keeps the row; so does a unit that names an error type after a chmod
+without asking. The checker does not follow dataflow: it does not check that
+the probe's path stands under the chmod's directory.
+
 ## `OSERROR_ATTRIBUTE` — nominated, not scored
 
 @drone, `tests/test_executor.py:205`:

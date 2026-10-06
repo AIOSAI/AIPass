@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: corpus.py
 # Description: static test corpus reader for the pytest_quality pack
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-06
 # =============================================
 
 """Static AST reader over a project's test files.
@@ -210,8 +210,21 @@ def _is_test_function(node: ast.AST) -> TypeGuard[Union[ast.FunctionDef, ast.Asy
     A TypeGuard rather than a plain bool so the narrowing survives the call:
     without it every caller has to re-assert the isinstance a second time to
     read `.name`, and the second assertion is the one that drifts.
+
+    A fixture is never a unit, whatever its name: pytest does not collect it
+    (read on pytest 9.1.1, seedgo, fleet green leg 20).
     """
-    return isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test")
+    return (
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test")
+        and not any(_is_fixture_decorator(decorator) for decorator in node.decorator_list)
+    )
+
+
+def _is_fixture_decorator(decorator: ast.expr) -> bool:
+    """True for ``@pytest.fixture``, ``@fixture`` and their called forms."""
+    target = decorator.func if isinstance(decorator, ast.Call) else decorator
+    return dotted_name(target) in ("pytest.fixture", "fixture")
 
 
 def _units_in_class(node: ast.ClassDef, relpath: str) -> List[TestUnit]:

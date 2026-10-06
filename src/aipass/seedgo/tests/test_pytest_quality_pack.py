@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack.py
 # Description: behavioural pins for the pytest_quality standards pack
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-09-01
-# Modified: 2026-10-03
+# Modified: 2026-10-06
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/corpus.py and the pack's checkers beside it."""
@@ -209,6 +209,40 @@ class TestCorpusCollection:
             "tests/test_ids.py::TestGrouped::test_in_a_class",
         ]
 
+    def test_a_fixture_named_like_a_test_is_not_a_unit(self, tmp_path):
+        """pytest does not collect a fixture, whatever its name (aipass' policy fixture, fleet green leg 20).
+
+        Read on pytest 9.1.1: an autouse fixture named ``test_...`` beside a
+        real test collects the real test alone. Both spellings of the
+        decorator, called and bare, are read. Red first on the name-only rule.
+        """
+        _write(
+            tmp_path,
+            "tests/test_fix.py",
+            """
+            import pytest
+            from pytest import fixture
+
+
+            @pytest.fixture(autouse=True)
+            def test_policy_stays_in_tmp():
+                yield 1
+
+
+            @fixture
+            def test_bare_fixture():
+                return 2
+
+
+            def test_real():
+                assert True
+            """,
+        )
+
+        ids = [unit.nodeid for unit in corpus.build(tmp_path).units()]
+
+        assert ids == ["tests/test_fix.py::test_real"]
+
 
 # =============================================================================
 # WHAT COUNTS AS AN ORACLE
@@ -383,6 +417,49 @@ class TestNomination:
 
         assert [row["nodeid"] for row in rows] == ["tests/test_lines.py::test_drives_and_checks_nothing"]
         assert rows[0]["line"] == expected_line
+
+    def test_a_helper_of_the_same_module_holding_the_asserts_is_the_oracle(self, tmp_path):
+        """One call away is still visible (hooks' _reason and ai_mail's _claims shapes, fleet green leg 20).
+
+        A method of the unit's own class reached through ``self`` and a
+        module-level function of the same file each count when their body
+        holds an oracle. One level only: the helper's own body is read, not
+        what it calls in turn. The control helper holds no oracle and its
+        caller stays flagged. Red first on the reader without helpers; its
+        proof is also the mutants, one per arm.
+        """
+        _write(
+            tmp_path,
+            "tests/test_helpers.py",
+            """
+            def _claims(value):
+                assert value == 1
+
+
+            def _produce(value):
+                return value
+
+
+            def test_module_helper_checks():
+                _claims(run())
+
+
+            def test_control_helper_checks_nothing():
+                _produce(run())
+
+
+            class TestGate:
+                def _reason(self, result):
+                    assert result == "block"
+
+                def test_method_helper_checks(self):
+                    self._reason(run())
+            """,
+        )
+
+        rows = no_oracle_check.find_unoracled(corpus.build(tmp_path))
+
+        assert [row["nodeid"] for row in rows] == ["tests/test_helpers.py::test_control_helper_checks_nothing"]
 
 
 # =============================================================================
@@ -841,6 +918,42 @@ class TestTypeOnlyIsAPropertyOfTheUnit:
                 result = parse("a=1")
                 assert result.offset == 3
                 assert isinstance(result.offset, int)
+            """
+        )
+
+        assert assertion_shape_check.unit_flags(unit) == []
+
+    def test_an_isinstance_on_the_cause_beside_a_raises_block_is_not_type_only(self):
+        """The raised error and its cause ARE the value (flow's register shape, fleet green leg 20).
+
+        A ``pytest.raises`` block is oracle company: the isinstance on
+        ``__cause__`` is the second half of a claim the block already makes.
+        Green-first reading of the old rule convicted it; its proof is the
+        mutant that drops the raises recognition.
+        """
+        unit = _unit(
+            """
+            def test_undecodable_register_refuses():
+                with pytest.raises(UnreadableRegisterError) as excinfo:
+                    find_project_root(SUB)
+                assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
+            """
+        )
+
+        assert assertion_shape_check.unit_flags(unit) == []
+
+    def test_an_isinstance_beside_a_mock_assert_call_is_not_type_only(self):
+        """A mock's ``assert_*`` call is an oracle (commons' identity shape, fleet green leg 20).
+
+        No raises block here, so only the ``assert_`` recognition can acquit
+        the unit. Its proof is the mutant that drops that recognition.
+        """
+        unit = _unit(
+            """
+            def test_lookup_returns_an_error_and_registers_nothing():
+                result = lookup(JUNK)
+                assert isinstance(result, LookupFailed)
+                mock_register.assert_not_called()
             """
         )
 
@@ -1308,6 +1421,69 @@ class TestUnenteredAssertReachability:
         assert len(named) == 1
         assert "tests/test_broken.py" in named[0]["message"]
         assert "NOT measured" in named[0]["message"]
+
+    def test_a_loop_over_a_named_literal_table_is_entered(self, tmp_path):
+        """A for over a name bound once to a non-empty literal runs (hooks' self.BLOCKED, fleet green leg 20).
+
+        Read in the class through ``self``, at module level by name, and in the
+        unit's own body before the loop. A table computed by a call, an empty
+        literal and a name bound twice keep the flag, because that is the shape
+        the standard means. Red first on the reader that took only a literal
+        at the loop itself; its proof is also the mutants, one per arm.
+        """
+        _write(
+            tmp_path,
+            "tests/test_tables.py",
+            """
+            CASES = ["a"]
+            TABLE = build()
+            EMPTY = ()
+            TWICE = ["a"]
+            TWICE = ["b"]
+
+
+            def test_module_table():
+                for case in CASES:
+                    assert run(case)
+
+
+            def test_local_table():
+                targets = ("a",)
+                for target in targets:
+                    assert run(target)
+
+
+            def test_computed_table():
+                for case in TABLE:
+                    assert run(case)
+
+
+            def test_empty_table():
+                for case in EMPTY:
+                    assert run(case)
+
+
+            def test_twice_bound_table():
+                for case in TWICE:
+                    assert run(case)
+
+
+            class TestSpellings:
+                BLOCKED = ("rm -rf x", "rm -r x")
+
+                def test_class_table(self):
+                    for spelling in self.BLOCKED:
+                        assert run(spelling)
+            """,
+        )
+
+        rows = unentered_assert_check.find_unentered(corpus.build(tmp_path))
+
+        assert [row["nodeid"].split("::")[-1] for row in rows] == [
+            "test_computed_table",
+            "test_empty_table",
+            "test_twice_bound_table",
+        ]
 
 
 # =============================================================================
@@ -8658,6 +8834,73 @@ class TestPlatformOracleAcquittals:
 
         assert result["violations"] == []
         assert result["score"] == 100
+
+    def test_a_chmod_whose_answer_the_test_asks_the_platform_for_is_not_a_mode_injector_row(self, tmp_path):
+        """The platform asked, the decision inside the test (flow's lock shape, fleet green leg 20).
+
+        After the chmod the unit makes the same kind of call with its own
+        hands in a ``try`` (in its body, or in a helper of the same module whose
+        body is that try) and branches on what came back. The controls keep
+        the row: a chmod with no probe, and a probe whose answer no ``if``
+        reads. Red first on the reader that saw only the chmod; its proof is
+        also the mutants.
+        """
+        _write(
+            tmp_path,
+            "tests/test_lock.py",
+            """
+            def _unlink_answer(path):
+                try:
+                    path.unlink()
+                except OSError as exc:
+                    return exc
+                return None
+
+
+            def test_helper_probe(tmp_path):
+                tmp_path.chmod(0o555)
+                refusal = _unlink_answer(tmp_path / "probe")
+                if refusal is not None:
+                    with pytest.raises(OSError):
+                        acquire(tmp_path / "lock")
+                else:
+                    assert acquire(tmp_path / "lock") is True
+
+
+            def test_inline_probe(tmp_path):
+                tmp_path.chmod(0o555)
+                try:
+                    (tmp_path / "probe").write_text("x")
+                    refused = None
+                except OSError as exc:
+                    refused = exc
+                if refused is not None:
+                    with pytest.raises(OSError):
+                        acquire(tmp_path / "lock")
+                else:
+                    assert acquire(tmp_path / "lock") is True
+
+
+            def test_no_probe(tmp_path):
+                tmp_path.chmod(0o000)
+                with pytest.raises(PermissionError):
+                    acquire(tmp_path / "lock")
+
+
+            def test_probe_never_read(tmp_path):
+                tmp_path.chmod(0o555)
+                refusal = _unlink_answer(tmp_path / "probe")
+                with pytest.raises(PermissionError):
+                    acquire(tmp_path / "lock")
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert [row["nodeid"].split("::")[-1] for row in result["violations"]] == [
+            "test_no_probe",
+            "test_probe_never_read",
+        ]
 
     def test_dev_null_exactly_is_a_sink_and_not_an_injector(self, tmp_path):
         """`/dev/null` is correct, common and portable through `os.devnull`.

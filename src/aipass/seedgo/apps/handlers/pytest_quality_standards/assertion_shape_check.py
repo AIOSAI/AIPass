@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: assertion_shape_check.py
 # Description: v5 - can this test's assertions actually fail
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-06
 # =============================================
 
 """Can this test's assertions actually fail?
@@ -103,6 +103,26 @@ def _is_isinstance_only(node: ast.AST) -> bool:
     return isinstance(node, ast.Call) and corpus.dotted_name(node.func) == "isinstance"
 
 
+def _has_oracle_company(unit: corpus.TestUnit) -> bool:
+    """True when the unit holds an oracle that is not an assert statement.
+
+    A ``with pytest.raises(...)`` block (with or without ``as``) and a call
+    whose attribute name starts with ``assert_`` (the mock family:
+    ``assert_called``, ``assert_not_called``, ``assert_called_once_with`` and
+    kin) each make a claim about the value, so an isinstance beside one is
+    not the unit's whole oracle (seedgo, fleet green leg 20).
+    """
+    for node in ast.walk(unit.node):
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                context = item.context_expr
+                if isinstance(context, ast.Call) and corpus.dotted_name(context.func) in ("pytest.raises", "raises"):
+                    return True
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr.startswith("assert_"):
+            return True
+    return False
+
+
 def _vacuous_len(test: ast.AST) -> str:
     """`len(x) >= 0` / `len(x) < 0`, or "" when the compare is real."""
     if not isinstance(test, ast.Compare) or len(test.ops) != 1:
@@ -191,7 +211,7 @@ def unit_flags(unit: corpus.TestUnit) -> List[Dict]:
         if escape:
             rows.append(_finding("OR-ESCAPE", unit, node.lineno, escape))
 
-    if all(_is_isinstance_only(node.test) for node in asserts):
+    if all(_is_isinstance_only(node.test) for node in asserts) and not _has_oracle_company(unit):
         rows.append(
             _finding(
                 "TYPE-ONLY",
