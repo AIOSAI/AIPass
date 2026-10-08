@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-05
 # Modified: 2026-10-08
 # =============================================
@@ -157,7 +157,7 @@ def _own_branch(module_path: str) -> str:
     return ""
 
 
-def _door_statement_problem(node: ast.stmt, own_handlers: str, imported: set) -> Optional[str]:
+def _door_statement_problem(node: ast.stmt, own_handlers: "re.Pattern[str]", imported: set) -> Optional[str]:
     """What one top-level statement of a door does wrong, or None.
 
     Imports from the branch's own handlers add their names to ``imported``;
@@ -165,7 +165,7 @@ def _door_statement_problem(node: ast.stmt, own_handlers: str, imported: set) ->
     """
     if isinstance(node, ast.ImportFrom):
         module = ("." * node.level) + (node.module or "")
-        if node.level == 0 and (module == own_handlers or module.startswith(own_handlers + ".")):
+        if node.level == 0 and own_handlers.match(module):
             imported.update(alias.asname or alias.name for alias in node.names)
             return None
         if node.level == 0 and module.split(".")[0] in sys.stdlib_module_names:
@@ -205,7 +205,9 @@ def check_door(content: str, module_path: str) -> Dict:
     except SyntaxError as exc:
         logger.info("modules: door unparseable %s: %s", module_path, exc)
         return {"name": "Door shape", "passed": False, "message": f"Door does not parse: {exc}"}
-    own_handlers = f"aipass.{_own_branch(module_path)}.apps.handlers"
+    # A handlers package nested anywhere under the branch's tree is its own
+    # (skills' lib/telegram, 10-08), the owner read as encapsulation reads it.
+    own_handlers = re.compile(rf"aipass\.{re.escape(_own_branch(module_path))}\.(?:\w+\.)*?apps\.handlers(?:\.|$)")
     imported: set = set()
     problems = [p for node in tree.body if (p := _door_statement_problem(node, own_handlers, imported))]
     exported: Optional[List[str]] = None

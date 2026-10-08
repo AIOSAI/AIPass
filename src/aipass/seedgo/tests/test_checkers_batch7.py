@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for checker sub-functions in encapsulation, imports, introspection, modules
-# Version: 1.1.4
+# Version: 1.1.5
 # Created: 2026-04-25
 # Modified: 2026-10-08
 # =============================================
@@ -1305,6 +1305,28 @@ class TestADoorReExportsItsOwnHandlersOnly:
         plain.write_text(_DOOR, encoding="utf-8")
         result = modules_check.check_module(str(plain))
         assert (result["passed"], result["score"]) == (True, 80)
+
+    @pytest.mark.parametrize(
+        ("handlers", "passed"),
+        [("aipass.skills.lib.telegram.apps.handlers.notifier", True), ("aipass.daemon.lib.x.apps.handlers.y", False)],
+        ids=["nested_under_its_own_branch", "nested_under_another_branch"],
+    )
+    def test_a_handlers_package_nested_in_the_branch_tree_is_its_own(self, tmp_path, handlers, passed):
+        """skills' door_notifier re-exports lib/telegram's handlers (10-08) and read 38/39.
+
+        The owner is the segment after ``aipass.``, as encapsulation reads it; a
+        handlers package nested under another branch's tree is still foreign.
+        """
+        door = tmp_path / "aipass" / "skills" / "apps" / "modules" / "door_notifier.py"
+        door.parent.mkdir(parents=True)
+        door.write_text(
+            f'"""Door: the telegram notifier."""\n\nfrom {handlers} import send\n\n__all__ = ["send"]\n',
+            encoding="utf-8",
+        )
+
+        [door_row] = [c for c in modules_check.check_module(str(door))["checks"] if c["name"] == "Door shape"]
+
+        assert door_row["passed"] is passed, door_row["message"]
 
 
 # -- check_file_size (modules) -----------------------------------------------

@@ -21,7 +21,7 @@ Standards specific to modules (orchestration layer). Modules coordinate workflow
 
 ### Doors — `apps/modules/door_<subject>.py` (DPLAN-0404, 2026-10-07)
 
-A door is how another branch reaches this branch's handlers. It is a thin re-export and nothing else: it imports only from its OWN branch's `apps.handlers` (plus the stdlib), defines no function or class, carries `__all__`, and every name in `__all__` is one it imported. The checker reads it as a "Door shape" row in place of `handle_command`, and introspection does not ask a door for `print_introspection`. A handler in another branch may import `aipass.<owner>.apps.modules.door_<subject>`: a branch's modules are its public gateway.
+A door is how another branch reaches this branch's handlers. It is a thin re-export and nothing else: it imports only from its OWN branch's `apps.handlers` (plus the stdlib) — a handlers package nested anywhere under the branch's tree is its own, so skills' door may re-export `aipass.skills.lib.telegram.apps.handlers` while `aipass.daemon.lib.x.apps.handlers` stays foreign (2026-10-08) — defines no function or class, carries `__all__`, and every name in `__all__` is one it imported. The checker reads it as a "Door shape" row in place of `handle_command`, and introspection does not ask a door for `print_introspection`. A handler in another branch may import `aipass.<owner>.apps.modules.door_<subject>`: a branch's modules are its public gateway.
 
 ```python
 """Door: memory's entry limits, for other branches."""
