@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for devpulse tests
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2025-11-08
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Shared pytest fixtures for devpulse tests.
@@ -176,12 +176,11 @@ def hermetic_mail_doors(tmp_path_factory, monkeypatch):
     feed = aipass_dir / "notifications.jsonl"
     register = aipass_dir / "dispatch_register.jsonl"
     monkeypatch.setattr("aipass.ai_mail.feed_path", lambda: feed)
-    monkeypatch.setattr("aipass.ai_mail.register_path", lambda: register)
     # The register transplant lives INSIDE @ai_mail (outstanding_dispatches →
-    # register_file), which resolves through its own find_repo_root — the
-    # public register_path door above never enters that path. Patching another
-    # branch's internal symbol is a reach, done knowingly and only in-process:
-    # @ai_mail is dispatched (2026-08-23) about giving the transplant a seam
-    # that does not require this; when that lands, this line becomes harmless.
-    monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.register.find_repo_root", lambda: live)
+    # register_file). register.py 1.3.0 (DPLAN-0404 leg 15) reads
+    # AIPASS_DISPATCH_REGISTER at every rootless call and the public
+    # register_path door follows it, so one variable moves both. The old patch
+    # of @ai_mail's private find_repo_root is gone: its handlers fence refuses
+    # that reach from this seat now.
+    monkeypatch.setenv("AIPASS_DISPATCH_REGISTER", str(register))
     return live
