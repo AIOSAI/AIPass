@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compass_recall.py
-# Version: 1.3.2
+# Version: 1.3.3
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -26,6 +26,7 @@ from aipass.hooks.apps.handlers.lifecycle.compact import handle as pre_compact
 from aipass.hooks.apps.handlers.prompt.compass_recall import handle
 from aipass.hooks.apps.modules.cadence import reset_counter
 from aipass.hooks.apps.modules.engine import dispatch
+from aipass.memory.apps.modules.governance import should_surface as governance_should_surface
 
 
 @pytest.fixture(autouse=True)
@@ -41,13 +42,19 @@ def _no_real_trust_banners(tmp_path):
     itself (FPLAN-0588): neither may reach the real repo config, the trust
     registry, or a live session's stamp in the temp dir. Memory's governance
     engine logs each surfacing to memory's own files; that is not ours to write.
+    The handler reads governance.should_surface through memory's modules door at
+    call time, so that name is wrapped: memory's real verdict, record=False.
     """
+
+    def _unrecorded(*args, **kwargs):
+        return governance_should_surface(*args, **{**kwargs, "record": False})
+
     with (
         patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
         patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
         patch("aipass.hooks.apps.handlers.prompt.compass_recall.find_project_config", return_value=None),
         patch("aipass.hooks.apps.modules.cadence._GUARD_DIR", tmp_path),
-        patch("aipass.memory.apps.handlers.governance.engine.json_handler.log_operation"),
+        patch("aipass.memory.apps.modules.governance.should_surface", side_effect=_unrecorded),
     ):
         yield
 
@@ -331,7 +338,7 @@ class TestCompassRecallHandler:
             assert "56" in saved["surfaced_ids"]
 
     def test_multiple_candidates_partial_approval(self, tmp_path):
-        def mock_should_surface(item_id, relevance, state, config=None, *, current_time=None):
+        def mock_should_surface(item_id, relevance, state, config=None, *, current_time=None, record=True):
             if item_id == "56":
                 new_st = {**state, "surfaces_count": 1, "surfaced_ids": list(state.get("surfaced_ids", [])) + ["56"]}
                 return True, "Ready", new_st
