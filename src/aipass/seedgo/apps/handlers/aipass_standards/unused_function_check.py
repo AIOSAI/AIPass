@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_function_check.py
 # Description: Unused Function Standards Checker Handler
-# Version: 1.0.6
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -34,14 +34,16 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
-from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir, is_disabled_file
 
 # APPLIES_TO: same discovery problem as dead_code - a test function has no caller by name.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "branch_level"
 
 # -- Directories to skip when collecting source files -------------------------
-SKIP_DIRS = SOURCE_SKIP_DIRS | {"tests", "json_templates"}
+# Skipped beside SOURCE_SKIP_DIRS (read through in_skipped_dir, which spares a
+# live package such as commons' apps/handlers/artifacts/), whatever they hold.
+SKIP_DIRS = frozenset({"tests", "json_templates"})
 
 # -- Function names excluded from analysis ------------------------------------
 EXCLUDED_NAMES = {
@@ -84,7 +86,8 @@ def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
     """
     parts = path.relative_to(branch_root).parts
     return (
-        any(part in SKIP_DIRS for part in parts)
+        in_skipped_dir(path, branch_root)
+        or any(part in SKIP_DIRS for part in parts)
         or (len(parts) > 1 and parts[0].startswith("."))
         or is_disabled_file(path.name)
         or is_seedgo_ignored(str(path), branch_root, ignore_entries)

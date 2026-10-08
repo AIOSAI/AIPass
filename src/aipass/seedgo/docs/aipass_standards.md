@@ -39,7 +39,7 @@ The table below carries every other row.
 | cli_flags | entry_point | production | --help, --version flag handling |
 | cli_ux | entry_point | production | CLI navigation + output quality (Nav/Output scoring) |
 | commented_logger | all_files | everywhere | No commented-out logger/logging calls |
-| dead_code | branch_level | production | Unreachable functions and dead imports |
+| dead_code | branch_level | production | Unreachable functions and dead imports; a dotted path in the project's `.aipass/*.json` is a reference |
 | debug_print | all_files | everywhere | No debug print/pprint statements |
 | deep_nesting | all_files | everywhere | Max nesting depth 4 (AST-measured) |
 | developer_home | all_files | everywhere | No developer's home directory (`/home/<x>`, `/Users/<x>`, `C:\Users\<x>`, any slash) naming a real login in any text file — comments and prose included; `TEXT_FILES = True` lets the checklist judge non-`.py` text, and `drone @seedgo home-paths scan` gates the whole tracked tree in CI (owner 2026-10-04) |

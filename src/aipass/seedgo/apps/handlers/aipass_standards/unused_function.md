@@ -26,6 +26,8 @@ Gathers all `.py` files in the branch, skipping irrelevant directories:
 
 `__pycache__`, `.archive`, `logs`, `tests`, `json_templates`, `tools`, `.trinity`, `.aipass`, `.ai_mail.local`, `.venv`, `venv`, `node_modules`, `.git`, `site-packages`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache`, `.spawn`, `backups`, `reports`, `docs`, `.sorting_unprocessed`
 
+A `SOURCE_SKIP_DIRS` name that is an importable package (an identifier directory holding `__init__.py`) is source and is read: commons keeps live code in `apps/handlers/artifacts/` (since 2026-10-08). `tests` and `json_templates` are skipped whatever they hold.
+
 ### Phase 2: Build Corpus
 
 Reads all collected files and strips non-code content to prevent false positives:

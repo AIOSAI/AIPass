@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-22
 # Modified: 2026-10-08
 # =============================================
@@ -13,7 +13,9 @@ Detects unused Python modules and handlers within an AIPass branch.
 
 Scans .py files in apps/modules/ and apps/handlers/, then checks whether
 anything in the branch's apps/ directory imports or references them.
-Files with zero references are flagged as dead code.
+Files with zero references are flagged as dead code. A handler the engine
+dispatches by dotted path from the project's ``.aipass/*.json`` is referenced
+there (seedgo, leg fed78ad8): hooks names 28 handlers only in that config.
 
 Score: referenced_files / total_files * 100, threshold 75%.
 """
@@ -25,15 +27,19 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
-from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir, is_disabled_file
 from aipass.seedgo.apps.handlers.aipass_standards.modules_check import check_door
 
 # APPLIES_TO: pytest calls test functions by discovery, so every one would read unreferenced.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "branch_level"
 
-# Directories to skip when collecting source files
-_SKIP_DIRS = SOURCE_SKIP_DIRS | {"tests", "json_templates"}
+# Skipped beside SOURCE_SKIP_DIRS (read through in_skipped_dir, which spares a
+# live package such as commons' apps/handlers/artifacts/), whatever they hold.
+_EXTRA_SKIP_DIRS = frozenset({"tests", "json_templates"})
+
+#: A project root holds one of these; hooks' config loader reads the same marker.
+_PROJECT_MARKER = "*_REGISTRY.json"
 
 
 def _is_shaped_door(py_file: Path) -> bool:
@@ -60,10 +66,11 @@ def _is_shaped_door(py_file: Path) -> bool:
 
 
 def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
-    """Check whether any parent directory component is in the skip set, file is
+    """Check whether a directory below the branch root is skipped, the file is
     disabled, or the path is excluded via .seedgoignore / the global default."""
     return (
-        any(part in _SKIP_DIRS for part in path.parts)
+        in_skipped_dir(path, branch_root)
+        or any(part in _EXTRA_SKIP_DIRS for part in path.relative_to(branch_root).parts)
         or is_disabled_file(path.name)
         or is_seedgo_ignored(str(path), branch_root, ignore_entries)
     )
@@ -103,6 +110,31 @@ def _collect_source_text(apps_dir: Path, branch_root: Path, ignore_entries: list
             logger.info("Skipped unreadable file during source collection: %s", py_file)
             continue
     return "\n".join(parts)
+
+
+def _project_config_text(branch_root: Path) -> str:
+    """The project's ``.aipass/*.json`` text, read-only, or "" outside a project.
+
+    The project root is the nearest directory at or above the branch holding a
+    ``*_REGISTRY.json``. Only a dotted module path in this text is a reference
+    (``_named_in_config``): a stem in a plan log or a per-feature json is not.
+    """
+    for root in (branch_root.resolve(), *branch_root.resolve().parents):
+        if not any(root.glob(_PROJECT_MARKER)):
+            continue
+        chunks: list[str] = []
+        for config in sorted((root / ".aipass").glob("*.json")):
+            try:
+                chunks.append(config.read_text(encoding="utf-8", errors="ignore"))
+            except OSError as exc:
+                logger.info("Skipped unreadable project config %s: %s", config, exc)
+        return "\n".join(chunks)
+    return ""
+
+
+def _named_in_config(import_path: str, config_text: str) -> bool:
+    """Whether the config names this module by its whole dotted path (``boot`` is not ``boot_extra``)."""
+    return re.search(rf"(?<![\w.]){re.escape(import_path)}(?!\w)", config_text) is not None
 
 
 # =============================================
@@ -163,6 +195,7 @@ def _check_file_used(
     branch_name: str,
     source_text: str,
     entry_point_name: str,
+    config_text: str = "",
 ) -> bool:
     """
     Determine if a .py file is referenced anywhere in the branch source.
@@ -175,6 +208,7 @@ def _check_file_used(
     5. Stem appears in an import statement in corpus, on one line or inside a
        parenthesised multi-line block
     6. Filename string reference in corpus
+    7. Full dotted path named in the project's .aipass/*.json (config_text)
     """
     stem = py_file.stem
 
@@ -246,7 +280,8 @@ def _check_file_used(
     if re.search(rf'["\']{re.escape(filename)}["\']', source_text):
         return True
 
-    return False
+    # Rule 7: the engine dispatches it from the project's config
+    return bool(config_text) and _named_in_config(import_path, config_text)
 
 
 # =============================================
@@ -340,13 +375,14 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     # Build the source corpus (all .py content from apps/)
     source_text = _collect_source_text(apps_dir, bp, ignore_entries)
+    config_text = _project_config_text(bp)
 
     # Check each target for references
     total_files = len(targets)
     dead_files: list[str] = []
 
     for target in targets:
-        used = _check_file_used(target, bp, branch_name, source_text, entry_point_name)
+        used = _check_file_used(target, bp, branch_name, source_text, entry_point_name, config_text)
         if not used:
             # Check per-file bypass
             try:

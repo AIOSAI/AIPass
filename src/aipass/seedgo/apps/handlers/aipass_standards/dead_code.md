@@ -40,6 +40,7 @@ For each collected file, the checker builds a search corpus from ALL `.py` conte
 | importlib.import_module | `import_module("...foo_handler")` |
 | Glob-based discovery | `glob("*_check.py")`, `glob("*.py")` |
 | Filename string literal | `"foo_handler.py"` in source |
+| Project config, dotted path only | `"aipass.branch.apps.handlers.foo.handle"` in the project's `.aipass/*.json`, the project root being the nearest directory at or above the branch holding a `*_REGISTRY.json` (since 2026-10-08: hooks names 28 handlers only there). A stem or filename in a json acquits nothing |
 
 ### Always Considered Used
 
@@ -54,6 +55,8 @@ For each collected file, the checker builds a search corpus from ALL `.py` conte
 The following directories are excluded from both collection and corpus building:
 
 `__pycache__`, `.archive`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache`, `json_templates`, `logs`, `tools`, `.venv`, `venv`, `node_modules`, `.git`, `site-packages`, `.trinity`, `.aipass`, `.ai_mail.local`, `.spawn`, `backups`, `reports`, `docs`, `tests`, `.sorting_unprocessed`
+
+The set is `SOURCE_SKIP_DIRS` plus `tests` and `json_templates`, read below the branch root only. A `SOURCE_SKIP_DIRS` name that is an importable package (an identifier directory holding `__init__.py`) is source and is read: commons keeps live code in `apps/handlers/artifacts/` (since 2026-10-08).
 
 ---
 

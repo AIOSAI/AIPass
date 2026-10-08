@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-03-29
 # Modified: 2026-10-08
 # =============================================
@@ -743,3 +743,65 @@ def test_a_name_with_a_mark_no_word_pattern_reads_is_still_counted(tmp_path):
     name = "aिb"
     files = {"apps/a.py": f"def {name}():\n    return 1\n", "apps/b.py": f"x = {name}()\n"}
     assert _charged_names(tmp_path / "branchroot", files) == []
+
+
+def _dead(branch: Path) -> list[str]:
+    """The unreferenced files dead_code names, relative to apps/."""
+    message = dead_code_check_branch(str(branch))["checks"][0]["message"]
+    return sorted(message.split(": ", 1)[1].split(" -- ")[0].split(", ")) if "unreferenced" in message else []
+
+
+class TestDeadCodeReadsTheProjectConfig:
+    """A handler the engine dispatches by dotted path in .aipass/*.json is referenced (seedgo, leg fed78ad8)."""
+
+    HANDLERS = ("lifecycle/boot.py", "security/gate.py")
+
+    def _project(self, tmp_path, config, registry=True):
+        project = tmp_path / "proj"
+        branch = project / "src" / "aipass" / "mybranch"
+        _make_branch(branch)
+        _write_file(branch / "apps" / "mybranch.py", "def handle_command():\n    pass\n")
+        for handler in self.HANDLERS:
+            _write_file(branch / "apps" / "handlers" / handler, "def handle(data):\n    return data\n")
+        if registry:
+            _write_file(project / "PROJ_REGISTRY.json", "{}")
+        _write_file(project / ".aipass" / "x.json", config)
+        return branch
+
+    def test_a_dotted_path_in_the_config_references_a_handler_and_a_stem_does_not(self, tmp_path):
+        config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot.handle", "b": "gate"}'
+        assert _dead(self._project(tmp_path, config)) == ["handlers/security/gate.py"]
+
+    def test_a_longer_module_name_does_not_reference_its_prefix(self, tmp_path):
+        config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot_extra.handle", "b": "x.aipass.mybranch.apps.handlers.security.gate"}'
+        assert _dead(self._project(tmp_path, config)) == ["handlers/lifecycle/boot.py", "handlers/security/gate.py"]
+
+    def test_a_config_with_no_registry_root_above_the_branch_references_nothing(self, tmp_path):
+        config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot.handle"}'
+        assert _dead(self._project(tmp_path, config, registry=False)) == [
+            "handlers/lifecycle/boot.py",
+            "handlers/security/gate.py",
+        ]
+
+
+class TestASkipNamedPackageIsSource:
+    """commons keeps live code in apps/handlers/artifacts/, a SOURCE_SKIP_DIRS name (seedgo, leg fed78ad8)."""
+
+    def _commons_shape(self, tmp_path):
+        branch = _make_branch(tmp_path)
+        _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command():\n    pass\n")
+        _write_file(branch / "apps" / "handlers" / "artifacts" / "__init__.py", "")
+        _write_file(branch / "apps" / "handlers" / "artifacts" / "trade_ops.py", "def never_traded():\n    return 1\n")
+        return branch
+
+    def test_dead_code_reads_a_skip_named_package(self, tmp_path):
+        assert _dead(self._commons_shape(tmp_path)) == ["handlers/artifacts/trade_ops.py"]
+
+    def test_unused_function_reads_a_skip_named_package(self, tmp_path):
+        checks = unused_function_check_branch(str(self._commons_shape(tmp_path)))["checks"]
+        assert [u["name"] for c in checks if c.get("unused") for u in c["unused"]] == ["never_traded"]
+
+    def test_an_archive_beside_the_package_is_still_skipped(self, tmp_path):
+        branch = self._commons_shape(tmp_path)
+        _write_file(branch / "apps" / "handlers" / ".archive" / "old_ops.py", "def retired():\n    return 1\n")
+        assert _dead(branch) == ["handlers/artifacts/trade_ops.py"]
