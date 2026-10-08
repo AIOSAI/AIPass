@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_owner_guard.py
 # Description: Tests for the shared owner-capability caller guard (#681)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-10
-# Modified: 2026-10-04
+# Modified: 2026-10-07
 # =============================================
 
 """Tests for apps/handlers/owner/guard.py through guard_owner_caller, against a stubbed sealed registry."""
@@ -13,7 +13,7 @@
 
 import pytest
 
-import aipass.spawn.apps.handlers.registry as reg
+from aipass.spawn.apps.modules import door_owner as reg
 from aipass.devpulse.apps.handlers.owner import guard as guard_mod
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: guard.py
 # Description: Owner-capability caller guard for devpulse owner-only tools
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-10
-# Modified: 2026-10-04
+# Modified: 2026-10-07
 # =============================================
 
 """
@@ -79,10 +79,10 @@ def _owner_decision(email: str, caller_cwd: Path) -> bool:
     unavailable or the project has no sealed owner yet.
     """
     try:
-        # is_owner is the frozen shared owner-capability contract (spawn is its
-        # sole home; no modules re-export). Lazy import keeps cold start fast and
-        # enables the fail-safe fallback below.
-        from aipass.spawn.apps.handlers.registry import (
+        # is_owner is the frozen shared owner-capability contract; spawn is its
+        # sole home and publishes it through its door (DPLAN-0404). Lazy import
+        # keeps cold start fast and enables the fail-safe fallback below.
+        from aipass.spawn.apps.modules.door_owner import (
             find_registry,
             get_owner,
             is_owner,
@@ -121,7 +121,7 @@ def owner_address(start_path: Path | None = None) -> str | None:
     with a project directory name, which cost $1.41 on 2026-08-21.
     """
     try:
-        from aipass.spawn.apps.handlers.registry import get_owner
+        from aipass.spawn.apps.modules.door_owner import get_owner
     except ImportError as exc:  # pragma: no cover - resolver is a hard dependency
         logger.info("[owner_guard] owner resolver unavailable: %s", exc)
         return None

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_module.py
 # Description: Tests for the watchdog module router
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-14
-# Modified: 2026-09-27
+# Modified: 2026-10-07
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
@@ -19,7 +19,7 @@ import sys
 from unittest.mock import patch
 
 import aipass.devpulse.apps.handlers.owner.guard as owner_guard
-import aipass.spawn.apps.handlers.registry as spawn_registry
+from aipass.spawn.apps.modules import door_owner as spawn_registry
 import pytest
 
 from aipass.cli.apps.modules import display as cli_display

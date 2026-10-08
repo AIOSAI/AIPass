@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_dispatches.py
 # Description: Tests for watchdog seat attribution (FPLAN-0452 P2 — only MY dispatches reach me)
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-08-22
-# Modified: 2026-09-27
+# Modified: 2026-10-07
 # =============================================
 
 """Tests for apps/handlers/watchdog/dispatches.py: whose completion was that, and what is still out."""
@@ -16,7 +16,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import aipass.spawn.apps.handlers.registry as spawn_registry
+from aipass.spawn.apps.modules import door_owner as spawn_registry
 import pytest
 
 from aipass.devpulse.apps.handlers.owner import guard
