@@ -131,11 +131,6 @@
       "reason": "backup_json() is consumed by @spawn (cross-branch caller). Appears unused in @aipass-only scan but is a shared API."
     },
     {
-      "file": "apps/modules/trust.py",
-      "standard": "encapsulation",
-      "reason": "Imports frozen trust_registry interface (enroll/revoke/is_trusted/read_registry) from @hooks by DPLAN-0244 design. Cross-branch import required — the registry module lives in hooks, consumers live in aipass."
-    },
-    {
       "file": "apps/handlers/provider_wire.py",
       "standard": "unused_function",
       "functions": [

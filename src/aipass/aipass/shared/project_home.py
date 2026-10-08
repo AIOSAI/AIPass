@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: project_home.py
 # Description: Shared AIPass-home detection, project-path validation, and settings content
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-07-21
-# Modified: 2026-09-28
+# Modified: 2026-10-07
 # =============================================
 
 """Project home — AIPASS_HOME detection, path validation, settings content.
@@ -167,7 +167,7 @@ def _enroll_project(target: Path) -> bool:
         logger.info("Skipping trust enrollment for throwaway path: %s", target)
         return False
     try:
-        from aipass.hooks.apps.handlers.config.trust_registry import enroll
+        from aipass.hooks.apps.modules.door_trust_registry import enroll
 
         if enroll(str(target)):
             logger.info("Enrolled project in trust registry: %s", target)

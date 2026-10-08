@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trust.py
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-07-15
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/modules/trust.py and the handlers it drives."""
@@ -25,7 +25,8 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
 from aipass.aipass.apps.modules.trust import handle_command
-from aipass.hooks.apps.handlers.config.trust_registry import (
+from aipass.hooks.apps.modules import door_trust_registry
+from aipass.hooks.apps.modules.door_trust_registry import (
     enroll,
     is_trusted,
     read_registry,
@@ -38,12 +39,21 @@ SETUP_SH = REPO_ROOT / "setup.sh"
 
 @pytest.fixture(autouse=True)
 def _isolate_registry(tmp_path, monkeypatch):
-    """Redirect REGISTRY_PATH to a tmp dir so tests never touch ~/.aipass."""
+    """Redirect REGISTRY_PATH to a tmp dir so tests never touch ~/.aipass.
+
+    Two copies, both redirected. hooks' verbs (enroll, read_registry, revoke,
+    is_trusted) read the global in hooks' handler; trust.py's prune writes the
+    door's copy, which a patch of the handler cannot reach. The handler path
+    below is HELD (DPLAN-0404 leg 8): it needs a seam hooks does not offer yet,
+    a registry path its verbs take or read from the environment, so one
+    setting redirects both.
+    """
     fake_registry = tmp_path / "trusted_projects.json"
     monkeypatch.setattr(
         "aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH",
         fake_registry,
     )
+    monkeypatch.setattr(door_trust_registry, "REGISTRY_PATH", fake_registry)
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +465,7 @@ def test_setup_sh_has_enroll_block():
     body = SETUP_SH.read_text(encoding="utf-8")
     assert _ENROLL_ANCHOR in body
     block = _extract_enroll_block()
-    assert "from aipass.hooks.apps.handlers.config.trust_registry import enroll" in block
+    assert "from aipass.hooks.apps.modules.door_trust_registry import enroll" in block
     assert "enroll(sys.argv[1])" in block
     # Only ever the repo being installed — never a blanket trust.
     assert '"$SCRIPT_DIR"' in block

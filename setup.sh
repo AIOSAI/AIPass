@@ -842,7 +842,7 @@ echo "Enrolling this install in the hook trust registry ..."
 if "$VENV_PYTHON" - "$SCRIPT_DIR" << 'PYEOF'
 import sys
 
-from aipass.hooks.apps.handlers.config.trust_registry import enroll
+from aipass.hooks.apps.modules.door_trust_registry import enroll
 
 sys.exit(0 if enroll(sys.argv[1]) else 1)
 PYEOF

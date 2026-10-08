@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trust.py
 # Description: Trust management — aipass trust / aipass revoke commands
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-15
-# Modified: 2026-07-15
+# Modified: 2026-10-07
 # =============================================
 
 """
@@ -19,8 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from aipass.cli.apps.modules import console, error, success
-from aipass.hooks.apps.handlers.config import trust_registry
-from aipass.hooks.apps.handlers.config.trust_registry import (
+from aipass.hooks.apps.modules import door_trust_registry
+from aipass.hooks.apps.modules.door_trust_registry import (
     enroll,
     read_registry,
     revoke,
@@ -109,8 +109,8 @@ def _do_prune() -> bool:
         # every hook in every enrolled project reads, so a lost write is an
         # error, not a warning (DPLAN-0325: this used hooks' write_json_file,
         # which raised — the loudness is kept, the import is now our own shim).
-        if not json_handler.write_json(trust_registry.REGISTRY_PATH, registry):
-            error(f"Could not write {trust_registry.REGISTRY_PATH} — the registry is unchanged.")
+        if not json_handler.write_json(door_trust_registry.REGISTRY_PATH, registry):
+            error(f"Could not write {door_trust_registry.REGISTRY_PATH} — the registry is unchanged.")
             logger.error("[AIPASS] trust: prune write failed, %d entries left in place", len(stale))
             return True
         json_handler.log_operation("prune", {"pruned_count": len(stale)}, module_name="trust")

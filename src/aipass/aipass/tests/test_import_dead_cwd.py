@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins every aipass module against an unreadable working directory
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Tests that apps/aipass.py and every module beneath it import without reading a dead working directory."""
@@ -60,13 +60,12 @@ _FOREIGN = [
     "aipass.prax",
     "aipass.prax.apps.modules.logger",
     "aipass.cli.apps.modules",
-    "aipass.hooks.apps.handlers.json",
-    "aipass.hooks.apps.handlers.config",
-    # trust_registry pulls hooks' own json_handler, whose module-level
-    # Path(__file__).resolve() is the same species at hooks/.../json_handler.py:30.
-    # Reported to @hooks 2026-08-31; their site, their build. Preloading it keeps
-    # this pin measuring aipass — drop the line when hooks is cured.
-    "aipass.hooks.apps.handlers.config.trust_registry",
+    # hooks' door to trust_registry (DPLAN-0404 leg 8: trust.py and project_home
+    # import it, no longer hooks' handlers). It pulls hooks' own json_handler, whose
+    # module-level Path(__file__).resolve() is the same species at
+    # hooks/.../json_handler.py:30. Reported to @hooks 2026-08-31; their site, their
+    # build. Preloading it keeps this pin measuring aipass — drop it when hooks is cured.
+    "aipass.hooks.apps.modules.door_trust_registry",
     "aipass.trigger.apps.modules.core",
 ]
 
