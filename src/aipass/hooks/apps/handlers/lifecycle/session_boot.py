@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.4.2
+# Version: 4.4.3
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -675,7 +675,7 @@ def _session_pointer():
     """
     import importlib
 
-    return importlib.import_module("aipass.ai_mail.apps.handlers.dispatch.session_pointer")
+    return importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
 
 
 def _chat_age(modified: float) -> str:
