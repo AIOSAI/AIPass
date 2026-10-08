@@ -3,7 +3,7 @@
 # Description: Direct Logger (Event Pipeline Bypass)
 # Version: 1.1.0
 # Created: 2026-02-27
-# Modified: 2026-08-11
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -179,6 +179,9 @@ def _get_or_create_logger(module_name: str, branch_path: Optional[str]) -> loggi
     key = f"{branch_name}_{module_name}"
     if key not in _direct_loggers:
         _direct_loggers[key] = _create_direct_logger(module_name, branch_name, branch_path)
+        # Recorded at the first log line, when the file is opened, never at
+        # get_direct_logger(), which runs at import (DPLAN-0404, prax).
+        json_handler.log_operation("direct_log_created", {"module": module_name, "branch_path": branch_path})
     return _direct_loggers[key]
 
 
@@ -236,9 +239,12 @@ def get_direct_logger() -> DirectLogger:
 
     Returns:
         DirectLogger instance bound to the caller's module/branch.
+
+    Writes nothing: most callers run it at module level, so a json operation
+    logged here was two writes per importing module, 58 for one import of the
+    dashboard module (DPLAN-0404, prax).
     """
     module_name, branch_path = _get_direct_caller_info()
-    json_handler.log_operation("direct_log_created", {"module": module_name, "branch_path": branch_path})
     return DirectLogger(module_name, branch_path)
 
 

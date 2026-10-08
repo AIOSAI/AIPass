@@ -196,11 +196,6 @@
       "reason": "Shim pattern \u2014 module-level names are BOUND METHODS of the fleet json service's JsonHandle, not constants. Lowercase is correct for callable bindings, and the file is byte-identical in all 18 branches by the owner's ruling (2026-09-03), hashed by seedgo. Matches the identical bypass in spawn/, canary/ and memory/."
     },
     {
-      "file": "apps/__init__.py",
-      "standard": "cli_flags",
-      "reason": "prax, leg 7: a two-line package init (`from . import handlers`), not an entry point; it parses no argv. The entry point is apps/prax.py, which takes --version/-V (argparse, and TOP_LEVEL_OPTIONS). The check names no line, so the rule is file-wide on this file alone."
-    },
-    {
       "file": "apps/modules/status.py",
       "standard": "logged_fallback",
       "lines": [133],
@@ -221,8 +216,8 @@
     {
       "file": "apps/handlers/json/json_service.py",
       "standard": "logged_fallback",
-      "lines": [263],
-      "reason": "prax, leg 7: 'unknown' means one thing on both paths, as the docstring says: there is no module behind frame 2. sys._getframe raises ValueError exactly when the stack is too shallow to have that frame; it is the same answer, not a failure dressed as one."
+      "lines": [269],
+      "reason": "prax, leg 7 (moved 263 -> 269 by the replace_with_retry docstring, DPLAN-0404): 'unknown' means one thing on both paths, as the docstring says: there is no module behind frame 2. sys._getframe raises ValueError exactly when the stack is too shallow to have that frame; it is the same answer, not a failure dressed as one."
     },
     {
       "file": "apps/handlers/logging/introspection.py",

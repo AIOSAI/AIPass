@@ -3,7 +3,7 @@
 # Description: The fleet's one JSON handler service (prax-owned)
 # Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-09-11
+# Modified: 2026-10-08
 # =============================================
 
 """The fleet's one JSON handler implementation (DPLAN-0325).
@@ -219,8 +219,14 @@ def _discard(temp_path: str) -> None:
         logger.warning("json_service: temp cleanup failed for '%s': %s", temp_path, exc)
 
 
-def _replace_with_retry(source: str, destination: str) -> None:
+def replace_with_retry(source: str, destination: str) -> None:
     """os.replace that tolerates Windows sharing violations, bounded.
+
+    Public as the seam for a caller's test that needs the real replace step to
+    fail (a full disk): patch ``aipass.prax.json_handler.replace_with_retry``,
+    the package path, which never names these handlers. write_json reads it
+    from this module at call time (DPLAN-0404, prax; it was _replace_with_retry,
+    patched by its handler path from aipass's test_profile).
 
     Args:
         source: Staged file to move into place.
@@ -382,7 +388,7 @@ class JsonHandle:
         temp_path = ""
         try:
             temp_path = _stage(file_path.parent, content, _current_mode(file_path))
-            _replace_with_retry(temp_path, str(file_path))
+            replace_with_retry(temp_path, str(file_path))
             return True
         except OSError as exc:
             logger.warning("json_service: write failed for '%s': %s", file_path, exc)

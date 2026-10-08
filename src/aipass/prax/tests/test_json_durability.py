@@ -4,7 +4,7 @@
 # Description: Durability tests for the json service, as prax reaches it (the AIPASS_TEST_LOG_DIR seam)
 # Version: 2.1.0
 # Created: 2026-08-18
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -42,7 +42,7 @@
 # seedgo: no-test-needed(through_the_command) — log_operation, covered by tests/test_json_handler.py
 # seedgo: no-test-needed(through_the_command) — read_json and write_json, covered by tests/test_json_handler.py
 # seedgo: no-test-needed(through_the_command) — for_module, covered by tests/test_json_handler.py
-# seedgo: no-test-needed(json_handler) — _replace_with_retry's bounded retry, pinned by seedgo's contract suite
+# seedgo: no-test-needed(json_handler) — replace_with_retry's bounded retry, pinned by seedgo's contract suite
 
 import os
 import subprocess

@@ -3,7 +3,7 @@
 # Description: Tests for the fleet json service through prax's own shim
 # Version: 2.2.0
 # Created: 2026-03-28
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -30,6 +30,7 @@ import logging
 import os
 import stat
 from datetime import date
+from unittest.mock import patch
 
 import pytest
 
@@ -253,13 +254,13 @@ class TestWriteJson:
     def test_a_failed_write_answers_false_and_never_raises(self, handle, tmp_path, monkeypatch):
         """OSError anywhere on the way answers False. This is the semantics the
         six production bool consumers depend on."""
-        monkeypatch.setattr(json_service, "_replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
 
         assert handle.write_json(tmp_path / "doc.json", {"a": 1}) is False
 
     def test_a_failed_write_cleans_up_its_temp_file(self, handle, tmp_path, monkeypatch):
         """A staged file left behind is litter that accumulates silently."""
-        monkeypatch.setattr(json_service, "_replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
 
         handle.write_json(tmp_path / "doc.json", {"a": 1})
 
@@ -269,11 +270,27 @@ class TestWriteJson:
         """The staged-write guarantee: a write that cannot land destroys nothing."""
         target = tmp_path / "doc.json"
         target.write_text(json.dumps({"live": True}), encoding="utf-8")
-        monkeypatch.setattr(json_service, "_replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
 
         handle.write_json(target, {"replacement": True})
 
         assert json.loads(target.read_text(encoding="utf-8")) == {"live": True}
+
+    def test_a_caller_fails_the_real_replace_through_the_package_path(self, handle, tmp_path):
+        """The seam another branch's test uses to make the replace step fail, as a
+        full disk would: patched as aipass.prax.json_handler.replace_with_retry, a
+        path through the package that never names these handlers, so the fence and
+        the encapsulation wall both stand (DPLAN-0404, prax; aipass's
+        test_profile patched the private _replace_with_retry by its handler path)."""
+        target = tmp_path / "doc.json"
+        target.write_text(json.dumps({"live": True}), encoding="utf-8")
+
+        with patch("aipass.prax.json_handler.replace_with_retry", side_effect=_raise_oserror):
+            landed = handle.write_json(target, {"replacement": True})
+
+        assert landed is False
+        assert json.loads(target.read_text(encoding="utf-8")) == {"live": True}
+        assert list(tmp_path.glob("*.tmp")) == []
 
 
 def _raise_oserror(source, destination):
@@ -554,7 +571,7 @@ class TestSaveJson:
     def test_a_write_that_cannot_land_raises_writefailed(self, handle, monkeypatch):
         """A lost document must not look like success, and must not look like a
         caller's validation mistake either."""
-        monkeypatch.setattr(json_service, "_replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
 
         with pytest.raises(json_service.WriteFailed):
             handle.save_json("doomed", "log", [])
@@ -613,7 +630,7 @@ class TestLogOperation:
     def test_a_write_failure_answers_false_and_does_not_raise(self, handle, monkeypatch):
         """log_operation is called from the monitor's display and watchdog
         threads. A raising writer there is silent half-death, not fail-honestly."""
-        monkeypatch.setattr(json_service, "_replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
 
         assert handle.log_operation("doomed", module_name="ops") is False
 

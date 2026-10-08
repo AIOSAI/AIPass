@@ -3,7 +3,7 @@
 # Description: Tests for prax logging handler modules
 # Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
@@ -1050,3 +1050,46 @@ class TestLifecycleRecordsWhoAskedForIt:
         lifecycle.run_shutdown("some_caller")
 
         assert [data.get("initiated_by") for _, data in recorded] == ["some_caller"]
+
+
+_COUNT_IMPORT_WRITES = """
+import sys
+writes = []
+def hook(event, args):
+    if event in ("os.rename", "os.replace"):
+        writes.append(str(args[1]))
+    elif event == "open" and any(c in str(args[1] or "r") for c in "wax+"):
+        writes.append(str(args[0]))
+sys.addaudithook(hook)
+import aipass.prax.apps.modules.dashboard
+print(len(writes))
+"""
+
+
+class TestAnImportWritesNothing:
+    """A fresh import of the dashboard module made 58 atomic writes (seedgo, 10-08).
+
+    Fourteen handlers call get_direct_logger() at module level, and each call
+    logged two json operations, direct_log_created and the introspection's
+    introspection_resolved: four renames per module, plus module_tracker's
+    initialisation. Every branch that imports the dashboard paid them
+    (DPLAN-0404, prax). The import runs in a fresh interpreter with
+    AIPASS_TEST_LOG_DIR set, so a red run writes under tmp_path, never prax_json.
+    """
+
+    def test_a_fresh_import_of_the_dashboard_module_writes_nothing(self, tmp_path):
+        import os
+        import subprocess
+
+        env = dict(os.environ, AIPASS_TEST_LOG_DIR=str(tmp_path / "logs"))
+        done = subprocess.run(
+            [sys.executable, "-c", _COUNT_IMPORT_WRITES],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            cwd=str(tmp_path),
+            env=env,
+        )
+        assert done.returncode == 0, done.stderr[-600:]
+        assert done.stdout.strip().splitlines()[-1] == "0"

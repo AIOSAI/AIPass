@@ -3,7 +3,7 @@
 # Description: Repo-Root Resolution Pins
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -971,16 +971,21 @@ class TestNothingCallsInspectStack:
         failing for the ban's reason. A control that can fail for the reason it
         is controlling for is not a control.
 
-        So the fixture is the guard's REAL docstrings and nothing else, lifted
-        by ast and re-emitted as string literals. That module contains no calls
-        by construction, so regrowing the walk cannot touch this test — and it
+        So the fixture is the REAL docstrings and nothing else, lifted by ast and
+        re-emitted as string literals. That module contains no calls by
+        construction, so regrowing the walk cannot touch this test — and it
         still uses live prose, so it expires the day the explanation is deleted.
+
+        The prose is json_service's (its caller attribution says why it uses
+        sys._getframe and never inspect.stack()). It was the handlers guard's
+        until the v2 fence replaced that file and no longer walks with inspect
+        at all (DPLAN-0404, prax).
         """
-        guard = APPS_DIR / "handlers" / "__init__.py"
+        guard = APPS_DIR / "handlers" / "json" / "json_service.py"
         tree = ast.parse(guard.read_text(encoding="utf-8"))
         mentions = [text for text in _docstrings(tree) if "inspect.stack()" in text]
         assert mentions, (
-            "the guard no longer explains why it does not use inspect.stack() — if the "
+            "json_service no longer explains why it does not use inspect.stack() — if the "
             "explanation was removed to satisfy a checker, the checker is the defect"
         )
         prose_only = "\n".join(repr(text) for text in mentions)
@@ -1150,88 +1155,43 @@ class TestCallerAttributionWithoutAWorkingDirectory:
         )
 
 
-class TestTheGuardsUndeterminableCallerBranch:
-    """The `caller_file is None` branch, pinned by BEHAVIOUR as well as by AST.
+class TestTheFenceSurvivesADeadWorkingDirectory:
+    """The v2 fence, from its kin seat, in a process whose cwd was removed.
 
-    @devpulse's round-4 guidance said this branch is unreachable and only a
-    structural ban can watch it. @spawn measured the correction and it is worth
-    stating precisely, because I repeated the too-strong version: the branch is
-    unreachable from IMPORT-shaped pins — apps/__init__ always supplies a
-    real-file frame — but it IS reachable by calling `_guard_branch_access()`
-    from a child whose every frame is a string pseudo-file or importlib. All of
-    those are skipped, `_find_real_caller` returns None, and the branch runs.
-
-    So the true sentence is "import-shaped pins cannot reach it", not "nothing
-    can". The AST ban stays: it needs no subprocess and names the defect at its
-    line. This is its sibling, and the two die together.
+    This class pinned the old guard's private walk (_find_real_caller,
+    _guard_branch_access called by name) until the v2 fence replaced it
+    (DPLAN-0404, prax). The behaviour it watched stays: the fence resolves
+    frame paths, Path.resolve routes through realpath, and on Windows realpath
+    reads os.getcwd first. So the kin probe runs with its cwd deleted and
+    realpath denied, through the fence's public shape (an import), and must
+    still be let through.
     """
 
-    def _child(self, body: str):
-        """Run `body` with realpath denied, in a `-c` child.
-
-        `-c`, not a script file, and that is @commons' lesson rather than a
-        style choice: run the probe as a real file on disk and EVERY frame
-        getsourcefile sees exists, so it early-returns before getmodule and the
-        denial is silently inert. The world would be spelled too realistically
-        to bite.
-        """
-        script = (
-            _NTPATH_SHAPED
-            + textwrap.dedent(
-                f"""
-                import sys
+    def test_the_kin_probe_is_allowed_with_its_cwd_gone_and_realpath_denied(self, tmp_path):
+        """Arming probe first: the denial bites in this child, so the claim is about it."""
+        doomed = tmp_path / "doomed"
+        doomed.mkdir()
+        probe = Path(__file__).resolve().parent / "support_fence.py"
+        script = _NTPATH_SHAPED + textwrap.dedent(
+            f"""
+                import os, runpy, sys
                 sys.path.insert(0, {REPO_SRC!r})
+                os.chdir({str(doomed)!r})
+                os.rmdir({str(doomed)!r})
+                try:
+                    os.path.realpath("x")
+                    print("ARM INERT")
+                except OSError:
+                    print("ARM BITES")
+                sys.argv = ["probe", "pkg"]
+                runpy.run_path({str(probe)!r}, run_name="__main__")
                 """
-            )
-            + textwrap.dedent(body)
         )
-        return subprocess.run(
+        result = subprocess.run(
             [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
         )
-
-    def test_the_branch_is_reachable_and_the_guard_returns_from_it(self):
-        """Both arming probes, then the claim — in that order, in one child.
-
-        Probe 1 proves the denial bites in THIS process shape (a `-c` child, not
-        the stdin shape the rest of this file uses). Probe 2 proves
-        `_find_real_caller` actually returned None, so a future change cannot
-        quietly route the test down the ordinary caller path and still pass.
-        Only then is the guard called.
-        """
-        result = self._child(
-            """
-            import inspect
-
-            from aipass.prax.apps import handlers
-
-            # ARMING PROBE 1 — is the world hostile at all?
-            try:
-                inspect.stack()
-                print("ARM1 INERT")
-            except BaseException:
-                print("ARM1 BITES")
-
-            # ARMING PROBE 2 — does the branch under test actually run?
-            print("ARM2", handlers._find_real_caller())
-
-            # THE CLAIM.
-            handlers._guard_branch_access()
-            print("GUARD RETURNED")
-            """
-        )
-        assert "ARM1 BITES" in result.stdout, (
-            "the realpath denial is inert in a -c child, so this test proves nothing about a "
-            f"stack walk.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert "ARM2 (None, None)" in result.stdout, (
-            "_find_real_caller found a caller, so the undeterminable-caller branch never ran and "
-            f"the claim below is about a different code path.\nstdout: {result.stdout}"
-        )
-        assert "GUARD RETURNED" in result.stdout, (
-            "the guard did not return from its undeterminable-caller branch in a process with no "
-            f"usable realpath.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert result.returncode == 0, f"child exited {result.returncode}: {result.stderr}"
+        assert "ARM BITES" in result.stdout, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        assert result.stdout.strip().splitlines()[-1] == "ALLOWED", f"stdout: {result.stdout}\nstderr: {result.stderr}"
 
 
 # Characters Windows refuses in a path component. Checked on every platform,

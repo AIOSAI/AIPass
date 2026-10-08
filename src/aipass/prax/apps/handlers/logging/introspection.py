@@ -3,7 +3,7 @@
 # Description: Stack Introspection
 # Version: 1.2.0
 # Created: 2025-11-10
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -175,13 +175,9 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
         relative = path.relative_to(_AIPASS_PKG_ROOT)
         # relative is like: flow/apps/module.py → parts[0] = "flow"
         if len(relative.parts) >= 2:
-            branch = relative.parts[0]
-            json_handler.log_operation(
-                "introspection_resolved",
-                {"module_path": module_path, "branch": branch},
-                module_name="prax_introspection",
-            )
-            return branch
+            # No json operation here: every get_direct_logger() at module level
+            # resolves through this, so one was two writes per import (DPLAN-0404, prax).
+            return relative.parts[0]
     except ValueError:
         logger.info("Path %s is not relative to aipass package root", module_path)
 
@@ -189,13 +185,7 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
     try:
         relative = path.relative_to(_SRC_ROOT)
         if len(relative.parts) >= 2 and relative.parts[0] != "aipass":
-            branch = relative.parts[0]
-            json_handler.log_operation(
-                "introspection_resolved",
-                {"module_path": module_path, "branch": branch, "outside_aipass": True},
-                module_name="prax_introspection",
-            )
-            return branch
+            return relative.parts[0]
     except ValueError:
         logger.info("Path %s is not relative to src root", module_path)
 
@@ -235,6 +225,12 @@ def detect_external_project(module_path: str) -> Optional[tuple]:
     for candidate in [search_path] + list(search_path.parents):
         if (candidate / ".git").exists() or (candidate / "pyproject.toml").exists():
             project_name = candidate.name.lower().replace(" ", "_").replace("-", "_")
+            # Outside AIPass only, never on a fleet module's import (DPLAN-0404, prax)
+            json_handler.log_operation(
+                "introspection_external_project",
+                {"module_path": module_path, "project": project_name},
+                module_name="prax_introspection",
+            )
             return (project_name, candidate)
 
     return None

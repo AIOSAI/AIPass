@@ -3,7 +3,7 @@
 # Description: Module Execution Tracker
 # Version: 0.1.0
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-10-08
 # =============================================
 
 """Track module execution and drone commands"""
@@ -23,5 +23,5 @@ class ModuleTracker:
         json_handler.log_operation("module_tracker_initialized", {"max_history": self.max_history})
 
 
-# Global instance
-tracker = ModuleTracker()
+# No module-level instance: nothing read it, and building one at import wrote
+# two json files for every importer; monitor builds its own (DPLAN-0404, prax).
