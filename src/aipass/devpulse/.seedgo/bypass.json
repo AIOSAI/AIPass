@@ -6,11 +6,6 @@
   },
   "bypass": [
     {
-      "standard": "cli_flags",
-      "file": "apps/__init__.py",
-      "reason": "Package marker, not an entry point (DPLAN-0404, devpulse's fence leg): one comment line and no code once 'from . import handlers' left it. cli_flags reads any .py whose parent is apps/ as an entry point; devpulse's entry point is apps/devpulse.py, which answers --version/-V. File-wide because cli_flags passes no line; the same row every fenced branch carries until seedgo's leg retires the misread."
-    },
-    {
       "standard": "through_the_command",
       "file": "tests/test_watchdog_wire.py",
       "lines": [152, 874, 875, 876, 893, 900, 944, 954, 961, 970, 980, 988, 996],
