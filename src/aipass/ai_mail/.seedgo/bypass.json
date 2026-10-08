@@ -254,8 +254,8 @@
     {
       "file": "apps/ai_mail.py",
       "standard": "logged_fallback",
-      "lines": [204],
-      "reason": "route_command (ai_mail, fleet green leg 9): a BrokenPipeError is stdout closed early by the reader (e.g. piped to head); the command ran and was recognised, so True is the true answer."
+      "lines": [209],
+      "reason": "route_command (ai_mail, fleet green leg 9; re-lined DPLAN-0404 leg 3b): a BrokenPipeError is stdout closed early by the reader (e.g. piped to head); the command ran and was recognised, so True is the true answer."
     },
     {
       "file": "apps/handlers/dispatch/pid_lock.py",
