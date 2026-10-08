@@ -3,7 +3,7 @@
 # Description: Tests for the drone-broker daemon, identity, and allowlist
 # Version: 2.0.7
 # Created: 2026-06-09
-# Modified: 2026-10-06
+# Modified: 2026-10-07
 # =============================================
 
 """Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""
@@ -37,7 +37,6 @@ from aipass.drone.apps.handlers.broker.client import (
     BROKER_FD_ENV,
 )
 from aipass.drone.apps.handlers import deletion_log
-from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.modules.rm import safe_delete
 
 # Tests for the drone-broker daemon (Phase 3 + Phase 6a FPLAN-0250).
@@ -55,8 +54,6 @@ pytestmark = pytest.mark.skipif(
 #: A mode-0 folder does not stop root: the walk would list it and the test would prove nothing.
 #: The platform is read first because a skipif does not stop the import, and Windows' os has no geteuid.
 _RUNS_AS_ROOT = sys.platform == "linux" and os.geteuid() == 0
-
-json_handler.log_operation("test_broker_load", {})
 
 
 # ---------------------------------------------------------------------------
