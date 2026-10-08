@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for the drone suite
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Shared pytest fixtures for drone tests."""
@@ -175,6 +175,43 @@ def make_owner_project(
     }
     (trinity / "passport.json").write_text(json.dumps(passport, indent=2), encoding="utf-8")
     return home
+
+
+@pytest.fixture()
+def devpulse_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a temp project in which devpulse genuinely holds owner-tier.
+
+    This fixture used to forge a branch name and nothing else, which is precisely
+    the escalation DPLAN-0281 closed — so it now mints all four facts the gate
+    checks. Tests that need one of them broken build their own via
+    make_owner_project(...).
+    """
+    make_owner_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+@pytest.fixture()
+def seedgo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a temp directory with a non-owner passport."""
+    trinity = tmp_path / ".trinity"
+    trinity.mkdir()
+    passport = trinity / "passport.json"
+    passport.write_text(
+        json.dumps({"branch_info": {"branch_name": "seedgo"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+@pytest.fixture()
+def repo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a temp repo root with AIPASS_REGISTRY.json."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
 
 
 @pytest.fixture
