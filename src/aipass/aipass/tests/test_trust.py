@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trust.py
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
-# Version: 1.2.3
+# Version: 1.2.4
 # Created: 2026-07-15
 # Modified: 2026-10-08
 # =============================================
@@ -9,7 +9,7 @@
 """Tests for apps/modules/trust.py and the handlers it drives."""
 
 # Tests trust/revoke CLI commands and init auto-enrollment.
-# All tests use tmp dirs + monkeypatch REGISTRY_PATH so they never
+# All tests use tmp dirs + AIPASS_TRUST_REGISTRY so they never
 # touch the real ~/.aipass registry.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
@@ -25,7 +25,6 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
 from aipass.aipass.apps.modules.trust import handle_command
-from aipass.hooks.apps.modules import door_trust_registry
 from aipass.hooks.apps.modules.door_trust_registry import (
     enroll,
     is_trusted,
@@ -39,21 +38,14 @@ SETUP_SH = REPO_ROOT / "setup.sh"
 
 @pytest.fixture(autouse=True)
 def _isolate_registry(tmp_path, monkeypatch):
-    """Redirect REGISTRY_PATH to a tmp dir so tests never touch ~/.aipass.
+    """Redirect the trust registry to a tmp file so tests never touch ~/.aipass.
 
-    Two copies, both redirected. hooks' verbs (enroll, read_registry, revoke,
-    is_trusted) read the global in hooks' handler; trust.py's prune writes the
-    door's copy, which a patch of the handler cannot reach. The handler path
-    below is HELD (DPLAN-0404 leg 8): it needs a seam hooks does not offer yet,
-    a registry path its verbs take or read from the environment, so one
-    setting redirects both.
+    One setting through hooks' public seam: every verb and trust.py's prune
+    resolve door_trust_registry.registry_path() per call, which reads
+    AIPASS_TRUST_REGISTRY (DPLAN-0404 follow-up).
     """
     fake_registry = tmp_path / "trusted_projects.json"
-    monkeypatch.setattr(
-        "aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH",
-        fake_registry,
-    )
-    monkeypatch.setattr(door_trust_registry, "REGISTRY_PATH", fake_registry)
+    monkeypatch.setenv("AIPASS_TRUST_REGISTRY", str(fake_registry))
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +442,9 @@ def _run_enroll_block(script_dir: Path, home: Path) -> subprocess.CompletedProce
         ]
     )
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    # An install has no override: the block must resolve the registry under HOME,
+    # not the fixture's AIPASS_TRUST_REGISTRY this process inherited.
+    env.pop("AIPASS_TRUST_REGISTRY", None)
     return subprocess.run(
         ["bash", "-c", script],
         capture_output=True,
