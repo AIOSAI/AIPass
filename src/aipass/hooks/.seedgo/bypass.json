@@ -1173,11 +1173,6 @@
       "reason": "Delegates to context_window module for transcript/settings reads — no direct JSON file ops needing json_handler. Same pattern as session_start.py delegating to cadence."
     },
     {
-      "file": "apps/handlers/lifecycle/pre_compact_prep.py",
-      "standard": "handlers",
-      "reason": "Line 75: lazy cross-branch import of aipass.flow.apps.handlers.plan.get_open_plans — needed for the open-plan count in the AUTO-COMPACT SNAPSHOT. No module-layer equivalent exists to switch to: flow's own modules (close_plan.py) import this same handler directly rather than re-exporting it, and list_plans.py's module is a CLI display orchestrator, not a programmatic data source. Read-only cross-branch primitive read, same authorized pattern as ai_mail's dispatch_monitor.py broker-client import. Call is wrapped in try/except and degrades to None on any failure — never corrupts the snapshot."
-    },
-    {
       "file": "apps/handlers/prompt/compass_recall.py",
       "standard": "handlers",
       "reason": "Lines 49, 75, 84: lazy cross-branch imports of aipass.memory.apps.modules.governance and aipass.devpulse.apps.modules.compass. Surfacing other branches' rated decisions at prompt time IS this handler's job — not orchestration bleed but the designed integration point, same authorized cross-branch primitive pattern as ai_mail's dispatch_monitor.py. Whole handler wrapped in try/except and never blocks the prompt on failure."

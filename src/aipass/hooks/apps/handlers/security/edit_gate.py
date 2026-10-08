@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.19.0
+# Version: 1.19.1
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -325,7 +325,7 @@ def _memory_service_reachable() -> bool:
     `aipass init` projects, which have no @memory (docs/edit_gate.md).
     """
     try:
-        _import_module("aipass.memory.apps.handlers.json.entry_limits")
+        _import_module("aipass.memory.apps.modules.door_entry_limits")
         return True
     except Exception as exc:  # any import failure means "not reachable here"
         logger.info("[HOOKS] edit_gate: @memory is not reachable from this project (%s)", exc)
@@ -782,7 +782,7 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
         todos = after.get("todos")
         if not isinstance(todos, list):
             return ""
-        cl = _import_module("aipass.memory.apps.handlers.json.config_loader")
+        cl = _import_module("aipass.memory.apps.modules.door_config_loader")
         configured = cl.get_todos_count(branch)
         limit = configured if configured is not None else _TODOS_COUNT_FALLBACK
         count = len(todos)
@@ -902,7 +902,7 @@ def _check_session_counts(branch: str, file_stem: str, entries: list, section_cf
 def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
     """Warn (never block) when rolling sections exceed their configured entry-count cap."""
     try:
-        cl = _import_module("aipass.memory.apps.handlers.json.config_loader")
+        cl = _import_module("aipass.memory.apps.modules.door_config_loader")
         roll = cl.section("rollover")
         branch_cfg = roll.get("per_branch", {}).get(branch) or roll.get("defaults", {})
         file_cfg = branch_cfg.get(file_stem, {})
@@ -1052,7 +1052,7 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         if block:
             return block
 
-        el = _import_module("aipass.memory.apps.handlers.json.entry_limits")
+        el = _import_module("aipass.memory.apps.modules.door_entry_limits")
         limits = el.load_entry_limits(branch)
         if limits.get("enabled"):
             block = _evaluate_limits(before, after, limits, el)
@@ -1178,7 +1178,7 @@ def _measure_memory_file(path: Path) -> list[str]:
     if not path.is_file():
         return [f"  {path.name} no longer exists."]
     if path.name in _FILE_BUDGET_FILES:
-        el = _import_module("aipass.memory.apps.handlers.json.entry_limits")
+        el = _import_module("aipass.memory.apps.modules.door_entry_limits")
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
@@ -1192,7 +1192,7 @@ def _measure_memory_file(path: Path) -> list[str]:
         return [f"  {path.name} no longer parses as JSON: {exc}"]
     if not isinstance(doc, dict):
         return [f"  {path.name} is no longer a JSON object."]
-    el = _import_module("aipass.memory.apps.handlers.json.entry_limits")
+    el = _import_module("aipass.memory.apps.modules.door_entry_limits")
     limits = el.load_entry_limits(path.parent.parent.name)
     if not limits.get("enabled"):
         return []

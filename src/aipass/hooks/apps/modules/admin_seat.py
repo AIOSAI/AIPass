@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: admin_seat.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: The verified admin-seat exemption and the caller's name, read once for every gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-10-07
+# Modified: 2026-10-08
 # =============================================
 
 """Answers one question for every security gate: is this session the admin seat?
@@ -59,7 +59,7 @@ CONSOLE = err_console
 # never by this string matching a directory.
 ADMIN_SEAT = "devpulse"
 
-_RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller"
+_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
 
 
 def is_admin_seat(cwd: str) -> bool:

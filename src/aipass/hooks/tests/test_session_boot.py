@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_boot.py
-# Version: 1.0.4
+# Version: 1.0.5
 # Description: Tests for session boot wrapper (menu-based attach/start/close)
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py."""
@@ -26,7 +26,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
+from aipass.ai_mail.apps.modules import door_session_pointer as sp
 from aipass.hooks.apps.handlers.lifecycle import session_boot
 from aipass.hooks.apps.modules import cc_sessions, cc_transcripts
 

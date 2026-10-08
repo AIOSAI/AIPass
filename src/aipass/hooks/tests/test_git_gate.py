@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.1.0
+# Version: 5.2.0
 # Description: Tests for git_gate: raw git and gh refused for every seat; protected config writes the admin seat's
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -46,7 +46,7 @@ def admin_grant():
     Patched at @ai_mail's rail, so no test reads this machine's real grant.
     TestRawGitIsRefusedForEverySeat patches it per call for the other seats.
     """
-    with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True):
+    with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
         yield
 
 
@@ -132,6 +132,21 @@ class TestGitGateGlobalOptions:
     def test_git_multiple_opts_push_blocked(self):
         _assert_blocked(_bash("git -C /foo -c key=val --no-pager push"))
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git --config core.hooksPath=/dev/null commit",
+            "git --no-pager push",
+            "git -c x=y commit",
+            "git --git-dir=/x checkout",
+            "git --work-tree=/tmp commit -m 'x'",
+            "git --bare push origin main",
+        ],
+    )
+    def test_a_write_verb_past_long_form_options_is_blocked(self, command):
+        """Absorbed from devpulse's test_git_gate (DPLAN-0163 finding 1): an option before the verb hides no write."""
+        _assert_blocked(_bash(command))
+
 
 class TestGitGateWriteBlocked:
     """Write/ambiguous git verbs are blocked."""
@@ -214,6 +229,31 @@ class TestGitGateWriteBlocked:
     def test_git_apply(self):
         _assert_blocked(_bash("git apply patch.diff"))
 
+    def test_git_config(self):
+        _assert_blocked(_bash("git config user.name 'x'"))
+
+    @pytest.mark.parametrize("command", ["git stash drop", "git stash clear", "git stash pop", "git stash apply"])
+    def test_each_stash_subcommand_is_blocked(self, command):
+        """Absorbed from devpulse's test_git_gate (DPLAN-0404): the stash verbs that drop or rewrite work."""
+        _assert_blocked(_bash(command))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git branch -d old",
+            "git branch -m old new",
+            "git branch -M old new",
+            "git tag -d v1.0",
+            "git tag --delete v1.0",
+            "git remote add origin url",
+            "git remote remove origin",
+            "git remote -v",
+        ],
+    )
+    def test_branch_tag_and_remote_operations_are_blocked(self, command):
+        """Absorbed from devpulse's test_git_gate (DPLAN-0404): renames, deletes, remote edits, the remote read."""
+        _assert_blocked(_bash(command))
+
     def test_bare_git_prints_usage_and_is_allowed(self):
         """A bare `git` with no argument touches nothing; the shell reads `git ` and `git` alike."""
         _assert_allowed(_bash("git "))
@@ -284,6 +324,10 @@ class TestGitGateWordBoundary:
 
     def test_dotgit_not_matched(self):
         _assert_allowed(_bash("cat .git/config"))
+
+    def test_a_drone_argument_quoting_a_write_verb_stays_allowed(self):
+        """Absorbed from devpulse's test_git_gate: a commit message naming `git commit` is an argument, not a call."""
+        _assert_allowed(_bash('drone @git pr "fix: git commit msg"'))
 
 
 class TestPathSpelledExecutable:
@@ -458,6 +502,15 @@ class TestGitGateEditProtection:
             result = _edit(path, CWD, grant=False)
             assert result["exit_code"] == 2, f"allowed: {path}"
 
+    def test_an_ordinary_file_beside_a_protected_one_stays_allowed(self, tmp_path):
+        """Absorbed from devpulse's test_git_gate: .claude/ and .git/ are not protected whole, only their switches."""
+        for path in (
+            tmp_path / "home" / ".claude" / "CLAUDE.md",
+            tmp_path / "home" / "project" / ".git" / "config",
+            tmp_path / "home" / "project" / "src" / "aipass" / "devpulse" / "apps" / "handler.py",
+        ):
+            _assert_allowed(_edit(str(path), CWD, grant=False))
+
     def test_a_windows_path_that_only_resembles_one_stays_allowed(self):
         for path in (r"D:\work\.claude\settings.json.bak", r"D:\a\repo\.claude\agents\helper.md"):
             _assert_allowed(handle({"tool_name": "Write", "tool_input": {"file_path": path}, "cwd": CWD}))
@@ -621,7 +674,7 @@ class TestOneProgramSpelledManyWays:
             _assert_blocked(_bash(f"git {self.WRITE}"))
 
 
-_RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller"
+_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller"
 
 
 def _seat(root: Path, name: str) -> str:

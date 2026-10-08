@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.5.1
+# Version: 1.5.2
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py."""
@@ -108,9 +108,9 @@ class TestEditGateHandler:
             "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/apps/test.py"},
             "cwd": "/srv/example/AIPass/src/aipass/devpulse",
         }
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
             assert handle(data)["exit_code"] == 2
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
             assert handle(data)["exit_code"] == 0
 
     def test_block_daemon_cross_branch(self):
@@ -198,13 +198,9 @@ class TestEditGateHandler:
     def test_the_registry_owner_row_grants_nothing_the_verified_grant_does(self, registered_projects: dict):
         """DPLAN-0356 item 5: an ``owner: true`` row wrote across its project with no grant."""
         for target in (registered_projects["aipass"] / "README.md", Path(registered_projects["memory"]) / "x.py"):
-            with patch(
-                "aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False
-            ):
+            with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
                 assert _write(registered_projects["devpulse"], target)["exit_code"] == 2
-            with patch(
-                "aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True
-            ):
+            with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
                 assert _write(registered_projects["devpulse"], target)["exit_code"] == 0
 
 
@@ -324,7 +320,7 @@ class TestEditGateProjectBoundary:
         project's files". The seat here is named devpulse and holds no grant:
         the name opens nothing.
         """
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
             result = handle(
                 {
                     "tool_name": "Edit",
@@ -336,7 +332,7 @@ class TestEditGateProjectBoundary:
         assert "Cross-project" in json.loads(result["stdout"])["reason"]
 
     def test_verified_admin_still_writes_down_into_nested_project(self, nested_projects: dict):
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
             result = handle(
                 {
                     "tool_name": "Edit",
@@ -353,7 +349,7 @@ class TestEditGateProjectBoundary:
             registered_projects["vera"] / "README.md",
             Path(registered_projects["baud_seat"]) / "app.py",
         )
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
             for seat in ("seedgo", "spawn"):
                 for target in targets:
                     result = _write(registered_projects[seat], target)
@@ -820,7 +816,7 @@ class TestEditGateExternalProject:
             assert _write(registered_projects["vera_seat"], target)["exit_code"] == 2, target
 
     def test_the_manager_reaches_nothing_outside_her_project(self, registered_projects: dict):
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
             for target in (Path(registered_projects["hooks"]) / "x.py", registered_projects["aipass"] / "README.md"):
                 result = _write(registered_projects["vera_seat"], target)
                 assert result["exit_code"] == 2, target

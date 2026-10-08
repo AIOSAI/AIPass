@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_process.py
-# Version: 1.3.5
+# Version: 1.3.6
 # Description: Tests for auto_process lifecycle handler (TDPLAN-0005, DPLAN-0294 phase 1b)
 # Branch: hooks
 # Created: 2026-06-06
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_process.py."""
@@ -43,7 +43,7 @@ def _kept_redirect() -> dict[str, str]:
 
 
 MODULE = "aipass.hooks.apps.handlers.lifecycle.auto_process"
-_MEMORY_AUTO_PROCESS = "aipass.memory.apps.handlers.intake.auto_process"
+_MEMORY_AUTO_PROCESS = "aipass.memory.apps.modules.door_auto_process"
 
 
 def _make_mock_module(**spawn_return):

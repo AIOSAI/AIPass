@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 3.1.0
+# Version: 3.1.1
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/security/rm_gate.py."""
@@ -56,7 +56,7 @@ def audit_log_to_tmp(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def no_admin_grant():
     """No test reads this machine's real admin grant; TestTheLockdown grants it where it means to."""
-    with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+    with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
         yield
 
 
@@ -224,7 +224,7 @@ class TestDeletionRecord:
         """The admin seat's drone rm is @drone's record — double-logging it would be a lie
         about how many deletions happened."""
         with (
-            patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True),
+            patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True),
             caplog.at_level(logging.INFO),
         ):
             assert self._bash("drone rm build/x")["exit_code"] == 0
@@ -404,7 +404,7 @@ class TestOneDeleteSpelledManyWays:
     def test_drone_spelled_any_way_is_the_admin_seats_lane(self):
         """DRONE rm is drone's lane, not a raw rm: the grant decides it, as for the bare spelling."""
         assert "admin seat's alone" in json.loads(self._bash("DRONE rm -rf build/x")["stdout"])["reason"]
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
             assert self._bash("DRONE rm -rf build/x")["exit_code"] == 0
 
     def test_a_renamed_delete_reaches_the_record(self, caplog):
@@ -421,7 +421,7 @@ class TestOneDeleteSpelledManyWays:
             assert self._bash("rm -rf build/x")["exit_code"] == 2
 
 
-_RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller"
+_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller"
 
 
 def _seat(root: Path, name: str) -> str:

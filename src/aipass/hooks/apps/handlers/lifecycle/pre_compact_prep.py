@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-09-06
+# Modified: 2026-10-08
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -72,7 +72,7 @@ def _count_active_dispatch_locks(repo_root: Path | None) -> int | None:
 
 def _count_open_plans(branch_dir: Path) -> int | None:
     try:
-        from aipass.flow.apps.handlers.plan.get_open_plans import get_open_plans
+        from aipass.flow.apps.modules.door_open_plans import get_open_plans
 
         target = str(branch_dir.resolve())
         return sum(1 for _num, info in get_open_plans() if info.get("location") == target)
@@ -145,7 +145,7 @@ def _summary_cap(branch: str) -> int:
         fleet going around it.
     """
     try:
-        el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        el = importlib.import_module("aipass.memory.apps.modules.door_entry_limits")
         limits = el.load_entry_limits(branch)
         cap = limits["entry_types"]["sessions"]["max_chars"]
         if isinstance(cap, int) and cap > 0:

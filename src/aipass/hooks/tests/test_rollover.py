@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rollover.py
-# Version: 2.2.2
+# Version: 2.2.3
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/lifecycle/rollover.py."""
@@ -19,7 +19,7 @@ import subprocess
 
 from aipass.hooks.apps.handlers.lifecycle import rollover
 from aipass.hooks.apps.handlers.lifecycle.rollover import handle
-from aipass.memory.apps.handlers.rollover import todo_report
+from aipass.memory.apps.modules import door_todo_report as todo_report
 
 
 MOD = "aipass.hooks.apps.handlers.lifecycle.rollover"

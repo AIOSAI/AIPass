@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.4.2
+# Version: 1.4.3
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -51,7 +51,7 @@ from aipass.hooks.apps.modules.bash_writes import write_targets
 # on every OS (devpulse 401ee814, PR #762). The Windows backslash spelling is
 # tested on purpose, through _win(), only in the classes that pin it.
 
-_RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller"
+_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
 # The parser's call-time import, refused for real through a None entry in sys.modules (fleet green leg 8).
 _BASH_WRITES = "aipass.hooks.apps.modules.bash_writes"
 

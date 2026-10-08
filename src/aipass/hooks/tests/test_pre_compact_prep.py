@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_pre_compact_prep.py
-# Version: 1.0.3
+# Version: 1.0.4
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -163,7 +163,7 @@ class TestCountOpenPlans:
             ("0003", {"location": str(branch_dir.resolve())}),
         ]
 
-        with patch("aipass.flow.apps.handlers.plan.get_open_plans.get_open_plans", return_value=fake_plans):
+        with patch("aipass.flow.apps.modules.door_open_plans.get_open_plans", return_value=fake_plans):
             snapshot = _snapshot(branch_dir)
 
         assert "2 open plan(s)" in snapshot
@@ -172,7 +172,7 @@ class TestCountOpenPlans:
 
         branch_dir = _make_branch(tmp_path)
 
-        with patch("aipass.flow.apps.handlers.plan.get_open_plans.get_open_plans", side_effect=RuntimeError("no")):
+        with patch("aipass.flow.apps.modules.door_open_plans.get_open_plans", side_effect=RuntimeError("no")):
             snapshot = _snapshot(branch_dir)
 
         assert "open plan" not in snapshot
@@ -219,7 +219,7 @@ if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
 
-_ENTRY_LIMITS = "aipass.memory.apps.handlers.json.entry_limits"
+_ENTRY_LIMITS = "aipass.memory.apps.modules.door_entry_limits"
 
 
 @contextlib.contextmanager

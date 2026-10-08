@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.8.4
+# Version: 1.8.5
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -25,7 +25,7 @@ import pytest
 from aipass.hooks.apps.handlers.security import edit_gate
 from aipass.hooks.apps.handlers.security.edit_gate import handle
 from aipass.hooks.apps.modules import cadence
-from aipass.memory.apps.handlers.json import entry_limits as memory_entry_limits
+from aipass.memory.apps.modules import door_entry_limits as memory_entry_limits
 
 
 _TEST_LIMITS_WARN = {
@@ -178,7 +178,7 @@ def _fence_real(mock):
 
 def _mock_importlib_modules(limits, rollover_cfg=None):
     """Return a side_effect for importlib.import_module supporting both modules."""
-    el_real = _REAL_IMPORT_MODULE("aipass.memory.apps.handlers.json.entry_limits")
+    el_real = _REAL_IMPORT_MODULE("aipass.memory.apps.modules.door_entry_limits")
 
     entry_limits_mock = MagicMock()
     entry_limits_mock.load_entry_limits.return_value = limits
@@ -196,7 +196,7 @@ def _mock_importlib_modules(limits, rollover_cfg=None):
     config_loader_mock.section.side_effect = lambda name: cfg.get(name, {})
     # memory's real resolver over the test's rollover section: no I/O when the
     # section is passed, so the pad count is exactly what memory's roll applies.
-    cl_real = _REAL_IMPORT_MODULE("aipass.memory.apps.handlers.json.config_loader")
+    cl_real = _REAL_IMPORT_MODULE("aipass.memory.apps.modules.door_config_loader")
     config_loader_mock.get_todos_count.side_effect = lambda branch: cl_real.get_todos_count(
         branch, cfg.get("rollover", {})
     )
