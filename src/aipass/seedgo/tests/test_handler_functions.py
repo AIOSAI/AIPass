@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_handler_functions.py
 # Description: Unit tests for handler-level functions across multiple handler packages
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/ functions: audit/audit_display.py, diagnostics_check.py, readme/readme_ops.py."""
@@ -12,7 +12,6 @@
 # json extras (retired, see section 3-4), readme, hooks_ext.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(removed) — json_handler increment_counter/update_data_metrics, retired in DPLAN-0325
 # seedgo: no-test-needed(covered) — audit_display.print_system_summary, in tests/test_coverage_audit.py
 # seedgo: no-test-needed(introspection) — audit_display.print_introspection, a static help blurb
 

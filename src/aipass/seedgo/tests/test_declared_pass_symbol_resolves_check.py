@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_declared_pass_symbol_resolves_check.py
 # Description: declared_pass_symbol_resolves_check — a declared-pass name that resolves nowhere
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-25
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/declared_pass_symbol_resolves_check.py."""
@@ -121,6 +121,31 @@ class TestWhatResolves:
         assert score == 0
         assert "declares handlers/nowhere/ needs no test, but it is no directory or module in apps/" in message
         assert "ceiling" not in message
+
+
+class TestArchivedCodeIsNotProduct:
+    """product_facts skips SOURCE_SKIP_DIRS: an archived file is not apps/ (seedgo, leg 148dd7c5)."""
+
+    def test_a_private_name_only_an_archived_file_defines_names_nothing(self, tmp_path):
+        path = _branch(tmp_path, "# seedgo: no-test-needed(generated) — trees from _project")
+        archive = tmp_path / "apps" / "handlers" / ".archive"
+        archive.mkdir()
+        (archive / "old.py").write_text("def _project():\n    return None\n", encoding="utf-8")
+        score, message = _verdict(path)
+        assert score == 0
+        assert "declares _project needs no test, but it names nothing in apps/" in message
+
+    def test_an_archived_directory_is_no_path_in_apps(self, tmp_path):
+        path = _branch(tmp_path, "# seedgo: no-test-needed(ruff) — that handlers/.archive/ parses")
+        (tmp_path / "apps" / "handlers" / ".archive").mkdir()
+        assert "declares handlers/.archive/ needs no test, but it is no directory or module" in _verdict(path)[1]
+
+    def test_a_product_file_that_warns_on_parse_names_its_file(self, tmp_path, recwarn):
+        path = _branch(
+            tmp_path, "# seedgo: no-test-needed(stdlib) — os.path.getsize()", product=PRODUCT + 'P = "\\d"\n'
+        )
+        _verdict(path)
+        assert {Path(w.filename).name for w in recwarn if issubclass(w.category, SyntaxWarning)} == {"ceiling.py"}
 
 
 class TestAWordInProseIsNotAModule:

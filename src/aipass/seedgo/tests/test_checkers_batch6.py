@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch6.py
 # Description: Unit tests for checker sub-functions in architecture, cli, cli_flags, documentation
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for the sub-functions of apps/handlers/aipass_standards/architecture_check.py and 3 siblings."""
@@ -91,6 +91,29 @@ class TestCheckLayerLocation:
         result = architecture_check.check_layer_location(False, False, False)
         assert result["passed"] is False
         assert "not in standard 3-layer" in result["message"]
+
+
+class TestTheSharedLibraryLayer:
+    """shared/ beside apps/ is a branch's pre-install library (seedgo, leg 148dd7c5: aipass)."""
+
+    def _layer(self, tmp_path, *parts, apps=True):
+        if apps:
+            (tmp_path / "apps").mkdir()
+        path = tmp_path.joinpath(*parts)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('"""A file."""\n', encoding="utf-8")
+        checks = architecture_check.check_module(str(path))["checks"]
+        return next(check for check in checks if check["name"] == "3-layer pattern")
+
+    def test_a_shared_file_beside_apps_passes_as_the_library_layer(self, tmp_path):
+        layer = self._layer(tmp_path, "shared", "project_home.py")
+        assert (layer["passed"], layer["message"]) == (True, architecture_check.LIBRARY_LAYER)
+
+    def test_a_stray_top_level_file_still_fails(self, tmp_path):
+        assert self._layer(tmp_path, "stray.py")["passed"] is False
+
+    def test_a_shared_directory_with_no_apps_beside_it_still_fails(self, tmp_path):
+        assert self._layer(tmp_path, "shared", "project_home.py", apps=False)["passed"] is False
 
 
 # -- check_file_size (architecture) -----------------------------------------

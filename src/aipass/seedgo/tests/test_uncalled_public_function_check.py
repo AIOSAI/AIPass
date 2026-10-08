@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_uncalled_public_function_check.py
 # Description: uncalled_public_function_check — crack class O, a subject's untested export
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/uncalled_public_function_check.py."""
@@ -12,6 +12,8 @@
 # seedgo: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
 # seedgo: no-test-needed(shared) — applies_to_file's production/tests split; tests/test_applicability.py
 # seedgo: no-test-needed(constant) — the prose of CURE; the function, line and shape are asserted
+
+from pathlib import Path
 
 import pytest
 
@@ -158,6 +160,37 @@ class TestTheSubjectLine:
     def test_a_private_function_is_never_judged(self, tmp_path):
         """The subject of the rule is the module's exported surface."""
         assert "_hidden" not in _names(tmp_path, DECLARES)
+
+
+class TestArchivedCodeIsNotProduct:
+    """The product graph skips SOURCE_SKIP_DIRS: trigger's .archive fed it (seedgo, leg 148dd7c5)."""
+
+    ARCHIVED_CALLER = "def run():\n    return discover()\n"
+
+    def _archive(self, branch, source):
+        archive = branch / "apps" / "modules" / ".archive"
+        archive.mkdir()
+        (archive / "old.py").write_text(source, encoding="utf-8")
+
+    def test_an_archived_caller_no_longer_acquits_a_live_function(self, tmp_path):
+        branch = _branch(tmp_path, tests=DECLARES + "def test_it():\n    run()\n")
+        self._archive(branch, self.ARCHIVED_CALLER)
+        findings, _acquitted = uncalled_public_function_check.scan(branch)
+        assert [name for _path, _line, name, _shape in findings] == ["discover"]
+
+    def test_an_archived_file_that_warns_on_parse_prints_nothing(self, tmp_path, recwarn):
+        branch = _branch(tmp_path, tests=DECLARES + "def test_it():\n    discover()\n")
+        self._archive(branch, 'PATTERN = "\\d"\n')
+        uncalled_public_function_check.scan(branch)
+        assert [w for w in recwarn if issubclass(w.category, SyntaxWarning)] == []
+
+    def test_a_live_file_that_warns_on_parse_names_its_file(self, tmp_path, recwarn):
+        branch = _branch(
+            tmp_path, tests=DECLARES + "def test_it():\n    discover()\n", extra={"loud.py": 'P = "\\d"\n'}
+        )
+        uncalled_public_function_check.scan(branch)
+        warned = {Path(w.filename).name for w in recwarn if issubclass(w.category, SyntaxWarning)}
+        assert warned == {"loud.py"}
 
 
 class TestTheEntryPoint:

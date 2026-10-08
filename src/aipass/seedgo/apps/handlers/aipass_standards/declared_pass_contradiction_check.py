@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: declared_pass_contradiction_check.py
 # Description: Declared Pass Contradiction Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-23
-# Modified: 2026-09-23
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -67,6 +67,7 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -96,14 +97,14 @@ CURE_PINNED = "assert the constant by name, or drop the line that declares it un
 CURE_ABSENT = "name the symbol that exists, or drop the line"
 
 
-def _parse(source: str) -> ast.Module | None:
+def _parse(source: str, filename: str = "<unknown>") -> ast.Module | None:
     """The file's tree, or None when Python cannot read it.
 
     ``ruff`` already convicts a syntax error, and a verdict invented for a file
     Python cannot parse sends its author to the wrong place.
     """
     try:
-        return ast.parse(source)
+        return ast.parse(source, filename=filename)
     except SyntaxError as exc:
         logger.info("[declared_pass_contradiction] Unparseable, nothing scanned: %s", exc)
         return None
@@ -143,18 +144,22 @@ def product_facts(branch_root: Path) -> Tuple[Dict[str, object], str]:
 
     The text is what answers "does this name exist": a name can be an env-var
     string, an annotated field, or a path segment, and only the text sees all
-    three.
+    three. ``.archive`` and the other SOURCE_SKIP_DIRS are not apps/: a name
+    only a retired file defines exists nowhere the product runs.
     """
     values: Dict[str, object] = {}
     chunks: List[str] = []
-    for path in sorted((branch_root / "apps").rglob("*.py")):
+    apps = branch_root / "apps"
+    for path in sorted(apps.rglob("*.py")):
+        if in_skipped_dir(path, apps):
+            continue
         try:
             source = path.read_text(encoding="utf-8", errors="ignore")
         except OSError as exc:
             logger.info("[declared_pass_contradiction] Cannot read %s: %s", path, exc)
             continue
         chunks.append(source)
-        tree = _parse(source)
+        tree = _parse(source, str(path))
         if tree is None:
             continue
         for node in tree.body:

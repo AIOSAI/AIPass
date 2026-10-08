@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_skip_dirs.py
 # Description: Unit tests for skip_dirs (is_throwaway_path routine-case logging regression)
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-07-27
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
-"""Tests for apps/handlers/aipass_standards/skip_dirs.py's is_throwaway_path."""
+"""Tests for apps/handlers/aipass_standards/skip_dirs.py's is_throwaway_path and in_skipped_dir."""
 
 # Regression coverage for the runaway-log bug (@trigger dispatch 98833403):
 # is_throwaway_path used to logger.info() every time a path was NOT under a temp
@@ -57,3 +57,17 @@ def test_throwaway_path_scratchpad_true(tmp_path):
     fp.write_text("pass", encoding="utf-8")
 
     assert skip_dirs.is_throwaway_path(str(fp)) is True
+
+
+def test_a_skip_named_directory_above_the_walk_root_empties_nothing(tmp_path):
+    root = tmp_path / "backups" / "apps"
+    assert skip_dirs.in_skipped_dir(root / "modules" / "live.py", root) is False
+    assert skip_dirs.in_skipped_dir(root / "modules" / ".archive" / "old.py", root) is True
+
+
+def test_a_skip_named_package_is_source_and_an_archive_with_init_is_not(tmp_path):
+    for name in ("artifacts", ".archive"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "__init__.py").write_text("", encoding="utf-8")
+    assert skip_dirs.in_skipped_dir(tmp_path / "artifacts" / "ops.py", tmp_path) is False
+    assert skip_dirs.in_skipped_dir(tmp_path / ".archive" / "old.py", tmp_path) is True

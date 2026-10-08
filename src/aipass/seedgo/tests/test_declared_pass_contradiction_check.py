@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_declared_pass_contradiction_check.py
 # Description: declared_pass_contradiction_check — crack class H, a declared pass the file breaks
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-23
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/declared_pass_contradiction_check.py."""
@@ -158,6 +158,23 @@ class TestAnAbsentNameIsSearchedInTheSourceText:
         path = tmp_path / "test_loose.py"
         path.write_text(f'"""Tests."""\n{DECLARES}\ndef test_it():\n    assert run()\n', encoding="utf-8")
         assert checker.scan(path.read_text(encoding="utf-8"), None) == ([], 0)
+
+
+class TestArchivedCodeIsNotProduct:
+    """product_facts skips SOURCE_SKIP_DIRS: an archived file is not apps/ (seedgo, leg 148dd7c5)."""
+
+    def test_a_constant_only_an_archived_file_defines_names_nothing(self, tmp_path):
+        path = _branch(tmp_path, "OTHER = 1\n", "def test_it():\n    assert run() == 1\n")
+        archive = tmp_path / "apps" / ".archive"
+        archive.mkdir()
+        (archive / "old.py").write_text('TRACKER_FILENAME = "drive_tracker.json"\n', encoding="utf-8")
+        findings, _ = checker.scan(path.read_text(encoding="utf-8"), tmp_path)
+        assert [(name, "names nothing" in why) for _line, name, why in findings] == [("TRACKER_FILENAME", True)]
+
+    def test_a_product_file_that_warns_on_parse_names_its_file(self, tmp_path, recwarn):
+        path = _branch(tmp_path, 'TRACKER_FILENAME = "\\d"\n', "def test_it():\n    assert run() == 1\n")
+        checker.scan(path.read_text(encoding="utf-8"), tmp_path)
+        assert {Path(w.filename).name for w in recwarn if issubclass(w.category, SyntaxWarning)} == {"names.py"}
 
 
 class TestWhatIsCountedAndNotScored:

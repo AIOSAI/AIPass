@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: uncalled_public_function_check.py
 # Description: Uncalled Public Function Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -93,6 +93,7 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -130,7 +131,7 @@ def _parse(path: Path) -> ast.Module | None:
     Python cannot parse sends its author to the wrong place.
     """
     try:
-        return ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        return ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
     except (SyntaxError, OSError) as exc:
         logger.info("[uncalled_public_function] Unparseable, nothing scanned: %s", exc)
         return None
@@ -229,9 +230,16 @@ def _functions(tree: ast.AST) -> List[ast.FunctionDef | ast.AsyncFunctionDef]:
 
 
 def product_graph(branch_root: Path) -> Dict[str, Set[str]]:
-    """Function name -> the names it calls, over the branch's whole ``apps/``."""
+    """Function name -> the names it calls, over the branch's whole ``apps/``.
+
+    ``.archive`` and the other SOURCE_SKIP_DIRS are not product: a retired
+    caller in the graph acquits a live function nothing runs.
+    """
     graph: Dict[str, Set[str]] = {}
-    for path in sorted((branch_root / "apps").rglob("*.py")):
+    apps = branch_root / "apps"
+    for path in sorted(apps.rglob("*.py")):
+        if in_skipped_dir(path, apps):
+            continue
         tree = _parse(path)
         if tree is None:
             continue

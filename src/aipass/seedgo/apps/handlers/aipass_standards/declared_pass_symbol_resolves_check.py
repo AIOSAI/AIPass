@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: declared_pass_symbol_resolves_check.py
 # Description: Declared Pass Symbol Resolves Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-09-25
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -67,6 +67,7 @@ from types import ModuleType
 from typing import Dict, FrozenSet, List, Set, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -225,7 +226,7 @@ def stdlib_anchors(tree: ast.AST) -> Dict[str, Tuple[str, bool]]:
 def _parse(source: str, where: object) -> ast.Module | None:
     """A file's tree, or None when Python cannot read it (``ruff`` convicts that)."""
     try:
-        return ast.parse(source)
+        return ast.parse(source, filename=str(where))
     except SyntaxError as exc:
         logger.info("[declared_pass_symbol_resolves] Unparseable %s: %s", where, exc)
         return None
@@ -237,13 +238,14 @@ def product_facts(branch_root: Path) -> Tuple[str, FrozenSet[str], Dict[str, Tup
 
     The text answers "does the product use this name": an env-var string, a
     dataclass field and a path segment are all uses the AST's names miss.
+    ``.archive`` and the other SOURCE_SKIP_DIRS are not apps/, as files or as paths.
     """
     apps = branch_root / "apps"
     chunks: List[str] = []
     paths: Set[str] = set()
     anchors: Dict[str, Tuple[str, bool]] = {}
     for path in sorted(apps.rglob("*")):
-        if "__pycache__" in path.parts:
+        if in_skipped_dir(path, apps):
             continue
         rel = path.relative_to(apps).as_posix()
         paths.add(rel[: -len(".py")] if rel.endswith(".py") else rel)
