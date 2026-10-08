@@ -342,18 +342,6 @@
       "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
-      "file": "tests/*",
-      "standard": "architecture",
-      "category": "false_positive",
-      "reason": "Test files live in tests/ by convention, not in the apps/ 3-layer structure"
-    },
-    {
-      "file": "tests/*",
-      "standard": "encapsulation",
-      "category": "false_positive",
-      "reason": "Unit tests import handlers directly to test implementation functions in isolation"
-    },
-    {
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
       "category": "architectural",
