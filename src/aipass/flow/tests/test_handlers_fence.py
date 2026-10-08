@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_handlers_fence.py
 # Description: The handlers fence: a foreign importer is refused, kin and the modules door pass (DPLAN-0404)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
 # Modified: 2026-10-08
 # =============================================
@@ -79,6 +79,18 @@ class TestAForeignImporterIsRefused:
         """A user's script or a project outside any aipass tree is foreign too."""
         answer = _probe(elsewhere_seat, "pkg", tmp_path)
         assert answer == "DENIED Caller branch: unknown", answer
+
+    @pytest.mark.parametrize("shape", FOREIGN_SHAPES)
+    def test_the_cwd_inside_this_branch_buys_a_foreign_seat_nothing(self, foreign_seat, shape):
+        """The process cwd is not a frame. Measured 2026-10-08: the bootstrap's pseudo
+        filenames resolved against a cwd inside this branch and read as kin, so a
+        foreign line that did not spell the handlers was let through. The cwd here
+        is the branch root; the verdicts are the ones the tmp cwd gives."""
+        answer = _probe(foreign_seat, shape, KIN_PROBE.parents[1])
+        assert answer.startswith(("DENIED", "REFUSED")), answer
+        if answer.startswith("DENIED"):
+            named = "sibling" if shape == "sibling" else "foreign"
+            assert f"Caller branch: {named}" in answer, answer
 
 
 class TestKinAndTheDoorPass:
