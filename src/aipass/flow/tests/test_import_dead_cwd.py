@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Every flow module imports, and keeps logging, without a readable working directory
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for aipass/flow/apps/__init__.py and every module beneath it importing with no readable working directory."""
@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 import aipass.flow.apps as flow_apps
+from aipass.flow.tests import support_fence
 
 # THE MECHANISM, measured on the Windows CI gate 2026-08-31. ``ntpath.realpath``
 # calls ``os.getcwd()`` UNCONDITIONALLY — on its first lines, before it even
@@ -1875,66 +1876,43 @@ except OSError:
         )
 
 
-class TestTheCallerIsNoneBranchSurvivesADeniedRealpath:
-    """The behavioural sibling of the AST ban, and the correction that produced it.
+class TestTheFenceLetsKinThroughWithNoCwd:
+    """The fence's kin walk under a dead cwd, through its public shape.
 
-    The round-4 guidance said the deleted second ``inspect.stack()`` walk is
-    unreachable and only an AST ban can watch it. That was TOO STRONG, and
-    @spawn measured the correction (relayed by @devpulse 2026-08-31): the branch
-    is unreachable from IMPORT-shaped pins — ``apps/__init__.py`` always supplies
-    a real-file frame, the nine-branch reproduction stands — but it IS reachable
-    by calling ``_guard_branch_access()`` DIRECTLY from a ``-c`` interpreter child.
-    Every frame there is a string pseudo-file or importlib, both skipped, so
-    ``_find_real_caller`` returns None and the branch RUNS. Under a realpath
-    denial a regrown walk dies in it; the cured plain ``return`` survives.
+    Until DPLAN-0404 leg 13 this class called the old guard's private
+    ``_find_real_caller`` and ``_guard_branch_access`` by hand. Fence v2 has
+    neither shape to call, so the pin runs the fence probe
+    (tests/support_fence.py) from its kin seat, the way test_handlers_fence does,
+    in world A: every frame the fence walks is resolved there, and kin must
+    still pass. The dead cwd is world A's emulation (``os.getcwd`` raises
+    FileNotFoundError), not a real rmdir, as trigger's reference pin does
+    (trigger, test_import_dead_cwd.py 1.4.0): Windows refuses to remove a
+    process's own working directory.
 
-    Kept ALONGSIDE the AST ban rather than replacing it. The ban needs no
-    subprocess, names the offending line, and catches a reintroduction anywhere
-    in the tree; this one proves the cure in the world it was built for. A mutant
-    that regrows the walk kills both.
-
-    TWO ARMING PROBES, because one is not enough here (@spawn's rules 2 and 4):
-    probe 1 proves the denial actually bites this interpreter, and probe 2 proves
-    ``_find_real_caller`` genuinely returned None — without it the child could be
-    exercising the same-branch allow instead, and the test would pass while
-    watching nothing.
-
-    Runs as a ``-c`` interpreter child, never a script and never a heredoc (@commons,
-    @hooks): a script frame is a real on-disk file, ``getsourcefile``
-    early-returns, and the denial is silently inert.
+    Runs as a ``-c`` interpreter child, like every world in this file; the probe
+    itself is run by ``runpy`` so its frames are the kin file's own.
     """
 
-    BODY = """
-import aipass.flow.apps.handlers as guard
+    BODY = f"""
+import runpy
 
-# Probe 2 BEFORE the assertion: the branch under test must actually be entered.
-_ns = {"g": guard, "OUT": None}
-exec(compile("OUT = g._find_real_caller()", "<string>", "exec"), _ns)
-print("CALLER_IS_NONE: " + ("YES" if _ns["OUT"] == (None, None) else "NO -> " + str(_ns["OUT"])))
-
-try:
-    exec(compile("g._guard_branch_access()", "<string>", "exec"), {"g": guard})
-    print("GUARD: RETURNED")
-except OSError as exc:
-    print("GUARD DIED: " + type(exc).__name__ + ": " + exc.__class__.__name__)
-except ImportError:
-    print("GUARD: BLOCKED")
+sys.argv = [{str(Path(support_fence.__file__))!r}, "pkg"]
+runpy.run_path(sys.argv[0], run_name="__main__")
 """
 
-    def test_calling_the_guard_directly_under_a_realpath_denial_returns(self):
-        result = _run_world(_WORLD_B, _STACK_CONTROL, self.BODY)
+    def test_the_fence_lets_kin_through_with_no_cwd(self):
+        """The kin seat imports its handlers under world A's dead cwd: ALLOWED.
 
-        assert result.returncode == 0, result.stdout + result.stderr
-        # Arming probe 1: the denial bites inspect.stack() on this interpreter.
-        assert "STACK_DIES: YES" in result.stdout, (
-            "world B did not arm — a regrown walk would survive it and this test would pass.\n" + result.stdout
+        Red against a fence whose frame walk resolves a path without its OSError
+        arm: the denied cwd then kills the import and the probe never answers.
+        """
+        result = _run_world(_WORLD_A, _RESOLVE_CONTROL, "\nimport sys\n" + self.BODY)
+        out = result.stdout
+
+        assert "RESOLVE_DIES: YES" in out, f"world A did not arm - this pin proves nothing:\n{out}"
+        assert out.strip().splitlines()[-1] == "ALLOWED", (
+            f"the fence refused or died on its own kin under a dead cwd:\nstdout={out}\nstderr={result.stderr}"
         )
-        # Arming probe 2: the branch under test is the one being exercised.
-        assert "CALLER_IS_NONE: YES" in result.stdout, (
-            "_find_real_caller did not return None, so the guard took a different "
-            "path and this test is watching nothing.\n" + result.stdout
-        )
-        assert "GUARD: RETURNED" in result.stdout, result.stdout
 
 
 class TestNoModuleLevelLocationCallSurvives:
@@ -1950,9 +1928,10 @@ class TestNoModuleLevelLocationCallSurvives:
     end "a parse of the tree is the only instrument that sees it". That was TOO
     STRONG. The branch is unreachable from IMPORT-shaped pins, which is not the
     same as unreachable — calling the guard DIRECTLY from a ``-c`` interpreter child
-    reaches it, and ``TestTheCallerIsNoneBranchSurvivesADeniedRealpath`` above is
-    that pin. Both are kept: regrowing the walk kills both, and this one needs no
-    subprocess and names the offending line anywhere in the tree.
+    reaches it. That pin called the old guard's private names and was retired
+    with the guard in DPLAN-0404 leg 13; fence v2 walks with sys._getframe and
+    has no such branch, and this ban still names a regrown walk anywhere in the
+    tree with no subprocess.
 
     The ban is on the CALL — ``ast.Call`` whose func is ``inspect.stack`` — never
     on the string, because this file and the cured modules SPELL the defect in
@@ -1981,19 +1960,38 @@ class TestNoModuleLevelLocationCallSurvives:
         return [p for p in sorted(root.rglob("*.py")) if not _WALK_IGNORED_DIRS.intersection(p.relative_to(root).parts)]
 
     @staticmethod
+    def _catches_oserror(node: ast.Try) -> bool:
+        """Whether one of the try's handlers names OSError, alone or in a tuple."""
+        for handler in node.handlers:
+            kinds = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+            if any(isinstance(kind, ast.Name) and kind.id == "OSError" for kind in kinds):
+                return True
+        return False
+
+    @staticmethod
     def _module_level_location_calls(tree: ast.Module) -> list[tuple[int, str]]:
-        """Calls that infer a location and are evaluated when the module loads."""
+        """Calls that infer a location and are evaluated when the module loads.
+
+        A call in the body of a module-level try that catches OSError is not one:
+        the dead cwd raises OSError there and the module still loads. That is the
+        fence v2 shape (apps/handlers/__init__.py, DPLAN-0404) and flow's
+        decision, leg 13; TestTheFenceLetsKinThroughWithNoCwd is its behaviour.
+        """
         found = []
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 continue
-            for sub in ast.walk(node):
-                if not isinstance(sub, ast.Call):
-                    continue
-                func = sub.func
-                attr = func.attr if isinstance(func, ast.Attribute) else None
-                if attr in TestNoModuleLevelLocationCallSurvives.BANNED_ATTRS:
-                    found.append((sub.lineno, ast.unparse(sub)))
+            parts = [node]
+            if isinstance(node, ast.Try) and TestNoModuleLevelLocationCallSurvives._catches_oserror(node):
+                parts = [*node.handlers, *node.orelse, *node.finalbody]
+            for part in parts:
+                for sub in ast.walk(part):
+                    if not isinstance(sub, ast.Call):
+                        continue
+                    func = sub.func
+                    attr = func.attr if isinstance(func, ast.Attribute) else None
+                    if attr in TestNoModuleLevelLocationCallSurvives.BANNED_ATTRS:
+                        found.append((sub.lineno, ast.unparse(sub)))
         return found
 
     @staticmethod
@@ -2087,6 +2085,39 @@ class TestNoModuleLevelLocationCallSurvives:
             "a resolve() inside a function is reached at CALL time, not import time — "
             "convicting it would ban the guarded helper this cure is built on"
         )
+
+    def test_the_module_level_detector_clears_a_resolve_guarded_by_oserror(self):
+        """The fence v2 shape: the dead cwd raises OSError inside the try and the import lives."""
+        tree = ast.parse(
+            "from pathlib import Path\n"
+            "try:\n"
+            "    F = str(Path(__file__).resolve())\n"
+            "except OSError:\n"
+            "    F = str(__file__)\n"
+        )
+        assert self._module_level_location_calls(tree) == [], "the detector convicts a resolve the import survives"
+
+    def test_the_module_level_detector_convicts_a_resolve_guarded_by_another_error(self):
+        """A try that does not catch OSError lets the dead cwd's raise kill the import."""
+        tree = ast.parse(
+            "from pathlib import Path\n"
+            "try:\n"
+            "    F = str(Path(__file__).resolve())\n"
+            "except ValueError:\n"
+            "    F = str(__file__)\n"
+        )
+        assert self._module_level_location_calls(tree), "the OSError exemption swallowed every try"
+
+    def test_the_module_level_detector_convicts_a_resolve_in_the_oserror_arm(self):
+        """The handler arm itself runs at import time and is not guarded by its own try."""
+        tree = ast.parse(
+            "from pathlib import Path\n"
+            "try:\n"
+            "    F = str(__file__)\n"
+            "except OSError:\n"
+            "    F = str(Path(__file__).resolve())\n"
+        )
+        assert self._module_level_location_calls(tree), "the exemption reached past the try body"
 
     def test_the_stack_detector_convicts_a_call_in_an_unreachable_branch(self):
         """@hooks' M7 and @trigger's 1058-green mutant, reproduced."""

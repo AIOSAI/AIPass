@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: post_close_runner.py
 # Description: Background post-close processing
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-02-14
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -107,7 +107,7 @@ def handle_command(command: str, args: list) -> bool:
         try:
             import importlib
 
-            _plans_mod = importlib.import_module("aipass.memory.apps.handlers.intake.plans_processor")
+            _plans_mod = importlib.import_module("aipass.memory.apps.modules.door_plans_processor")
             result = _plans_mod.process_plans()
             if result.get("success"):
                 count = result.get("files_processed", 0)
@@ -196,7 +196,7 @@ def main(argv: list[str]) -> int:
         try:
             import importlib
 
-            _plans_mod = importlib.import_module("aipass.memory.apps.handlers.intake.plans_processor")
+            _plans_mod = importlib.import_module("aipass.memory.apps.modules.door_plans_processor")
             result = _plans_mod.process_plans()
             if result.get("success"):
                 logger.info("[%s] Plan vectorization: %s", MODULE_NAME, result)
