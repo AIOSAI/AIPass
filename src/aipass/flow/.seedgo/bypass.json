@@ -421,12 +421,6 @@
       "category": "false_positive",
       "lines": [117],
       "reason": "route_command's True means 'a module handled this command'. A BrokenPipeError is the reader closing stdout early (`drone @flow list | head`): the command ran and its output was cut by the reader, not failed. False would print 'unknown command' for a known one (flow's decision, leg 5)."
-    },
-    {
-      "file": "apps/__init__.py",
-      "standard": "cli_flags",
-      "pattern": "apps package init read as an entry point",
-      "reason": "A package init, not an entry point: it holds one comment line and no code since DPLAN-0404 leg 13 removed `from . import handlers`, takes no arguments and is never run, so --version has nothing to report. The entry point is apps/flow.py, which answers --version / -V. FILE-WIDE because cli_flags passes no line (flow's decision, leg 13; the same row trigger and daemon carry)."
     }
   ],
   "notes": {

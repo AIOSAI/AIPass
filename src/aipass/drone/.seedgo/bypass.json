@@ -6,11 +6,6 @@
   },
   "bypass": [
     {
-      "file": "apps/__init__.py",
-      "standard": "cli_flags",
-      "reason": "Package marker, not an entry point (DPLAN-0404 flip): one comment line and no code once 'from . import handlers' left it. cli_flags reads any .py whose parent is apps/ as an entry point; drone's entry point is apps/drone.py, which answers --version/-V. A file-level row is the only form a bypass of this row can take; it covers this file alone. Same row ai_mail carries."
-    },
-    {
       "file": "apps/handlers/scanning/formatters.py",
       "standard": "cli",
       "reason": "Formatter handler — purpose is to format and print Rich output. console.print() is the core function, not a violation."

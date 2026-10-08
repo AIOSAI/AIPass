@@ -1585,12 +1585,6 @@
       "standard": "through_the_command",
       "lines": [22],
       "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is that a .claude/ path is skipped in the backslashed spelling handle() hands the checklist on Windows (compass 458). Through handle() the host chooses the separator, so on POSIX the public door can only ever hand the forward-slash spelling, which test_skip_claude_hooks_from_seedgo_checks pins through handle(). The one import kept is _run_seedgo_checklist, for test_skip_claude_hooks_in_the_windows_spelling alone."
-    },
-    {
-      "file": "apps/__init__.py",
-      "standard": "cli_flags",
-      "pattern": "apps package init read as an entry point",
-      "reason": "A package init, not an entry point (hooks, DPLAN-0404 leg 12; trigger's leg 10 row the precedent): it holds one comment line and no code since the leg removed `from . import handlers`, takes no arguments and is never run, so --version has nothing to report. The entry point is apps/hooks.py. FILE-WIDE because cli_flags passes no line."
     }
   ],
   "notes": {

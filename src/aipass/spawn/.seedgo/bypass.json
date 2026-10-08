@@ -96,11 +96,6 @@
       "reason": "Routing only since fleet green leg 9 (spawn's decision): the mint lane moved whole to handlers/mint_ops.py spawn_at, and its operations are logged there at the decision points (mint_refused for a retired or forbidden class, mint_refused for a missing file, branch_created). core now parses create's flags and hands in its meta-tab importer; it performs no operation of its own to log. File-wide because json_structure passes no line."
     },
     {
-      "file": "apps/__init__.py",
-      "standard": "cli_flags",
-      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): cli_flags takes every file directly in apps/ as an entry point, and its own scope comment says apps/{name}.py. This file is the package marker, one line (from . import handlers), never run; the entry point is apps/spawn.py, which passes cli_flags. File-wide because cli_flags passes no line."
-    },
-    {
       "file": "tests/__init__.py",
       "standard": "file_top",
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): tests/__init__.py is the package marker of the suite, not a test module. It carries the META header (item 5, cured in leg 8), but items 6 and 7 ask for the module it tests and a declared pass, and it tests nothing; the checker already judges conftest.py on item 5 only for the same reason (a conftest has no subject)."

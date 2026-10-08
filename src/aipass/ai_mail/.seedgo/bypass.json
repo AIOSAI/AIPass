@@ -85,11 +85,6 @@
       "measured": "2026-08-23 (S154) — re-checked against the built wire, not assumed. One of the two doors named here is now live; the entry survives only for register_path()."
     },
     {
-      "file": "apps/__init__.py",
-      "standard": "cli_flags",
-      "reason": "Package marker, not an entry point (ai_mail, fleet green leg 9): the file is two lines, a comment and 'from . import handlers', with no argv, no main and no command. The entry point is apps/ai_mail.py, which answers --version/-V at line 256 and passes cli_flags. cli_flags is a file-level row that passes no line, so this file-wide rule is the only form a bypass can take; it covers this file alone."
-    },
-    {
       "file": "tests/test_wake.py",
       "standard": "stdlib_patch",
       "reason": "Platform and pid simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 13: os.kill 189 196 202 218 464 478 (dead/alive answers of the kill(0) family); sys.platform 195 203 219 236 248 260 270 281 293 313 321 334 352 375 472 1001 1013 1028 1051 (the linux/darwin/win32 lanes); builtins.open 210 225 240 252 275 387 398 413 and os.readlink 315 322 1008 1021 1036 1062 (the /proc reads of a pid; 270 and 275 came with the test moved from test_daemon in leg 12); shutil.which 734 1264 1292 1717 3023 (which tools the host has); time.sleep 880 1109 (the wait on a pid, no real waiting); Path.home 2107 (the host home sent to tmp). One line is not platform or pid, 938 (an OSError injected into the lock open); it is named here, not hidden, and stays under this rule by @devpulse's leg 11 ruling a (ai_mail, leg 11). A seam for any of these would exist for the test alone."

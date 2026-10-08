@@ -6,11 +6,6 @@
   },
   "bypass": [
     {
-      "file": "apps/__init__.py",
-      "standard": "cli_flags",
-      "reason": "File-wide because cli_flags passes no line. A package init, not an entry point (daemon, fleet green leg 5): it holds one comment line and no code (DPLAN-0404 removed `from . import handlers`), takes no arguments and is never run, so --version has nothing to report."
-    },
-    {
       "file": "tests/__init__.py",
       "standard": "file_top",
       "reason": "File-wide because the file_top finding carries no line a line rule can match. Package marker (daemon, fleet green leg 5): the file holds no code and no symbol, so item 7's no-test-needed marker has nothing to name (declared_pass_symbol_resolves refuses a marker that names nothing). Items 5 and 6 are met: the META header and a subject docstring naming apps/daemon.py."
