@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-08-27
-# Modified: 2026-10-02
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -44,8 +44,7 @@ from aipass.memory.apps.handlers.rollover import orchestrator
 from aipass.memory.apps.handlers.templates import push_report
 from aipass.memory.apps.handlers.tracking import tab_renderer
 from aipass.memory.apps.modules import push as push_module
-from aipass.seedgo.apps.handlers.aipass_standards import trinity_check
-from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
+from aipass.seedgo.apps.modules.door_trinity import check_branch, expected_meta_line
 from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.templates import trinity_push as tp
 
@@ -217,7 +216,7 @@ def _seedgo_renders_the_retired_todos_tab() -> bool:
     A changed mirror signature counts as landed: the checker pin then runs strict.
     """
     try:
-        line = trinity_groups.expected_meta_line("todos", "guinea", _config(), "prose")
+        line = expected_meta_line("todos", "guinea", _config(), "prose")
     except TypeError:
         return False
     return "rollover OFF" in line
@@ -835,7 +834,7 @@ class TestThePushedFileIsCanonical:
     """The output is measured by the standard's own checker, not by opinion."""
 
     def test_a_pushed_branch_satisfies_the_trinity_checker(self, tmp_path):
-        pytest.importorskip("aipass.seedgo.apps.handlers.aipass_standards.trinity_check")
+        pytest.importorskip("aipass.seedgo.apps.modules.door_trinity")
         local = {
             "document_metadata": {"created": "2026-01-01", "status": {"health": "healthy"}},
             "sessions": [_entry(2), _entry(1, findings=["drift"])],
@@ -854,7 +853,7 @@ class TestThePushedFileIsCanonical:
         plan = tp.plan_branch("guinea", root, _config())
         tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
 
-        result = trinity_check.check_branch(str(root))
+        result = check_branch(str(root))
         failing = [check["name"] for check in result["checks"] if check["score"] < 100]
         messages = [str(check.get("message")) for check in result["checks"] if check["score"] < 100]
         if failing == ["Meta lines & _usage"] and _seedgo_renders_the_retired_todos_tab():

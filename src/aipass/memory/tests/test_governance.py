@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_governance.py
 # Description: Surfacing governance module — state API, rejection paths, command exit seam
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-07-16
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/modules/governance.py (pure state-in/state-out API)."""
@@ -16,6 +16,7 @@
 import pytest
 
 from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.memory.apps.handlers.governance import engine
 from aipass.memory.apps.modules import governance as governance_module
 from aipass.memory.apps.modules.governance import (
     DEFAULT_CONFIG,
@@ -172,6 +173,29 @@ class TestShouldSurfaceHappy:
         updated = record_message(updated)
         ok, _, _ = should_surface("compass-2", 0.8, updated, current_time=600.0)
         assert ok is True
+
+
+# =============================================================================
+# The record switch — a caller that wants the verdict alone writes no log line
+# =============================================================================
+
+
+class TestTheRecordSwitchKeepsTheSurfaceOffTheLog:
+    def test_a_surface_with_record_off_writes_no_log_line(self, monkeypatch):
+        written = []
+        monkeypatch.setattr(engine.json_handler, "log_operation", lambda *a, **k: written.append(a))
+        state = new_state()
+        ok, _, _ = should_surface("compass-7", 0.9, state, current_time=10.0, record=False)
+        assert ok is True
+        assert written == []
+
+    def test_a_surface_by_default_still_writes_its_log_line(self, monkeypatch):
+        written = []
+        monkeypatch.setattr(engine.json_handler, "log_operation", lambda *a, **k: written.append(a))
+        state = new_state()
+        ok, _, _ = should_surface("compass-8", 0.9, state, current_time=10.0)
+        assert ok is True
+        assert [entry[0] for entry in written] == ["governance_surface"]
 
 
 # =============================================================================

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: engine.py
 # Description: Surfacing governance engine — implementation
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-16
-# Modified: 2026-07-16
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -60,11 +60,14 @@ def should_surface(
     config: Dict[str, Any] | None = None,
     *,
     current_time: float | None = None,
+    record: bool = True,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """
     Decide whether an item should be surfaced, given current state.
 
-    Pure function — does not mutate the input state dict.
+    Does not mutate the input state dict. A surface writes one
+    governance_surface line to memory's operation log; record=False
+    returns the same verdict and writes nothing.
     """
     import time
 
@@ -105,10 +108,11 @@ def should_surface(
         "surfaced_ids": list(surfaced_ids) + [item_id],
     }
     logger.info(f"[governance] Surfacing {item_id} (score={relevance_score:.2f}, surfaces={updated['surfaces_count']})")
-    json_handler.log_operation(
-        "governance_surface",
-        {"item_id": item_id, "relevance_score": relevance_score, "surfaces_count": updated["surfaces_count"]},
-    )
+    if record:
+        json_handler.log_operation(
+            "governance_surface",
+            {"item_id": item_id, "relevance_score": relevance_score, "surfaces_count": updated["surfaces_count"]},
+        )
     return True, "Ready to surface", updated
 
 

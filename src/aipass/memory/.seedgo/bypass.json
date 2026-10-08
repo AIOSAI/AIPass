@@ -588,11 +588,6 @@
       "reason": "Bare `todo` IS the verb, by ruling (DPLAN-0345 @memory review section 4, FPLAN-0590 row 5): `drone @memory todo` prints ONE line - pad N of COUNT and the backlog count - so handle_command() deliberately has no no-args gate calling print_introspection(); a gate there would replace that line with the module page. The module still defines print_introspection() (printed after a refused argument) and print_help() (--help/-h/help in any slot). The bare behaviour is pinned by tests/test_config_verbs.py::TestTodoVerbs::test_bare_is_one_line_the_pad_of_the_configured_count_and_the_backlog. Same class as @ai_mail's apps/modules/email.py introspection rule (inbox works without args). Added 2026-09-15; DELETE this rule if bare `todo` ever becomes the introspection page."
     },
     {
-      "file": "apps/__init__.py",
-      "standard": "cli_flags",
-      "reason": "File-wide because the checker names no line. apps/__init__.py is the package marker (one line: from . import handlers), not an entry point; the entry point is apps/memory.py, which answers --version / -V (line 315). Leg 8 of DPLAN-0354, @memory's decision."
-    },
-    {
       "file": "tests/__init__.py",
       "standard": "file_top",
       "reason": "File-wide because the checker names no line. An empty package marker: it tests no module, so it has no subject line or declared pass to state, and a header on an empty file would be the only content. Leg 8 of DPLAN-0354, @memory's decision."
@@ -799,7 +794,7 @@
     {
       "file": "tests/test_trinity_push.py",
       "standard": "through_the_command",
-      "lines": [1547],
+      "lines": [1546],
       "reason": "Ruling (b): tp._RULES_CACHE.clear() empties the module's cache of the global rules file so the test reads its own tmp copy and can count re-reads; there is no public reset, and no door is added for the test. Leg 11 of DPLAN-0354."
     },
     {

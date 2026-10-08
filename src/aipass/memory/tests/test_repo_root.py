@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/repo_root.py."""
@@ -36,6 +36,7 @@ import importlib
 import inspect
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -44,6 +45,7 @@ import pytest
 
 import aipass.memory.tests.test_residency_scope as residency
 from aipass.memory.apps.handlers import repo_root as rr
+from aipass.memory.tests import support_fence
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.tests.dead_cwd import (
     ACCESSOR_SHAPE,
@@ -467,13 +469,7 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
             # the 3.10 accessor too, so import order stops deciding whether the
             # world is hostile — but a probe that reads in the order it takes
             # effect cannot quietly regrow the dependency.
-            f"{world}"
-            "import sys, pathlib\n"
-            f"sys.path.insert(0, {_src_root()!r})\n"
-            "import aipass.prax.apps.handlers.config.load as prax_load\n"
-            f"prax_load._find_repo_root = lambda: pathlib.Path({str(rr.SOURCE_ROOT)!r})\n"
-            f"import {module}\n"
-            "print('OK')\n"
+            f"{world}import sys, pathlib\nsys.path.insert(0, {_src_root()!r})\nimport {module}\nprint('OK')\n"
         )
         result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, (
@@ -504,8 +500,6 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
             f"{_DENY_CWD}"
             "import sys, pathlib\n"
             f"sys.path.insert(0, {_src_root()!r})\n"
-            "import aipass.prax.apps.handlers.config.load as prax_load\n"
-            f"prax_load._find_repo_root = lambda: pathlib.Path({str(rr.SOURCE_ROOT)!r})\n"
             # every registry on this machine becomes invisible, so the walk in
             # every lane runs off the end and the fallback is what answers
             "_real_exists = pathlib.Path.exists\n"
@@ -578,8 +572,6 @@ class TestBothConstructionsAgree:
         "pathlib.Path.exists = lambda self, *a, **k: (\n"
         "    False if self.name.endswith('_REGISTRY.json') else _real(self, *a, **k)\n"
         ")\n"
-        "import aipass.prax.apps.handlers.config.load as prax_load\n"
-        "prax_load._find_repo_root = lambda: pathlib.Path(__file__ if False else '/')\n"
         "from aipass.memory.apps.handlers import repo_root\n"
         "print('ANSWER', repo_root.find_repo_root())\n"
     )
@@ -864,28 +856,16 @@ class TestResolvingOwnFileIsACwdReadOnWindows:
     property of the STDLIB on that platform and reproducible here in six lines.
     Pinning "we are on Windows" would have pinned nothing runnable.
 
-    WHAT THIS CLASS DOES NOT CLAIM. It holds the OTHER branches' copy of the
-    template-born guard constant, because ``prax/apps/handlers/__init__.py``
-    carries the identical ``inspect.stack()`` defect and would crash first. That
-    is memory's half proved, and the fleet's half named rather than assumed —
-    routed to @spawn, who owns the template all eighteen copies came from.
+    It used to hold prax's guard and repo-root walk constant in the child, while
+    prax carried the same ``inspect.stack()`` defect. Prax's cure landed, and
+    since DPLAN-0404 (2026-10-08) no probe here reaches into another branch's
+    handlers: the child imports this branch alone.
     """
-
-    _HOLD_OTHER_BRANCHES = (
-        "import aipass.prax.apps.handlers as _prax_handlers\n"
-        "_prax_handlers._find_real_caller = lambda: (None, None)\n"
-        "import aipass.prax.apps.handlers.config.load as _prax_load\n"
-        f"_prax_load._find_repo_root = lambda: pathlib.Path({str(rr.SOURCE_ROOT)!r})\n"
-    )
 
     def _probe(self, module):
         return (
             "import sys, pathlib\n"
-            f"sys.path.insert(0, {_src_root()!r})\n"
-            + self._HOLD_OTHER_BRANCHES
-            + _WINDOWS_REALPATH
-            + _DENY_CWD
-            + f"import {module}\n"
+            f"sys.path.insert(0, {_src_root()!r})\n" + _WINDOWS_REALPATH + _DENY_CWD + f"import {module}\n"
             "print('OK')\n"
         )
 
@@ -1118,73 +1098,50 @@ class TestTheStackReadIsReproducibleAfterAll:
         )
 
 
-class TestTheDiagnosticBranchIsReachableAfterAll:
-    """The second correction of the day, and it is against my own sentence.
+class TestTheFenceStillJudgesInADeadWorkingDirectory:
+    """The old guard's dead-cwd pins, on the fence's public shape (DPLAN-0404, 2026-10-08).
 
-    I wrote — and @devpulse relayed fleet-wide — that the guard's
-    ``caller_file is None`` branch can only be watched structurally. The true
-    sentence is narrower: it is unreachable from IMPORT-shaped pins, because
-    ``apps/__init__.py`` does ``from . import handlers`` and so always supplies
-    a real-file frame. It is perfectly reachable by CALLING
-    ``_guard_branch_access()`` directly from a ``python -c`` child: every frame
-    is then a string pseudo-name or importlib, both skipped, ``_find_real_caller``
-    returns None, and the branch RUNS.
-
-    @spawn measured that; @devpulse confirmed it in their own tree before
-    relaying it. It is a better sentence than mine and it costs about fifteen
-    lines, so the excuse for not having the behavioural sibling was never the
-    price.
-
-    TWO ARMING PROBES, because this world has two ways to be silently inert and
-    each would leave the pin green while measuring nothing:
-
-    * the realpath denial might not bite at all, and
-    * the guard might be reaching a DIFFERENT path — if ``_find_real_caller``
-      returns a real file, the branch under test never runs and the assertion
-      below is about code that did not execute.
-
-    The second probe is the one I would not have written a week ago. "The test
-    passed" and "the test ran the line" are different claims, and only the
-    second one is worth anything in a world built by injection.
+    The class here used to call the old guard's private walk and its diagnostic
+    branch directly; the v2 fence replaced both. What those pins meant stands:
+    with ``os.getcwd()`` raising, the fence neither dies nor waves a caller
+    through. The probe is ``tests/support_fence.py``, run by runpy from a
+    ``python -c`` child so the world is in place before the first import;
+    ``<string>`` and runpy are transport, and the probe's own file decides.
     """
 
-    _WORLD = REALPATH_DENIED_WORLD
-    _SETUP = "import aipass.memory.apps.handlers as h\n"
-
-    def _child(self, body: str) -> subprocess.CompletedProcess:
-        probe = f"import sys\nsys.path.insert(0, {_src_root()!r})\n{self._WORLD}{self._SETUP}{body}"
-        return subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
-
-    def test_the_denial_bites_in_this_child(self):
-        """Arming probe 1: the world is hostile where the defect would live."""
-        result = self._child(
-            "import inspect\n"
-            "try:\n"
-            "    inspect.stack()\n"
-            "except FileNotFoundError:\n"
-            "    print('ARMED')\n"
-            "else:\n"
-            "    print('INERT')\n"
+    @staticmethod
+    def _run(seat: Path, shape: str) -> str:
+        """Run the fence probe at *seat* in a dead-cwd child; answer its one output line."""
+        probe = (
+            f"{_DENY_CWD}"
+            "import runpy, sys\n"
+            f"sys.path.insert(0, {_src_root()!r})\n"
+            f"sys.argv = [{str(seat)!r}, {shape!r}]\n"
+            f"runpy.run_path({str(seat)!r}, run_name='__main__')\n"
         )
+        result = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
+        assert result.returncode == 0, result.stderr[-600:]
+        return result.stdout.strip().splitlines()[-1]
+
+    def test_the_cwd_is_dead_in_the_child(self):
+        """Arming probe: the world bites, so the verdicts below were reached in it."""
+        probe = (
+            f"{_DENY_CWD}import os\ntry:\n    os.getcwd()\n    print('INERT')\nexcept OSError:\n    print('ARMED')\n"
+        )
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
         assert result.returncode == 0, result.stderr
-        assert "ARMED" in result.stdout, "realpath is not denied in this child: " + result.stdout
+        assert "ARMED" in result.stdout, result.stdout
 
-    def test_the_guard_really_takes_the_caller_is_none_branch_here(self):
-        """Arming probe 2: the line under test is the line that runs."""
-        result = self._child("print('CALLER', h._find_real_caller())\n")
-        assert result.returncode == 0, result.stderr
-        assert "CALLER (None, None)" in result.stdout, (
-            "a real-file frame reached the walk, so the diagnostic branch is NOT what the "
-            "pin below exercises: " + result.stdout
-        )
+    def test_kin_is_allowed_with_the_cwd_dead(self):
+        assert self._run(Path(support_fence.__file__), "pkg") == "ALLOWED"
 
-    def test_the_diagnostic_branch_returns_instead_of_crashing(self):
-        result = self._child("h._guard_branch_access()\nprint('RETURNED')\n")
-        assert result.returncode == 0, (
-            "the caller-is-None branch crashed with os.path.realpath denied — this is the "
-            "second inspect.stack() walk, regrown.\n" + result.stderr
-        )
-        assert "RETURNED" in result.stdout
+    def test_an_elsewhere_caller_is_refused_with_the_cwd_dead(self, tmp_path):
+        seat = tmp_path / "elsewhere" / "probe.py"
+        seat.parent.mkdir(parents=True)
+        shutil.copy(support_fence.__file__, seat)
+        assert self._run(seat, "pkg") == "DENIED Caller branch: unknown"
 
 
 class TestTheTwoWorldsMustNotBeStacked:
