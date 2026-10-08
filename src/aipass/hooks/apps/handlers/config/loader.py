@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Version: 2.0.0
+# Version: 2.0.1
 # Description: Hook config loader — the AIPass config from AIPASS_HOME, a project's own behind trust, gates always
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-09-30
+# Modified: 2026-10-08
 # =============================================
 
 """Which hook config a session runs. Security never depends on trust (DPLAN-0356 item 1).
@@ -170,9 +170,9 @@ def find_project_config() -> dict | None:
     (:func:`resolve_config` does), never "no hooks".
     """
     from aipass.hooks.apps.handlers.config.trust_registry import (
-        REGISTRY_PATH,
         bootstrap,
         is_trusted,
+        registry_path,
     )
 
     kind, where = locate_config()
@@ -180,7 +180,7 @@ def find_project_config() -> dict | None:
         return None
     config_file = where / _CONFIG
     if kind == EXTERNAL:
-        if not REGISTRY_PATH.exists():
+        if not registry_path().exists():
             bootstrap()
         if not is_trusted(str(where)):
             logger.warning(

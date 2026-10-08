@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_trust_registry.py
-# Version: 2.0.2
+# Version: 2.1.0
 # Description: Tests for trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-15
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/config/trust_registry.py and apps/handlers/config/loader.py's trust integration."""
@@ -95,6 +95,28 @@ class TestRegistryHelpers:
         with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
             result = read_registry()
         assert result == {"version": 1, "projects": {}}
+
+    def test_aipass_trust_registry_redirects_every_verb(self, temp_test_dir, mock_logger, monkeypatch):
+        """The public seam (DPLAN-0404 leg 12): one setenv moves enroll, is_trusted, read_registry and revoke,
+        and the default path is never written."""
+        default = temp_test_dir / "default.json"
+        redirected = temp_test_dir / "elsewhere" / "registry.json"
+        monkeypatch.setenv("AIPASS_TRUST_REGISTRY", str(redirected))
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", default):
+            project = self._enrolled(temp_test_dir, '{"v": 1}')
+            assert redirected.exists(), "enroll wrote somewhere other than $AIPASS_TRUST_REGISTRY"
+            assert str(project.resolve()) in json.loads(redirected.read_text(encoding="utf-8"))["projects"]
+            assert is_trusted(str(project)) is True
+            assert revoke(str(project)) is True
+            assert read_registry()["projects"] == {}
+        assert not default.exists()
+
+    def test_an_empty_aipass_trust_registry_falls_back_to_the_default(self, temp_test_dir, mock_logger, monkeypatch):
+        default = temp_test_dir / "default.json"
+        monkeypatch.setenv("AIPASS_TRUST_REGISTRY", "")
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", default):
+            project = self._enrolled(temp_test_dir, '{"v": 1}')
+        assert str(project.resolve()) in json.loads(default.read_text(encoding="utf-8"))["projects"]
 
     def test_read_registry_valid(self, temp_test_dir, mock_logger):
         reg_path = temp_test_dir / "registry.json"
@@ -787,6 +809,28 @@ class TestLoaderTrustIntegration:
         assert reg_path.exists()
         data = json.loads(reg_path.read_text(encoding="utf-8"))
         assert str(hostile_dir.resolve()) not in data["projects"]
+
+    def test_the_loader_reads_the_redirected_registry_before_bootstrapping(
+        self, temp_test_dir, mock_logger, monkeypatch
+    ):
+        """DPLAN-0404 leg 12: with $AIPASS_TRUST_REGISTRY set and the default absent, the loader asks the
+        redirected file whether a registry exists. Asking the default would bootstrap over the redirected
+        registry with AIPASS_HOME alone, and the enrolled project would lose its trust."""
+        aipass_dir = temp_test_dir / "real_aipass"
+        (aipass_dir / ".aipass").mkdir(parents=True)
+        (aipass_dir / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
+        project = temp_test_dir / "enrolled_project"
+        (project / ".aipass").mkdir(parents=True)
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
+        monkeypatch.setenv("AIPASS_TRUST_REGISTRY", str(temp_test_dir / "redirected.json"))
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", temp_test_dir / "absent.json"),
+            patch.dict("os.environ", {"AIPASS_HOME": str(aipass_dir)}),
+            _chdir(project),
+        ):
+            assert enroll(str(project)) is True
+            config = find_project_config()
+        assert config is not None, "the enrolled project lost its trust: the loader bootstrapped over its registry"
 
 
 def _install(root, gates_entry=True) -> Path:

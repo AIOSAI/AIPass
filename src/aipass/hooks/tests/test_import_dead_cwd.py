@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins hooks imports against a dead working directory (two worlds)
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/__init__.py's guard: every hooks module imports without a readable cwd."""
@@ -288,9 +288,25 @@ class TestTheCureCannotBeSilentlyReverted:
 
     def test_the_guard_source_is_actually_read(self):
         """Positive control for the checks below: a wrong path would let them
-        all pass while reading nothing."""
+        all pass while reading nothing. Fence v2's public line, never a private name."""
         text = GUARD_SOURCE.read_text(encoding="utf-8")
-        assert "_find_real_caller" in text and "_guard_branch_access" in text
+        assert 'MY_BRANCH = "hooks"' in text
+
+    def test_the_fence_lets_kin_through_with_no_cwd(self):
+        """The kin seat imports its handlers under world A (the ntpath-shaped denial): ALLOWED.
+
+        Rewritten for fence v2 (DPLAN-0404 leg 12, trigger's 1.4.0 the reference): the probe
+        tests/support_fence.py runs from its kin seat through runpy, so every frame the fence
+        walks is resolved with the cwd denied. Red against a frame walk whose resolve has no
+        OSError arm: the denied cwd kills the import and the probe never answers.
+        """
+        probe = BRANCH_ROOT / "tests" / "support_fence.py"
+        run_kin = f"\nimport runpy\nimport sys\nsys.argv = [{str(probe)!r}, 'pkg']\n"
+        result = _run_world(_WORLD_A, run_kin + "runpy.run_path(sys.argv[0], run_name='__main__')\n")
+        _assert_world_was_armed(result.stdout)
+        assert "ALLOWED" in result.stdout.splitlines(), (
+            f"the fence refused or died on its kin under a dead cwd:\nstdout={result.stdout}\nstderr={result.stderr}"
+        )
 
     @staticmethod
     def _inspect_stack_calls(source: str) -> list[int]:
@@ -342,8 +358,8 @@ class TestTheCureCannotBeSilentlyReverted:
 
     def test_the_guards_own_resolve_is_guarded(self):
         """The world-A conviction site. An unguarded resolve in this file is
-        reached by EVERY hooks import, because apps/__init__.py imports
-        handlers - so this one line decides the whole branch."""
+        reached by every import of hooks' handlers - the engine's and each
+        bridge's - so this one line decides every hook."""
         tree = ast.parse(GUARD_SOURCE.read_text(encoding="utf-8"))
         unguarded = [
             node.lineno

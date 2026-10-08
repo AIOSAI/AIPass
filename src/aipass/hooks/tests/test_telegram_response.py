@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_telegram_response.py
-# Version: 2.0.6
+# Version: 2.0.7
 # Description: Tests for telegram_response notification handler
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-15
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/notification/telegram_response.py."""
@@ -285,6 +285,27 @@ class TestFindPendingFile:
 
         assert result is None
 
+    def test_a_file_not_named_bot_star_is_never_matched(self, tmp_path, monkeypatch):
+        """Absorbed from skills' test_multibot_integration: only bot-*.json is read; a telegram-*.json whose
+        work_dir holds the cwd would match on everything but its name."""
+        pending_dir = tmp_path / "telegram_pending"
+        pending_dir.mkdir()
+        work = tmp_path / "project"
+        work.mkdir()
+        data = {"timestamp": time.time(), "work_dir": str(work)}
+        (pending_dir / "telegram-something.json").write_text(json.dumps(data), encoding="utf-8")
+        monkeypatch.chdir(work)
+
+        with (
+            patch(LOGGER_PATCH),
+            patch(f"{MOD}.PENDING_DIR", pending_dir),
+            patch(f"{MOD}.MIRROR_DIR", tmp_path / "no_mirror"),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
+        ):
+            result = find_pending_file()
+
+        assert result is None
+
 
 # ===========================================================================
 # _is_expired
@@ -296,6 +317,11 @@ class TestIsExpired:
 
     def test_fresh_not_expired(self, tmp_path):
         assert _found(tmp_path, {"timestamp": time.time()}) is True
+
+    def test_half_an_hour_old_is_inside_the_one_hour_ttl(self, tmp_path):
+        """Absorbed from skills' test_multibot_integration: the TTL is an hour, so 30 minutes old with no tmux
+        session to ask about is still handed back."""
+        assert _found(tmp_path, {"timestamp": time.time() - 1800}) is True
 
     def test_old_no_tmux_expired(self, tmp_path):
         with patch(f"{MOD}.subprocess.run") as mock_run:
@@ -641,6 +667,10 @@ class TestChunkText:
     def test_empty_text(self):
         result = chunk_text("")
         assert result == [""]
+
+    def test_text_with_no_boundary_is_cut_hard_at_the_limit(self):
+        """Absorbed from skills' test_multibot_integration: no sentence, newline or space to break at."""
+        assert chunk_text("a" * 200, limit=100) == ["a" * 100, "a" * 100]
 
 
 # ===========================================================================
