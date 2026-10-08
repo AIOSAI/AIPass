@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # Category: memory/tests
 # =============================================
 
@@ -21,7 +21,7 @@ import json
 import pytest
 import shutil
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Generator
 from unittest.mock import MagicMock
 
@@ -40,6 +40,7 @@ from aipass.memory.apps.handlers import write_fence as _write_fence
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.templates import trinity_push
 from aipass.cli.apps.modules import display
+from aipass.memory.tests.support_config_verbs import _real_verbs
 
 # The branch shim's own file, so the service can resolve memory's json directory
 # the way the shim does, without importing (and caching) the memory json package
@@ -457,3 +458,9 @@ def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
+
+
+@pytest.fixture
+def verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Real config_loader + rollover module wired to a MINTED config and registry (see :func:`_real_verbs`)."""
+    return _real_verbs(tmp_path, monkeypatch)

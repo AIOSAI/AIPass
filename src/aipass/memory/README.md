@@ -81,7 +81,13 @@ first one that claims a command, and turns a refusal into an exit code. `apps/mo
 business-logic module per verb — fleet, governance, health, limits, lint, pool, push, rollover,
 roots, search, symbolic, templates, todo, verify and watch — alongside `rollover_config` and
 `rollover_json`, which carry the `config` verb's implementation and the shared `--json` emitter for
-a `rollover` module that outgrew one file. `apps/handlers/` holds the implementation,
+a `rollover` module that outgrew one file. Eight door modules are the files a foreign branch may
+import, each a plain re-export of the handlers it opens: `door_auto_process` (the background
+auto-process launch), `door_config_loader` (config sections and the todo pad size),
+`door_entry_limits` (entry limits and file budgets), `door_plans_processor` (closed-plan
+vectorization), `door_registry_scope` (fleet and external branch scope), `door_tab_renderer` (the
+`*_meta` line rendering), `door_todo_report` (the todo pad's ready phrase) and `door_trinity_push`
+(the push's entry rules). `apps/handlers/` holds the implementation,
 grouped one directory per concern: `json/` (the fleet's json shim, the write gate, the caps and the
 closed shape), `rollover/` (the extractor, the normalizer, the todo roll), `templates/` (the trinity
 push and the gold templates), `tracking/` (line counts and the `*_meta` state tabs), `monitor/`

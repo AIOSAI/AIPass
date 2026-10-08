@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_import_isolation.py
 # Description: Pins against sys.modules poisoning of the handlers.json package
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-27
-# Modified: 2026-09-29
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for tests/conftest.py's handlers/json stand-in and the suite's sys.modules evictions."""
@@ -247,6 +247,15 @@ class TestNobodyEvictsThePackageOneWay:
     # left with their files, archived under tests/.archive/. Their subject was
     # the parked symbolic tier, so the stand-ins went with them rather than
     # being fixed. test_symbolic_extras.py stays — it is still on disk.
+    #
+    # 2026-10-08 (oversize split): the symbolic-extras stand-in moved verbatim
+    # into support_symbolic_extras.py, the helpers module both halves share, so
+    # its row moved with it and the scan below reads support_*.py too. A shared
+    # helpers module is where a moved stand-in lands; unscanned, it would hide.
+    # The same split moved _import_orchestrator into the extraction file. It
+    # stands in monitor and tracking, so the tracking row moved with it, and
+    # monitor is now listed twice: the original keeps its own through
+    # _import_rollover_module.
     KNOWN_BARE_PACKAGE_STAND_INS = {
         "conftest.py::aipass.prax.apps.modules",
         "test_rollover.py::aipass.memory.apps.handlers",
@@ -256,14 +265,16 @@ class TestNobodyEvictsThePackageOneWay:
         "test_rollover.py::aipass.memory.apps.handlers.rollover",
         "test_rollover_pipeline.py::aipass.memory.apps.handlers.monitor",
         "test_rollover_pipeline.py::aipass.memory.apps.handlers.rollover",
-        "test_rollover_pipeline.py::aipass.memory.apps.handlers.tracking",
-        "test_symbolic_extras.py::aipass.memory.apps.handlers.vector",
+        "test_rollover_pipeline_extraction.py::aipass.memory.apps.handlers.monitor",
+        "test_rollover_pipeline_extraction.py::aipass.memory.apps.handlers.tracking",
+        "support_symbolic_extras.py::aipass.memory.apps.handlers.vector",
     }
 
     def _bare_package_stand_ins(self):
         installs = re.compile(r"setitem\(sys\.modules,\s*\"([\w.]+)\"\s*,\s*([\w.]+)\s*\)")
         found_all = set()
-        for path in sorted(_TESTS.glob("test_*.py")) + [_TESTS / "conftest.py"]:
+        scanned = sorted(_TESTS.glob("test_*.py")) + sorted(_TESTS.glob("support_*.py")) + [_TESTS / "conftest.py"]
+        for path in scanned:
             source = path.read_text(encoding="utf-8")
             found = installs.findall(source)
             names = {name for name, _ in found}
