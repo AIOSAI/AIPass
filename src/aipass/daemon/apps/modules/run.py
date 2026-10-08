@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.6.1
+# Version: 1.6.2
 # Created: 2026-06-15
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -208,8 +208,8 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
             logger.warning("[run] Failed to fire %s/%s: %s", job["owner"], job["id"], detail)
         return (OUTCOME_FIRED if ok else OUTCOME_FAILED), detail
 
-    # Cross-branch handler import authorized by DPLAN-0204 §2.8
-    from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+    # Through ai_mail's published door (DPLAN-0404)
+    from aipass.ai_mail.apps.modules.door_wake import wake_branch
     from aipass.daemon.apps.handlers.schedule.telegram_notifier import (
         notify_triggered,
         notify_complete,

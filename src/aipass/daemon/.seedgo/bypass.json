@@ -8,7 +8,7 @@
     {
       "file": "apps/__init__.py",
       "standard": "cli_flags",
-      "reason": "File-wide because cli_flags passes no line. A package init, not an entry point (daemon, fleet green leg 5): it holds one comment and `from . import handlers`, takes no arguments and is never run, so --version has nothing to report."
+      "reason": "File-wide because cli_flags passes no line. A package init, not an entry point (daemon, fleet green leg 5): it holds one comment line and no code (DPLAN-0404 removed `from . import handlers`), takes no arguments and is never run, so --version has nothing to report."
     },
     {
       "file": "tests/__init__.py",
@@ -130,12 +130,6 @@
       "pattern": "discover_plugins"
     },
     {
-      "file": "apps/modules/run.py",
-      "standard": "encapsulation",
-      "reason": "Authorized cross-branch wake_branch import (DPLAN-0204 §2.8 path A). ai_mail exposes wake_branch only via its handler — ai_mail's own modules and @trigger import it identically; no module entry point exists to use. Root fix (an ai_mail module wrapper) is tracked separately.",
-      "pattern": "Handler imported directly"
-    },
-    {
       "file": "apps/handlers/schedule/telegram_notifier.py",
       "standard": "encapsulation",
       "reason": "Authorized cross-branch import (TDPLAN-0008 contract). daemon emits lifecycle pings via skills telegram notifier — the only send path; no module wrapper exists.",
@@ -179,12 +173,6 @@
     },
     {
       "file": "apps/modules/inbox_sweep.py",
-      "standard": "encapsulation",
-      "reason": "Authorized cross-branch wake_branch/is_wake_blocked import (DPLAN-0204 §2.8 path A, same as run.py). ai_mail exposes its wake surface only via that handler — ai_mail's own modules and @trigger import it identically; no module entry point exists. Root fix (an ai_mail module wrapper) is tracked separately.",
-      "pattern": "Handler imported directly"
-    },
-    {
-      "file": "apps/modules/inbox_sweep.py",
       "standard": "introspection",
       "reason": "Bare 'inbox-sweep' runs the sweep — that IS its primary function, and the scheduled job invokes it with no args. An introspection gate would make the daily job a no-op (same pattern as run.py, queue.py).",
       "pattern": "no-args gate"
@@ -194,12 +182,6 @@
       "standard": "modules",
       "reason": "Installer module — mkdir for ~/.config/systemd/user/ is the core purpose. Direct file ops are inherent to the install function.",
       "pattern": "direct file operations"
-    },
-    {
-      "file": "apps/modules/rotation.py",
-      "standard": "encapsulation",
-      "reason": "Authorized cross-branch wake_branch/is_wake_blocked import (DPLAN-0204 §2.8 path A, same as run.py and inbox_sweep.py). ai_mail exposes its wake surface only via that handler; no module entry point exists. Root fix (an ai_mail module wrapper) is tracked separately.",
-      "pattern": "Handler imported directly"
     },
     {
       "file": "apps/modules/rotation.py",

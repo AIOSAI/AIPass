@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_module.py
 # Description: Tests for the drone @daemon run module
-# Version: 1.2.0
-# Created: 2026-06-15
-# Modified: 2026-09-27
+# Version: 1.2.1
+# Created:2026-06-15
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -304,7 +304,7 @@ class TestRotationDelegation:
             results = self._tick(
                 live_job(),
                 runstate,
-                patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", side_effect=RuntimeError("no wake")),
+                patch("aipass.ai_mail.apps.modules.door_wake.wake_branch", side_effect=RuntimeError("no wake")),
             )
         assert (results["fired"], results["failed"]) == (0, 1)
         assert runstate["jobs"]["@commons/live"]["last_error"] == "no wake"
@@ -698,7 +698,7 @@ def telegram():
 @pytest.fixture
 def no_wake():
     """wake_branch, wired to fail loudly if a command job ever reaches it."""
-    wake = "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch"
+    wake = "aipass.ai_mail.apps.modules.door_wake.wake_branch"
     with patch(wake, side_effect=AssertionError("a command job woke someone")) as mock_wake:
         yield mock_wake
 

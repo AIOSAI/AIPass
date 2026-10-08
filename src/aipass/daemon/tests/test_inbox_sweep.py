@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_inbox_sweep.py
 # Description: Fleet inbox sweep tests — stale unread mail detection, wake policy and waking
-# Version: 1.1.0
-# Created: 2026-08-11
-# Modified: 2026-09-27
+# Version: 1.1.1
+# Created:2026-08-11
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/modules/inbox_sweep.py and the handlers/monitoring/inbox_scanner.py it drives."""
@@ -36,7 +36,7 @@ NOW = datetime(2026, 8, 11, 12, 0, 0)
 
 SCANNER = "aipass.daemon.apps.handlers.monitoring.inbox_scanner"
 DISCOVERY = "aipass.daemon.apps.handlers.schedule.discovery"
-WAKE = "aipass.ai_mail.apps.handlers.dispatch.wake"
+WAKE = "aipass.ai_mail.apps.modules.door_wake"
 
 
 # ── Fixtures ──────────────────────────────────────────

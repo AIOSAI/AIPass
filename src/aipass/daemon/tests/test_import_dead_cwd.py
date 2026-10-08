@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins daemon imports against a dead working directory
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/module_root.py — every daemon module imports without a readable working directory."""
@@ -490,15 +490,25 @@ class TestTheGuardNeverCallsInspectStack:
 # The resolve half of the same species, banned at parse level for the same
 # reason: a module-level Path(__file__).resolve() is an import-time
 # working-directory read, and no import-shaped pin can name WHICH line did it.
+# One shape is acquitted: a resolve inside a module-level try whose handler
+# catches OSError, the fence's own (DPLAN-0404 v2, apps/handlers/__init__.py),
+# because a dead cwd raises there and the handler takes the import on.
 # ---------------------------------------------------------------------------
 
 
+def _catches_oserror(handler: ast.ExceptHandler) -> bool:
+    """True when an except clause names OSError, alone or in a tuple."""
+    names = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+    return any(isinstance(name, ast.Name) and name.id == "OSError" for name in names)
+
+
 def _module_level_resolves(source: str) -> list:
-    """Lines calling .resolve() at MODULE level (outside any def/class).
+    """Lines calling .resolve() at MODULE level (outside any def/class), unguarded.
 
     Only module level: a resolve inside a function is reached when the function
     is called, and module_file() itself must be allowed to make the call it
-    exists to guard.
+    exists to guard. Only unguarded: a resolve in the body of a module-level try
+    that catches OSError cannot take the import down.
     """
     tree = ast.parse(source)
     nested = set()
@@ -506,6 +516,11 @@ def _module_level_resolves(source: str) -> list:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             for child in ast.walk(node):
                 nested.add(id(child))
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Try) and any(_catches_oserror(h) for h in stmt.handlers):
+            for node in stmt.body:
+                for child in ast.walk(node):
+                    nested.add(id(child))
 
     return [
         node.lineno

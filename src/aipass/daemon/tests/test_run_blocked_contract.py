@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_blocked_contract.py
 # Description: Blocked is not ran — a wake that never started must not consume the period
-# Version: 1.0.0
-# Created: 2026-08-30
-# Modified: 2026-09-28
+# Version: 1.0.1
+# Created:2026-08-30
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/modules/run.py — blocked is not ran: a wake that never started must not consume the period."""
@@ -146,9 +146,7 @@ def _fire_with(status, ok, job=None):
     Mutant killed through it: run.py's _BLOCKED_STEPS emptied (every gate read as a failure).
     """
     fake_wake = MagicMock(return_value=(status, ok))
-    outcome, detail, _ = _fire_due(
-        job or _job(), patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", fake_wake)
-    )
+    outcome, detail, _ = _fire_due(job or _job(), patch("aipass.ai_mail.apps.modules.door_wake.wake_branch", fake_wake))
     return (outcome, detail), fake_wake
 
 
@@ -218,7 +216,7 @@ class TestBlockedClassification:
 
     def test_an_exception_is_a_failure_not_a_block(self):
         outcome, detail, _ = _fire_due(
-            _job(), patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", side_effect=RuntimeError("boom"))
+            _job(), patch("aipass.ai_mail.apps.modules.door_wake.wake_branch", side_effect=RuntimeError("boom"))
         )
         assert outcome == OUTCOME_FAILED
         assert "boom" in detail

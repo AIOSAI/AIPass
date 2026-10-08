@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rotation.py
 # Description: Tests for the steward rotation handler and module
-# Version: 1.4.0
-# Created: 2026-08-12
-# Modified: 2026-09-27
+# Version: 1.4.1
+# Created:2026-08-12
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/modules/rotation.py and handlers/schedule/rotation.py — the nightly rounds (DPLAN-0287)."""
@@ -39,7 +39,7 @@ from aipass.daemon.apps.handlers.schedule.rotation import (
     render_prompt,
 )
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
-from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+from aipass.ai_mail.apps.modules.door_wake import wake_branch
 from aipass.daemon.apps.handlers.schedule.discovery import active_citizens, discover_jobs, framework_root
 from aipass.daemon.apps.modules import rotation as rotation_module
 from aipass.daemon.apps.modules import run as run_module
@@ -47,7 +47,7 @@ from aipass.daemon.apps.modules import run as run_module
 HANDLER = "aipass.daemon.apps.handlers.schedule.rotation"
 MODULE = "aipass.daemon.apps.modules.rotation"
 RUN = "aipass.daemon.apps.modules.run"
-WAKE_SEAM = "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch"
+WAKE_SEAM = "aipass.ai_mail.apps.modules.door_wake.wake_branch"
 SCHEDULE_FILE = Path(__file__).resolve().parents[1] / ".daemon" / "schedule.json"
 
 
@@ -530,7 +530,7 @@ class TestRotationCommand:
 
     def test_blocklist_filter_drops_blocked_branches(self, roster, capsys):
         """Mutant killed: _apply_wake_blocklist keeps a blocked entry."""
-        with patch("aipass.ai_mail.apps.handlers.dispatch.wake.is_wake_blocked", side_effect=lambda e: e == "@backup"):
+        with patch("aipass.ai_mail.apps.modules.door_wake.is_wake_blocked", side_effect=lambda e: e == "@backup"):
             status = rotation_json(capsys, roster, jobs=[rotation_job()], real_blocklist=True)
         assert [c["email"] for c in status["roster"]] == ["@commons"]
 
