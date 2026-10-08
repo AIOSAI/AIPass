@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_template_import_guard.py
 # Description: What the newborn's handler guard must survive on its very first import
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-08-30
 # Modified: 2026-10-08
 # =============================================
@@ -95,6 +95,41 @@ def _plant_newborn(root: Path, class_name: str) -> Path:
 def _run(script: str, cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-c", textwrap.dedent(script).strip()],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=str(cwd),
+    )
+
+
+# The import a stranger makes, by a variable so its line never spells the handlers:
+# the verdict is the fence's frame walk, not its line rule. Prints the refusal's
+# caller line, OTHER for a different ImportError, or ALLOWED.
+_FOREIGN_PROBE = """
+    import importlib
+
+    name = "aipass.newborn.apps." + "handlers"
+    try:
+        importlib.import_module(name)
+    except ImportError as exc:
+        callers = [ln.strip() for ln in str(exc).splitlines() if "Caller branch" in ln]
+        print(callers[0] if "ACCESS DENIED" in str(exc) and callers else "OTHER")
+    else:
+        print("ALLOWED")
+    """
+
+
+def _run_seat(seat: Path, root: Path, body: str, cwd: Path) -> subprocess.CompletedProcess:
+    """Write `body` as a file at `seat`, with the planted tree first on sys.path, and run it.
+
+    A real file, not `-c`: the fence judges a caller by its file's path, so the
+    seat is what makes the caller foreign, kin or unknown.
+    """
+    seat.parent.mkdir(parents=True, exist_ok=True)
+    head = f"import sys\n\nsys.path.insert(0, {str(root)!r})\n\n"
+    seat.write_text(head + textwrap.dedent(body).strip() + "\n", encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, str(seat)],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -2684,33 +2719,27 @@ def test_newborn_import_survives_a_cwd_that_cannot_be_read(class_name, world, tm
     assert lines[-1] == "IMPORTED"
 
 
-@pytest.mark.parametrize("world", sorted(PORTABLE_WORLDS))
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
-def test_resolve_is_never_reached_for_a_pseudo_filename(class_name, world, tmp_path):
-    """Ordering pin: pseudo-files are skipped before anything touches the disk.
+def test_a_cwd_inside_the_newborn_buys_a_foreign_seat_nothing(class_name, tmp_path):
+    """A pseudo filename is never resolved, pinned through the import a stranger makes.
 
-    Behaviourally identical to the pin above for today's code, but it fails on
-    the ORDERING rather than on the whole import — so a future rewrite that
-    reintroduces an early resolve() is named precisely.
+    Replaces the ordering pin that called the old guard's private _find_real_caller
+    (spawn's template leg, DPLAN-0404). Under v2.1 the frozen bootstrap's
+    '<frozen importlib._bootstrap>' frames are transport; resolved against a cwd
+    inside the newborn they would read as kin, and a foreign line that does not
+    spell the handlers would be let through (measured 2026-10-08, devpulse's flip).
     """
     root = _plant_newborn(tmp_path / "tree", class_name)
-    (tmp_path / "stand_here").mkdir()
 
-    result = _in_dead_cwd(
+    result = _run_seat(
+        tmp_path / "aipass" / "foreign" / "probe.py",
         root,
-        PORTABLE_WORLDS[world],
-        """
-        from aipass.newborn.apps.handlers import _find_real_caller
-
-        caller, line = _find_real_caller()
-        print("NO_CRASH")
-        """,
-        cwd=tmp_path / "stand_here",
+        _FOREIGN_PROBE,
+        cwd=root / "aipass" / "newborn",
     )
 
-    lines = _require_live_world(result, world)
-    assert result.returncode == 0, f"_find_real_caller still needs a cwd:\n{result.stderr}"
-    assert lines[-1] == "NO_CRASH"
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "Caller branch: foreign"
 
 
 # =============================================================================
@@ -2823,40 +2852,56 @@ class TestBothConstructionsAgree:
 
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
 def test_newborn_still_refuses_an_outside_caller(class_name, tmp_path):
-    """A file outside the newborn's tree importing its handlers is still blocked."""
+    """A file outside any aipass tree importing the newborn's handlers is refused as unknown."""
     root = _plant_newborn(tmp_path / "tree", class_name)
 
-    outsider = tmp_path / "outsider"
-    outsider.mkdir()
-    caller = outsider / "trespass.py"
-    caller.write_text(
-        textwrap.dedent(
-            f"""
-            import sys
+    result = _run_seat(tmp_path / "outsider" / "trespass.py", root, _FOREIGN_PROBE, cwd=tmp_path)
 
-            sys.path.insert(0, {str(root)!r})
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "Caller branch: unknown"
 
-            try:
-                import aipass.newborn.apps.handlers
-            except ImportError as exc:
-                print("BLOCKED" if "ACCESS DENIED" in str(exc) else "OTHER")
-            else:
-                print("ALLOWED")
-            """
-        ).strip(),
-        encoding="utf-8",
+
+@pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
+def test_newborn_refuses_a_foreign_branch_and_names_it(class_name, tmp_path):
+    """A file under another branch's directory is refused, and the refusal names that branch."""
+    root = _plant_newborn(tmp_path / "tree", class_name)
+
+    result = _run_seat(tmp_path / "aipass" / "foreign" / "probe.py", root, _FOREIGN_PROBE, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "Caller branch: foreign"
+
+
+@pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
+def test_the_newborns_modules_door_is_open_to_a_foreign_branch(class_name, tmp_path):
+    """A foreign seat imports a newborn module that imports the handlers on its behalf.
+
+    Kin asked, so the fence lets it through: that is the door every other branch
+    is told to use. The door file is planted here (the scaffold ships none) and
+    names the handlers on its own kin line, which the fence never reads.
+    """
+    root = _plant_newborn(tmp_path / "tree", class_name)
+    modules = root / "aipass" / "newborn" / "apps" / "modules"
+    modules.mkdir()
+    (modules / "__init__.py").write_text("", encoding="utf-8")
+    (modules / "door_probe.py").write_text(
+        "from aipass.newborn.apps.handlers import MY_BRANCH\n\n__all__ = ['MY_BRANCH']\n", encoding="utf-8"
     )
 
-    result = subprocess.run(
-        [sys.executable, str(caller)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=str(tmp_path),
+    result = _run_seat(
+        tmp_path / "aipass" / "foreign" / "probe.py",
+        root,
+        """
+        import importlib
+
+        door = importlib.import_module("aipass.newborn.apps.modules.door_probe")
+        print("ALLOWED " + door.MY_BRANCH)
+        """,
+        cwd=tmp_path,
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "BLOCKED"
+    assert result.stdout.strip() == "ALLOWED newborn"
 
 
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)

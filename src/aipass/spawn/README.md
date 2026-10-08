@@ -93,8 +93,10 @@ concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verif
 
 `templates/citizen/` is the one template both classes mint from, and its
 `.spawn/.template_registry.json` manifest is what a mint is verified against — change a
-template file and regenerate that manifest in the same pass. `templates/docs_page.md`, the
-docs page skeleton, sits beside it so that no mint ever stamps it.
+template file and regenerate that manifest in the same pass. A newborn is born fenced: the
+template's `apps/handlers/__init__.py` is the fleet's fence template (v2.1, DPLAN-0404), and
+its tests ship the fence pair `test_handlers_fence.py` and `support_fence.py`.
+`templates/docs_page.md`, the docs page skeleton, sits beside it so that no mint ever stamps it.
 
 The full directory tree lives in this branch's own prompt
 (`.aipass/aipass_local_prompt.md`) — one place, so it cannot disagree with itself.

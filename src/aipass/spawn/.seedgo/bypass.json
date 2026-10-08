@@ -114,7 +114,7 @@
     {
       "file": "tests/test_template_import_guard.py",
       "standard": "import_site",
-      "lines": [3124],
+      "lines": [3169],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision; HELD in leg 7): importlib.import_module in test_the_denier_actually_denies is the negative control. Its subject is the import attempt under the denier; a top-level import would succeed before the denier exists and prove nothing. The sys.modules delitems only drop cached aipass.memory modules so the finder is consulted, and monkeypatch restores them."
     },
     {

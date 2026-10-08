@@ -61,8 +61,15 @@ refuse_legacy_class("specialist")        # -> "" (not a retired name)
 is the separate lane for callers that must distinguish "this passport has not been migrated
 yet" from a hard error.
 
-`tests/test_modules_gateway.py` pins the door, and `tests/test_template_import_guard.py`
-pins what a newborn's own handler guard must survive on its first import.
+`tests/test_modules_gateway.py` pins the door, and `tests/test_handlers_fence.py` pins
+spawn's own fence (`apps/handlers/__init__.py`, v2.1, DPLAN-0404) in a fresh interpreter per
+case. Every newborn is born with the same fence: `templates/citizen/apps/handlers/__init__.py`
+is devpulse's fence template verbatim, placeholders intact, and the template ships the pair
+`tests/test_handlers_fence.py` and `tests/support_fence.py` so a newborn pins its own fence
+from its first run. `tests/test_template_import_guard.py` pins the template's fence before
+any mint: a foreign seat refused by name, an outside seat refused as unknown, kin and the
+modules door allowed, a dead cwd survived, and a cwd inside the newborn buying a foreign seat
+nothing.
 
 ---
 

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_scaffold.py
 # Description: Scaffold smoke test for template test infrastructure
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-04
-# Modified: 2026-08-31
+# Modified: 2026-10-08
 # =============================================
 
 """Scaffold smoke test — proves pytest infrastructure works in this branch.
@@ -60,7 +60,7 @@ def test_conftest_fixtures_available(request):
 def _inspect_stack_calls(source: str) -> list:
     """Line numbers of every ``inspect.stack()`` CALL in ``source``.
 
-    An AST matcher, not a string search: the guard's docstring names
+    An AST matcher, not a string search: a guard's docstring may name
     ``inspect.stack()`` while explaining what it replaced, and a spelling ban
     would convict the explanation.
     """
@@ -109,12 +109,10 @@ def test_the_handler_guard_never_walks_inspect_stack():
     CI gate 2026-08-31; the cure is to walk frames with ``sys._getframe`` and
     read ``frame.f_code.co_filename``, which asks the filesystem nothing.
 
-    WHY IT IS STRUCTURAL. The regression has no behavioural instrument. The
-    guard's ``caller_file is None`` branch is unreachable from any import-shaped
-    test, because ``apps/__init__.py`` always supplies a real-file frame —
-    measured identically across nine branches, where restoring the walk left the
-    whole suite green. A call that must not exist is pinned by reading the
-    source; there is nothing else to watch.
+    WHY IT IS STRUCTURAL. The regression shows only on Windows with a dead cwd,
+    so this suite has no portable behavioural instrument for it (the fence's own
+    behaviour is pinned in test_handlers_fence.py). A call that must not exist
+    is pinned by reading the source.
 
     Unlike the fixture smoke test above, this does NOT skip when a branch grows
     its own suite: the guard is inherited code that a branch rarely edits, which
