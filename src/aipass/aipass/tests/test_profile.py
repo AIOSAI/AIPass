@@ -3,7 +3,7 @@
 # Description: Tests for aipass profile Phase 3
 # Version: 1.2.6
 # Created: 2026-04-16
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/modules/profile.py and the handlers it drives."""
@@ -137,9 +137,14 @@ class TestWriteDurability:
 
     @staticmethod
     def _fail_the_replace():
-        """Patch the handler's replace step to raise, as a full disk would."""
+        """Patch the json service's replace step to raise, as a full disk would.
+
+        Through prax's package path, the seam prax published for this test
+        (DPLAN-0404): the fence refuses a foreign import of its handlers, and
+        the private _replace_with_retry this patched by its handler path is gone.
+        """
         return patch(
-            "aipass.prax.apps.handlers.json.json_service._replace_with_retry",
+            "aipass.prax.json_handler.replace_with_retry",
             side_effect=OSError("no space left on device"),
         )
 
