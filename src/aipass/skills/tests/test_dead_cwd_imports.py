@@ -1,12 +1,14 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import pins
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.1.0 (2026-10-08): The old guard's caller-is-None case, read through
+#     private names, becomes two dead-cwd pins on the v2 fence (DPLAN-0404)
 #   - v1.0.0 (2026-08-31): Windows round 4 - every skills module must import
 #     with an unreadable working directory, in two denial worlds
 #
@@ -378,6 +380,10 @@ if hasattr(_pl, "_NormalAccessor"):
     _pl._NormalAccessor.realpath = staticmethod(_denied_realpath)
 
 sys.path.insert(0, sys.argv[1])
+# The driver loads the shim first, from a <string> frame the fence reads as
+# transport: a_named_module sits under tmp, a foreign seat the fence refuses
+# (DPLAN-0404). The caller's name is this pin's subject; the fence has its own.
+import aipass.skills.apps.handlers.json.json_handler
 import a_named_module
 
 # inspect memoises filename -> module name, and a cache HIT returns before
@@ -532,96 +538,91 @@ def test_skill_creation_refuses_rather_than_guessing():
 
 
 # ---------------------------------------------------------------------------
-# The caller-is-None branch, measured by BEHAVIOUR as well as by parse tree
+# The fence under a dead cwd, through its public shape (DPLAN-0404)
 #
-# The round-4 guidance said only an AST ban can watch this branch. That was too
-# strong, and spawn measured the correction: the branch is unreachable from
-# IMPORT-shaped pins (apps/__init__.py always supplies a real-file frame), but
-# calling _guard_branch_access() DIRECTLY from a -c child reaches it - every
-# frame is then string-pseudo or importlib, both skipped, so _find_real_caller
-# returns None and the branch runs. A regrown inspect.stack() walk dies there
-# under a realpath denial; the cured plain return survives.
-#
-# The AST ban stays: it needs no subprocess and names the defect precisely.
-# This is its behavioural sibling, not its replacement.
+# The fence reads every frame's path, and Path.resolve reaches realpath, which
+# on Windows reads the cwd first. The child removes its own cwd (POSIX; Windows
+# holds a process's cwd open, so there world A's denial stands in for it), arms
+# world A on top, then runs tests/support_fence.py from a seat: kin must still
+# be let through and a seat outside any branch must still be refused by name.
 # ---------------------------------------------------------------------------
 
 
-_NONE_BRANCH_PROBE = r"""
+_FENCE_DEAD_CWD_DRIVER = r"""
 import os
-import os.path
+import runpy
 import sys
 
-import aipass.skills.apps.handlers as guard
-
-
-def _denied_realpath(*a, **k):
-    raise FileNotFoundError(2, "No such file or directory (dead cwd)")
-
-
-os.path.realpath = _denied_realpath
-
-# Pre-3.11 pathlib captured its realpath at class creation, so a bare module
-# rebind leaves the world inert on 3.10. Takes any arguments because a plain
-# function on a class arrives BOUND - the accessor is passed as self.
-import pathlib as _pl
-
-if hasattr(_pl, "_NormalAccessor"):
-    _pl._NormalAccessor.realpath = staticmethod(_denied_realpath)
-
-# ARMING PROBE 1 - the denial actually bites the call the defect makes. A world
-# spelled too realistically (running this as a script, where every frame is a
-# real on-disk file and getsourcefile early-returns) leaves the denial inert
-# and turns the assertion below vacuously green.
-import inspect
-
-inspect.modulesbyfile.clear()
-inspect._filesbymodname.clear()
+seat, shape, doomed = sys.argv[2:5]
+os.chdir(doomed)
 try:
-    inspect.stack()
+    os.rmdir(doomed)
 except OSError:
-    print("ARMED_DENIAL=1")
+    print("REMOVED=0")
+exec(os.environ["SKILLS_WORLD_TEXT"])
+
+# ARMING PROBE - a cwd the child can still read would make the verdict below
+# say nothing about a dead one.
+try:
+    os.getcwd()
+except OSError:
+    print("ARMED_CWD=1")
 else:
-    print("ARMED_DENIAL=0")
+    print("ARMED_CWD=0")
 
-# ARMING PROBE 2 - we are really in the caller-is-None branch, not some other
-# path that happens to return quietly.
-caller_file, _line = guard._find_real_caller()
-print("ARMED_NONE=%s" % (1 if caller_file is None else 0))
-
-guard._guard_branch_access()
-print("GUARD_RETURNED=1")
+sys.argv = [seat, shape]
+runpy.run_path(seat, run_name="__main__")
 """
 
 
-def test_caller_is_none_branch_returns_without_a_readable_cwd():
-    """Reaching the caller-is-None branch must not need a cwd.
+def _run_fence_with_a_dead_cwd(seat: Path, tmp_path: Path) -> list:
+    """Run the fence probe at `seat` (shape pkg) in a child whose cwd is gone.
 
-    Both arming probes must report before the assertion means anything: a
-    denial that does not bite, or a stack that never produced None, would make
-    this pass over a live defect.
+    Returns:
+        list[str]: The child's stdout lines.
     """
-    env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
-    env.pop("AIPASS_TEST_LOG_DIR", None)
+    doomed = tmp_path / "doomed_cwd"
+    doomed.mkdir()
+    env = dict(os.environ, PYTHONPATH=str(SRC_ROOT), SKILLS_WORLD_TEXT=WORLD_A)
     result = subprocess.run(
-        [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", _NONE_BRANCH_PROBE],
+        [
+            sys.executable,
+            "-c",
+            "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))",
+            _FENCE_DEAD_CWD_DRIVER,
+            str(seat),
+            "pkg",
+            str(doomed),
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",
         env=env,
-        cwd=str(SRC_ROOT),
+        cwd=str(tmp_path),
         timeout=60,
     )
-    assert "ARMED_DENIAL=1" in result.stdout, (
-        f"the realpath denial did not bite inspect.stack(); this pin would be "
-        f"vacuously green. stdout={result.stdout!r} stderr={result.stderr[-400:]!r}"
-    )
-    assert "ARMED_NONE=1" in result.stdout, (
-        f"_find_real_caller did not return None, so the branch under test never ran. stdout={result.stdout!r}"
-    )
-    assert result.returncode == 0 and "GUARD_RETURNED=1" in result.stdout, (
-        f"the guard could not complete the caller-is-None branch with an unreadable cwd: {result.stderr[-800:]}"
-    )
+    assert result.returncode == 0, f"the fence probe crashed under a dead cwd: {result.stderr[-800:]}"
+    lines = result.stdout.strip().splitlines()
+    assert "ARMED_CWD=1" in lines, f"the cwd was still readable, so this pin asserts nothing: {lines}"
+    return lines
+
+
+def test_the_fence_lets_kin_through_with_a_dead_cwd(tmp_path):
+    """The branch's own seat imports its handlers with no readable cwd."""
+    kin_seat = BRANCH_ROOT / "tests" / "support_fence.py"
+    assert _run_fence_with_a_dead_cwd(kin_seat, tmp_path)[-1] == "ALLOWED"
+
+
+def test_the_fence_refuses_an_elsewhere_seat_with_a_dead_cwd(tmp_path):
+    """A seat outside any branch is still refused, and named, with no readable cwd.
+
+    Without this, a fence that stopped working under a dead cwd would pass the
+    kin pin above by letting everybody in.
+    """
+    seat = tmp_path / "elsewhere" / "probe.py"
+    seat.parent.mkdir()
+    seat.write_bytes((BRANCH_ROOT / "tests" / "support_fence.py").read_bytes())
+    assert _run_fence_with_a_dead_cwd(seat, tmp_path)[-1] == "DENIED Caller branch: unknown"
 
 
 # ---------------------------------------------------------------------------
