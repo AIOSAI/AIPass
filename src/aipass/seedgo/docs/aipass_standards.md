@@ -48,7 +48,6 @@ The table below carries every other row.
 | encapsulation | all_files | production | No cross-branch imports, proper isolation |
 | error_handling | all_files | production | Try/except patterns, error propagation |
 | gateway_boundary | all_files | production | A branch writes its OWN private storage; another branch's goes through that branch's door |
-| handler_import | branch_level | production | apps/__init__.py contains `from . import handlers` |
 | handlers | all_files | production | Handler directory structure + handler independence |
 | hardcoded_key | all_files | everywhere | No hardcoded API keys or secrets |
 | hardcoded_path | all_files | everywhere | No hardcoded absolute paths |

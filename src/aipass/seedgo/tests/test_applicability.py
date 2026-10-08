@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.16.2
+# Version: 1.16.3
 # Created: 2026-08-09
-# Modified: 2026-10-07
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/applicability.py and its two consumers."""
@@ -167,6 +167,15 @@ def test_bug_finding_standards_still_apply_to_tests():
     checkers = discover_checkers()
     for name in ("windows_compat", "hardcoded_path", "silent_catch", "hardcoded_key", "ruff", "encapsulation"):
         assert applicability.applies_to(checkers[name]) == applicability.EVERYWHERE, name
+
+
+def test_the_handler_import_row_is_retired():
+    """handler_import DEMANDED 'from . import handlers', the line that killed the fence (DPLAN-0404).
+
+    One rule, not two: encapsulation's guard row convicts the line, so the row
+    that asked for it is gone from the pack.
+    """
+    assert "handler_import" not in discover_checkers()
 
 
 def test_trigger_is_production_only():

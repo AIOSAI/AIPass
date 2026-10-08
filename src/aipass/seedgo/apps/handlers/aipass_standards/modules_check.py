@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-07
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -137,6 +137,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     # Overall pass if score >= 75%
     overall_passed = score >= 75
+
+    # A door's verdict is its shape (DPLAN-0404): a CLI-shaped door scored 80
+    # and passed on the aggregate, so a failing Door shape row now fails the file
+    door_fault = [check for check in checks if check["name"] == "Door shape" and not check["passed"]]
+    if door_fault:
+        score, overall_passed = 0, False
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "modules"})
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "MODULES"}

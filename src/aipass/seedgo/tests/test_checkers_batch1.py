@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch1.py
 # Description: Unit tests for 8 aipass_standards checkers
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and seven batch-1 sibling checkers."""
@@ -187,6 +187,26 @@ def test_cli_flags_check_violation_caught(tmp_path):
     )
     result = check_cli_flags(str(entry_file))
     assert result["score"] < 100, f"Entry point without --version should lose points: {result}"
+
+
+def test_a_comment_only_apps_package_is_not_an_entry_point(tmp_path):
+    """The fenced apps/__init__.py is one comment line: no code, no --version asked (DPLAN-0404).
+
+    A package __init__ that carries code is still read, so the skip is the empty body, not the name.
+    """
+    apps_dir = tmp_path / "mybranch" / "apps"
+    apps_dir.mkdir(parents=True)
+    init_file = apps_dir / "__init__.py"
+    init_file.write_text("# MYBRANCH apps package\n", encoding="utf-8")
+    assert check_cli_flags(str(init_file)) == {
+        "passed": True,
+        "checks": [{"name": "Entry point check", "passed": True, "message": "Package marker with no code (skipped)"}],
+        "score": 100,
+        "standard": "CLI_FLAGS",
+    }
+
+    init_file.write_text("# MYBRANCH apps package\nfrom . import handlers\n", encoding="utf-8")
+    assert check_cli_flags(str(init_file))["passed"] is False
 
 
 def test_cli_flags_check_bypass_respected(tmp_path):

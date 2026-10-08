@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_json_handler_contract.py
 # Description: Fleet-wide contract suite over every branch json_handler
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-09-01
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for every branch's apps/handlers/json/json_handler.py, one contract over the fleet."""
@@ -52,7 +52,6 @@ import contextlib
 import copy
 import errno
 import hashlib
-import importlib
 import importlib.util
 import inspect
 import json
@@ -77,7 +76,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import CANO
 # absent — moving it into _fleet_roster() would put a product import back
 # inside a function for no behavioural gain.
 try:
-    from aipass.memory.apps.handlers.monitor.registry_scope import fleet_branches
+    from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 except Exception as exc:  # pragma: no cover - exercised only where @memory is absent
     logger.info("[json_handler_contract] @memory unreachable, the roster is the installed glob alone: %s", exc)
     fleet_branches = None
@@ -170,14 +169,18 @@ def handler_path(branch: str) -> Path:
     return ROSTER[branch] / HANDLER_RELPATH
 
 
-#: Every roster handler, imported ONCE, here at module level, before any test
+#: Every roster handler, loaded ONCE, here at module level, before any test
 #: can stage a replacement for it (template item 8).
 #:
-#: A core citizen is imported by its dotted name, which is what every other
-#: caller in the fleet uses. A RESIDENT has no dotted name inside `aipass`, so
-#: it is loaded from the file instead — the same module object either way, and
-#: the alternative was leaving those citizens unmeasured, which is the gap the
-#: roster widening closed.
+#: Every handler is loaded from its FILE, core citizen and resident alike. A
+#: core citizen used to be imported by its dotted name, but since the fences
+#: came back (DPLAN-0404, 2026-10-08) `aipass.<branch>.apps.handlers` refuses
+#: a foreign importer, and this suite is one: it is seedgo's instrument reading
+#: a specimen of each branch's handler, the way the checkers read sources, not
+#: a caller using the handler as a service. A file load executes the specimen
+#: without passing the fence, and a resident never had a dotted name inside
+#: `aipass` anyway; the alternative was leaving those citizens unmeasured,
+#: which is the gap the roster widening closed.
 #:
 #: ONE module object per branch, for the whole run. Loading the file afresh on
 #: each call returns a NEW module object every time, and a test that captures a
@@ -193,9 +196,6 @@ def handler_path(branch: str) -> Path:
 #: its tests skips naming the path (see :func:`implementation`).
 IMPLEMENTATIONS: dict[str, Any] = {}
 for _branch in BRANCHES:
-    if ROSTER[_branch].parent == PACKAGE_ROOT:
-        IMPLEMENTATIONS[_branch] = importlib.import_module(f"aipass.{_branch}.apps.handlers.json.json_handler")
-        continue
     _key = f"_aipass_contract_json_handler_{_branch}"
     _spec = importlib.util.spec_from_file_location(_key, handler_path(_branch))
     if _spec is None or _spec.loader is None:
@@ -1443,7 +1443,10 @@ def retry_label(relative: Path) -> str:
     return relative.parts[0] if canonical else relative.with_suffix("").as_posix()
 
 
-#: Label to dotted module path for every implementation the package ships.
+#: Label to file for every implementation the package ships. Each is loaded
+#: from its file by :func:`retry_implementation`, never by its dotted name:
+#: two of them live under a branch's ``apps/handlers`` and the fences refuse
+#: that import from seedgo (DPLAN-0404); this suite reads them as specimens.
 #:
 #: An ``rglob`` over the package rather than the two globs that would find the
 #: known families, and the difference is a measurement rather than a
@@ -1469,11 +1472,15 @@ def retry_label(relative: Path) -> str:
 #: asserted here; the floor below is, so a sweep that removes a copy cannot
 #: turn this red.
 RETRY_IMPLEMENTATIONS = {
-    retry_label(path.relative_to(PACKAGE_ROOT)): "aipass."
-    + ".".join(path.relative_to(PACKAGE_ROOT).with_suffix("").parts)
+    retry_label(path.relative_to(PACKAGE_ROOT)): path
     for path in shipped_python_files(PACKAGE_ROOT)
     if ships_retry_helper(path)
 }
+
+#: One module object per label for the whole run, for the same reason as
+#: :data:`IMPLEMENTATIONS`: a test that captures the helper from one load and
+#: patches another patches nothing.
+RETRY_MODULES: dict[str, Any] = {}
 
 #: One param per implementation, and deliberately no divergence table beside
 #: it. Every body was measured assertion-identical on 2026-09-02
@@ -1483,15 +1490,23 @@ RETRY_PARAMS = [pytest.param(label, id=label) for label in RETRY_IMPLEMENTATIONS
 
 
 def retry_implementation(label: str) -> Any:
-    """Import one implementation by its discovery label.
+    """Load one implementation from its file by its discovery label, once.
 
     Args:
         label: A key of :data:`RETRY_IMPLEMENTATIONS`.
 
     Returns:
-        The imported module.
+        The loaded module, the same object on every call.
     """
-    return importlib.import_module(RETRY_IMPLEMENTATIONS[label])
+    module = RETRY_MODULES.get(label)
+    if module is None:
+        key = "_aipass_contract_retry_" + label.replace("/", "_").replace(".", "_")
+        spec = importlib.util.spec_from_file_location(key, RETRY_IMPLEMENTATIONS[label])
+        assert spec is not None and spec.loader is not None, f"{label}: {RETRY_IMPLEMENTATIONS[label]} has no loader"
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        RETRY_MODULES[label] = module
+    return module
 
 
 def retry_helper_of(module: Any) -> Callable | None:
@@ -1766,11 +1781,11 @@ def test_retry_discovery_finds_the_whole_package_and_names_no_module_itself():
     that makes a consolidated suite more dangerous than the copies it
     replaced, since there is now one place to go quiet instead of seven. Pins
     a floor rather than a count so a new implementation does not turn this
-    red, and checks every discovered label really imports.
+    red, and checks every discovered label really loads.
     """
     assert len(RETRY_IMPLEMENTATIONS) >= 2, f"retry discovery found {RETRY_IMPLEMENTATIONS} under {PACKAGE_ROOT}"
-    for label, dotted in RETRY_IMPLEMENTATIONS.items():
-        module = importlib.import_module(dotted)
+    for label in RETRY_IMPLEMENTATIONS:
+        module = retry_implementation(label)
         assert retry_helper_of(module) is not None, f"{label}: discovered but exposes no bounded replace helper"
 
 

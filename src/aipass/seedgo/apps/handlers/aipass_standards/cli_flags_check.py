@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_flags_check.py
 # Description: CLI Flags Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -33,6 +33,20 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 # APPLIES_TO: entry-point flags; a test file has no --help.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
+
+#: The skip message for a package marker that carries no code.
+_EMPTY_MARKER = "Package marker with no code (skipped)"
+
+
+def _is_empty_package_marker(path: Path, content: str) -> bool:
+    """Whether this is an ``__init__.py`` whose every line is blank or a comment.
+
+    The fenced apps/__init__.py is one comment line (DPLAN-0404), and a package
+    marker with no code has no --version to ask for. One that carries code,
+    even a docstring, is still read as an entry point.
+    """
+    lines = (line.strip() for line in content.splitlines())
+    return path.name == "__init__.py" and all(not line or line.startswith("#") for line in lines)
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -92,6 +106,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "passed": False,
             "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
             "score": 0,
+            "standard": "CLI_FLAGS",
+        }
+
+    if _is_empty_package_marker(path, content):
+        return {
+            "passed": True,
+            "checks": [{"name": "Entry point check", "passed": True, "message": _EMPTY_MARKER}],
+            "score": 100,
             "standard": "CLI_FLAGS",
         }
 

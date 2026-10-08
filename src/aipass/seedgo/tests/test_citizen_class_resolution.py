@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_citizen_class_resolution.py
 # Description: Template baseline resolves class via spawn's modules gateway, never a mirror or a path join
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-28
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py resolving citizen_class via spawn's gateway."""
@@ -23,11 +23,13 @@ import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
 
-# The gateway is what production imports; the handler behind it is what these
-# tests read to enumerate cases (the retired-name list is spawn's to own, and a
-# test that hardcoded it would be the mirror coming back in through the door).
+# The gateway is what production imports; spawn's class_registry door is what
+# these tests read to enumerate cases (the retired-name list is spawn's to own,
+# and a test that hardcoded it would be the mirror coming back in through the
+# door). The door re-exports the handler's own objects (DPLAN-0404), so the
+# identity asserts below still compare spawn's functions.
 from aipass.spawn.apps import modules as spawn_gateway
-from aipass.spawn.apps.handlers import class_registry
+from aipass.spawn.apps.modules import door_class_registry as class_registry
 
 
 def _branch(tmp_path: Path, citizen_class: str) -> Path:

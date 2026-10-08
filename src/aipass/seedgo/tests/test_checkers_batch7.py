@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for checker sub-functions in encapsulation, imports, introspection, modules
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-04-25
-# Modified: 2026-10-07
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -1271,6 +1271,27 @@ class TestADoorReExportsItsOwnHandlersOnly:
         [door_row] = [check for check in result["checks"] if check["name"] == "Door shape"]
         assert door_row["passed"] is False
         assert named in door_row["message"]
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            ("__all__ = [", "def helper():\n    return 1\n\n\n__all__ = ["),
+            ("\n\n__all__", "\nfrom aipass.ai_mail.apps.handlers.wake import wake_branch\n\n__all__"),
+            ('"check_file_budget"]', '"check_file_budget", "wake"]'),
+        ],
+    )
+    def test_a_wrong_shaped_door_fails_the_standard_whatever_else_scores(self, tmp_path, change):
+        """The Door shape row is the verdict for a door: an 80 aggregate no longer passes it (DPLAN-0404)."""
+        result = modules_check.check_module(self._door(tmp_path, _DOOR.replace(*change)))
+        assert (result["passed"], result["score"]) == (False, 0)
+
+    def test_the_same_body_under_a_plain_name_keeps_the_aggregate(self, tmp_path):
+        """A non-door modules file at 80 (no handle_command) still passes: the aggregate rule stands."""
+        plain = tmp_path / "aipass" / "memory" / "apps" / "modules" / "entry_limits.py"
+        plain.parent.mkdir(parents=True)
+        plain.write_text(_DOOR, encoding="utf-8")
+        result = modules_check.check_module(str(plain))
+        assert (result["passed"], result["score"]) == (True, 80)
 
 
 # -- check_file_size (modules) -----------------------------------------------

@@ -200,7 +200,7 @@ in its leg 8. At that fix the checkers that pass no line were:
 accepted_and_never_used_parameter, architecture, cli_flags, cli_ux, commented_logger,
 conftest_fixtures, constant_predicate, dead_code, declared_pass_contradiction,
 declared_pass_symbol_resolves, deep_nesting, discarded_patch, docs_page, documentation,
-duplicate_test, error_handling, file_top, flag_never_passed, handler_import, handlers,
+duplicate_test, error_handling, file_top, flag_never_passed, handlers,
 help_flag_safety, imports, introspection, json_handler, json_structure, log_structure, meta,
 module_scope_side_effect, modules, naming, no_product_call, oversize_test_file, readme,
 readme_quality, retired_token_docstring, ruff_check, self_set_assert, shebang, silent_catch,

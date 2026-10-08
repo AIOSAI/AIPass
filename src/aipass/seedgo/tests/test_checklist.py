@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checklist.py
 # Description: Unit tests for the checklist module
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-10-07
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/modules/checklist.py."""
@@ -172,6 +172,11 @@ def test_a_door_passes_every_standard_on_the_checklist(tmp_path, monkeypatch):
     results = checklist.run_checklist(str(door))
     assert [r["standard"] for r in results if not r["passed"]] == []
     assert len(results) == 39
+
+    # The same door with a function in it is a wrong shape: modules FAILS on the
+    # checklist, not a tick at 80 (DPLAN-0404, measured on a CLI-shaped door 10-07)
+    door.write_text(door.read_text(encoding="utf-8") + "\n\ndef helper():\n    return 1\n", encoding="utf-8")
+    assert "modules" in [r["standard"] for r in checklist.run_checklist(str(door)) if not r["passed"]]
 
 
 def test_run_checklist_throwaway_temp_path_skipped(tmp_path, monkeypatch):
