@@ -3,8 +3,8 @@
 # Name: test_import_dead_cwd.py
 # Description: trigger imports without a readable cwd
 # Created: 2026-08-31
-# Modified: 2026-10-05
-# Version: 1.3.1
+# Modified: 2026-10-08
+# Version: 1.4.0
 # Category: trigger/tests
 # =============================================
 
@@ -58,6 +58,7 @@ import pytest
 
 from aipass.trigger.apps.config import module_file
 from aipass.trigger.apps.handlers import repo_root
+from aipass.trigger.tests import support_fence
 
 # Peers held constant in the healthy world, before the denial.
 #
@@ -877,57 +878,41 @@ def test_the_folding_injection_is_a_real_negative_control(tmp_path, monkeypatch)
 
 
 # ===========================================================================
-# The deleted second stack walk — reachable only OUTSIDE an import
+# The fence's kin walk under a dead cwd, through its public shape
 # ===========================================================================
 #
-# @cli's finding, 2026-08-31, and it landed on this branch too: the guard's
-# `caller_file is None` branch is UNREACHABLE from any import-shaped pin. During
-# a real import apps/__init__.py does `from . import handlers`, so there is
-# always a real-file frame above the guard and _find_real_caller never returns
-# None. MEASURED HERE: restoring the deleted inspect.stack() walk as a mutant
-# passed all 1058 trigger tests, including every world above. Five green pins and
-# the defect back in the tree.
-#
-# The branch is reachable exactly where it was meant to be — a REPL or a -c
-# script, the callers it exists to allow — so the world calls the guard directly
-# instead of importing something.
+# Until DPLAN-0404 leg 10 a world here called the old guard's private
+# _find_real_caller and _guard_branch_access by hand. Fence v2 has neither
+# shape to call, so the pin now runs the fence probe (tests/support_fence.py)
+# from its kin seat, the way test_handlers_fence does, under the ntpath-shaped
+# denial. Every frame the fence walks is resolved there, and kin must still pass.
+# The dead cwd is the file's emulation (os.getcwd raises FileNotFoundError), not
+# a real rmdir: Windows refuses to remove a process's own working directory.
 
-NO_CALLER_WORLD = (
+KIN_SEAT_WORLD = (
     _NTPATH_PREAMBLE
-    + r"""
-from aipass.trigger.apps.handlers import _find_real_caller, _guard_branch_access
+    + f"""
+import runpy
+import sys
 
-# Positive control: this world must actually REACH the branch under test.
-# A -c frame is spelled "<string>", which the walk skips, so there is no
-# caller outside this file and the guard takes its None arm.
-caller, line = _find_real_caller()
-if caller is None:
-    print("NO_CALLER_REACHED")
-else:
-    print("NO_CALLER_NOT_REACHED", caller)
-
-_guard_branch_access()
-print("IMPORTED")
+sys.argv = [{str(Path(support_fence.__file__))!r}, "pkg"]
+runpy.run_path(sys.argv[0], run_name="__main__")
 """
 )
 
 
-def test_the_no_caller_branch_needs_no_cwd():
-    """The guard's `caller_file is None` arm, under the ntpath-shaped denial.
+def test_the_fence_lets_kin_through_with_no_cwd():
+    """The kin seat imports its handlers under the ntpath-shaped denial: ALLOWED.
 
-    Red against a restored second inspect.stack() walk, which no import world
-    can reach. Credited to @cli, who found it by mutating their own identical
-    deletion and watching it stroll past five green pins.
+    Red against a fence whose frame walk resolves a path without its OSError arm:
+    the denied cwd then kills the import and the probe never answers.
     """
-    result = _run(NO_CALLER_WORLD)
+    result = _run(KIN_SEAT_WORLD)
     out = result.stdout
 
     assert "STACK_DIES" in out, f"the ntpath world went vacuous - this pin proves nothing:\n{out}"
-    assert "NO_CALLER_REACHED" in out, (
-        f"the guard found a caller, so its None arm never ran and this pin measured nothing:\n{out}"
-    )
-    assert "IMPORTED" in out, (
-        f"the guard's no-caller arm still depends on a readable cwd:\nstdout={out}\nstderr={result.stderr}"
+    assert out.strip().splitlines()[-1] == "ALLOWED", (
+        f"the fence refused or died on its own kin under a dead cwd:\nstdout={out}\nstderr={result.stderr}"
     )
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.9.0
+# Version: 2.9.1
 # Created: 2026-02-10
-# Modified: 2026-09-29
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -619,7 +619,8 @@ def handle_error_detected(
 
         # Wake the target branch so the email is processed immediately
         try:
-            from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+            # Through ai_mail's published door (DPLAN-0404), never its handlers.
+            from aipass.ai_mail.apps.modules.door_wake import wake_branch
 
             wake_branch(recipient, fresh=False, sender="@trigger")
         except Exception as exc:

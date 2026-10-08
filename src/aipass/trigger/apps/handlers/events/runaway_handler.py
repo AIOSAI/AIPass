@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-07-14
-# Modified: 2026-09-29
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -352,7 +352,8 @@ def handle_runaway_log_detected(
         _write_decision_log("delivered", gate_reason or "critical", file_path, target_branch)
 
         try:
-            from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+            # Through ai_mail's published door (DPLAN-0404), never its handlers.
+            from aipass.ai_mail.apps.modules.door_wake import wake_branch
 
             wake_branch(recipient, fresh=False, sender="@trigger")
         except Exception as exc:

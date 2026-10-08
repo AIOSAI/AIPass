@@ -3,7 +3,7 @@
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
 # Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
@@ -27,7 +27,7 @@ import pytest
 import aipass.trigger.apps.handlers as handlers_pkg
 import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.events.error_detected as error_detected
-from aipass.ai_mail.apps.handlers.dispatch import wake
+from aipass.ai_mail.apps.modules import door_wake as wake
 from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers import escalation
 
@@ -45,7 +45,8 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 
     Every edge that reaches outside is swapped with monkeypatch.setattr, so
     teardown restores it even when a test assigns over it directly:
-    _send_email (mail), wake.wake_branch (the lazy import wakes a branch),
+    _send_email (mail), wake.wake_branch (ai_mail's door_wake, which the
+    lazy import reads at call time, wakes a branch),
     the registry gates error_detected bound at import, json_handler's
     log_operation, the medic/branch-registry files and the logger. Escalation
     reaches error_registry.report (a registry write) by a lazy import, so

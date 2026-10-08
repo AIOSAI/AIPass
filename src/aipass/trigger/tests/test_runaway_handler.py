@@ -3,7 +3,7 @@
 # Description: Tests for the runaway_log_detected event handler
 # Version: 1.0.1
 # Created: 2026-08-09
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/events/runaway_handler.py."""
@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.ai_mail.apps.handlers.dispatch import wake as ai_mail_wake
+from aipass.ai_mail.apps.modules import door_wake as ai_mail_wake
 from aipass.trigger.apps import config as trigger_config
 from aipass.trigger.apps.handlers.events import runaway_handler as mod
 
@@ -52,7 +52,7 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: igno
     _trail.reset_mock()
     monkeypatch.setattr(trigger_config, "_append_jsonl", _trail)
 
-    # The handler imports wake_branch from its home at call time: replace it there
+    # The handler imports wake_branch from ai_mail's door at call time: replace it there
     monkeypatch.setattr(ai_mail_wake, "wake_branch", MagicMock())
 
     yield
