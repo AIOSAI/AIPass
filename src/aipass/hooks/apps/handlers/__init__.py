@@ -64,10 +64,16 @@ _FLEET_ROOT = _THIS_FILE.rsplit("/", 4)[0] + "/"
 def _frame_path(frame) -> str:
     """The frame's file as a forward-slash absolute path, or its raw spelling.
 
+    A pseudo filename (<frozen importlib._bootstrap>, <string>, <stdin>) is
+    not a path and is never resolved: relative, it would resolve against the
+    process cwd, and with the cwd inside this branch every bootstrap frame
+    would read as kin (measured 2026-10-08, devpulse's flip).
     Path.resolve routes through ntpath.realpath, which reads os.getcwd
     unconditionally; a process whose cwd was deleted must not die here.
     """
     raw = frame.f_code.co_filename
+    if raw.startswith("<"):
+        return raw
     try:
         return str(Path(raw).resolve()).replace("\\", "/")
     except OSError:
