@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_cli_routing.py
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
-# Version: 2.0.5
+# Version: 2.0.6
 # Created: 2026-06-12
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""
@@ -185,8 +185,12 @@ class TestModuleDiscovery:
         discovered = entry.discover_modules()
 
         found = sorted(module.__name__.split(".")[-1] for module in discovered)
-        on_disk = sorted(path.stem for path in entry.MODULES_DIR.glob("*.py") if not path.name.startswith("_"))
+        # A door publishes names and carries no handle_command (DPLAN-0404): not a command.
+        on_disk = sorted(
+            path.stem for path in entry.MODULES_DIR.glob("*.py") if not path.name.startswith(("_", "door_"))
+        )
         assert found == on_disk, f"discovery and apps/modules/ disagree: {found!r} vs {on_disk!r}"
+        assert "door_trail" not in found, "a door reached the router as a command module"
         # Not decoration: MODULES_DIR pointed somewhere empty would make both
         # sides [] and the equality above pass on nothing. These name modules
         # that must be in the list, and the identity check says the walk

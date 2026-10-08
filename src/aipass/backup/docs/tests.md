@@ -26,10 +26,10 @@ parametrised, so case counts run well ahead of function counts there.
 - **Real credentials.** A help-gate test once patched only one lane, so `all`
   fell through to live OAuth and rewrote the machine's real Google credentials
   file. The pins that closed it stay in `tests/test_cli_routing.py`.
-- **Fabricated filenames.** Tests that compile code under made-up paths keep
-  those paths under `tmp_path`; a fabricated name that looks like a real tree
-  file breaks the coverage report with no test failure at all. See
-  [the handlers fence](module_fence.md).
+- **The fence runs in fresh interpreters.** `tests/test_handlers_fence.py`
+  copies `tests/support_fence.py` to foreign seats under `tmp_path` and runs it
+  in a child process per case, because the fence only fires on a package's
+  first import. See [the handlers fence](module_fence.md).
 - **New test files.** They need permission by fleet policy. Editing an existing
   test file is normal work; adding one is a conversation with @devpulse first.
 

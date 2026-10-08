@@ -29,7 +29,9 @@ The handlers package guard walks `sys._getframe` rather than `inspect.stack()`.
 `inspect.stack()` calls `getmodule` → `getabsfile` → `os.path.realpath` on every
 frame with no guard (inspect.py:1009), so it dies before the guard's own
 skip-the-pseudo-frame logic is ever consulted. Reading `f_code.co_filename` off
-the frame touches no filesystem at all.
+the frame touches no filesystem at all; where the fence resolves a real frame's
+path it catches `OSError` and keeps the raw spelling, and a pseudo filename
+(`<string>`, `<frozen ...>`) is never resolved.
 
 Measured on 2026-08-31 by importing all 57 modules then in the tree, in a child
 interpreter under two injections: **57/57 failed to import before the cure, 0/57
