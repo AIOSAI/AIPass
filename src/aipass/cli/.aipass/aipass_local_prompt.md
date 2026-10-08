@@ -19,13 +19,13 @@ The face is `README.md`, kept short for strangers. Depth lives in `docs/`, one p
 
 ```
 cli/
-├── __init__.py                     top-level exports + cli_entry()
+├── __init__.py                     lazy top-level exports (PEP 562) + cli_entry()
 ├── apps/
 │   ├── cli.py                      entry point: main, run_cli, discover_modules, route_command
 │   ├── modules/                    public — import from here
 │   │   ├── display.py              messages, fatal, section, exit-code seam
 │   │   └── templates.py            operation_start, operation_complete
-│   ├── handlers/                   private — do not import from outside
+│   ├── handlers/                   private — the fence (v2.1) refuses a foreign importer
 │   │   ├── cli/help_flags.py       wants_help() — whole-sequence help detection
 │   │   ├── json/json_handler.py    shim binding the fleet json service in prax
 │   │   └── templates/              package only, no implementation
@@ -57,6 +57,7 @@ Three lines in `main()`, in order: `reset_command_state()` on entry, route, then
 
 These are the things that have actually broken here.
 
+ - The handlers fence is only as good as the packages above it. `apps/__init__.py` imports nothing and the package `__init__.py` loads display lazily; an eager import in either puts kin in every stack and opens the fence. `tests/test_handlers_fence.py` pins both.
  - `apps/modules/` must not import `aipass.prax` — circular, prax depends on this branch. Bypassed in `.seedgo/bypass.json`. The json shim is the one exception and is safe only because prax's `__init__` is lazy.
  - The json shim binds names (`log_operation = _h.log_operation`) and never wraps them. A `def` wrapper adds a frame and the service then logs to the wrong document.
  - Import the json handler as a module, then call through it. The seedgo AST checker matches that exact shape.

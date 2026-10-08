@@ -1,25 +1,31 @@
 # =================== AIPass ====================
 # META DATA HEADER
 # Name: test_import_dead_cwd.py - cli imports without a readable cwd
-# Description: Every cli module imports, and its call-time sites run, with the cwd deleted
-# Version: 1.1.0
+# Description: Every cli module imports, the fence decides, and call-time sites run, with the cwd deleted
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # Category: cli/tests
 # =============================================
 
 """Tests for apps/handlers/__init__.py and every cli import-time site — imports with no readable cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — the OS cwd read behind pathlib.Path.resolve(); emulated, the instrument tests pin it fires
-# seedgo: no-test-needed(standard) — the guard's refuse/allow contract with a healthy cwd; tests/test_handler_guard.py covers it
+# seedgo: no-test-needed(stdlib) — the OS cwd read behind Path.resolve(); emulated, the instrument tests pin it
+# seedgo: no-test-needed(standard) — the fence with a healthy cwd; tests/test_handlers_fence.py covers it
 
 import ast
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-# Every cli module must import without a readable working directory.
+import pytest
+
+from aipass.cli.tests import support_fence
+
+# Every cli module must import without a readable working directory, and the
+# handlers fence must still decide without one.
 #
 # THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
 # reported to this branch by @trigger): ntpath.realpath calls os.getcwd()
@@ -28,12 +34,9 @@ from pathlib import Path
 # those reached AT IMPORT is a working-directory read, and a process whose cwd was
 # deleted cannot import the module at all.
 #
-# WHY THIS BRANCH, LOUDLY. The handler guard at apps/handlers/__init__.py runs at
-# IMPORT time, and most of the fleet imports aipass.cli. @trigger could not get
-# their own dead-cwd pin past this branch: they preload aipass.cli.apps.modules in
-# the HEALTHY world so their pin can measure their own sites, and marked that
-# preload TEMPORARY - delete when @cli is cured. @commons and @devpulse carry the
-# same note. This file is what retires those three preloads.
+# WHY THIS BRANCH, LOUDLY. The handlers fence at apps/handlers/__init__.py runs at
+# IMPORT time and resolves every frame's path, and most of the fleet imports
+# aipass.cli. A fence that dies without a cwd takes the fleet's renderer with it.
 #
 # THE WORLD injects ntpath's behaviour as a CONDITION rather than a platform, so
 # the defect is reachable from Linux. The injection happens in a child process
@@ -54,12 +57,15 @@ from pathlib import Path
 # denies the call the DEFECT actually makes (@memory's rule), not one the platform
 # happens to catch first.
 
+KIN_PROBE = Path(support_fence.__file__)
+
 # Peers held constant in the HEALTHY world, before the denial, so a failure here
 # names a cli site and never a dependency's.
 _PRELOAD = r"""
 import rich.console  # noqa: F401
 import inspect  # noqa: F401
 import linecache  # noqa: F401
+import runpy  # noqa: F401
 """
 
 _NTPATH_PREAMBLE = (
@@ -106,113 +112,23 @@ except FileNotFoundError:
 """
 )
 
-# Every cli site that resolved a path or walked the stack at IMPORT, named one
-# per line so a failure says which module died rather than "the branch".
+# Every cli site that resolves a path at IMPORT, reached the way the fleet reaches
+# them: the modules door (which imports the handlers as kin), then the package's
+# lazy names. Named one per line so a failure says which step died.
 _SITES = r"""
-import aipass.cli.apps.handlers  # noqa: F401
-print("GUARD_OK")
-import aipass.cli.apps.handlers.json.json_handler  # noqa: F401
-print("JSON_OK")
 import aipass.cli.apps.modules  # noqa: F401
 print("MODULES_OK")
-import aipass.cli  # noqa: F401
+from aipass.cli import console  # noqa: F401
 print("IMPORTED")
 """
-
-GUARD_WORLD = (
-    _NTPATH_PREAMBLE
-    + r"""
-import aipass.cli.apps.handlers  # noqa: F401
-
-print("IMPORTED")
-"""
-)
 
 SWEEP_WORLD = _NTPATH_PREAMBLE + _SITES
 
-# The CALL-time site: log_operation() -> _get_caller_module_name() walked the
-# stack too. It never blocked an import, but log_operation is called from across
-# the fleet and would have raised in this world.
-# The guard's undeterminable-caller path, reached DIRECTLY.
-#
-# This one needs its own world and it is worth saying why, because the obvious
-# pin does not cover it. During a real import there is always a real-file frame
-# on the stack - apps/__init__.py does `from . import handlers` - so
-# _find_real_caller() finds it and the caller_file-is-None branch is never
-# entered. A mutation restoring the deleted second inspect.stack() walk therefore
-# SURVIVES every import-shaped pin above (measured, 2026-08-31). The branch is
-# only reachable by calling the guard directly, which is what a REPL or a -c
-# script does - exactly the callers that branch existed to allow.
-GUARD_NONE_PATH_WORLD = (
-    _PRELOAD
-    + r"""
-import os
-
-_real_realpath = os.path.realpath
-_real_abspath = os.path.abspath
-
-
-def _ntpath_realpath(path, **kw):
-    os.getcwd()
-    return _real_realpath(path, **kw)
-
-
-def _ntpath_abspath(path):
-    try:
-        return _real_abspath(path)
-    except OSError:
-        return path
-
-
-# Import in the HEALTHY world: this pin is about the guard being CALLED without
-# a cwd, not about importing it without one - that is the sweep's job.
-import aipass.cli.apps.handlers as h
-
-os.path.realpath = _ntpath_realpath
-os.path.abspath = _ntpath_abspath
-
-
-def _dead_getcwd():
-    raise FileNotFoundError(2, "cwd deleted", "")
-
-
-os.getcwd = _dead_getcwd
-
-import inspect
-
-try:
-    inspect.stack()
-    print("STACK_SURVIVES")
-except FileNotFoundError:
-    print("STACK_DIES")
-
-# From a -c script every frame is <string> or internals, so this is the
-# undeterminable-caller case by construction.
-caller = h._find_real_caller()
-print(f"CALLER_IS_NONE={caller == (None, None)}")
-h._guard_branch_access()
-print("IMPORTED")
-"""
-)
-
+# The CALL-time site: display.print_help() resolves __file__ to print the module
+# reference, and `drone @cli --help` in a dead-cwd world should not traceback.
 CALL_TIME_WORLD = (
     _NTPATH_PREAMBLE
     + r"""
-from aipass.cli.apps.handlers.json import json_handler
-
-# Reached through the service, because that is where it lives now: cli's
-# handler is a shim that BINDS the fleet json service (DPLAN-0325), and the
-# service owns caller detection for all 18 branches. Imported off cli's own
-# shim so the hop cli actually makes is the hop under test.
-import sys as _sys
-
-_service = _sys.modules[json_handler.log_operation.__self__.__class__.__module__]
-
-name = _service._get_caller_module_name()
-print(f"CALLER_NAME={name}")
-
-# display.print_help() resolves __file__ to print the module reference. Also
-# call-time, and `drone @cli --help` in a dead-cwd world should not traceback.
 import io
 import contextlib
 
@@ -224,6 +140,13 @@ print("HELP_OK")
 print("IMPORTED")
 """
 )
+
+
+def _fence_world(seat: Path, shape: str) -> str:
+    """The dead-cwd world, then the fence probe at `seat` run as a script."""
+    return _NTPATH_PREAMBLE + (
+        f"\nimport sys\nsys.argv[1:] = [{shape!r}]\nrunpy.run_path({str(seat)!r}, run_name='__main__')\n"
+    )
 
 
 def _run(world: str) -> subprocess.CompletedProcess:
@@ -257,6 +180,15 @@ def _inspect_stack_call_lines(tree: ast.Module) -> list:
     return lines
 
 
+@pytest.fixture
+def elsewhere_seat(tmp_path: Path) -> Path:
+    """A copy of the fence probe under a path with no branch segment at all."""
+    seat = tmp_path / "elsewhere" / "probe.py"
+    seat.parent.mkdir(parents=True)
+    shutil.copy(KIN_PROBE, seat)
+    return seat
+
+
 class TestTheInstrumentItself:
     """A positive control needs its own negative control (@spawn's rule)."""
 
@@ -286,19 +218,27 @@ print("IMPORTED")
         )
 
 
-class TestImportTimeSites:
-    def test_handlers_guard_survives_the_ntpath_shaped_denial(self):
-        """The guard must not walk inspect.stack().
+class TestTheFenceWithoutACwd:
+    """The fence resolves every frame's path; with no cwd it must still decide."""
 
-        RED against the pre-2026-08-31 spelling: the guard ran at import and
-        died at inspect.py:1009 in getmodule, before any of its own code ran.
-        """
-        result = _run(GUARD_WORLD)
+    def test_kin_is_allowed_with_the_cwd_deleted(self):
+        """This branch's own probe imports its handlers: allowed, not crashed."""
+        result = _run(_fence_world(KIN_PROBE, "pkg"))
         _assert_world_is_hostile(result.stdout)
-        assert "IMPORTED" in result.stdout, (
-            f"the handlers guard still depends on a readable cwd:\nstdout={result.stdout}\nstderr={result.stderr}"
+        assert result.stdout.strip().splitlines()[-1] == "ALLOWED", (
+            f"the fence did not allow kin without a cwd:\nstdout={result.stdout}\nstderr={result.stderr}"
         )
 
+    def test_an_elsewhere_caller_is_still_refused_with_the_cwd_deleted(self, elsewhere_seat):
+        """A dead cwd must not open the fence: a script outside any aipass tree is refused."""
+        result = _run(_fence_world(elsewhere_seat, "pkg"))
+        _assert_world_is_hostile(result.stdout)
+        assert result.stdout.strip().splitlines()[-1] == "DENIED Caller branch: unknown", (
+            f"the fence did not refuse a foreign caller without a cwd:\nstdout={result.stdout}\nstderr={result.stderr}"
+        )
+
+
+class TestImportTimeSites:
     def test_every_import_time_site_survives_a_denied_cwd(self):
         """The whole branch, which is what the fleet actually imports."""
         result = _run(SWEEP_WORLD)
@@ -308,42 +248,11 @@ class TestImportTimeSites:
         )
 
 
-class TestUndeterminableCallerPath:
-    """The branch that used to hold a SECOND inspect.stack() walk.
-
-    Both its arms returned None with no side effect - match and fall-through
-    alike - so the call could not change the answer. @prax's ruling, and
-    @trigger measured the same dead arm in their own copy: a call that needs a
-    working directory to compute a value nobody reads is pure exposure. Deleted
-    rather than wrapped, and pinned here because no import-shaped test reaches it.
-    """
-
-    def test_guard_called_without_a_cwd_allows_an_undeterminable_caller(self):
-        result = _run(GUARD_NONE_PATH_WORLD)
-        _assert_world_is_hostile(result.stdout)
-        assert "CALLER_IS_NONE=True" in result.stdout, (
-            "this world no longer produces an undeterminable caller, so it no "
-            f"longer exercises the deleted walk:\n{result.stdout}"
-        )
-        assert "IMPORTED" in result.stdout, (
-            "the guard's undeterminable-caller path still reads the cwd:\n"
-            f"stdout={result.stdout}\nstderr={result.stderr}"
-        )
-
-
 class TestCallTimeSites:
-    def test_log_operation_caller_detection_survives_a_denied_cwd(self):
-        """_get_caller_module_name walked inspect.stack() too.
-
-        Call-time, so it never blocked an import - but every branch calls
-        json_handler.log_operation(), and this would have raised there.
-        """
+    def test_print_help_survives_a_denied_cwd(self):
+        """print_help() resolves __file__ at call time; `drone @cli --help` must not traceback."""
         result = _run(CALL_TIME_WORLD)
         _assert_world_is_hostile(result.stdout)
-        assert "IMPORTED" in result.stdout, (
-            f"caller detection still depends on a readable cwd:\nstdout={result.stdout}\nstderr={result.stderr}"
-        )
-        assert "CALLER_NAME=" in result.stdout, f"caller detection did not return a name:\n{result.stdout}"
         assert "HELP_OK" in result.stdout, (
             f"print_help() still depends on a readable cwd:\nstdout={result.stdout}\nstderr={result.stderr}"
         )
@@ -353,15 +262,11 @@ class TestStructuralSweep:
     """AST ban on inspect.stack() in the files that run at import.
 
     REQUIRED BY THE ROLLOUT (@memory's rule, relayed by @devpulse): an
-    import-probe cannot see the caller-is-None branch, so a behavioural pin
-    alone can miss a reintroduced walk. Measured here and it is not theoretical
-    — a mutant restoring the deleted second walk survived every import-shaped
-    test in this file before TestUndeterminableCallerPath was added.
-
-    Parsed, not grepped: a string ban convicts docstrings, and this file's own
-    docstrings discuss inspect.stack() at length. The two pins are
-    complementary, not redundant — this one convicts the CODE, the direct-call
-    world convicts the BEHAVIOUR.
+    import-probe cannot see every branch of a stack walk, so a behavioural pin
+    alone can miss a reintroduced inspect.stack(). Parsed, not grepped: a string
+    ban convicts docstrings, and this file's own comments discuss inspect.stack()
+    at length. The two pins are complementary, not redundant — this one convicts
+    the CODE, the worlds above convict the BEHAVIOUR.
     """
 
     # Files whose module level runs on import of this branch.
