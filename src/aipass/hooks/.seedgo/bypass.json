@@ -1068,9 +1068,26 @@
       "reason": "Boot wrapper has no JSON file ops — delegates to cc_sessions module for session reads. No json_handler needed."
     },
     {
-      "file": "apps/handlers/lifecycle/session_boot.py",
+      "file": "tests/test_engine_contracts.py",
+      "standard": "through_the_command",
+      "lines": [30],
+      "reason": "Moved from tests/test_engine.py (split leg, 2026-10-08); the ruling of that file's through_the_command row, fleet green leg 9. _run_hook, ruling (c): dispatch() runs a command hook as a shell subprocess (a spawn); contract: exit code, stdout, stderr and elapsed_ms answered, TIMEOUT and OSError answered as exit -1, never raised. _log, ruling (b): the JSONL diagnostics writer, one JSON object appended per line, a failed write never raises."
+    },
+    {
+      "file": "tests/test_engine_safeguards.py",
+      "standard": "through_the_command",
+      "lines": [28, 463],
+      "reason": "Moved from tests/test_engine.py (split leg, 2026-10-08); the ruling of that file's through_the_command row, fleet green leg 9. _run_handler, ruling (c): on a timeout dispatch()'s far side speaks the timeout through the sound player (a spawn); contract: a handler outside aipass.* is refused before import, a hung handler answers TIMEOUT at its timeout, a raising one answers exit -1. _log, ruling (b): the JSONL diagnostics writer; line 463's hasattr pin (line 1614 before the split) is the json-handler shape the module keeps."
+    },
+    {
+      "file": "tests/support_cadence.py",
+      "standard": "state_leak",
+      "reason": "_reset_module_globals writes cadence's caches on the tests' behalf; the restore is conftest's _restore_cadence_globals, requested by every test of test_cadence.py and test_cadence_regroup.py through pytestmark. state_leak reads one file and cannot see a conftest fixture (its own Known limits). Split leg, 2026-10-08."
+    },
+    {
+      "file": "handlers/lifecycle/session_boot.py",
       "standard": "dead_code",
-      "reason": "Boot wrapper invoked via __main__ entry point from shell shim (tools/install_boot_shim.sh) — not engine-dispatched. boot() and main() called at process entry, not statically imported."
+      "reason": "The boot wrapper's launcher is the owner's shell, outside the repo by design: typing claude in a branch directory runs python -m aipass.hooks.apps.handlers.lifecycle.session_boot. Not engine-dispatched, imported by nothing. Path is apps-relative: dead_code matches the rule against handlers/..., never apps/handlers/... (2026-10-08)."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",
@@ -1509,10 +1526,31 @@
       "reason": "Fleet green leg 9, ruling (b), hooks' decision: three guards no public door reaches. resolve_session_pid walks from os.getpid() and its parents, so a dead PID never reaches the ppid lookup (contract: a failed ps answers None); find_live_for_cwd checks liveness first, so a dead PID never reaches the /proc start read (contract: unreadable answers None, liveness only) nor a non-int pid the identity check (contract: cannot check, keep). The live halves of the same helpers are read through resolve_session_pid, find_live_for_cwd and the sessions listing."
     },
     {
-      "file": "tests/test_telegram_response.py",
+      "file": "tests/test_telegram_response_delivery.py",
       "standard": "through_the_command",
-      "lines": [26],
-      "reason": "Fleet green leg 9, ruling (c), hooks' decision: the import of _advance_pending, _deliver_chunks, _prepend_branch_prefix, _send_with_retry and _write_delivery_log. Their one public door is handle(), whose far side sends to the Telegram Bot API (send_to_telegram/edit_telegram_message over urlopen), writes the delivery log and rewrites or unlinks the bot's pending file; telegram's send is a named far side. Contract: retry until ok, edit-then-send per chunk, the pending cursor advances to the transcript's line count, one JSONL record per delivery. _is_expired and _extract_user_text are read through find_pending_file and extract_mirror_turn."
+      "lines": [22],
+      "reason": "Fleet green leg 9, ruling (c), hooks' decision: the import of _advance_pending, _deliver_chunks, _prepend_branch_prefix, _send_with_retry and _write_delivery_log. Their one public door is handle(), whose far side sends to the Telegram Bot API (send_to_telegram/edit_telegram_message over urlopen), writes the delivery log and rewrites or unlinks the bot's pending file; telegram's send is a named far side. Contract: retry until ok, edit-then-send per chunk, the pending cursor advances to the transcript's line count, one JSONL record per delivery. _is_expired and _extract_user_text are read through find_pending_file and extract_mirror_turn. Moved from tests/test_telegram_response.py:26 (split leg, 2026-10-08)."
+    },
+    {
+      "file": "tests/test_telegram_response_mirror.py",
+      "standard": "through_the_command",
+      "lines": [23],
+      "reason": "Moved from tests/test_telegram_response.py:26 (split leg, 2026-10-08); the ruling of that row, fleet green leg 9, ruling (c): _advance_pending's one public door is handle(), whose far side sends to the Telegram Bot API. Contract here: a mirror mapping file is never unlinked, with or without a readable transcript."
+    },
+    {
+      "file": "tests/test_telegram_response.py",
+      "standard": "discarded_patch",
+      "reason": "Split leg, 2026-10-08: patch(LOGGER_PATCH) silences the prax logger and is observed only where a test asserts on it. Before the split LOGGER_PATCH was a file-local constant, which discarded_patch reads as not-own-branch; imported from support_telegram_response it reads as own-branch, so the same unchanged patches convict. The bypass is whole-file only (check_module takes no line). Cure (assert on the logger or drop the patch) is a test-body change, outside a no-body-edit split; reported to devpulse."
+    },
+    {
+      "file": "tests/test_telegram_response_delivery.py",
+      "standard": "discarded_patch",
+      "reason": "Split leg, 2026-10-08: the same unchanged patch(LOGGER_PATCH) lines as tests/test_telegram_response.py's discarded_patch row, moved here; that row's reason applies."
+    },
+    {
+      "file": "tests/test_telegram_response_mirror.py",
+      "standard": "discarded_patch",
+      "reason": "Split leg, 2026-10-08: the same unchanged patch(LOGGER_PATCH) lines as tests/test_telegram_response.py's discarded_patch row, moved here; that row's reason applies."
     },
     {
       "file": "tests/test_auto_fix.py",
@@ -1523,14 +1561,14 @@
     {
       "file": "tests/test_engine.py",
       "standard": "through_the_command",
-      "lines": [28, 1614],
+      "lines": [28],
       "reason": "Fleet green leg 9, hooks' decision. _run_hook, ruling (c): dispatch() runs a command hook as a shell subprocess (a spawn); contract: exit code, stdout, stderr and elapsed_ms answered, TIMEOUT and OSError answered as exit -1, never raised. _run_handler, ruling (c): on a timeout dispatch()'s far side speaks the timeout through the sound player (a spawn); contract: a handler outside aipass.* is refused before import, a hung handler answers TIMEOUT at its timeout, a raising one answers exit -1. _log, ruling (b): the JSONL diagnostics writer, one JSON object appended per line, a failed write never raises; dispatch writes the same file, and line 1614's hasattr pin is the json-handler shape the module keeps. _matches is read through dispatch() (_fires), _cc_len through a test-own UTF-16 count."
     },
     {
-      "file": "tests/test_session_boot.py",
+      "file": "tests/test_session_boot_lookups.py",
       "standard": "stdlib_patch",
-      "lines": [1505, 1516, 1529],
-      "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): real SIGTERM / real exec of tmux; no seam on exec or kill; on 10-05 leg 7 a def-time seam let the string-form patches miss and one run exec'd real tmux."
+      "lines": [283, 294, 307],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): real SIGTERM / real exec of tmux; no seam on exec or kill; on 10-05 leg 7 a def-time seam let the string-form patches miss and one run exec'd real tmux. Re-pointed from test_session_boot.py by the 2026-10-08 split."
     },
     {
       "file": "tests/test_session_boot.py",
@@ -1545,10 +1583,10 @@
       "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1505): patch(f\"{_MOD}.os.kill\"). The far side is a real signal: _stop_session sends SIGTERM to the session's pid, a live claude process of this machine, so no run may reach it. Its only public door is boot()'s menu, which also ends in an exec, so no door is safe; and no seam may stand on a kill, by the same 10-05 incident. The patch is the only guard, held at call time."
     },
     {
-      "file": "tests/test_session_boot.py",
+      "file": "tests/test_session_boot_lookups.py",
       "standard": "stdlib_patch",
-      "lines": [2002],
-      "reason": "Fleet green row 0 (leg 8, landed leg 10): Path.home patched to raise (unresolvable home), not an exec; no portable in-process way to make the real Path.home raise."
+      "lines": [381],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10): Path.home patched to raise (unresolvable home), not an exec; no portable in-process way to make the real Path.home raise. Re-pointed from test_session_boot.py by the 2026-10-08 split."
     },
     {
       "file": "tests/test_cc_sessions.py",
@@ -1571,8 +1609,14 @@
     {
       "file": "tests/test_session_boot.py",
       "standard": "through_the_command",
-      "lines": [71, 75, 92, 99, 105, 109, 119, 127, 131, 138, 143, 147, 153, 158, 161, 168, 175, 179, 184, 187, 190, 195, 199, 203, 207, 211, 218, 396, 401, 407, 416, 427, 437, 742, 758, 769, 780, 843, 856, 871, 877, 882, 893, 904, 913, 924, 933, 944, 958, 970, 974, 977, 990, 1003, 1016, 1184, 1237, 1336, 1357, 1360, 1363, 1366, 1379, 1391, 1399, 1408, 1417, 1424, 1429, 1434, 1437, 1443, 1466, 1470, 1476, 1477, 1487, 1491, 1498, 1507, 1518, 1531, 2009],
-      "reason": "Fleet green leg 9, ruling (c) without trial, devpulse's ruling for this file (the 10-05 incident): the module's only public doors are boot() and main(), and every path through them ends in os.execvp (claude, tmux new-session/attach-session, drone @prax monitor) or os.kill (SIGTERM on a stopped session), after spawning tmux, ps, the claude CLI and drone @daemon stop. No seam may bind on an exec, kill or spawn. The 24 names (_takeover_bg, _stop_session, _warn_on_version_drift, _name_flag, _is_descendant, _find_tmux_session_for_pid, _daemon_stop, _tmux_session_exists, _session_label, _resume_session, _is_session_file_present, _get_ppid, _tmux_kill_session, _make_session_name, _exec_in_tmux, _chat_age, _running_cli_version, _pinned_cli_version, _find_tmux, _start_fresh, _resolve_claude_binary, _find_manifest, _chat_line, _CHAT_LIMIT) are pinned at their own contracts with the exec and kill stood in."
+      "lines": [205, 210, 216, 225, 236, 246, 523, 539, 550, 561, 624, 637, 652, 658, 663, 674, 685, 694, 705, 714, 729, 742, 755, 923, 976, 1075, 1096, 1099, 1102, 1105, 1118, 1130, 1138, 1147, 1156, 1163, 1168, 1173, 1176, 1182],
+      "reason": "Fleet green leg 9, ruling (c) without trial, devpulse's ruling for this file (the 10-05 incident): the module's only public doors are boot() and main(), and every path through them ends in os.execvp (claude, tmux new-session/attach-session, drone @prax monitor) or os.kill (SIGTERM on a stopped session), after spawning tmux, ps, the claude CLI and drone @daemon stop. No seam may bind on an exec, kill or spawn. The 24 names (_takeover_bg, _stop_session, _warn_on_version_drift, _name_flag, _is_descendant, _find_tmux_session_for_pid, _daemon_stop, _tmux_session_exists, _session_label, _resume_session, _is_session_file_present, _get_ppid, _tmux_kill_session, _make_session_name, _exec_in_tmux, _chat_age, _running_cli_version, _pinned_cli_version, _find_tmux, _start_fresh, _resolve_claude_binary, _find_manifest, _chat_line, _CHAT_LIMIT) are pinned at their own contracts with the exec and kill stood in. Lines re-pointed by the 2026-10-08 split; the lookups half is the row for test_session_boot_lookups.py."
+    },
+    {
+      "file": "tests/test_session_boot_lookups.py",
+      "standard": "through_the_command",
+      "lines": [42, 46, 63, 70, 76, 80, 90, 98, 102, 109, 114, 118, 124, 129, 132, 139, 146, 150, 155, 158, 161, 166, 170, 174, 178, 182, 189, 201, 215, 227, 231, 234, 244, 248, 254, 255, 265, 269, 276, 285, 296, 309, 388],
+      "reason": "Moved from test_session_boot.py by the 2026-10-08 split, same ruling: fleet green leg 9, ruling (c) without trial, devpulse's ruling for session_boot (the 10-05 incident). Its only public doors, boot() and main(), end in os.execvp or os.kill after spawning tmux, ps and the claude CLI, and no seam may bind on an exec, kill or spawn. The lookups (_resolve_claude_binary, _find_tmux, _tmux_session_exists, _find_tmux_session_for_pid, _get_ppid, _is_descendant, _make_session_name, _name_flag, _session_label, _exec_in_tmux, _is_session_file_present, _tmux_kill_session, _stop_session, _start_fresh) are pinned at their own contracts with the exec and kill stood in."
     },
     {
       "file": "tests/test_temporal.py",

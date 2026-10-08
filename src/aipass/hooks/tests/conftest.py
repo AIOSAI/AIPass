@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.3.2
+# Version: 2.5.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -38,7 +38,8 @@ import pytest
 from aipass.cli.apps.modules import display
 from aipass.hooks.apps.handlers.config import diagnostics, trust_registry
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.hooks.apps.modules import cadence
+from aipass.hooks.apps.handlers.lifecycle import session_boot
+from aipass.hooks.apps.modules import cadence, cc_transcripts
 from aipass.hooks.apps.modules import diagnostics_state as ds
 
 collect_ignore_glob = [".archive/*"]
@@ -211,6 +212,72 @@ def isolated_cadence_state(tmp_path_factory, monkeypatch):
     """
     monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path_factory.mktemp("cadence_state"))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "pytest-session")
+
+
+@pytest.fixture
+def _restore_cadence_globals(monkeypatch):
+    """Hand cadence's module caches back as they were found, whatever a test wrote.
+
+    _reset_module_globals below writes them directly, mid-test, to model a new
+    process; monkeypatch records the originals here first and restores them at
+    teardown, so no cached turn or config leaks into the next test file.
+    """
+    monkeypatch.setattr(cadence, "_turn", None)
+    monkeypatch.setattr(cadence, "_config", None)
+    monkeypatch.setattr(cadence, "_turn_degraded", None)
+    yield
+
+
+@pytest.fixture
+def _no_real_trust_banners():
+    """dispatch() now runs both trust banners unconditionally on UserPromptSubmit.
+
+    Neutralize by default so the many dispatch()-calling tests in this file
+    never do a real CWD-to-home walk against the actual ~/.aipass registry.
+    Tests that want to exercise the banners override with their own nested
+    patch, which takes precedence inside its `with` block.
+    """
+    with (
+        patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
+        patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
+    ):
+        yield
+
+
+# Classes that test the tmux lookups themselves — they must see the real thing.
+_TMUX_OWN_TESTS = {
+    "TestFindTmux",
+    "TestTmuxSessionExists",
+    "TestFindTmuxSessionForPid",
+    "TestTmuxLookupsSurviveAMachineWithoutTmux",
+}
+
+
+@pytest.fixture
+def _no_real_tmux_lookup(request):
+    """Keep the MENU tests off a real subprocess.
+
+    Rendering the multi-session menu describes each live process, which asks
+    tmux where that process lives. That is a real `tmux list-panes` call: it
+    raises WinError 2 on the Windows runner (6 CI failures, 2026-08-18) and is
+    slow everywhere else. Whether [Enter] continues the last chat is not a
+    platform question, so the lookup is stubbed for every test except the ones
+    whose subject IS the lookup.
+    """
+    if request.cls is not None and request.cls.__name__ in _TMUX_OWN_TESTS:
+        yield
+        return
+    with patch.object(session_boot, "_find_tmux_session_for_pid", return_value=None):
+        yield
+
+
+@pytest.fixture
+def fake_projects(tmp_path, monkeypatch):
+    """Point the transcript reader at a throwaway projects root."""
+    root = tmp_path / "projects_root"
+    root.mkdir()
+    monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", root)
+    return root
 
 
 @pytest.fixture(autouse=True)
