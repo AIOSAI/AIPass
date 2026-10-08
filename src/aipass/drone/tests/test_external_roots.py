@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_external_roots.py
 # Description: Declared roots are the third resolution source
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-30
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py's declared-roots tier: externals resolve, never over a local."""
@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.memory.apps.handlers.monitor import registry_scope
+from aipass.memory.apps.modules import door_registry_scope as registry_scope
 from aipass.memory.apps.modules import fleet
 from aipass.drone.apps.handlers import registry_handler
 from aipass.drone.apps.handlers.registry_handler import reset_registry_path, set_registry_path

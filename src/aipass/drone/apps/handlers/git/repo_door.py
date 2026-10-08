@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-13
-# Modified: 2026-10-01
+# Modified: 2026-10-08
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -237,10 +237,10 @@ def admin_verdict() -> AdminVerdict:
         when refused, the exact refusal text.
     """
     try:
-        # Cross-branch handler import, named by @devpulse in the DPLAN-0344 brief:
-        # the admin contract has one home and this door consumes it rather than
-        # mirroring it. Lazy, so a dark lane refuses instead of breaking @git.
-        from aipass.ai_mail.apps.handlers.users import verified_caller as rail
+        # Through @ai_mail's door (DPLAN-0404): the admin contract has one home
+        # and this door consumes it rather than mirroring it. Lazy, so a dark
+        # lane refuses instead of breaking @git.
+        from aipass.ai_mail.apps.modules import door_verified_caller as rail
     except Exception as exc:
         logger.warning("git repo door: admin lane dark — verified-caller rail unavailable: %s", exc)
         return AdminVerdict(

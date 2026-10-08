@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access, new handlers, and PR deprecation
-# Version: 1.1.7
+# Version: 1.1.8
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py's git tiers and the git doors of apps/modules/git_module.py."""
@@ -1774,7 +1774,9 @@ class TestGhPassthroughHelp:
 # External-repo door — --repo <path>, admin seat only (DPLAN-0344)
 # ===========================================================================
 
-_RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller"
+_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
+# HELD (DPLAN-0404 leg 14): the door does not publish verify_admin_caller, the leg one test patches.
+_RAIL_HANDLER = "aipass.ai_mail.apps.handlers.users.verified_caller"
 
 
 def _git(cwd: Path, *argv: str) -> str:
@@ -1866,7 +1868,9 @@ class TestRepoDoorRefusals:
         _git(ext, "add", "new.txt")
         _git(ext, "commit", "-q", "-m", "local only")
 
-        with patch(f"{_RAIL}.verify_admin_caller", return_value=(False, "leg4 signature: no signing key")) as legs:
+        with patch(
+            f"{_RAIL_HANDLER}.verify_admin_caller", return_value=(False, "leg4 signature: no signing key")
+        ) as legs:
             result = handle_command("push", ["--repo", "projects/ext"])
 
         assert result == {"stdout": "", "stderr": repo_door.REFUSE_NOT_ADMIN.format(caller="@devpulse"), "exit_code": 1}
