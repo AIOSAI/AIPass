@@ -3,7 +3,7 @@
 # Description: Windows dead-cwd import defect - every api module imports without a readable cwd
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """Tests that every module under apps/ imports without a readable cwd, and apps/handlers/__init__.py's guard."""
@@ -232,9 +232,11 @@ class TestEveryModuleImportsWithoutAReadableCwd:
 
 # --------------------------------------------------------------------------
 # The pin-shape hole: the deleted inspect.stack() walk is UNREACHABLE from any
-# import-shaped test (apps/__init__ always supplies a real-file frame), so
+# import-shaped test (apps/__init__ always supplied a real-file frame), so
 # restoring the defect leaves every behavioural pin green (@trigger measured
-# this). Only a structural ban convicts it.
+# this). Only a structural ban convicts it. The v2.1 fence that replaced that
+# guard walks sys._getframe too, and apps/__init__ no longer imports it
+# (api, DPLAN-0404 fence leg); the ban reads the file, so it holds either way.
 #
 # An AST ban, never a string ban: the guard's docstring NAMES inspect.stack
 # while explaining the defect, and a spelling ban convicts the explanation.

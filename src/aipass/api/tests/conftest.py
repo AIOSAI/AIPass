@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for api tests
 # Version: 2.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-02
+# Modified: 2026-10-08
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -29,9 +29,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import importlib
 import logging
-import sys
 import threading
-import types
 from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock
@@ -51,12 +49,12 @@ BRANCH_MODULE = "api"
 _HANDLER_PKG = f"aipass.{BRANCH_MODULE}.apps.handlers"
 _JSON_MOD_PATH = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
-if _HANDLER_PKG not in sys.modules:
-    _stub = types.ModuleType(_HANDLER_PKG)
-    _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-    _stub.__path__ = [str(_handlers_dir)]
-    sys.modules[_HANDLER_PKG] = _stub
-
+# The real handlers package, fence and all: this file is kin and pytest is
+# transport, so the v2.1 fence lets it through. The stub that stood here kept
+# the old guard from refusing pytest's frames; it was bound onto apps only by
+# apps/__init__'s 'from . import handlers', and with that line gone a dotted
+# patch could no longer walk to it (api, DPLAN-0404 fence leg).
+importlib.import_module(_HANDLER_PKG)
 _json_mod = importlib.import_module(_JSON_MOD_PATH)
 
 # The host handlers the autouse fixtures below reset, imported plainly. None of

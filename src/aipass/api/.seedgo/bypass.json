@@ -243,7 +243,7 @@
     {
       "file": "tests/conftest.py",
       "standard": "through_the_command",
-      "lines": [234, 236],
+      "lines": [232, 234],
       "reason": "_refusals._reset_refusals() empties the refusal memory around every test, so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12)."
     }
   ],
