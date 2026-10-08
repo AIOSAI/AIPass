@@ -19,6 +19,18 @@ Standards specific to modules (orchestration layer). Modules coordinate workflow
 - **handle_command(args) -> bool pattern** - Standard entry point for drone routing
 - **Each module accepts ONE primary command - no aliases (Session 14 standard)** - Simplify routing logic
 
+### Doors — `apps/modules/door_<subject>.py` (DPLAN-0404, 2026-10-07)
+
+A door is how another branch reaches this branch's handlers. It is a thin re-export and nothing else: it imports only from its OWN branch's `apps.handlers` (plus the stdlib), defines no function or class, carries `__all__`, and every name in `__all__` is one it imported. The checker reads it as a "Door shape" row in place of `handle_command`, and introspection does not ask a door for `print_introspection`. A handler in another branch may import `aipass.<owner>.apps.modules.door_<subject>`: a branch's modules are its public gateway.
+
+```python
+"""Door: memory's entry limits, for other branches."""
+
+from aipass.memory.apps.handlers.json.entry_limits import check_file_budget, load_entry_limits
+
+__all__ = ["load_entry_limits", "check_file_budget"]
+```
+
 ---
 
 ## Module Responsibilities

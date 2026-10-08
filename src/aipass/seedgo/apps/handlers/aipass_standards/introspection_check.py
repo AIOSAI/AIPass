@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection_check.py
 # Description: Introspection Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-08
-# Modified: 2026-10-02
+# Modified: 2026-10-07
 # =============================================
 
 """
@@ -127,7 +127,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     # Determine file type from path
     is_entry_point = _is_entry_point(module_path, path)
-    is_module = "/modules/" in module_path and path.parent.name == "modules"
+    # A door (apps/modules/door_<subject>.py, DPLAN-0404) is a re-export with
+    # no CLI: the modules standard reads its shape, there is nothing to introspect
+    is_module = "/modules/" in module_path and path.parent.name == "modules" and not path.name.startswith("door_")
 
     # If neither entry point nor module, skip
     if not is_entry_point and not is_module:

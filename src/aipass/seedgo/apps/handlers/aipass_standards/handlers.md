@@ -125,6 +125,8 @@ json_handler.log_operation("validation_run", {"files": 42})
 
 **Core principle:** Handlers cannot import MODULES from their own branch (prevents circular dependencies).
 
+**Strings are imports (2026-10-07, DPLAN-0404).** The cross-branch rule also reads a handlers target named as a call's string: `importlib.import_module("aipass.<other>.apps.handlers...")` (any alias, or a seam whose name ends in `import_module`), `pkgutil.resolve_name(...)`, `patch(...)` (first positional), `<x>.setattr("...", ...)`, and a bare name bound once at module level to such a string. The conviction quotes the line with `(string import)`. Prose (docstrings, comments, assignments, log messages) is not read; same-branch targets stay allowed. Reach another branch through its door, `aipass.<owner>.apps.modules.door_<subject>`.
+
 ### Why This Matters
 
 **Circular dependency prevention:** If handlers import modules, and modules import handlers, you get import loops.

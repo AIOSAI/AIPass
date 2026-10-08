@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handlers_check.py
 # Description: Handlers Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-07
 # =============================================
 
 """
@@ -21,6 +21,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.string_imports import STRING_IMPORT_NOTE, iter_string_imports
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
@@ -255,6 +256,11 @@ def check_handler_independence(content: str, lines: List[str], module_path: str)
 
         # Forbidden: another branch's handlers are not ours to import
         forbidden_imports.append(f"line {lineno}: {_line_text(lines, lineno, module)}")
+
+    # The same rule over targets named as a call's string (DPLAN-0404 leg 1)
+    for lineno, target in iter_string_imports(content):
+        if _branch_of_import(target) != own_branch:
+            forbidden_imports.append(f"line {lineno}: {_line_text(lines, lineno, target)} {STRING_IMPORT_NOTE}")
 
     if forbidden_imports:
         return {

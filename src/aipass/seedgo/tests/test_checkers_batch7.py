@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for checker sub-functions in encapsulation, imports, introspection, modules
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-25
-# Modified: 2026-10-05
+# Modified: 2026-10-07
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -30,6 +30,7 @@ from aipass.seedgo.apps.handlers.aipass_standards import (
     handlers_check,
     imports_check,
     json_structure_check,
+    modules_check,
     silent_catch_check,
     unused_function_check,
 )
@@ -245,6 +246,50 @@ class TestCheckHandlerGuard:
         result = encapsulation_check.check_handler_guard(str(branch / "apps" / "x.py"))
         assert result is None
 
+    @pytest.mark.parametrize(
+        "eager_line",
+        ["from . import handlers", "from aipass.mybranch.apps import handlers", "import aipass.mybranch.apps.handlers"],
+    )
+    def test_an_apps_package_that_imports_handlers_fails_the_guard(self, tmp_path, monkeypatch, eager_line):
+        """The eager line kills the fence whatever the guard says (DPLAN-0404 leg 1)."""
+        monkeypatch.setattr(encapsulation_check, "_handler_guard_cache", {})
+        branch = tmp_path / "mybranch"
+        handlers_dir = branch / "apps" / "handlers"
+        handlers_dir.mkdir(parents=True)
+        (handlers_dir / "__init__.py").write_text("def _guard_branch_access():\n    pass\n", encoding="utf-8")
+        (branch / "apps" / "__init__.py").write_text(f'"""Apps."""\n{eager_line}\n', encoding="utf-8")
+        monkeypatch.setattr(
+            encapsulation_check, "get_branch_from_path", lambda fp: {"name": "mybranch", "path": str(branch)}
+        )
+
+        result = encapsulation_check.check_handler_guard(str(handlers_dir / "json" / "handler.py"))
+        assert result == {
+            "name": "Handler security guard",
+            "passed": False,
+            "message": "apps/__init__.py imports handlers: the fence sees its own package as every caller (2026-04-25)",
+        }
+
+    def test_the_v2_guard_call_passes_beside_a_clean_apps_package(self, tmp_path, monkeypatch):
+        """A module-level _guard_branch_access() call is the v2 marker; prose naming handlers is not an import."""
+        monkeypatch.setattr(encapsulation_check, "_handler_guard_cache", {})
+        branch = tmp_path / "mybranch"
+        handlers_dir = branch / "apps" / "handlers"
+        handlers_dir.mkdir(parents=True)
+        (handlers_dir / "__init__.py").write_text(
+            "from .guard import _guard_branch_access\n_guard_branch_access()\n", encoding="utf-8"
+        )
+        (branch / "apps" / "__init__.py").write_text('"""Never: from . import handlers."""\n', encoding="utf-8")
+        monkeypatch.setattr(
+            encapsulation_check, "get_branch_from_path", lambda fp: {"name": "mybranch", "path": str(branch)}
+        )
+
+        result = encapsulation_check.check_handler_guard(str(handlers_dir / "json" / "handler.py"))
+        assert result == {
+            "name": "Handler security guard",
+            "passed": True,
+            "message": "Handler security guard present (module-level _guard_branch_access() call)",
+        }
+
 
 # -- check_cross_branch_imports ----------------------------------------------
 
@@ -284,6 +329,99 @@ class TestCheckCrossBranchImports:
             lines, (tmp_path / "seedgo" / "apps" / "modules" / "a.py").as_posix(), "seedgo"
         )
         assert result["passed"] is True
+
+    def test_a_string_import_of_another_branch_fails_quoting_the_line(self, tmp_path):
+        """A handlers target passed to import_module is an import (DPLAN-0404 leg 1)."""
+        lines = _lines('x = 1\nmod = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")\n')
+        result = check_cross_branch_imports(
+            lines, (tmp_path / "hooks" / "apps" / "modules" / "a.py").as_posix(), "hooks"
+        )
+        assert result == {
+            "name": "Cross-branch handler imports",
+            "passed": False,
+            "message": (
+                "Line 2: memory.apps.handlers imported (string import) (use modules entry point): "
+                'mod = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")'
+            ),
+        }
+
+    def test_prose_and_a_same_branch_string_stay_acquitted(self, tmp_path):
+        """A string that is not a call's import argument is prose; one naming its own branch is kin."""
+        lines = _lines(
+            'NOTE = "aipass.memory.apps.handlers.json.entry_limits"\n'
+            'logger.info("aipass.memory.apps.handlers.json is memory\'s")\n'
+            'mod = importlib.import_module("aipass.hooks.apps.handlers.config.loader")\n'
+        )
+        result = check_cross_branch_imports(
+            lines, (tmp_path / "hooks" / "apps" / "modules" / "a.py").as_posix(), "hooks"
+        )
+        assert result == {
+            "name": "Cross-branch handler imports",
+            "passed": True,
+            "message": "No cross-branch handler imports detected",
+        }
+
+
+class TestTestsAreKinToTheirOwnBranchOnly:
+    """A file under tests/ is convicted for another branch's handlers, never its own (DPLAN-0404 leg 1)."""
+
+    @staticmethod
+    def _test_file(tmp_path, body: str) -> str:
+        """Seat a test file in a tmp branch named hooks and return its path."""
+        branch = tmp_path / "aipass" / "hooks"
+        (branch / "apps").mkdir(parents=True)
+        (branch / "tests").mkdir()
+        test_file = branch / "tests" / "test_gate.py"
+        test_file.write_text(body, encoding="utf-8")
+        return str(test_file)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "from aipass.memory.apps.handlers.json import entry_limits\n",
+            (
+                "from unittest.mock import patch\n\n"
+                'with patch("aipass.memory.apps.handlers.json.entry_limits.load"):\n    pass\n'
+            ),
+        ],
+    )
+    def test_another_branchs_handlers_convict_a_test(self, tmp_path, body):
+        """An import or a patch string into memory's handlers, from hooks' tests."""
+        result = encapsulation_check.check_module(self._test_file(tmp_path, body))
+        assert result["score"] == 0
+        assert [check["name"] for check in result["checks"]] == ["Cross-branch handler imports"]
+        assert result["checks"][0]["message"].startswith("Line ")
+
+    def test_a_nested_package_is_judged_by_the_branch_after_aipass(self, tmp_path):
+        """skills' own lib/telegram handlers are kin to skills' tests; the segment before apps is not the branch."""
+        body = (
+            "from aipass.hooks.lib.telegram.apps.handlers import notifier\n"
+            'patch("aipass.hooks.lib.telegram.apps.handlers.notifier.send")\n'
+        )
+        result = encapsulation_check.check_module(self._test_file(tmp_path, body))
+        assert result["score"] == 100
+
+    def test_own_handlers_and_a_source_fixture_stay_allowed(self, tmp_path):
+        """Own-branch imports and patches pass; a handlers import inside a triple-quoted fixture is prose."""
+        body = (
+            "from unittest.mock import patch\n"
+            "from aipass.hooks.apps.handlers.security import edit_gate\n"
+            'SOURCE = """\n'
+            "from aipass.memory.apps.handlers.json import entry_limits\n"
+            'patch("aipass.memory.apps.handlers.json.entry_limits.load")\n'
+            '"""\n'
+            'with patch("aipass.hooks.apps.handlers.security.edit_gate.run"):\n'
+            "    pass\n"
+        )
+        result = encapsulation_check.check_module(self._test_file(tmp_path, body))
+        assert result["score"] == 100
+        assert result["checks"] == [
+            {
+                "name": "Cross-branch handler imports",
+                "passed": True,
+                "message": "No cross-branch handler imports detected",
+            }
+        ]
 
 
 # -- check_cross_package_imports ---------------------------------------------
@@ -1074,6 +1212,65 @@ class TestCheckHandleCommand:
         assert result is not None
         assert result["passed"] is False
         assert "missing -> bool" in result["message"]
+
+
+# -- doors (apps/modules/door_<subject>.py) ---------------------------------
+
+_DOOR = (
+    '"""Door: memory\'s entry limits, for other branches."""\n\n'
+    "from __future__ import annotations\n\n"
+    "from aipass.memory.apps.handlers.json.entry_limits import check_file_budget, load_entry_limits\n\n"
+    '__all__ = ["load_entry_limits", "check_file_budget"]\n'
+)
+
+
+class TestADoorReExportsItsOwnHandlersOnly:
+    """A door is a thin re-export of its own branch's handlers (DPLAN-0404 leg 1)."""
+
+    @staticmethod
+    def _door(tmp_path, body: str) -> str:
+        """Seat a door in memory's modules and return its path."""
+        modules_dir = tmp_path / "aipass" / "memory" / "apps" / "modules"
+        modules_dir.mkdir(parents=True)
+        door = modules_dir / "door_entry_limits.py"
+        door.write_text(body, encoding="utf-8")
+        return str(door)
+
+    def test_the_door_shape_passes_without_a_handle_command(self, tmp_path):
+        """A door carries no CLI, so the handle_command row is not asked of it."""
+        result = modules_check.check_module(self._door(tmp_path, _DOOR))
+        door_row = [check for check in result["checks"] if check["name"] == "Door shape"]
+        assert door_row == [
+            {"name": "Door shape", "passed": True, "message": "Door re-exports only its own handlers (2 names)"}
+        ]
+        assert "handle_command pattern" not in [check["name"] for check in result["checks"]]
+        assert result["score"] == 100
+
+    @pytest.mark.parametrize(
+        ("change", "named"),
+        [
+            (
+                ("\n\n__all__", "\nfrom aipass.ai_mail.apps.handlers.wake import wake_branch\n\n__all__"),
+                "line 6: imports aipass.ai_mail.apps.handlers.wake",
+            ),
+            (("from __future__ import annotations", "from aipass.prax import logger"), "line 3: imports aipass.prax"),
+            (
+                ("__all__ = [", "def handle_command(command, args):\n    return True\n\n\n__all__ = ["),
+                "line 7: defines handle_command",
+            ),
+            (('__all__ = ["load_entry_limits", "check_file_budget"]', "X = 1"), "carries no __all__"),
+            (
+                ('"check_file_budget"]', '"check_file_budget", "wake"]'),
+                "__all__ names 'wake', which it does not import",
+            ),
+        ],
+    )
+    def test_anything_else_in_a_door_is_named(self, tmp_path, change, named):
+        """A foreign import, a non-stdlib import, a def, a missing __all__, an un-imported name."""
+        result = modules_check.check_module(self._door(tmp_path, _DOOR.replace(*change)))
+        [door_row] = [check for check in result["checks"] if check["name"] == "Door shape"]
+        assert door_row["passed"] is False
+        assert named in door_row["message"]
 
 
 # -- check_file_size (modules) -----------------------------------------------

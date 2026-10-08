@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.16.1
+# Version: 1.16.2
 # Created: 2026-08-09
-# Modified: 2026-09-27
+# Modified: 2026-10-07
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/applicability.py and its two consumers."""
@@ -154,14 +154,18 @@ def test_no_checker_applies_to_retired_code(tmp_path):
 def test_structural_standards_are_declared_production_only():
     """These failed on 25-96% of every branch's test files before they were scoped."""
     checkers = discover_checkers()
-    for name in ("architecture", "encapsulation", "handlers", "modules", "meta", "documentation", "cli"):
+    for name in ("architecture", "handlers", "modules", "meta", "documentation", "cli"):
         assert applicability.applies_to(checkers[name]) == applicability.PRODUCTION, name
 
 
 def test_bug_finding_standards_still_apply_to_tests():
-    """Scoping, not muting: Windows CI runs the whole suite, so a bad path in a test is real."""
+    """Scoping, not muting: Windows CI runs the whole suite, so a bad path in a test is real.
+
+    encapsulation joined on 2026-10-07 (DPLAN-0404 leg 1): a test is asked only
+    whether it imports or patches ANOTHER branch's handlers.
+    """
     checkers = discover_checkers()
-    for name in ("windows_compat", "hardcoded_path", "silent_catch", "hardcoded_key", "ruff"):
+    for name in ("windows_compat", "hardcoded_path", "silent_catch", "hardcoded_key", "ruff", "encapsulation"):
         assert applicability.applies_to(checkers[name]) == applicability.EVERYWHERE, name
 
 

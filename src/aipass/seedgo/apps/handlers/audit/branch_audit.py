@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.7.1
+# Version: 2.8.0
 # Created: 2026-03-05
-# Modified: 2026-10-03
+# Modified: 2026-10-07
 # =============================================
 """Branch Audit Handler — auto-discovers checkers from handlers/*_standards/ packs via glob."""
 
@@ -98,10 +98,13 @@ def _collect_py_files(
     root = branch_path.resolve()
     ignore_entries = ignore_handler.load_ignore_entries(branch_path)
 
+    # shared/ joined on 2026-10-07 (DPLAN-0404 leg 1): a package beside apps/ is
+    # the branch's product code too. The aipass branch keeps project_home.py
+    # there, and its import of hooks' handlers was invisible to every standard.
     candidates: List[Path] = []
-    apps_dir = branch_path / "apps"
-    if apps_dir.exists():
-        candidates += [f for f in apps_dir.rglob("*.py") if include_init or f.name != "__init__.py"]
+    for product_dir in (branch_path / "apps", branch_path / "shared"):
+        if product_dir.exists():
+            candidates += [f for f in product_dir.rglob("*.py") if include_init or f.name != "__init__.py"]
     tests_dir = branch_path / "tests"
     if tests_dir.exists():
         candidates += [f for f in tests_dir.rglob("*.py") if _is_collectable_test(f)]

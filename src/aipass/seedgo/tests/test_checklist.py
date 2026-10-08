@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checklist.py
 # Description: Unit tests for the checklist module
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-07
 # =============================================
 
 """Tests for apps/modules/checklist.py."""
@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
+from aipass.seedgo.apps.handlers.audit import branch_audit
 from aipass.seedgo.apps.handlers.bypass import bypass_handler
 from aipass.seedgo.apps.modules import checklist
 
@@ -142,6 +143,35 @@ def test_run_checklist_python_file_no_checkers(tmp_path, monkeypatch):
     results = checklist.run_checklist(str(py_file))
     # The autouse fixture's pack discovers nothing: one failing error row, never a silent pass.
     assert results == [{"standard": "(error)", "passed": False, "detail": "No checkers discovered"}]
+
+
+def test_a_door_passes_every_standard_on_the_checklist(tmp_path, monkeypatch):
+    """The door shape (DPLAN-0404 leg 1) passes the real pack: no CLI, no introspection, no logic asked.
+
+    A re-export of its own handlers with __all__ seated in memory's modules; the
+    seat has no apps/__init__.py and no handlers/, so the guard row is not asked.
+    """
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    monkeypatch.setattr(checklist, "discover_checkers", branch_audit.discover_checkers)
+    door = tmp_path / "aipass" / "memory" / "apps" / "modules" / "door_entry_limits.py"
+    door.parent.mkdir(parents=True)
+    door.write_text(
+        "# =================== AIPass ====================\n"
+        "# Name: door_entry_limits.py\n"
+        "# Description: Door - memory's entry limits, for other branches\n"
+        "# Version: 1.0.0\n"
+        "# Created: 2026-10-07\n"
+        "# Modified: 2026-10-07\n"
+        "# =============================================\n\n"
+        '"""Door: memory\'s entry limits, for other branches."""\n\n'
+        "from aipass.memory.apps.handlers.json.entry_limits import check_file_budget, load_entry_limits\n\n"
+        '__all__ = ["load_entry_limits", "check_file_budget"]\n',
+        encoding="utf-8",
+    )
+
+    results = checklist.run_checklist(str(door))
+    assert [r["standard"] for r in results if not r["passed"]] == []
+    assert len(results) == 39
 
 
 def test_run_checklist_throwaway_temp_path_skipped(tmp_path, monkeypatch):

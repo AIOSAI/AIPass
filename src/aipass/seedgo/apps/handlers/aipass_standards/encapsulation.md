@@ -133,6 +133,11 @@ The `encapsulation_check.py` validates:
 - Compares against current file's branch context
 - Respects bypass rules from `.seedgo/bypass.json`
 
+**Since 2026-10-07 (DPLAN-0404, the wall):**
+- **Strings are imports.** A handlers target passed as the string argument of `import_module` (any alias, a seam named `*import_module`), `pkgutil.resolve_name`, `patch` / `mock.patch` (first positional; `patch.object` is not read) or `<x>.setattr` (the string form) counts like an import statement, and so does a bare name bound once at module level to such a string. The conviction quotes the line and says `(string import)`. A string anywhere else (a docstring, a comment, an assignment, a log message) is prose and stays acquitted. Same-branch targets stay allowed.
+- **Tests are kin to their own branch only.** A file under `tests/` is asked one thing: whether it imports or patches ANOTHER branch's handlers. Its own branch's handlers stay allowed. Imports are read from the parse tree, so an import inside a triple-quoted source fixture is prose. The branch of a target is the segment after `aipass.` (`aipass.skills.lib.telegram.apps.handlers` is skills').
+- **The apps package.** The guard row also reads `apps/__init__.py`. A line there that imports handlers (`from . import handlers`, `from aipass.<x>.apps import handlers`, `import aipass.<x>.apps.handlers`) fails it: "apps/__init__.py imports handlers: the fence sees its own package as every caller (2026-04-25)". A module-level `_guard_branch_access()` call in `handlers/__init__.py` is the v2 guard marker.
+
 ---
 
 ## Bypass Configuration

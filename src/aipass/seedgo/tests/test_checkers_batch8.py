@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-04-25
-# Modified: 2026-10-03
+# Modified: 2026-10-07
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
@@ -87,6 +87,46 @@ def test_handler_independence_cross_branch_import_fails():
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is False
     assert "Cross-branch handler imports" in result["message"]
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        'importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")',
+        '_import_module("aipass.memory.apps.handlers.json.entry_limits")',
+        'pkgutil.resolve_name("aipass.memory.apps.handlers.json.entry_limits")',
+        'patch("aipass.memory.apps.handlers.json.entry_limits.load")',
+        'monkeypatch.setattr("aipass.memory.apps.handlers.json.entry_limits.load", None)',
+        "importlib.import_module(_RAIL)",
+    ],
+)
+def test_handler_independence_reads_a_string_import_of_another_branch(call):
+    """A handler named as a call's string reaches the other branch like an import (DPLAN-0404 leg 1)."""
+    content = f'_RAIL = "aipass.memory.apps.handlers.json.entry_limits"\n\ndef go():\n    return {call}\n'
+    handler_path = "src/aipass/hooks/apps/handlers/security/edit_gate.py"
+
+    result = check_handler_independence(content, _lines(content), handler_path)
+    assert result["passed"] is False
+    assert f"line 4: return {call} (string import)" in result["message"]
+
+
+def test_handler_independence_leaves_prose_and_its_own_branch_strings_alone():
+    """A docstring example and a same-branch string target are not cross-branch imports."""
+    content = (
+        '"""Example: importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")."""\n'
+        'NOTE = "aipass.memory.apps.handlers.json.entry_limits"\n'
+        'logger.info("aipass.memory.apps.handlers.json is memory\'s")\n'
+        'mod = importlib.import_module("aipass.hooks.apps.handlers.config.loader")\n'
+        'patch.object(holder, "aipass.memory.apps.handlers.json")\n'
+    )
+    handler_path = "src/aipass/hooks/apps/handlers/security/edit_gate.py"
+
+    result = check_handler_independence(content, _lines(content), handler_path)
+    assert result == {
+        "name": "Handler independence",
+        "passed": True,
+        "message": "No forbidden cross-branch handler imports",
+    }
 
 
 def test_handler_independence_same_package(tmp_path):

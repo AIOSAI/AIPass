@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_audit.py
 # Description: Unit tests for handlers/audit/
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-07
 # =============================================
 
 """Tests for apps/handlers/audit/audit_display.py, discovery.py and branch_audit.py."""
@@ -192,6 +192,20 @@ def test_collect_py_files_empty_branch(tmp_path, monkeypatch):
     branch = {"name": "tmpb", "path": str(tmp_path), "entry_file": ""}
     result = branch_audit.audit_branch(branch, [], pack_path=tmp_path / "no_pack")
     assert result["files_checked"] == 0
+
+
+def test_a_branchs_shared_package_is_in_the_corpus(tmp_path, monkeypatch):
+    """A shared/ package beside apps/ is the branch's product code and is audited (DPLAN-0404 leg 1).
+
+    The aipass branch keeps project_home.py there, and its hooks import was invisible to every lane.
+    """
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    (tmp_path / "stray.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "shared").mkdir()
+    (tmp_path / "shared" / "project_home.py").write_text("x = 1\n", encoding="utf-8")
+    branch = {"name": "tmpb", "path": str(tmp_path), "entry_file": ""}
+    result = branch_audit.audit_branch(branch, [], pack_path=tmp_path / "no_pack")
+    assert result["files_checked"] == 1
 
 
 # ---------------------------------------------------------------------------

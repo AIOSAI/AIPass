@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-02
+# Modified: 2026-10-07
 # =============================================
 
 """
@@ -15,6 +15,7 @@ Checks handle_command pattern, thin orchestration, file size guidelines.
 
 import re
 import ast
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 from aipass.prax import logger
@@ -100,8 +101,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "MODULES",
         }
 
+    # A door is a re-export with no CLI (DPLAN-0404 leg 1): its own row
+    # replaces handle_command; the size and logic rows still stand
+    if path.name.startswith("door_"):
+        checks.append(check_door(content, module_path))
     # Check 1: handle_command pattern (for non-__init__ files)
-    if not path.name == "__init__.py":
+    elif not path.name == "__init__.py":
         handle_cmd_check = check_handle_command(content)
         if handle_cmd_check:
             checks.append(handle_cmd_check)
@@ -135,6 +140,83 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "modules"})
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "MODULES"}
+
+
+def _own_branch(module_path: str) -> str:
+    """The path segment before ``apps``: the branch a modules file belongs to."""
+    parts = Path(module_path).parts
+    for i, part in enumerate(parts):
+        if part == "apps" and i > 0:
+            return parts[i - 1]
+    return ""
+
+
+def _door_statement_problem(node: ast.stmt, own_handlers: str, imported: set) -> Optional[str]:
+    """What one top-level statement of a door does wrong, or None.
+
+    Imports from the branch's own handlers add their names to ``imported``;
+    a stdlib import is allowed and exports nothing.
+    """
+    if isinstance(node, ast.ImportFrom):
+        module = ("." * node.level) + (node.module or "")
+        if node.level == 0 and (module == own_handlers or module.startswith(own_handlers + ".")):
+            imported.update(alias.asname or alias.name for alias in node.names)
+            return None
+        if node.level == 0 and module.split(".")[0] in sys.stdlib_module_names:
+            return None
+        return f"line {node.lineno}: imports {module} (a door imports only its own handlers)"
+    if isinstance(node, ast.Import):
+        foreign = [a.name for a in node.names if a.name.split(".")[0] not in sys.stdlib_module_names]
+        return f"line {node.lineno}: imports {foreign[0]} (a door imports only its own handlers)" if foreign else None
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return f"line {node.lineno}: defines {node.name} (a door carries no logic)"
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+        return None  # the docstring
+    if isinstance(node, ast.Assign) and [getattr(t, "id", "") for t in node.targets] == ["__all__"]:
+        return None
+    return f"line {node.lineno}: a statement beyond re-export (a door carries no logic)"
+
+
+def check_door(content: str, module_path: str) -> Dict:
+    """Check that ``apps/modules/door_<subject>.py`` is a door and nothing else.
+
+    A door is how another branch reaches this branch's handlers (DPLAN-0404):
+    it imports only from its OWN branch's ``apps.handlers`` (and the stdlib),
+    defines no function or class, carries ``__all__``, and every name in
+    ``__all__`` is one it imported. The handlers standard already lets a
+    foreign handler import ``aipass.<owner>.apps.modules.door_<subject>``,
+    because a branch's modules are its public gateway.
+
+    Args:
+        content: Source of the door file.
+        module_path: Its path, posix form; the branch is the segment before ``apps``.
+
+    Returns:
+        The "Door shape" check dict.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        logger.info("modules: door unparseable %s: %s", module_path, exc)
+        return {"name": "Door shape", "passed": False, "message": f"Door does not parse: {exc}"}
+    own_handlers = f"aipass.{_own_branch(module_path)}.apps.handlers"
+    imported: set = set()
+    problems = [p for node in tree.body if (p := _door_statement_problem(node, own_handlers, imported))]
+    exported: Optional[List[str]] = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and [getattr(t, "id", "") for t in node.targets] == ["__all__"]:
+            exported = list(ast.literal_eval(node.value)) if isinstance(node.value, (ast.List, ast.Tuple)) else None
+    if exported is None:
+        exported = []
+        problems.append("carries no __all__ list of names")
+    problems += [f"__all__ names {name!r}, which it does not import" for name in exported if name not in imported]
+    if problems:
+        return {"name": "Door shape", "passed": False, "message": "Door shape: " + "; ".join(problems)}
+    return {
+        "name": "Door shape",
+        "passed": True,
+        "message": f"Door re-exports only its own handlers ({len(exported)} names)",
+    }
 
 
 def _track_docstring_state(stripped: str, in_docstring: bool) -> tuple:
