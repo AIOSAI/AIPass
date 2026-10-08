@@ -24,9 +24,9 @@ src/aipass could drift, and a file gated on a branch the audit does not score
 import sys
 from pathlib import Path
 
-from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch
-from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
-from aipass.seedgo.apps.handlers.context_standards import name_ratchet, startup_ratchet
+# seedgo's handlers are fenced (DPLAN-0404): this script is no branch, so it reads
+# the door seedgo publishes for it, never the handlers.
+from aipass.seedgo.apps.modules.door_audit import audit_branch, load_bypass_rules, name_ratchet, startup_ratchet
 
 THRESHOLD = 100
 

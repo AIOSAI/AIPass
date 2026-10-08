@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-05
-# Modified: 2026-09-21
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -106,6 +106,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     is_handler = "/handlers/" in module_path
     is_init_file = path.name == "__init__.py"
     is_small_file = len([line for line in lines if line.strip() and not line.strip().startswith("#")]) < 20
+    # A door re-exports and logs nothing, whatever its length (DPLAN-0404).
+    is_door = path.name.startswith("door_") and path.parent.name == "modules"
 
     # Check 1: No AIPASS_ROOT (pip packages must not use it)
     if not is_init_file:
@@ -116,7 +118,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         checks.append(check_no_sys_path(import_lines, module_path, bypass_rules))
 
     # Check 3: Prax logger via aipass.prax (production only — see check_prax_logger)
-    if not is_init_file and not is_small_file and not is_handler and not applicability.is_test_path(module_path):
+    exempt = is_init_file or is_small_file or is_door or is_handler
+    if not exempt and not applicability.is_test_path(module_path):
         prax_check = check_prax_logger(import_lines, module_path, bypass_rules)
         if prax_check:
             checks.append(prax_check)

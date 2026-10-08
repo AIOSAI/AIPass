@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch2.py
 # Description: Tests for checker handlers batch 2
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-29
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/error_handling_check.py and seven batch-2 sibling checkers."""
@@ -456,6 +456,36 @@ def record(base):
 
         failed = [c["name"] for c in result["checks"] if not c["passed"]]
         assert failed == ["No sys.path hacking"]
+
+
+class TestADoorOwesNoLogger:
+    """A door re-exports and logs nothing, whatever its length (DPLAN-0404).
+
+    spawn's door_class_registry (21 code lines, one long import list) was
+    convicted for the logger while door_owner (3 lines) passed under the
+    small-file exemption. The same source under a plain module name keeps the row.
+    """
+
+    NAMES = [f"name_{n:02d}" for n in range(20)]
+    DOOR = (
+        "from aipass.spawn.apps.handlers.registry import (\n"
+        + "".join(f"    {name},\n" for name in NAMES)
+        + ")\n\n__all__ = "
+        + repr(NAMES)
+        + "\n"
+    )
+
+    @pytest.mark.parametrize(
+        ("name", "rows"), [("door_registry.py", []), ("registry_view.py", ["Prax logger import (recommended)"])]
+    )
+    def test_the_logger_row_reads_the_door_name(self, tmp_path: Path, name: str, rows: list) -> None:
+        target = tmp_path / "spawn" / "apps" / "modules" / name
+        target.parent.mkdir(parents=True)
+        target.write_text(self.DOOR, encoding="utf-8")
+
+        result = check_imports(str(target))
+
+        assert [c["name"] for c in result["checks"] if not c["passed"]] == rows
 
 
 # ===================================================================

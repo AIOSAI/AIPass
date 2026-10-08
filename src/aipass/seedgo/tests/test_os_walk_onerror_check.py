@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_os_walk_onerror_check.py
 # Description: os_walk_onerror_check — an os.walk call in product code that names no onerror
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/os_walk_onerror_check.py."""
@@ -32,14 +32,15 @@ def _verdict(tmp_path, body, name="walk.py"):
 MODEL = Path(__file__).parent.parent / "apps" / "modules" / "readme_update.py"
 
 #: @backup's apps/handlers/scan/walk.py, walk_project as on disk 2026-09-25, docstring cut.
-#: The os.walk call is line 11 here, line 34 on disk.
+#: The os.walk call is line 11 here, line 34 on disk. The trail is reached through
+#: @backup's door (DPLAN-0404), not its handlers package.
 SPECIMEN = """import os
 
-from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.modules.door_trail import log_operation
 
 
 def walk_project(root: str):
-    trail.log_operation("walk_project", {"root": root})
+    log_operation("walk_project", {"root": root})
     root_path = os.path.realpath(root)
 
 

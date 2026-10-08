@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-29
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
@@ -365,6 +365,28 @@ class TestDeadCodeCheck:
 
         assert result["score"] == 0
         assert "repo_door.py" in result["checks"][0]["message"]
+
+    @pytest.mark.parametrize(
+        ("tail", "dead"),
+        [("", False), ("\n\ndef log_more():\n    return log_operation\n", True)],
+        ids=["shaped_door_is_referenced", "door_that_defines_a_function_is_dead"],
+    )
+    def test_a_door_counts_as_referenced_by_its_shape(self, mock_json, tmp_path: Path, tail: str, dead: bool) -> None:
+        """A door is called from other branches, so its own corpus never names it (DPLAN-0404).
+
+        spawn's door_class_registry and door_owner read unreferenced on 2026-10-08.
+        A door_*.py that passes Door shape is referenced the way the entry point is;
+        one that fails Door shape is read like any other module.
+        """
+        branch = _make_branch(tmp_path)
+        _write_file(branch / "apps" / "handlers" / "trail.py", "def log_operation():\n    return True\n")
+        door = f'from aipass.{branch.name}.apps.handlers.trail import log_operation\n\n__all__ = ["log_operation"]\n'
+        _write_file(branch / "apps" / "modules" / "door_trail.py", door + tail)
+        _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command(): pass\n")
+
+        result = dead_code_check_branch(str(branch))
+
+        assert ("door_trail.py" in result["checks"][0]["message"]) is dead
 
 
 # =============================================

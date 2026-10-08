@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check.py
 # Description: Unit tests for trinity_check - trinity memory file standards checker
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-08-25
-# Modified: 2026-10-02
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -44,13 +44,13 @@ from aipass.seedgo.apps.handlers.audit import branch_audit
 # MagicMock. Presence is decided by looking for the file rather than by
 # catching an ImportError, so a genuine breakage in that module is never
 # swallowed as "unavailable".
-_RENDERER_RELATIVE = ("src", "aipass", "memory", "apps", "handlers", "tracking", "tab_renderer.py")
+_RENDERER_RELATIVE = ("src", "aipass", "memory", "apps", "modules", "door_tab_renderer.py")
 _compose_meta = None
-_COMPOSE_META_IMPORT_ERROR = "@memory tab_renderer.py is not on disk"
+_COMPOSE_META_IMPORT_ERROR = "@memory door_tab_renderer.py is not on disk"
 
 for _parent in Path(__file__).resolve().parents:
     if _parent.joinpath(*_RENDERER_RELATIVE).is_file():
-        from aipass.memory.apps.handlers.tracking.tab_renderer import compose_meta as _compose_meta
+        from aipass.memory.apps.modules.door_tab_renderer import compose_meta as _compose_meta
 
         _COMPOSE_META_IMPORT_ERROR = ""
         break
@@ -69,14 +69,14 @@ for _parent in Path(__file__).resolve().parents:
 # to do, and this suite scores the branch that wrote the rule. The MODULE is
 # held, never the symbol, so a signature change surfaces here as an
 # AttributeError instead of a wrong number downstream.
-_PUSH_RELATIVE = ("src", "aipass", "memory", "apps", "handlers", "templates", "trinity_push.py")
+_PUSH_RELATIVE = ("src", "aipass", "memory", "apps", "modules", "door_trinity_push.py")
 _entry_rules = None
 _memory_limits = None
-_MEMORY_SHAPE_IMPORT_ERROR = "@memory trinity_push.py is not on disk"
+_MEMORY_SHAPE_IMPORT_ERROR = "@memory door_trinity_push.py is not on disk"
 
 for _parent in Path(__file__).resolve().parents:
     if _parent.joinpath(*_PUSH_RELATIVE).is_file():
-        from aipass.memory.apps.handlers.templates.trinity_push import entry_rules as _entry_rules
+        from aipass.memory.apps.modules.door_trinity_push import entry_rules as _entry_rules
         from aipass.memory.apps.modules import limits as _memory_limits
 
         _MEMORY_SHAPE_IMPORT_ERROR = ""

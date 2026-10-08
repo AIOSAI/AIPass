@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for checker sub-functions in encapsulation, imports, introspection, modules
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-04-25
 # Modified: 2026-10-08
 # =============================================
@@ -131,6 +131,19 @@ class TestExtractBranchFromImport:
         """Extract branch from 'import branch.apps.handlers...' pattern."""
         result = extract_branch_from_import("import seedgo.apps.handlers.json")
         assert result == "seedgo"
+
+    def test_handlers_nested_under_a_branch_tree_are_that_branchs(self):
+        """daemon's telegram_notifier.py:28 imports skills' lib/telegram handlers (measured 10-08).
+
+        The reader answered None, so the line fell to the same-branch package row
+        and read "handlers.notifier imported from handlers.schedule". The owner is
+        the segment after ``aipass.``, as ``_target_branch`` reads it.
+        """
+        line = "from aipass.skills.lib.telegram.apps.handlers.notifier import ("
+        violation = check_cross_branch_imports([line], "daemon/apps/handlers/schedule/notifier_use.py", "daemon")
+
+        assert extract_branch_from_import(line) == "skills"
+        assert violation["message"] == "Line 1: skills.apps.handlers imported (use modules entry point)"
 
 
 # -- extract_handler_package -------------------------------------------------

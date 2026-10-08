@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-22
-# Modified: 2026-09-14
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -26,6 +26,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
+from aipass.seedgo.apps.handlers.aipass_standards.modules_check import check_door
 
 # APPLIES_TO: pytest calls test functions by discovery, so every one would read unreferenced.
 APPLIES_TO = "production"
@@ -33,6 +34,19 @@ AUDIT_SCOPE = "branch_level"
 
 # Directories to skip when collecting source files
 _SKIP_DIRS = SOURCE_SKIP_DIRS | {"tests", "json_templates"}
+
+
+def _is_shaped_door(py_file: Path) -> bool:
+    """Whether this is an ``apps/modules/door_*.py`` that passes Door shape (DPLAN-0404).
+
+    A door is called from other branches, never its own, so its branch's corpus
+    never names it; its shape is its reference, the way the entry point's name is.
+    A ``door_`` file that fails Door shape is read like any other module.
+    """
+    if not (py_file.name.startswith("door_") and py_file.parent.name == "modules"):
+        return False
+    content = py_file.read_text(encoding="utf-8", errors="ignore")
+    return check_door(content, py_file.as_posix())["passed"]
 
 
 # =============================================
@@ -170,6 +184,10 @@ def _check_file_used(
 
     # Rule 2: entry point
     if py_file.name == f"{entry_point_name}.py" and py_file.parent.name == "apps":
+        return True
+
+    # Rule 2b: a door, by its shape
+    if _is_shaped_door(py_file):
         return True
 
     # Rule 3: glob/discovery convention files

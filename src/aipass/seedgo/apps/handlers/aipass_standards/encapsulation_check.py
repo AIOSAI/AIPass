@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-03-15
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -123,8 +123,9 @@ def extract_branch_from_import(import_line: str) -> Optional[str]:
     if match:
         return match.group(1)
 
-    # Pattern 2: aipass.branch.apps.handlers...
-    match = re.search(r"from\s+aipass\.(\w+)\.apps\.handlers", import_line)
+    # Pattern 2: aipass.branch[.nested...].apps.handlers... -- handlers anywhere
+    # under a branch's tree are that branch's (skills' lib/telegram, 10-08)
+    match = re.search(r"from\s+aipass\.(\w+)\.(?:\w+\.)*?apps\.handlers", import_line)
     if match:
         return match.group(1)
 

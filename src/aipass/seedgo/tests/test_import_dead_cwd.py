@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins seedgo imports against a working directory the OS cannot read
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-10-02
+# Modified: 2026-10-08
 # =============================================
 
 """Tests that every module under apps/, apps/handlers/__init__.py first, imports with a dead cwd."""
@@ -145,10 +145,12 @@ def _no_working_tree_litter():
 #: in this branch imports it (json_handler_check.py holds it as an accept
 #: STRING, not an import), and @aipass retires the file under FPLAN-0489.
 #: Measured, not assumed - 83 passed, 3 skipped before and after.
+#: aipass.prax.apps.handlers.logging.setup was dropped on 2026-10-08 (DPLAN-0404):
+#: prax's logger module above already loads it, so naming another branch's
+#: handlers here warmed nothing.
 PRELOAD = """
 from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
-import aipass.prax.apps.handlers.logging.setup  # noqa: F401
 import aipass.cli  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 import aipass.cli.apps.modules.display  # noqa: F401
@@ -2628,96 +2630,49 @@ print("SWEPT")
 
 
 # ---------------------------------------------------------------------------
-# The caller-is-None branch, watched behaviourally as well as structurally
+# The fence (v2, DPLAN-0404) keeps its verdicts with the cwd dead
 # ---------------------------------------------------------------------------
 
-_DIRECT_CALL_BODY = """
-from aipass.seedgo.apps.handlers import _find_real_caller, _guard_branch_access
+#: The fence's own probe (tests/test_handlers_fence.py), run as a script so its
+#: frames carry the seat's filename. The old guard's private names it replaced
+#: (_find_real_caller and the caller-is-None branch) do not exist in v2.
+FENCE_PROBE = SEEDGO_ROOT / "tests" / "support_fence.py"
 
-# ARMING PROBE 2: the branch under test only RUNS when _find_real_caller
-# returns None. Fed on stdin every frame is <stdin> or frozen importlib, both
-# skipped, so it does. Without this the guard could return for some entirely
-# different reason and the pin would report the same green.
-print("CALLER_IS_NONE:", _find_real_caller() == (None, None))
+_RUN_PROBE_AT = """
+import runpy
+import sys
 
-_guard_branch_access()
-print("GUARD_RETURNED")
+sys.argv = ["probe", "pkg"]
+runpy.run_path(%(seat)r, run_name="__main__")
 """
 
 
-class TestTheCallerIsNoneBranchIsReachableByADirectCall:
-    """@devpulse relaying @spawn's correction of MY sentence, 2026-08-31.
-
-    I published "the deleted second inspect.stack() walk is unreachable, so only
-    an AST ban can watch it". Too strong, and @spawn measured the correction:
-    unreachable from IMPORT-shaped pins — apps/__init__ always supplies a real
-    on-disk frame — but reachable by calling ``_guard_branch_access()`` DIRECTLY
-    from a child fed on stdin, where every frame is a pseudo-file or frozen
-    importlib and ``_find_real_caller`` therefore returns None.
-
-    So the branch gets a behavioural pin as well as the structural one. The AST
-    ban still earns its place: no subprocess, and it names the defect precisely.
-    This one is the sibling that watches the BEHAVIOUR, and the two die to
-    different mutations — regrowing the walk kills both, deleting only the AST
-    rule leaves this standing.
-
-    The true sentence, for the record: import-shaped pins cannot reach it. Not
-    "nothing can".
-    """
+class TestTheFenceKeepsItsVerdictsWithADeadCwd:
+    """The v2 fence resolves its own file and every frame's under a try, and
+    reads a pseudo filename raw (DPLAN-0404). Under both worlds, kin is still
+    let in and a caller from no branch is still refused by name: a fence that
+    died here would refuse its own branch, and one that fell open would let
+    the elsewhere seat through."""
 
     @staticmethod
-    @pytest.fixture(scope="class", params=["native", "310-shaped"])
-    def result(request):
-        """Run on BOTH interpreter shapes.
+    def _verdict(world: str, seat: Path) -> tuple:
+        result = _run(PRELOAD + world + PROBE + PROBE_REALPATH + _RUN_PROBE_AT % {"seat": str(seat)})
+        lines = result.stdout.strip().splitlines()
+        return result, lines[-1] if lines else ""
 
-        Parametrised to close a mutant that survived the first run: putting the
-        old resolve-shaped probe back changed nothing on 3.12, because
-        delegation makes the two probes agree there. Under the 3.10 shape the
-        old probe reports VACUOUS and the substitution finally has a
-        consequence a local run can see.
-        """
-        shape = EMULATE_PY310_PATHLIB if request.param == "310-shaped" else ""
-        return _run(PRELOAD + shape + ARM_WORLD_B + PROBE_REALPATH + _DIRECT_CALL_BODY)
+    @pytest.mark.parametrize("world", [ARM_WORLD_A_PRIME, ARM_WORLD_B], ids=["world_a_prime", "world_b"])
+    def test_kin_is_allowed(self, world):
+        result, verdict = self._verdict(world, FENCE_PROBE)
+        assert "PROBE_ARMED" in result.stdout, result.stdout
+        assert verdict == "ALLOWED", result.stdout + result.stderr
 
-    def test_the_denial_bites_in_this_child(self, result):
-        """Arming probe 1. A world that silently failed to deny anything would
-        let a regrown inspect.stack() walk pass this whole class.
+    @pytest.mark.parametrize("world", [ARM_WORLD_A_PRIME, ARM_WORLD_B], ids=["world_a_prime", "world_b"])
+    def test_an_elsewhere_caller_is_refused(self, world, tmp_path):
+        seat = tmp_path / "elsewhere" / "probe.py"
+        seat.parent.mkdir()
+        seat.write_text(FENCE_PROBE.read_text(encoding="utf-8"), encoding="utf-8")
 
-        MEASURES os.path.realpath, which is what world B denies and what
-        ``inspect`` calls directly on every interpreter. The first version asked
-        ``Path.resolve()`` instead — a question about PATHLIB, true on 3.11+
-        only by delegation — and went red on the 3.10 CI leg over a property
-        world B never depended on. The world was fine; the probe was measuring
-        something else (@devpulse relaying the 3.10 leg of 8550ed10).
-        """
-        assert "PROBE_ARMED" in result.stdout, result.stderr
+        result, verdict = self._verdict(world, seat)
 
-    def test_the_branch_under_test_actually_runs(self, result):
-        """Arming probe 2, and @spawn's rule: a structural claim that read the
-        wrong thing reports exactly the same green as a clean tree. If
-        _find_real_caller returned a real caller here, the guard would be
-        exercising the ALLOW-pytest path instead and proving nothing."""
-        assert "CALLER_IS_NONE: True" in result.stdout, result.stdout
-
-    def test_the_old_probe_would_have_gone_vacuous_on_a_310_shaped_pathlib(self):
-        """Why this class's arming probe had to change, reproduced locally.
-
-        The original probe asked ``Path.resolve()`` — a question about pathlib —
-        while world B denies ``os.path.realpath``. On 3.11+ delegation makes the
-        two agree and the substitution is invisible; against a 3.10-shaped
-        pathlib the old probe reports VACUOUS while the world is fully armed,
-        which is the red the 3.10 CI leg produced.
-
-        Pinned so the correction is falsifiable HERE rather than only on the one
-        interpreter this machine does not have.
-        """
-        old_probe = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_B + PROBE)
-        new_probe = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_B + PROBE_REALPATH)
-        assert "PROBE_VACUOUS" in old_probe.stdout, old_probe.stdout
-        assert "PROBE_ARMED" in new_probe.stdout, new_probe.stdout
-
-    def test_the_guard_returns_rather_than_dying(self, result):
-        """The claim itself. A regrown second walk dies here under the realpath
-        denial; the cured plain return survives."""
-        assert "GUARD_RETURNED" in result.stdout, result.stderr
-        assert result.returncode == 0, result.stderr
+        assert "PROBE_ARMED" in result.stdout, result.stdout
+        assert verdict == "DENIED Caller branch: unknown", result.stdout + result.stderr
