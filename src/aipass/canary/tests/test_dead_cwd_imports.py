@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
 # Description: Windows dead-cwd import defect - two-world child pins, live-injection controls, AST ban on inspect.stack
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/__init__.py and every canary package, imported under a dead cwd."""
@@ -403,63 +403,76 @@ def test_ast_ban_ignores_an_unrelated_stack_attribute():
 
 
 # ---------------------------------------------------------------------------
-# THE BEHAVIOURAL SIBLING for the caller-is-None branch
+# THE FENCE WITH ITS CWD REMOVED (v2's public shape, DPLAN-0404)
 # ---------------------------------------------------------------------------
-# CORRECTION TO THIS FILE'S ROUND-4 CLAIM. I reported that the AST ban was the
-# ONLY instrument able to watch the deleted second walk. That was too strong,
-# and @spawn measured the correction: the branch is unreachable from
-# IMPORT-shaped pins (apps/__init__.py always supplies a real-file frame, so
-# caller_file is never None on an import), but it IS reachable by calling
-# _guard_branch_access() DIRECTLY from a python -c child — every frame is then
-# string-pseudo or importlib, both skipped, so _find_real_caller returns None
-# and the branch runs. Under a realpath denial a regrown walk dies there; the
-# cured plain return survives.
-#
-# Both instruments are kept. The AST ban needs no subprocess and names the
-# defect precisely; this one proves the cured branch actually behaves.
+# The old guard's caller-is-None pin called its private walk directly; v2 has
+# no such walk, so that pin retired with the old guard (canary's fence leg,
+# 2026-10-08). What it protected still matters: the fence reads frame paths,
+# and a path read must not kill an import whose process cwd is gone. These
+# pins run test_handlers_fence's own probe (tests/support_fence.py) in a child
+# that chdirs into a directory and removes it, then wraps realpath to read the
+# cwd first, as ntpath's does. Where the platform refuses to remove a cwd
+# (Windows), the child denies getcwd instead, world A's way; either way the
+# child reports ARM_CWD_DEAD before the probe runs, or the pin is vacuous.
+
+FENCE_PROBE = BRANCH_ROOT / "tests" / "support_fence.py"
+
+_DEAD_CWD_LAUNCHER = """
+import os, runpy, sys
+seat, shape, doomed = sys.argv[1], sys.argv[2], sys.argv[3]
+os.chdir(doomed)
+try:
+    os.rmdir(doomed)
+except OSError:
+    def _dead_cwd(*a, **k):
+        raise FileNotFoundError(2, "No such file or directory")
+    os.getcwd = _dead_cwd
+_real = os.path.realpath
+def realpath(p, *a, **k):
+    os.getcwd()
+    return _real(p, *a, **k)
+os.path.realpath = realpath
+try:
+    os.getcwd()
+    print("ARM_CWD_ALIVE")
+except OSError:
+    print("ARM_CWD_DEAD")
+sys.argv = [seat, shape]
+runpy.run_path(seat, run_name="__main__")
+"""
 
 
-def test_caller_is_none_branch_survives_a_realpath_denial():
-    """Call the guard directly, with no real-file frame, under world B.
+def _probe_with_cwd_removed(seat: Path, tmp_path: Path) -> list:
+    """Run the fence probe's 'pkg' shape from `seat` in a child whose cwd is gone; its output lines."""
+    doomed = tmp_path / "doomed"
+    doomed.mkdir()
+    done = subprocess.run(
+        [sys.executable, "-c", _DEAD_CWD_LAUNCHER, str(seat), "pkg", str(doomed)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        cwd=str(tmp_path),
+    )
+    assert done.returncode == 0, done.stderr[-1200:]
+    return done.stdout.strip().splitlines()
 
-    Two arming probes first, because this pin is worthless if the world is
-    not hostile or if the branch under test never ran:
-      probe 1 — the denial bites (realpath raises).
-      probe 2 — _find_real_caller() really returned None, so the guard took
-                the caller-is-None path and not some other early return.
 
-    ON PROBE 2 AND ITS MUTANT, recorded rather than left as a gap. Deleting
-    probe 2 leaves this pin green (mutant M10 survives), because in TODAY's
-    world the caller genuinely is None — it is an equivalent mutant here.
-    It is not decorative: measured 2026-08-31, if _find_real_caller returns a
-    KIN path instead, the guard still returns — via the kin early-return, the
-    wrong reason entirely — and without probe 2 this pin passes vacuously
-    while the branch it names is never executed. Probe 2 is what makes the
-    pin's subject provable, so it stays.
-    """
-    body = (
-        "".join(f"import {m}\n" for m in PRELOAD)
-        + "import aipass.canary.apps.handlers as H\n"
-        + _WORLD_B
-        + "import os.path\n"
-        "try:\n"
-        "    os.path.realpath('x')\n"
-        "    print('ARM1_DENIAL_INERT')\n"
-        "except OSError:\n"
-        "    print('ARM1_DENIAL_BITES')\n"
-        "print('ARM2_CALLER=' + repr(H._find_real_caller()[0]))\n"
-        "H._guard_branch_access()\n"
-        "print('GUARD_RETURNED')\n"
-    )
-    result = _run_child(body)
-    assert "ARM1_DENIAL_BITES" in result.stdout, (
-        f"world B was inert — this pin proves nothing:\n{result.stdout}\n{result.stderr[-800:]}"
-    )
-    assert "ARM2_CALLER=None" in result.stdout, (
-        f"_find_real_caller did not return None, so the caller-is-None branch was never exercised:\n{result.stdout}"
-    )
-    assert "GUARD_RETURNED" in result.stdout, (
-        "the guard raised on the caller-is-None path under a realpath denial "
-        f"— a frame walk has regrown there:\n{result.stdout}\n"
-        f"{result.stderr[-1200:]}"
-    )
+def test_the_fence_lets_kin_through_with_its_cwd_removed(tmp_path):
+    """The kin seat imports its own handlers in a process with no cwd; proven by its mutants."""
+    lines = _probe_with_cwd_removed(FENCE_PROBE, tmp_path)
+
+    assert lines[0] == "ARM_CWD_DEAD", lines
+    assert lines[-1] == "ALLOWED", lines
+
+
+def test_an_elsewhere_caller_is_still_refused_with_its_cwd_removed(tmp_path):
+    """A seat outside any aipass tree is refused and named, cwd or no cwd; proven by its mutants."""
+    seat = tmp_path / "elsewhere" / "probe.py"
+    seat.parent.mkdir(parents=True)
+    seat.write_bytes(FENCE_PROBE.read_bytes())
+
+    lines = _probe_with_cwd_removed(seat, tmp_path)
+
+    assert lines[0] == "ARM_CWD_DEAD", lines
+    assert lines[-1] == "DENIED Caller branch: unknown", lines
