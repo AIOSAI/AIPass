@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.3.1
+# Version: 3.4.0
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -241,8 +241,11 @@ def _declares_no_callable_code(content: str) -> bool:
 _BOOTSTRAP_WALK_CAP = 2000
 
 
-def _resolve_relative(module_name: str | None, level: int, package: str | None) -> str | None:
+def resolve_relative(module_name: str | None, level: int, package: str | None) -> str | None:
     """Absolute dotted name for a relative import, given the importer's package.
+
+    Public (10-08): the resolver is pure name arithmetic and its own unit, so
+    its tests reach it by this name rather than through a whole src/aipass tree.
 
     ``from ..paths import module_file`` inside
     ``aipass.canary.apps.handlers.json.json_handler`` is
@@ -308,7 +311,7 @@ def _aipass_imports(content: str, package: str | None = None) -> list[str]:
                 names.append(node.module)
                 names.extend(f"{node.module}.{alias.name}" for alias in node.names)
                 continue
-            resolved = _resolve_relative(node.module, node.level, package)
+            resolved = resolve_relative(node.module, node.level, package)
             if resolved:
                 names.append(resolved)
                 names.extend(f"{resolved}.{alias.name}" for alias in node.names)

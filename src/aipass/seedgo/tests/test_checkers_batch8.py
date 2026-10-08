@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-04-25
-# Modified: 2026-10-07
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
@@ -283,14 +283,16 @@ def test_auto_detection_missing():
 
 def test_auto_detection_judges_an_unparseable_file_strictly():
     """An unparseable file that names module_name is CONVICTED, never acquitted (fleet green
-    leg 15). The parse failure answers "optional" (handlers_check 353) and "walks no frame"
-    (407), the strict answers; "required" would return None and acquit the file. Green from
-    its first run: its proof is the mutant that makes 353 answer False, which it kills."""
+    leg 15), and the finding says it did not parse rather than that it reads no frame.
+    The two helpers answer None for an unparseable file (fleet green, 10-08: a False or
+    True there was a value the success path also returns); "required" would return None
+    from the check and acquit the file."""
     content = "def do_work(module_name=None:\n    return True\n"
 
     result = check_auto_detection(content)
     assert result is not None
     assert result["passed"] is False
+    assert result["message"].startswith("Does not parse"), result["message"]
 
 
 def test_auto_detection_with_get_caller():

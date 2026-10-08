@@ -65,9 +65,13 @@ help output rots the next time a verb is added. The generated surface is the one
 
 Three layers. `apps/seedgo.py` is a thin router: it discovers modules, dispatches to the first
 one that claims a command, and turns a refusal into an exit code. `apps/modules/` holds one
-business-logic module per verb — audit_tests, bypass, checklist, diagnostics_audit, inbox_audit,
-inventory, permissions, proof_query, readme_update, seedgo_proof, shadow_cycle,
-standards_audit, standards_query, test_map and tests_lane. `apps/handlers/` holds the implementation,
+business-logic module per verb — audit_tests, bypass, checklist, diagnostics_audit, home_paths
+(the developer-home scan the CI gate runs), inbox_audit, inventory, permissions, proof_query,
+readme_update, seedgo_proof, shadow_cycle, standards_audit, standards_query, test_map and
+tests_lane — and two doors, door_audit (the audit, bypass rules and context ratchets, for the
+CI audit script) and door_trinity (the .trinity/ check, for @memory). A door is the one modules
+file another branch may import: a re-export of this branch's handlers and nothing else
+(DPLAN-0404). `apps/handlers/` holds the implementation,
 grouped one directory per concern: the checker packs (`*_standards/`), the proof pack, the
 audit engine, the bypass and ignore systems, the test lanes, and the json shim every branch
 shares.

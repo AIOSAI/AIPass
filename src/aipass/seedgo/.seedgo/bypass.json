@@ -252,8 +252,8 @@
     {
       "file": "tests/test_checkers_batch8.py",
       "standard": "permission_flags",
-      "lines": [1182, 1209, 1221],
-      "reason": "Test input (fleet green leg 15): 'cmd = \"--dangerously-skip-permissions\"' and its sibling are strings written into tmp files as the permission_flags checker's own input; no command is ever built from them."
+      "lines": [1224, 1251, 1263],
+      "reason": "Test input (fleet green leg 15; re-pinned 10-08 from 1182/1209/1221, the file grew above them): 'cmd = \"--dangerously-skip-permissions\"' and its sibling are strings written into tmp files as the permission_flags checker's own input; no command is ever built from them."
     },
     {
       "file": "tests/test_aipass_standards.py",
@@ -326,12 +326,6 @@
       "standard": "through_the_command",
       "lines": [940, 2298],
       "reason": "No public route (fleet green leg 15): m10._fingerprint (940) and statement_deletion._mutant_text (2298, the unparseable-mutant answer) are reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
-    },
-    {
-      "file": "tests/test_checkers_batch7.py",
-      "standard": "through_the_command",
-      "lines": [2249],
-      "reason": "No public route (fleet green leg 15; re-pinned -4 leg 17): json_structure_check._resolve_relative resolves relative imports for the bootstrap chain, which check_module reaches only for a file inside a real aipass source root. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_checkers_batch8.py",
@@ -533,8 +527,8 @@
     {
       "file": "apps/handlers/aipass_standards/json_structure_check.py",
       "standard": "logged_fallback",
-      "lines": [441, 459],
-      "reason": "The checker is wrong on these lines (fleet green leg 14): each failure answer is the STRICT answer. An unparseable file is not eligible for the bootstrap exemption (441, logged). A path outside the source root has no branch root (459): that is the true answer, and its one caller, _seam_logging, then finds no seam and grants nothing."
+      "lines": [444, 462],
+      "reason": "The checker is wrong on these lines (fleet green leg 14; re-pinned +3 10-08, resolve_relative's docstring grew): each failure answer is the STRICT answer. An unparseable file is not eligible for the bootstrap exemption (441, logged). A path outside the source root has no branch root (459): that is the true answer, and its one caller, _seam_logging, then finds no seam and grants nothing."
     },
     {
       "file": "apps/handlers/aipass_standards/ruff_check.py",

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for checker sub-functions in encapsulation, imports, introspection, modules
-# Version: 1.1.5
+# Version: 1.1.6
 # Created: 2026-04-25
 # Modified: 2026-10-08
 # =============================================
@@ -2496,10 +2496,10 @@ class TestTheBootstrapChainSeesRelativeImports:
     """
 
     def _resolve(self, module, level, package):
-        # HELD (seedgo, fleet green leg 8): the private resolver is the unit, pure
-        # name arithmetic; check_module reaches it only through a whole src/aipass
-        # tree, which the end-to-end test below already walks.
-        return json_structure_check._resolve_relative(module, level, package)
+        # The resolver is the unit, pure name arithmetic, public since 10-08;
+        # check_module reaches it only through a whole src/aipass tree, which the
+        # end-to-end test below already walks.
+        return json_structure_check.resolve_relative(module, level, package)
 
     def test_a_sibling_import_resolves(self):
         assert self._resolve("paths", 2, "aipass.canary.apps.handlers.json") == "aipass.canary.apps.handlers.paths"

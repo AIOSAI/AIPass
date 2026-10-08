@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handlers_check.py
 # Description: Handlers Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-07
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -330,7 +330,7 @@ _FRAME_WALK_CALLS = frozenset(
 _CALLER_HELPER_MARKERS = ("_get_caller_module_name", "get_caller")
 
 
-def _module_name_is_optional(content: str) -> bool:
+def _module_name_is_optional(content: str) -> Optional[bool]:
     """True when some public function lets ``module_name`` be omitted.
 
     AUTO-DETECTION ONLY MEANS SOMETHING IF THE ARGUMENT CAN BE MISSING. A
@@ -349,14 +349,15 @@ def _module_name_is_optional(content: str) -> bool:
 
     Returns:
         True if any public function accepts ``module_name`` with a default,
-        or absorbs it through ``*args`` / ``**kwargs``.
+        or absorbs it through ``*args`` / ``**kwargs``; False if none does;
+        None when the file does not parse - unreadable is not evidence of
+        absence, so the caller must not read None as "required".
     """
     try:
         tree = ast.parse(content)
     except SyntaxError as exc:
-        # Unreadable is not evidence of absence — same rule as the scan above.
-        logger.info("handlers: unparseable, assuming module_name is optional: %s", exc)
-        return True
+        logger.info("handlers: unparseable, cannot read module_name defaults: %s", exc)
+        return None
 
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.name.startswith("_"):
@@ -375,7 +376,7 @@ def _module_name_is_optional(content: str) -> bool:
     return False
 
 
-def _walks_the_caller_frame(content: str) -> bool:
+def _walks_the_caller_frame(content: str) -> Optional[bool]:
     """True when the file asks who called it, BY ANY MECHANISM.
 
     THE CHECK USED TO MANDATE THE DEFECT. It accepted the literal string
@@ -404,13 +405,15 @@ def _walks_the_caller_frame(content: str) -> bool:
 
     Returns:
         True if a call to any known frame-walk API, or to a named caller
-        helper, appears anywhere in the file's parse tree.
+        helper, appears anywhere in the file's parse tree; False if none does;
+        None when the file does not parse - not evidence of a frame walk, and
+        not evidence of its absence either.
     """
     try:
         tree = ast.parse(content)
     except SyntaxError as exc:
         logger.info("handlers: unparseable, cannot see a frame walk: %s", exc)
-        return False
+        return None
 
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
@@ -471,10 +474,18 @@ def check_auto_detection(content: str) -> Optional[Dict]:
     if not _public_function_takes_module_name(content):
         return None  # No module_name parameter, auto-detection not needed
 
-    if not _module_name_is_optional(content):
+    if _module_name_is_optional(content) is False:
         return None  # Callers always supply it — there is nothing to detect
 
-    if _walks_the_caller_frame(content):
+    walks = _walks_the_caller_frame(content)
+    if walks is None:
+        # Unparseable: neither helper could read it, and that is no acquittal.
+        return {
+            "name": "Auto-detection pattern",
+            "passed": False,
+            "message": "Does not parse, so no caller-frame read can be seen (it names module_name)",
+        }
+    if walks:
         return {
             "name": "Auto-detection pattern",
             "passed": True,
