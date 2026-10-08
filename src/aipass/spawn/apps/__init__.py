@@ -1,1 +1,1 @@
-from . import handlers
+# Spawn apps package

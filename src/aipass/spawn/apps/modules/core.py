@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-05
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -68,7 +68,7 @@ def _load_meta_tabs():
     Returns empty dict when @memory is unavailable (standalone project).
     """
     try:
-        from aipass.memory.apps.handlers.tracking.tab_renderer import render_all_meta_tabs
+        from aipass.memory.apps.modules.door_tab_renderer import render_all_meta_tabs
     # Width, not politeness: see the module-level import above.
     except (ImportError, OSError) as e:
         logger.info("[spawn] @memory not available — meta-tab placeholders will be empty (%s)", e)

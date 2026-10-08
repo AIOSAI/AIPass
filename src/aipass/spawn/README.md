@@ -81,7 +81,10 @@ flags before parsing, routes a verb to the first module that claims it, and reso
 exit code so a refusal can never leave as success. `apps/modules/` holds one coordinator per
 surface — `core` (mint and adopt), `update`, `delete`, `sync_registry`,
 `regenerate_registry`, `migrate_passports`, `export_seeds`, `repair` and `grant_admin` —
-each parsing arguments and delegating. `apps/handlers/` holds the implementation, grouped by
+each parsing arguments and delegating. Two door modules, `door_owner` and
+`door_class_registry`, are no commands: they re-export handler names for other branches,
+because `apps/handlers/__init__.py` is a fence that refuses a foreign importer (DPLAN-0404).
+`apps/handlers/` holds the implementation, grouped by
 concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verify`,
 `class_registry`, `docs_page`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
 `receipt_ops`, `adoption_ops`), the engines (`update_ops`, `update_ignore`, `delete_ops`,
@@ -122,8 +125,8 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - **aipass.cli** — console output, refusal formatting and exit-code state
 - **aipass.aipass.shared** — `deep_merge` and `backup_json`, registry discovery, and the one
   shared home detector used by the placeholder engine
-- **aipass.memory** (optional) — meta tabs at create; the import is guarded and degrades to
-  empty when it is unavailable
+- **aipass.memory** (optional) — meta tabs at create, through its `door_tab_renderer`; the
+  import is guarded and degrades to empty when it is unavailable
 
 ### Provides To
 
@@ -132,10 +135,12 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - **@seedgo** — the docs page skeleton its `docs_page` standard renders, read live through
   the same gateway
 - Registry CRUD on `AIPASS_REGISTRY.json` and any project's own `*_REGISTRY.json`
+- **@devpulse** — the owner check behind admin dispatch, through `door_owner`
+- **@aipass**, **@seedgo** — the citizen classes and their refusals, through `door_class_registry`
 
 ---
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-10-08
 
 ---
 [← Back to AIPass](../../../README.md)

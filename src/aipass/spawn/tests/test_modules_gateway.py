@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_modules_gateway.py
 # Description: Tests for the apps.modules package gateway re-exports
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-08-28
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/modules/__init__.py's gateway re-exports (DPLAN-0319 wave 3)."""
@@ -299,63 +299,21 @@ class TestRefuseLegacyClassThroughGateway:
 
 
 class TestHandlerGuard:
-    """The guard the gateway exists to answer — pinned as it actually behaves.
+    """The fence the gateway exists to answer, pinned through the real import.
 
-    MEASURED 2026-08-28, reported to @devpulse: the guard refuses an outside
-    caller when it RUNS, but at real import time it is pre-empted and never
-    runs. ``apps/__init__.py:1`` is ``from . import handlers`` — so importing
-    anything under ``aipass.spawn.apps`` (this gateway included) executes the
-    handlers package first, with a caller frame inside spawn, which the guard
-    allows. ``aipass.spawn.apps.handlers`` is then in ``sys.modules`` and every
-    later import from any branch is a cache hit that never reaches the guard.
-
-    Both halves are pinned below so the state is a measurement, not a belief.
-    If the pre-emption is ever fixed, the second test goes red and names what
-    changed rather than leaving a silently-stale claim behind.
+    The 2026-08-28 pin here recorded a hole: ``apps/__init__.py`` imported the
+    handlers eagerly, so the fence never saw a foreign caller and a direct
+    handler import from outside spawn succeeded. Spawn's fence leg (DPLAN-0404)
+    removed that line and installed fence v2.1; the private-name case that
+    called ``_guard_branch_access`` directly is gone, and the hole pin is turned
+    to the closed state. The full shape table is tests/test_handlers_fence.py.
     """
 
-    def test_guard_refuses_an_outside_caller_when_it_runs(self, tmp_path):
-        """Called directly with an outside caller frame, the guard says no.
+    def test_a_direct_handler_import_from_outside_spawn_is_refused(self, tmp_path):
+        """A script outside any aipass tree imports a handler and is refused, by name.
 
-        The probe lives in tmp_path, not REPO_ROOT. It used to be written beside
-        the repo root and unlinked in a finally — which still counts as two
-        writes into a tree the suite does not own, and @seedgo's audit-tests
-        write gate named them (2026-08-30). Only the CWD needs to be REPO_ROOT,
-        so that aipass resolves on the import path; the file does not.
-        """
-        probe = tmp_path / "probe_guard_direct.py"
-        probe.write_text(
-            textwrap.dedent(
-                """
-                from aipass.spawn.apps.handlers import _guard_branch_access
-
-                try:
-                    _guard_branch_access()
-                except ImportError as exc:
-                    print("BLOCKED" if "ACCESS DENIED" in str(exc) else "OTHER")
-                else:
-                    print("ALLOWED")
-                """
-            ).strip(),
-            encoding="utf-8",
-        )
-        result = subprocess.run(
-            [sys.executable, str(probe)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            cwd=str(REPO_ROOT),
-        )
-
-        assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == "BLOCKED"
-
-    def test_import_time_enforcement_is_currently_pre_empted(self, tmp_path):
-        """KNOWN HOLE — a direct handler import from outside spawn SUCCEEDS today.
-
-        This pins the hole rather than the wish. Reported to @devpulse
-        2026-08-28; the fix is @spawn's ``apps/__init__.py`` eager
-        ``from . import handlers``, which is out of scope for wave 3.
+        The probe lives in tmp_path and runs there, in a fresh interpreter, so the
+        fence's first import in that process is this one.
         """
         probe = tmp_path / "probe_handler_from_outside.py"
         probe.write_text(
@@ -369,12 +327,10 @@ class TestHandlerGuard:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            cwd=str(REPO_ROOT),
+            cwd=str(tmp_path),
         )
 
-        assert result.returncode == 0, (
-            "the import-time hole appears to be CLOSED — good news. "
-            "Update this pin and the class docstring, and tell @seedgo the "
-            "gateway is now the only door.\n" + result.stderr
-        )
-        assert result.stdout.strip() == "citizen"
+        assert result.returncode != 0, result.stdout
+        assert "ACCESS DENIED" in result.stderr, result.stderr[-600:]
+        assert "Caller branch: unknown" in result.stderr, result.stderr[-600:]
+        assert result.stdout == ""

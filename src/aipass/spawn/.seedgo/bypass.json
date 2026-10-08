@@ -76,11 +76,6 @@
       "reason": "load_branch_meta() no longer called by P1 engine but has tests and may be reused by sync-registry or P2 shared library."
     },
     {
-      "file": "apps/modules/core.py",
-      "standard": "encapsulation",
-      "reason": "Local import of render_all_meta_tabs from memory.apps.handlers.tracking.tab_renderer \u2014 @memory has no module entry point for this API. Cross-branch contract per FPLAN-0286."
-    },
-    {
       "file": "apps/handlers/registry.py",
       "standard": "unused_function",
       "reason": "backfill_owner_and_registry_id() is a migration function for TDPLAN-0012 \u2014 called manually to backfill existing registries. is_owner() is part of the frozen interface contract (TDPLAN-0012) \u2014 consumed by @ai_mail and @devpulse via direct import."

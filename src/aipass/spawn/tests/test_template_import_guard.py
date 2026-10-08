@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_template_import_guard.py
 # Description: What the newborn's handler guard must survive on its very first import
-# Version: 1.0.2
+# Version: 1.0.4
 # Created: 2026-08-30
-# Modified: 2026-10-02
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
@@ -3121,7 +3121,7 @@ class TestOptionalPeerImportsAreWideEnough:
             monkeypatch.delitem(sys.modules, name, raising=False)
 
         with pytest.raises(FileNotFoundError):
-            importlib.import_module("aipass.memory.apps.handlers.tracking.tab_renderer")
+            importlib.import_module("aipass.memory.apps.modules.door_tab_renderer")
 
     def test_a_real_programming_error_is_still_fatal(self, monkeypatch, tmp_path):
         """The width is OSError, not Exception — a broken peer must stay loud."""
@@ -3300,29 +3300,20 @@ class TestTheStackMatcherIsTheRealOne:
 
         assert _inspect_stack_calls(source) == [5]
 
-    def test_the_guards_own_docstring_is_not_a_violation(self):
+    def test_prose_that_names_the_walk_is_not_a_violation(self):
         """The cure explains itself by naming the defect — that must stay legal.
 
-        Takes the guard's REAL docstring and puts it in a stub, rather than
-        asserting the whole live file is clean. The first version did the
-        latter, and the mutant run exposed it: restoring the walk made this
-        "control" red too, which means it was a second copy of the ban wearing a
-        control's name. A control has to fail for the reason it exists — here,
-        only if prose starts convicting.
+        Puts the old guard's own sentence in a stub's docstring, rather than
+        asserting the whole live file is clean. The first version read the live
+        guard's prose, and the mutant run exposed it: restoring the walk made
+        this "control" red too, which means it was a second copy of the ban
+        wearing a control's name. Since the v2 fence (DPLAN-0404) spawn's live
+        guard no longer mentions inspect.stack() at all, so the sentence lives
+        here. A control has to fail for the reason it exists — here, only if
+        prose starts convicting.
         """
-        guard = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py"
-        tree = ast.parse(guard.read_text(encoding="utf-8"))
+        prose = "Replaces the inspect.stack() walk of the first guard (2026-04-25)."
 
-        docstrings = [
-            ast.get_docstring(node)
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef))
-        ]
-        prose = "\n".join(d for d in docstrings if d)
-
-        assert "inspect.stack()" in prose, (
-            "the guard no longer explains what it replaced — this control is measuring nothing"
-        )
         assert _inspect_stack_calls(f'def stub():\n    """{prose}"""\n') == []
 
     @pytest.mark.parametrize(
@@ -3423,110 +3414,3 @@ class TestNewbornsAreBornPinned:
             f"shipped pin cannot convict:\n{result.stdout}"
         )
         assert "handler guard" in result.stdout
-
-
-class TestTheCallerIsNoneBranchHasABehaviouralInstrumentAfterAll:
-    """A behavioural pin for the branch @devpulse's sweep called unreachable.
-
-    Their fleet measurement (nine branches, 2026-08-31) is correct as stated:
-    the ``caller_file is None`` branch is unreachable from any IMPORT-shaped
-    test, because ``apps/__init__.py`` eagerly imports handlers and so always
-    supplies a real-file frame. That is why restoring the walk leaves whole
-    suites green.
-
-    It is reachable from a DIRECT-CALL-shaped test. Called from a ``python -c``
-    child, the only frames are ``<string>`` and importlib — both skipped — so
-    ``_find_real_caller`` returns ``(None, None)`` and the branch runs. Deny
-    ``os.path.realpath`` in that child and the restored walk dies where the
-    cured guard returns cleanly.
-
-    MEASURED both ways before writing this, against spawn's live guard:
-        cured    -> GUARD_OK
-        walk back -> GUARD_RAISED FileNotFoundError
-
-    So the AST pin above is not the only thing standing between the fleet and a
-    silent regrowth — it is just the only one that needs no subprocess. Relayed
-    to @devpulse, because eight other branches were told no instrument exists.
-    """
-
-    PROBE = """
-        import errno, os, os.path
-        from pathlib import Path
-
-        from aipass.spawn.apps.handlers import _find_real_caller, _guard_branch_access
-
-        # Arming probe: the branch under test only runs when there is no caller
-        # frame outside the guard. If a real-file frame ever appears here, this
-        # test is exercising a different path and must say so rather than pass.
-        caller, _line = _find_real_caller()
-        print("CALLER_IS_NONE" if caller is None else f"CALLER_IS_{caller}")
-
-        def _no_realpath(*args, **kwargs):
-            raise FileNotFoundError(errno.ENOENT, "No such file or directory")
-
-        os.path.realpath = _no_realpath
-
-        import pathlib as _pathlib
-
-        if hasattr(_pathlib, "_NormalAccessor"):
-            _pathlib._NormalAccessor.realpath = staticmethod(_no_realpath)
-        if hasattr(_pathlib, "_normal_accessor"):
-            _pathlib._normal_accessor.realpath = _no_realpath
-
-        # Second arming probe, split by ROUTE. The guard can reach realpath two
-        # ways and they are denied by different patches, so one combined
-        # DENIAL_LIVE would hide a half-armed world:
-        #
-        #   direct  — inspect.stack() -> getsourcefile -> getmodule ->
-        #             os.path.realpath(f). This is the route a REGROWN walk
-        #             takes, and it is what this pin exists to catch.
-        #   pathlib — _find_real_caller's own Path(...).resolve() calls, which
-        #             on <=3.10 go through the captured accessor and are NOT
-        #             denied by the rebinding above.
-        #
-        # Both paths are ABSOLUTE. @devpulse's trap (c): a relative probe path
-        # can raise because the path is relative and the cwd is unreadable,
-        # which convicts for the path's shape rather than for the denial.
-        _abs = os.path.join(os.sep, "definitely", "not", "here")
-
-        try:
-            os.path.realpath(_abs)
-        except OSError:
-            print("DENIAL_LIVE_DIRECT")
-        else:
-            print("DENIAL_DEAD_DIRECT")
-
-        try:
-            Path(_abs).resolve()
-        except OSError:
-            print("DENIAL_LIVE_PATHLIB")
-        else:
-            print("DENIAL_DEAD_PATHLIB")
-
-        _guard_branch_access()
-        print("GUARD_RETURNED")
-        """
-
-    def test_the_guard_returns_from_that_branch_without_touching_the_filesystem(self):
-        result = _run(self.PROBE, cwd=Path(__file__).resolve().parents[4])
-
-        lines = result.stdout.split()
-        assert lines and lines[0] == "CALLER_IS_NONE", (
-            "the probe did not reach the caller-is-None branch — it is measuring "
-            f"a different path: {result.stdout!r} {result.stderr[-400:]}"
-        )
-        for route in ("DIRECT", "PATHLIB"):
-            assert f"DENIAL_DEAD_{route}" not in lines, (
-                f"the {route.lower()} realpath route was inert in the child, so this run "
-                f"claims nothing. On <=3.10 the pathlib route needs the captured "
-                f"accessor patched as well as os.path.realpath: {result.stdout!r}"
-            )
-            assert f"DENIAL_LIVE_{route}" in lines, (
-                f"the child never armed the {route.lower()} route: {result.stdout!r}"
-            )
-
-        assert result.returncode == 0, (
-            "the caller-is-None branch needs the filesystem — a restored "
-            f"inspect.stack() walk is the usual cause:\n{result.stderr}"
-        )
-        assert lines[-1] == "GUARD_RETURNED"
