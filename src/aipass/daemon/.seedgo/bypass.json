@@ -125,18 +125,6 @@
       "pattern": "discover_plugins"
     },
     {
-      "file": "apps/handlers/schedule/telegram_notifier.py",
-      "standard": "encapsulation",
-      "reason": "Authorized cross-branch import (TDPLAN-0008 contract). daemon emits lifecycle pings via skills telegram notifier — the only send path; no module wrapper exists.",
-      "pattern": "Handler imported directly"
-    },
-    {
-      "file": "apps/handlers/schedule/telegram_notifier.py",
-      "standard": "handlers",
-      "reason": "Authorized cross-branch import (TDPLAN-0008 contract). send_telegram_notification lives in @skills handler — daemon's notifier wraps it fail-soft.",
-      "pattern": "Cross-handler imports"
-    },
-    {
       "file": "apps/modules/run.py",
       "standard": "introspection",
       "reason": "drone @daemon run with no args runs one scheduler tick — that IS its primary function. A no-args introspection gate would break the core invocation (same pattern as update.py, activity_report.py).",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_scheduler_bot.py
 # Description: Tests for TDPLAN-0008 Phase 1 — scheduler bot daemon layer
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-25
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/modules/queue.py, apps/modules/run.py and handlers/schedule/ — TDPLAN-0008 Phase 1."""
@@ -323,7 +323,7 @@ class TestFailSoft:
         assert notify_error("@x", "y", "e") is False
 
     @patch(
-        "aipass.skills.lib.telegram.apps.handlers.notifier.send_telegram_notification",
+        "aipass.skills.apps.modules.door_notifier.send_telegram_notification",
         side_effect=Exception("connection refused"),
     )
     def test_exception_caught(self, mock_notifier):
