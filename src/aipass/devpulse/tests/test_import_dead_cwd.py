@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins devpulse imports against a dead working directory
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/__init__.py and apps/handlers/module_root.py with no readable working directory."""
@@ -95,10 +95,11 @@ def test_the_guard_never_calls_inspect_stack():
     """Structural pin on the guard cure - import probes cannot carry this.
 
     The deleted second inspect.stack() walk sat in the caller-is-None branch,
-    which no import-shaped world ever reaches: apps/__init__.py always
-    supplies a real-file frame, so _find_real_caller never returns None
-    during an import. @trigger measured the hole - restoring the defect left
-    their whole suite green. Only a parse of the file convicts it.
+    which no import-shaped world ever reached while apps/__init__.py supplied
+    a real-file frame. @trigger measured the hole - restoring the defect left
+    their whole suite green. Only a parse of the file convicts it. The fence
+    v2 (DPLAN-0404) walks sys._getframe and resolves each frame's file under
+    its own except OSError; inspect has no place in it.
     """
     guard = (Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py").read_text(encoding="utf-8")
 
@@ -154,17 +155,16 @@ def test_fallback_diagnostics_never_take_the_lane_down(monkeypatch, capsys):
     assert "cannot record it" in capsys.readouterr().err
 
 
-DIRECT_CALL_WORLD = r"""
-# @spawn's finding (2026-08-31): the caller-is-None branch is unreachable from
-# IMPORT-shaped pins (apps/__init__ always supplies a real-file frame) but IS
-# reachable by calling the guard directly from a -c child - every frame is
-# <string> or importlib, both skipped, so _find_real_caller returns (None,
-# None) and the branch runs. A regrown inspect.stack() walk there dies under
-# the realpath denial; the cured plain return survives it.
+DENIED_RESOLVE_WORLD = r"""
+# The fence v2 (DPLAN-0404) resolves every frame's file in _frame_path, under
+# its own except OSError: a process whose cwd was deleted must not die in the
+# walk. This world denies realpath for every path, so each resolve raises and
+# the fence falls back to the raw spelling; a -c seat's frames are <string> and
+# importlib, transport, so the walk finds no foreign frame and returns. The
+# public shape is all this world touches: the import, and its survival.
 from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
-import aipass.devpulse.apps.handlers as handlers
 
 import os
 
@@ -182,26 +182,35 @@ try:
 except FileNotFoundError:
     print("DENIAL_ARMED")
 
-# Arming probe 2: this world must actually reach the None branch.
-caller = handlers._find_real_caller()
-print(f"CALLER_IS_NONE:{caller == (None, None)}")
+# Arming probe 2: this interpreter's resolve() must reach the denial, or the
+# fence's except arm is never exercised (3.11+ routes through os.path.realpath).
+import pathlib
 
-handlers._guard_branch_access()
+try:
+    pathlib.Path(pathlib.__file__).resolve()
+    print("RESOLVE_INERT")
+except FileNotFoundError:
+    print("RESOLVE_DENIED")
+
+import aipass.devpulse.apps.handlers  # noqa: F401
+
 print("GUARD_RETURNED")
 """
 
 
-def test_the_none_branch_is_reachable_by_direct_call():
-    """Behavioural sibling of the AST ban - @spawn measured the shape.
+def test_the_fence_survives_a_denied_resolve_from_a_file_less_seat():
+    """Behavioural sibling of the AST ban, against v2's public shape.
 
-    The AST pin names the defect precisely but is a parse, not a run; this
-    world RUNS the caller-is-None branch under a realpath denial. Both
-    instruments watch the same branch from different sides: restoring the
-    deleted inspect.stack() walk turns this red (the walk executes under the
-    denial) and the AST pin red (the call is back in the source).
+    The AST pin is a parse, not a run; this world RUNS the fence's walk with
+    every resolve denied. Mutant-proven: _frame_path without its except OSError
+    arm dies here (M8, DPLAN-0404), and a regrown inspect.stack() walk dies the
+    same way. The resolve-level probe is asserted on 3.11+, where pathlib routes
+    resolve through os.path.realpath; 3.10 resolves through a copy pathlib
+    captured at its first import, so the arm is out of this world's reach there
+    and the import's survival is all it can pin.
     """
     result = subprocess.run(
-        [sys.executable, "-c", DIRECT_CALL_WORLD],
+        [sys.executable, "-c", DENIED_RESOLVE_WORLD],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -210,10 +219,9 @@ def test_the_none_branch_is_reachable_by_direct_call():
     )
     out = result.stdout
     assert "DENIAL_ARMED" in out, f"the realpath denial never bit - vacuous world:\n{out}\n{result.stderr}"
-    assert "CALLER_IS_NONE:True" in out, f"the world never reached the None branch - wrong path exercised:\n{out}"
-    assert "GUARD_RETURNED" in out, (
-        f"the guard died in the caller-is-None branch under a realpath denial:\n{out}\n{result.stderr}"
-    )
+    if sys.version_info >= (3, 11):
+        assert "RESOLVE_DENIED" in out, f"resolve() never reached the denial - the fence's arm is untouched:\n{out}"
+    assert "GUARD_RETURNED" in out, f"the fence died walking the stack under a denied resolve:\n{out}\n{result.stderr}"
 
 
 def test_handlers_import_with_dead_cwd():
