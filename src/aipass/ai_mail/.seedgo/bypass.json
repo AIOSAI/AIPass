@@ -13,16 +13,6 @@
       "measured": "2026-08-13 (S141) — added WITH the file, not inherited. Live rule, not a prune candidate: audit lane reports the violation with it off (99%) and clears with it on (100%)."
     },
     {
-      "file": "apps/handlers/users/verified_caller.py",
-      "standard": "handlers",
-      "reason": "Lazy cross-branch import of devpulse's admin_grant.verify_admin_grant, authorized by @devpulse in the FPLAN-0401 Phase 4 dispatch: the 5-leg admin contract has ONE home so this lane cannot drift from it. Their modules/ entry point re-exports the same function object, but that import trips the handler-imports-modules rule instead — both shapes need a bypass, and the handler import is the narrower dependency (no CLI/help layer at verification time). Import failure is caught and returns lane-dark, so the coupling can never break a dispatch."
-    },
-    {
-      "file": "apps/handlers/users/verified_caller.py",
-      "standard": "encapsulation",
-      "reason": "Same cross-branch import as the handlers entry above — devpulse owns the admin-grant contract (FPLAN-0401 THE CONTRACT), ai_mail consumes it rather than mirroring it."
-    },
-    {
       "file": "apps/modules/email.py",
       "standard": "introspection",
       "reason": "Multi-command module where inbox, sent, contacts work without args by design. Adding no-args gate would break primary mail workflow (drone @ai_mail inbox)."
@@ -50,12 +40,7 @@
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "handlers",
-      "reason": "Two cross-branch imports, both lazy and both inside the function that needs them. line 83 drone.apps.handlers.broker.client.create_identified_connection — Phase 6b broker-fd handshake (FPLAN-0250), authorized by brief. line 66 hooks.apps.modules.sandbox.build_policy/build_srt_config/resolve_bwrap_command — the srt kernel sandbox wrap; @hooks owns the policy so this consumes their modules/ entry point rather than mirroring bwrap construction, which trips handler-imports-modules instead. Both raise rather than fall back, so neither can silently degrade a spawn."
-    },
-    {
-      "file": "apps/handlers/dispatch/dispatch_monitor.py",
-      "standard": "encapsulation",
-      "reason": "Lazy-imports drone.apps.handlers.broker.client.create_identified_connection inside _connect_broker() — cross-branch handler import for Phase 6b broker-fd handshake (FPLAN-0250). Brief explicitly authorizes this import path."
+      "reason": "One cross-branch import, lazy and inside the function that needs it: hooks.apps.modules.sandbox.build_policy/build_srt_config/resolve_bwrap_command — the srt kernel sandbox wrap; @hooks owns the policy so this consumes their modules/ entry point rather than mirroring bwrap construction, which trips handler-imports-modules instead. It raises rather than falls back, so it cannot silently degrade a spawn. (The drone broker half expired in DPLAN-0404 leg 15: _connect_broker now reaches drone's door_broker.)"
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
@@ -218,8 +203,8 @@
     {
       "file": "apps/handlers/dispatch/register.py",
       "standard": "logged_fallback",
-      "lines": [360, 603],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 11). 360: record_monitor_pid returns True only when the annotation was appended; False is its documented failure answer, the same as for a bad pid, and its one caller (wake.py's spawn, after the monitor is already running) must not cancel a live dispatch over a lost annotation; the row then falls back to expected_by. 603: _is_overdue cannot read expected_by, so it cannot say the row is late; the row stays listed as outstanding, the warning names it, and the flag is read as a bool by @devpulse's watchdog (dispatches.py:164, wire.py:531), so a third value would reach another branch."
+      "lines": [368, 611],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined DPLAN-0404 leg 15). 368: record_monitor_pid returns True only when the annotation was appended; False is its documented failure answer, the same as for a bad pid, and its one caller (wake.py's spawn, after the monitor is already running) must not cancel a live dispatch over a lost annotation; the row then falls back to expected_by. 611: _is_overdue cannot read expected_by, so it cannot say the row is late; the row stays listed as outstanding, the warning names it, and the flag is read as a bool by @devpulse's watchdog (dispatches.py:164, wire.py:531), so a third value would reach another branch."
     },
     {
       "file": "apps/handlers/email/format.py",
@@ -301,7 +286,7 @@
     {
       "file": "tests/test_dispatch_monitor.py",
       "standard": "literal_path",
-      "lines": [1567],
+      "lines": [1566],
       "reason": "(ai_mail, fleet green leg 9; re-lined 2026-10-04) The literal is the subject: _get_jsonl_projects_dir encodes a cwd STRING into Claude's project-dir name (separators to '-'). No file system is asked and nothing is read or written at that path; built from tmp_path the expected name would have to re-implement the encoding under test. Kept as the subject since leg 5; devpulse accepted it as a string parse in the leg 7 ruling."
     },
     {
@@ -314,7 +299,7 @@
       "file": "tests/test_session_pointer.py",
       "standard": "literal_path",
       "lines": [105],
-      "reason": "(ai_mail, fleet green leg 9; re-lined leg 17) Same as test_dispatch_monitor.py 1567: transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
+      "reason": "(ai_mail, fleet green leg 9; re-lined leg 17) Same as test_dispatch_monitor.py 1566: transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
     },
     {
       "file": "apps/handlers/dispatch/session_pointer.py",

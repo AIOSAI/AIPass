@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verified_caller.py
 # Description: Verified-Caller Rail for privilege-bearing decisions
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-08-12
-# Modified: 2026-10-06
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -195,13 +195,10 @@ def verify_admin_caller(
         so a refusal can be read without a debugger.
     """
     try:
-        # Cross-branch handler import, authorized by @devpulse in the FPLAN-0401
-        # Phase 4 dispatch: "lazy-import it — one implementation, no drift".
-        # Their modules/ entry point re-exports this same function object, but
-        # importing the handler keeps the dependency tight (no CLI/help layer
-        # pulled in at verification time). Both shapes need a bypass entry;
-        # this is the narrower one. Bypassed: handlers (cross-branch import).
-        from aipass.devpulse.apps.handlers.owner.admin_grant import verify_admin_grant
+        # devpulse's door (DPLAN-0404): one implementation of the 5-leg contract,
+        # reached through its published re-export, never its handlers. Lazy, so
+        # a dark lane costs nothing at import.
+        from aipass.devpulse.apps.modules.door_admin_grant import verify_admin_grant
     except ImportError as exc:
         logger.warning("[identity] admin lane dark — reference implementation unavailable: %s", exc)
         return False, f"admin lane dark: devpulse admin_grant reference unavailable ({exc})"

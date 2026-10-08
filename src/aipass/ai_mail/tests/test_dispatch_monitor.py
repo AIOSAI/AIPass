@@ -3,7 +3,7 @@
 # Description: Tests for dispatch monitor lifecycle handler
 # Version: 1.1.2
 # Created: 2026-04-02
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py -- startup check, retry loop, bounce, rate limiting."""
@@ -49,8 +49,7 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
     main,
 )
 from aipass.ai_mail.apps.handlers.dispatch.wake import DispatchStatus
-from aipass.drone.apps.handlers.broker.client import create_identified_connection
-from aipass.drone.apps.handlers.broker.daemon import BrokerDaemon
+from aipass.drone.apps.modules.door_broker import BrokerDaemon, create_identified_connection
 
 
 # --- Fixtures --------------------------------------------------------

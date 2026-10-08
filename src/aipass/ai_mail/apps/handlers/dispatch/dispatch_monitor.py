@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.6.0
+# Version: 2.7.0
 # Created: 2026-03-02
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -87,7 +87,7 @@ def _connect_broker(repo_root: Path, branch_name: str) -> socket.socket:
 
     Raises on ANY failure — caller must not silently skip the broker.
     """
-    from aipass.drone.apps.handlers.broker.client import create_identified_connection
+    from aipass.drone.apps.modules.door_broker import create_identified_connection
 
     socket_path = repo_root / ".ai_central" / "drone_broker.sock"
     secret_path = repo_root / ".ai_central" / "broker_secret"

@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch register append-only log
 # Version: 1.0.2
 # Created: 2026-08-22
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register."""
@@ -559,6 +559,38 @@ class TestNeverProduction:
         result = register.register_file(repo_root=target)
 
         assert target in result.parents
+
+
+class TestThePublicSeam:
+    """AIPASS_DISPATCH_REGISTER re-points the default register, read at every call.
+
+    A consumer's tests (devpulse's hermetic_mail_doors) transplanted the register
+    by patching this module's private find_repo_root; the fence refuses that
+    reach. The variable is the public seam in its place (DPLAN-0404 leg 15).
+    """
+
+    def test_the_variable_names_the_register_every_rootless_caller_reads(self, monkeypatch, tmp_path):
+        chosen = tmp_path / "chosen" / "dispatch_register.jsonl"
+        monkeypatch.setenv("AIPASS_DISPATCH_REGISTER", str(chosen))
+
+        dispatch_id = register.open_dispatch("@a", "@b", "s", 7200)
+
+        assert register.register_file() == chosen
+        assert [row["dispatch_id"] for row in register.outstanding()] == [dispatch_id]
+        assert chosen.exists()
+
+    def test_a_given_root_still_wins_over_the_variable(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AIPASS_DISPATCH_REGISTER", str(tmp_path / "chosen.jsonl"))
+        target = tmp_path / "rooted"
+
+        assert register.register_file(repo_root=target) == target / ".aipass" / register.REGISTER_FILENAME
+
+    def test_unset_is_the_repo_root_answer(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("AIPASS_DISPATCH_REGISTER", raising=False)
+        root = tmp_path / "root"
+        monkeypatch.setattr(register, "find_repo_root", lambda: root)
+
+        assert register.register_file() == root / ".aipass" / register.REGISTER_FILENAME
 
 
 class TestReadingIsForgiving:
