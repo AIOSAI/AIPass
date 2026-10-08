@@ -2,9 +2,9 @@
 # META DATA HEADER
 # Name: test_import_dead_cwd.py - commons imports without a readable cwd
 # Description: Pins that commons imports with a deleted cwd, and the sys.path[0] repair in apps/commons.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # Category: commons/tests
 # =============================================
 
@@ -15,11 +15,16 @@
 
 import ast
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from aipass.commons.tests import support_fence
+
+KIN_PROBE = Path(support_fence.__file__)
 
 # The mechanism, measured on the Windows CI gate 2026-08-31 (@memory's finding,
 # relayed round 4): ntpath.realpath calls os.getcwd() UNCONDITIONALLY - not only
@@ -106,18 +111,21 @@ print("IMPORTED")
 """
 )
 
-# The guard alone. Named separately because its cwd read arrives by a
-# different route - inspect.stack() builds a FrameInfo per frame and
-# getmodule() calls os.path.realpath() outside any try - so a cure to the
-# constants would leave this red and a reader deserves to know which broke.
-GUARD_WORLD = (
-    _PREAMBLE
-    + r"""
-import aipass.commons.apps.handlers  # noqa: F401
+# The fence alone, through its public shape: the fence probe (support_fence.py)
+# run under the denial, from the seat the test names. Named separately from the
+# sweep because the fence resolves every frame's path, a cwd read the constants
+# above do not make, so a reader deserves to know which broke (DPLAN-0404).
+_FENCE_PROBE_BODY = r"""
+import runpy
+import sys
 
-print("IMPORTED")
+sys.argv = [{seat!r}, {shape!r}]
+runpy.run_path({seat!r}, run_name="__main__")
 """
-)
+
+
+def _fence_world(seat: Path, shape: str) -> str:
+    return _PREAMBLE + _FENCE_PROBE_BODY.format(seat=str(seat), shape=shape)
 
 
 # The same denial, shaped like ntpath rather than posixpath.
@@ -227,12 +235,26 @@ def test_handler_modules_import_with_dead_cwd():
     _assert_probe_armed(out)
 
 
-def test_handlers_guard_imports_with_dead_cwd():
-    """The package guard reaches the same cwd read through its stack walk."""
-    result = _run(GUARD_WORLD)
+@pytest.mark.parametrize("shape", ["pkg", "deep", "mock"])
+def test_the_fence_lets_its_own_branch_in_under_a_dead_cwd(shape):
+    """The kin seat is allowed with every path resolve denied, so the fence's walk needs no cwd."""
+    result = _run(_fence_world(KIN_PROBE, shape))
     out = result.stdout
 
-    assert "IMPORTED" in out, f"the handlers guard died under the dead-cwd world:\nstdout={out}\nstderr={result.stderr}"
+    assert out.strip().splitlines()[-1:] == ["ALLOWED"], f"stdout={out}\nstderr={result.stderr}"
+    _assert_probe_armed(out)
+
+
+def test_the_fence_refuses_an_elsewhere_caller_under_a_dead_cwd(tmp_path):
+    """A seat outside any aipass tree is still refused and named when no path can be resolved."""
+    seat = tmp_path / "elsewhere" / "probe.py"
+    seat.parent.mkdir(parents=True)
+    shutil.copy(KIN_PROBE, seat)
+
+    result = _run(_fence_world(seat, "pkg"))
+    out = result.stdout
+
+    assert out.strip().splitlines()[-1:] == ["DENIED Caller branch: unknown"], f"stdout={out}\nstderr={result.stderr}"
     _assert_probe_armed(out)
 
 
@@ -439,18 +461,6 @@ def _assert_probe_is_usable(probe: dict) -> None:
         )
 
 
-def _assert_caller_is_none_world(out: str, stderr: str) -> None:
-    """Judge the caller-is-None world's output. Both arming probes enforced."""
-    assert "STACK_DIES" in out, f"arming probe 1: the ntpath world did not bite:\n{out}\n{stderr}"
-    assert "CALLER_IS_NONE" in out, (
-        "arming probe 2: the world did not reach the caller-is-None branch, so "
-        f"a regrown walk there would go unwatched:\n{out}"
-    )
-    assert "GUARD_RETURNED" in out, (
-        f"the guard raised instead of returning for a caller-less stack:\nstdout={out}\nstderr={stderr}"
-    )
-
-
 def _symlink_spelling_probe(tmp_path) -> dict:
     """Run a script through a symlinked directory and record what the host did.
 
@@ -592,7 +602,9 @@ probe_dir = {probe_dir!r}
 os.environ["AIPASS_TEST_LOG_DIR"] = probe_dir
 
 # Written BEFORE the denial: a genuine module on disk, so the frame the lookup
-# reads is compiled source and not a "<string>" pseudo-name.
+# reads is compiled source and not a "<string>" pseudo-name. It sits in tmp, a
+# foreign seat, so it takes the shim through a modules door; the handlers fence
+# refuses a foreign seat that imports the handler itself (DPLAN-0404).
 #
 # Measured THROUGH log_operation rather than by calling the detector, because
 # after DPLAN-0325 there is no detector to call: the shim binds the one prax
@@ -602,7 +614,7 @@ os.environ["AIPASS_TEST_LOG_DIR"] = probe_dir
 # is the public one, and the ANSWER is read off the document it wrote.
 with open(os.path.join(probe_dir, "probe_caller.py"), "w", encoding="utf-8") as fh:
     fh.write(
-        "from aipass.commons.apps.handlers.json import json_handler\n"
+        "from aipass.commons.apps.modules.commons_identity import json_handler\n"
         "def _inner():\n"
         "    json_handler.log_operation('probe', {{'ok': True}})\n"
         "    directory = json_handler.get_json_path('probe', 'log').parent\n"
@@ -677,14 +689,14 @@ def test_caller_module_autodetect_survives_and_answers_under_a_dead_cwd(tmp_path
 # ===========================================================================
 #
 # @devpulse's round-4 follow-up, measured fleet-wide by @trigger and reproduced
-# in eight branches: the guard's DELETED second walk sat in the caller-is-None
-# branch, which no import-shaped pin can reach - apps/__init__ always supplies
-# a real-file frame, so that branch never runs during an import. Regrow the walk
-# and every behavioural pin above stays green.
+# in eight branches: the old guard's DELETED second walk sat in its caller-is-None
+# branch, which no import-shaped pin could reach. A walk regrown in a branch the
+# fence pins above never take would leave them green. The v2 fence (DPLAN-0404)
+# walks with sys._getframe only.
 #
-# A parse-tree ban, never a spelling ban: this file and the guard both NAME
-# inspect.stack in prose while explaining the defect, and a string search would
-# convict its own documentation.
+# A parse-tree ban, never a spelling ban: this file NAMES inspect.stack in prose
+# while explaining the defect, and a string search would convict its own
+# documentation.
 
 
 def _inspect_stack_call_lines(source: str, filename: str) -> list:
@@ -780,22 +792,16 @@ def test_no_inspect_stack_call_anywhere_in_apps():
 
 
 def test_the_guard_specifically_carries_no_stack_walk():
-    """
-    Named separately from the tree-wide sweep so the failure reads plainly.
-
-    The guard's second walk lived in the caller-is-None branch, which no
-    import-shaped pin in this file can reach.
-    """
+    """Named separately from the tree-wide sweep so the failure reads plainly."""
     guard = Path(__file__).resolve().parent.parent / "apps" / "handlers" / "__init__.py"
     source = guard.read_text(encoding="utf-8")
 
-    assert "inspect" in source, (
-        "the guard no longer mentions inspect at all — if the explanation was "
-        "deleted with the call, this pin's positive control is worth re-reading"
+    assert "sys._getframe(" in source, (
+        "the fence no longer walks with sys._getframe - if the walk moved, this "
+        "pin's positive control is worth re-reading"
     )
     assert _inspect_stack_call_lines(source, str(guard)) == [], (
-        "the handlers guard walks inspect.stack() again — the caller-is-None "
-        "branch is invisible to every behavioural pin in this file"
+        "the handlers fence walks inspect.stack() again, which reads os.getcwd() on Windows; walk with sys._getframe"
     )
 
 
@@ -836,48 +842,6 @@ def test_the_matcher_leaves_legitimate_code_alone(source, why):
     another name and touches no filesystem.
     """
     assert _inspect_stack_call_lines(source, "<negative>") == [], f"matcher over-convicted: {why}"
-
-
-# ===========================================================================
-# The caller-is-None branch, reached behaviourally
-# ===========================================================================
-#
-# @devpulse's round-4 correction (relay 6be10723), measured by @spawn: the
-# guidance that only an AST ban can watch this branch was TOO STRONG. It is
-# unreachable from IMPORT-shaped pins - apps/__init__ always supplies a
-# real-file frame, so _find_real_caller never returns None during an import,
-# which is the nine-branch reproduction - but calling the guard DIRECTLY from
-# a python -c child reaches it: every frame is a string pseudo-name or an
-# importlib internal, both skipped, so the walk falls off the end.
-#
-# Kept ALONGSIDE the AST ban rather than replacing it: the ban needs no
-# subprocess and names the defect precisely, this one proves the branch still
-# behaves. Both die to a regrown walk, which is the point.
-
-_CALLER_IS_NONE_WORLD = (
-    _NTPATH_PREAMBLE
-    + r"""
-import aipass.commons.apps.handlers as guard
-
-# ARMING PROBE 2: the world must actually exercise the caller-is-None branch.
-# Without this the pin could pass by taking the same-branch return instead,
-# and a regrown walk in the dead branch would never be touched.
-caller_file, _ = guard._find_real_caller()
-print("CALLER_IS_NONE" if caller_file is None else "CALLER_WAS:" + str(caller_file))
-
-# The branch itself: no caller outside this file, so the guard must simply
-# return. A regrown inspect.stack() walk dies here under the denial.
-guard._guard_branch_access()
-print("GUARD_RETURNED")
-"""
-)
-
-
-def test_guard_returns_from_the_caller_is_none_branch_under_a_dead_cwd():
-    """The branch no import-shaped pin in this file can reach."""
-    result = _run(_CALLER_IS_NONE_WORLD)
-
-    _assert_caller_is_none_world(result.stdout, result.stderr)
 
 
 # ===========================================================================
@@ -927,30 +891,6 @@ def test_a_probe_reporting_success_with_an_empty_field_is_refused():
 def test_a_usable_probe_passes_the_same_judgement():
     """POSITIVE CONTROL — the refusals above are not refusing everything."""
     _assert_probe_is_usable({"built": True, "reason": "", "path0": "/real", "unresolved": "/link", "resolved": "/real"})
-
-
-@pytest.mark.parametrize(
-    "out, missing",
-    [
-        ("CALLER_IS_NONE\nGUARD_RETURNED\n", "arming probe 1"),
-        ("STACK_DIES\nGUARD_RETURNED\n", "arming probe 2"),
-        ("STACK_DIES\nCALLER_IS_NONE\n", "the guard raised"),
-    ],
-)
-def test_the_caller_is_none_judgement_needs_every_marker(out, missing):
-    """
-    Each marker is load-bearing: drop any one and the world proves less.
-
-    Reachable here because the output is a string I hand it, not something a
-    live child process happened to print.
-    """
-    with pytest.raises(AssertionError, match=missing):
-        _assert_caller_is_none_world(out, "")
-
-
-def test_the_caller_is_none_judgement_passes_a_complete_world():
-    """POSITIVE CONTROL for the three refusals above."""
-    _assert_caller_is_none_world("STACK_DIES\nCALLER_IS_NONE\nGUARD_RETURNED\n", "")
 
 
 @pytest.mark.parametrize(

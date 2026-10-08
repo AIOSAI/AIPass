@@ -406,11 +406,6 @@
       "reason": "_validate_metadata: every None means the same thing, the input is not valid shallow JSON, and its one caller refuses all three with one true message; no system failure is hidden (commons' decision, DPLAN-0354 leg 5)"
     },
     {
-      "file": "apps/__init__.py",
-      "standard": "cli_flags",
-      "reason": "A package marker, not an entry point: cli_flags reads every file directly under apps/, and the entry point apps/commons.py carries --version. The checker passes no line, so the rule is file-wide (commons' decision, DPLAN-0354 leg 5)"
-    },
-    {
       "file": "tests/__init__.py",
       "standard": "file_top",
       "reason": "A package marker holding no test: items 6 and 7 (a subject path, a declared pass) have nothing to name. Item 5, the banner, was cured in leg 5. The checker passes no line, so the rule is file-wide (commons' decision, DPLAN-0354 leg 5)"
