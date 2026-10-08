@@ -28,11 +28,14 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 import importlib
+import json
 import logging
+import shutil
+import subprocess
 import threading
 from pathlib import Path
-from typing import Generator
-from unittest.mock import MagicMock
+from typing import Any, Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -65,6 +68,263 @@ _json_mod = importlib.import_module(_JSON_MOD_PATH)
 from aipass.api.apps.handlers.host import attach as _attach
 from aipass.api.apps.handlers.host import fleet as _fleet
 from aipass.api.apps.handlers.host import refusals as _refusals
+
+# ---------------------------------------------------------------------------
+# The attach lane's shared fixtures. They moved here whole from
+# test_host_attach.py when it split into three files along the unit under
+# test, because two or more of the three use each (api, the oversize split
+# leg, 2026-10-08). `store` serves test_host_api.py's files the same way.
+# ---------------------------------------------------------------------------
+from aipass.api.apps.handlers.host import attach as host_attach
+from aipass.api.tests.support_host_attach import _forced_tmux_which
+
+PATCH_ATTACH_JSON = "aipass.api.apps.handlers.host.attach.json_handler"
+PATCH_ATTACH_LOGGER = "aipass.api.apps.handlers.host.attach.logger"
+PATCH_SECRETS_BASE = "aipass.api.apps.handlers.auth.secrets.SECRETS_BASE"
+PATCH_SECRETS_JSON = "aipass.api.apps.handlers.auth.secrets.json_handler"
+PATCH_SECRETS_LOGGER = "aipass.api.apps.handlers.auth.secrets.logger"
+PATCH_TOKENS_JSON = "aipass.api.apps.handlers.host.tokens.json_handler"
+PATCH_TOKENS_LOGGER = "aipass.api.apps.handlers.host.tokens.logger"
+# The project this server is seated in, as the registry names it.
+SEAT = "AIPass"
+
+
+@pytest.fixture
+def quiet():
+    """Silence the attach lane's own logging."""
+    with patch(PATCH_ATTACH_JSON), patch(PATCH_ATTACH_LOGGER):
+        yield
+
+
+@pytest.fixture
+def tmux_preflight(monkeypatch: Any):
+    """
+    Satisfy `open_attach`'s tmux preflight on a host that has no tmux.
+
+    RUN 34704362515 (macOS, 2026-09-12): 15 failed and 8 errors in this file,
+    every one of them `AttachUnavailable: tmux is not installed on this host`.
+    Not one of those cases runs tmux — they replace the argv with `cat`, `echo`
+    or `pwd`, or patch `Popen` outright — so what they measured was the runner's
+    package list rather than this lane. The precedent is already in this file
+    (`TestOneRoomHonoursAnOutsideSeat`, which forces the same preflight because
+    argv composition is string work no binary takes part in).
+
+    One of the fifteen was worse than a red: `test_a_failed_spawn_leaks_no_
+    descriptors` asserts `AttachUnavailable` from a spawn that raises, and on a
+    tmux-less host the preflight raised that exact class three lines earlier —
+    the case would have passed while measuring nothing.
+
+    Only the tmux binary is answered for; every other lookup goes to the real
+    `shutil.which`, so the monitor lane's own drone preflight is untouched.
+    """
+    monkeypatch.setattr(host_attach.shutil, "which", _forced_tmux_which(shutil.which))
+
+
+@pytest.fixture
+def store(tmp_path: Path):
+    """Redirect the token store to a temp dir — no real token is ever touched."""
+    with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
+        with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER):
+            yield tmp_path
+
+
+@pytest.fixture
+def seated(tmp_path: Path, monkeypatch: Any):
+    """
+    A citizen registry of this test's own, so the seat resolves to a KNOWN name.
+
+    THE CI RED THIS FIXES (PR #734, run 32094572478): the attach route asks
+    which project it is seated in before it opens anything, and that answer
+    comes from drone's citizen registry. The live registry is machine-managed
+    and ignored by version control, so a fresh runner has none — the ubuntu job
+    installs the package and runs pytest, nothing more. Six tests here were
+    therefore leaning on whatever this developer's machine happened to contain,
+    and on CI the refusal fired at registry resolution BEFORE the contract under
+    test was ever reached: close code 1011 where 1008 was expected, the tmux
+    sentence replaced by a registry one, and empty resize and write lists
+    downstream because the pump never started.
+
+    None of those six tests are about registry resolution. A test that needs a
+    registry brings its own, and then it is testing the thing it claims to.
+
+    AIPASS_REGISTRY is drone's OWN documented door (priority 2 of 3 in
+    get_registry_path, behind only an explicit set_registry_path), so the
+    resolution under test stays drone's real one end to end — path normalising,
+    credential check and all. Nothing here reaches for the live registry, and
+    monkeypatch puts the environment back on the way out.
+
+    The root is named for the real seat so the seat-versus-external branch of
+    the route lands the same way here as it does on the developer machine.
+    """
+    root = tmp_path / SEAT
+    branch_dir = root / "src" / "aipass" / "api"
+    branch_dir.mkdir(parents=True)
+
+    registry = root / "AIPASS_REGISTRY.json"
+    registry.write_text(
+        json.dumps(
+            {
+                # No metadata.id ON PURPOSE: drone only compares registries
+                # against a passport when BOTH carry an id, so leaving it out
+                # keeps this fixture from arguing with the citizen running it.
+                "metadata": {"description": "hermetic registry for the attach tests"},
+                "branches": [
+                    {
+                        "name": "API",
+                        "path": "src/aipass/api",
+                        "email": "@api",
+                        "status": "active",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("AIPASS_REGISTRY", str(registry))
+    yield root
+
+
+# ---------------------------------------------------------------------------
+# The read lane's shared fixtures. They moved here whole from
+# test_host_read_lane.py when it split into four files along the unit under
+# test, because two or more of the four use each (api, the oversize split leg,
+# 2026-10-08). The git-changes cache clear is autouse, so it now runs around
+# every case in the suite, beside the fleet and refusal resets below.
+# ---------------------------------------------------------------------------
+from aipass.api.apps.handlers.host import git_reads as host_git
+from aipass.api.tests.support_host_read_lane import _BranchNotFound, _RegistryBroken, remote_document
+
+PATCH_FEED_PATH = "aipass.api.apps.handlers.host.feed.feed_path"
+PATCH_FEED_LOGGER = "aipass.api.apps.handlers.host.feed.logger"
+PATCH_FEED_JSON = "aipass.api.apps.handlers.host.feed.json_handler"
+PATCH_READS_LOGGER = "aipass.api.apps.handlers.host.reads.logger"
+PATCH_READS_JSON = "aipass.api.apps.handlers.host.reads.json_handler"
+PATCH_READS_DRONE = "aipass.api.apps.handlers.host.reads.drone"
+PATCH_GIT_LOGGER = "aipass.api.apps.handlers.host.git_reads.logger"
+PATCH_GIT_JSON = "aipass.api.apps.handlers.host.git_reads.json_handler"
+
+
+@pytest.fixture(autouse=True)
+def _clean_git_changes_cache():
+    """
+    Empty the git-changes cache around every case in this file.
+
+    `read_git_changes` coalesces on (branch, project, grain) with a 1.5s TTL
+    (2026-09-07, the stampede cure). Cases here mock a different `drone @git
+    status` answer under the same branch name, so without this the SECOND case
+    to run is served the FIRST one's document and asserts against a subprocess
+    that was never called. That failure reads as a broken lane and is not one —
+    it is the cache doing its job across a boundary a suite does not have.
+
+    Autouse rather than opt-in: a case added later would otherwise inherit the
+    bleed silently, and it passes alone, which is the worst way to find it.
+    """
+    host_git._changes.clear()
+    yield
+    host_git._changes.clear()
+
+
+@pytest.fixture
+def feed_file(tmp_path: Path):
+    """A temp feed file wired into the handler."""
+    path = tmp_path / "notifications.jsonl"
+    with patch(PATCH_FEED_PATH, return_value=path), patch(PATCH_FEED_LOGGER), patch(PATCH_FEED_JSON):
+        yield path
+
+
+@pytest.fixture
+def fake_repo(tmp_path: Path):
+    """A repo root with a registry and one branch, wired into the handler."""
+    root = tmp_path / "FakeRepo"
+    branch = root / "src" / "aipass" / "demo"
+    branch.mkdir(parents=True)
+    (branch / "hello.txt").write_text("hello world", encoding="utf-8")
+    (branch / "nested").mkdir()
+    (branch / "nested" / "deep.txt").write_text("deep", encoding="utf-8")
+    (root / "secret.txt").write_text("do not read me", encoding="utf-8")
+
+    registry = root / "AIPASS_REGISTRY.json"
+    registry.write_text(
+        json.dumps({"branches": [{"name": "DEMO", "path": str(branch), "email": "@demo"}]}),
+        encoding="utf-8",
+    )
+
+    # Stand in for @drone's public surface — the door this handler resolves
+    # through. Its real error classes are kept so the refused/unavailable split
+    # is exercised rather than assumed.
+    fake_drone = MagicMock()
+    fake_drone.BranchNotFoundError = _BranchNotFound
+    fake_drone.RegistryError = _RegistryBroken
+    fake_drone.get_registry_path.return_value = str(registry)
+
+    def _info(name: str) -> dict:
+        if name.lower() not in ("demo", "@demo"):
+            raise _BranchNotFound(name)
+        return {"name": "DEMO", "path": str(branch), "email": "@demo"}
+
+    fake_drone.get_branch_info.side_effect = _info
+
+    with (
+        patch(PATCH_READS_DRONE, fake_drone),
+        patch(PATCH_READS_LOGGER),
+        patch(PATCH_READS_JSON),
+        patch(PATCH_GIT_LOGGER),
+        patch(PATCH_GIT_JSON),
+    ):
+        yield {"root": root, "branch": branch, "registry": registry, "drone": fake_drone}
+
+
+def _raise(error: Exception) -> Any:
+    """Raise inside a lambda — the fixture's resolver needs one expression."""
+    raise error
+
+
+@pytest.fixture
+def remote_repo(tmp_path: Path):
+    """A branch whose remote door can be made to answer anything, per test."""
+    root = tmp_path / "RemoteRepo"
+    branch = root / "src" / "aipass" / "demo"
+    branch.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    registry = root / "AIPASS_REGISTRY.json"
+    registry.write_text(
+        json.dumps({"branches": [{"name": "DEMO", "path": str(branch), "email": "@demo"}]}),
+        encoding="utf-8",
+    )
+
+    fake_drone = MagicMock()
+    fake_drone.BranchNotFoundError = _BranchNotFound
+    fake_drone.RegistryError = _RegistryBroken
+    fake_drone.get_registry_path.return_value = str(registry)
+    fake_drone.get_branch_info.side_effect = lambda name: (
+        {"name": "DEMO", "path": str(branch), "email": "@demo"}
+        if name.lower() in ("demo", "@demo")
+        else _raise(_BranchNotFound(name))
+    )
+
+    runner = MagicMock()
+
+    def serve(stdout: str, returncode: int = 0, stderr: str = "") -> None:
+        """What `drone @git remote --json` answers with, for this test."""
+        completed = MagicMock()
+        completed.stdout = stdout
+        completed.stderr = stderr
+        completed.returncode = returncode
+        runner.return_value = completed
+
+    serve(remote_document("https://github.com/AIOSAI/AIPass.git"))
+
+    with (
+        patch(PATCH_READS_DRONE, fake_drone),
+        patch(PATCH_READS_LOGGER),
+        patch(PATCH_READS_JSON),
+        patch(PATCH_GIT_LOGGER),
+        patch(PATCH_GIT_JSON),
+        patch.object(subprocess, "run", runner),
+    ):
+        yield {"root": root, "branch": branch, "serve": serve, "runner": runner}
 
 
 # Never discover out of .archive/: it holds verbatim disposal copies of the
