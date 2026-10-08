@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins daemon imports against a dead working directory
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-31
 # Modified: 2026-10-08
 # =============================================
@@ -9,7 +9,7 @@
 """Tests for apps/handlers/module_root.py — every daemon module imports without a readable working directory."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — ntpath/posixpath.realpath's cwd reads; measured in the child worlds, not re-tested
+# seedgo: no-test-needed(stdlib) — Path.resolve's own cwd read in the platform realpath; measured in the child worlds
 # seedgo: no-test-needed(ruff) — that each swept file parses; the sweeps ast.parse every one and would raise first
 
 import ast
