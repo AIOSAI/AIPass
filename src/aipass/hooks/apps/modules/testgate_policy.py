@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testgate_policy.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Reads .aipass/test_write_policy.json — the switch behind the test-write gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-10-04
+# Modified: 2026-10-07
 # =============================================
 
 """Reads the test-write policy: may agents create new test files here?
@@ -275,8 +275,8 @@ def handle_command(command: str, args: list) -> bool:
         CONSOLE.print("  drone @hooks testwrite       Show the policy and the gate's residual")
         CONSOLE.print()
         CONSOLE.print(f"[dim]Policy file: <project>/{POLICY_DIR}/{POLICY_FILENAME}[/dim]")
-        CONSOLE.print("[dim]Read-only on purpose: flipping an owner-level ruling is a human edit,")
-        CONSOLE.print("not something an agent can do to the gate that constrains it.[/dim]")
+        CONSOLE.print("[dim]Read-only on purpose: flipping an owner-level ruling is a human edit,[/dim]")
+        CONSOLE.print("[dim]not something an agent can do to the gate that constrains it.[/dim]")
         return True
     print_introspection()
     return True

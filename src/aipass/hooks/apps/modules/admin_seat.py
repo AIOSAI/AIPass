@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: admin_seat.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: The verified admin-seat exemption and the caller's name, read once for every gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-09-30
+# Modified: 2026-10-07
 # =============================================
 
 """Answers one question for every security gate: is this session the admin seat?
@@ -133,6 +133,8 @@ def _verified(cwd: str) -> bool:
         os.environ["AIPASS_CALLER_CWD"] = cwd
     try:
         return bool(vc.is_verified_admin_caller())
+    # Deliberate: every caller is a gate, where False is a refusal, so a raising verifier fails closed here.
+    # The warning names the raise, so a broken rail never reads as a working one that said no.
     except Exception as exc:
         logger.warning("[HOOKS] admin_seat: admin verification raised (refusing): %s", exc)
         return False
