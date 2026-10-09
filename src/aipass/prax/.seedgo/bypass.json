@@ -320,9 +320,9 @@
       "reason": "prax, leg 10 (file-wide: this checker passes no line). Three families, each a with-block undone at its end. Path.home: _get_watch_directories reads ~/.claude/projects and ~/.codex/sessions, and without the patch the test would walk the operator's live session trees; it answers tmp_path. time.sleep: the monitor loops pace themselves with time.sleep(0.1/0.5); the doubles end the loop (KeyboardInterrupt) or count turns, and a clock seam would be a door for the tests alone. sys.stdin.isatty and builtins.input: the interactive prompt reads the terminal; the tests choose the TTY branch and feed lines or EOF, where a reader seam would be a door for the tests alone."
     },
     {
-      "file": "tests/test_monitoring_handlers.py",
+      "file": "tests/test_monitoring_handlers_display.py",
       "standard": "mock_console",
-      "lines": [863],
+      "lines": [154],
       "reason": "prax, leg 11, under devpulse's console ruling (b): the colour is the claim (error level red, SEEDGO green, an unknown branch white), and it exists nowhere but inside print_event's console call (a dict lookup into the markup string). capsys strips it. A real Console on a buffer with colour forced, set by monkeypatch for the three colour tests alone; every other test in the file reads the real console with capsys."
     },
     {

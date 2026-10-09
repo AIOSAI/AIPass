@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for prax tests
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2025-11-08
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """Shared pytest fixtures for prax tests.
@@ -31,8 +31,11 @@ from unittest.mock import MagicMock
 # product actually prints through.
 from aipass.cli.apps.modules import display
 from aipass.prax.apps.handlers.config import load as config_load
+from aipass.prax.apps.handlers.monitoring import branch_detector, filesystem_handler
 from aipass.prax.apps.handlers.registry import load as registry_load
 from aipass.prax.apps.handlers.registry import save as registry_save
+from aipass.prax.tests.support_test_filesystem_handler import _DOUBLES
+from aipass.prax.tests.support_test_operations import _DASHBOARD_MODULES, _Screen
 
 collect_ignore_glob = [".archive/*"]
 
@@ -198,3 +201,80 @@ def sample_test_data() -> dict:
         "test_key": "test_value",
         "sample_data": "example",
     }
+
+
+# =============================================
+# SHARED BY THE SPLIT TEST FILES
+# =============================================
+
+
+@pytest.fixture
+def _branch_detector_fresh(monkeypatch):
+    """Double branch_detector's collaborators where it binds them and empty its singleton.
+
+    Replaces a re-import under a mocked Path, json.load and open: the module
+    reads no file at import, so all the re-import gave was an empty singleton.
+
+    Autouse in test_monitoring_handlers.py until its split (2026-10-08); the
+    detector and external-project files each request it with a module pytestmark.
+    """
+    monkeypatch.setattr(branch_detector, "logger", MagicMock())
+    monkeypatch.setattr(branch_detector, "json_handler", MagicMock())
+    monkeypatch.setattr(branch_detector, "_detector_instance", None)
+
+
+@pytest.fixture
+def _filesystem_handler_doubled(monkeypatch):
+    """filesystem_handler is bound at the top and never reloaded; each name it took
+    from the event queue, the branch detector and the filters is doubled on it for
+    one test, with its logger and json service (prax, leg 13: the raw sys.modules
+    stubs of watchdog and three handlers were the import_site rows).
+
+    Autouse in test_filesystem_handler.py until its split (2026-10-08); the four
+    filesystem_handler files each request it with a module pytestmark, and read the
+    doubles back through support_test_filesystem_handler._import_filesystem_handler.
+    """
+    event_queue = MagicMock()
+    event_queue.MonitoringEvent = MagicMock()
+    event_queue.MonitoringQueue = MagicMock
+    branch_detector = MagicMock()
+    branch_detector.detect_branch_from_path = MagicMock(return_value="PRAX")
+    filters = MagicMock()
+    filters.should_monitor = MagicMock(return_value=True)
+    filters.get_priority = MagicMock(return_value="info")
+    queue = MagicMock()
+    queue.enqueue = MagicMock(return_value=True)
+
+    monkeypatch.setattr(filesystem_handler, "MonitoringEvent", event_queue.MonitoringEvent)
+    monkeypatch.setattr(filesystem_handler, "MonitoringQueue", event_queue.MonitoringQueue)
+    monkeypatch.setattr(filesystem_handler, "detect_branch_from_path", branch_detector.detect_branch_from_path)
+    monkeypatch.setattr(filesystem_handler, "should_monitor", filters.should_monitor)
+    monkeypatch.setattr(filesystem_handler, "get_priority", filters.get_priority)
+    monkeypatch.setattr(filesystem_handler, "logger", MagicMock())
+    monkeypatch.setattr(filesystem_handler, "json_handler", MagicMock())
+    for name, double in (
+        ("event_queue", event_queue),
+        ("branch_detector", branch_detector),
+        ("filters", filters),
+        ("queue", queue),
+    ):
+        monkeypatch.setitem(_DOUBLES, name, double)
+
+
+@pytest.fixture
+def _dashboard_quiet(monkeypatch):
+    """What the reload under the conftest stubs used to give each test: a logger
+    and a json service that write nothing (prax, leg 11).
+
+    Autouse in test_operations.py until its split (2026-10-08); the four
+    test_operations files each request it with a module pytestmark.
+    """
+    for module in _DASHBOARD_MODULES:
+        for name in ("logger", "json_handler"):
+            if hasattr(module, name):
+                monkeypatch.setattr(module, name, MagicMock())
+
+
+@pytest.fixture
+def screen(capsys) -> _Screen:
+    return _Screen(capsys)
