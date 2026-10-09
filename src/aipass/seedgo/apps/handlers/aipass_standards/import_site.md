@@ -1,6 +1,6 @@
 # Import Site Standards
-**Status:** v1
-**Date:** 2026-09-21
+**Status:** v1.3
+**Date:** 2026-10-08
 
 ---
 
@@ -112,11 +112,15 @@ The unscored `check_branch_info` backlog line retired with that ruling — it ex
 
 ## Known limit
 
-The `aipass` module has to be named in the statement itself:
+The `aipass` module has to be named in the statement itself, or by a subscript key that is a
+module-level string constant (checker 1.2.0, leg 17) — bound once in the file, or imported
+from the file's own `tests/support_<stem>.py` (1.3.0, 2026-10-08, the split rules move
+constants there). A key bound inside the function is not read:
 
 ```python
-key = "aipass.prax"
-sys.modules[key] = stub        # NOT convicted
+def test_x():
+    key = "aipass.prax"
+    sys.modules[key] = stub    # NOT convicted
 ```
 
 The checker reads one statement, not the function's dataflow. No fleet test file does this today. Reaching it would mean convicting every `sys.modules` write, product or not — which would convict a test stubbing a third-party module it has every right to stub.

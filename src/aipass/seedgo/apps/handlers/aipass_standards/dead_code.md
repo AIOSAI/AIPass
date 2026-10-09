@@ -1,6 +1,6 @@
 # Dead Code Standard
-**Status:** Draft v1
-**Date:** 2026-03-22
+**Status:** v1.4
+**Date:** 2026-10-08
 
 ---
 
@@ -113,17 +113,15 @@ Add an entry to `.seedgo/bypass.json`:
 ```json
 {
     "standard": "dead_code",
-    "file": "path/to/file.py"
+    "file": "apps/handlers/path/to/file.py"
 }
 ```
 
-The entire standard can also be bypassed at branch level:
-
-```json
-{
-    "standard": "dead_code"
-}
-```
+`file` is matched as a substring of the path from the branch root, so `apps/handlers/x.py`
+and `handlers/x.py` both match (checker 1.4.0, 2026-10-08). Until then dead_code alone was
+handed the `apps/`-relative path: @hooks' rows written `apps/handlers/lifecycle/session_boot.py`
+silenced nothing, and `bypass prune`'s dead-rule report could not see it because every other
+lane matched them. A rule naming no `file` is inert (owner, 2026-09-25), not branch-wide.
 
 ---
 

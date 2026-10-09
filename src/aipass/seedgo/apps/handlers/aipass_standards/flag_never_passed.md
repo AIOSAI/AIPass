@@ -1,6 +1,6 @@
 # Flag Never Passed Standards
-**Status:** v1
-**Date:** 2026-10-03
+**Status:** v1.1
+**Date:** 2026-10-08
 
 ---
 
@@ -112,6 +112,15 @@ something else, is **not declared** and is never convicted. The declared set sta
 
 The router's contract is the one the tests exercise; a `__main__`-only flag is a different
 surface and belongs to whatever tests that entry point.
+
+**An argv for another program is not declared either** (checker 1.1.0, 2026-10-08), even
+inside the parser's reach. A string in the argv handed to `subprocess.run` / `Popen` /
+`call` / `check_call` / `check_output`, `os.exec*` / `os.spawn*` or
+`asyncio.create_subprocess_exec` belongs to the program being started: the list literal
+itself, or the list a same-function name was bound to when the call passes that name.
+@hooks' `diagnostics_state.py:243` handed `--outputjson` to pyright and was convicted for it
+until this cut. Only the dotted spelling (`subprocess.run`) is read; a bare `run(...)` could
+be any function, and guessing would acquit a real parser's literal.
 
 ---
 

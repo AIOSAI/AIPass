@@ -1,6 +1,6 @@
 # Discarded Patch Standards
-**Status:** v1
-**Date:** 2026-10-03
+**Status:** v1.1
+**Date:** 2026-10-08
 
 ---
 
@@ -193,6 +193,17 @@ a deliberate hole with a stated reason, not an oversight.
 
 **A target built at runtime** — an f-string, a variable — is not resolved, so it is not
 judged. The rule only convicts what it can name.
+
+**A constant imported from the branch's own `tests/` is judged exactly as a local one**
+(checker 1.1.0, 2026-10-08) — that is, not judged. Until then a name imported from
+`aipass.<branch>.tests.support_x` counted as an own-branch PRODUCT name, so
+`patch(LOGGER_PATCH)` convicted when `LOGGER_PATCH` came from a support module and passed when
+the same line bound it in the file: @api duplicated its `PATCH_*` per file to stay green, and
+@hooks wrote three file-wide rows for `test_telegram_response*.py`. Measured over the fleet's
+test files: 101 hits in 5 files before, 11 in 2 after (both `(disabled)` copies in @memory).
+Resolving every constant to its string instead, local and imported alike, would judge
+**714 hits in 40 files** — a hole larger than everything the rule convicts today, and a
+ruling of its own, not a side effect of this cut.
 
 **A file outside any branch scores 100.** It has no own code to discard a patch of.
 

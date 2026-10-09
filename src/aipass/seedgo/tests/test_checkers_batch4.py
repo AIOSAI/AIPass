@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-29
 # Modified: 2026-10-08
 # =============================================
@@ -292,6 +292,19 @@ class TestDeadCodeCheck:
         result = dead_code_check_branch(str(branch), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
+
+    @pytest.mark.parametrize("spelled", ["apps/handlers/lifecycle/orphan.py", "handlers/lifecycle/orphan.py"])
+    def test_a_file_rule_spelled_from_the_branch_root_or_from_apps_silences_its_file_alone(
+        self, mock_json, tmp_path: Path, spelled: str
+    ) -> None:
+        """hooks' rows began 'apps/handlers/...' and dead_code matched only 'handlers/...': they silenced nothing."""
+        branch = _make_branch(tmp_path)
+        _write_file(branch / "apps" / "handlers" / "lifecycle" / "orphan.py", "def lonely():\n    pass\n")
+        _write_file(branch / "apps" / "handlers" / "lifecycle" / "stray.py", "def alone():\n    pass\n")
+        _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command(): pass\n")
+        result = dead_code_check_branch(str(branch), bypass_rules=[{"file": spelled, "standard": "dead_code"}])
+        message = result["checks"][0]["message"]
+        assert "stray.py" in message and "orphan.py" not in message
 
     def test_dead_code_ignores_tools_dir_by_default(self, mock_json, tmp_path: Path) -> None:
         """Orphan modules under apps/tools/ are skipped via the global .seedgoignore default."""

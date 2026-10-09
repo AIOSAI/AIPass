@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discarded_patch_check.py
 # Description: Discarded Patch Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -108,6 +108,9 @@ STANDARD_KEY = "discarded_patch"
 #: The product's import root.
 PRODUCT = "aipass"
 
+#: A branch's test package: what is imported from it is test code, not the product.
+TESTS = "tests"
+
 #: Prefix that makes a function a test, which is the only unit this rule judges.
 TEST_PREFIX = "test_"
 
@@ -161,11 +164,21 @@ def branch_of(module_path: str) -> str:
 
 
 def _own_names(tree: ast.Module, branch: str) -> Set[str]:
-    """Names this file binds from its OWN branch's package."""
+    """Names this file binds from its OWN branch's package, its tests/ excepted.
+
+    A name imported from ``aipass.<branch>.tests.support_x`` is test code --
+    a constant the split rules moved out of the file -- and is judged exactly as
+    the same constant bound in the file would be (1.1.0, fleet green split legs:
+    api duplicated its PATCH_* per file because the import convicted and the
+    local binding did not).
+    """
     package = f"{PRODUCT}.{branch}"
+    tests = f"{package}.{TESTS}"
     names: Set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(package):
+            if node.module == tests or (node.module or "").startswith(f"{tests}."):
+                continue
             names |= {alias.asname or alias.name for alias in node.names}
         elif isinstance(node, ast.Import):
             names |= {a.asname or a.name.split(".")[0] for a in node.names if a.name.startswith(package)}

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: import_site_check.py
 # Description: Import Site Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-21
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -192,10 +192,14 @@ def _keyed_by_product_constant(node: ast.AST, constants: Dict[str, str]) -> bool
     return False
 
 
-def _stubs(tree: ast.Module) -> List[Tuple[int, str]]:
-    """Every sys.modules write or in-function reload that names a product module."""
+def _stubs(tree: ast.Module, path: Path | None) -> List[Tuple[int, str]]:
+    """Every sys.modules write or in-function reload that names a product module.
+
+    A key imported from the file's own support module resolves like a local
+    constant (``module_constants.file_constants``, 1.3.0).
+    """
     found: List[Tuple[int, str]] = []
-    constants = module_constants.string_constants(tree)
+    constants = module_constants.file_constants(tree, path)
 
     def walk(node: ast.AST, inside: bool) -> None:
         """Descend, carrying whether a function body has been entered."""
@@ -209,7 +213,7 @@ def _stubs(tree: ast.Module) -> List[Tuple[int, str]]:
     return found
 
 
-def scan(source: str) -> List[Tuple[int, str, str]]:
+def scan(source: str, path: Path | None = None) -> List[Tuple[int, str, str]]:
     """(line, shape, fix) for every hit in one test file's source, in line order.
 
     A file that does not parse yields nothing: ruff already convicts the
@@ -222,14 +226,14 @@ def scan(source: str) -> List[Tuple[int, str, str]]:
         logger.info("[import_site] Unparseable, nothing scanned: %s", exc)
         return []
     hits = [(ln, f"product import inside a function ({what})", FIX_IMPORT) for ln, what in _deferred_imports(tree)]
-    hits += [(ln, f"sys.modules stub ({what})", FIX_STUB) for ln, what in _stubs(tree)]
+    hits += [(ln, f"sys.modules stub ({what})", FIX_STUB) for ln, what in _stubs(tree, path)]
     return sorted(hits)
 
 
 def _scan_path(path: Path) -> List[Tuple[int, str, str]]:
     """scan() for a file on disk, or [] if it cannot be read."""
     try:
-        return scan(path.read_text(encoding="utf-8", errors="ignore"))
+        return scan(path.read_text(encoding="utf-8", errors="ignore"), path)
     except OSError as exc:
         logger.info("[import_site] Cannot read %s: %s", path, exc)
         return []

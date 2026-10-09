@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-22
 # Modified: 2026-10-08
 # =============================================
@@ -289,6 +289,20 @@ def _check_file_used(
 # =============================================
 
 
+def _branch_relative(target: Path, branch_root: Path) -> str:
+    """The target as a posix path from the branch root (``apps/handlers/x.py``), else as given.
+
+    A bypass rule's ``file`` is a substring match, so both ``apps/handlers/x.py``
+    and ``handlers/x.py`` match this spelling; only the apps-relative one
+    matched before.
+    """
+    try:
+        return target.relative_to(branch_root).as_posix()
+    except ValueError:
+        logger.info("[dead_code] %s is outside %s; its bypass is matched on the full path", target, branch_root)
+        return target.as_posix()
+
+
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """
     Check a branch for dead code (unreferenced modules and handlers).
@@ -390,7 +404,11 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             except ValueError:
                 logger.info("File %s not relative to apps dir, using full path", target)
                 rel = target
-            if not is_bypassed(str(rel), "dead_code", bypass_rules=bypass_rules):
+            # The rule is matched against the BRANCH-relative path (apps/...), the
+            # spelling every other checker is handed and dead_rules reads. Matched
+            # against "handlers/..." alone, a row written "apps/handlers/..."
+            # silenced nothing and nobody was told (hooks, 1.4.0).
+            if not is_bypassed(_branch_relative(target, bp), "dead_code", bypass_rules=bypass_rules):
                 dead_files.append(str(rel))
 
     referenced_files = total_files - len(dead_files)

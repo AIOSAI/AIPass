@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_flag_never_passed_check.py
 # Description: flag_never_passed_check — crack class P, a parsed flag no test passes
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/flag_never_passed_check.py."""
@@ -166,6 +166,33 @@ class TestWhatIsNotEvenDeclared:
         """Only a parser's flags are the router's contract."""
         apps = "def helper(args):\n    return '--loud' in args\n"
         assert flag_never_passed_check.scan(_branch(tmp_path, apps=apps))[0] == []
+
+    def test_an_argv_for_another_program_declares_nothing_and_the_parser_still_does(self, tmp_path):
+        """hooks diagnostics_state.py:243 handed --outputjson to pyright and was convicted for it."""
+        apps = (
+            "import subprocess, sys\n"
+            "def _pyright(path):\n"
+            "    subprocess.run([sys.executable, '-m', 'pyright', '--outputjson', path])\n"
+            "    cmd = ['git', 'clone', '--depth', '1']\n"
+            "    subprocess.check_output(args=cmd)\n"
+            "def handle_command(command, args):\n"
+            "    _pyright(args[0])\n"
+            "    return '--loud' in args\n"
+        )
+        findings = flag_never_passed_check.scan(_branch(tmp_path, apps=apps))[0]
+        assert [flag for _p, _l, flag in findings] == ["--loud"]
+
+    def test_the_same_flag_in_a_real_add_argument_is_still_convicted_at_the_parse(self, tmp_path):
+        apps = (
+            "import argparse, subprocess, sys\n"
+            "def handle_command(command, args):\n"
+            "    subprocess.run([sys.executable, '-m', 'pyright', '--outputjson'])\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('--outputjson')\n"
+            "    return parser.parse_args(args)\n"
+        )
+        findings = flag_never_passed_check.scan(_branch(tmp_path, apps=apps))[0]
+        assert [(line, flag) for _p, line, flag in findings] == [(5, "--outputjson")]
 
 
 class TestTheEntryPoint:

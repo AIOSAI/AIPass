@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_import_site_check.py
 # Description: import_site_check — test template v1 item 8, product imports at the top of a test file
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-09-21
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/import_site_check.py."""
@@ -317,3 +317,11 @@ class TestAModuleConstantKeyIsRead:
         source = 'KEY = "requests"\n\n\ndef test_x():\n    sys.modules[KEY] = stub\n'
 
         assert _shapes(source) == []
+
+    def test_a_key_imported_from_the_files_own_support_module_is_convicted_like_a_local_one(self, tmp_path):
+        """The split rules move constants into support_<stem>.py; the key must not go unread with them."""
+        path = _write(tmp_path, "from .support_thing import KEY\n\n\ndef test_x():\n    sys.modules[KEY] = stub\n")
+        (path.parent / "support_thing.py").write_text('KEY = "aipass.prax"\n', encoding="utf-8")
+
+        said = import_site_check.check_module(str(path))["checks"][0]["message"]
+        assert "test_thing.py:5" in said and "sys.modules stub" in said

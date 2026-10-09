@@ -1,6 +1,6 @@
 # Stdlib Patch Standards
-**Status:** v1
-**Date:** 2026-10-03
+**Status:** v1.3
+**Date:** 2026-10-08
 
 ---
 
@@ -126,6 +126,15 @@ patch.object(mod.os, "stat", ...)            # what is `mod`? the AST cannot say
 
 The rule says nothing and counts them in the passing message. **That set is larger than
 everything it convicts** — the honest edge of a resolution-based rule.
+
+**A constant imported from the file's own support module resolves like a local one**
+(checker 1.3.0, 2026-10-08, through `module_constants.file_constants`). The fleet's split
+rule 4 moves a test file's `_MOD` into `tests/support_<stem>.py`; from then on
+`patch(f"{_MOD}.os.execvp")` read nothing, and @hooks' 63 such sites across
+`test_session_boot*.py` went "not judged" while their bypass rows bypassed nothing. One hop,
+own branch only: `from aipass.<branch>.tests.support_x import NAME` or
+`from .support_x import NAME`, the support file beside the test file, the name bound nowhere
+else in the file. Nothing the support module itself imports is followed.
 
 ---
 

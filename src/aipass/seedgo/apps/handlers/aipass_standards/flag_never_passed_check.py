@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: flag_never_passed_check.py
 # Description: Flag Never Passed Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -64,6 +64,13 @@ is NOT declared and is never convicted. The declared set starts at
 router's contract is the one the tests exercise; a ``__main__``-only flag is a
 different surface and belongs to whatever tests that entry point.
 
+AN ARGV FOR ANOTHER PROGRAM IS NOT DECLARED EITHER, even inside the parser's
+reach (1.1.0, 2026-10-08). A string in the argv of ``subprocess.run`` /
+``Popen`` / ``check_output`` / ``os.exec*`` -- the list literal itself, or the
+list a same-function name was bound to -- belongs to the program being started.
+hooks' ``diagnostics_state.py:243`` handed ``--outputjson`` to pyright and was
+convicted for it until this cut.
+
 WHY IT CANNOT BE SATISFIED BY ACCIDENT: if the literal never reaches the
 parser in any test, the branch behind it is never taken, and deleting the
 parse cannot turn the suite red. There is no threshold and nothing to tune.
@@ -92,6 +99,15 @@ FLAG = re.compile(r"^--[A-Za-z][\w-]*$")
 
 #: The two spellings that short-circuit a command before any other flag is read.
 HELP: frozenset[str] = frozenset({"--help", "-h"})
+
+#: Calls whose first argument (or ``args=``) is an argv for ANOTHER program, by
+#: the module that owns them. A flag in that argv is the other program's, never
+#: this branch's parser's (hooks, fleet green split legs, 2026-10-08).
+ARGV_CALLS: Dict[str, frozenset[str]] = {
+    "subprocess": frozenset({"run", "Popen", "call", "check_call", "check_output"}),
+    "os": frozenset({"execv", "execve", "execvp", "execvpe", "spawnv", "spawnve", "spawnvp", "spawnvpe"}),
+    "asyncio": frozenset({"create_subprocess_exec"}),
+}
 
 #: Marker carried down a descent to say "this row is a help argv".
 _HELP_ROW = "help"
@@ -150,6 +166,48 @@ def declared_flags(branch_root: Path) -> Dict[str, Tuple[Path, int]]:
     return found
 
 
+def _argv_of(call: ast.Call) -> ast.AST | None:
+    """The argv expression of a call that starts another program, or None.
+
+    Only the dotted spelling is read (``subprocess.run``, ``os.execvp``): a bare
+    ``run(...)`` is any function of that name, and guessing would acquit a real
+    parser's literal.
+    """
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)):
+        return None
+    if func.attr not in ARGV_CALLS.get(func.value.id, frozenset()):
+        return None
+    if call.args:
+        return call.args[0]
+    return next((keyword.value for keyword in call.keywords if keyword.arg == "args"), None)
+
+
+def _argv_literals(function: ast.AST) -> Set[int]:
+    """Node ids of every string sitting in an argv this function hands to another program.
+
+    The argv is the call's own expression, or the list a same-function name was
+    bound to when the call passes that name. hooks' ``diagnostics_state.py:243``
+    is the shape: ``subprocess.run([sys.executable, "-m", "pyright",
+    "--outputjson", file_path])`` builds pyright's argv, not hooks' parser.
+    """
+    binds: Dict[str, List[ast.AST]] = {}
+    argvs: List[ast.AST] = []
+    for node in ast.walk(function):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    binds.setdefault(target.id, []).append(node.value)
+        elif isinstance(node, ast.Call):
+            argv = _argv_of(node)
+            if argv is not None:
+                argvs.append(argv)
+    for argv in list(argvs):
+        if isinstance(argv, ast.Name):
+            argvs.extend(binds.get(argv.id, []))
+    return {id(node) for argv in argvs for node in ast.walk(argv) if isinstance(node, ast.Constant)}
+
+
 def _parsed_here(functions: Dict[str, ast.AST], path: Path, found: Dict[str, Tuple[Path, int]]) -> None:
     """Follow one file's parser and record every flag literal it reads."""
     seen: Set[str] = set()
@@ -160,7 +218,10 @@ def _parsed_here(functions: Dict[str, ast.AST], path: Path, found: Dict[str, Tup
         if name in seen:
             continue
         seen.add(name)
+        another_program = _argv_literals(function)
         for node in ast.walk(function):
+            if id(node) in another_program:
+                continue
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and FLAG.match(node.value):
                 found.setdefault(node.value, (path, node.lineno))
             elif isinstance(node, ast.Call) and _tail_name(node.func) in functions:

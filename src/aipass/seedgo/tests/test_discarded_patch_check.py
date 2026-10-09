@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_discarded_patch_check.py
 # Description: discarded_patch_check — crack class R, a mock nothing ever observes
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/discarded_patch_check.py."""
@@ -168,6 +168,19 @@ class TestWhatStaysLegal:
     def test_another_branch_is_acquitted(self):
         """Sealing an edge is what a test is supposed to do."""
         source = "def test_it():\n    with patch('aipass.api.apps.handlers.google.client.upload'):\n        run_all()\n"
+        assert _lines(source) == []
+
+    @pytest.mark.parametrize(
+        "binding",
+        [
+            f"PATCH_LOG = {OWN_TARGET!r}",
+            "from aipass.backup.tests.support_specimen import PATCH_LOG",
+            "from aipass.backup.tests import PATCH_LOG",
+        ],
+    )
+    def test_a_constant_from_the_branchs_own_tests_is_judged_as_a_local_one(self, binding):
+        """api duplicated its PATCH_* per file: the support import convicted, the local binding did not."""
+        source = f"{binding}\ndef test_it():\n    with patch(PATCH_LOG):\n        run_all()\n"
         assert _lines(source) == []
 
     def test_a_patch_outside_a_test_body_is_acquitted(self):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stdlib_patch_check.py
 # Description: Stdlib Patch Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-22
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -325,14 +325,18 @@ def _parse(source: str) -> ast.Module | None:
         return None
 
 
-def scan(source: str) -> Tuple[List[Tuple[int, str, str]], int]:
-    """((line, target, module) scored, how many targets could not be resolved)."""
+def scan(source: str, path: Path | None = None) -> Tuple[List[Tuple[int, str, str]], int]:
+    """((line, target, module) scored, how many targets could not be resolved).
+
+    ``path`` lets a constant imported from the file's own ``support_*.py``
+    resolve like a local one (``module_constants.file_constants``, 1.3.0).
+    """
     tree = _parse(source)
     if tree is None:
         return [], 0
 
     imports = _imports(tree)
-    constants = module_constants.string_constants(tree)
+    constants = module_constants.file_constants(tree, path)
     scored: List[Tuple[int, str, str]] = []
     unresolved = 0
     for node in ast.walk(tree):
@@ -403,7 +407,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if source is None:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
 
-    scored, unresolved = scan(source)
+    scored, unresolved = scan(source, path)
     # A rule with `lines` acquits those rows alone (seedgo, fleet green leg 16):
     # the file-level ask above passes no line, so a lines rule never matched it.
     scored = [

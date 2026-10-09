@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_stdlib_patch_check.py
 # Description: stdlib_patch_check — crack class Q, a patch that replaces work the product owns
-# Version: 1.1.4
+# Version: 1.2.0
 # Created: 2026-09-22
-# Modified: 2026-10-05
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/stdlib_patch_check.py."""
@@ -397,3 +397,38 @@ class TestAnFStringTargetWithAModuleConstantHead:
         source = f'_A = "{WATCHDOG}"\n_B = "agent.Path"\ndef test_it():\n    patch(f"{{_A}}.{{_B}}.resolve")\n'
 
         assert _scored(source) == [(4, 'f"{_A}.{_B}.resolve"', "pathlib")]
+
+    @pytest.mark.parametrize(
+        "line",
+        ["from aipass.hooks.tests.support_specimen import _MOD", "from .support_specimen import _MOD"],
+    )
+    def test_a_head_imported_from_the_branchs_own_support_module_is_scored(self, tmp_path, line):
+        """hooks' split moved _MOD into support_session_boot.py and 45 execvp/kill sites went unjudged."""
+        tests_dir = tmp_path / "hooks" / "tests"
+        tests_dir.mkdir(parents=True)
+        (tests_dir / "support_specimen.py").write_text(self.HEAD, encoding="utf-8")
+        path = tests_dir / "test_specimen.py"
+        source = line + '\ndef test_it():\n    patch(f"{_MOD}.Path.resolve")\n'
+        path.write_text(source, encoding="utf-8")
+
+        said = stdlib_patch_check.check_module(str(path))["checks"][0]["message"]
+        assert said.startswith('test_specimen.py:3 f"{_MOD}.Path.resolve" replaces pathlib process-wide')
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "from aipass.flow.tests.support_specimen import _MOD",
+            "from aipass.hooks.tests.helpers_specimen import _MOD",
+            "from .support_specimen import _MOD\n_MOD = 'os'",
+        ],
+    )
+    def test_another_branch_a_non_support_module_or_a_rebound_name_stays_unresolved(self, tmp_path, line):
+        tests_dir = tmp_path / "hooks" / "tests"
+        tests_dir.mkdir(parents=True)
+        for stem in ("support_specimen", "helpers_specimen"):
+            (tests_dir / f"{stem}.py").write_text(self.HEAD, encoding="utf-8")
+        path = tests_dir / "test_specimen.py"
+        source = line + '\ndef test_it():\n    patch(f"{_MOD}.Path.resolve")\n'
+        path.write_text(source, encoding="utf-8")
+
+        assert stdlib_patch_check.scan(source, path) == ([], 1)
