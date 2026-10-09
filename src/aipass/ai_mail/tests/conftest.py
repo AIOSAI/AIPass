@@ -1,11 +1,12 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-03-05
 # Modified: 2026-10-08
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
+#   - v1.7.1 (2026-10-08): monitor_wake_stubbed patches the public doors wake_sender, log_wake_result
 #   - v1.7.0 (2026-10-08): wake_log_operation_suppressed, repo_root - test_wake.py's own
 #     fixtures, shared by its split siblings; monitor_json_silenced, monitor_logger_silenced,
 #     monitor_wake_stubbed, main_argv - the same for test_dispatch_monitor.py
@@ -14,7 +15,6 @@
 #     shared by their split siblings through pytestmark
 #   - v1.5.1 (2026-09-29): sandboxed_central docstring names the live caller, not a retired name
 #   - v1.5.0 (2026-09-27): recorded_bus - no test fires on the real trigger bus
-#   - v1.4.0 (2026-09-27): sandboxed_central - no test writes the live central file
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
@@ -159,9 +159,9 @@ def monitor_logger_silenced(monkeypatch):
 
 @pytest.fixture
 def monitor_wake_stubbed(monkeypatch):
-    """Prevent _wake_sender from importing/calling real wake_branch in unrelated tests."""
-    monkeypatch.setattr(monitor_mod, "_wake_sender", MagicMock(return_value="skipped_sender"))
-    monkeypatch.setattr(monitor_mod, "_log_wake_result", MagicMock())
+    """Prevent wake_sender from importing/calling real wake_branch in unrelated tests."""
+    monkeypatch.setattr(monitor_mod, "wake_sender", MagicMock(return_value="skipped_sender"))
+    monkeypatch.setattr(monitor_mod, "log_wake_result", MagicMock())
 
 
 @pytest.fixture
@@ -355,7 +355,7 @@ def _strip_ambient_identity_source(monkeypatch):
 def _isolate_wake_depth(monkeypatch):
     """Start EVERY test with AIPASS_WAKE_DEPTH absent, and undo whatever it becomes.
 
-    _wake_sender() bumps the var with a raw os.environ write, which monkeypatch
+    wake_sender() bumps the var with a raw os.environ write, which monkeypatch
     never sees. The old per-test delenv(raising=False) recorded no undo when the
     var was absent, so each wake-back test left depth=1 behind for the next test
     on the worker (measured: 15 TestWakeSender tests, before None, after "1").

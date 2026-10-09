@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_helpers.py
 # Description: Tests for the dispatch monitor's units - rate limit, fresh cmd, startup check, kill, logs, lock, JSONL
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
 # Modified: 2026-10-08
 # =============================================
@@ -33,7 +33,7 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
     _parse_result_json,
     _read_stderr_segment,
     _rotate_attempt_stdout,
-    _run_with_startup_check,
+    run_with_startup_check,
     _snapshot_jsonl_sizes,
     _summarize_result_json,
 )
@@ -111,7 +111,7 @@ def test_make_fresh_cmd_does_not_remove_c_value():
     assert "-c" not in result
 
 
-# --- _run_with_startup_check tests (mock Popen) -----------------------
+# --- run_with_startup_check tests (mock Popen) -----------------------
 
 
 def test_run_startup_check_success(tmp_path, monkeypatch):
@@ -140,7 +140,7 @@ def test_run_startup_check_success(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: {})
     monkeypatch.setattr(mod, "_check_jsonl_activity", fake_activity)
 
-    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
+    exit_code, startup_failed = run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     assert exit_code == 0
     assert startup_failed is False
 
@@ -164,7 +164,7 @@ def test_run_startup_check_timeout(tmp_path, monkeypatch):
     mock_kill = MagicMock()
     monkeypatch.setattr(mod, "_kill_process", mock_kill)
 
-    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
+    exit_code, startup_failed = run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     assert exit_code == -3
     assert startup_failed is True
     mock_kill.assert_called_once()
@@ -185,7 +185,7 @@ def test_run_startup_check_process_exits_during_startup_no_output(tmp_path, monk
 
     monkeypatch.setattr(mod.subprocess, "Popen", lambda *a, **kw: mock_proc)
 
-    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
+    exit_code, startup_failed = run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     assert exit_code == 1
     assert startup_failed is True  # Zero output = startup failure
 
@@ -223,7 +223,7 @@ def test_run_startup_check_process_exits_during_startup_with_output(tmp_path, mo
     activity = MagicMock(return_value=True)
     monkeypatch.setattr(mod, "_check_jsonl_activity", activity)
 
-    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
+    exit_code, startup_failed = run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     activity.assert_called_with(tmp_path / "projects", sizes)
     assert exit_code == 1
     assert startup_failed is False  # Had JSONL activity = normal failure, not startup
@@ -262,7 +262,7 @@ def test_run_startup_check_hard_timeout(tmp_path, monkeypatch):
     activity = MagicMock(return_value=True)
     monkeypatch.setattr(mod, "_check_jsonl_activity", activity)
 
-    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
+    exit_code, startup_failed = run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     activity.assert_called_with(tmp_path / "projects", sizes)
     assert exit_code == -1
     assert startup_failed is False
@@ -282,7 +282,7 @@ def test_run_startup_check_spawn_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mod.subprocess, "Popen", raise_oserror)
 
-    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
+    exit_code, startup_failed = run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     assert exit_code == -2
     assert startup_failed is False
 

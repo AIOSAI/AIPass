@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_pointer.py
 # Description: Tests for the dispatch monitor's session-pointer aware retry loop
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
 # Modified: 2026-10-08
 # =============================================
@@ -22,10 +22,10 @@ from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
-    _cmd_for_attempt,
+    cmd_for_attempt,
     _has_resume,
     _make_fresh_cmd,
-    _reconcile_pointer,
+    reconcile_pointer,
     _session_id_in,
     main,
 )
@@ -162,7 +162,7 @@ def test_make_fresh_cmd_leaves_everything_else_byte_identical():
 def test_attempt_1_is_the_command_as_built(tmp_path, pointer_home):
     """Strike 1 changes nothing — wake.py already decided where this lands."""
     cmd = ["claude", "--resume", "abc", "-p", "hi"]
-    built, mode = _cmd_for_attempt(cmd, 1, tmp_path)
+    built, mode = cmd_for_attempt(cmd, 1, tmp_path)
     assert built == cmd
     assert mode == "resume"
 
@@ -183,7 +183,7 @@ def test_attempt_2_converts_a_consumed_session_id_to_resume(tmp_path, pointer_ho
     _plant_transcript(branch, "abc-123")
     cmd = ["claude", "-p", "hi", "--session-id", "abc-123"]
 
-    built, mode = _cmd_for_attempt(cmd, 2, branch)
+    built, mode = cmd_for_attempt(cmd, 2, branch)
 
     assert built == ["claude", "--resume", "abc-123", "-p", "hi"]
     assert "--session-id" not in built
@@ -209,7 +209,7 @@ def test_attempt_2_resume_leads_even_for_a_long_command(tmp_path, pointer_home):
         "abc-123",
     ]
 
-    built, _ = _cmd_for_attempt(cmd, 2, branch)
+    built, _ = cmd_for_attempt(cmd, 2, branch)
 
     assert built[:3] == ["/usr/bin/claude", "--resume", "abc-123"]
     assert built[3:] == ["-p", "check inbox", "--model", "opus", "--max-turns", "100", "--output-format", "json"]
@@ -222,7 +222,7 @@ def test_attempt_2_leaves_a_command_with_nothing_but_a_session_id_alone(tmp_path
     _plant_transcript(branch, "abc-123")
     cmd = ["--session-id", "abc-123"]
 
-    built, _ = _cmd_for_attempt(cmd, 2, branch)
+    built, _ = cmd_for_attempt(cmd, 2, branch)
 
     assert built == cmd
 
@@ -233,7 +233,7 @@ def test_attempt_2_leaves_an_unconsumed_session_id_alone(tmp_path, pointer_home)
     branch.mkdir()
     cmd = ["claude", "-p", "hi", "--session-id", "abc-123"]
 
-    built, mode = _cmd_for_attempt(cmd, 2, branch)
+    built, mode = cmd_for_attempt(cmd, 2, branch)
 
     assert built == cmd
     assert mode == "fresh"
@@ -259,7 +259,7 @@ def test_attempt_2_mints_a_new_id_when_the_transcript_cannot_be_checked(tmp_path
     monkeypatch.setattr(mod.session_pointer, "transcript_file", unstatable)
     cmd = ["claude", "-p", "hi", "--session-id", "abc-123"]
 
-    built, mode = _cmd_for_attempt(cmd, 2, branch)
+    built, mode = cmd_for_attempt(cmd, 2, branch)
 
     unstatable.assert_called_once_with(branch, "abc-123")
     assert mode == "fresh"
@@ -286,7 +286,7 @@ def test_attempt_2_mints_a_new_id_when_there_is_no_home(tmp_path, pointer_home, 
     monkeypatch.setattr(mod.session_pointer, "transcript_file", no_home)
     cmd = ["claude", "-p", "hi", "--session-id", "abc-123"]
 
-    built, mode = _cmd_for_attempt(cmd, 2, branch)
+    built, mode = cmd_for_attempt(cmd, 2, branch)
 
     no_home.assert_called_once_with(branch, "abc-123")
     assert mode == "fresh"
@@ -302,7 +302,7 @@ def test_attempt_2_mints_a_new_id_when_there_is_no_home(tmp_path, pointer_home, 
 def test_attempt_2_of_a_dash_c_run_is_unchanged(tmp_path, pointer_home):
     """The -c path has no id to consume — retrying it is free, as before."""
     cmd = ["claude", "-c", "-p", "hi"]
-    built, mode = _cmd_for_attempt(cmd, 2, tmp_path)
+    built, mode = cmd_for_attempt(cmd, 2, tmp_path)
     assert built == cmd
     assert mode == "resume"
 
@@ -313,7 +313,7 @@ def test_attempt_3_mints_a_new_id_and_repoints_the_branch(tmp_path, pointer_home
     branch.mkdir()
     cmd = ["claude", "--resume", "old-id", "-p", "hi", "--model", "opus"]
 
-    built, mode = _cmd_for_attempt(cmd, 3, branch)
+    built, mode = cmd_for_attempt(cmd, 3, branch)
 
     assert mode == "fresh"
     assert "--resume" not in built and "old-id" not in built
@@ -332,7 +332,7 @@ def test_attempt_3_replaces_a_spent_minted_id(tmp_path, pointer_home):
     branch.mkdir()
     cmd = ["claude", "-p", "hi", "--session-id", "spent-id"]
 
-    built, _ = _cmd_for_attempt(cmd, 3, branch)
+    built, _ = cmd_for_attempt(cmd, 3, branch)
 
     assert "spent-id" not in built
     assert built[built.index("--session-id") + 1] != "spent-id"
@@ -345,7 +345,7 @@ def test_attempt_3_still_spawns_when_the_pointer_cannot_be_written(tmp_path, poi
     write_pointer = MagicMock(return_value=False)
     monkeypatch.setattr(mod.session_pointer, "write_pointer", write_pointer)
 
-    built, mode = _cmd_for_attempt(["claude", "-c", "-p", "hi"], 3, branch)
+    built, mode = cmd_for_attempt(["claude", "-c", "-p", "hi"], 3, branch)
 
     assert mode == "fresh"
     assert "-c" not in built
@@ -357,7 +357,7 @@ def test_attempt_3_still_spawns_when_the_pointer_cannot_be_written(tmp_path, poi
 def test_attempt_3_of_an_unbound_command_is_unchanged(tmp_path, pointer_home):
     """Nothing to abandon and no id to burn — leave it exactly as it is."""
     cmd = ["claude", "-p", "hi", "--model", "opus"]
-    built, mode = _cmd_for_attempt(cmd, 3, tmp_path)
+    built, mode = cmd_for_attempt(cmd, 3, tmp_path)
     assert built == cmd
     assert mode == "fresh"
 
@@ -379,7 +379,7 @@ def test_reconcile_refuses_to_adopt_a_session_landed_on_by_bare_c(tmp_path, poin
     stdout_log = tmp_path / "stdout.log"
     stdout_log.write_text(json.dumps({"session_id": "landed-by-mtime", "is_error": False}), encoding="utf-8")
 
-    _reconcile_pointer(branch, str(stdout_log), _C_CMD)
+    reconcile_pointer(branch, str(stdout_log), _C_CMD)
 
     assert mod.session_pointer.read_pointer(branch) is None, "a -c landing must leave the branch pointerless"
 
@@ -395,7 +395,7 @@ def test_reconcile_writes_the_pointer_when_we_aimed_and_landed_elsewhere(tmp_pat
     stdout_log = tmp_path / "stdout.log"
     stdout_log.write_text(json.dumps({"session_id": "actual-id", "is_error": False}), encoding="utf-8")
 
-    _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
+    reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
 
     pointer = mod.session_pointer.read_pointer(branch)
     assert pointer is not None
@@ -410,7 +410,7 @@ def test_reconcile_adopts_a_minted_session_id(tmp_path, pointer_home):
     stdout_log = tmp_path / "stdout.log"
     stdout_log.write_text(json.dumps({"session_id": "minted-id"}), encoding="utf-8")
 
-    _reconcile_pointer(branch, str(stdout_log), ["claude", "-p", "hi", "--session-id", "minted-id"])
+    reconcile_pointer(branch, str(stdout_log), ["claude", "-p", "hi", "--session-id", "minted-id"])
 
     pointer = mod.session_pointer.read_pointer(branch)
     assert pointer is not None
@@ -425,7 +425,7 @@ def test_reconcile_does_not_rewrite_a_matching_pointer(tmp_path, pointer_home):
     stdout_log = tmp_path / "stdout.log"
     stdout_log.write_text(json.dumps({"session_id": "same-id"}), encoding="utf-8")
 
-    _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
+    reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
 
     pointer = mod.session_pointer.read_pointer(branch)
     assert pointer is not None
@@ -440,7 +440,7 @@ def test_reconcile_ignores_result_json_without_a_session_id(tmp_path, pointer_ho
     stdout_log = tmp_path / "stdout.log"
     stdout_log.write_text(json.dumps({"is_error": True}), encoding="utf-8")
 
-    _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
+    reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
 
     pointer = mod.session_pointer.read_pointer(branch)
     assert pointer is not None
@@ -455,7 +455,7 @@ def test_reconcile_leaves_an_existing_pointer_alone_on_a_c_run(tmp_path, pointer
     stdout_log = tmp_path / "stdout.log"
     stdout_log.write_text(json.dumps({"session_id": "somewhere-else"}), encoding="utf-8")
 
-    _reconcile_pointer(branch, str(stdout_log), _C_CMD)
+    reconcile_pointer(branch, str(stdout_log), _C_CMD)
 
     pointer = mod.session_pointer.read_pointer(branch)
     assert pointer is not None
@@ -475,7 +475,7 @@ def test_reconcile_survives_a_failing_pointer_write(tmp_path, pointer_home, monk
     # it. pytest.raises cannot spell "must not raise", so the oracle is what
     # SURVIVED the refused write — no pointer was invented on disk to paper over
     # it, which is the failure mode a swallowed exception would hide.
-    _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
+    reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
 
     write_pointer.assert_called_once_with(branch, "actual-id", "monitor-reconciled")
     assert mod.session_pointer.read_pointer(branch) is None
@@ -497,7 +497,7 @@ def test_main_third_attempt_is_fresh_for_a_resumed_dispatch(monkeypatch, main_ar
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", track_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", track_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -529,7 +529,7 @@ def _run_main_capturing_pointer(monkeypatch, argv, landed_session, tmp_path):
         return (0, False)
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", MagicMock())
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -583,7 +583,7 @@ def test_main_does_not_reconcile_after_a_failed_run(monkeypatch, main_argv, poin
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(

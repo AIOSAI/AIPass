@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_sandbox.py
 # Description: Tests for the dispatch monitor's sandbox gate and its broker-fd handshake
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
 # Modified: 2026-10-08
 # =============================================
@@ -22,8 +22,8 @@ from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
-    _is_sandbox_enabled,
-    _wrap_for_sandbox,
+    is_sandbox_enabled,
+    wrap_for_sandbox,
     main,
 )
 from aipass.drone.apps.modules.door_broker import BrokerDaemon, create_identified_connection
@@ -35,39 +35,39 @@ pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_si
 
 
 class TestIsSandboxEnabled:
-    """_is_sandbox_enabled reads AIPASS_SANDBOX_ENABLED from env."""
+    """is_sandbox_enabled reads AIPASS_SANDBOX_ENABLED from env."""
 
     def test_unset_returns_false(self, monkeypatch):
         monkeypatch.delenv("AIPASS_SANDBOX_ENABLED", raising=False)
-        assert _is_sandbox_enabled() is False
+        assert is_sandbox_enabled() is False
 
     def test_empty_returns_false(self, monkeypatch):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "")
-        assert _is_sandbox_enabled() is False
+        assert is_sandbox_enabled() is False
 
     def test_false_string_returns_false(self, monkeypatch):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "false")
-        assert _is_sandbox_enabled() is False
+        assert is_sandbox_enabled() is False
 
     def test_zero_returns_false(self, monkeypatch):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "0")
-        assert _is_sandbox_enabled() is False
+        assert is_sandbox_enabled() is False
 
     def test_one_returns_true(self, monkeypatch):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "1")
-        assert _is_sandbox_enabled() is True
+        assert is_sandbox_enabled() is True
 
     def test_true_returns_true(self, monkeypatch):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "true")
-        assert _is_sandbox_enabled() is True
+        assert is_sandbox_enabled() is True
 
     def test_yes_returns_true(self, monkeypatch):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "yes")
-        assert _is_sandbox_enabled() is True
+        assert is_sandbox_enabled() is True
 
     def test_true_case_insensitive(self, monkeypatch):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "TRUE")
-        assert _is_sandbox_enabled() is True
+        assert is_sandbox_enabled() is True
 
 
 class TestFlagOffOldPath:
@@ -84,7 +84,7 @@ class TestFlagOffOldPath:
             return (0, False)
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+        monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
         bounce = MagicMock()
         monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
@@ -106,15 +106,15 @@ class TestFlagOffOldPath:
         monkeypatch.delenv("AIPASS_SANDBOX_ENABLED", raising=False)
 
         wrap_calls = []
-        original_wrap = mod._wrap_for_sandbox
+        original_wrap = mod.wrap_for_sandbox
 
         def tracking_wrap(*args, **kwargs):
             wrap_calls.append(args)
             return original_wrap(*args, **kwargs)
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_wrap_for_sandbox", tracking_wrap)
-        monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+        monkeypatch.setattr(mod, "wrap_for_sandbox", tracking_wrap)
+        monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
         bounce = MagicMock()
         monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
@@ -131,7 +131,7 @@ class TestFlagOffOldPath:
 
 
 class TestFlagOnSandboxPath:
-    """Flag ON: dispatch wraps cmd via _wrap_for_sandbox."""
+    """Flag ON: dispatch wraps cmd via wrap_for_sandbox."""
 
     def test_flag_on_cmd_wrapped(self, monkeypatch, main_argv, tmp_path):
         argv, lock_file, stderr_log = main_argv
@@ -144,7 +144,7 @@ class TestFlagOnSandboxPath:
             return (0, False)
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+        monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
         bounce = MagicMock()
         monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
@@ -154,7 +154,7 @@ class TestFlagOnSandboxPath:
         )
         monkeypatch.setattr(
             mod,
-            "_wrap_for_sandbox",
+            "wrap_for_sandbox",
             lambda cmd, bp: ["/bin/bash", "-c", "bwrap --sandbox " + " ".join(cmd)],
         )
         mock_sock = MagicMock()
@@ -196,7 +196,7 @@ class TestFlagOnSandboxPath:
             mock_resolve_bwrap,
         )
 
-        result = _wrap_for_sandbox(["claude", "--model", "opus"], tmp_path)
+        result = wrap_for_sandbox(["claude", "--model", "opus"], tmp_path)
 
         assert call_log == ["build_policy", "build_srt_config", "resolve_bwrap_command"]
         assert result[0] == "/bin/bash"
@@ -221,8 +221,8 @@ class TestBrokenSandboxFailsLoud:
             raise RuntimeError("srt resolve failed: node not found")
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
-        monkeypatch.setattr(mod, "_wrap_for_sandbox", broken_wrap)
+        monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
+        monkeypatch.setattr(mod, "wrap_for_sandbox", broken_wrap)
         bounce = MagicMock()
         monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
@@ -249,8 +249,8 @@ class TestBrokenSandboxFailsLoud:
         mock_bounce = MagicMock()
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-        monkeypatch.setattr(mod, "_wrap_for_sandbox", broken_wrap)
+        monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
+        monkeypatch.setattr(mod, "wrap_for_sandbox", broken_wrap)
         monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
@@ -287,8 +287,8 @@ class TestBrokenSandboxFailsLoud:
             return (0, False)
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
-        monkeypatch.setattr(mod, "_wrap_for_sandbox", counting_broken_wrap)
+        monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
+        monkeypatch.setattr(mod, "wrap_for_sandbox", counting_broken_wrap)
         bounce = MagicMock()
         monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
@@ -323,7 +323,7 @@ class TestFlagOffNoBroker:
 
         monkeypatch.setattr(mod, "_connect_broker", tracking_connect)
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+        monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
         bounce = MagicMock()
         monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
@@ -350,7 +350,7 @@ class TestFlagOffNoBroker:
             return (0, False)
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+        monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
         bounce = MagicMock()
         monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
@@ -380,10 +380,10 @@ class TestBrokerDownFailsLoud:
             return (0, False)
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+        monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
         monkeypatch.setattr(
             mod,
-            "_wrap_for_sandbox",
+            "wrap_for_sandbox",
             lambda cmd, bp: ["/bin/bash", "-c", "bwrap " + " ".join(cmd)],
         )
         monkeypatch.setattr(
@@ -418,10 +418,10 @@ class TestBrokerDownFailsLoud:
             return (0, False)
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+        monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
         monkeypatch.setattr(
             mod,
-            "_wrap_for_sandbox",
+            "wrap_for_sandbox",
             lambda cmd, bp: ["/bin/bash", "-c", "bwrap " + " ".join(cmd)],
         )
         monkeypatch.setattr(
@@ -451,10 +451,10 @@ class TestBrokerDownFailsLoud:
 
         mock_bounce = MagicMock()
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+        monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
         monkeypatch.setattr(
             mod,
-            "_wrap_for_sandbox",
+            "wrap_for_sandbox",
             lambda cmd, bp: ["/bin/bash", "-c", "bwrap " + " ".join(cmd)],
         )
         monkeypatch.setattr(
@@ -494,10 +494,10 @@ class TestBrokerFdHandshake:
         mock_sock.fileno.return_value = 42
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+        monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
         monkeypatch.setattr(
             mod,
-            "_wrap_for_sandbox",
+            "wrap_for_sandbox",
             lambda cmd, bp: ["/bin/bash", "-c", "bwrap " + " ".join(cmd)],
         )
         monkeypatch.setattr(mod, "_connect_broker", MagicMock(return_value=mock_sock))
@@ -526,10 +526,10 @@ class TestBrokerFdHandshake:
         mock_sock.fileno.return_value = 7
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+        monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
         monkeypatch.setattr(
             mod,
-            "_wrap_for_sandbox",
+            "wrap_for_sandbox",
             lambda cmd, bp: ["/bin/bash", "-c", "bwrap " + " ".join(cmd)],
         )
         monkeypatch.setattr(mod, "_connect_broker", MagicMock(return_value=mock_sock))
@@ -562,10 +562,10 @@ class TestBrokerFdHandshake:
         mock_sock.fileno.return_value = 10
 
         monkeypatch.setattr("sys.argv", argv)
-        monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+        monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
         monkeypatch.setattr(
             mod,
-            "_wrap_for_sandbox",
+            "wrap_for_sandbox",
             lambda cmd, bp: ["/bin/bash", "-c", "bwrap " + " ".join(cmd)],
         )
         monkeypatch.setattr(mod, "_connect_broker", MagicMock(return_value=mock_sock))

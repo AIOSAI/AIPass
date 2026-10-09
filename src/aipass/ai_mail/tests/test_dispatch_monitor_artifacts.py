@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_artifacts.py
 # Description: Tests for what each dispatch attempt leaves behind - stdout, exit codes, result JSON, the lock
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
 # Modified: 2026-10-08
 # =============================================
@@ -76,7 +76,7 @@ def test_stdout_preserved_across_retries(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
@@ -106,7 +106,7 @@ def test_per_attempt_exit_code_written_to_stderr_log(monkeypatch, main_argv, tmp
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (0, False)]))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(side_effect=[(1, False), (0, False)]))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
@@ -130,7 +130,7 @@ def test_per_attempt_startup_timeout_noted_in_stderr_log(monkeypatch, main_argv,
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(-3, True), (0, False)]))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(side_effect=[(-3, True), (0, False)]))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
@@ -192,7 +192,7 @@ def test_bounce_reason_includes_parsed_stdout_result(monkeypatch, main_argv, tmp
     mock_bounce = MagicMock()
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
@@ -256,7 +256,7 @@ def test_main_does_not_steal_successor_lock(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -301,7 +301,7 @@ def test_bg_tasks_still_running_treated_as_incomplete(monkeypatch, main_argv, tm
     mock_bounce = MagicMock()
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -335,7 +335,7 @@ def test_bg_tasks_marker_from_prior_attempt_does_not_leak_forward(monkeypatch, m
     mock_bounce = MagicMock()
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))

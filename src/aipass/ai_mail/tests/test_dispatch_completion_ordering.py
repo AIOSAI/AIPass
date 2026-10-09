@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_completion_ordering.py
 # Description: The terminal moment's ordering, FPLAN-0452 P0's second fix
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-09-27
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py -- the terminal moment's ordering."""
@@ -75,7 +75,7 @@ class TestTheReportOutlivesTheLock:
         the woken sender would have to re-dispatch this branch within the
         milliseconds it takes to write one JSON file, while booting a CLI.
         """
-        assert tail.index("_wake_sender(") < tail.index("build_report(")
+        assert tail.index("wake_sender(") < tail.index("build_report(")
 
 
 class TestAFailedReportIsNotRoutine:

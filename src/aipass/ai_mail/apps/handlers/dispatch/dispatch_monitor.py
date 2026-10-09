@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.7.0
+# Version: 2.8.0
 # Created: 2026-03-02
 # Modified: 2026-10-08
 # =============================================
@@ -57,13 +57,18 @@ HARD_TIMEOUT = 7200  # 2 hours
 POLL_INTERVAL = 5
 
 
-def _is_sandbox_enabled() -> bool:
-    """Check if dispatch sandbox is enabled via AIPASS_SANDBOX_ENABLED env var."""
+def is_sandbox_enabled() -> bool:
+    """Check if dispatch sandbox is enabled via AIPASS_SANDBOX_ENABLED env var.
+
+    A door: main() reads it once per dispatch; the env var is the deployment's switch.
+    """
     return os.environ.get("AIPASS_SANDBOX_ENABLED", "").lower() in ("1", "true", "yes")
 
 
-def _wrap_for_sandbox(cmd: list, branch_path: Path) -> list:
+def wrap_for_sandbox(cmd: list, branch_path: Path) -> list:
     """Wrap a claude command in the srt kernel sandbox.
+
+    A door: main() calls it when the sandbox flag is on; @hooks owns the building blocks it calls.
 
     Uses @hooks sandbox building blocks to resolve the bwrap command,
     then returns a shell invocation list compatible with Popen.
@@ -101,12 +106,14 @@ MAX_WAKE_DEPTH = 3
 # the agent's, and would leak the choice into any dispatch the agent makes.
 NO_WAKE_BACK_FLAG = "--no-wake-back"
 # The dispatch_wake.log tag main() records in place of a wake result when the
-# caller declined the wake-back — _wake_sender is then never called.
+# caller declined the wake-back — wake_sender is then never called.
 WAKE_RESULT_DECLINED = "declined"
 
 
-def _wake_sender(sender: str, branch_email: str, exit_code: int) -> str:
+def wake_sender(sender: str, branch_email: str, exit_code: int) -> str:
     """Wake the dispatcher back after target completion.
+
+    A door: main() calls it, and its tags are read in dispatch_wake.log and by managers.
 
     Builder-class citizens get woken back, subject to the same availability
     checks as a normal wake (interactive session, active lock, depth cap).
@@ -254,10 +261,12 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int) -> bool:
         return False
 
 
-def _log_wake_result(branch_email: str, sender: str, exit_code: int, result: str, lock_file: str):
+def log_wake_result(branch_email: str, sender: str, exit_code: int, result: str, lock_file: str):
     """Append a wake-back result line to dispatch_wake.log under target's logs/.
 
-    ``result`` is one of _wake_sender's tags, or "declined" when the caller
+    A door: main() calls it, and its line is read in dispatch_wake.log by managers and the register.
+
+    ``result`` is one of wake_sender's tags, or "declined" when the caller
     passed --no-wake-back.
     """
     lock_path = Path(lock_file).resolve()
@@ -406,8 +415,10 @@ def _make_fresh_cmd(claude_cmd: list) -> list:
     return fresh
 
 
-def _cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple[list, str]:
+def cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple[list, str]:
     """Build the command for one attempt of the 3-strike loop. Returns (cmd, mode).
+
+    A door: main() calls it per attempt; it keeps the --resume/--session-id shapes wake.py builds.
 
     Attempts 1 and 2 used to re-run the identical command. Harmless for -c,
     fatal for --session-id: the CLI refuses an id that already exists
@@ -485,12 +496,12 @@ def _transcript_exists(branch_path: Path, session_id: str) -> Optional[bool]:
     Returns:
         True or False when the transcript can be looked for; None when this
         machine cannot name its home, so no transcript can be located and the
-        id's state is unknown. _cmd_for_attempt mints a new id on None
+        id's state is unknown. cmd_for_attempt mints a new id on None
         (ai_mail, leg 11; before it, no home answered False and the id was re-sent).
 
     Raises:
         OSError: the transcript could not be stat'd. False would say the id is
-            free to re-send when it may already be taken; _cmd_for_attempt
+            free to re-send when it may already be taken; cmd_for_attempt
             mints a new id on this instead (ai_mail, leg 10).
     """
     transcript = session_pointer.transcript_file(branch_path, session_id)
@@ -511,8 +522,10 @@ def _aimed_at_a_session(claude_cmd: list) -> bool:
     return _session_id_in(claude_cmd) is not None or any(flag in claude_cmd for flag in RESUME_FLAGS)
 
 
-def _reconcile_pointer(branch_path: Path, stdout_log: str, claude_cmd: list) -> None:
+def reconcile_pointer(branch_path: Path, stdout_log: str, claude_cmd: list) -> None:
     """Record the session the CLI actually used, when it differs from the pointer.
+
+    A door: main() calls it after a clean run; wake.py reads the pointer it writes.
 
     Only runs when we AIMED at a session (--session-id or --resume). On the bare
     -c fallback the landing spot was picked by file mtime, and writing that down
@@ -724,11 +737,13 @@ def _kill_process(process: subprocess.Popen, branch_email: str):
             logger.warning("[monitor] %s SIGKILL didn't work", branch_email)
 
 
-def _run_with_startup_check(
+def run_with_startup_check(
     claude_cmd: list, stdout_log: str, stderr_fh, cwd: str, spawn_env: dict, branch_email: str, pass_fds: tuple = ()
 ) -> tuple:
     """
     Run claude with startup timeout check.
+
+    A door: main() runs every attempt through it, and the tests drive main() with it as the seam.
 
     Returns:
         (exit_code, startup_failed: bool)
@@ -935,7 +950,7 @@ def main():
     start_time = time.time()
 
     # ─── Sandbox Gate ─────────────────────────────────────
-    sandbox_enabled = _is_sandbox_enabled()
+    sandbox_enabled = is_sandbox_enabled()
     if sandbox_enabled:
         logger.info("[monitor] Sandbox ENABLED for %s", branch_email)
 
@@ -953,7 +968,7 @@ def main():
     cmd = list(claude_cmd)
 
     for attempt in range(1, 4):
-        cmd, mode = _cmd_for_attempt(claude_cmd, attempt, branch_path)
+        cmd, mode = cmd_for_attempt(claude_cmd, attempt, branch_path)
         if attempt == 3 and mode == "fresh" and cmd != claude_cmd:
             logger.info("[monitor] %s attempt %d/3: switching to --fresh", branch_email, attempt)
 
@@ -964,7 +979,7 @@ def main():
         attempt_pass_fds: tuple = ()
         if sandbox_enabled:
             try:
-                run_cmd = _wrap_for_sandbox(cmd, branch_path)
+                run_cmd = wrap_for_sandbox(cmd, branch_path)
             except Exception as e:
                 logger.error(
                     "[monitor] Sandbox init FAILED for %s: %s — ABORTING (will NOT launch unsandboxed)",
@@ -999,7 +1014,7 @@ def main():
             stderr_fh.flush()
             attempt_stderr_offset = stderr_fh.tell()
 
-        exit_code, startup_failed = _run_with_startup_check(
+        exit_code, startup_failed = run_with_startup_check(
             run_cmd,
             stdout_log,
             stderr_fh if stderr_fh is not None else subprocess.DEVNULL,
@@ -1074,7 +1089,7 @@ def main():
     # `cmd` is the LAST attempt's command, not the original — strike 3 remints,
     # so the original would misreport which session this run actually aimed at.
     if exit_code == 0:
-        _reconcile_pointer(branch_path, stdout_log, cmd)
+        reconcile_pointer(branch_path, stdout_log, cmd)
 
     # Check for max-turns hit (Claude exits 0 but output contains stop_reason)
     max_turns_hit = False
@@ -1157,19 +1172,19 @@ def main():
     # ordering below is the whole of FPLAN-0452 P0's second fix and it is not
     # arbitrary — see the block comment on the report write.
     if wake_back:
-        wake_result = _wake_sender(sender, branch_email, exit_code)
+        wake_result = wake_sender(sender, branch_email, exit_code)
     else:
         # The caller declined (wake_branch(wake_back=False), e.g. @daemon's
         # scheduled nudges): a nudge owes no reply, and waking the sender back
         # only burned a session reading an empty inbox. No wake and no manager
-        # mail — _wake_sender owns both. Bounce mail above still used sender.
+        # mail — wake_sender owns both. Bounce mail above still used sender.
         logger.info(
             "[monitor] Wake-back declined by caller: %s finished, sender %s not woken or mailed",
             branch_email,
             sender,
         )
         wake_result = WAKE_RESULT_DECLINED
-    _log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
+    log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
 
     # ─── The completion report, written BEFORE the lock is released ────────
     # Under the old design the report was a garnish, so losing it was a

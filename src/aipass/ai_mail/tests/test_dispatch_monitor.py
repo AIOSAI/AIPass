@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor.py
 # Description: Tests for dispatch monitor lifecycle handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-02
 # Modified: 2026-10-08
 # =============================================
@@ -16,7 +16,7 @@
 # seedgo: no-test-needed(constant) — POLL_INTERVAL and RATE_LIMIT_DELAY: real values, overridden by every test
 # seedgo: no-test-needed(shared) — the startup check, kill, logs, lock, JSONL: tests/test_dispatch_monitor_helpers.py
 # seedgo: no-test-needed(shared) — the sandbox gate and the broker handshake: tests/test_dispatch_monitor_sandbox.py
-# seedgo: no-test-needed(shared) — _wake_sender, _log_wake_result and the decline: tests/test_dispatch_monitor_wake.py
+# seedgo: no-test-needed(shared) — wake_sender, log_wake_result and the decline: tests/test_dispatch_monitor_wake.py
 # seedgo: no-test-needed(shared) — what each attempt leaves behind: tests/test_dispatch_monitor_artifacts.py
 # seedgo: no-test-needed(shared) — the session-pointer retry loop: tests/test_dispatch_monitor_pointer.py
 
@@ -77,7 +77,7 @@ def test_main_single_attempt_success(monkeypatch, main_argv, tmp_path, recorded_
 
     monkeypatch.setenv("AIPASS_DISPATCH_ID", "dsp-single")
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", mock_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", mock_run)
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -114,7 +114,7 @@ def test_main_second_attempt_success(monkeypatch, main_argv, tmp_path):
     mock_bounce = MagicMock()
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", mock_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", mock_run)
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -151,7 +151,7 @@ def test_main_third_attempt_fresh(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", track_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", track_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -193,7 +193,7 @@ def test_main_all_three_fail_sends_bounce(monkeypatch, main_argv, tmp_path, reco
     mock_bounce = MagicMock()
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (-3, True), (1, False)]))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(side_effect=[(1, False), (-3, True), (1, False)]))
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -242,7 +242,7 @@ def test_main_rate_limit_delay(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (0, False)]))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(side_effect=[(1, False), (0, False)]))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=True))
     monkeypatch.setattr(mod, "time", mock_time)
@@ -344,7 +344,7 @@ def test_notification_uses_at_branch_format(monkeypatch, main_argv, tmp_path, re
     monkeypatch.setenv("AIPASS_DISPATCH_ID", "dsp-notify")
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -396,7 +396,7 @@ def test_max_turns_changes_notification_status(monkeypatch, main_argv, tmp_path,
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -445,7 +445,7 @@ def test_stderr_rotation_on_large_file(tmp_path, monkeypatch):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -500,7 +500,7 @@ def test_stdout_rotation_on_large_file(tmp_path, monkeypatch):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -525,7 +525,7 @@ def test_lock_cleanup_on_success(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -546,7 +546,7 @@ def test_lock_cleanup_on_failure(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (1, False), (1, False)]))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(side_effect=[(1, False), (1, False), (1, False)]))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -581,7 +581,7 @@ def test_main_attempt_exit_lines_in_stderr(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(-3, True), (1, False), (0, False)]))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(side_effect=[(-3, True), (1, False), (0, False)]))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
@@ -614,7 +614,7 @@ def test_main_failed_attempt_stdout_preserved(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
@@ -642,7 +642,7 @@ def test_main_stale_attempt_files_shifted(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -671,7 +671,7 @@ def test_main_bounce_includes_result_json(monkeypatch, main_argv, tmp_path):
         return (1, False)
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
@@ -704,7 +704,7 @@ def test_main_bg_orphaned_treated_as_incomplete(monkeypatch, main_argv, tmp_path
         return (0, False)
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -729,7 +729,7 @@ def test_main_bg_marker_from_previous_run_ignored(monkeypatch, main_argv, tmp_pa
     mock_bounce = MagicMock()
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -755,7 +755,7 @@ def test_main_lock_left_for_successor_monitor(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -802,7 +802,7 @@ def test_env_vars_set_correctly(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
 
@@ -858,7 +858,7 @@ def test_auto_compact_window_pinned_to_350k(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -908,7 +908,7 @@ def test_main_max_turns_detected(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -961,7 +961,7 @@ def test_stderr_rotation(tmp_path, monkeypatch):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+    monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -1000,7 +1000,7 @@ def test_env_vars_setup(monkeypatch, main_argv, tmp_path):
 
     bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+    monkeypatch.setattr(mod, "run_with_startup_check", capture_run)
     monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
 
