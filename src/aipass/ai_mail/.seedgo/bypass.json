@@ -87,12 +87,32 @@
     {
       "file": "tests/test_wake.py",
       "standard": "stdlib_patch",
-      "reason": "Platform and pid simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 13: os.kill 189 196 202 218 464 478 (dead/alive answers of the kill(0) family); sys.platform 195 203 219 236 248 260 270 281 293 313 321 334 352 375 472 1001 1013 1028 1051 (the linux/darwin/win32 lanes); builtins.open 210 225 240 252 275 387 398 413 and os.readlink 315 322 1008 1021 1036 1062 (the /proc reads of a pid; 270 and 275 came with the test moved from test_daemon in leg 12); shutil.which 734 1264 1292 1717 3023 (which tools the host has); time.sleep 880 1109 (the wait on a pid, no real waiting); Path.home 2107 (the host home sent to tmp). One line is not platform or pid, 938 (an OSError injected into the lock open); it is named here, not hidden, and stays under this rule by @devpulse's leg 11 ruling a (ai_mail, leg 11). A seam for any of these would exist for the test alone."
+      "reason": "Platform and pid simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the 2026-10-08 split, measured by the checker (the platform, pid and lock lines moved to tests/test_wake_helpers.py, the manager lanes to tests/test_wake_managers.py, the shared helpers to tests/support_wake.py; each carries its own row): time.sleep 95 (the wait on a pid, no real waiting); shutil.which 260 288 (which tools the host has); Path.home 684 (the host home sent to tmp). A seam for any of these would exist for the test alone."
+    },
+    {
+      "file": "tests/test_wake_helpers.py",
+      "standard": "stdlib_patch",
+      "reason": "Platform and pid simulation, moved with its tests out of tests/test_wake.py in the 2026-10-08 split (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the split, measured by the checker: os.kill 183 190 196 212 394 453 467 (dead/alive answers of the kill(0) family); sys.platform 189 197 213 264 291 314 372 380 393 461 928 940 955 978 (the linux/darwin/win32 lanes); builtins.open 203 218 269 308 402 and os.readlink 266 293 347 382 935 948 963 989 (the /proc reads of a pid); shutil.which 731 (which claude the host has). One line is not platform or pid, 866 (an OSError injected into the lock open); it is named here, not hidden, and stays under this rule by @devpulse's leg 11 ruling a (ai_mail, leg 11). A seam for any of these would exist for the test alone."
+    },
+    {
+      "file": "tests/test_wake_managers.py",
+      "standard": "stdlib_patch",
+      "reason": "Host tool simulation, moved with its test out of tests/test_wake.py in the 2026-10-08 split (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the split, measured by the checker: shutil.which 782 (which tmux the host has). A seam would exist for the test alone."
+    },
+    {
+      "file": "tests/support_wake.py",
+      "standard": "stdlib_patch",
+      "reason": "Host tool and pid-wait simulation in the wake helpers shared by the test_wake*.py files, moved out of tests/test_wake.py in the 2026-10-08 split (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the split, measured by the checker: time.sleep 66 (the wait on a pid, no real waiting); shutil.which 121 (which tools the host has). A seam for any of these would exist for the test alone."
     },
     {
       "file": "tests/test_daemon.py",
       "standard": "stdlib_patch",
-      "reason": "Platform and pid simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 13: os.kill 951 971 1052 1070 (dead/alive answers of the kill(0) family; 951 is leg 13's zombie holder, with sys.platform 946); sys.platform 946 1062 1313 1333 1357; os.readlink 1324 1344 1368 (the /proc reads of a pid; the builtins.open lines left with the session-type tests, which moved to test_wake in leg 12); os.open 1144 1161 1188 1210 1228 and Path.unlink 1187 (the Windows sharing denial on the pid file); time.monotonic/sleep 1108 1109 (the clock of that denial retry, no real waiting); os.waitpid 1717 (child reaping). Three lines are not platform or pid, 1009 (an OSError injected into lock creation), 1715 (the sleep of the daemon loop beside the waitpid) and 1809 (leg 13: the sleep of a skipped cycle, which records the interval and stops the loop, no real waiting); they are named here, not hidden, and stay under this rule by @devpulse's leg 11 ruling a (ai_mail, leg 11). A seam for any of these would exist for the test alone."
+      "reason": "Pid simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the 2026-10-08 split (the platform, lock and pid-file lines moved to tests/test_daemon_locks.py, whose own row carries them): os.waitpid 480 (child reaping). Two lines are not platform or pid, 479 (the sleep of the daemon loop beside the waitpid) and 573 (leg 13: the sleep of a skipped cycle, which records the interval and stops the loop, no real waiting); they are named here, not hidden, and stay under this rule by @devpulse's leg 11 ruling a (ai_mail, leg 11). A seam for any of these would exist for the test alone."
+    },
+    {
+      "file": "tests/test_daemon_locks.py",
+      "standard": "stdlib_patch",
+      "reason": "Platform and pid simulation, moved with its tests out of tests/test_daemon.py in the 2026-10-08 split (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the split: os.kill 152 172 266 280 (dead/alive answers of the kill(0) family; 152 is leg 13's zombie holder, with sys.platform 147); sys.platform 147 273 535 555 579; os.readlink 546 566 590 (the /proc reads of a pid); os.open 347 362 390 438 456 and Path.unlink 389 417 (the Windows sharing denial on the pid file); time.monotonic/sleep 312 313 (the clock of that denial retry, no real waiting). One line is not platform or pid, 210 (an OSError injected into lock creation); it is named here, not hidden, and stays under this rule by @devpulse's leg 11 ruling a (ai_mail, leg 11). A seam for any of these would exist for the test alone."
     },
     {
       "file": "tests/test_dispatch_register.py",
@@ -126,9 +146,9 @@
       "reason": "Import-failure injection (ai_mail, fleet green leg 11, under @devpulse's leg 11 ruling b): an installed module cannot be made missing on demand, and a seam would be a door for the test alone. stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Line covered as of leg 11: 194, builtins.__import__ replaced so the admin-grant import fails and the lane is seen to fail closed."
     },
     {
-      "file": "tests/test_email_module.py",
+      "file": "tests/test_email_module_send.py",
       "standard": "stdlib_patch",
-      "reason": "Import-failure injection (ai_mail, fleet green leg 11, under @devpulse's leg 11 ruling b): an installed module cannot be made missing on demand, and a seam would be a door for the test alone. stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Line covered as of leg 11: 1447, builtins.__import__ replaced so one import fails and the handler's answer to it is seen."
+      "reason": "Import-failure injection (ai_mail, fleet green leg 11, under @devpulse's leg 11 ruling b): an installed module cannot be made missing on demand, and a seam would be a door for the test alone. stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Line covered as of the 2026-10-08 split, which moved the row with its test out of tests/test_email_module.py (1447 there): 450, builtins.__import__ replaced so one import fails and the handler's answer to it is seen."
     },
     {
       "file": "tests/test_central_writer.py",
@@ -279,10 +299,10 @@
       "reason": "monitor_alive (ai_mail, fleet green legs 9 and 10, os.kill family): PermissionError from os.kill(pid, 0) means the process exists under another user, so True at 207 is the answer. 210 answers None, 'could not probe', a third value the success path never returns (it answers True or False), and the register's readers show it as unknown; the checker reads a tri-state as a fallback."
     },
     {
-      "file": "tests/test_dispatch_monitor.py",
+      "file": "tests/test_dispatch_monitor_helpers.py",
       "standard": "literal_path",
-      "lines": [1566],
-      "reason": "(ai_mail, fleet green leg 9; re-lined 2026-10-04) The literal is the subject: _get_jsonl_projects_dir encodes a cwd STRING into Claude's project-dir name (separators to '-'). No file system is asked and nothing is read or written at that path; built from tmp_path the expected name would have to re-implement the encoding under test. Kept as the subject since leg 5; devpulse accepted it as a string parse in the leg 7 ruling."
+      "lines": [498],
+      "reason": "(ai_mail, fleet green leg 9; re-lined 2026-10-04; moved with its test from test_dispatch_monitor.py 1566 in the 2026-10-08 split) The literal is the subject: _get_jsonl_projects_dir encodes a cwd STRING into Claude's project-dir name (separators to '-'). No file system is asked and nothing is read or written at that path; built from tmp_path the expected name would have to re-implement the encoding under test. Kept as the subject since leg 5; devpulse accepted it as a string parse in the leg 7 ruling."
     },
     {
       "file": "tests/test_notify.py",
@@ -294,7 +314,7 @@
       "file": "tests/test_session_pointer.py",
       "standard": "literal_path",
       "lines": [105],
-      "reason": "(ai_mail, fleet green leg 9; re-lined leg 17) Same as test_dispatch_monitor.py 1566: transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
+      "reason": "(ai_mail, fleet green leg 9; re-lined leg 17) Same as test_dispatch_monitor_helpers.py 498: transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
     },
     {
       "file": "apps/handlers/dispatch/session_pointer.py",
