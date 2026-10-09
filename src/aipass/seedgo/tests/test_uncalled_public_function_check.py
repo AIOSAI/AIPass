@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_uncalled_public_function_check.py
 # Description: uncalled_public_function_check — crack class O, a subject's untested export
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-09-22
 # Modified: 2026-10-08
 # =============================================
@@ -191,6 +191,37 @@ class TestArchivedCodeIsNotProduct:
         uncalled_public_function_check.scan(branch)
         warned = {Path(w.filename).name for w in recwarn if issubclass(w.category, SyntaxWarning)}
         assert warned == {"loud.py"}
+
+
+class TestCalledByPytestProtocol:
+    """A plugin's hooks are called by pytest, never by name (seedgo, leg 1cd2e911)."""
+
+    def test_a_plugin_hook_no_test_names_is_acquitted_as_protocol(self, tmp_path):
+        """payload/audit_hygiene_plugin.py pytest_configure was convicted O2.
+
+        Mutant: PYTEST_HOOKS emptied -- red, pytest_configure convicted again.
+        """
+        subject = "def pytest_configure(config):\n    return None\n"
+        message = uncalled_public_function_check.check_branch(str(_branch(tmp_path, subject=subject)))["checks"][0][
+            "message"
+        ]
+        assert f"1 {uncalled_public_function_check.PROTOCOL}" in message
+
+    def test_a_helper_only_a_hook_calls_is_live(self, tmp_path):
+        """The plugin's emit is called from its hooks and from nowhere else.
+
+        Mutant: the hooks no longer seed reachability -- red, emit convicted O2.
+        """
+        subject = "def pytest_configure(config):\n    emit()\ndef emit():\n    return 1\n"
+        assert _names(tmp_path, DECLARES, subject=subject) == []
+
+    def test_a_hook_name_in_a_file_that_is_no_plugin_is_still_judged(self, tmp_path):
+        """No pytest_configure or pytest_sessionstart: pytest never loads it, so nothing calls it.
+
+        Mutant: the plugin-file test dropped -- red, the function acquitted.
+        """
+        subject = "def pytest_runtest_setup(item):\n    return None\n"
+        assert _names(tmp_path, DECLARES, subject=subject) == ["pytest_runtest_setup"]
 
 
 class TestTheEntryPoint:

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: uncalled_public_function_check.py
 # Description: Uncalled Public Function Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-22
 # Modified: 2026-10-08
 # =============================================
@@ -32,6 +32,12 @@ THE CRISP PART IS WHAT COUNTS AS CALLED, and it is the whole rule:
     decoration -- it acquits 19 of the 21 candidates, including
     ``route_command`` and every ``print_introspection``, which ``main()``
     reaches for tests that call ``main()``.
+
+  * CALLED BY PYTEST PROTOCOL is shape O3, acquitted (leg 1cd2e911): a hook
+    a pytest plugin defines is called by pytest, never by a test. It is
+    counted in the passing message, and it seeds the graph as a test call
+    would, so the helpers only a hook calls are live. ``protocol_hooks``
+    says which files count as plugins, and why.
 
   A name-level graph collapses two modules that both define ``run``, so it
   over-acquits rather than under-acquits. For a SCORED rule that is the right
@@ -111,6 +117,71 @@ _PATCH_VERBS: frozenset[str] = frozenset({"patch", "object", "setattr"})
 
 REPLACED = "O1 replaced by a patch and never run"
 UNREACHED = "O2 never named by a test and unreachable from one"
+
+#: Acquitted shapes -- counted in the passing message, never charged.
+PRODUCT = "are reached only through the product, which the rule allows"
+PROTOCOL = "O3 called by pytest protocol"
+
+#: Every hook pytest 9.1's hookspec declares: the names pytest calls, never a test.
+PYTEST_HOOKS: frozenset[str] = frozenset(
+    {
+        "pytest_addhooks",
+        "pytest_addoption",
+        "pytest_assertion_pass",
+        "pytest_assertrepr_compare",
+        "pytest_cmdline_main",
+        "pytest_cmdline_parse",
+        "pytest_collect_directory",
+        "pytest_collect_file",
+        "pytest_collection",
+        "pytest_collection_finish",
+        "pytest_collection_modifyitems",
+        "pytest_collectreport",
+        "pytest_collectstart",
+        "pytest_configure",
+        "pytest_deselected",
+        "pytest_enter_pdb",
+        "pytest_exception_interact",
+        "pytest_fixture_post_finalizer",
+        "pytest_fixture_setup",
+        "pytest_generate_tests",
+        "pytest_ignore_collect",
+        "pytest_internalerror",
+        "pytest_itemcollected",
+        "pytest_keyboard_interrupt",
+        "pytest_leave_pdb",
+        "pytest_load_initial_conftests",
+        "pytest_make_collect_report",
+        "pytest_make_parametrize_id",
+        "pytest_markeval_namespace",
+        "pytest_plugin_registered",
+        "pytest_pycollect_makeitem",
+        "pytest_pycollect_makemodule",
+        "pytest_pyfunc_call",
+        "pytest_report_collectionfinish",
+        "pytest_report_from_serializable",
+        "pytest_report_header",
+        "pytest_report_teststatus",
+        "pytest_report_to_serializable",
+        "pytest_runtest_call",
+        "pytest_runtest_logfinish",
+        "pytest_runtest_logreport",
+        "pytest_runtest_logstart",
+        "pytest_runtest_makereport",
+        "pytest_runtest_protocol",
+        "pytest_runtest_setup",
+        "pytest_runtest_teardown",
+        "pytest_runtestloop",
+        "pytest_sessionfinish",
+        "pytest_sessionstart",
+        "pytest_terminal_summary",
+        "pytest_unconfigure",
+        "pytest_warning_recorded",
+    }
+)
+
+#: The hooks whose definition makes a module a pytest plugin -- see ``protocol_hooks``.
+PLUGIN_MARKERS: frozenset[str] = frozenset({"pytest_configure", "pytest_sessionstart"})
 
 CURE = "call it in a test, or retire it"
 
@@ -229,11 +300,41 @@ def _functions(tree: ast.AST) -> List[ast.FunctionDef | ast.AsyncFunctionDef]:
     return [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
 
-def product_graph(branch_root: Path) -> Dict[str, Set[str]]:
+def protocol_hooks(tree: ast.Module | None) -> Set[str]:
+    """The module-level hooks pytest calls in this module, when it is a plugin.
+
+    THE FILE TEST: a module is a plugin when it defines ``pytest_configure``
+    or ``pytest_sessionstart``. The dispatch offered three tests (a
+    conftest.py, a module under payload/, or this one) and asked for one. This
+    one reads what the file IS, not where it sits:
+
+      * the audit_hygiene payload is loaded with ``-p`` from a scratch copy,
+        so neither its name nor its directory is what makes pytest call it;
+      * a payload/ rule would acquit anything dropped under that directory and
+        miss a plugin anywhere else;
+      * a conftest.py lives in tests/, which no subject path under apps/ names.
+
+    The cost, said plainly: a plugin that defines neither marker -- only
+    ``pytest_runtest_call``, say -- is still judged. The rule errs toward
+    judging.
+    """
+    if tree is None:
+        return set()
+    hooks = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in PYTEST_HOOKS
+    }
+    return hooks if hooks & PLUGIN_MARKERS else set()
+
+
+def product_graph(branch_root: Path, hooks: Set[str] | None = None) -> Dict[str, Set[str]]:
     """Function name -> the names it calls, over the branch's whole ``apps/``.
 
     ``.archive`` and the other SOURCE_SKIP_DIRS are not product: a retired
-    caller in the graph acquits a live function nothing runs.
+    caller in the graph acquits a live function nothing runs. When ``hooks``
+    is given, every plugin hook under ``apps/`` is added to it: pytest calls
+    those, so they seed reachability as a test call would (leg 1cd2e911).
     """
     graph: Dict[str, Set[str]] = {}
     apps = branch_root / "apps"
@@ -243,6 +344,8 @@ def product_graph(branch_root: Path) -> Dict[str, Set[str]]:
         tree = _parse(path)
         if tree is None:
             continue
+        if hooks is not None:
+            hooks |= protocol_hooks(tree)
         aliases = _aliases(tree)
         for function in _functions(tree):
             graph.setdefault(function.name, set()).update(_calls(function, aliases))
@@ -338,30 +441,32 @@ def _verdict(name: str, replaced: Set[str], elsewhere: Set[str], live: Set[str],
     return UNREACHED
 
 
-def scan(branch_root: Path) -> Tuple[List[Tuple[Path, int, str, str]], int]:
-    """(findings, how many uncalled functions the product still reaches)."""
+def scan(branch_root: Path) -> Tuple[List[Tuple[Path, int, str, str]], Dict[str, int]]:
+    """(findings, acquitted uncalled functions by shape: PRODUCT or PROTOCOL)."""
     tests_dir = branch_root / "tests"
+    acquitted = {PRODUCT: 0, PROTOCOL: 0}
     if not tests_dir.is_dir() or not (branch_root / "apps").is_dir():
-        return [], 0
+        return [], acquitted
 
     called, replaced, elsewhere, subjects = _read_tests(tests_dir, branch_root)
     if not subjects:
-        return [], 0
+        return [], acquitted
 
-    graph = product_graph(branch_root)
-    live = reachable(graph, called)
+    hooks: Set[str] = set()
+    graph = product_graph(branch_root, hooks)
+    live = reachable(graph, called | hooks)
     run = run_unpatched(tests_dir, graph)
     findings: List[Tuple[Path, int, str, str]] = []
-    acquitted = 0
     for subject in dict.fromkeys(subjects):
+        protocol = protocol_hooks(_parse(subject))
         for name, line in _publics(subject):
             if name in called:
                 continue
-            shape = _verdict(name, replaced, elsewhere, live, run)
-            if shape:
+            shape = PROTOCOL if name in protocol else _verdict(name, replaced, elsewhere, live, run)
+            if shape in (REPLACED, UNREACHED):
                 findings.append((subject, line, name, shape))
             else:
-                acquitted += 1
+                acquitted[shape or PRODUCT] += 1
     return sorted(findings), acquitted
 
 
@@ -375,19 +480,17 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
     return [{"name": "Uncalled public function", "passed": passed, "message": message}]
 
 
-def _clean_message(acquitted: int) -> str:
-    """The passing message, carrying the acquitted count without a verdict.
+def _clean_message(acquitted: Dict[str, int]) -> str:
+    """The passing message, carrying each acquitted count without a verdict.
 
     The device ``weak_oracle`` uses for its soft oracles: a number the owner
     asked for rides along, and nobody is charged for it. Here it is the size of
-    the reachability guard, which is the rule's biggest judgement.
+    the reachability guard, which is the rule's biggest judgement, and the
+    hooks pytest calls by protocol, one count per shape.
     """
-    if not acquitted:
-        return "Every public function of every declared subject is called by a test"
-    return (
-        f"Every public function of every declared subject is called by a test "
-        f"({acquitted} are reached only through the product, which the rule allows)"
-    )
+    counts = "; ".join(f"{count} {shape}" for shape, count in acquitted.items() if count)
+    message = "Every public function of every declared subject is called by a test"
+    return f"{message} ({counts})" if counts else message
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
