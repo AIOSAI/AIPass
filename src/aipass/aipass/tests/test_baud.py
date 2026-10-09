@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_baud.py
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
 # Modified: 2026-10-08
 # =============================================
@@ -89,3 +89,21 @@ class TestFromOnlyRule:
         _out, err = capsys.readouterr()
         assert f"{flag} goes with --from" in err
         assert installs.calls == []
+
+
+class TestInstallBestEffort:
+    def test_a_crashing_face_install_warns_prints_the_retry_hint_and_answers_false(self, monkeypatch, capsys):
+        def crash(**_kwargs: object) -> int:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(baud, "install_phone_face", crash)
+        assert baud.install_best_effort() is False
+        out, err = capsys.readouterr()
+        assert "boom" in err
+        assert baud.RETRY_HINT in out
+
+    def test_a_pointed_face_install_answers_true_without_the_hint(self, installs, capsys):
+        assert baud.install_best_effort(dry_run=True) is True
+        assert installs.calls == [{"dry_run": True, "best_effort": True}]
+        out, _err = capsys.readouterr()
+        assert baud.RETRY_HINT not in out
