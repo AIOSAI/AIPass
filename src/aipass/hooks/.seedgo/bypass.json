@@ -1337,8 +1337,8 @@
     {
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
-      "lines": [682, 744, 812, 1092, 1155],
-      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 682 _allowed_fields: the refusal's wording only, the refusal stands. 744: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 812: the todos advisory text, never a verdict. 1092 _seat_trinity and 1155 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through (the old 1049 and 1080) were cured fail-closed in leg 5."
+      "lines": [685, 747, 815, 1095, 1158],
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 685 _allowed_fields: the refusal's wording only, the refusal stands. 747: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 815: the todos advisory text, never a verdict. 1095 _seat_trinity and 1158 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through (the old 1049 and 1080) were cured fail-closed in leg 5. Re-pinned +3 after the 729ffaa9 probe refusal landed above them (2026-10-08)."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
@@ -1538,21 +1538,6 @@
       "reason": "Moved from tests/test_telegram_response.py:26 (split leg, 2026-10-08); the ruling of that row, fleet green leg 9, ruling (c): _advance_pending's one public door is handle(), whose far side sends to the Telegram Bot API. Contract here: a mirror mapping file is never unlinked, with or without a readable transcript."
     },
     {
-      "file": "tests/test_telegram_response.py",
-      "standard": "discarded_patch",
-      "reason": "Split leg, 2026-10-08: patch(LOGGER_PATCH) silences the prax logger and is observed only where a test asserts on it. Before the split LOGGER_PATCH was a file-local constant, which discarded_patch reads as not-own-branch; imported from support_telegram_response it reads as own-branch, so the same unchanged patches convict. The bypass is whole-file only (check_module takes no line). Cure (assert on the logger or drop the patch) is a test-body change, outside a no-body-edit split; reported to devpulse."
-    },
-    {
-      "file": "tests/test_telegram_response_delivery.py",
-      "standard": "discarded_patch",
-      "reason": "Split leg, 2026-10-08: the same unchanged patch(LOGGER_PATCH) lines as tests/test_telegram_response.py's discarded_patch row, moved here; that row's reason applies."
-    },
-    {
-      "file": "tests/test_telegram_response_mirror.py",
-      "standard": "discarded_patch",
-      "reason": "Split leg, 2026-10-08: the same unchanged patch(LOGGER_PATCH) lines as tests/test_telegram_response.py's discarded_patch row, moved here; that row's reason applies."
-    },
-    {
       "file": "tests/test_auto_fix.py",
       "standard": "through_the_command",
       "lines": [32, 423, 424, 430, 431],
@@ -1567,20 +1552,26 @@
     {
       "file": "tests/test_session_boot_lookups.py",
       "standard": "stdlib_patch",
-      "lines": [283, 294, 307],
-      "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): real SIGTERM / real exec of tmux; no seam on exec or kill; on 10-05 leg 7 a def-time seam let the string-form patches miss and one run exec'd real tmux. Re-pointed from test_session_boot.py by the 2026-10-08 split."
+      "lines": [199, 213, 283, 294, 307],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): real SIGTERM / real exec of tmux; no seam on exec or kill; on 10-05 leg 7 a def-time seam let the string-form patches miss and one run exec'd real tmux. Re-pointed from test_session_boot.py by the 2026-10-08 split; 199 and 213 (patch(f\"{_MOD}.os.execvp\"), judged again once the checker followed the support import) added in the re-pin leg."
     },
     {
       "file": "tests/test_session_boot.py",
       "standard": "stdlib_patch",
-      "lines": [229, 242, 267, 282, 314, 341, 355, 372, 386, 487, 501, 511, 522, 533, 546, 557, 569, 585, 656, 720, 740, 756, 816, 854, 942, 956, 988, 1001, 1014, 1029, 1047, 1069, 1092, 1164, 1182, 1194, 1208, 1222, 1235, 1699, 1785, 1879],
-      "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1516 and 1529): patch(f\"{_MOD}.os.execvp\"). The far side is a real exec: os.execvp replaces the test process with tmux (new-session / attach-session), claude or drone, so no run may reach it. Every public door of session_boot (boot(), main()) ends in that exec, so no door is safe; and no seam may stand on an exec, because on 10-05 (leg 7) a def-time seam let string-form patches miss and one run exec'd real tmux. The patch is the only guard, held at call time."
+      "lines": [38, 51, 76, 91, 123, 150, 164, 181, 195, 296, 310, 320, 331, 342, 355, 366, 378, 394, 437, 501, 521, 537, 597, 635, 727, 740, 753, 768, 786, 808, 831, 903, 921, 933, 947, 961, 974],
+      "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1516 and 1529): patch(f\"{_MOD}.os.execvp\"). The far side is a real exec: os.execvp replaces the test process with tmux (new-session / attach-session), claude or drone, so no run may reach it. Every public door of session_boot (boot(), main()) ends in that exec, so no door is safe; and no seam may stand on an exec, because on 10-05 (leg 7) a def-time seam let string-form patches miss and one run exec'd real tmux. The patch is the only guard, held at call time. Lines re-pinned after the 2026-10-08 split."
+    },
+    {
+      "file": "tests/test_session_boot_doors.py",
+      "standard": "stdlib_patch",
+      "lines": [119, 205, 299],
+      "reason": "Moved from test_session_boot.py by the 2026-10-08 split; that file's execvp row's ruling: fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8: patch(f\"{_MOD}.os.execvp\"). The far side is a real exec: os.execvp replaces the test process with tmux, claude or drone, so no run may reach it. Every public door of session_boot (boot(), main()) ends in that exec, so no door is safe; and no seam may stand on an exec, because on 10-05 (leg 7) a def-time seam let string-form patches miss and one run exec'd real tmux. The patch is the only guard, held at call time."
     },
     {
       "file": "tests/test_session_boot.py",
       "standard": "stdlib_patch",
-      "lines": [406, 425, 435],
-      "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1505): patch(f\"{_MOD}.os.kill\"). The far side is a real signal: _stop_session sends SIGTERM to the session's pid, a live claude process of this machine, so no run may reach it. Its only public door is boot()'s menu, which also ends in an exec, so no door is safe; and no seam may stand on a kill, by the same 10-05 incident. The patch is the only guard, held at call time."
+      "lines": [215, 234, 244],
+      "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1505): patch(f\"{_MOD}.os.kill\"). The far side is a real signal: _stop_session sends SIGTERM to the session's pid, a live claude process of this machine, so no run may reach it. Its only public door is boot()'s menu, which also ends in an exec, so no door is safe; and no seam may stand on a kill, by the same 10-05 incident. The patch is the only guard, held at call time. Lines re-pinned after the 2026-10-08 split."
     },
     {
       "file": "tests/test_session_boot_lookups.py",

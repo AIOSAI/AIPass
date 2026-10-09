@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_programs.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Which programs only read, and which only take data — the default-deny tables (DPLAN-0356 phase 4)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """The tables that invert the gates: what is KNOWN safe, so everything else is not (DPLAN-0356 phase 4).
@@ -61,6 +61,9 @@ PLAIN_PROGRAMS = READ_ONLY_PROGRAMS | frozenset(
     }
 )  # fmt: skip
 
+#: Programs whose first plain word is a format string, never a path (devpulse 729ffaa9).
+_FORMAT_FIRST = frozenset({"printf", "echo"})
+
 #: Programs a gate of their own answers for (git_gate): their operands are not judged twice.
 OWN_GATED = frozenset({"git", "gh"})
 
@@ -97,13 +100,21 @@ def _carriers(invocations: list) -> set[int]:
     return carried
 
 
-def _operand_texts(argv: tuple[str, ...]) -> list[str]:
-    """Every operand a path could hide in: plain words, and the value of a --flag=value."""
+def _operand_texts(argv: tuple[str, ...], program: str = "") -> list[str]:
+    """Every operand a path could hide in: plain words, and the value of a --flag=value.
+
+    printf's and echo's first plain word is a FORMAT, data and never a path; their
+    redirect target is the write, read by bash_writes (devpulse 729ffaa9).
+    """
     texts = []
+    format_pending = program in _FORMAT_FIRST
     for arg in argv[1:]:
         if arg.startswith("-"):
             if "=" in arg:
                 texts.append(arg.split("=", 1)[1])
+            continue
+        if format_pending:
+            format_pending = False
             continue
         texts.append(arg)
     return [text for text in texts if text]
@@ -150,7 +161,7 @@ def named_operands(invocations: list, places=None) -> list[tuple[str, Path]]:
     for index, inv in enumerate(invocations):
         if index in carried or not inv.program or read_only(inv.program, inv.argv) or inv.program in OWN_GATED:
             continue
-        for text in _operand_texts(inv.argv):
+        for text in _operand_texts(inv.argv, inv.program):
             if inv.text and text == inv.text:  # an interpreter's -c program text is read as a program, not a path
                 continue
             path = Path(text).expanduser()

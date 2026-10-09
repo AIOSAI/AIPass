@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-10-04
+# Modified: 2026-10-08
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
@@ -39,6 +39,7 @@ rollover) never passes through a tool call, so no hook sees it. That fence is th
 service's own to carry.
 """
 
+import errno
 import fnmatch
 import json
 import os
@@ -62,6 +63,11 @@ AIPASS_REGISTRY = "AIPASS_REGISTRY.json"
 # project, or @flow's own plan files would read as a foreign project to @flow.
 # An unreadable or empty marker still counts: a boundary is never dropped on doubt.
 PROJECT_MARKER = "*_REGISTRY.json"
+
+# A shell target that cannot be probed is refused in one line (devpulse 729ffaa9):
+# Windows has no pathconf, so its long-path ceiling stands in; the word is cut here.
+_WINDOWS_PATH_MAX = 32767
+_SHOWN_CHARS = 120
 
 _WHO = (
     "Who writes where (the owner's rulings, 2026-09-18 and 2026-09-30): each agent its own branch; "
@@ -167,6 +173,43 @@ def project_of(start: Path) -> Project | None:
             if isinstance(data, dict) and data and "branches" not in data:
                 continue
             return Project(candidate, marker, _branches(data, candidate))
+    return None
+
+
+def _path_max() -> int:
+    """The host's PATH_MAX; Windows publishes none, so its long-path ceiling. 0 when unknown: the probe alone judges."""
+    pathconf = getattr(os, "pathconf", None)
+    if pathconf is None:
+        return _WINDOWS_PATH_MAX
+    try:
+        return pathconf("/", "PC_PATH_MAX")
+    except (OSError, ValueError) as exc:
+        logger.info("[HOOKS] write_ownership: PATH_MAX unpublished here, the probe alone judges length: %s", exc)
+        return 0
+
+
+def unprobeable(targets: list[tuple[Path, str]]) -> str | None:
+    """Why a shell target cannot be placed on disk, in one line, or None when every one can (devpulse 729ffaa9).
+
+    project_of stats each target, and an OSError there (ENAMETOOLONG on a printf
+    format read as a path) reached edit_gate as its crash refusal, traceback and
+    all. The call is still refused, a write the fence cannot place is not let
+    through, but the reason names the word and the errno. A target not written
+    yet is the ordinary case.
+    """
+    limit = _path_max()
+    for target, how in targets:
+        text = str(target)
+        try:
+            if limit and len(text) > limit:
+                raise OSError(errno.ENAMETOOLONG, f"longer than PATH_MAX ({limit})")
+            os.stat(target)
+        except OSError as exc:
+            if exc.errno in (errno.ENOENT, errno.ENOTDIR):  # not written yet
+                continue
+            name = errno.errorcode.get(exc.errno or 0, type(exc).__name__)
+            shown = text if len(text) <= _SHOWN_CHARS else f"{text[:_SHOWN_CHARS]}… ({len(text)} chars)"
+            return f"edit_gate cannot probe a path this call names ({name}), so it is refused: {shown} ({how})"
     return None
 
 

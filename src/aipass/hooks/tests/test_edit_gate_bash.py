@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.4.3
+# Version: 1.5.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
@@ -1113,3 +1113,41 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
         seat = registered_projects["hooks"]
         for command in ("drone @seedgo checklist apps", "mkdir -p .archive && mv old.py .archive/", "pytest tests -q"):
             assert _run(seat, command=command)["exit_code"] == 0, command
+
+
+class TestAWordTheGateCannotProbe:
+    """devpulse 729ffaa9: a long printf format string was probed as a path and crashed the gate (ENAMETOOLONG)."""
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param(
+                "x" * 300 + ".txt",
+                marks=pytest.mark.skipif(
+                    sys.platform == "win32", reason="the probe's errno for an over-long name is measured on POSIX only"
+                ),
+                id="name-over-NAME_MAX",
+            ),
+            pytest.param("x" * 40000, id="path-over-PATH_MAX"),
+        ],
+    )
+    def test_a_target_the_probe_cannot_read_is_refused_in_one_line(self, registered_projects: dict, name: str):
+        """Mutant: the OSError swallowed into an allow (exit 0)."""
+        result = _run(registered_projects["hooks"], command=f"echo hi > {name}")
+        assert _blocked(result)
+        reason = _reason(result)
+        assert "ENAMETOOLONG" in reason and "could not check" not in reason
+        assert "\n" not in reason and name not in reason
+
+    @pytest.mark.parametrize("program", ["printf", "echo"])
+    def test_a_format_string_is_data_and_its_redirect_is_the_write(
+        self, registered_projects: dict, grant_withheld, program: str
+    ):
+        """Mutant: the format string read as a path (refused as unprobeable)."""
+        seat = registered_projects["hooks"]
+        fmt = "row %s: " + "x" * 480
+        result = _run(seat, command=f"for b in a b c; do {program} '{fmt}' $b 1 2 > head_$b.txt; done")
+        assert result["exit_code"] == 0, result["stdout"]
+        other = (Path(registered_projects["memory"]) / "head.txt").as_posix()
+        refused = _run(seat, command=f"{program} '{fmt}' a > {other}")
+        assert _blocked(refused) and "ENAMETOOLONG" not in _reason(refused)

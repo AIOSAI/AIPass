@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.19.1
+# Version: 1.20.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
@@ -240,11 +240,14 @@ def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path
     repeated in the README. A parser that guessed would refuse correct commands,
     which is the failure mode that teaches agents to route around a gate.
 
+    A target that cannot be probed on disk is refused first, in one line (729ffaa9).
     Returns a block dict, or None to allow.
     """
+    wo = _ownership()
+    if unprobeable := wo.unprobeable(targets):
+        return _refuse(unprobeable)
     if caller is None:
         return None
-    wo = _ownership()
     for target, how in targets:
         landing = wo.project_of(target)
         if not wo.is_crossing(caller, landing):
