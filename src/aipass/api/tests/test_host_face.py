@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_face.py
 # Description: Tests for serving @baud's phone face from the host API origin
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-09
 # =============================================
 
 """Tests for apps/handlers/host/face.py and the face routes apps/handlers/host/server.py mounts."""
@@ -24,8 +24,8 @@
 # test_a_route_added_after_create_app_still_answers.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(duplicate_test) — set_face_dir() and the face_dir config command, tests/test_host_api.py
-# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api.py
+# seedgo: no-test-needed(duplicate_test) — set_face_dir(), test_host_api_config.py; its config command, test_host_api.py
+# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
 
 from pathlib import Path
 from unittest.mock import patch

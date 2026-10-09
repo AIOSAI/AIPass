@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane.py
 # Description: Tests for the host API read lane — file reads, the whole diff, and the read lane's /v1 routes
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-08
+# Modified: 2026-10-09
 # =============================================
 
 """Tests for the file and diff reads in apps/handlers/host/reads.py and git_reads.py, and their /v1 routes."""
@@ -111,6 +111,9 @@ PATCH_TOKENS_LOGGER = "aipass.api.apps.handlers.host.tokens.logger"
 
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
+
+# The /v1/git-changes route cases reach read_git_changes and its cache.
+pytestmark = pytest.mark.usefixtures("_clean_git_changes_cache")
 
 
 class TestReadFile:

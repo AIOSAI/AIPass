@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane_changes.py
 # Description: Tests for the read lane's git-changes lane — the card contract, the stampede, grains, rows, refusals
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-09
 # =============================================
 
 """Tests for read_git_changes() in apps/handlers/host/git_reads.py and its cache and refusal memory."""
@@ -42,6 +42,9 @@ from aipass.api.tests.support_host_read_lane import GIT_STATUS_ALL_STDOUT, GIT_S
 PATCH_GIT_LOGGER = "aipass.api.apps.handlers.host.git_reads.logger"
 PATCH_CACHE_LOGGER = "aipass.api.apps.handlers.host.read_cache.logger"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
+
+# Every case here calls read_git_changes, which answers from its cache.
+pytestmark = pytest.mark.usefixtures("_clean_git_changes_cache")
 
 
 class TestGitChangesMatchesTheDesktopCard:

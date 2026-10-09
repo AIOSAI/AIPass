@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_memory_config.py
 # Description: Tests for the host API memory-config lane — @memory's rollover limits
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-08-16
-# Modified: 2026-10-02
+# Modified: 2026-10-09
 # =============================================
 
 """Tests for apps/handlers/host/memory_config.py and its routes in apps/handlers/host/server.py."""
@@ -29,7 +29,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — the real drone.route_command dispatch, stubbed here; @memory's suite
-# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api.py
+# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
 
 import importlib.util
 from typing import Any

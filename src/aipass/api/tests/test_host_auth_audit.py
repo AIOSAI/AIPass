@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_auth_audit.py
 # Description: Tests for failed-auth auditing with peer address (security C1)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-10-03
+# Modified: 2026-10-09
 # =============================================
 
 """Tests for apps/handlers/host/server.py, its failed-auth audit with the peer address."""
@@ -29,7 +29,7 @@
 # value, not a prefix — a prefix leaks entropy for free.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(duplicate_test) — issue_token() and revoke_token() themselves, tests/test_host_api.py
+# seedgo: no-test-needed(duplicate_test) — issue_token() and revoke_token() themselves, tests/test_host_api_config.py
 # seedgo: no-test-needed(duplicate_test) — _audit_socket_refusal on the websocket lane, tests/test_host_attach.py
 
 from pathlib import Path

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_roots.py
 # Description: Tests for the roots roster and the widened name fence
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-18
-# Modified: 2026-10-03
+# Modified: 2026-10-09
 # =============================================
 
 """Tests for apps/handlers/host/reads.py's four-kind name fence and the /v1/roots route."""
@@ -108,7 +108,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(duplicate_test) — the branch read lane with no root, tests/test_host_read_lane.py
-# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api.py
+# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
 
 import json
 import sys

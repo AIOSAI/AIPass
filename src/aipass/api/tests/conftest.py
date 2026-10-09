@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for api tests
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-03-05
-# Modified: 2026-10-08
+# Modified: 2026-10-09
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -205,20 +205,22 @@ PATCH_GIT_LOGGER = "aipass.api.apps.handlers.host.git_reads.logger"
 PATCH_GIT_JSON = "aipass.api.apps.handlers.host.git_reads.json_handler"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _clean_git_changes_cache():
     """
-    Empty the git-changes cache around every case in this file.
+    Empty the git-changes cache around every case in a file that requests it.
 
     `read_git_changes` coalesces on (branch, project, grain) with a 1.5s TTL
-    (2026-09-07, the stampede cure). Cases here mock a different `drone @git
+    (2026-09-07, the stampede cure). Cases mock a different `drone @git
     status` answer under the same branch name, so without this the SECOND case
     to run is served the FIRST one's document and asserts against a subprocess
     that was never called. That failure reads as a broken lane and is not one —
     it is the cache doing its job across a boundary a suite does not have.
 
-    Autouse rather than opt-in: a case added later would otherwise inherit the
-    bleed silently, and it passes alone, which is the worst way to find it.
+    Requested per file by a module pytestmark (usefixtures), never suite-wide
+    autouse: every case in a requesting file gets it, so a case added later
+    there cannot inherit the bleed silently. test_host_read_lane.py and
+    test_host_read_lane_changes.py request it.
     """
     host_git._changes.clear()
     yield
