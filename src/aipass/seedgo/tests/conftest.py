@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for seedgo tests
-# Version: 2.1.0
+# Version: 2.3.0
 # Created: 2026-03-05
 # Modified: 2026-10-08
 # =============================================
@@ -35,8 +35,14 @@ from unittest.mock import MagicMock
 from aipass.cli.apps.modules import display
 from aipass.seedgo.apps import seedgo as seedgo_entry
 from aipass.seedgo.apps.handlers.aipass_standards import trinity_check, trinity_groups
+from aipass.seedgo.apps.handlers.audit import audit_display, branch_audit
 from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
+    is_seedgo_ignored as real_is_seedgo_ignored,
+    load_ignore_entries as real_load_ignore_entries,
+)
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.tests.support_json_handler_contract import BRANCHES, implementation, redirect_documents
 from aipass.seedgo.tests.support_trinity_check import _CONFIG, _TEMPLATES
 from aipass.trigger.apps.modules import core as trigger_core
 
@@ -44,6 +50,82 @@ from aipass.trigger.apps.modules import core as trigger_core
 # handler's tests, the pre-service durability suite) that must not be collected
 # or rglob-walked into dotted module names (DPLAN-0325, spec 4c).
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
+
+@pytest.fixture
+def quarantined_document_directories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Redirect EVERY handler's document directory, not only the one under test.
+
+    Closing a side channel that was found by auditing this suite's own syscalls
+    rather than by reasoning about it. Measured chain, branch-local run,
+    2026-09-01::
+
+        test_load_json_survives_a_corrupt_document[ai_mail]
+          -> ai_mail json_utils ensure_json_exists   (regenerating, so it warns)
+          -> prax logger.warning -> _ensure_watcher
+          -> trigger core.fire -> _ensure_initialized -> registry.setup_handlers
+          -> TRIGGER's json_handler.log_operation
+          -> mkdir + atomic rename inside src/aipass/trigger/trigger_json
+
+    So provoking a diagnostic in the subject wrote into a THIRD branch's live
+    document directory — through a path that never touches the subject's
+    redirect, which is why per-subject redirection alone could not have caught
+    it. Every discovered handler is redirected for the duration of every test;
+    ``redirected`` then re-points the subject at its own directory, and because
+    monkeypatch restores in reverse order both survive teardown intact.
+
+    WHAT THIS DOES NOT CLOSE, stated rather than left to be rediscovered. The
+    same logger boot also runs trigger's startup handler, which persists
+    trigger's own state through ``trigger/apps/config.py::atomic_write_json`` —
+    a writer that is not a json_handler and holds its own directory. One mkdir
+    and one rename per pytest process still land there. Reaching into another
+    branch's config module to silence it would couple this suite to the
+    internals of a branch it does not test, so it is reported instead. It is
+    pre-existing: the same events were measured under seedgo's existing
+    test_json_durability.py, which imports no handler but this branch's.
+
+    Args:
+        tmp_path: pytest's per-test directory.
+        monkeypatch: Restores every binding at teardown.
+    """
+    for branch in BRANCHES:
+        redirect_documents(implementation(branch), tmp_path / "quarantine" / branch, monkeypatch)
+
+
+@pytest.fixture
+def coverage_audit_seams(monkeypatch):
+    """Patch audit_display's and branch_audit's own seams with mocks.
+
+    audit_display and branch_audit are imported for real at module top, so
+    isolation is applied at the edge each one actually reads (its own bound
+    name for logger / warning / json_handler / ignore_handler / scan_branch)
+    instead of intercepting the packages in sys.modules. The console stays
+    real: it writes to stdout at print time, and the render tests read capsys.
+    """
+    mock_logger = MagicMock()
+    mock_json_handler = MagicMock()
+    mock_json_handler.log_operation = MagicMock(return_value=True)
+
+    mock_ignore_handler = MagicMock()
+    mock_ignore_handler.get_audit_ignore_patterns = MagicMock(return_value=[])
+    # The ignore list removes nothing here, as the empty pattern list above says.
+    mock_ignore_handler.audit_ignore_match = MagicMock(return_value=None)
+    mock_ignore_handler.ignored_tracked_source = MagicMock(return_value=[])
+    mock_ignore_handler.is_seedgo_ignored = real_is_seedgo_ignored
+    mock_ignore_handler.load_ignore_entries = real_load_ignore_entries
+    mock_scan_branch = MagicMock(return_value=None)
+
+    # -- audit_display's own seams --------------------------------------
+    monkeypatch.setattr(audit_display, "warning", MagicMock())
+    monkeypatch.setattr(audit_display, "json_handler", mock_json_handler)
+
+    # -- branch_audit's own seams ----------------------------------------
+    monkeypatch.setattr(branch_audit, "logger", mock_logger)
+    monkeypatch.setattr(branch_audit, "json_handler", mock_json_handler)
+    monkeypatch.setattr(branch_audit, "ignore_handler", mock_ignore_handler)
+    monkeypatch.setattr(branch_audit, "dead_rules", MagicMock())
+    monkeypatch.setattr(branch_audit, "inert", MagicMock())
+    monkeypatch.setattr(branch_audit, "scan_branch", mock_scan_branch)
 
 
 @pytest.fixture

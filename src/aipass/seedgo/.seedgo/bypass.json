@@ -279,9 +279,9 @@
       "reason": "One test, test_ntpath_does_not_call_a_rooted_literal_absolute (fleet green leg 15): the measured platform premise the nominator rests on, a control of the library behaviour the rule exists for, not a test of the product. File-wide because no_product_call passes no line to is_bypassed; every other test here calls the nominator."
     },
     {
-      "file": "tests/test_audit_tests_lane.py",
+      "file": "tests/test_audit_tests_lane_gate.py",
       "standard": "literal_path",
-      "lines": [203],
+      "lines": [166],
       "reason": "Data, not a host path (fleet green leg 15): plugin._split_path splits a STRING on separators and never touches disk; '/weird/back\\\\slash.txt' is the input whose backslash must survive on POSIX."
     },
     {
@@ -290,9 +290,9 @@
       "reason": "One test, test_the_divergence_tables_only_name_branches_that_still_exist (fleet green leg 15): it guards this file's own xfail tables against the discovered branch set, a meta-test of the file's apparatus. File-wide because no_product_call passes no line to is_bypassed; every other test here runs a shim."
     },
     {
-      "file": "tests/test_json_handler_contract.py",
+      "file": "tests/test_json_handler_contract_durability.py",
       "standard": "weak_oracle",
-      "reason": "Three tests, 1613/1756/2184 (fleet green leg 15): each runs over EVERY branch's copy, whose constants differ per branch, so the claim is a bound (attempts > 1, backoff > 0, a floor of two implementations, no success answer) and no exact value exists to pin; the 1108 test was cured to == []. File-wide because weak_oracle passes no line to is_bypassed."
+      "reason": "Three tests, 312/455/888 (fleet green leg 15; moved from test_json_handler_contract.py 1613/1756/2184 by the 2026-10-08 split): each runs over EVERY branch's copy, whose constants differ per branch, so the claim is a bound (attempts > 1, backoff > 0, a floor of two implementations, no success answer) and no exact value exists to pin; the 1108 test was cured to == []. File-wide because weak_oracle passes no line to is_bypassed."
     },
     {
       "file": "tests/test_audit_tests_static.py",
@@ -307,7 +307,7 @@
     {
       "file": "tests/test_coverage_audit.py",
       "standard": "stdlib_patch",
-      "reason": "One patch, line 1007 (fleet green leg 15): importlib.util.spec_from_file_location answering None drives discover_checkers' 'no spec' branch, which no real *_check.py on disk can reach. File-wide because stdlib_patch passes no line to is_bypassed."
+      "reason": "One patch, line 92 (fleet green leg 15; line 1007 before the 2026-10-08 split): importlib.util.spec_from_file_location answering None drives discover_checkers' 'no spec' branch, which no real *_check.py on disk can reach. File-wide because stdlib_patch passes no line to is_bypassed."
     },
     {
       "file": "tests/test_aipass_standards.py",
@@ -322,10 +322,16 @@
       "reason": "No public route (fleet green leg 15): runner._m10_proof is reached by the lane only after a full suite run under the gate. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
-      "file": "tests/test_audit_tests_lane.py",
+      "file": "tests/test_audit_tests_lane_adapter.py",
       "standard": "through_the_command",
-      "lines": [940, 2298],
-      "reason": "No public route (fleet green leg 15): m10._fingerprint (940) and statement_deletion._mutant_text (2298, the unparseable-mutant answer) are reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
+      "lines": [422],
+      "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split): m10._fingerprint is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
+    },
+    {
+      "file": "tests/test_audit_tests_lane_statement_deletion.py",
+      "standard": "through_the_command",
+      "lines": [423],
+      "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split): statement_deletion._mutant_text, the unparseable-mutant answer, is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_checkers_batch8.py",
@@ -342,7 +348,7 @@
     {
       "file": "tests/test_coverage_audit.py",
       "standard": "through_the_command",
-      "lines": [1316, 1328, 1347, 1364],
+      "lines": [401, 413, 432, 449],
       "reason": "No public route (fleet green leg 15): branch_audit._load_diagnostics_checker is reached by audit_branch only with pyright on PATH. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
@@ -475,14 +481,20 @@
       "reason": "CALLED IN PRODUCTION THROUGH A MANIFEST STRING, which no static reader can follow. context_standards/pack.json declares \"measured_by\": \"startup_budget_check:measure_corpus\"; audit/discovery.measure_pack_corpus() resolves that string and calls it on every branch, which is why `drone @seedgo audit context` prints '6 startup files measured' instead of the engine's apps/**/*.py count. The checker strips string literals from its corpus by design (a name that only appears inside a quote is not a call), so the one real call site is invisible to it. Name-scoped, not file-wide: every other function in this checker is still measured."
     },
     {
-      "file": "tests/test_audit_tests_lane.py",
+      "file": "tests/test_audit_tests_lane_gate.py",
       "standard": "hardcoded_path",
       "reason": "The POSIX home literals are INPUT to plugin.classify(), whose job is to judge a path SHAPE. The literal is the fixture; this file never opens it. Replacing it with pathlib would delete the test."
     },
     {
-      "file": "tests/test_audit_tests_lane.py",
+      "file": "tests/test_audit_tests_lane_gate.py",
       "standard": "windows_compat",
       "reason": "The /tmp literals are INPUT to plugin.classify_sqlite(), which parses sqlite connection strings. The string shape is the subject under test, never a location this file touches."
+    },
+    {
+      "file": "tests/test_audit_tests_lane.py",
+      "standard": "windows_compat",
+      "lines": [760],
+      "reason": "An argv token, not a location (surfaced by the 10-08 split, hidden until then under the file-wide classify_sqlite row): '/tmp/some_project' is a documented `audit-tests <path>` invocation handed to the verb's parser, whose runner is a recorder; nothing opens it."
     },
     {
       "file": "tests/test_audit_tests_static.py",
