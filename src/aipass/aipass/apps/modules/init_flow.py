@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: 10-stage guided first-run setup — aipass init command
-# Version: 1.3.4
+# Version: 1.3.5
 # Created: 2026-04-16
-# Modified: 2026-09-29
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -1312,6 +1312,9 @@ def _handle_init_update(args: list[str]) -> int:
     try:
         if result.get("trust_enrolled"):
             success("Enrolled in trust registry — hooks active.")
+        elif "trust_enrolled" in result and result["trust_enrolled"] is None:
+            # None is project_home's 'registry unavailable', distinct from a refusal.
+            warning(f"Trust registry unavailable — not enrolled. Run 'aipass trust {target}' once AIPass is installed.")
         # Owner/identity check + heal via the frozen sync-registry contract
         try:
             check_proc = subprocess.run(

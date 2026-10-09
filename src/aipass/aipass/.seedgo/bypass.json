@@ -187,9 +187,9 @@
       "reason": "_find_srt_resolver is a probe: None is 'resolver not found', the same answer as a missing spec or file, and its one caller (check_srt_resolvable, sandbox_checker.py:214) reports the resolver as not found on None. Re-read in fleet green leg 7 (aipass's decision)."
     },
     {
-      "file": "tests/test_bootstrap.py",
+      "file": "tests/test_bootstrap_update.py",
       "standard": "stdlib_patch",
-      "reason": "File-wide because the stdlib_patch checker passes no line (measured leg 7: a lines [511] rule left the line convicted). The one patch is at _windows_newline_world, line 511. _windows_newline_world manufactures the one platform behaviour Linux cannot produce: write_text translating LF to CRLF when newline is unset (PR #761's windows-setup red). Asserting on disk alone would pass on Linux whatever the writer does, so the pin needs the translation. A product seam would exist for this test alone (every writer goes through write_text_lf already). monkeypatch restores Path.write_text at teardown. Fleet green leg 7 (aipass's decision)."
+      "reason": "File-wide because the stdlib_patch checker passes no line (measured leg 7: a lines [511] rule left the line convicted). The one patch is at _windows_newline_world, line 110 (moved with it from test_bootstrap.py:511 in the 2026-10-08 split). _windows_newline_world manufactures the one platform behaviour Linux cannot produce: write_text translating LF to CRLF when newline is unset (PR #761's windows-setup red). Asserting on disk alone would pass on Linux whatever the writer does, so the pin needs the translation. A product seam would exist for this test alone (every writer goes through write_text_lf already). monkeypatch restores Path.write_text at teardown. Fleet green leg 7 (aipass's decision)."
     },
     {
       "file": "tests/test_registry_case_sweep.py",
@@ -217,8 +217,34 @@
     {
       "file": "tests/test_doctor.py",
       "standard": "through_the_command",
-      "lines": [46],
+      "lines": [30],
       "reason": "Ruling (c), fleet green leg 7: _doctor_wire's public caller, check_provider_manifest with fix or a yes at the prompt, writes the provider settings (~/.claude/settings.json); its verify, merge and reconcile rows are pinned on a tmp settings file with the wire stubbed. The module is private because the CLI never routes to it (discover_modules skips it)."
+    },
+    {
+      "file": "shared/scaffold_content.py",
+      "standard": "imports",
+      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): shared/ is the pre-install library. init and doctor reach it from a fresh clone before aipass.prax can be imported, and @spawn imports it into its own process (docs/shared_contract.md), so the prax logger cannot be a dependency here. Stdlib-only by contract; tests/test_shared_bootstrap_safety.py guards it."
+    },
+    {
+      "file": "shared/project_home.py",
+      "standard": "imports",
+      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): shared/ is the pre-install library. init and doctor reach it from a fresh clone before aipass.prax can be imported, and @spawn imports it into its own process (docs/shared_contract.md), so the prax logger cannot be a dependency here. Stdlib-only by contract; tests/test_shared_bootstrap_safety.py guards it."
+    },
+    {
+      "file": "shared/registry_discovery.py",
+      "standard": "imports",
+      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): shared/ is the pre-install library. init and doctor reach it from a fresh clone before aipass.prax can be imported, and @spawn imports it into its own process (docs/shared_contract.md), so the prax logger cannot be a dependency here. Stdlib-only by contract; tests/test_shared_bootstrap_safety.py guards it."
+    },
+    {
+      "file": "shared/json_ops.py",
+      "standard": "imports",
+      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): shared/ is the pre-install library. init and doctor reach it from a fresh clone before aipass.prax can be imported, and @spawn imports it into its own process (docs/shared_contract.md), so the prax logger cannot be a dependency here. Stdlib-only by contract; tests/test_shared_bootstrap_safety.py guards it."
+    },
+    {
+      "file": "shared/project_home.py",
+      "standard": "log_visibility",
+      "lines": [25],
+      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): the stdlib logging.getLogger on line 25 is the right logger for a pre-install file. aipass.prax is not importable when init first reads the project home, and @spawn imports this module into its own process."
     }
   ]
 }

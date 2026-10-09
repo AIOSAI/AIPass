@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: project_home.py
 # Description: Shared AIPass-home detection, project-path validation, and settings content
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-07-21
-# Modified: 2026-10-07
+# Modified: 2026-10-08
 # =============================================
 
 """Project home — AIPASS_HOME detection, path validation, settings content.
@@ -156,12 +156,16 @@ def merge_local_settings(existing: dict, generated: dict) -> dict:
     return merged
 
 
-def _enroll_project(target: Path) -> bool:
+def _enroll_project(target: Path) -> bool | None:
     """Enroll a project in the trusted-project registry (DPLAN-0244).
 
     Skips throwaway paths (temp dirs, Claude Code scratchpads) so ephemeral
     test/pytest directories never bloat the registry (GH-712).
     Lazy import to keep this module free of prax/module-level deps.
+
+    Answers True when enrolled, False when skipped or refused, and None when
+    hooks' trust registry cannot be imported (a clone before install): the
+    caller can tell 'unavailable' from 'refused' and say so.
     """
     if is_throwaway_path(target):
         logger.info("Skipping trust enrollment for throwaway path: %s", target)
@@ -176,7 +180,7 @@ def _enroll_project(target: Path) -> bool:
         return False
     except ImportError as exc:
         logger.info("Trust registry unavailable, skipping enrollment: %s", exc)
-        return False
+        return None
 
 
 def is_projects_child(target: Path) -> bool:
@@ -184,6 +188,9 @@ def is_projects_child(target: Path) -> bool:
 
     The host is identified by having a ``*_REGISTRY.json`` in the grandparent
     of target (i.e. target's parent is named ``projects``).
+
+    Raises RuntimeError naming the host when its listing cannot be read: that
+    is not a 'no', and init and adopt catch RuntimeError and print it.
     """
     resolved = target.resolve()
     if resolved.parent.name != "projects":
@@ -193,7 +200,7 @@ def is_projects_child(target: Path) -> bool:
         return any(f.is_file() and f.name.endswith("_REGISTRY.json") for f in host.iterdir())
     except OSError as exc:
         logger.info("is_projects_child: could not read host dir %s: %s", host, exc)
-        return False
+        raise RuntimeError(f"Could not read {host} to tell whether {target} is its projects/ child: {exc}") from exc
 
 
 def find_fenceless_projects(aipass_home: str) -> list[Path]:

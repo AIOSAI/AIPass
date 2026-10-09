@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trust.py
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
-# Version: 1.2.4
+# Version: 1.2.5
 # Created: 2026-07-15
 # Modified: 2026-10-08
 # =============================================
@@ -25,6 +25,7 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
 from aipass.aipass.apps.modules.trust import handle_command
+from aipass.hooks.apps.modules import door_trust_registry
 from aipass.hooks.apps.modules.door_trust_registry import (
     enroll,
     is_trusted,
@@ -332,6 +333,45 @@ def test_update_project_reports_trust_enrolled(tmp_path, monkeypatch):
     result = update_project(target)
 
     assert result["trust_enrolled"] is True
+
+
+def test_update_project_reports_none_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypatch):
+    """A re-enrol with hooks' door unimportable (a clone before install) reports None,
+    not the False of a refused enrollment, so the receipt can say which it was.
+    The door's enroll is removed at the edge; _enroll_project's lazy import fails.
+
+    Mutant: project_home's ImportError arm returns False again -> red.
+    """
+    target = tmp_path / "noregproj"
+    monkeypatch.setattr(
+        "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
+        _throwaway_except(target),
+    )
+    monkeypatch.setattr(
+        "aipass.aipass.shared.project_home.is_throwaway_path",
+        _throwaway_except(target),
+    )
+    aipass_home = tmp_path / "aipass_home"
+    (aipass_home / ".aipass").mkdir(parents=True)
+    template = aipass_home / ".aipass" / "project_hooks.json"
+    template.write_text('{"hooks_enabled": true}', encoding="utf-8")
+    (aipass_home / "CLAUDE.md").write_text("# Test", encoding="utf-8")
+    monkeypatch.setattr(
+        "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+        lambda: str(aipass_home),
+    )
+    target.mkdir()
+    init_project(target, project_name="test")
+    template.write_text(
+        '{"hooks_enabled": true, "SessionStart": '
+        '{"new_hook": {"handler": "aipass.hooks.apps.handlers.test.handle", "enabled": true}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.delattr(door_trust_registry, "enroll")
+
+    result = update_project(target)
+
+    assert result["trust_enrolled"] is None
 
 
 # ---------------------------------------------------------------------------

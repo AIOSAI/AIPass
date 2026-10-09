@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_project_home.py
 # Description: Tests for shared/project_home.py — CLAUDE.md ancestor fence helpers
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-07-31
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Tests for shared/project_home.py and the CLAUDE.md ancestor-fence helpers it drives."""
@@ -18,19 +18,49 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
-# seedgo: no-test-needed(covered_elsewhere) — is_throwaway_path, _detect_aipass_home, _claude_settings,
-# seedgo: no-test-needed(covered_elsewhere) — _enroll_project, is_projects_child; see tests/test_doctor.py
+# seedgo: no-test-needed(covered_elsewhere) — is_throwaway_path, _detect_aipass_home, _claude_settings;
+# seedgo: no-test-needed(covered_elsewhere) — _enroll_project; see tests/test_trust.py, tests/test_doctor.py
 # seedgo: no-test-needed(covered_elsewhere) — and tests/test_bootstrap.py
 
 import json
+import os
+import sys
 from pathlib import Path
+
+import pytest
 
 from aipass.aipass.shared.project_home import (
     claude_local_settings,
     claude_md_excludes,
     find_fenceless_projects,
+    is_projects_child,
     merge_local_settings,
 )
+
+
+# ---------------------------------------------------------------------------
+# is_projects_child: an unreadable host is an error, not a 'no' (fleet green)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="POSIX mode bits; root reads any directory")
+def test_is_projects_child_raises_naming_the_host_it_could_not_read(tmp_path):
+    """A host whose listing is denied (mode 0o300: enter, never list) cannot say
+    whether the target is its projects/ child. The error names the host, where a
+    False sent init and adopt down the not-a-child path with the wrong reason.
+    The mode is restored on every path.
+
+    Mutant: the OSError arm returns False again -> red.
+    """
+    host = tmp_path / "host"
+    target = host / "projects" / "child"
+    target.mkdir(parents=True)
+    host.chmod(0o300)
+    try:
+        with pytest.raises(RuntimeError, match=str(host)):
+            is_projects_child(target)
+    finally:
+        host.chmod(0o755)
 
 
 # ---------------------------------------------------------------------------
