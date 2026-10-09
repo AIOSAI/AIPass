@@ -26,7 +26,7 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import (
     nominators,
     unread_redirect_check as R,
 )
-from aipass.seedgo.tests.support_audit_tests_lane import _spec_for
+from aipass.seedgo.tests.support_audit_tests_lane import _records, _spec_for
 
 # =============================================================================
 # THE ADAPTER CONTRACT
@@ -281,6 +281,42 @@ class TestTeardown:
 # =============================================================================
 # THE ENVIRONMENT - Law M10
 # =============================================================================
+
+
+class TestFireCanary:
+    """fire_canary reports the canary the gated session recorded; it runs no second experiment."""
+
+    def test_fire_canary_reports_the_summary_record_from_the_gate_log(self, tmp_path):
+        """The summary record's canary comes back field by field, booleans coerced.
+
+        Mutant: the summary record skipped in apps/handlers/tests_pytest_standards/adapter.py — killed.
+        """
+        spec = _spec_for(tmp_path)
+        spec.log_path.parent.mkdir(parents=True)
+        lines = [json.dumps(record) for record in _records(canary_caught=False)]
+        spec.log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        reported = adapter.fire_canary(spec)
+
+        assert reported["attempted"] is True
+        assert reported["caught"] is False
+        assert reported["path"] == "/env/c"
+        assert reported["error"] == ""
+        assert set(reported) == {"attempted", "caught", "path", "error"}
+
+    def test_fire_canary_names_an_unreadable_log_in_error(self, tmp_path):
+        """No log on disk leaves the gate unproven, and the error names the missing log.
+
+        Mutant: GateLogError swallowed into an empty dict in apps/handlers/tests_pytest_standards/adapter.py — killed.
+        """
+        spec = _spec_for(tmp_path)
+
+        reported = adapter.fire_canary(spec)
+
+        assert reported["attempted"] is False
+        assert reported["caught"] is False
+        assert reported["path"] == ""
+        assert reported["error"] == f"the gate wrote no log at {spec.log_path} - the plugin did not run"
 
 
 class TestEnvLayout:
