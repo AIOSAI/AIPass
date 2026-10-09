@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for seedgo tests
-# Version: 2.0.2
+# Version: 2.1.0
 # Created: 2026-03-05
-# Modified: 2026-09-28
+# Modified: 2026-10-08
 # =============================================
 
 """Shared pytest fixtures for seedgo tests.
@@ -24,6 +24,7 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
+import copy
 import shutil
 from pathlib import Path
 from typing import Generator, List, Tuple
@@ -33,7 +34,10 @@ from unittest.mock import MagicMock
 
 from aipass.cli.apps.modules import display
 from aipass.seedgo.apps import seedgo as seedgo_entry
+from aipass.seedgo.apps.handlers.aipass_standards import trinity_check, trinity_groups
+from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.tests.support_trinity_check import _CONFIG, _TEMPLATES
 from aipass.trigger.apps.modules import core as trigger_core
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
@@ -161,6 +165,53 @@ def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
 
     monkeypatch.setattr(seedgo_entry, "logger", _CapturingLogger())
     return captured
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _mock_infrastructure(monkeypatch):
+    """Patch the logger and json_handler at the edge, on both modules that read them."""
+    mock_logger = MagicMock()
+    mock_json_handler = MagicMock()
+    mock_json_handler.log_operation = MagicMock(return_value=True)
+
+    for module in (trinity_check, trinity_groups):
+        monkeypatch.setattr(module, "logger", mock_logger)
+        monkeypatch.setattr(module, "json_handler", mock_json_handler)
+    return {"logger": mock_logger, "json_handler": mock_json_handler}
+
+
+@pytest.fixture
+def checker(_mock_infrastructure):
+    """The trinity_check module, infrastructure patched at the edge."""
+    return trinity_check
+
+
+@pytest.fixture
+def trinity(checker, monkeypatch):
+    """trinity_check with the pinned config and gold templates in place."""
+    monkeypatch.setattr(checker, "load_memory_config", lambda: copy.deepcopy(_CONFIG))
+    monkeypatch.setattr(checker, "_load_templates", lambda: copy.deepcopy(_TEMPLATES))
+    return checker
+
+
+@pytest.fixture
+def _pin_bypass_log(monkeypatch):
+    """Point is_bypassed's json_handler at a mock for every test here.
+
+    The bypass tests call the real is_bypassed, which appends to the
+    repo-tracked seedgo_json/utils_log.json via the json_handler global in
+    its OWN module — xdist workers racing on that shared file corrupt it
+    (JSONDecodeError: Extra data). sys.modules patching never reaches a
+    function's globals, so the pin must land on the utils module object.
+    """
+    mock_handler = MagicMock()
+    mock_handler.log_operation = MagicMock(return_value=True)
+    monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
 
 
 #: The package whose modules a test's sys.modules stubs can poison. A checker
