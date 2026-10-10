@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_creator_handler.py
 # Description: Tests for skill creation handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/creator_handler.py: is_valid_name and create_skill."""
@@ -101,13 +101,15 @@ class TestCreateSkill:
 
     def test_returns_created_files_list(self, tmp_path):
         # Mutant killed 2026-09-27: copy_template appends before its is_file() filter, listing directories.
+        # The answer itself is pinned, order and spelling: re-sorting it as Paths
+        # compared case-blind on Windows and put SKILL.md last (CI, 2026-10-10).
         result = create_skill("test-files", template_type="full", target_dir=tmp_path)
-        assert sorted(Path(name) for name in result["files"]) == [
-            Path("SKILL.md"),
-            Path("apps/__init__.py"),
-            Path("apps/handlers/__init__.py"),
-            Path("apps/modules/__init__.py"),
-            Path("handler.py"),
+        assert result["files"] == [
+            "SKILL.md",
+            "apps/__init__.py",
+            "apps/handlers/__init__.py",
+            "apps/modules/__init__.py",
+            "handler.py",
         ]
 
     def test_empty_name_fails(self):
