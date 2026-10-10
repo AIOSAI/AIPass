@@ -1,30 +1,13 @@
 # =================== AIPass ====================
 # Name: test_memory_files.py
 # Description: Tests for memory_files.py, the memory file safe I/O handler
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/json/memory_files.py."""
 
-# Tests for memory_files.py -- Memory File Safe I/O Handler.
-#
-# Covers read_memory_file, write_memory_file, read_memory_file_data,
-# write_memory_file_simple, and update_metadata.
-#
-# The module under test imports ``json_handler`` and ``get_system_logger``
-# at module level.  The conftest autouse fixture mocks those via
-# ``sys.modules``, but the conftest also replaces the entire
-# ``aipass.memory.apps.handlers.json`` package with a MagicMock -- which
-# prevents Python from resolving child modules like ``memory_files``.
-#
-# The fix: each test pops the cached ``memory_files`` module from
-# ``sys.modules`` and re-imports, after ensuring the parent package mock
-# is in place AND the real ``memory_files`` module is registered.
-#
-# ---------------------------------------------------------------------------
-# Per-test fixture: force-reimport memory_files with fresh mocks
 # ---------------------------------------------------------------------------
 # update_metadata — REMOVED 2026-08-25
 # ---------------------------------------------------------------------------
@@ -40,3 +23,26 @@
 # seedgo: no-test-needed(covered_elsewhere) — read_memory_file() and write_memory_file(), tests/test_changed_entries.py
 # seedgo: no-test-needed(covered_elsewhere) — violation_line(), read_memory_file_data(): tests/test_changed_entries.py
 # seedgo: no-test-needed(covered_elsewhere) — write_memory_file_simple(), pinned in tests/test_handlers.py
+
+import pytest
+
+from aipass.memory.apps.handlers.json.memory_files import validate_memory_file_structure
+
+
+class TestValidateMemoryFileStructure:
+    def test_a_complete_header_is_accepted(self):
+        data = {"document_metadata": {"document_type": "t", "document_name": "n", "version": "1.0.0"}, "sessions": []}
+
+        assert validate_memory_file_structure(data) == (True, "")
+
+    @pytest.mark.parametrize(
+        ("data", "reason"),
+        [
+            ([{"document_metadata": {}}], "Data is not a dictionary"),
+            ({"sessions": []}, "Missing 'document_metadata' field"),
+            ({"document_metadata": ["document_type"]}, "'document_metadata' is not a dictionary"),
+            ({"document_metadata": {"document_type": "t"}}, "Missing metadata fields: document_name, version"),
+        ],
+    )
+    def test_a_malformed_file_is_refused_with_its_reason(self, data, reason):
+        assert validate_memory_file_structure(data) == (False, reason)
