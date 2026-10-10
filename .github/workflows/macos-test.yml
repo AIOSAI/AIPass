@@ -52,7 +52,9 @@ jobs:
           # merge, job green; @verify c89af1b3, 2026-09-11). The step's own
           # non-zero exit is the gate; upload below still runs on if: always().
           set -o pipefail
-          pytest -v --tb=short --rootdir=. -n auto --dist loadscope 2>&1 | tee pytest-output.txt
+          # --timeout: a per-test ceiling (pytest-timeout, installed by setup.sh's
+          # dev extra); see ci.yml's test job for the hang that made it necessary.
+          pytest -v --tb=short --rootdir=. -n auto --dist loadscope --timeout 300 2>&1 | tee pytest-output.txt
 
       - name: Upload test results
         if: always()

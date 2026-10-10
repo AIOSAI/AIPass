@@ -64,7 +64,12 @@ jobs:
       # xdist (DPLAN-0277 phase 1b): loadscope keeps each test class on one
       # worker. The suite's shared-state hygiene was fixed for this — see the
       # repo-root conftest.py guard — and proven over repeated full runs.
-      - run: pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope
+      # --timeout (pytest-timeout, a dev extra): one hung test used to take the
+      # whole job to its 30-minute cap with no traceback — PR #774 round three,
+      # run 38087470864, the 3.10 leg sat 26 min behind one api socket test and
+      # the summary never printed. A per-test ceiling fails that one test with
+      # the stack of where it sat; the slowest honest test here is under 2 min.
+      - run: pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope --timeout 300
 
   standards:
     name: seedgo-audit
@@ -113,7 +118,7 @@ jobs:
       - run: |
           python -m pip install --require-hashes -r .github/requirements/pip.txt
           pip install -e ".[dev,host]"
-      - run: coverage run -m pytest --rootdir=. --ignore=tests/e2e
+      - run: coverage run -m pytest --rootdir=. --ignore=tests/e2e --timeout 300
       - run: coverage xml
       - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
