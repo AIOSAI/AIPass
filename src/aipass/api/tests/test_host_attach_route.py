@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_attach_route.py
 # Description: Tests for the attach route and its seats — opening, socket auth, watches, outside rooms, the ping
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for the WS /v1/room/attach route in apps/handlers/host/server.py and open_attach/open_monitor in attach.py."""
@@ -1058,7 +1058,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = StubSession()
 
-        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
             with patch.object(host_attach, "open_attach", return_value=session):
                 client = TestClient(host_server.create_app())
                 with client.websocket_connect(
@@ -1067,7 +1067,12 @@ class TestThePhoneCanMeasureItsOwnSocket:
                     socket.send_text('{"type": "ping"}')
                     answer = socket.receive_text()
 
+                    # The route's own last line, not the hangup: leaving the
+                    # context while the pump still unwinds cancels a live server
+                    # and the client's exit raises it as a CancelledError (the
+                    # same window test_host_attach_pump.py closed, round three).
                     detach_and_wait(socket, session)
+                    wait_for_log(log, "socket detached from")
 
         assert json.loads(answer) == {"type": "pong"}
 
@@ -1084,7 +1089,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = StubSession()
 
-        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
             with patch.object(host_attach, "open_attach", return_value=session):
                 client = TestClient(host_server.create_app())
                 with client.websocket_connect(
@@ -1096,6 +1101,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
                         answers.append(socket.receive_text())
 
                     detach_and_wait(socket, session)
+                    wait_for_log(log, "socket detached from")
 
         assert answers == [json.dumps({"type": "pong"})] * 5
 
@@ -1112,7 +1118,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = StubSession()
 
-        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
             with patch.object(host_attach, "open_attach", return_value=session):
                 client = TestClient(host_server.create_app())
                 with client.websocket_connect(
@@ -1127,6 +1133,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
                     session.wait_until(lambda: bool(session.writes))
 
                     detach_and_wait(socket, session)
+                    wait_for_log(log, "socket detached from")
 
         assert session.writes == [b"echo alive"]
         assert session.resizes == []
@@ -1144,7 +1151,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = StubSession()
 
-        with patch(PATCH_PUMP_LOGGER) as log, patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+        with patch(PATCH_PUMP_LOGGER) as log, patch(PATCH_SERVER_LOGGER) as server_log, patch(PATCH_SERVER_JSON):
             with patch.object(host_attach, "open_attach", return_value=session):
                 client = TestClient(host_server.create_app())
                 with client.websocket_connect(
@@ -1159,6 +1166,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
                     answer = socket.receive_text()
 
                     detach_and_wait(socket, session)
+                    wait_for_log(server_log, "socket detached from")
 
         assert json.loads(answer) == {"type": "pong"}
         assert any("unknown control frame" in str(call) for call in log.warning.call_args_list)

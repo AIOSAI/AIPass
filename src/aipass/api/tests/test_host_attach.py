@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_attach.py
 # Description: Tests for the host API attach lane — the pump's shape and the socket's records
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for the attach socket's records in apps/handlers/host/server.py and the pump's shape in pump.py."""
@@ -270,14 +270,19 @@ class TestTheDetachIsWrittenDownToo:
 
         with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
             client = TestClient(host_server.create_app())
-            for _ in range(3):
+            for n in range(3):
                 session = StubSession()
+                # Each socket its own room name, so each wait below finds its
+                # own detach line and not the one before it.
+                session.room = f"baud-api-{n}"
                 with patch.object(host_attach, "open_attach", return_value=session):
                     with client.websocket_connect(
                         "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
                     ) as socket:
+                        # Inside the context: the route's last line before the
+                        # exit, or the exit cancels a server still unwinding.
                         detach_and_wait(socket, session)
-                wait_for_log(log, "socket detached from")
+                        wait_for_log(log, f"socket detached from baud-api-{n} ")
 
         rendered = [call.args[0] % call.args[1:] for call in log.info.call_args_list if len(call.args) > 1]
 
