@@ -100,10 +100,6 @@
       "reason": "compass/ is the devpulse-owned Compass decision store (SQLite/FTS5 \u2014 db + wal + shm) which needs its own directory. Legitimate data subdir, not operator-config (custom_config/) nor auto-gen root data. Sanctioned exception per #643."
     },
     {
-      "standard": "architecture",
-      "reason": "No 'manager' citizen_class template in spawn. Devpulse is the only manager branch. MEASURED 2026-08-13 (control-first, rule pulled + full audit): exactly 1 live finding (missing spawn/templates/manager), but NO file key = suppresses architecture on all 106 files. Over-broad by mechanism, not intent \u2014 seedgo finding, DPLAN-0291 follow-up. Dies when spawn ships a manager template; branch-level rule scope routed to @seedgo."
-    },
-    {
       "standard": "cli",
       "file": "apps/handlers/watchdog/presenter.py",
       "reason": "Watchdog presentation layer \u2014 console.print() IS the output. Same sanctioned shape as the feedback display handlers below: every function here renders a handler result dict for the operator and decides nothing. Split out of apps/modules/watchdog.py on 2026-08-22, which had reached 692 lines across r2/r3/r4 and broke the 600-line module ceiling; the display functions were the cohesive third that shared no state with the routing code."
