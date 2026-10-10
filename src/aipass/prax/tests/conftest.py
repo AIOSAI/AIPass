@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for prax tests
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2025-11-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Shared pytest fixtures for prax tests.
@@ -178,29 +178,13 @@ def mock_prax_infrastructure(monkeypatch, tmp_path) -> Path:
     json_dir = root / "prax" / "prax_json"
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(root))
     monkeypatch.setattr(config_load, "PRAX_JSON_DIR", json_dir)
+    # Fixed at import to the git-ignored live prax_json, so a dev seat read its log
+    # format and a clean CI checkout read the default (prax, PR #774).
+    monkeypatch.setattr(config_load, "PRAX_LOGGER_CONFIG_FILE", json_dir / "prax_logger_config.json")
     monkeypatch.setattr(registry_load, "REGISTRY_FILE", json_dir / "prax_registry.json")
     monkeypatch.setattr(registry_save, "PRAX_JSON_DIR", json_dir)
     monkeypatch.setattr(registry_save, "REGISTRY_FILE", json_dir / "prax_registry.json")
     return root
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Reusable sample data shaped like a valid 'data' JSON document.
-
-    The citizen template ships this fixture and 17 of 18 branches carry it;
-    prax's conftest never had it, and the gap was invisible because
-    test_json_handler.py happened to mention the name. Restored on seedgo's
-    session-L measurement (DPLAN-0325, 2026-09-04): the next notch of the
-    test_quality subject gate charges prax exactly this one item, and the
-    fixture is the cure flow needed on pair 7.
-    """
-    return {
-        "created": "2026-09-04",
-        "last_updated": "2026-09-04",
-        "test_key": "test_value",
-        "sample_data": "example",
-    }
 
 
 # =============================================

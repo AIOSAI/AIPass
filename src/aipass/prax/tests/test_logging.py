@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging.py
 # Description: Tests for prax logging subsystem
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-29
-# Modified: 2026-10-03
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
@@ -328,8 +328,10 @@ class TestConcurrentFirstCallsBuildOneLogger:
 
         assert local.count("a later line") == 1
         assert central.count("a later line") == 1
-        assert sorted(line.split(" | ")[-1] for line in local.splitlines() if "timed out" in line) == sorted(
-            f"root {i} timed out" for i in range(self.THREADS)
+        # The message ends each line whatever the configured separator: the line
+        # format is the config's, pinned in test_config.py (prax, PR #774).
+        assert sorted(line.rsplit("root ", 1)[-1] for line in local.splitlines() if "timed out" in line) == sorted(
+            f"{i} timed out" for i in range(self.THREADS)
         )
 
     def test_racing_first_calls_build_the_logger_once(self, monkeypatch, tmp_path):
