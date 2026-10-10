@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_module.py
 # Description: Tests for the watchdog module router
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-14
-# Modified: 2026-10-07
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
@@ -61,7 +61,7 @@ def _pin_watch_registry(monkeypatch, tmp_path):
     The arm is recorded where it is exercised, but a route a mutant opens past
     the recorder must still land here and never in the live .watchdog/.
     """
-    monkeypatch.setattr(wd_registry, "_default_storage_path", lambda: tmp_path / "watchdog_active.json")
+    monkeypatch.setattr(wd_registry, "default_storage_path", lambda: tmp_path / "watchdog_active.json")
 
 
 def test_handle_command_rejects_unrelated_command():
@@ -620,7 +620,7 @@ def test_agent_subcommand_says_no_sign_in_wire_when_none_is_registered(capsys, m
     2026-09-25: a day of `watchdog agent` wires, no sign-in, 27 completions queued as
     MISSED while the statusline read idle. The old line said "invoke via Monitor tool".
     """
-    monkeypatch.setattr(wd_registry, "_default_storage_path", lambda: _registry_holding(tmp_path, []))
+    monkeypatch.setattr(wd_registry, "default_storage_path", lambda: _registry_holding(tmp_path, []))
     monkeypatch.setattr(wd_mod, "_agent_handler", _fake_agent_module)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-a")
 
@@ -642,7 +642,7 @@ def test_agent_subcommand_names_the_live_sign_in_wire_of_this_session(capsys, mo
         "started_epoch": 0,
     }
     theirs = dict(mine, handle="baseline_wire-zzz999", metadata={"session": "session-b", "wrapper": "background"})
-    monkeypatch.setattr(wd_registry, "_default_storage_path", lambda: _registry_holding(tmp_path, [theirs, mine]))
+    monkeypatch.setattr(wd_registry, "default_storage_path", lambda: _registry_holding(tmp_path, [theirs, mine]))
     monkeypatch.setattr(wd_mod, "_agent_handler", _fake_agent_module)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-a")
 

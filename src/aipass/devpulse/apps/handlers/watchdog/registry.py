@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Watchdog Watch Registry — multi-watch tracking + lifecycle
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-14
-# Modified: 2026-09-12
+# Modified: 2026-10-10
 # =============================================
 
 # Storage: .watchdog/watchdog_active.json with atomic write (tmp + os.replace).
@@ -26,6 +26,7 @@ Public surface:
   is_zombie(pid) -> bool
   kill_watch(handle, storage_path=None) -> dict
   kill_all(storage_path=None) -> list[dict]
+  default_storage_path() -> Path   (where the registry lives when no storage_path is given)
 
 Registry file schema (version 1):
   {
@@ -57,6 +58,12 @@ from pathlib import Path
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.devpulse.apps.handlers.json import json_handler
 
+try:
+    import fcntl  # POSIX advisory locks: absent on Windows, so the lock door reads this, not sys.platform
+except ImportError as exc:  # pragma: no cover - the host that lacks it is the Windows runner
+    fcntl = None  # type: ignore[assignment]
+    logger.info("[watchdog.registry] fcntl absent on this host, registry writes run unlocked: %s", exc)
+
 
 _STORAGE_FILENAME = "watchdog_active.json"
 _STORAGE_VERSION = 1
@@ -83,7 +90,7 @@ def _devpulse_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _default_storage_path() -> Path:
+def default_storage_path() -> Path:
     """Resolve `.watchdog/watchdog_active.json` relative to the devpulse root."""
     return _devpulse_root() / ".watchdog" / _STORAGE_FILENAME
 
@@ -127,11 +134,16 @@ def _atomic_write_unlocked(storage_path: Path, data: dict) -> None:
 
 
 class _FileLock:
-    """Exclusive lock on a sibling .lock file (fcntl on Unix, no-op on Windows).
+    """Exclusive lock on a sibling .lock file (fcntl where it exists, no-op without it).
 
     Using a sibling avoids racing with the atomic replace of the data file:
     if we locked the data file itself, os.replace would swap the inode out
     from under the lock.
+
+    The door is the module-level ``fcntl`` binding, not ``sys.platform``: a test
+    that pretends darwin to reach the portable zombie rule must not make a
+    Windows host import a module it does not have (CI red on PR #774, run
+    38068553235, two rows in test_watchdog_agent.py).
     """
 
     def __init__(self, storage_path: Path) -> None:
@@ -139,10 +151,8 @@ class _FileLock:
         self._fh = None
 
     def __enter__(self) -> "_FileLock":
-        # Windows: skip file locking entirely (single-user typical).
-        if sys.platform != "win32":
-            import fcntl
-
+        # No fcntl (Windows): skip file locking entirely (single-user typical).
+        if fcntl is not None:
             self._lock_path.parent.mkdir(parents=True, exist_ok=True)
             # 'a+' so the file is created if missing and lock survives concurrent opens.
             self._fh = open(self._lock_path, "a+", encoding="utf-8")
@@ -150,10 +160,8 @@ class _FileLock:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        if sys.platform != "win32" and self._fh is not None:
+        if fcntl is not None and self._fh is not None:
             try:
-                import fcntl
-
                 fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
             finally:
                 self._fh.close()
@@ -165,13 +173,18 @@ def _generate_handle(watch_type: str) -> str:
     return f"{watch_type}-{secrets.token_hex(_HANDLE_HASH_LEN // 2)}"
 
 
-def _is_zombie_linux(pid: int) -> bool:
-    """Linux-only zombie check via /proc. Returns True only if state is 'Z'."""
+def _is_zombie_linux(pid: int) -> bool | None:
+    """Linux-only zombie check via /proc: True only if the state is 'Z'.
+
+    None when /proc has no readable entry for the pid: it vanished between the
+    caller's probe and this read, or there is no /proc. That is not an answer
+    about the state; the caller decides what a missing entry means.
+    """
     try:
         status_text = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
     except OSError as exc:
         logger.info("[watchdog.registry] /proc/%s/status unreadable: %s", pid, exc)
-        return False
+        return None
     for line in status_text.splitlines():
         if line.startswith("State:"):
             return "Z" in line
@@ -211,7 +224,8 @@ def is_zombie(pid: int) -> bool:
     listed (macOS CI 34682737363, FPLAN-0554).
     """
     if sys.platform == "linux":
-        return _is_zombie_linux(pid)
+        # A zombie keeps its /proc entry; no entry (None) means gone or reaped, not a zombie.
+        return _is_zombie_linux(pid) is True
     return _is_zombie_ps(pid)
 
 
@@ -243,29 +257,47 @@ def _pid_alive_windows(pid: int) -> bool:
         kernel32.CloseHandle(handle)
 
 
-def is_pid_alive(pid: int) -> bool:
-    """Return True if the process exists and is not a zombie. Windows-safe."""
-    if not isinstance(pid, int) or pid <= 0:
-        return False
+def _signal_zero(pid: int) -> str:
+    """Probe ``pid`` with signal 0 and name the kernel's answer.
+
+    ``"exists"`` when the signal went through, ``"absent"`` when there is no
+    such process, ``"foreign"`` when it exists but belongs to another user.
+    The two handler answers are words the success path never returns. Never
+    called on Windows, where signal 0 terminates the target: the guard raises.
+    """
     if sys.platform == "win32":
-        # os.kill(pid, 0) TERMINATES the target on Windows — use OpenProcess.
-        try:
-            return _pid_alive_windows(pid)
-        except Exception as exc:
-            logger.info("[watchdog.registry] PID %s Windows check failed (assuming alive): %s", pid, exc)
-            return True
+        raise OSError("signal 0 terminates the target on Windows; is_pid_alive routes Windows to OpenProcess")
     try:
         os.kill(pid, 0)
     except ProcessLookupError as exc:
         logger.info("[watchdog.registry] PID %s not found: %s", pid, exc)
-        return False
+        return "absent"
     except PermissionError as exc:
         # Process exists but is owned by someone else — still "alive".
         logger.info("[watchdog.registry] PID %s permission denied (alive): %s", pid, exc)
-        return True
-    if is_zombie(pid):
+        return "foreign"
+    return "exists"
+
+
+def is_pid_alive(pid: int) -> bool:
+    """Return True if the process exists and is not a zombie. Windows-safe.
+
+    Off Windows the kernel answers through signal 0: absent is dead, foreign is
+    alive, and an existing pid is alive unless ``is_zombie`` reads it as exited
+    and unreaped. On Windows the probe is OpenProcess; a probe that raises is a
+    defect to see, never a pid to assume alive.
+    """
+    if not isinstance(pid, int) or pid <= 0:
         return False
-    return True
+    if sys.platform == "win32":
+        # os.kill(pid, 0) TERMINATES the target on Windows — use OpenProcess.
+        return _pid_alive_windows(pid)
+    answer = _signal_zero(pid)
+    if answer == "absent":
+        return False
+    if answer == "foreign":
+        return True
+    return not is_zombie(pid)
 
 
 def register(
@@ -286,7 +318,7 @@ def register(
     if not isinstance(watch_type, str) or not watch_type.strip():
         raise ValueError(f"watch_type must be a non-empty string, got {watch_type!r}")
 
-    path = storage_path or _default_storage_path()
+    path = storage_path or default_storage_path()
     handle = _generate_handle(watch_type)
     now_epoch = time.time()
     entry = {
@@ -318,7 +350,7 @@ def deregister(handle: str, storage_path: Path | None = None) -> bool:
     if not isinstance(handle, str) or not handle:
         return False
 
-    path = storage_path or _default_storage_path()
+    path = storage_path or default_storage_path()
     with _FileLock(path):
         store = _load_store_unlocked(path)
         before = len(store["watches"])
@@ -343,7 +375,7 @@ def list_active(
     Each returned entry is a shallow copy with a live ``elapsed_seconds`` key
     computed against ``time.time()``.
     """
-    path = storage_path or _default_storage_path()
+    path = storage_path or default_storage_path()
     now = time.time()
     pruned_count = 0
 
@@ -389,7 +421,7 @@ def kill_watch(handle: str, storage_path: Path | None = None) -> dict:
     Returns:
         dict with keys ``handle``, ``killed``, ``was_alive``, ``reason``.
     """
-    path = storage_path or _default_storage_path()
+    path = storage_path or default_storage_path()
     watch = None
     with _FileLock(path):
         watch = _lookup(handle, path)
@@ -472,7 +504,7 @@ def kill_watch(handle: str, storage_path: Path | None = None) -> dict:
 
 def kill_all(storage_path: Path | None = None) -> list[dict]:
     """Kill every active watch. Returns the list of per-watch kill results."""
-    path = storage_path or _default_storage_path()
+    path = storage_path or default_storage_path()
     active = list_active(storage_path=path, prune_stale=False)
     results = []
     for watch in active:

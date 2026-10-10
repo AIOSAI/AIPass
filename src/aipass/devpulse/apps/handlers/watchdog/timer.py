@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: timer.py
 # Description: Watchdog Timer Handler — wake-in-N + named duration tracking
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-04-14
+# Modified: 2026-10-10
 # =============================================
 
 # Storage choice: .watchdog/watchdog_timers.json with atomic write (tmp + rename).
@@ -66,7 +66,7 @@ def _devpulse_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _default_storage_path() -> Path:
+def default_storage_path() -> Path:
     """Resolve `.watchdog/watchdog_timers.json` relative to the devpulse root."""
     return _devpulse_root() / ".watchdog" / _STORAGE_FILENAME
 
@@ -218,7 +218,7 @@ def timer_start(name: str, storage_path: Path | None = None) -> dict:
     if not isinstance(name, str) or not name.strip():
         return {"name": name, "state": "error", "reason": "timer name required"}
 
-    path = storage_path or _default_storage_path()
+    path = storage_path or default_storage_path()
     store = _load_store(path)
     if name in store["active"]:
         return {"name": name, "state": "error", "reason": "timer already running"}
@@ -236,7 +236,7 @@ def timer_stop(name: str, storage_path: Path | None = None) -> dict:
     if not isinstance(name, str) or not name.strip():
         return {"name": name, "state": "error", "reason": "timer name required"}
 
-    path = storage_path or _default_storage_path()
+    path = storage_path or default_storage_path()
     store = _load_store(path)
     if name not in store["active"]:
         return {"name": name, "state": "error", "reason": "timer not running"}
@@ -275,7 +275,7 @@ def timer_list(storage_path: Path | None = None) -> dict:
     Active entries include a live ``elapsed_so_far_seconds`` computed against
     ``time.time()`` so callers always see fresh numbers.
     """
-    path = storage_path or _default_storage_path()
+    path = storage_path or default_storage_path()
     store = _load_store(path)
     now = time.time()
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_registry.py
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-14
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/watchdog/registry.py and the handlers that register through it."""
@@ -271,21 +271,35 @@ def test_a_live_pid_off_linux_is_still_alive(monkeypatch, pretend_platform):
     assert watch_registry.is_pid_alive(os.getpid()) is True
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="POSIX-only RECIPE, not a POSIX-only rule: this is the one off-Linux test that goes through "
-    "list_active, so it takes _FileLock — which imports fcntl on every platform that is not win32. "
-    "Forcing darwin here tells the lock it is on POSIX, and on Windows that import does not exist. "
-    "The zombie state it prunes on has no Windows spelling either (ps -o state= is POSIX). Pruning "
-    "itself is pinned on this host and on macOS.",
-)
 def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch, pretend_platform):
-    """What the bug cost operationally: a dead watch stayed listed forever."""
+    """What the bug cost operationally: a dead watch stayed listed forever.
+
+    Runs on every host since registry 1.1.1: this goes through list_active and
+    so through _FileLock, whose door is now the fcntl binding, not the platform
+    name this test pretends. The Windows skip it used to carry was the symptom
+    of the same import that reddened two watch_agent rows on the Windows runner.
+    """
     watch_registry.register("agent", {"label": "reaped"}, storage_path=store_path)
     pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
 
     assert watch_registry.list_active(storage_path=store_path, prune_stale=True) == []
+
+
+def test_the_lock_is_a_no_op_where_fcntl_is_absent(store_path, monkeypatch, pretend_platform):
+    """Windows has no fcntl. The lock reads that fact from the module binding, not
+    from sys.platform, so a pretended darwin on a host without fcntl neither
+    imports it nor creates the lock file (CI red on PR #774, run 38068553235:
+    test_watchdog_agent's two off-Linux rows died in this door on the Windows
+    runner with ModuleNotFoundError: No module named 'fcntl')."""
+    monkeypatch.setattr(watch_registry, "fcntl", None)
+    pretend_platform(watch_registry, "darwin")
+
+    handle = watch_registry.register("agent", {"label": "unlocked"}, storage_path=store_path)
+
+    assert handle.startswith("agent-")
+    assert store_path.exists()
+    assert not store_path.with_suffix(store_path.suffix + ".lock").exists()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -463,7 +477,7 @@ def test_agent_handler_registers_and_deregisters(store_path, monkeypatch):
     """watch_agent registers on entry and deregisters in finally (even on early return)."""
     # Force the handler's default storage path to our tmp file so register
     # lands in the right place.
-    monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
+    monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
     # @__definitely_not_a_branch__ hits the early "not found" return —
     # exercises the deregister-in-finally path with minimal work.
@@ -477,7 +491,7 @@ def test_agent_handler_registers_and_deregisters(store_path, monkeypatch):
 
 def test_timer_wake_in_registers_and_deregisters(store_path, monkeypatch):
     """wake_in with a short duration registers then deregisters; mutant 'register skipped' reddens it."""
-    monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
+    monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
     # Poll the store on disk from here while the timer waits in its own thread.
     outcome: dict = {}
@@ -505,7 +519,7 @@ def test_timer_wake_in_registers_and_deregisters(store_path, monkeypatch):
 
 def test_schedule_wake_at_registers_and_deregisters(store_path, monkeypatch):
     """wake_at with a tiny relative delay registers then deregisters."""
-    monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
+    monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
     # Fast-forward clock so wake_at returns immediately without real waiting.
     start = datetime(2026, 4, 14, 12, 0, 0)
@@ -529,7 +543,7 @@ def test_schedule_wake_at_registers_and_deregisters(store_path, monkeypatch):
 
 def test_handler_deregisters_on_exception(store_path, monkeypatch):
     """If a handler raises mid-wait, the finally block must still deregister."""
-    monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
+    monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
     # Make time.sleep raise after the register call.
     def exploding_sleep(duration):
@@ -585,7 +599,7 @@ class TestTheDefaultStoreNeverLandsAtTheCallersFeet:
         """
         monkeypatch.chdir(tmp_path)
         for mod in (reg, tmr):
-            default = mod._default_storage_path()
+            default = mod.default_storage_path()
             assert not default.is_relative_to(tmp_path), (
                 f"the default store landed at the caller's feet — the cwd fallback is back: {default}"
             )
@@ -597,5 +611,5 @@ class TestTheDefaultStoreNeverLandsAtTheCallersFeet:
         assert package_root.name == "devpulse", (
             f"the layout assumption this test rests on moved — re-derive parents[N]: {package_root}"
         )
-        assert reg._default_storage_path() == (package_root / ".watchdog" / "watchdog_active.json")
-        assert tmr._default_storage_path() == (package_root / ".watchdog" / "watchdog_timers.json")
+        assert reg.default_storage_path() == (package_root / ".watchdog" / "watchdog_active.json")
+        assert tmr.default_storage_path() == (package_root / ".watchdog" / "watchdog_timers.json")

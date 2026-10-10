@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for devpulse tests
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2025-11-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Shared pytest fixtures for devpulse tests.
@@ -22,10 +22,7 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
-from unittest.mock import patch
-
 import pytest
-import shutil
 from pathlib import Path
 from typing import Generator
 
@@ -60,8 +57,8 @@ def sealed_watchdog_store(request: pytest.FixtureRequest, tmp_path: Path, monkey
     if request.node.get_closest_marker("live_default_store"):
         return
     store = tmp_path / "_sealed_watchdog"
-    monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store / "watchdog_active.json")
-    monkeypatch.setattr(watch_timer, "_default_storage_path", lambda: store / "watchdog_timers.json")
+    monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store / "watchdog_active.json")
+    monkeypatch.setattr(watch_timer, "default_storage_path", lambda: store / "watchdog_timers.json")
 
 
 class _SysAs:
@@ -103,28 +100,6 @@ def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data."""
-    return {"test_key": "test_value", "sample_data": "example"}
-
-
-@pytest.fixture
-def mock_logger():
-    """Mock the prax logger to suppress output during tests."""
-    with patch("aipass.prax.logger") as mock_log:
-        yield mock_log
 
 
 @pytest.fixture(autouse=True)

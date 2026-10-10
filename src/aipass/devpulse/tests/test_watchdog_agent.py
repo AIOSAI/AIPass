@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_agent.py
 # Description: Tests for the watchdog agent handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-04-14
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""
@@ -35,11 +35,11 @@ def _hermetic_watch_store(tmp_path, monkeypatch):
     and before the __file__-derived root (2026-08-31) they wrote wherever the
     process stood, which on CI's composed runner was the repo root. Module-
     local autouse, per this branch's conftest philosophy: the registry pin
-    tests measure _default_storage_path itself and must not inherit a patch.
+    tests measure default_storage_path itself and must not inherit a patch.
     """
     monkeypatch.setattr(
         watch_registry,
-        "_default_storage_path",
+        "default_storage_path",
         lambda: tmp_path / "watchdog_active.json",
     )
 
