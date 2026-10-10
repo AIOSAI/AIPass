@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_windows_compat.py
 # Description: Tests for windows_compat_check.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-05-14
 # Modified: 2026-10-10
 # =============================================
@@ -1148,3 +1148,92 @@ def test_terminal_size_cached_into_a_constant_convicted(tmp_path):
 def test_console_pinned_at_import_not_read_in_tests(tmp_path):
     (tmp_path / "tests").mkdir()
     assert _module_result(tmp_path / "tests", _PINNED_DISPLAY, "conftest.py")["passed"] is True
+
+
+# ===========================================================================
+# Test-file arm: a tmp_path name holding a backslash, written to disk
+# ===========================================================================
+# seedgo's own tests/test_checkers_batch7.py (PR #774, CI round three) wrote
+# tmp_path / "aipass\\memory\\apps\\modules\\door_entry_limits.py": one file on
+# POSIX, a tree with no parents on Windows, so write_text raised there before
+# the checker under test ran. The specimens below are minimised from it.
+
+_BACKSLASHED_DOOR = (
+    "def test_a_door_under_a_backslashed_modules_path_passes(tmp_path):\n"
+    '    door = tmp_path / "aipass\\\\memory\\\\apps\\\\modules\\\\door_entry_limits.py"\n'
+    '    door.write_text("x", encoding="utf-8")\n'
+)
+
+
+def _test_file_rows(tmp_path, source):
+    (tmp_path / "tests").mkdir()
+    result = _module_result(tmp_path / "tests", source, "test_doors.py")
+    return result["passed"], result["checks"][0]["message"]
+
+
+def test_a_backslashed_tmp_path_name_written_is_convicted(tmp_path):
+    """Mutant: _find_backslashed_tmp_writes returns no rows in windows_compat_check.py — killed."""
+    passed, message = _test_file_rows(tmp_path, _BACKSLASHED_DOOR)
+    assert passed is False
+    assert message == (
+        "1 unguarded POSIX pattern(s): L3: tmp_path name 'aipass\\\\memory\\\\apps\\\\modules\\\\door_entry_limits.py'"
+        " holds a backslash -- one file on POSIX, a tree on Windows"
+    )
+
+
+def test_a_backslashed_name_written_in_place_is_convicted(tmp_path):
+    source = (
+        "def test_one(tmp_path):\n"
+        '    (tmp_path / "sub" / "a\\\\b.txt").write_text("x", encoding="utf-8")\n'
+        '    tmp_path.joinpath("c\\\\d").mkdir()\n'
+        '    with open(tmp_path / "e\\\\f.txt", "w", encoding="utf-8") as fh:\n'
+        '        fh.write("x")\n'
+    )
+    passed, message = _test_file_rows(tmp_path, source)
+    assert passed is False
+    assert message.startswith("3 unguarded POSIX pattern(s): L2: tmp_path name 'a\\\\b.txt'"), message
+    assert "L3: tmp_path name 'c\\\\d'" in message and "L4: tmp_path name 'e\\\\f.txt'" in message
+
+
+def test_the_cured_door_is_acquitted(tmp_path):
+    """The cure: a real tree written, its Windows spelling handed over as a string."""
+    source = (
+        "from pathlib import PureWindowsPath\n\n"
+        "def test_a_door_under_a_backslashed_modules_path_passes(tmp_path):\n"
+        '    door = tmp_path.joinpath("aipass", "memory", "apps", "modules", "door_entry_limits.py")\n'
+        "    door.parent.mkdir(parents=True, exist_ok=True)\n"
+        '    door.write_text("x", encoding="utf-8")\n'
+        "    assert str(PureWindowsPath(door))\n"
+    )
+    assert _test_file_rows(tmp_path, source) == (True, "No unguarded POSIX-only patterns found")
+
+
+def test_a_backslashed_name_never_written_is_acquitted(tmp_path):
+    """A name only read or handed on means the same missing file on both hosts."""
+    source = (
+        "def test_missing(tmp_path):\n"
+        '    missing = tmp_path / "a\\\\b.py"\n'
+        "    assert not missing.exists()\n"
+        '    with open(tmp_path / "c\\\\d.txt", encoding="utf-8") as fh:\n'
+        "        fh.read()\n"
+    )
+    assert _test_file_rows(tmp_path, source) == (True, "No unguarded POSIX-only patterns found")
+
+
+def test_a_backslashed_name_in_a_posix_only_test_is_acquitted(tmp_path):
+    """A test that means the POSIX file name, skipped on Windows, says so."""
+    source = (
+        "import sys\n\nimport pytest\n\n"
+        '@pytest.mark.skipif(sys.platform == "win32", reason="a backslash is a separator there")\n' + _BACKSLASHED_DOOR
+    )
+    assert _test_file_rows(tmp_path, source) == (True, "No unguarded POSIX-only patterns found")
+
+
+def test_a_name_rebound_to_a_clean_path_is_not_guessed_at(tmp_path):
+    source = (
+        "def test_rebound(tmp_path):\n"
+        '    door = tmp_path / "a\\\\b.py"\n'
+        '    door = tmp_path / "b.py"\n'
+        '    door.write_text("x", encoding="utf-8")\n'
+    )
+    assert _test_file_rows(tmp_path, source) == (True, "No unguarded POSIX-only patterns found")

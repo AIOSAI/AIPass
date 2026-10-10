@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: windows_compat_content.py
 # Description: Windows Compatibility Standards Content Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-05-10
 # Modified: 2026-10-10
 # =============================================
@@ -57,6 +57,13 @@ def get_windows_compat_standards() -> str:
         "     Acquitted: [dim]file=[/dim] other than sys.stdout/sys.stderr,",
         "     [dim]force_terminal=True/False[/dim], [dim]color_system=None[/dim], or a",
         "     subclass that defines [dim]_color_system[/dim] (cli's _LiveConsole: per print).",
+        "  7. [red]tmp_path name holding a backslash, written[/red] (test_* functions, no",
+        '     platform skipif): [dim]tmp_path / "a\\\\b.py"[/dim] (or [dim].joinpath[/dim]) then',
+        "     write_text / write_bytes / touch / mkdir / open for writing. One file on POSIX,",
+        "     a tree with no parents on Windows: the write raises before the code under",
+        "     test runs (seedgo batch7, PR #774 CI round three). Cure: write a real tree",
+        "     and hand over [dim]str(PureWindowsPath(path))[/dim]. Not read: a name only",
+        "     read or handed on, a name bound twice, names built in variables or helpers.",
         "",
         "  [yellow]Valid guards (checker recognizes):[/yellow]",
         "  - [dim]if sys.platform != 'win32':[/dim]",

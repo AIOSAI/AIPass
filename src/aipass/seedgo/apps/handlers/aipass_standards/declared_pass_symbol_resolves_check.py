@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: declared_pass_symbol_resolves_check.py
 # Description: Declared Pass Symbol Resolves Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-25
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -43,7 +43,9 @@ WHAT RESOLVES.
   * A slash path resolves when ``apps/`` has that directory or module.
 
 A REAL CHAIN IS READ, NEVER RUN (leg 11): no declared module is imported for
-its Python; ``_module`` says how each kind is read.
+its Python; ``_module`` says how each kind is read. Stdlib is
+``sys.stdlib_module_names``, never importability: a stdlib module this host
+lacks (``fcntl`` on Windows) is UNKNOWN, never a conviction (PR #774).
 
 A LINE THAT NAMES NOTHING is its own finding -- unless its category is itself
 a standard in this pack (``ruff``, ``documentation``, ``cli``). Then the line
@@ -267,7 +269,6 @@ def _mentions(name: str, text: str) -> bool:
     return re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", text) is not None
 
 
-@lru_cache(maxsize=256)
 def _module(name: str) -> object | None:
     """A stdlib module to judge by, never imported here, or None.
 
@@ -280,11 +281,26 @@ def _module(name: str) -> object | None:
         and one whose source builds its names at run time (``globals()``, a
         module ``__getattr__``: hashlib's sha256) answers UNKNOWN;
       * a module with no Python at all (built into the interpreter, or a
-        compiled extension) has nothing of Python's to run and is imported.
+        compiled extension) has nothing of Python's to run and is imported;
+      * a stdlib module THIS host does not have (``fcntl`` on Windows) is
+        still stdlib -- ``sys.stdlib_module_names`` lists every platform's --
+        and its names cannot be read here, so it answers UNKNOWN. Importability
+        is not existence (PR #774 Windows row 3).
+
+    What the host holds is asked fresh every call; only the read is cached, so
+    a cached read never answers for a host that has since changed.
     """
     loaded = sys.modules.get(name)
     if loaded is not None:
         return loaded
+    if importlib.util.find_spec(name.split(".")[0]) is None:
+        return UNKNOWN if _is_stdlib(name) else None
+    return _read_module(name)
+
+
+@lru_cache(maxsize=256)
+def _read_module(name: str) -> object | None:
+    """The module _module judges by, read from what find_spec says this host has."""
     spec = importlib.util.find_spec(name.split(".")[0])
     if spec is None:
         return None

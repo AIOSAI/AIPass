@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: declared_pass_symbol_resolves_content.py
 # Description: Declared Pass Symbol Resolves Standards Content Handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-25
-# Modified: 2026-10-03
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -43,6 +43,8 @@ def get_declared_pass_symbol_resolves_standards() -> str:
         "  A path: apps/ has that directory or module.",
         "  A chain is [green]read, never run[/green]: no declared module is imported (leg 11).",
         "  A module that builds its names when it runs (hashlib) is never a conviction.",
+        "  Stdlib is [green]sys.stdlib_module_names[/green], not importability: a stdlib module this",
+        "  host lacks ([green]fcntl[/green] on Windows) is never a conviction (PR #774 Windows row 3).",
         "",
         "[bold cyan]A LINE THAT NAMES NOTHING:[/bold cyan]",
         "  Its own finding -- unless its category is a standard in this pack (ruff,",

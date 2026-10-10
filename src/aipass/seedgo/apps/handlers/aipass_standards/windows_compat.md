@@ -87,6 +87,30 @@ Measured at introduction (2026-10-10, 1638 product files): 1 row, seedgo's own
 `diagnostics_check.py` (cured the same day: the console is built in its
 `__main__` block); cli's cured display.py acquitted.
 
+### Rule 7 — a tmp_path name holding a backslash, written (checker 1.6.0)
+Test files only, in `test_*` functions with no platform skipif (the test-file
+arm that also reads `os.chmod` / `os.symlink` / `stat.S_I*`). Flags a write —
+`.write_text` / `.write_bytes` / `.touch` / `.mkdir`, `.open(...)` or
+`open(...)` with a `w` / `a` / `x` / `+` mode — to a path rooted at the
+`tmp_path` / `tmpdir` fixture (`/` chains and `.joinpath(...)`) where a string
+literal segment holds a backslash, either in place or through a name bound
+once in the function to such a path. On POSIX that is one file whose name
+carries backslashes; on Windows it is a tree whose parents do not exist, so
+the write raises before the code under test runs. Specimen: seedgo's own
+`tests/test_checkers_batch7.py` (PR #774, CI 38087470872, rows 1 and 2) wrote
+`tmp_path / "aipass\\memory\\apps\\modules\\door_entry_limits.py"`. Acquitted:
+the cure (a real tree written with `joinpath(...)` and `mkdir(parents=True)`,
+its Windows spelling handed over as a string via `PureWindowsPath`), a
+backslashed name only read or handed on (the same missing file on both
+hosts), a test under a platform skipif or `sys.platform` guard (it means the
+POSIX name), and a name bound more than once (which binding reaches the write
+needs flow). Known misses: a backslashed name built in a variable or helper
+(`name = "a\\b"; tmp_path / name`), and writes in fixtures or helper methods.
+Measured at introduction (2026-10-10): 2 rows in seedgo's batch7 test as it
+stood at HEAD (L596, L607, both true, cured the same day), 0 in 786 test files
+fleet-wide after the cure. The scored audit walks product files; this arm
+convicts through the checklist lane on test files.
+
 ### Valid Guards (recognized by checker)
 - `if sys.platform != "win32":` / `if sys.platform == "linux":`
 - `if os.name != "nt":` / `if os.name == "posix":`

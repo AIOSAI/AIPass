@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: windows_compat_check.py
 # Description: Windows Compatibility Standards Checker Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-05-10
 # Modified: 2026-10-10
 # =============================================
@@ -609,6 +609,85 @@ def _scan_test_body(
         if desc:
             violations.append((lineno, desc))
             seen_lines.add(lineno)
+
+    for lineno, desc in _find_backslashed_tmp_writes(func_node):
+        if lineno not in guarded and lineno not in seen_lines:
+            violations.append((lineno, desc))
+            seen_lines.add(lineno)
+
+
+# A tmp_path name holding a backslash (PR #774, CI round three): one file on
+# POSIX, a tree whose parents do not exist on Windows, so the write raises
+# there before the code under test runs. Only a literal segment of a path
+# rooted at the tmp_path / tmpdir fixture, and only when the test writes it: a
+# name only read or handed on is the same missing file on both hosts.
+_TMP_ROOTS = frozenset({"tmp_path", "tmpdir"})
+_PATH_WRITE_METHODS = frozenset({"write_text", "write_bytes", "touch", "mkdir"})
+
+
+def _backslashed_literal(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str) and "\\" in node.value:
+        return node.value
+    return None
+
+
+def _backslashed_tmp_name(node: ast.expr) -> str | None:
+    """The backslashed literal segment of a tmp_path-rooted path expression, else None."""
+    found = None
+    while True:
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            found = _backslashed_literal(node.right) or found
+            node = node.left
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "joinpath":
+            for arg in node.args:
+                found = _backslashed_literal(arg) or found
+            node = node.func.value
+        else:
+            break
+    return found if isinstance(node, ast.Name) and node.id in _TMP_ROOTS else None
+
+
+def _opens_for_writing(call: ast.Call, mode_index: int) -> bool:
+    modes = [kw.value for kw in call.keywords if kw.arg == "mode"]
+    if len(call.args) > mode_index:
+        modes.append(call.args[mode_index])
+    return any(isinstance(m, ast.Constant) and isinstance(m.value, str) and set(m.value) & set("wax+") for m in modes)
+
+
+def _written_path(call: ast.Call) -> ast.expr | None:
+    """The path a call writes or creates on disk, else None."""
+    func = call.func
+    if isinstance(func, ast.Attribute) and func.attr in _PATH_WRITE_METHODS:
+        return func.value
+    if isinstance(func, ast.Attribute) and func.attr == "open" and _opens_for_writing(call, 0):
+        return func.value
+    if isinstance(func, ast.Name) and func.id == "open" and call.args and _opens_for_writing(call, 1):
+        return call.args[0]
+    return None
+
+
+def _find_backslashed_tmp_writes(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[int, str]]:
+    """Writes to a tmp_path name holding a backslash, in place or through a name bound once."""
+    bindings: dict[str, list[str | None]] = {}
+    for node in ast.walk(func_node):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            bindings.setdefault(node.targets[0].id, []).append(_backslashed_tmp_name(node.value))
+    # A name bound more than once is not guessed at: which binding reaches the write needs flow.
+    named = {name: values[0] for name, values in bindings.items() if len(values) == 1 and values[0]}
+
+    rows: list[tuple[int, str]] = []
+    for node in ast.walk(func_node):
+        if not isinstance(node, ast.Call):
+            continue
+        target = _written_path(node)
+        if target is None:
+            continue
+        literal = named.get(target.id) if isinstance(target, ast.Name) else _backslashed_tmp_name(target)
+        if literal:
+            rows.append(
+                (node.lineno, f"tmp_path name {literal!r} holds a backslash -- one file on POSIX, a tree on Windows")
+            )
+    return rows
 
 
 def _collect_unguarded_tests(

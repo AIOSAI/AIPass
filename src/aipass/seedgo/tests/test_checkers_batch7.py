@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-25
 # Modified: 2026-10-10
 # =============================================
@@ -15,6 +15,8 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that each checker in handlers/aipass_standards/ parses and imports
 # seedgo: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
+
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -582,6 +584,12 @@ class TestAWindowsPathIsReadLikeAPosixOne:
     was judged as an entry point's. On Linux a file NAME may carry backslashes,
     so the string Windows produces is reproduced exactly; the proof on Windows
     itself is the next CI run.
+
+    The file is written as a real tree (CI round three: a backslashed NAME is a
+    tree on Windows, its parents did not exist, and write_text raised before the
+    checker ran). The checker is handed the Windows spelling of that tree, and
+    its Path reads a backslash as Windows does, so the file it opens is the one
+    written; the string its module test searches keeps every backslash.
     """
 
     _DOOR = (
@@ -590,24 +598,32 @@ class TestAWindowsPathIsReadLikeAPosixOne:
         '__all__ = ["load_entry_limits", "check_file_budget"]\n'
     )
 
+    def _windows_spelled(self, tmp_path, monkeypatch, *parts):
+        """Write the door under tmp_path/aipass/memory/apps/<parts>; return its path as Windows spells it."""
+        door = tmp_path.joinpath("aipass", "memory", "apps", *parts)
+        door.parent.mkdir(parents=True, exist_ok=True)
+        door.write_text(self._DOOR, encoding="utf-8")
+        # The checker's file reads parse a backslash as a separator, as on Windows (no-op there).
+        monkeypatch.setattr(encapsulation_check, "Path", lambda *a: Path(*(str(p).replace("\\", "/") for p in a)))
+        # Windows infers the branch from Path.parts; this pins it on every host.
+        monkeypatch.setattr(encapsulation_check, "get_branch_from_path", lambda fp: {"name": "memory", "path": "x"})
+        return str(PureWindowsPath(door))
+
     def test_a_door_under_a_backslashed_modules_path_passes(self, tmp_path, monkeypatch):
         """Mutant: the separator normalisation dropped from check_module's module test — killed."""
-        door = tmp_path / "aipass\\memory\\apps\\modules\\door_entry_limits.py"
-        door.write_text(self._DOOR, encoding="utf-8")
-        # Windows infers the branch from Path.parts; a Linux file name has none to split.
-        monkeypatch.setattr(encapsulation_check, "get_branch_from_path", lambda fp: {"name": "memory", "path": "x"})
+        door = self._windows_spelled(tmp_path, monkeypatch, "modules", "door_entry_limits.py")
+        assert "\\apps\\modules\\" in door
 
-        result = encapsulation_check.check_module(str(door))
+        result = encapsulation_check.check_module(door)
 
         assert [c["name"] for c in result["checks"] if not c["passed"]] == []
 
     def test_the_same_door_outside_modules_is_still_convicted(self, tmp_path, monkeypatch):
         """Control: an entry point under a backslashed apps path keeps the direct-import rule."""
-        entry = tmp_path / "aipass\\memory\\apps\\door_entry_limits.py"
-        entry.write_text(self._DOOR, encoding="utf-8")
-        monkeypatch.setattr(encapsulation_check, "get_branch_from_path", lambda fp: {"name": "memory", "path": "x"})
+        entry = self._windows_spelled(tmp_path, monkeypatch, "door_entry_limits.py")
+        assert "\\apps\\door_entry_limits.py" in entry
 
-        result = encapsulation_check.check_module(str(entry))
+        result = encapsulation_check.check_module(entry)
 
         assert [c["name"] for c in result["checks"] if not c["passed"]] == ["Direct handler imports"]
 

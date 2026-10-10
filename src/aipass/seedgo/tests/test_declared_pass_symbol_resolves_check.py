@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_declared_pass_symbol_resolves_check.py
 # Description: declared_pass_symbol_resolves_check — a declared-pass name that resolves nowhere
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-09-25
 # Modified: 2026-10-10
 # =============================================
@@ -186,6 +186,16 @@ class TestAWordInProseIsNotAModule:
         score, message = _verdict(_branch(tmp_path, "# seedgo: no-test-needed(stdlib) — fakelib usage"))
         assert score == 0
         assert "declares (stdlib) needs no test, but it names nothing at all" in message
+
+    def test_a_stdlib_module_this_host_cannot_import_still_resolves(self, tmp_path, monkeypatch):
+        """PR #774 Windows row 3: fcntl is stdlib on every host; a None in sys.modules makes it unimportable here."""
+        monkeypatch.setitem(sys.modules, "fcntl", None)
+        product = "import fcntl\n\n\ndef lock(f):\n    fcntl.flock(f, fcntl.LOCK_EX)\n"
+        declared = "# seedgo: no-test-needed(stdlib) — fcntl, unavailable on Windows"
+        assert _verdict(_branch(tmp_path, declared, product=product)) == (
+            100,
+            "Every name the declared pass mentions resolves",
+        )
 
     def test_a_bare_module_the_test_imports_is_still_judged(self, tmp_path):
         """The control: shutil is imported by the test file and never used by the product."""
