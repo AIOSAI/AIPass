@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Repo-Root Resolution Pins
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -1162,22 +1162,22 @@ class TestTheFenceSurvivesADeadWorkingDirectory:
     _guard_branch_access called by name) until the v2 fence replaced it
     (DPLAN-0404, prax). The behaviour it watched stays: the fence resolves
     frame paths, Path.resolve routes through realpath, and on Windows realpath
-    reads os.getcwd first. So the kin probe runs with its cwd deleted and
+    reads os.getcwd first. So the kin probe runs with its cwd gone and
     realpath denied, through the fence's public shape (an import), and must
     still be let through.
+
+    The cwd is gone by injection (_DENY_REALPATH: os.getcwd raises), not by
+    deleting it: Windows holds a process's cwd open, so the rmdir failed there
+    and the child died before printing (PR #774, run 38078052852).
     """
 
-    def test_the_kin_probe_is_allowed_with_its_cwd_gone_and_realpath_denied(self, tmp_path):
+    def test_the_kin_probe_is_allowed_with_its_cwd_gone_and_realpath_denied(self):
         """Arming probe first: the denial bites in this child, so the claim is about it."""
-        doomed = tmp_path / "doomed"
-        doomed.mkdir()
         probe = Path(__file__).resolve().parent / "support_fence.py"
-        script = _NTPATH_SHAPED + textwrap.dedent(
+        script = _DENY_REALPATH + textwrap.dedent(
             f"""
                 import os, runpy, sys
                 sys.path.insert(0, {REPO_SRC!r})
-                os.chdir({str(doomed)!r})
-                os.rmdir({str(doomed)!r})
                 try:
                     os.path.realpath("x")
                     print("ARM INERT")
