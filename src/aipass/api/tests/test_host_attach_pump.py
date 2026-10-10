@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_attach_pump.py
 # Description: Tests for the attach lane's room and pump — the tmux command, a real PTY, resize and hangup
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/host/attach.py's room and PTY, and apps/handlers/host/pump.py's control frames."""
@@ -43,6 +43,7 @@ from aipass.api.tests.support_host_attach import (
     fastapi_required,
     pty_required,
     source_of,
+    wait_for_log,
 )
 
 # The patch targets stay this file's own constants rather than the support
@@ -843,7 +844,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = StubSession()
 
-        with patch(PATCH_SERVER_LOGGER), patch(PATCH_PUMP_LOGGER), patch(PATCH_SERVER_JSON):
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_PUMP_LOGGER), patch(PATCH_SERVER_JSON):
             with patch.object(host_attach, "open_attach", return_value=session):
                 client = TestClient(host_server.create_app())
                 with client.websocket_connect(
@@ -857,7 +858,14 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
                     socket.send_text('{"type": "resize", "cols": 72, "rows": 44}')
                     session.wait_until(lambda: bool(session.resizes))
 
+                    # The hangup is the FIRST line of the pump's finally, not
+                    # the last of the route. Leaving the context before the
+                    # route's own detach line cancels a server still unwinding
+                    # its pump, and the client's exit raises that as a
+                    # CancelledError in 0.7s (CI 38087470864, 3.10). Wait for
+                    # the route's last line, so the exit cancels nothing live.
                     detach_and_wait(socket, session)
+                    wait_for_log(log, "socket detached from")
 
         assert session.resizes == [(72, 44)]
         assert session.writes == []
@@ -876,7 +884,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = StubSession()
 
-        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
             with patch.object(host_attach, "open_attach", return_value=session):
                 client = TestClient(host_server.create_app())
                 with client.websocket_connect(
@@ -888,6 +896,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
                     session.wait_until(lambda: len(session.writes) >= 2)
 
                     detach_and_wait(socket, session)
+                    wait_for_log(log, "socket detached from")
 
         assert session.writes == [b"echo still-listening", b"\r"]
 
@@ -913,7 +922,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = StubSession()
 
-        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
             with patch.object(host_attach, "open_attach", return_value=session):
                 client = TestClient(host_server.create_app())
                 started = time.monotonic()
@@ -921,6 +930,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
                     "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
                 ) as socket:
                     detach_and_wait(socket, session)
+                    wait_for_log(log, "socket detached from")
                 elapsed = time.monotonic() - started
 
         assert session.hangups == 1

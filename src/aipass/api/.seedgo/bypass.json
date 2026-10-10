@@ -134,7 +134,7 @@
     {
       "file": "tests/test_host_attach_pump.py",
       "standard": "through_the_command",
-      "lines": [528],
+      "lines": [529],
       "reason": "kwargs['preexec_fn'] is host_attach._acquire_controlling_tty: the identity IS the claim (open_attach hands Popen this very hook), so the name must be read; kept under compass 481 and accepted in leg 8 (api, fleet green leg 9). Moved with the test from test_host_attach.py:716 in the oversize split (api, 2026-10-08)."
     },
     {
