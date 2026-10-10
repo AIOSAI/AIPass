@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_timer_install.py
 # Description: Tests for the timer_install module (systemd user timer installer)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-25
-# Modified: 2026-10-06
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
@@ -118,6 +118,16 @@ if said:
 sys.exit(code)
 """
 
+# systemd is Linux's. Windows has no systemctl, and CreateProcess finds a bare
+# name on PATH only as name.exe (subprocess does not read PATHEXT), so no stub
+# laid here can be run there by the wrapper. The install verb's answer on
+# Windows is test_systemctl_not_found's (exit 1, systemd not available), which
+# lays no stub and runs on every host, Windows included.
+_NEEDS_A_STUB_ON_PATH = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="systemd does not exist on Windows; the verb's answer there is pinned by test_systemctl_not_found",
+)
+
 
 @pytest.fixture
 def systemctl_on_path(tmp_path, monkeypatch):
@@ -131,8 +141,9 @@ def systemctl_on_path(tmp_path, monkeypatch):
     a host with no systemctl.
 
     The host is asked whether a bare-named stub runs at all, by running it the
-    way the wrapper does; Windows finds no extensionless script on PATH, and
-    where it cannot run that is what the test reports, never a skip.
+    way the wrapper does. Windows, where it cannot, is declared by
+    _NEEDS_A_STUB_ON_PATH on each case that lays one; on any other host where
+    it cannot run, that is what the test reports, never a skip.
     """
 
     def lay(answers: dict | None) -> Path:
@@ -181,6 +192,7 @@ class TestTheCommandsReadSystemctlsAnswers:
         with patch(f"{TI}._DAEMON_ROOT", root):
             yield
 
+    @_NEEDS_A_STUB_ON_PATH
     def test_success_runs_reload_enable_start_in_that_order(self, systemctl_on_path):
         """Every step exits 0: install-timer answers True and systemctl saw daemon-reload, enable, start.
 
@@ -194,6 +206,7 @@ class TestTheCommandsReadSystemctlsAnswers:
             "--user start daemon-tick.timer",
         ]
 
+    @_NEEDS_A_STUB_ON_PATH
     def test_a_non_zero_exit_fails_the_install_and_prints_why(self, systemctl_on_path, capsys):
         """daemon-reload exits 1 with a stderr line: both print, install exits 1, nothing more is asked."""
         log = systemctl_on_path({"daemon-reload": [1, "Failed to connect to bus"]})
@@ -203,6 +216,7 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert "Failed to connect to bus" in said, said
         assert _argv(log) == ["--user daemon-reload"]
 
+    @_NEEDS_A_STUB_ON_PATH
     def test_not_loaded_on_a_stop_is_nothing_to_stop(self, systemctl_on_path, tmp_path, capsys):
         """stop exits 5 (not loaded): uninstall-timer goes on to disable, removes the files and exits 0, with no FAIL.
 
@@ -224,6 +238,7 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert not service.exists() and not timer.exists()
         assert "FAIL" not in "".join(capsys.readouterr()), "not loaded is nothing to stop, never a failure"
 
+    @_NEEDS_A_STUB_ON_PATH
     def test_a_stop_refused_for_another_reason_fails_the_uninstall(self, systemctl_on_path, tmp_path):
         """stop exits 1: not loaded is exit 5 only, so the uninstall names the stop, exits 1 and keeps the files.
 
@@ -237,6 +252,7 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert _argv(log) == ["--user stop daemon-tick.timer"]
         assert service.exists() and timer.exists()
 
+    @_NEEDS_A_STUB_ON_PATH
     def test_not_loaded_anywhere_but_a_stop_is_a_failure(self, systemctl_on_path, capsys):
         """enable exits 5: install-timer does not pass not_loaded_ok, so the install fails at enable and never starts.
 
