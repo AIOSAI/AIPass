@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: Tests for apps/handlers/cli/help_flags.py -- whole-sequence help detection (DPLAN-0291 rule E)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-05
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the flow command modules that call it."""
@@ -12,6 +12,7 @@
 # seedgo: no-test-needed(ruff) — that help_flags.py and the command modules parse and import
 # seedgo: no-test-needed(constant) — each module's print_help() and print_introspection() literal text
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -50,6 +51,20 @@ def _read_answer(path: Path) -> OSError | None:
         path.read_text(encoding="utf-8")
     except OSError as exc:
         return exc
+    return None
+
+
+def _create_answer(path: Path) -> OSError | None:
+    """Exclusively create ``path`` with the test's own hands, the lock's create, and keep the answer.
+
+    Returns:
+        The OSError the create raised, or None when the create succeeded.
+    """
+    try:
+        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except OSError as exc:
+        return exc
+    os.close(fd)
     return None
 
 
@@ -373,15 +388,25 @@ class TestUnflaggedModulesHelpSafety:
         come back as False - "Another instance is already running" - so the runner
         exited quietly forever. It is now reported as an error, with no processing.
         The argument gate is patched open for the reason the test above gives.
-        What reading a directory raises is the platform's choice (IsADirectoryError
-        on Linux and macOS, PermissionError on Windows), so the test reads it with
-        its own hands first and asserts the product logged that same error.
+        What the exclusive create and the read answer for a directory is the
+        platform's choice: Linux and macOS refuse the create with FileExistsError
+        and the read with IsADirectoryError, so the product reaches the read and
+        logs its error; Windows refuses the create with PermissionError, so the
+        product spends its retry budget and logs its own PermissionError, chained
+        from that denial. The test makes both calls with its own hands first and
+        asserts the product logged the error its platform's route ends in.
         Mutant: except OSError as e: -> except PermissionError as e: reddens this
         where the platform's answer is not a PermissionError; on Windows it is
         one, and there this mutant survives.
+        Mutant: is_lock_stale returning False on a read error ('already running') reddens this on Linux and macOS.
+        Mutant: try_create_lock returning False past its budget reddens this on Windows.
         """
         lock = tmp_path / ".post_close_runner.lock"
         lock.mkdir()
+        created = _create_answer(lock)
+        assert isinstance(created, (FileExistsError, PermissionError)), (
+            f"{sys.platform} answered {created!r} to creating over a directory: the premise of this test is gone"
+        )
         answer = _read_answer(lock)
         assert isinstance(answer, OSError) and not isinstance(answer, FileNotFoundError), (
             f"{sys.platform} answered {answer!r} to reading a directory: the premise of this test is gone"
@@ -394,6 +419,7 @@ class TestUnflaggedModulesHelpSafety:
             patch(f"{_POST}.release_lock") as release,
             patch(f"{_POST}.error") as error_fn,
             patch(f"{_POST}.warning") as warning_fn,
+            patch("aipass.flow.apps.handlers.runner.lock_ops._sleep") as sleep,
         ):
             try:
                 handled = post_close_runner.handle_command("post", ["run"])
@@ -409,8 +435,20 @@ class TestUnflaggedModulesHelpSafety:
         logged = [c for c in mock_logger.error.call_args_list if "Could not create lock" in c.args[0]]
         assert len(logged) == 1
         assert logged[0].args[2] == lock
-        assert type(logged[0].args[3]) is type(answer)
-        assert logged[0].args[3].errno == answer.errno
+        reported = logged[0].args[3]
+        if isinstance(created, PermissionError):
+            # Windows: the create is denied past the budget; the read is never reached.
+            assert type(reported) is PermissionError
+            budget = re.search(r"still denied after (\d+) attempts", str(reported))
+            assert budget, str(reported)
+            assert sleep.call_count == int(budget.group(1))
+            cause = reported.__cause__
+            assert isinstance(cause, OSError) and type(cause) is type(created)
+            assert cause.errno == created.errno
+        else:
+            sleep.assert_not_called()
+            assert type(reported) is type(answer)
+            assert reported.errno == answer.errno
         assert lock.is_dir()
 
     def test_detached_run_with_an_unreadable_lock_logs_and_exits_1(self, tmp_path, mock_logger):
