@@ -1,11 +1,13 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for canary - json seam, console width, command state, logger capture
-# Version: 3.2.0
+# Version: 3.3.0
 # Created: 2025-11-08
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 #
 # CHANGELOG (Max 5 entries):
+#   - v3.3.0 (2026-10-10): temp_test_dir and sample_test_data retired - the template's
+#     fixtures, requested only by the git-ignored .archive scaffold (seedgo, PR #774)
 #   - v3.2.0 (2026-10-04): Template item 5 header - AIPass banner, the five META fields
 #   - v3.1.0 (2026-10-03): Template C1/C2 - pinned console width, command state reset
 #     after every test; product import moved to the top
@@ -29,7 +31,6 @@ test, so every test lands in its own tmp_path without knowing it.
 """
 
 import os
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator, List, Tuple
@@ -67,26 +68,6 @@ def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after."""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data shaped like a valid 'data' JSON document."""
-    return {
-        "created": "2026-09-03",
-        "last_updated": "2026-09-03",
-        "test_key": "test_value",
-        "sample_data": "example",
-    }
 
 
 @pytest.fixture(autouse=True)

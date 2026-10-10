@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_top.py
 # Description: Tests for the leaderboard reader - drone @canary top, its JSON form and its refusals
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-19
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/modules/top.py and the leaderboard reader it drives."""
@@ -19,6 +19,7 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.leaderboard import reader
+from aipass.cli.apps.modules import display
 
 # Driven through the entry point's main() with real module discovery, so the
 # exit codes asserted here are the ones drone hands back to a caller.
@@ -40,6 +41,16 @@ def _run(monkeypatch, argv):
     """Invoke the entry point with a synthetic argv, real discovery."""
     monkeypatch.setattr(sys, "argv", ["canary", *argv])
     return canary_entry.main()
+
+
+def _narrow_error_console(monkeypatch):
+    """Wrap stderr at 40 columns for one test, so a refusal's phrase breaks across lines.
+
+    The conftest pins 200; a refusal naming a long tmp path still wrapped inside
+    its phrase there (macOS CI, PR #774, 2026-10-10). At 40 the break lands in
+    every phrase on every platform, so an oracle that reads across it is measured.
+    """
+    monkeypatch.setattr(display.err_console, "width", 40)
 
 
 def _board(tmp_path, text, name="scores.txt"):
@@ -295,12 +306,13 @@ BAD_ROWS = {
 def test_a_row_that_is_not_a_name_and_an_integer_count_is_refused(monkeypatch, capsys, tmp_path, flags, row, reason):
     """One bad row refuses the whole file: a ranking missing a row is not a ranking."""
     board = _board(tmp_path, "bob 30\n" + row)
+    _narrow_error_console(monkeypatch)
 
     assert _run(monkeypatch, ["top", *flags, "2", board]) == 2
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert reason in captured.err
+    assert reason in " ".join(captured.err.split())
 
 
 def test_a_bad_row_is_named_by_its_line_number(monkeypatch, capsys, tmp_path):
