@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Trigger package paths, cwd-free module resolve, atomic JSON writes, recursion-safe trail logger
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-03-09
-# Modified: 2026-10-02
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -311,19 +311,54 @@ def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = Tr
         raise
 
 
+# The lock primitives, bound once at import, so the arm a lock call takes is
+# decided before any test pretends another platform. Every host lacks one of
+# the two. The None is not logged: a trail line per import would describe one
+# host N times. The arm that needs a missing primitive raises instead, naming
+# the host (_lock_primitive).
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None  # type: ignore[assignment]
+
+
+def _lock_primitive(module: Any, name: str) -> Any:
+    """The module-level lock primitive, or an ImportError naming the host.
+
+    Args:
+        module: The binding made at import (fcntl or msvcrt), None when absent.
+        name: The module's name, for the message.
+
+    Returns:
+        The module, when this host has it.
+
+    Raises:
+        ImportError: This host has no such module. Running unlocked is not one
+            of the outcomes.
+    """
+    if module is None:
+        raise ImportError(f"{name} is unavailable on this host ({sys.platform}); json_file_lock cannot lock")
+    return module
+
+
 def _try_lock_win32(lock_file, msvcrt_module: Any = None) -> bool:
     """One non-blocking attempt at the sidecar's byte lock.
 
     Args:
         lock_file: Open file object for the sidecar.
-        msvcrt_module: The locking primitive; None imports msvcrt at call time.
+        msvcrt_module: The locking primitive; None is the module-level msvcrt binding.
             The seam exists for the tests, which drive the win32 arm on any host.
 
     Returns:
         True if the lock was taken, False if someone else holds it.
     """
     if msvcrt_module is None:
-        import msvcrt as msvcrt_module
+        msvcrt_module = _lock_primitive(msvcrt, "msvcrt")
 
     try:
         lock_file.seek(0)
@@ -343,16 +378,17 @@ def _acquire_lock_win32(
 
     Args:
         lock_file: Open file object for the sidecar.
-        msvcrt_module: The locking primitive; None imports msvcrt at call time.
+        msvcrt_module: The locking primitive; None is the module-level msvcrt binding.
         sleep_fn: The wait between attempts; None is time.sleep at call time.
             Both seams exist for the tests: patching time.sleep or sys.modules
             reaches every reader in the process.
 
     Raises:
         OSError: Still held after _LOCK_ATTEMPTS tries.
+        ImportError: No seam was handed and this host has no msvcrt.
     """
     if msvcrt_module is None:
-        import msvcrt as msvcrt_module
+        msvcrt_module = _lock_primitive(msvcrt, "msvcrt")
     sleep = sleep_fn or time.sleep
 
     for _attempt in range(_LOCK_ATTEMPTS - 1):
@@ -378,19 +414,19 @@ def _acquire_lock(
     Args:
         lock_file: Open file object for the sidecar.
         platform: The platform name; None reads sys.platform at call time.
-        msvcrt_module: Handed to the win32 arm; None imports msvcrt there.
+        msvcrt_module: Handed to the win32 arm; None is the module-level msvcrt there.
         sleep_fn: Handed to the win32 arm; None is time.sleep there.
             The seams exist for the tests, which drive the win32 arm on any host.
 
     Raises:
         OSError: The lock was still held after every attempt.
+        ImportError: The arm taken needs a primitive this host does not have.
     """
     if platform == "win32" or (platform is None and sys.platform == "win32"):
         _acquire_lock_win32(lock_file, msvcrt_module, sleep_fn)
     else:
-        import fcntl
-
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        posix_lock = _lock_primitive(fcntl, "fcntl")
+        posix_lock.flock(lock_file, posix_lock.LOCK_EX)
 
 
 def _release_lock(lock_file, platform: Optional[str] = None, msvcrt_module: Any = None) -> None:
@@ -399,19 +435,21 @@ def _release_lock(lock_file, platform: Optional[str] = None, msvcrt_module: Any 
     Args:
         lock_file: The same open file object that was locked.
         platform: The platform name; None reads sys.platform at call time.
-        msvcrt_module: The locking primitive; None imports msvcrt at call time.
+        msvcrt_module: The locking primitive; None is the module-level msvcrt binding.
             The seams exist for the tests, which drive the win32 arm on any host.
+
+    Raises:
+        ImportError: The arm taken needs a primitive this host does not have.
     """
     if platform == "win32" or (platform is None and sys.platform == "win32"):
         if msvcrt_module is None:
-            import msvcrt as msvcrt_module
+            msvcrt_module = _lock_primitive(msvcrt, "msvcrt")
 
         lock_file.seek(0)
         msvcrt_module.locking(lock_file.fileno(), msvcrt_module.LK_UNLCK, 1)
     else:
-        import fcntl
-
-        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        posix_lock = _lock_primitive(fcntl, "fcntl")
+        posix_lock.flock(lock_file, posix_lock.LOCK_UN)
 
 
 @contextmanager
