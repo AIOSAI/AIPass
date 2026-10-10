@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_template_import_guard.py
 # Description: What the newborn's handler guard must survive on its very first import
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-30
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
@@ -1272,8 +1272,7 @@ class TestNewbornsAreBornPinned:
     the cured guard, but without a pin a future author regrows the walk and
     every suite stays green — which is exactly the fleet-wide condition
     @devpulse measured in nine branches. test_scaffold.py is the right home
-    because it is self-contained: unlike the fixture smoke test beside it, the
-    pin needs no conftest, so it survives a branch replacing the template
+    because it is self-contained: the pin needs no conftest, so it survives a branch replacing the template
     scaffolding with its own suite.
 
     STATED LIMIT: ``spawn update`` never overwrites .py files, so this reaches

@@ -339,7 +339,7 @@
       "path": "templates/README.md"
     },
     "f037": {
-      "content_hash": "7a753f85e4df",
+      "content_hash": "d86b3bf896a0",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "tests/README.md"
@@ -351,7 +351,7 @@
       "path": "tests/__init__.py"
     },
     "f039": {
-      "content_hash": "109bb10d6e10",
+      "content_hash": "acec07c1e0c4",
       "has_branch_placeholder": false,
       "name": "conftest.py",
       "path": "tests/conftest.py"
@@ -411,7 +411,7 @@
       "path": "tests/test_cli_routing.py"
     },
     "f049": {
-      "content_hash": "97db882ad263",
+      "content_hash": "bd23375e1fe5",
       "has_branch_placeholder": false,
       "name": "test_scaffold.py",
       "path": "tests/test_scaffold.py"
@@ -431,7 +431,7 @@
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-10-08",
+    "last_updated": "2026-10-10",
     "version": "1.0.0"
   }
 }
