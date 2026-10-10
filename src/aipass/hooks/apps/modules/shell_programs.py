@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_programs.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Which programs only read, and which only take data — the default-deny tables (DPLAN-0356 phase 4)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """The tables that invert the gates: what is KNOWN safe, so everything else is not (DPLAN-0356 phase 4).
@@ -30,6 +30,7 @@ its own writes. modules/shell_reader, handlers/security/git_gate and edit_gate
 read these; no other copy exists.
 """
 
+import re
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
@@ -50,6 +51,15 @@ READ_ONLY_PROGRAMS = frozenset(
 
 #: find reads, unless one of these makes it act (its -exec programs are read as programs anyway).
 _FIND_ACTIONS = frozenset({"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"})
+
+#: sed flags that only change how it reads and prints; -i, -f, -l and any other flag keep sed off the read list.
+_SED_SHORT_FLAGS = frozenset("nErsuz")
+_SED_LONG_FLAGS = frozenset(
+    {"--quiet", "--silent", "--regexp-extended", "--separate", "--null-data", "--unbuffered", "--posix"}
+)
+
+#: A sed script of addresses and p, d, q, = only: no s, w, W, e, r or R, so it neither writes nor runs (hooks todo 80).
+_SED_PRINT_SCRIPT = re.compile(r"[0-9$,;!~pdq= ]+")
 
 #: Programs whose operands are data or files, never a program to run (P3).
 PLAIN_PROGRAMS = READ_ONLY_PROGRAMS | frozenset(
@@ -81,11 +91,57 @@ def read_only(program: str, argv: tuple[str, ...]) -> bool:
         argv: Its whole argument vector, the program word first.
 
     Returns:
-        True for a READ_ONLY_PROGRAMS member, and for find without an acting flag.
+        True for a READ_ONLY_PROGRAMS member, for find without an acting flag, and
+        for sed running only print scripts.
     """
     if program == "find":
         return not any(arg in _FIND_ACTIONS for arg in argv[1:])
+    if program == "sed":
+        return _sed_only_prints(argv)
     return program in READ_ONLY_PROGRAMS
+
+
+def _sed_only_prints(argv: tuple[str, ...]) -> bool:
+    """True when sed's every script is a print script and every flag is a reading one (hooks todo 80).
+
+    `sed -n 68,90p file` was refused as a write: sed's script can write (w) or run (e), so
+    phase 4 read every sed as a writer. A script of addresses and p, d, q, = can do neither.
+    """
+    scripts: list[str] = []
+    plain: list[str] = []
+    script_next = False
+    for arg in argv[1:]:
+        if script_next:
+            scripts.append(arg)
+            script_next = False
+            continue
+        kind = _sed_word(arg)
+        if kind == "unread":
+            return False
+        script_next = kind == "script"
+        if kind == "inline":
+            scripts.append(arg.split("=", 1)[1])
+        elif kind == "operand":
+            plain.append(arg)
+    if script_next or not (scripts or plain):
+        return False
+    return all(_SED_PRINT_SCRIPT.fullmatch(script) for script in (scripts or plain[:1]))
+
+
+def _sed_word(arg: str) -> str:
+    """What one sed word is: operand, flag, script (the next word is one), inline (--expression=) or unread."""
+    if arg.startswith("--expression="):
+        return "inline"
+    if arg == "--expression":
+        return "script"
+    if arg.startswith("--"):
+        return "flag" if arg in _SED_LONG_FLAGS else "unread"
+    if not arg.startswith("-") or arg == "-":
+        return "operand"
+    cluster = arg[1:]
+    if not set(cluster.removesuffix("e")) <= _SED_SHORT_FLAGS:
+        return "unread"
+    return "script" if cluster.endswith("e") else "flag"
 
 
 def _carriers(invocations: list) -> set[int]:

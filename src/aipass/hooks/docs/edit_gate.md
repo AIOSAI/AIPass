@@ -15,7 +15,10 @@ operand of a program that does not only read (`modules/shell_programs.READ_ONLY_
 the same three rules: the project fence, whose file it is, and the `.trinity` memory rule. So a program
 nobody listed as a writer cannot name another branch's file or a memory file off the admin seat. `cat`,
 `grep`, `jq` and friends still read anywhere; `drone` is the router and passes; git and gh answer to
-git_gate. `sed` without `-i` and `awk` are no longer read as filters: their scripts can write.
+git_gate. `awk` and `sed` are not read as filters: their scripts can write. The one exception is
+`sed` whose every script is addresses and `p`, `d`, `q`, `=` with only reading flags (`sed -n 68,90p f`).
+That shape reads anywhere, a memory file included (hooks todo 80). A `w` or `e` inside any other
+script is not read: its target or command passes unseen.
 
 ## Who may write whose files — the owner's ruling, 2026-09-18
 

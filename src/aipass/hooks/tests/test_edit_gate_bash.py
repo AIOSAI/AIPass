@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -1151,3 +1151,66 @@ class TestAWordTheGateCannotProbe:
         other = (Path(registered_projects["memory"]) / "head.txt").as_posix()
         refused = _run(seat, command=f"{program} '{fmt}' a > {other}")
         assert _blocked(refused) and "ENAMETOOLONG" not in _reason(refused)
+
+
+class TestASedPrintScriptIsARead:
+    """hooks todo 80 (devpulse c393e2f8): `sed -n 68,90p .claude/provider_manifest.json` was refused as a write."""
+
+    def _manifest(self, registered_projects: dict) -> str:
+        manifest = registered_projects["aipass"] / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir()
+        manifest.write_text("{}\n", encoding="utf-8")
+        return manifest.as_posix()
+
+    def test_the_refused_read_is_allowed(self, registered_projects: dict, grant_withheld):
+        """Mutant: sed read off the read-only table again (refused as a project-level write)."""
+        self._manifest(registered_projects)
+        aipass = registered_projects["aipass"].as_posix()
+        command = f"cd {aipass}; sed -n 68,90p .claude/provider_manifest.json"
+        result = _run(registered_projects["hooks"], command=command)
+        assert result["exit_code"] == 0, result["stdout"]
+
+    @pytest.mark.parametrize("script", ["-n 1,5p", "-n '1,5p;$p'", "-n -e 1p -e '$p'", "-nE 3q", "'2~3d'"])
+    def test_a_print_script_may_name_another_branch(self, registered_projects: dict, grant_withheld, script: str):
+        target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        result = _run(registered_projects["hooks"], command=f"sed {script} {target}")
+        assert result["exit_code"] == 0, result["stdout"]
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "sed -n '68,90w copy.txt' {manifest}",
+            "sed -n 1e {manifest}",
+            "sed -n '1r /dev/null' {manifest}",
+            "sed -n -f edit.sed {manifest}",
+            "sed -n s/a/b/p {manifest}",
+            "sed -n -l 5 1p {manifest}",
+        ],
+        ids=["w-command", "e-command", "r-command", "script-file", "substitute", "unread-flag"],
+    )
+    def test_a_script_that_can_write_or_run_still_names_its_operands(
+        self, registered_projects: dict, grant_withheld, command: str
+    ):
+        """Mutant: every sed without -i read as a read (all six allowed)."""
+        manifest = self._manifest(registered_projects)
+        result = _run(registered_projects["hooks"], command=command.format(manifest=manifest))
+        assert _blocked(result)
+        assert "sed (not a read-only program)" in _reason(result)
+
+    @pytest.mark.parametrize("flags", ["-i -n", "-ni", "--in-place -n", "-n -i.bak"])
+    def test_sed_in_place_on_the_same_path_stays_refused(self, registered_projects: dict, grant_withheld, flags: str):
+        """Mutant: every sed read as a read. bash_writes' sed -i lane misses all four shapes; this lane holds them."""
+        manifest = self._manifest(registered_projects)
+        result = _run(registered_projects["hooks"], command=f"sed {flags} 68,90p {manifest}")
+        assert _blocked(result)
+        assert "provider_manifest.json" in _reason(result)
+
+    def test_a_print_read_of_a_memory_file_is_allowed_and_its_writes_are_not(self, registered_projects: dict):
+        """Refused by the memory lane until 1.3.0 of shell_programs, like cat and jq it now reads."""
+        seat = Path(registered_projects["hooks"])
+        (seat / ".trinity").mkdir()
+        (seat / ".trinity" / "local.json").write_text("{}\n", encoding="utf-8")
+        read = _run(str(seat), command="sed -n 68,90p .trinity/local.json")
+        assert read["exit_code"] == 0, read["stdout"]
+        for command in ("sed -i -n 68,90p .trinity/local.json", "sed -n s/a/b/p .trinity/local.json"):
+            assert "Memory files are not written from a shell" in _reason(_run(str(seat), command=command)), command
