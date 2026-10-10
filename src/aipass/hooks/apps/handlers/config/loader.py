@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Version: 2.0.1
+# Version: 2.1.0
 # Description: Hook config loader — the AIPass config from AIPASS_HOME, a project's own behind trust, gates always
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Which hook config a session runs. Security never depends on trust (DPLAN-0356 item 1).
@@ -109,7 +109,9 @@ def locate_config() -> tuple[str, Path | None]:
     Logs a WARNING for every config it ignores on the way.
     """
     home = aipass_home()
-    search, stop = _search_bounds()
+    # One canonical form, resolved like home and like the trust registry's keys: a walk spelled
+    # through a symlink (macOS /var -> /private/var) read the install as external (CI red, PR #774).
+    search, stop = (_absolute(str(bound)) for bound in _search_bounds())
     start = search
     while search != stop and search.parent != search:
         if (search / _CONFIG).exists():

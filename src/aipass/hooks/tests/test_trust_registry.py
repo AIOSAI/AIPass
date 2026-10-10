@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_trust_registry.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Tests for trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-15
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/config/trust_registry.py and apps/handlers/config/loader.py's trust integration."""
@@ -60,6 +60,18 @@ def _chdir(where: Path) -> Iterator[None]:
     with pytest.MonkeyPatch.context() as mp:
         mp.chdir(where)
         yield
+
+
+def _linked(real: Path, link: Path) -> Path:
+    """*link*, a directory symlink to *real*: CI's macOS tmp dir sits under one (/var -> /private/var).
+
+    Windows refuses a symlink without the privilege; there this case cannot be built, and the skip says so.
+    """
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"this host refuses a directory symlink: {exc}")
+    return link
 
 
 class TestRegistryHelpers:
@@ -505,7 +517,7 @@ class TestTrustBreakBanner:
         ):
             banner = trust_break_banner() or ""
         assert "TRUST BREAK" in banner
-        assert f"aipass trust {project}" in banner
+        assert f"aipass trust {project.resolve()}" in banner
 
     def test_banner_never_names_a_command_that_does_not_exist(self, temp_test_dir, mock_logger):
         """This banner is the ONLY message shown while every hook is dark.
@@ -531,7 +543,7 @@ class TestTrustBreakBanner:
             _chdir(project),
         ):
             banner = trust_break_banner() or ""
-        assert f"aipass trust {project}" in banner  # a banner that names the command that exists
+        assert f"aipass trust {project.resolve()}" in banner  # a banner that names the command that exists
         assert "trust enroll" not in banner
         assert "init update" not in banner
 
@@ -552,9 +564,30 @@ class TestTrustBreakBanner:
         ):
             banner = trust_break_banner()
             reason = config_unavailable_reason()
-        remedy = f"aipass trust {project}"
+        remedy = f"aipass trust {project.resolve()}"
         assert remedy in (banner or "")
         assert remedy in (reason or "")
+
+    def test_a_project_reached_through_a_symlink_prints_its_canonical_fix_line(self, temp_test_dir, mock_logger):
+        """CI red PR #774 (macOS): enrolled through one spelling, walked through another, printed the walk's."""
+        reg_path = temp_test_dir / "registry.json"
+        real = temp_test_dir / "real_project"
+        (real / ".aipass").mkdir(parents=True)
+        hooks_file = real / ".aipass" / "hooks.json"
+        hooks_file.write_text('{"hooks_enabled": true}', encoding="utf-8")
+        link = _linked(real, temp_test_dir / "linked_project")
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(real))
+        hooks_file.write_text('{"hooks_enabled": false}', encoding="utf-8")
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch.object(loader, "_search_bounds", return_value=(link, temp_test_dir)),
+        ):
+            banner = trust_break_banner() or ""
+            reason = config_unavailable_reason()
+        remedy = f"aipass trust {real.resolve()}"
+        assert remedy in banner
+        assert remedy in reason
 
 
 class TestBootstrap:
@@ -660,7 +693,7 @@ class TestConfigUnavailableReason:
         ):
             reason = config_unavailable_reason()
         assert "not enrolled" in reason
-        assert f"aipass trust {project}" in reason
+        assert f"aipass trust {project.resolve()}" in reason
         assert "No .aipass/hooks.json found" not in reason
 
     def test_enrolled_but_hash_mismatch(self, temp_test_dir, mock_logger):
@@ -679,7 +712,7 @@ class TestConfigUnavailableReason:
         ):
             reason = config_unavailable_reason()
         assert "changed since it was enrolled" in reason
-        assert f"aipass trust {project}" in reason
+        assert f"aipass trust {project.resolve()}" in reason
 
     def test_trusted_but_unparseable(self, temp_test_dir, mock_logger):
         """Enrolled, hash matches, but the JSON is broken — the fourth refusal."""
@@ -888,6 +921,15 @@ class TestSecurityDoesNotDependOnTrust:
         assert config["hooks_enabled"] is True
         assert "rm_gate" in config["PreToolUse"]
         assert "IGNORED" in log.warning.call_args[0][0]
+
+    def test_an_install_reached_through_a_symlink_is_still_the_install(self, temp_test_dir, mock_logger):
+        """CI red PR #774 (macOS): the walk under one spelling and AIPASS_HOME under the other read it as external."""
+        reg_path = temp_test_dir / "registry.json"
+        reg_path.write_text('{"version": 1, "projects": {}}', encoding="utf-8")
+        home = _install(temp_test_dir / "real")
+        link = _linked(temp_test_dir / "real", temp_test_dir / "link")
+        config = self._resolve(home, link / "aipass" / "src" / "aipass" / "canary", reg_path)
+        assert "tool_use_sound" in config["PreToolUse"]
 
     def test_an_untrusted_external_project_gets_the_gate_set_not_nothing(self, temp_test_dir, mock_logger):
         reg_path = temp_test_dir / "registry.json"
