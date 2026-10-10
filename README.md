@@ -133,7 +133,7 @@ src/my_project/<agent>/
 └── README.md           # Domain knowledge (read on startup)
 ```
 
-**One router.** `drone @branch command [args]` reaches any agent — routing and @agent resolution handled for you. Git is the one tiered surface: every agent can read (`drone @git status`, `log`, `diff`), and write access is earned per repo by that project's manager. Agents use the same commands to reach each other: they dispatch work, share findings, and wake whoever they're waiting on.
+**One router.** `drone @branch command [args]` reaches any agent — routing and @agent resolution handled for you. Git is the one tiered surface: every agent can read (`drone @git status`, `log`, `diff`), and write access is earned per repo by that project's manager. Raw `git` and `gh` are refused for every agent, reads included: if `drone @git` can't do it, it can't be done. Agents use the same commands to reach each other: they dispatch work, share findings, and wake whoever they're waiting on.
 
 <!-- GIF SLOT 3 — team (~20s): dispatch a task to an agent, completion reported back, result lands.
      ![team](assets/team.gif) -->
@@ -225,6 +225,7 @@ devpulse (orchestrator)
 - [Claude Code](https://code.claude.com/docs)
 - Linux, macOS, or Windows via Git Bash (tested in CI; WSL should work but is untested)
 - `sudo` access optional (Linux uses it for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it; macOS never asks)
+- Node.js + npm optional (install uses them to add the `@anthropic-ai/sandbox-runtime` sandbox; without them that step is listed under "action needed" with the command to run later)
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)
 
 ---
