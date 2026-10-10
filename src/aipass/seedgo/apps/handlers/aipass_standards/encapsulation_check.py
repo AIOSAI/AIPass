@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -152,15 +152,27 @@ def extract_handler_package(import_line: str) -> Optional[str]:
     return None
 
 
+def _posix(file_path: str) -> str:
+    """The path as a string with forward slashes, whatever host handed it in.
+
+    The checks below search the path for "apps/handlers/" and "apps/modules/";
+    Windows hands in C:\\...\\apps\\modules\\door.py, which matched neither,
+    and a door was judged as an entry point on Windows only (PR #774, round
+    two). Same idiom as apps/handlers/__init__.py.
+    """
+    return str(file_path).replace("\\", "/")
+
+
 def get_file_handler_package(file_path: str) -> Optional[str]:
     """
     Get the handler package a file belongs to
 
     Examples:
         '/home/.../apps/handlers/json/json_handler.py' -> 'json'
+        'C:\\...\\apps\\handlers\\json\\json_handler.py' -> 'json'
         '/home/.../apps/modules/something.py' -> None (not a handler)
     """
-    path_str = str(file_path)
+    path_str = _posix(file_path)
 
     if "apps/handlers/" not in path_str:
         return None
@@ -404,7 +416,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     file_branch_name = file_branch.get("name", "").lower() if file_branch else None
     file_handler_package = get_file_handler_package(module_path)
     is_handler_file = file_handler_package is not None
-    is_module_file = "apps/modules/" in str(module_path)
+    is_module_file = "apps/modules/" in _posix(module_path)
 
     # Check 1: Cross-branch handler imports
     cross_branch_check = check_cross_branch_imports(lines, module_path, file_branch_name, bypass_rules)

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -569,3 +569,48 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
         handlers.mkdir(parents=True)
         (handlers / "module_root.py").write_text("def module_file(:\n", encoding="utf-8")
         assert self._allowed(branch, "module_root") is False
+
+
+# -- the path a host hands the checker --------------------------------------
+
+
+class TestAWindowsPathIsReadLikeAPosixOne:
+    """Windows hands the checker C:\\...\\apps\\modules\\door.py, and the checker asked for "apps/modules/".
+
+    test_checklist's door row convicted encapsulation on Windows only (PR #774,
+    round two): the door was not seen as a module file, so its handler import
+    was judged as an entry point's. On Linux a file NAME may carry backslashes,
+    so the string Windows produces is reproduced exactly; the proof on Windows
+    itself is the next CI run.
+    """
+
+    _DOOR = (
+        '"""Door: memory\'s entry limits, for other branches."""\n\n'
+        "from aipass.memory.apps.handlers.json.entry_limits import check_file_budget, load_entry_limits\n\n"
+        '__all__ = ["load_entry_limits", "check_file_budget"]\n'
+    )
+
+    def test_a_door_under_a_backslashed_modules_path_passes(self, tmp_path, monkeypatch):
+        """Mutant: the separator normalisation dropped from check_module's module test — killed."""
+        door = tmp_path / "aipass\\memory\\apps\\modules\\door_entry_limits.py"
+        door.write_text(self._DOOR, encoding="utf-8")
+        # Windows infers the branch from Path.parts; a Linux file name has none to split.
+        monkeypatch.setattr(encapsulation_check, "get_branch_from_path", lambda fp: {"name": "memory", "path": "x"})
+
+        result = encapsulation_check.check_module(str(door))
+
+        assert [c["name"] for c in result["checks"] if not c["passed"]] == []
+
+    def test_the_same_door_outside_modules_is_still_convicted(self, tmp_path, monkeypatch):
+        """Control: an entry point under a backslashed apps path keeps the direct-import rule."""
+        entry = tmp_path / "aipass\\memory\\apps\\door_entry_limits.py"
+        entry.write_text(self._DOOR, encoding="utf-8")
+        monkeypatch.setattr(encapsulation_check, "get_branch_from_path", lambda fp: {"name": "memory", "path": "x"})
+
+        result = encapsulation_check.check_module(str(entry))
+
+        assert [c["name"] for c in result["checks"] if not c["passed"]] == ["Direct handler imports"]
+
+    def test_a_backslashed_handler_path_names_its_package(self):
+        """get_file_handler_package read the same slash; a Windows handler was no handler."""
+        assert get_file_handler_package("C:\\runner\\aipass\\memory\\apps\\handlers\\json\\entry_limits.py") == "json"

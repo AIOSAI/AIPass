@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_eviction_content.py
 # Description: Module Eviction Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -41,12 +41,26 @@ def get_module_eviction_standards() -> str:
         "  Every function in a test file - tests, fixtures, and helpers at",
         "  module, class or nested level - read on its own scope.",
         "",
-        "  [yellow]Two species:[/yellow]",
+        "  [yellow]Three species:[/yellow]",
         "  - [red]SYS_MODULES_EVICTION[/red] — [dim]sys.modules.pop(K)[/dim] or",
         "    [dim]del sys.modules[K][/dim]",
         "  - [red]PACKAGE_ATTRIBUTE_EVICTION[/red] — [dim]delattr(M, 'attr')[/dim]",
         "    where M is provably a module: bound from import_module,",
         "    __import__, sys.modules[...] or sys.modules.get, or by an import",
+        "  - [red]PARENT_ATTRIBUTE_REBIND[/red] — a fresh import (import_module,",
+        "    __import__, import, from-import) of a module evicted EARLIER in the",
+        "    same function, by any spelling including monkeypatch.delitem. The",
+        "    import sets the new module on the surviving parent package; every",
+        "    cache restore (monkeypatch, patch.dict, a finally, an autouse",
+        "    record) leaves that attribute changed. Read only when both the",
+        "    evicted key and the imported name resolve to literals (a string, a",
+        "    module constant, a for over a literal list, or a startswith prefix",
+        "    over sys.modules). Acquitted by a monkeypatch setattr/delattr of",
+        "    that leaf name BEFORE the import, a setattr / M.leaf = after it or",
+        "    in a finally, or a fixture teardown. An import inside",
+        "    pytest.raises binds nothing and is not read. importlib.reload is",
+        "    not a fresh import: it keeps the module object.",
+        "    Incident: PR #774, memory test_trinity_standard (3.10/3.11 rows)",
         "",
         "[bold cyan]WHAT IS NEVER FLAGGED:[/bold cyan]",
         "  - [green]monkeypatch recorded it first[/green] — setitem/delitem on",

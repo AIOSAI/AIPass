@@ -1,6 +1,6 @@
 # Dead Code Standard
-**Status:** v1.4
-**Date:** 2026-10-08
+**Status:** v1.5
+**Date:** 2026-10-10
 
 ---
 
@@ -40,7 +40,7 @@ For each collected file, the checker builds a search corpus from ALL `.py` conte
 | importlib.import_module | `import_module("...foo_handler")` |
 | Glob-based discovery | `glob("*_check.py")`, `glob("*.py")` |
 | Filename string literal | `"foo_handler.py"` in source |
-| Project config, dotted path only | `"aipass.branch.apps.handlers.foo.handle"` in the project's `.aipass/*.json`, the project root being the nearest directory at or above the branch holding a `*_REGISTRY.json` (since 2026-10-08: hooks names 28 handlers only there). A stem or filename in a json acquits nothing |
+| Project config, dotted path only | `"aipass.branch.apps.handlers.foo.handle"` in the project's `.aipass/*.json`, the project root being the nearest directory at or above the branch holding a `*_REGISTRY.json` (since 2026-10-08: hooks names 28 handlers only there), or the AIPass install, known as hooks' loader knows it: `.aipass/hooks.json` beside `src/aipass/` (since 2026-10-10: `AIPASS_REGISTRY.json` is git-ignored, so a clean checkout read hooks 88 where the seat read 100). A stem or filename in a json acquits nothing |
 
 ### Always Considered Used
 
@@ -102,7 +102,7 @@ from aipass.branch.apps.handlers.legacy import old_processor
 - **Threshold:** Score >= 75 to pass overall
 - A branch with 20/25 files referenced scores 80 (passes)
 - A branch with 15/25 files referenced scores 60 (fails)
-- The violation message lists up to 10 unreferenced files
+- The violation message lists up to 10 unreferenced files, each relative to `apps/` with forward slashes on every host (`handlers/x/y.py`, never `handlers\x\y.py`; since 2026-10-10, Windows CI)
 
 ---
 

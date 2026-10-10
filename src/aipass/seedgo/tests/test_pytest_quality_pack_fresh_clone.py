@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack_fresh_clone.py
 # Description: pytest_quality pack, fresh_clone checker pins (split from test_pytest_quality_pack.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/fresh_clone_check.py."""
@@ -1023,3 +1023,115 @@ class TestFreshCloneBranchCheck:
         assert len(result["violations"]) == 14
         assert message.count("::test_row_") == 12
         assert message.endswith("(+2 more)")
+
+
+#: api apps/modules/openrouter_client.py check_status(), minimised: the OpenAI SDK
+#: is the `llm` extra, imported inside the function behind except ImportError.
+_OPENROUTER_PRODUCT = """
+import sys
+
+
+def check_status():
+    print("Provider: OpenRouter")
+    try:
+        import openai  # noqa: F401
+
+        print("OpenAI SDK: available")
+    except ImportError:
+        print("OpenAI SDK not installed", file=sys.stderr)
+
+
+def get_cache_stats():
+    return {"cached_clients": 0}
+"""
+
+
+class TestFreshCloneOptionalExtra:
+    """OPTIONAL_EXTRA: a unit calls a product function whose extra import is guarded, so the host's install decides."""
+
+    def test_the_status_test_that_inherits_the_sdk_from_the_host_is_flagged(self, tmp_path):
+        """api tests/test_openrouter_client.py pre-1.0.1 (d77aeb44): no llm extra on CI, a second warning followed."""
+        _write(tmp_path, "apps/modules/openrouter_client.py", _OPENROUTER_PRODUCT)
+        _write(
+            tmp_path,
+            "tests/test_openrouter_client.py",
+            """
+            from aipass.api.apps.modules import openrouter_client
+
+
+            def test_check_status_no_key(capsys):
+                openrouter_client.check_status()
+                _out, err = capsys.readouterr()
+                assert err.splitlines() == ["API key not configured"]
+
+
+            def test_the_cache_is_empty():
+                assert openrouter_client.get_cache_stats() == {"cached_clients": 0}
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        rows = [(row["nodeid"], row["line"], row["species"]) for row in result["violations"]]
+        assert rows == [("tests/test_openrouter_client.py::test_check_status_no_key", 5, "OPTIONAL_EXTRA")]
+        assert "openai" in result["violations"][0]["detail"]
+
+    def test_a_unit_that_sets_the_module_entry_or_skips_on_its_absence_is_acquitted(self, tmp_path):
+        """The cure: the test sets sys.modules['openai'] itself; importorskip is the other honest answer."""
+        _write(tmp_path, "apps/modules/openrouter_client.py", _OPENROUTER_PRODUCT)
+        _write(
+            tmp_path,
+            "tests/test_openrouter_client.py",
+            """
+            import sys
+            import types
+
+            import pytest
+
+            from aipass.api.apps.modules import openrouter_client
+
+
+            @pytest.mark.parametrize("sdk", [types.ModuleType("openai"), None])
+            def test_check_status_no_key(sdk, capsys, monkeypatch):
+                monkeypatch.setitem(sys.modules, "openai", sdk)
+                openrouter_client.check_status()
+                assert capsys.readouterr().err
+
+
+            def test_check_status_with_the_sdk(capsys):
+                pytest.importorskip("openai")
+                openrouter_client.check_status()
+                assert "available" in capsys.readouterr().out
+            """,
+        )
+
+        assert fresh_clone_check.check_branch(str(tmp_path))["violations"] == []
+
+    def test_a_sibling_that_names_the_extra_does_not_acquit_a_unit_that_does_not(self, tmp_path):
+        """api test_check_status_with_key today: the file names openai in its sibling, this unit inherits the host."""
+        _write(tmp_path, "apps/modules/openrouter_client.py", _OPENROUTER_PRODUCT)
+        _write(
+            tmp_path,
+            "tests/test_openrouter_client.py",
+            """
+            import sys
+
+            from aipass.api.apps.modules.openrouter_client import check_status
+
+
+            def test_check_status_no_key(monkeypatch):
+                monkeypatch.setitem(sys.modules, "openai", None)
+                check_status()
+
+
+            def test_check_status_with_key(capsys):
+                check_status()
+                assert "Provider" in capsys.readouterr().out
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert [row["nodeid"] for row in result["violations"]] == [
+            "tests/test_openrouter_client.py::test_check_status_with_key"
+        ]

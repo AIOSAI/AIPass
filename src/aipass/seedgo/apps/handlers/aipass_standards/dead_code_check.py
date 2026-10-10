@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-22
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -21,7 +21,7 @@ Score: referenced_files / total_files * 100, threshold 75%.
 """
 
 import re
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -40,6 +40,12 @@ _EXTRA_SKIP_DIRS = frozenset({"tests", "json_templates"})
 
 #: A project root holds one of these; hooks' config loader reads the same marker.
 _PROJECT_MARKER = "*_REGISTRY.json"
+
+#: The AIPass install holds both, and hooks' loader (aipass_home) knows it by them
+#: alone: AIPASS_REGISTRY.json is git-ignored, so a clean checkout has no marker
+#: and dead_code read hooks 88 in CI where the seat read 100 (addendum d13d7c68 B).
+_INSTALL_CONFIG = Path(".aipass") / "hooks.json"
+_INSTALL_SOURCE = Path("src") / "aipass"
 
 
 def _is_shaped_door(py_file: Path) -> bool:
@@ -116,11 +122,14 @@ def _project_config_text(branch_root: Path) -> str:
     """The project's ``.aipass/*.json`` text, read-only, or "" outside a project.
 
     The project root is the nearest directory at or above the branch holding a
-    ``*_REGISTRY.json``. Only a dotted module path in this text is a reference
-    (``_named_in_config``): a stem in a plan log or a per-feature json is not.
+    ``*_REGISTRY.json``, or the AIPass install (``.aipass/hooks.json`` beside
+    ``src/aipass/``), so a clean checkout reads what the seat reads. Only a
+    dotted module path in this text is a reference (``_named_in_config``): a
+    stem in a plan log or a per-feature json is not.
     """
     for root in (branch_root.resolve(), *branch_root.resolve().parents):
-        if not any(root.glob(_PROJECT_MARKER)):
+        is_install = (root / _INSTALL_CONFIG).is_file() and (root / _INSTALL_SOURCE).is_dir()
+        if not (is_install or any(root.glob(_PROJECT_MARKER))):
             continue
         chunks: list[str] = []
         for config in sorted((root / ".aipass").glob("*.json")):
@@ -303,6 +312,15 @@ def _branch_relative(target: Path, branch_root: Path) -> str:
         return target.as_posix()
 
 
+def reported_path(path: PurePath, root: PurePath) -> str:
+    """The path from root as the finding prints it: ``handlers/x.py``, forward slashes on every host.
+
+    Raises:
+        ValueError: path is not below root.
+    """
+    return path.relative_to(root).as_posix()
+
+
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """
     Check a branch for dead code (unreferenced modules and handlers).
@@ -400,16 +418,16 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         if not used:
             # Check per-file bypass
             try:
-                rel = target.relative_to(apps_dir)
+                rel = reported_path(target, apps_dir)
             except ValueError:
                 logger.info("File %s not relative to apps dir, using full path", target)
-                rel = target
+                rel = target.as_posix()
             # The rule is matched against the BRANCH-relative path (apps/...), the
             # spelling every other checker is handed and dead_rules reads. Matched
             # against "handlers/..." alone, a row written "apps/handlers/..."
             # silenced nothing and nobody was told (hooks, 1.4.0).
             if not is_bypassed(_branch_relative(target, bp), "dead_code", bypass_rules=bypass_rules):
-                dead_files.append(str(rel))
+                dead_files.append(rel)
 
     referenced_files = total_files - len(dead_files)
     score = int(referenced_files / total_files * 100) if total_files > 0 else 100

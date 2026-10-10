@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: diagnostics_check.py
 # Description: Diagnostics Orchestrator
-# Version: 2.1.1
+# Version: 2.1.2
 # Created: 2026-03-05
-# Modified: 2026-10-02
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -29,8 +29,6 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import audit_ignore_match
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.module_root import module_file
-
-console = Console()
 
 AUDIT_SCOPE = "branch_level"
 
@@ -565,6 +563,9 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+
+    # Built when run, not at import: Rich fixes colour in __init__ (windows_compat 1.5.0, cli b6655280)
+    console = Console()
 
     # CLI usage: drone @seedgo diagnostics [file_or_directory]
     if len(sys.argv) < 2:

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
@@ -18,7 +18,7 @@
 # seedgo: no-test-needed(stdlib) — tokenize's own error classes; the fallback they trigger is pinned via check_branch
 
 import tokenize
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 from types import SimpleNamespace
@@ -37,6 +37,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
 )
 from aipass.seedgo.apps.handlers.aipass_standards.dead_code_check import (
     check_branch as dead_code_check_branch,
+    reported_path as dead_code_reported_path,
 )
 from aipass.seedgo.apps.handlers.aipass_standards.unused_function_check import (
     check_branch as unused_function_check_branch,
@@ -769,7 +770,7 @@ class TestDeadCodeReadsTheProjectConfig:
 
     HANDLERS = ("lifecycle/boot.py", "security/gate.py")
 
-    def _project(self, tmp_path, config, registry=True):
+    def _project(self, tmp_path, config, registry=True, config_name="x.json"):
         project = tmp_path / "proj"
         branch = project / "src" / "aipass" / "mybranch"
         _make_branch(branch)
@@ -778,8 +779,15 @@ class TestDeadCodeReadsTheProjectConfig:
             _write_file(branch / "apps" / "handlers" / handler, "def handle(data):\n    return data\n")
         if registry:
             _write_file(project / "PROJ_REGISTRY.json", "{}")
-        _write_file(project / ".aipass" / "x.json", config)
+        _write_file(project / ".aipass" / config_name, config)
         return branch
+
+    @pytest.mark.parametrize("registry", [True, False], ids=["seat", "clean_checkout"])
+    def test_the_install_config_references_a_handler_with_or_without_the_registry(self, tmp_path, registry):
+        """AIPASS_REGISTRY.json is git-ignored: CI read hooks 88 where the seat read 100 (addendum d13d7c68 B)."""
+        config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot.handle"}'
+        branch = self._project(tmp_path, config, registry=registry, config_name="hooks.json")
+        assert _dead(branch) == ["handlers/security/gate.py"]
 
     def test_a_dotted_path_in_the_config_references_a_handler_and_a_stem_does_not(self, tmp_path):
         config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot.handle", "b": "gate"}'
@@ -818,3 +826,11 @@ class TestASkipNamedPackageIsSource:
         branch = self._commons_shape(tmp_path)
         _write_file(branch / "apps" / "handlers" / ".archive" / "old_ops.py", "def retired():\n    return 1\n")
         assert _dead(branch) == ["handlers/artifacts/trade_ops.py"]
+
+
+class TestDeadCodeReportsAForwardSlashPath:
+    """Windows CI printed 'handlers\\\\security\\\\gate.py' where the oracles read a slash (addendum d13d7c68 D)."""
+
+    def test_a_windows_shaped_path_is_reported_with_forward_slashes(self):
+        target = PureWindowsPath("C:/proj/apps/handlers/security/gate.py")
+        assert dead_code_reported_path(target, PureWindowsPath("C:/proj/apps")) == "handlers/security/gate.py"

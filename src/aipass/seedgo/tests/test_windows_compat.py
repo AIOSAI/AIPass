@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_windows_compat.py
 # Description: Tests for windows_compat_check.py
-# Version: 1.0.1
+# Version: 1.2.0
 # Created: 2026-05-14
-# Modified: 2026-09-27
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/windows_compat_check.py."""
@@ -457,7 +457,8 @@ def test_rich_entry_with_getattr_reconfigure_passes(tmp_path):
 
 def test_rich_non_entry_passes(tmp_path):
     f = tmp_path / "helper.py"
-    f.write_text("from rich.console import Console\nc = Console()\nc.print('hi')\n", encoding="utf-8")
+    # The console is built at call time: a module-level Console() is the import-time colour row below.
+    f.write_text("from rich.console import Console\n\ndef show():\n    Console().print('hi')\n", encoding="utf-8")
     result = check_module(str(f))
     assert result["passed"] is True
 
@@ -704,13 +705,14 @@ def test_lock_race_advisory_corpus_is_apps_only(tmp_path):
     assert check_branch_info(str(tmp_path)) == []
 
 
-def test_lock_race_advisory_respects_line_bypass(tmp_path):
+def test_lock_race_advisory_respects_line_bypass(tmp_path, monkeypatch):
     branch = _advisory_branch(tmp_path, _INCIDENT_LOCK)
-    windows_compat_check.load_bypass_rules.return_value = [
-        {"file": "apps/handlers/lock.py", "standard": "windows_compat", "lines": [7], "reason": "test"}
-    ]
+    rules = MagicMock(
+        return_value=[{"file": "apps/handlers/lock.py", "standard": "windows_compat", "lines": [7], "reason": "test"}]
+    )
+    monkeypatch.setattr(windows_compat_check, "load_bypass_rules", rules)
     assert check_branch_info(str(branch)) == []
-    windows_compat_check.load_bypass_rules.assert_called_once_with(str(branch))
+    rules.assert_called_once_with(str(branch))
 
 
 # ===========================================================================
@@ -839,11 +841,12 @@ def test_mock_repr_advisory_line_reads_tests_and_never_scores(tmp_path):
     assert check_module(str(branch / "tests" / "test_lock.py"))["score"] == 100
 
 
-def test_mock_repr_advisory_respects_line_bypass(tmp_path):
+def test_mock_repr_advisory_respects_line_bypass(tmp_path, monkeypatch):
     branch = _advisory_branch(tmp_path, _INCIDENT_REPR, rel="tests/test_lock.py")
-    windows_compat_check.load_bypass_rules.return_value = [
-        {"file": "tests/test_lock.py", "standard": "windows_compat", "lines": [5], "reason": "test"}
-    ]
+    rules = MagicMock(
+        return_value=[{"file": "tests/test_lock.py", "standard": "windows_compat", "lines": [5], "reason": "test"}]
+    )
+    monkeypatch.setattr(windows_compat_check, "load_bypass_rules", rules)
     assert check_branch_info(str(branch)) == []
 
 
@@ -910,3 +913,238 @@ def test_mock_repr_helper_returns_read_by_kind_not_by_call(tmp_path):
         "    assert str(obj._lock(tmp_path)) in logged\n"
     )
     assert [line for line, _ in _repr_paths(tmp_path, source)] == [18, 20, 24]
+
+
+# ===========================================================================
+# Deferred platform-only import (devpulse a831fe55, PR #774 CI run 38068553235)
+# ===========================================================================
+
+# Minimised from devpulse apps/handlers/watchdog/registry.py 1.1.0 (_FileLock):
+# fcntl imported at call time under sys.platform != 'win32'; a test that pretends
+# darwin made the Windows runner import a module it does not have.
+_DEFERRED_FCNTL = (
+    "import sys\n"
+    "\n"
+    "class _FileLock:\n"
+    "    def __enter__(self):\n"
+    "        if sys.platform != 'win32':\n"
+    "            import fcntl\n"
+    "\n"
+    "            self._fh = open(self._lock_path, 'a+', encoding='utf-8')\n"
+    "            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)\n"
+    "        return self\n"
+    "\n"
+    "    def __exit__(self, exc_type, exc, tb):\n"
+    "        if sys.platform != 'win32' and self._fh is not None:\n"
+    "            import fcntl\n"
+    "\n"
+    "            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)\n"
+)
+
+# registry.py 1.1.1, the cure: one module-level binding, None (logged) where absent.
+_BOUND_FCNTL = (
+    "import logging\n"
+    "\n"
+    "logger = logging.getLogger(__name__)\n"
+    "\n"
+    "try:\n"
+    "    import fcntl\n"
+    "except ImportError as exc:\n"
+    "    fcntl = None\n"
+    "    logger.info('fcntl absent: %s', exc)\n"
+    "\n"
+    "class _FileLock:\n"
+    "    def __enter__(self):\n"
+    "        if fcntl is not None:\n"
+    "            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)\n"
+    "        return self\n"
+)
+
+
+def _module_result(tmp_path, source, name="registry.py"):
+    f = tmp_path / name
+    f.write_text(source, encoding="utf-8")
+    return check_module(str(f))
+
+
+def test_deferred_platform_import_under_a_platform_condition_convicted(tmp_path):
+    result = _module_result(tmp_path, _DEFERRED_FCNTL)
+    message = result["checks"][0]["message"]
+    assert result["passed"] is False
+    assert message.startswith("2 unguarded POSIX pattern(s)"), message
+    assert "L6: import fcntl inside __enter__()" in message
+    assert "L14: import fcntl inside __exit__()" in message
+
+
+def test_deferred_platform_import_cure_module_level_binding_is_acquitted(tmp_path):
+    result = _module_result(tmp_path, _BOUND_FCNTL)
+    assert result["passed"] is True, result["checks"][0]["message"]
+
+
+def test_module_level_platform_gated_import_stays_acquitted(tmp_path):
+    source = "import sys\nif sys.platform == 'win32':\n    import msvcrt\nelse:\n    import fcntl\n"
+    result = _module_result(tmp_path, source, "inbox_lock.py")
+    assert result["passed"] is True, result["checks"][0]["message"]
+
+
+def test_windows_only_module_deferred_into_a_function_convicted(tmp_path):
+    source = (
+        "def _try_lock_win32(lock_file, msvcrt_module=None):\n"
+        "    if msvcrt_module is None:\n"
+        "        import msvcrt as msvcrt_module\n"
+        "    return msvcrt_module\n"
+        "\n"
+        "def _hive():\n"
+        "    from winreg import HKEY_CURRENT_USER\n"
+        "    return HKEY_CURRENT_USER\n"
+    )
+    message = _module_result(tmp_path, source, "config.py")["checks"][0]["message"]
+    assert "L3: import msvcrt inside _try_lock_win32()" in message
+    assert "L7: from winreg import ... inside _hive()" in message
+
+
+def test_deferred_platform_import_inside_try_importerror_is_acquitted(tmp_path):
+    source = (
+        "import sys\n"
+        "\n"
+        "def lock(fh):\n"
+        "    if sys.platform != 'win32':\n"
+        "        try:\n"
+        "            import fcntl\n"
+        "        except ImportError:\n"
+        "            return\n"
+        "        fcntl.flock(fh, fcntl.LOCK_EX)\n"
+    )
+    assert _module_result(tmp_path, source)["passed"] is True
+
+
+def test_unguarded_function_level_fcntl_reported_once(tmp_path):
+    message = _module_result(tmp_path, "def lock(fh):\n    import fcntl\n    fcntl.flock(fh, 2)\n")["checks"][0][
+        "message"
+    ]
+    assert message == "1 unguarded POSIX pattern(s): L2: import fcntl"
+
+
+# ===========================================================================
+# Console colour pinned at import (cli b6655280, PR #774 CI run 38068553235)
+# ===========================================================================
+
+# Minimised from cli apps/modules/display.py 0.5.2: isatty() read once at import,
+# and both consoles built from it. A conftest imported display while pytest's
+# capture was suspended; on a Windows xdist worker stdout is NUL, isatty() said
+# True, and every later capture carried escape codes (380 of 518 Windows rows).
+_PINNED_DISPLAY = (
+    "import sys\n"
+    "from rich.console import Console\n"
+    "\n"
+    "_IS_TTY = sys.stdout.isatty()\n"
+    "\n"
+    "CONSOLE = Console(force_terminal=_IS_TTY)\n"
+    "console = CONSOLE\n"
+    "err_console = Console(stderr=True, force_terminal=sys.stderr.isatty())\n"
+)
+
+# display.py 0.5.3, the cure: a Console subclass that re-detects colour per print.
+_LIVE_DISPLAY = (
+    "from rich.console import Console\n"
+    "\n"
+    "class _LiveConsole(Console):\n"
+    "    @property\n"
+    "    def _color_system(self):\n"
+    "        return self._detect_color_system()\n"
+    "\n"
+    "    @_color_system.setter\n"
+    "    def _color_system(self, _value):\n"
+    "        pass\n"
+    "\n"
+    "CONSOLE = _LiveConsole()\n"
+    "console = CONSOLE\n"
+    "err_console = _LiveConsole(stderr=True)\n"
+)
+
+
+def _stream_rows(tmp_path, source, name="display.py"):
+    return _module_result(tmp_path, source, name)["checks"][0]["message"]
+
+
+def test_console_pinned_at_import_incident_shape_convicted(tmp_path):
+    result = _module_result(tmp_path, _PINNED_DISPLAY, "display.py")
+    message = result["checks"][0]["message"]
+    assert result["passed"] is False
+    assert message.startswith("3 unguarded POSIX pattern(s)"), message
+    assert "L4: isatty() read at import" in message
+    assert "L6: module-level Console() fixes its colour at import" in message
+    assert "L8: module-level Console() fixes its colour at import" in message
+
+
+def test_console_deciding_colour_per_print_cure_is_acquitted(tmp_path):
+    result = _module_result(tmp_path, _LIVE_DISPLAY, "display.py")
+    assert result["passed"] is True, result["checks"][0]["message"]
+
+
+def test_plain_module_level_console_convicted(tmp_path):
+    """Rich runs _detect_color_system() in __init__: an unset force_terminal still pins it."""
+    source = "from rich.console import Console as _Console\n\nconsole = _Console()\n"
+    assert "L3: module-level _Console() fixes its colour" in _stream_rows(tmp_path, source, "diagnostics_check.py")
+
+
+def test_console_subclass_that_keeps_the_init_answer_convicted(tmp_path):
+    source = "import rich.console\n\nclass Quiet(rich.console.Console):\n    pass\n\nOUT = Quiet()\n"
+    assert "L6: module-level Quiet() fixes its colour" in _stream_rows(tmp_path, source)
+
+
+def test_console_with_an_explicit_colour_decision_is_acquitted(tmp_path):
+    source = (
+        "import io\n"
+        "from rich.console import Console\n"
+        "\n"
+        "BUFFER = Console(file=io.StringIO())\n"
+        "PLAIN = Console(force_terminal=False)\n"
+        "NO_COLOUR = Console(color_system=None)\n"
+    )
+    assert _module_result(tmp_path, source)["passed"] is True
+
+
+def test_console_bound_to_the_import_time_stream_convicted(tmp_path):
+    source = "import sys\nfrom rich.console import Console\n\nOUT = Console(file=sys.stdout)\n"
+    assert "L4: module-level Console() fixes its colour" in _stream_rows(tmp_path, source)
+
+
+def test_console_built_at_call_time_fallback_or_main_is_acquitted(tmp_path):
+    """A function body, a cross-branch ImportError fallback and a script's main run no Console at import."""
+    source = (
+        "try:\n"
+        "    from aipass.cli.apps.modules import console\n"
+        "except ImportError:\n"
+        "    from rich.console import Console\n"
+        "    console = Console()\n"
+        "\n"
+        "def render():\n"
+        "    from rich.console import Console\n"
+        "    return Console()\n"
+        "\n"
+        "if __name__ == '__main__':\n"
+        "    import sys\n"
+        "    from rich.console import Console\n"
+        "    sys.stdout.reconfigure(encoding='utf-8')\n"
+        "    Console().print('demo')\n"
+    )
+    assert _module_result(tmp_path, source, "feed.py")["passed"] is True
+
+
+def test_terminal_size_cached_into_a_constant_convicted(tmp_path):
+    source = (
+        "import shutil\n"
+        "\n"
+        "WIDTH = shutil.get_terminal_size().columns\n"
+        "\n"
+        "def width():\n"
+        "    return shutil.get_terminal_size()\n"
+    )
+    message = _stream_rows(tmp_path, source, "layout.py")
+    assert message == "1 unguarded POSIX pattern(s): L3: get_terminal_size() read at import -- read it when you print"
+
+
+def test_console_pinned_at_import_not_read_in_tests(tmp_path):
+    (tmp_path / "tests").mkdir()
+    assert _module_result(tmp_path / "tests", _PINNED_DISPLAY, "conftest.py")["passed"] is True

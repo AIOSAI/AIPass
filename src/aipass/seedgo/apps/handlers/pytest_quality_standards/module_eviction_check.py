@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_eviction_check.py
 # Description: v5 - a test that evicts a cached module and does not put it back
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-10-10
 # =============================================
 
 """Does this test leave the import cache the way it found it?
@@ -56,6 +56,26 @@ WHAT COUNTS AS AN EVICTION:
 
   `monkeypatch.delitem(sys.modules, ...)` and `monkeypatch.delattr(...)` are
   never evictions here. They are the cure.
+
+THE THIRD SPECIES, PARENT_ATTRIBUTE_REBIND (1.1.0, PR #774). memory's
+test_trinity_standard evicted every `handlers.json*` key with
+`monkeypatch.delitem` and re-imported `handlers.json.memory_files`. The fresh
+import set the NEW json package as the attribute of the surviving
+`aipass.memory.apps.handlers`; teardown restored sys.modules only. On 3.10/3.11
+a dotted `mock.patch` walks package attributes (`mock._importer`), on 3.12+ it
+reads sys.modules, so later string patches landed on the new module while the
+product read the old one: two rows on 3.10/3.11 only. Read: every cache
+removal in the function (`del`, `.pop`, and `<mp>.delitem(sys.modules, K)`)
+whose key resolves to literal names or to a literal `startswith` prefix over
+`sys.modules`, then every later fresh import with a literal name. The first
+evicted package on the imported path whose own parent survived is the rebound
+attribute. Acquitted by a monkeypatch `setattr`/`delattr` of that leaf name
+before the import (the cure on disk), a `setattr`/`M.leaf =` after it or in a
+`finally`, a fixture teardown, or the import sitting inside `pytest.raises`
+(a failed import binds nothing). Every cache restore - monkeypatch,
+`patch.dict`, a `finally`, an autouse record - leaves the attribute changed,
+so none of them acquits this species. `importlib.reload` keeps the module
+object and is not read.
 
 WHAT ACQUITS A SITE:
 
@@ -145,6 +165,9 @@ SYS_MODULES: str = "sys.modules"
 #: module, and a finding says which one was left changed.
 SPECIES_CACHE: str = "SYS_MODULES_EVICTION"
 SPECIES_ATTRIBUTE: str = "PACKAGE_ATTRIBUTE_EVICTION"
+#: The third: a fresh import after a cache eviction sets the new module on the
+#: surviving parent package, which a cache-only restore never puts back.
+SPECIES_REBIND: str = "PARENT_ATTRIBUTE_REBIND"
 
 #: Calls whose result can only be a module (or None), so a name bound from one
 #: is provably a module.
@@ -593,8 +616,282 @@ def _recorded_by_autouse(eviction: Eviction, nodes: List[ast.AST], facts: FileFa
 # =============================================================================
 
 
+# =============================================================================
+# THE THIRD SPECIES - A RE-IMPORT REBINDS THE PARENT'S ATTRIBUTE
+# =============================================================================
+
+
+def _string_value(node: Optional[ast.AST], facts: FileFacts) -> str:
+    """A string literal, or a module-level string constant by name, else ""."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return facts.strings.get(node.id, "")
+    return ""
+
+
+def _reads_sys_modules(node: ast.AST) -> bool:
+    """True for `sys.modules`, `sys.modules.keys()`, or `list(...)` / `tuple(...)` of either."""
+    if corpus.dotted_name(node) == SYS_MODULES:
+        return True
+    if not isinstance(node, ast.Call):
+        return False
+    dotted = corpus.dotted_name(node.func)
+    if dotted == SYS_MODULES + ".keys":
+        return True
+    return dotted in ("list", "tuple", "sorted") and len(node.args) == 1 and _reads_sys_modules(node.args[0])
+
+
+def _startswith_prefixes(test: ast.AST, variable: str, facts: FileFacts) -> Set[str]:
+    """The literal prefixes of every `variable.startswith(P)` inside one filter expression."""
+    prefixes: Set[str] = set()
+    for node in ast.walk(test):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or not node.args:
+            continue
+        if node.func.attr != "startswith" or not isinstance(node.func.value, ast.Name):
+            continue
+        if node.func.value.id != variable:
+            continue
+        argument = node.args[0]
+        parts = argument.elts if isinstance(argument, ast.Tuple) else [argument]
+        prefixes.update(value for value in (_string_value(part, facts) for part in parts) if value)
+    return prefixes
+
+
+def key_prefixes(key: ast.expr, nodes: List[ast.AST], facts: FileFacts) -> Set[str]:
+    """The prefixes a loop key over `sys.modules` was filtered by, or an empty set.
+
+    Two spellings, both one hop: `for k in [n for n in sys.modules if
+    n.startswith(P)]` (memory's specimen), and `for k in list(sys.modules):`
+    with an `if k.startswith(P):` in the loop body.
+    """
+    if not isinstance(key, ast.Name):
+        return set()
+    prefixes: Set[str] = set()
+    for node in nodes:
+        if not isinstance(node, ast.For) or not isinstance(node.target, ast.Name) or node.target.id != key.id:
+            continue
+        source = node.iter
+        if isinstance(source, ast.Call) and corpus.dotted_name(source.func) in ("list", "tuple", "sorted"):
+            source = source.args[0] if source.args else source
+        if isinstance(source, (ast.ListComp, ast.GeneratorExp, ast.SetComp)):
+            prefixes |= _comprehension_prefixes(source, facts)
+        elif _reads_sys_modules(source):
+            guards = [statement.test for statement in node.body if isinstance(statement, ast.If)]
+            prefixes.update(*(_startswith_prefixes(test, key.id, facts) for test in guards))
+    return prefixes
+
+
+def _comprehension_prefixes(source: Union[ast.ListComp, ast.GeneratorExp, ast.SetComp], facts: FileFacts) -> Set[str]:
+    """The prefixes of `[n for n in sys.modules if n.startswith(P)]`, or an empty set for any other shape."""
+    if len(source.generators) != 1:
+        return set()
+    generator = source.generators[0]
+    element = source.elt
+    if not _reads_sys_modules(generator.iter) or not isinstance(generator.target, ast.Name):
+        return set()
+    if not isinstance(element, ast.Name) or element.id != generator.target.id:
+        return set()
+    prefixes: Set[str] = set()
+    for condition in generator.ifs:
+        prefixes |= _startswith_prefixes(condition, element.id, facts)
+    return prefixes
+
+
+@dataclass
+class CacheClear:
+    """One `sys.modules` key removal, through monkeypatch or bare, with what its key stands for."""
+
+    line: int
+    column: int
+    names: Set[str]
+    prefixes: Set[str]
+
+    def covers(self, dotted: str) -> bool:
+        """True when this removal took the module named `dotted` out of the cache."""
+        return dotted in self.names or any(dotted.startswith(prefix) for prefix in self.prefixes)
+
+
+def cache_clears_in(nodes: List[ast.AST], facts: FileFacts) -> List[CacheClear]:
+    """Every `sys.modules` key removal in one scope whose key resolves to literal names or prefixes.
+
+    `monkeypatch.delitem(sys.modules, K)` counts here, unlike in the first
+    species: it restores the cache entry and nothing else, and the attribute a
+    re-import rebinds on the parent package is the part it never saw.
+    """
+    found: List[CacheClear] = []
+    for node in nodes:
+        if not isinstance(node, (ast.Delete, ast.Call)):
+            continue
+        for key in _cleared_keys(node):
+            names = key_strings(key, nodes, facts)
+            prefixes = key_prefixes(key, nodes, facts)
+            if names or prefixes:
+                found.append(CacheClear(node.lineno, node.col_offset, names, prefixes))
+    return found
+
+
+def _cleared_keys(node: Union[ast.Delete, ast.Call]) -> List[ast.expr]:
+    """The key expressions one `del sys.modules[K]`, `sys.modules.pop(K)` or `<mp>.delitem(sys.modules, K)` removes."""
+    if isinstance(node, ast.Delete):
+        return [t.slice for t in node.targets if isinstance(t, ast.Subscript) and _is_sys_modules(t.value)]
+    if not node.args:
+        return []
+    if corpus.dotted_name(node.func) == "sys.modules.pop":
+        return [node.args[0]]
+    is_delitem = isinstance(node.func, ast.Attribute) and node.func.attr == "delitem"
+    if is_delitem and len(node.args) >= 2 and _is_sys_modules(node.args[0]):
+        return [node.args[1]]
+    return []
+
+
+def _is_sys_modules(node: ast.AST) -> bool:
+    """True for `sys.modules` itself."""
+    return corpus.dotted_name(node) == SYS_MODULES
+
+
+def _imported_names(node: ast.AST, facts: FileFacts) -> List[str]:
+    """The dotted module names a statement or call imports fresh, when literal; else [].
+
+    `importlib.import_module(N)` / `import_module(N)` / `__import__(N)` with a
+    literal or module-constant N, `import a.b.c`, and `from a.b import c`
+    (which may import `a.b.c`). `importlib.reload` is not here: it re-executes
+    the same module object in place, and the parent's attribute keeps it.
+    """
+    if isinstance(node, ast.Call) and node.args:
+        if corpus.dotted_name(node.func) in ("importlib.import_module", "import_module", "__import__"):
+            value = _string_value(node.args[0], facts)
+            return [value] if value and not value.startswith(".") else []
+        return []
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    if isinstance(node, ast.ImportFrom) and node.module and not node.level:
+        return [node.module] + [f"{node.module}.{alias.name}" for alias in node.names if alias.name != "*"]
+    return []
+
+
+def _rebound_parent(dotted: str, clears: List[CacheClear]) -> Optional[Tuple[str, str, CacheClear]]:
+    """The (parent, leaf, clear) a fresh import of `dotted` rebinds, or None.
+
+    The import re-executes every evicted package on its path; the first one
+    whose own parent survived is set as an attribute on that surviving parent.
+    A top-level name has no parent package and rebinds nothing.
+    """
+    parts = dotted.split(".")
+    for depth in range(1, len(parts) + 1):
+        candidate = ".".join(parts[:depth])
+        for clear in clears:
+            if clear.covers(candidate):
+                return (".".join(parts[: depth - 1]), parts[depth - 1], clear) if depth > 1 else None
+    return None
+
+
+def _attribute_pinned(leaf: str, before: Tuple[int, int], nodes: List[ast.AST]) -> bool:
+    """True when monkeypatch recorded an attribute named `leaf` before the given position."""
+    for node in nodes:
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or len(node.args) < 2:
+            continue
+        if node.func.attr not in RECORDING_ATTR_METHODS or (node.lineno, node.col_offset) >= before:
+            continue
+        second = node.args[1]
+        if isinstance(second, ast.Constant) and second.value == leaf:
+            return True
+    return False
+
+
+def _attribute_restored(leaf: str, after: int, nodes: List[ast.AST], finally_ids: Set[int]) -> bool:
+    """True for `setattr(M, "leaf", ...)` or `M.leaf = ...` after the import or in a finally."""
+    for node in nodes:
+        if getattr(node, "lineno", -1) <= after and id(node) not in finally_ids:
+            continue
+        if isinstance(node, ast.Call) and corpus.dotted_name(node.func) == "setattr" and len(node.args) >= 2:
+            if isinstance(node.args[1], ast.Constant) and node.args[1].value == leaf:
+                return True
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == leaf for t in node.targets):
+            return True
+    return False
+
+
+def _inside_pytest_raises(nodes: List[ast.AST]) -> Set[int]:
+    """Ids of every node inside a `with pytest.raises(...)` body.
+
+    An import the test expects to raise binds nothing: the parent attribute is
+    set only after the child module finished executing. Measured on the fleet:
+    spawn's `test_the_denier_actually_denies` evicts `aipass.memory*` and
+    re-imports it under a meta-path denier inside `pytest.raises`.
+    """
+    inside: Set[int] = set()
+    for node in nodes:
+        if not isinstance(node, (ast.With, ast.AsyncWith)):
+            continue
+        for item in node.items:
+            call = item.context_expr
+            if isinstance(call, ast.Call) and corpus.dotted_name(call.func).rsplit(".", 1)[-1] == "raises":
+                inside.update(id(child) for statement in node.body for child in ast.walk(statement))
+    return inside
+
+
+def rebinds_in(
+    function: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+    facts: Optional[FileFacts] = None,
+) -> List[Eviction]:
+    """Every fresh import after a cache eviction that rebinds a parent attribute nothing pinned.
+
+    EXACT OR SILENT. Both the evicted key and the imported name must resolve to
+    literal names (or a literal `startswith` prefix over `sys.modules`) in this
+    function or as module-level constants, and the import must sit after the
+    eviction. Acquitted by a monkeypatch `setattr`/`delattr` of an attribute of
+    that leaf name made BEFORE the eviction, an explicit `setattr`/assignment of
+    it after the import or in a `finally`, or a fixture teardown after its yield.
+    `patch.dict(sys.modules)` acquits nothing here: it restores the dict only.
+    """
+    known = facts or FileFacts()
+    nodes = own_nodes(function)
+    clears = cache_clears_in(nodes, known)
+    if not clears or teardown_after_yield(function, nodes):
+        return []
+    finally_ids = _in_a_finally(nodes)
+    expected_to_fail = _inside_pytest_raises(nodes)
+    found: List[Eviction] = []
+    seen: Set[Tuple[int, str]] = set()
+    for node in nodes:
+        if id(node) in expected_to_fail:
+            continue
+        position = (getattr(node, "lineno", -1), getattr(node, "col_offset", -1))
+        for dotted in _imported_names(node, known):
+            earlier = [c for c in clears if (c.line, c.column) < position]
+            rebound = _rebound_parent(dotted, earlier)
+            if rebound is None:
+                continue
+            parent, leaf, clear = rebound
+            if (position[0], leaf) in seen:
+                continue
+            if _attribute_pinned(leaf, position, nodes):
+                continue
+            if _attribute_restored(leaf, position[0], nodes, finally_ids):
+                continue
+            seen.add((position[0], leaf))
+            found.append(
+                Eviction(
+                    SPECIES_REBIND,
+                    node,
+                    position[0],
+                    position[1],
+                    ast.Constant(parent),
+                    ast.Constant(leaf),
+                    f"{parent}.{leaf} rebound by importing {dotted} after line {clear.line}",
+                )
+            )
+    return found
+
+
 def _describe(eviction: Eviction) -> str:
     """One site, as the clause a finding quotes."""
+    if eviction.species == SPECIES_REBIND and eviction.attr is not None:
+        return (
+            f"line {eviction.line} re-import leaves {eviction.spelling}: pin "
+            f"monkeypatch.setattr(<{_text(eviction.target)}>, {_text(eviction.attr)}, ...) before the eviction"
+        )
     if eviction.species == SPECIES_ATTRIBUTE and eviction.attr is not None:
         return f"line {eviction.line} delattr({_text(eviction.target)}, {_text(eviction.attr)})"
     if eviction.spelling == "del sys.modules":
@@ -654,22 +951,44 @@ def find_unrestored(scanned: corpus.Corpus) -> List[Dict]:
         facts = file_facts(parsed.tree)
         for qualname, function in functions_in(parsed.tree):
             left = unrestored_in(function, facts)
-            if not left:
+            rebound = rebinds_in(function, facts)
+            if not left and not rebound:
                 continue
+            first = min(left + rebound, key=lambda e: (e.line, e.column))
             rows.append(
                 {
                     "nodeid": f"{parsed.relpath}::{qualname}",
-                    "line": left[0].line,
-                    "species": left[0].species,
-                    "detail": (
-                        "; ".join(_describe(e) for e in left)
-                        + " - evicted with nothing recording it first and nothing putting it back, so the "
-                        "import cache keeps whatever the next import mints, in every later test on this "
-                        "worker. monkeypatch.delitem(sys.modules, ...) and monkeypatch.delattr are restored for you"
-                    ),
+                    "line": first.line,
+                    "species": first.species,
+                    "detail": " | ".join(part for part in (_evicted_detail(left), _rebound_detail(rebound)) if part),
                 }
             )
     return rows
+
+
+def _evicted_detail(left: List[Eviction]) -> str:
+    """The first two species' clause of a row, or "" when the function has none."""
+    if not left:
+        return ""
+    return (
+        "; ".join(_describe(e) for e in left)
+        + " - evicted with nothing recording it first and nothing putting it back, so the "
+        "import cache keeps whatever the next import mints, in every later test on this "
+        "worker. monkeypatch.delitem(sys.modules, ...) and monkeypatch.delattr are restored for you"
+    )
+
+
+def _rebound_detail(rebound: List[Eviction]) -> str:
+    """The third species' clause of a row, or "" when the function has none."""
+    if not rebound:
+        return ""
+    return (
+        "; ".join(_describe(e) for e in rebound)
+        + " - the fresh import sets the NEW module on the surviving parent package, and a restore of "
+        "sys.modules alone leaves that attribute pointing at it after teardown. On 3.10/3.11 a dotted "
+        "mock.patch walks package attributes, so later string patches land on the new module while "
+        "the product reads the old one"
+    )
 
 
 # =============================================================================

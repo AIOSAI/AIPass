@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: uncalled_public_function_content.py
 # Description: Uncalled Public Function Standards Content Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -96,6 +96,12 @@ def get_uncalled_public_function_standards() -> str:
         "  SCORED, per BRANCH — the rule compares declared subjects against the whole",
         "  tests/ tree. Every hit names the function, its line and its shape, on ONE",
         "  check. Functions the product still reaches are counted, never charged.",
+        "",
+        "[bold cyan]A RETIRED TEST CALLS NOTHING:[/bold cyan]",
+        "  Only live test files are read: tests/.archive and every SOURCE_SKIP_DIRS",
+        "  dir are out, as in unused_conftest_fixture 1.1.0. .archive is git-ignored,",
+        "  so CI never sees it: memory's validate_memory_file_structure read 100 on",
+        "  memory's seat and 98 on the clean checkout (devpulse d13d7c68 item A).",
         "",
         "[bold cyan]THE CURE:[/bold cyan]",
         "  [green]call it in a test, or retire it.[/green]",

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: host_portability_content.py
 # Description: Host Portability Standards Content Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-12
 # Modified: 2026-10-10
 # =============================================
@@ -67,6 +67,15 @@ def get_host_portability_standards() -> str:
         "     [dim]class X(Path)[/dim] or [dim]class X(PurePath)[/dim] with no [dim]_flavour[/dim]:",
         "     [yellow]AttributeError _flavour[/yellow] on 3.10 and 3.11, fine on 3.12+.",
         "     A concrete flavour ([dim]PureWindowsPath[/dim]) is acquitted.",
+        "",
+        "  [red]ARM E -- a resolved path compared with one taken as given[/red]",
+        "     In one function, [dim]==[/dim] / [dim]!=[/dim] / [dim]in x.parents[/dim] /",
+        "     [dim]relative_to[/dim] / [dim]is_relative_to[/dim] / [dim]startswith[/dim] with one side",
+        "     through [dim].resolve()[/dim] or [dim]os.path.realpath[/dim] and the other from",
+        "     [dim]Path.home()[/dim], [dim]Path.cwd()[/dim], [dim]os.getcwd()[/dim] or [dim]tempfile[/dim] as given.",
+        "     Followed through same-function names, [dim]/[/dim], [dim].parent[/dim], [dim]str()[/dim],",
+        "     and same-file helpers (hooks loader: aipass_home -> _absolute -> resolve).",
+        "     macOS /var -> /private/var makes the two differ. Cure: resolve both.",
         "",
         f"  Arm A also follows a name bound to a {_PROC} literal to where it is",
         "  READ; a bound [dim]Path()[/dim] is judged at its read, not its constructor.",

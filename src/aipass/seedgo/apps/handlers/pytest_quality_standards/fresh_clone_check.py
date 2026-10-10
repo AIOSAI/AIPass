@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fresh_clone_check.py
 # Description: v5 - would this test pass on a machine that has only what the repo ships
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-09-08
-# Modified: 2026-09-08
+# Modified: 2026-10-10
 # =============================================
 
 """Would this test pass on a machine that has only what the repo ships?
@@ -43,7 +43,7 @@ Same resolver. One argument. The world it reads is the world the test built two
 lines up, so the answer is the same on every machine that will ever run it. The
 red one calls the same resolver with ZERO arguments and lets the host answer.
 
-THREE ARMS, EACH NAMED IN ITS FINDING.
+FOUR ARMS, EACH NAMED IN ITS FINDING.
 
   IGNORED_PATH - the unit opens, lists, globs or stats a path whose spelling
     matches a root `.gitignore` pattern and is not rooted at `tmp_path`. A path
@@ -67,6 +67,16 @@ THREE ARMS, EACH NAMED IN ITS FINDING.
     `BRANCH_ROOT = Path(__file__).resolve().parents[1]` is a CLASS constant - so
     class-level and module-level assignments are resolved one hop, the same single
     hop `host_state` uses to read a `parametrize` list.
+
+  OPTIONAL_EXTRA - the unit calls a production function whose OWN body imports
+    an optional extra inside `try:` / `except ImportError`, and never spells the
+    extra itself (a `sys.modules` entry, an `importorskip`, a `find_spec`) in the
+    unit, a fixture it requests, an autouse fixture or at module level. A clone
+    with only the core dependencies takes the except arm; the author's seat took
+    the other. api's check_status (PR #774, d77aeb44) is the specimen. The extras
+    are OPTIONAL_EXTRA_MODULES, frozen from pyproject. This is the one species
+    that reads production, and only one hop of it: a module-level guard and a
+    guarded import behind a helper are the call graph this file does not follow.
 
 THREE WORDS DO THE WORK IN THE THIRD ARM, and each of them was bought with a
 measurement:
@@ -174,8 +184,9 @@ WHAT THIS FILE DELIBERATELY DOES NOT CLAIM, all of it toward FEWER flags:
     file cannot - a project that ships the directory anyway, a CI stage that
     populates it first. It nominates. A human decides.
 
-STDLIB ONLY - `ast`, `pathlib`, `typing`, and the pack's own corpus reader, like
-the rest of the pack. That constraint is why the pack lifts onto any project.
+STDLIB ONLY - `ast`, `pathlib`, `typing`, the pack's own corpus reader and this
+rule's own `fresh_clone_extras` (OPTIONAL_EXTRA, split out at the 1500-line cap
+on 2026-10-10), like the rest of the pack. That constraint is why the pack lifts onto any project.
 """
 
 import ast
@@ -183,6 +194,24 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
+
+# OPTIONAL_EXTRA and the three primitives it shares with the species below were
+# split into fresh_clone_extras on 2026-10-10 (the 1500-line cap). Every name is
+# re-exported here so no caller's import address moved; the two lists are read
+# only by the moved species, so their re-export is the one unused import.
+from aipass.seedgo.apps.handlers.pytest_quality_standards.fresh_clone_extras import (  # noqa: F401
+    IMPORT_ERRORS,
+    OPTIONAL_EXTRA_MODULES,
+)
+from aipass.seedgo.apps.handlers.pytest_quality_standards.fresh_clone_extras import (
+    _finding,
+    _is_fixture,
+    _tail,
+    file_extra_controls,
+    optional_extra,
+    optional_extra_functions,
+    product_aliases,
+)
 
 # =============================================================================
 # CONFIGURATION
@@ -452,15 +481,13 @@ SKIP_CALLS: frozenset = frozenset({"skip", "skipif"})
 #: report artifact; a check message printing hundreds of lines is unreadable.
 MAX_REPORTED: int = 12
 
+# OPTIONAL_EXTRA_MODULES and IMPORT_ERRORS (the OPTIONAL_EXTRA lists) live in
+# fresh_clone_extras with the species that reads them, imported above.
+
 
 # =============================================================================
 # READING NAMES AND WHAT THEY ARE ROOTED AT
 # =============================================================================
-
-
-def _tail(dotted: str) -> str:
-    """The last component of a dotted call spelling."""
-    return dotted.rsplit(".", 1)[-1]
 
 
 def _names_under(node: ast.AST) -> Set[str]:
@@ -1197,15 +1224,6 @@ def sandbox_fixtures(tree: ast.Module) -> Set[str]:
     return found
 
 
-def _is_fixture(node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
-    """True when a function carries a pytest fixture decorator."""
-    for decorator in node.decorator_list:
-        target = decorator.func if isinstance(decorator, ast.Call) else decorator
-        if _tail(corpus.dotted_name(target)) == "fixture":
-            return True
-    return False
-
-
 def fixture_built_spellings(tree: ast.Module) -> Dict[str, Set[str]]:
     """Fixture name -> the ignored segments that fixture CREATES.
 
@@ -1227,11 +1245,9 @@ def fixture_built_spellings(tree: ast.Module) -> Dict[str, Set[str]]:
 # =============================================================================
 # ANALYSIS
 # =============================================================================
-
-
-def _finding(species: str, unit: corpus.TestUnit, line: int, detail: str) -> Dict:
-    """One row, in the shape every rule in this pack reports."""
-    return {"nodeid": unit.nodeid, "line": line, "species": species, "detail": detail}
+#
+# OPTIONAL_EXTRA (optional_extra_functions, product_aliases, file_extra_controls,
+# optional_extra) lives in fresh_clone_extras, imported above; see its docstring.
 
 
 def unit_flags(
@@ -1267,14 +1283,18 @@ def find_host_dependent(scanned: corpus.Corpus) -> List[Dict]:
     """
     rows: List[Dict] = []
     seen: Set[str] = set()
+    guarded = optional_extra_functions(scanned.production_trees)
     for parsed in scanned.files:
         module_scope = _bound_names_in_body(parsed.tree.body)
         classes = _class_scopes(parsed.tree)
         handed_out = sandbox_fixtures(parsed.tree)
         fixture_built = fixture_built_spellings(parsed.tree)
+        aliases = product_aliases(parsed.tree, guarded) if guarded else {}
+        controls = file_extra_controls(parsed.tree)
         for unit in parsed.units:
             scope = unit_scope(unit, module_scope, classes)
-            for row in unit_flags(unit, scope, handed_out, fixture_built):
+            extra_rows = optional_extra(unit, aliases, guarded, controls) if aliases else []
+            for row in unit_flags(unit, scope, handed_out, fixture_built) + extra_rows:
                 if row["nodeid"] not in seen:
                     seen.add(row["nodeid"])
                     rows.append(row)
@@ -1302,7 +1322,9 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
         number, because zero tests measured is not zero quality found.
     """
     root = Path(branch_path)
-    scanned = corpus.build(root, test_dirs=TEST_DIRS)
+    # Production is parsed for one species only: OPTIONAL_EXTRA reads which product
+    # functions guard an optional import, then which units call them.
+    scanned = corpus.build(root, test_dirs=TEST_DIRS, with_production=True)
     total = scanned.unit_count()
 
     # THE UNREADABLE-FILE LINE IS BUILT FIRST, BECAUSE THE EMPTY PATH NEEDS IT

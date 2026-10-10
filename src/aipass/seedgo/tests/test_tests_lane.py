@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_tests_lane.py
 # Description: Template v1 — tests_lane module, retire_ops and template_ops
-# Version: 1.0.3
+# Version: 1.0.5
 # Created: 2026-09-21
 # Modified: 2026-10-10
 # =============================================
@@ -19,7 +19,6 @@ import json
 
 import pytest
 
-from aipass.cli.apps.modules import display
 from aipass.seedgo.apps.handlers import registry_scan
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.tests_lane import template_ops
@@ -417,9 +416,13 @@ class TestTemplateBump:
         saw success (seedgo's decision, leg 4: exit 2, a lane that could not run).
         Mutant L1: _run_bump's error print replaced by pass — killed (leg 4).
         The console is pinned wider than any path, so the line search below does
-        not depend on where Rich wraps (PR #774, macOS).
+        not depend on where Rich wraps (PR #774, macOS). The pin lands on the
+        console tests_lane prints through, never display.CONSOLE: cli's
+        test_display reloads display in the serial run, display.CONSOLE becomes
+        a new object at width 80 while tests_lane keeps the old one, and the
+        path wrapped (PR #774 coverage job, round two).
         """
-        monkeypatch.setattr(display.CONSOLE, "width", 10_000)
+        monkeypatch.setattr(tests_lane.console, "width", 10_000)
         with pytest.raises(CommandRefused) as refusal:
             tests_lane.handle_command("tests", ["template", "bump", "@alpha", "--confirm"])
 
@@ -439,7 +442,8 @@ class TestTemplateBump:
             tests_lane.handle_command("tests", ["template", "bump", "--confirm"])
 
         assert refusal.value.code == 2
-        assert f"no page to distribute: {gold / 'test_template_v1.md'} is missing" in capsys.readouterr().err
+        unwrapped = " ".join(capsys.readouterr().err.split())  # a long tmp path makes Rich wrap inside the phrase
+        assert f"no page to distribute: {gold / 'test_template_v1.md'} is missing" in unwrapped
 
     def test_a_test_body_is_never_distributed(self, fleet, gold, bus):
         """The one thing this lane must never do: a branch's tests stay its own."""

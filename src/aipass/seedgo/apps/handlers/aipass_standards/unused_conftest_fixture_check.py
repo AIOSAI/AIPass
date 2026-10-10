@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: unused_conftest_fixture_check.py
 # Description: Unused Conftest Fixture Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-22
 # Modified: 2026-10-10
 # =============================================
@@ -61,7 +61,7 @@ There is no threshold and nothing to tune.
 """
 
 import ast
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Dict, List, Set, Tuple
 
 from aipass.prax import logger
@@ -161,6 +161,11 @@ def scan(branch_root: Path) -> List[Tuple[Path, int, str]]:
     return sorted((path, line, name) for name, (path, line) in fixtures.items() if name not in requested)
 
 
+def reported_path(path: PurePath, root: PurePath) -> str:
+    """The path from root as the finding prints it: ``tests/conftest.py``, forward slashes on every host."""
+    return path.relative_to(root).as_posix()
+
+
 def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
     """The result shape every checker in this pack returns."""
     return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
@@ -193,7 +198,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     # check and appends "(+N more)", so one check per fixture would show the
     # first and hide the rest behind a count.
     detail = "\n".join(
-        f"{path.relative_to(branch_root)}:{line} {name} is defined and never requested - {CURE}"
+        f"{reported_path(path, branch_root)}:{line} {name} is defined and never requested - {CURE}"
         for path, line, name in findings
     )
 

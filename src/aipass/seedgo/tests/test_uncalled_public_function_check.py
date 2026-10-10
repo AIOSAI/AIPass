@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_uncalled_public_function_check.py
 # Description: uncalled_public_function_check — crack class O, a subject's untested export
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-09-22
 # Modified: 2026-10-10
 # =============================================
@@ -296,3 +296,49 @@ class TestTheBypass:
             )["score"]
             == 100
         )
+
+
+class TestARetiredTestCallsNothing:
+    """tests/.archive is git-ignored: CI never sees it (devpulse d13d7c68 item A, PR #774 round two).
+
+    memory's apps/handlers/json/memory_files.py:471 validate_memory_file_structure
+    read 100 on memory's seat and 98 on the clean checkout: its one naming test was
+    tests/.archive/deleted_2026-09-03_json_handler.py. The same cure as
+    unused_conftest_fixture 1.1.0 - live test files only.
+    """
+
+    CALLS = "def test_old():\n    assert discover() == []\n"
+
+    def _retire(self, branch, directory, source):
+        retired = branch / "tests" / directory
+        retired.mkdir(parents=True, exist_ok=True)
+        (retired / "test_retired.py").write_text(source, encoding="utf-8")
+
+    @pytest.mark.parametrize("directory", [".archive", "backups"])
+    def test_a_function_named_only_by_a_retired_test_is_convicted(self, tmp_path, directory):
+        """The archived call is the only one; a skipped dir under tests/ is not a test."""
+        branch = _branch(tmp_path)
+        self._retire(branch, directory, self.CALLS)
+        findings, _acquitted = uncalled_public_function_check.scan(branch)
+        assert [(name, shape) for _path, _line, name, shape in findings] == [
+            ("discover", uncalled_public_function_check.UNREACHED)
+        ]
+
+    def test_the_same_call_in_a_live_test_acquits(self, tmp_path):
+        """The control: memory's cure, the naming test moved into the live tree."""
+        branch = _branch(tmp_path)
+        (branch / "tests" / "test_live.py").write_text(self.CALLS, encoding="utf-8")
+        findings, _acquitted = uncalled_public_function_check.scan(branch)
+        assert findings == []
+
+    def test_a_retired_unpatched_run_does_not_rescue_a_replaced_function(self, tmp_path):
+        """O1 stays O1: the run_unpatched pass reads live test files only, too."""
+        branch = _branch(
+            tmp_path, tests=DECLARES + "@patch('apps.modules.thing.discover')\ndef test_it(fake):\n    run()\n"
+        )
+        self._retire(branch, ".archive", self.CALLS.replace("assert discover() == []", "run()"))
+        (branch / "apps" / "modules" / "entry.py").write_text("def run():\n    return discover()\n", encoding="utf-8")
+        findings, _acquitted = uncalled_public_function_check.scan(branch)
+        assert [(name, shape) for _path, _line, name, shape in findings] == [
+            ("discover", uncalled_public_function_check.REPLACED)
+        ]

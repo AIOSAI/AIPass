@@ -40,6 +40,53 @@ without platform guard.
 `os.kill(pid, signal)` without `try/except OSError`.  Windows raises
 `OSError: [WinError 87] The parameter is incorrect` for invalid PIDs.
 
+### Rule 5 — platform-only import deferred into a function (checker 1.4.0)
+`fcntl`, `pwd`, `grp`, `termios`, `resource`, `msvcrt` or `winreg` imported
+inside a function body, outside a `try` whose handler catches `ImportError`
+(or `ModuleNotFoundError`, `Exception`, a bare `except`). A `sys.platform` /
+`os.name` guard does **not** clear this rule: a deferred import is decided at
+call time, after a test may have pretended another platform. Specimen: devpulse
+a831fe55 (PR #774, CI 38068553235) — registry's `_FileLock` imported `fcntl`
+under `sys.platform != "win32"`; the off-Linux liveness tests pretend darwin,
+so the Windows runner imported a module it lacks. Acquitted shape: one
+module-level `try: import fcntl / except ImportError: fcntl = None` (logged),
+and the function reads the binding (`if fcntl is not None:`). Module-level
+imports — gated by platform or by try/except — are decided once at import,
+before any test runs, and are not read by this rule. A line Rule 1 already
+reports is not reported twice.
+
+### Rule 6 — a stream answer pinned at import (checker 1.5.0)
+Product files only (not `tests/`, `test_*.py`, `conftest.py`). Flags, in code a
+module runs when imported, a rich `Console(...)` — the name, an alias from
+`from rich.console import Console as X`, `rich.console.Console`, or a same-file
+subclass — and any `.isatty()` / `get_terminal_size()` call. Rich runs
+`_detect_color_system()` in `Console.__init__` and keeps the answer (rich
+15.0.0, console.py:710, read per print at console.py:2136), so leaving
+`force_terminal` unset does not make colour live. Specimen: cli b6655280 (PR
+#774, CI 38068553235) — display.py read `sys.stdout.isatty()` into `_IS_TTY`
+and built `CONSOLE = Console(force_terminal=_IS_TTY)`; a conftest imported it
+while pytest's capture was suspended, a Windows xdist worker's stdout is NUL
+and NUL answers `isatty()` True, so every later capture carried escape codes
+(380 of 518 Windows rows, fleet-wide). Linux and macOS pipes answer False.
+
+Read: the module body, class bodies, and the bodies and heads of module-level
+`if` / `try` / `with` / `for` / `while`. Not read: function bodies, lambdas,
+`if __name__ == "__main__":`, and `except` handlers — the fleet's 27 module-level
+consoles in handlers are all `except ImportError` fallbacks for
+`from aipass.cli.apps.modules import console`, which never runs where the
+package is installed (measured 2026-10-10). Acquitted: `file=` anything other
+than `sys.stdout` / `sys.stderr` (a buffer decides against itself),
+`force_terminal=True` / `False` (a constant, not a stream answer),
+`color_system=None`, a `**kwargs` call (the decision is not in the file), and a
+subclass that defines `_color_system` — cli's `_LiveConsole`, which re-detects
+colour per print against the live stream (the cure). One row per line.
+
+Known misses: a console built at import in another module's function the
+module calls at import; `Console` reached through a factory or a re-export.
+Measured at introduction (2026-10-10, 1638 product files): 1 row, seedgo's own
+`diagnostics_check.py` (cured the same day: the console is built in its
+`__main__` block); cli's cured display.py acquitted.
+
 ### Valid Guards (recognized by checker)
 - `if sys.platform != "win32":` / `if sys.platform == "linux":`
 - `if os.name != "nt":` / `if os.name == "posix":`

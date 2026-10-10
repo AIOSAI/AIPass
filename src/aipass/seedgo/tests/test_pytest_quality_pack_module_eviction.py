@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack_module_eviction.py
 # Description: pytest_quality pack, module_eviction checker pins (split from test_pytest_quality_pack.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/module_eviction_check.py."""
@@ -44,9 +44,11 @@ def _first_line(path: Path, prefix: str) -> int:
 def _module_eviction_project(root: Path) -> Path:
     """Six functions, two of which leave the import cache changed.
 
-    The four clean ones are clean for four DIFFERENT reasons - recorded first,
-    patch.dict, a restore in a finally, a fixture teardown - so losing any one
-    acquittal adds a row and moves the number off 66.
+    The four whose cache is put back are acquitted for four DIFFERENT reasons -
+    recorded first, patch.dict, a restore in a finally, a fixture teardown. Three
+    of those still re-import after the eviction and leave pkg.modules.rollover
+    rebound (PARENT_ATTRIBUTE_REBIND), so the fixture teardown is the one clean
+    function and the score is 16.
     """
     _write(
         root,
@@ -507,7 +509,14 @@ class TestModuleEvictionAcquittals:
             """,
         )
 
-        assert _eviction_rows(tmp_path) == []
+        rows = _eviction_rows(tmp_path)
+
+        # patch.dict restores the dict, never pkg.drive's attribute: the re-import rows are PARENT_ATTRIBUTE_REBIND.
+        assert [row["detail"] for row in rows if "evicted with nothing recording" in row["detail"]] == []
+        assert [(row["nodeid"], row["species"]) for row in rows] == [
+            ("tests/test_drive.py::test_the_drive_client_is_reimported", "PARENT_ATTRIBUTE_REBIND"),
+            ("tests/test_drive.py::test_the_share_module_is_reimported", "PARENT_ATTRIBUTE_REBIND"),
+        ]
 
     def test_patch_dict_never_restores_a_package_attribute_so_a_delattr_inside_it_is_still_read(self, tmp_path):
         """backup's conftest names it exactly: patch.dict restores the DICT, never the parent's ATTRIBUTE.
@@ -754,7 +763,11 @@ class TestModuleEvictionAcquittals:
             """,
         )
 
-        assert _eviction_rows(tmp_path) == []
+        rows = _eviction_rows(tmp_path)
+
+        # The autouse record puts the cache back; the from-import still rebinds pkg.symbolic's attribute.
+        assert [row["detail"] for row in rows if "evicted with nothing recording" in row["detail"]] == []
+        assert {row["species"] for row in rows} == {"PARENT_ATTRIBUTE_REBIND"}
 
     def test_what_an_autouse_record_does_not_cover_is_still_flagged(self, tmp_path):
         """Autouse, the same literal key, resolvable at all - each boundary pinned.
@@ -823,17 +836,21 @@ class TestModuleEvictionBranchCheck:
         helper, and scoring helper rows against a count of tests lets a file of
         helpers drive a project below zero. Mutation caught: `population =
         function_count(scanned)` becoming `population = total`, which reports 33
-        over three units where the honest answer is 66 over six functions.
+        over three units where the honest answer is 16 over six functions (two
+        cache rows, three parent-attribute rebinds).
         """
         result = module_eviction_check.check_branch(str(_module_eviction_project(tmp_path)))
 
-        assert result["score"] == 66
-        assert [row["nodeid"] for row in result["violations"]] == [
-            "tests/test_reimport.py::_import_rollover_bare",
-            "tests/test_reimport.py::test_the_parent_attribute_is_left_behind",
+        assert result["score"] == 16
+        assert [(row["nodeid"], row["species"]) for row in result["violations"]] == [
+            ("tests/test_reimport.py::_import_rollover_bare", "SYS_MODULES_EVICTION"),
+            ("tests/test_reimport.py::_import_rollover_recorded", "PARENT_ATTRIBUTE_REBIND"),
+            ("tests/test_reimport.py::test_the_parent_attribute_is_left_behind", "PACKAGE_ATTRIBUTE_EVICTION"),
+            ("tests/test_reimport.py::test_the_eviction_sits_inside_patch_dict", "PARENT_ATTRIBUTE_REBIND"),
+            ("tests/test_reimport.py::test_the_eviction_is_put_back_in_a_finally", "PARENT_ATTRIBUTE_REBIND"),
         ]
         assert (
-            "2/6 test functions, fixtures and helpers evict a cached module with no visible restore"
+            "5/6 test functions, fixtures and helpers evict a cached module with no visible restore"
             in result["checks"][0]["message"]
         )
 
@@ -900,7 +917,7 @@ class TestModuleEvictionBranchCheck:
         result = module_eviction_check.check_branch(str(tmp_path))
         named = [check for check in result["checks"] if check["name"] == "Corpus readable"]
 
-        assert result["score"] == 66
+        assert result["score"] == 16
         assert len(named) == 1
         assert "tests/test_broken.py" in named[0]["message"]
         assert "NOT measured" in named[0]["message"]
@@ -926,3 +943,92 @@ class TestModuleEvictionBranchCheck:
         assert len(result["violations"]) == 14
         assert message.count("::_load_") == 12
         assert message.endswith("(+2 more)")
+
+
+class TestModuleEvictionParentRebind:
+    """A re-import after a monkeypatch eviction rebinds the parent package's attribute, which monkeypatch never saw."""
+
+    def test_memory_reimport_before_its_cure_is_flagged_at_the_re_import(self, tmp_path):
+        """Minimised from memory tests/test_trinity_standard.py before 66960830 (PR #774, 3.10/3.11 rows)."""
+        path = _write(
+            tmp_path,
+            "tests/test_trinity_standard.py",
+            """
+            import importlib
+            import sys
+
+
+            def test_no_status_writer_after_a_clean_reimport(monkeypatch):
+                for name in [n for n in sys.modules if n.startswith("aipass.memory.apps.handlers.json")]:
+                    monkeypatch.delitem(sys.modules, name, raising=False)
+                memory_files = importlib.import_module("aipass.memory.apps.handlers.json.memory_files")
+                importlib.reload(memory_files)
+                assert not hasattr(memory_files, "update_metadata")
+            """,
+        )
+
+        rows = _eviction_rows(tmp_path)
+
+        assert [(row["species"], row["line"]) for row in rows] == [
+            ("PARENT_ATTRIBUTE_REBIND", _first_line(path, "memory_files = importlib.import_module("))
+        ]
+        assert "aipass.memory.apps.handlers.json" in rows[0]["detail"]
+        assert "'json'" in rows[0]["detail"]
+
+    def test_memory_cure_pins_the_parent_attribute_first_and_is_acquitted(self, tmp_path):
+        """The cure on disk: monkeypatch.setattr(handlers_pkg, "json", ...) before the eviction."""
+        _write(
+            tmp_path,
+            "tests/test_trinity_standard.py",
+            """
+            import importlib
+            import sys
+
+
+            def test_no_status_writer_after_a_clean_reimport(monkeypatch):
+                handlers_pkg = sys.modules["aipass.memory.apps.handlers"]
+                monkeypatch.setattr(handlers_pkg, "json", handlers_pkg.json)
+                for name in [n for n in sys.modules if n.startswith("aipass.memory.apps.handlers.json")]:
+                    monkeypatch.delitem(sys.modules, name, raising=False)
+                memory_files = importlib.import_module("aipass.memory.apps.handlers.json.memory_files")
+                importlib.reload(memory_files)
+                assert not hasattr(memory_files, "update_metadata")
+            """,
+        )
+
+        assert _eviction_rows(tmp_path) == []
+
+    def test_a_pin_made_after_the_eviction_or_an_unrelated_re_import_reads_as_written(self, tmp_path):
+        """A pin after the re-import recorded the new module; a re-import of a module never evicted rebinds nothing."""
+        _write(
+            tmp_path,
+            "tests/test_reimport.py",
+            """
+            import importlib
+            import sys
+
+
+            def test_the_pin_comes_too_late(monkeypatch):
+                monkeypatch.delitem(sys.modules, "pkg.modules.rollover", raising=False)
+                from pkg.modules import rollover
+                parent = importlib.import_module("pkg.modules")
+                monkeypatch.setattr(parent, "rollover", None, raising=False)
+                assert rollover
+
+
+            def test_another_module_is_imported(monkeypatch):
+                monkeypatch.delitem(sys.modules, "pkg.modules.rollover", raising=False)
+                assert importlib.import_module("pkg.other")
+
+
+            def test_the_denier_actually_denies(monkeypatch):
+                for name in [m for m in sys.modules if m.startswith("pkg.memory")]:
+                    monkeypatch.delitem(sys.modules, name, raising=False)
+                with pytest.raises(FileNotFoundError):
+                    importlib.import_module("pkg.memory.apps.modules.door_tab_renderer")
+            """,
+        )
+
+        rows = _eviction_rows(tmp_path)
+
+        assert [row["nodeid"] for row in rows] == ["tests/test_reimport.py::test_the_pin_comes_too_late"]

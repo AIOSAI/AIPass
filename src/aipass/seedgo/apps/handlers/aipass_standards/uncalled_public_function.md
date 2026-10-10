@@ -1,6 +1,6 @@
 # Uncalled Public Function Standards
 **Status:** v1
-**Date:** 2026-10-03
+**Date:** 2026-10-10
 
 ---
 
@@ -37,6 +37,12 @@ under `tests/`; a test that reaches it with none of those runs the real one and 
 cli's `print_introspection` test runs the `discover_modules` that `stub_module` replaces
 elsewhere. An import alias is the name it imports: devpulse's `seat_email` calls
 `owner_address` as `_owner_address`, and that edge now reaches it.
+
+**A retired test calls nothing** (2026-10-10, devpulse d13d7c68 item A). Only live test files
+are read: `tests/.archive` and every SOURCE_SKIP_DIRS directory are out, the same cure
+`unused_conftest_fixture` 1.1.0 got. `.archive` is git-ignored, so CI never sees it: memory's
+`apps/handlers/json/memory_files.py:471 validate_memory_file_structure` read 100 on memory's
+seat and 98 on the clean checkout, because its one naming test sat in `tests/.archive`.
 
 **Reached through the product** — the false conviction to avoid, and the dispatch asked how
 the rule decides it. A **name-level call graph** over the branch's whole `apps/`, seeded

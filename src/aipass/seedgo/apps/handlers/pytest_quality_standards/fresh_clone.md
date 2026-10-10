@@ -5,7 +5,7 @@
 > them.
 
 **Scope:** `branch_level` · **Severity:** advisory
-**Species:** `IGNORED_PATH` · `BOTH_WORLDS` · `DERIVED_EXPECTED`
+**Species:** `IGNORED_PATH` · `BOTH_WORLDS` · `DERIVED_EXPECTED` · `OPTIONAL_EXTRA`
 
 ---
 
@@ -148,6 +148,49 @@ that unit clean.
 The "written down" requirement is what makes the species name true: this arm is
 about an **expected value**, not about a test that hands a root to production and
 then asserts a *property* of the answer.
+
+### `OPTIONAL_EXTRA` — the host's install of an optional dependency picks the path
+
+```python
+def test_check_status_no_key(mock_header, mock_keys, mock_client, capsys):
+    openrouter_client.check_status()          # flagged: check_status imports openai behind except ImportError
+    out, err = capsys.readouterr()
+    assert err.splitlines() == ["⚠️  API key not configured"]
+```
+
+api, PR #774 (d77aeb44): CI installs no `llm` extra, so `import openai` failed
+there and the product's documented second warning followed the first. A fresh
+clone with only the core dependencies is exactly that machine.
+
+**What it reads:** a production module-level function whose **own body** imports
+an optional extra inside `try:` with an `except ImportError` /
+`ModuleNotFoundError` handler, and a test unit that calls it (through
+`import pkg.mod [as m]` -> `m.f()`, `from pkg import mod` -> `mod.f()`, or
+`from pkg.mod import f` -> `f()`). This is the one species that reads production
+(`corpus.build(..., with_production=True)`); a test import is matched to a
+production file by its dotted tail.
+
+**Acquitted:** a string spelled exactly as the extra (or a submodule of it) in the
+unit, its decorators, a same-file fixture it requests, a same-file autouse
+fixture, or a module-level statement: `monkeypatch.setitem(sys.modules, "openai",
+...)`, `patch.dict(sys.modules, {"openai": ...})`, `pytest.importorskip("openai")`,
+`find_spec("openai")`. A sibling unit's control does not acquit this one.
+
+**The extras are a shipped constant** (`OPTIONAL_EXTRA_MODULES`), derived from the
+AIPass root `pyproject.toml` `[project.optional-dependencies]` on 2026-10-10 and
+mapped to import names by hand (`google-api-python-client` -> `googleapiclient`),
+for the same reason the ignore list below is: the pack reads Python files only.
+
+**Not read, toward fewer flags:** a guard at **module** level (decided at import;
+which function then reads the binding is a call graph — measured, that reading
+convicted 19 api/backup files, mostly host-route tests whose answer does not move
+with the extra), and a guarded import reached through a helper the called function
+calls.
+
+**Fleet, 2026-10-10:** 1 row — api `tests/test_openrouter_client.py::test_check_status_with_key`
+(line 379): its sibling now sets `sys.modules["openai"]`, this unit does not; it
+passes on both hosts because it reads stdout only, while on a host without the SDK
+it runs the unpatched `logger.warning` branch.
 
 ## The ignore list is shipped as a constant
 

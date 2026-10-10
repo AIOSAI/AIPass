@@ -1,6 +1,6 @@
 # Host Portability
-**Status:** Draft v1.2 (arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
-**Date:** 2026-10-03
+**Status:** Draft v1.3 (arm E, a symlinked prefix — PR #774; arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
+**Date:** 2026-10-10
 
 ---
 
@@ -24,8 +24,8 @@ Mac and on Windows. Nothing in the pack had a name for either.
 
 ## What the Checker Scans For
 
-AST-parses every `.py` file under `apps/`, `tests/` **and** `lib/`. All three
-arms score.
+AST-parses every `.py` file under `apps/`, `tests/` **and** `lib/`. Every arm
+(A to E) scores.
 
 ### Arm A — `/proc` as a filesystem argument
 
@@ -117,6 +117,37 @@ every 3.12 seat (PR #774, Linux 3.10/3.11): backup `_ResolveDeniedPath`, trigger
 `tests/test_roots_lifecycle.py:450`), or a class body that sets `_flavour`.
 **Cure:** wrap a real `Path` instead of subclassing, or patch the one method on
 the instance's class with `monkeypatch`.
+
+### Arm E — a resolved path compared with one taken as given (file-local)
+
+macOS spells one directory two ways (`/var` and `/private/var`). `Path.home()`,
+`Path.cwd()`, `os.getcwd()`, `tempfile.gettempdir()` / `mkdtemp()` /
+`TemporaryDirectory()` keep the spelling the host hands out; `.resolve()` and
+`os.path.realpath` do not. Comparing one with the other is false whenever a
+prefix is a symlink. Specimen: hooks `loader.locate_config()` before 2.1.0
+(60d2af72) compared `aipass_home()` — resolved through `_absolute()` — with walk
+bounds from `_search_bounds()` (`Path.cwd(), Path.home()`): eight macOS rows, the
+install read as an external project.
+
+**What it reads, inside one function:** an `==` / `!=`, an `x in y.parents`, or a
+`.relative_to()` / `.is_relative_to()` / `.startswith()` whose one side passed
+through `.resolve()` / `os.path.realpath` and whose other side is a host spelling.
+A side is followed through a name assigned earlier in the same function (last
+assignment wins), through `/`, `.parent`, `.parents[i]`, `str()`, `Path()`,
+`os.fspath`, `os.path.join`, `.as_posix()`, `.joinpath()`, a tuple unpack, a
+generator, and through a same-file module-level function whose every known return
+carries one spelling (followed to a fixed point: `aipass_home -> _absolute ->
+resolve` is seen).
+
+**Not read:** a path from a parameter, an attribute or another module carries no
+spelling and is never judged — that is the call graph this arm does not have.
+`tmp_path` is not a host spelling here.
+
+**Fleet, 2026-10-10 (2,084 files):** 4 rows, all hooks, all the specimen's walk
+with `home = Path.home()` as the stop beside a resolved `search`:
+`apps/modules/admin_seat.py:99`, `apps/modules/grounding_content.py:225` and
+`:406`, `apps/modules/release_notice.py:78`. **Cure:** resolve both sides
+(`Path.home().resolve()`), as loader 2.1.0 does.
 
 ### Valid guards (recognized by checker)
 - a platform test anywhere in the enclosing function: `sys.platform`, `os.name`,

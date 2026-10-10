@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_incremental_audit.py
 # Description: Equivalence + re-run-matrix tests for audit_branch_incremental
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-07-31
-# Modified: 2026-09-28
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py's audit_branch_incremental and incremental_cache.py beside it."""
@@ -806,7 +806,7 @@ class TestThePerCheckerStampScopesAReRun:
     def _split(call_log: Path) -> tuple:
         """(files the first checker saw, files the second saw, branch-level calls)."""
         calls = _read_calls(call_log)
-        first = {Path(c).name for c in calls if ":" not in c}
+        first = {Path(c).name for c in calls if not c.startswith(("second:", "branchlevel:"))}
         second = {Path(c.split(":", 1)[1]).name for c in calls if c.startswith("second:")}
         branch_level = [c for c in calls if c.startswith("branchlevel:")]
         return first, second, branch_level
@@ -986,6 +986,26 @@ class TestThePerCheckerStampScopesAReRun:
         first, _second, _bl = self._split(call_log)
         assert result["_cache_hit"] is False
         assert first == {"good.py", "main.py"}
+
+    def test_a_drive_letter_path_is_the_first_checkers_call_not_a_tagged_one(self, tmp_path):
+        """A Windows absolute path carries a colon, and the split told calls apart by colon.
+
+        Every untagged call on Windows reads C:\\...\\good.py, so "no colon" kept
+        none of them: first came back set() and three rows of this class went red
+        on Windows only (PR #774, round two). A tagged call is told by its tag.
+        The proof on Windows itself is the next CI run.
+        """
+        call_log = tmp_path / "calls.log"
+        call_log.write_text(
+            "C:/runner/work/apps/good.py\nsecond:C:/runner/work/apps/good.py\nbranchlevel:C:/runner/work\n",
+            encoding="utf-8",
+        )
+
+        first, second, branch_level = self._split(call_log)
+
+        assert first == {"good.py"}
+        assert second == {"good.py"}
+        assert branch_level == ["branchlevel:C:/runner/work"]
 
 
 class TestFingerprintFile:

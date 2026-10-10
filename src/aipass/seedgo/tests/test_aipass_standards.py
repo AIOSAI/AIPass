@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
 # Modified: 2026-10-10
 # =============================================
@@ -1820,6 +1820,89 @@ def test_lib_is_in_the_corpus(tmp_path):
     assert result["score"] == 0
     failing = [c for c in result["checks"] if not c["passed"]]
     assert failing[0]["violations"][0]["file"] == "lib/telegram/apps/handlers/tmux_manager.py"
+
+
+# -- ARM E: a resolved path compared with one taken as given -----------------
+
+_LOCATE_CONFIG = """import os
+from pathlib import Path
+
+
+def _search_bounds():
+    return Path.cwd(), Path.home()
+
+
+def _absolute(raw):
+    path = Path(raw)
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
+def aipass_home():
+    raw = os.environ.get("AIPASS_HOME", "")
+    if raw:
+        return _absolute(raw)
+    return None
+
+
+def locate_config():
+    home = aipass_home()
+    BOUNDS
+    while search != stop and search.parent != search:
+        if search == home:
+            return "aipass", home
+        search = search.parent
+    return "none", None
+"""
+
+
+def test_a_resolved_home_compared_with_an_unresolved_walk_is_convicted(tmp_path):
+    """hooks apps/handlers/config/loader.py locate_config() before 2.1.0 (60d2af72, macOS CI PR #774).
+
+    home went through _absolute() (resolve: /private/var), the walk's bounds came
+    from Path.cwd() and Path.home() as given (/var): the install read as external.
+    """
+    source = _LOCATE_CONFIG.replace("BOUNDS", "search, stop = _search_bounds()")
+    violations, _acquitted = _scan_source(tmp_path, source)
+    assert _lines(violations) == [28]
+    assert "search == home" in violations[0][1]
+    assert "resolve" in violations[0][1]
+
+
+def test_both_walk_bounds_resolved_like_home_are_acquitted(tmp_path):
+    """The cure in loader.py 2.1.0: both bounds pass through the same _absolute() as home."""
+    source = _LOCATE_CONFIG.replace("BOUNDS", "search, stop = (_absolute(str(bound)) for bound in _search_bounds())")
+    assert _scan_source(tmp_path, source)[0] == []
+
+
+def test_relative_to_and_startswith_across_the_two_spellings_are_convicted(tmp_path):
+    """The other three comparisons the arm reads: relative_to, is_relative_to, startswith on str()."""
+    source = (
+        "import os\nimport tempfile\nfrom pathlib import Path\n\n\n"
+        "def rel(target):\n"
+        "    return Path(target).resolve().relative_to(Path.home())\n\n\n"
+        "def inside(target):\n"
+        "    where = Path(target).resolve()\n"
+        "    return str(where).startswith(os.getcwd())\n\n\n"
+        "def scratch(target):\n"
+        "    return Path(tempfile.gettempdir()).is_relative_to(Path(target).resolve())\n"
+    )
+    violations, _acquitted = _scan_source(tmp_path, source)
+    assert _lines(violations) == [7, 12, 16]
+
+
+def test_two_unresolved_or_two_resolved_spellings_are_acquitted(tmp_path):
+    """Same spelling on both sides compares equal on every host: nothing to convict."""
+    source = (
+        "from pathlib import Path\n\n\n"
+        "def same_raw(target):\n"
+        "    return Path(target) == Path.home() or Path.cwd() == Path.home()\n\n\n"
+        "def same_resolved(target):\n"
+        "    return Path(target).resolve().relative_to(Path.home().resolve())\n"
+    )
+    assert _scan_source(tmp_path, source)[0] == []
 
 
 # ---------------------------------------------------------------------------

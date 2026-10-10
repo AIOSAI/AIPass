@@ -53,7 +53,7 @@ The table below carries every other row.
 | hardcoded_path | all_files | everywhere | No hardcoded absolute paths |
 | help_flag_safety | all_files | production | A help flag ANYWHERE means explain, never execute |
 | help_text | all_files | production | --help content quality |
-| host_portability | branch_level | everywhere | Linux-only host assumptions — `/proc` reads (direct or through a bound name), non-portable binaries, and a test skip that names Windows on a Linux recipe (corpus: apps/, tests/ **and** lib/) |
+| host_portability | branch_level | everywhere | Linux-only host assumptions — `/proc` reads (direct or through a bound name), non-portable binaries, a test skip that names Windows on a Linux recipe, a direct `Path` subclass (3.10/3.11), and a `resolve()`d path compared in the same function with `Path.home()` / `Path.cwd()` / `os.getcwd()` / `tempfile` as given (arm E, file-local) (corpus: apps/, tests/ **and** lib/) |
 | imports | all_files | everywhere | Import ordering and grouping |
 | introspection | all_files | production | No-args introspection gate |
 | json_handler | branch_level | production | The canonical json shim by sha256 + bidirectional config/data/log triplet completeness |

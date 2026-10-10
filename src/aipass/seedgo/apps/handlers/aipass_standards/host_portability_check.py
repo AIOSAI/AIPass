@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-12
 # Modified: 2026-10-10
 # =============================================
@@ -96,6 +96,23 @@ ARM D IS THE HOST'S PYTHON, not its OS (PR #774). A class whose base is
 (``PureWindowsPath``, memory's) or a body that sets ``_flavour`` is acquitted.
 It lives here and not in a new standard because CI's hosts differ by Python as
 well as by OS, and a new standard would move EXPECTED_STANDARDS mid-train.
+
+ARM E IS A SYMLINKED PREFIX (PR #774, hooks 60d2af72). macOS hands out /var and
+/private/var for one directory; ``Path.home()``, ``Path.cwd()``, ``os.getcwd()``
+and ``tempfile`` keep the spelling they were given, ``.resolve()`` does not. hooks'
+``locate_config()`` compared ``aipass_home()`` (through ``_absolute()``, a
+resolve) with walk bounds from ``_search_bounds()`` (``Path.cwd(), Path.home()``)
+and read the install as a foreign project. The arm is FILE-LOCAL: inside one
+function, an ``==`` / ``!=`` / ``in x.parents`` / ``relative_to`` /
+``is_relative_to`` / ``startswith`` whose one side passed through ``.resolve()``
+or ``os.path.realpath`` and whose other side is one of those host spellings -
+directly, through a name assigned in the same function (last assignment wins),
+through ``/``, ``.parent``, ``str()``, ``Path()``, or through a same-file
+module-level function every known return of which carries one spelling (followed
+to a fixed point, so the loader's helper of a helper is seen). A path from a
+parameter or another module carries no spelling and is never judged: that is the
+call graph this arm does not have. Measured 2026-10-10 over 2,084 files: 4 rows,
+all hooks, all the specimen's walk with ``home = Path.home()`` as the stop.
 
 Interface: AUDIT_SCOPE = "branch_level", entry point ``check_branch``.
 The corpus is ``apps/``, ``tests/`` AND ``lib/`` — a test that reads /proc is
@@ -225,6 +242,30 @@ PASS_THRESHOLD = 75
 #: (PosixPath, PureWindowsPath, ...) carries its own _flavour on every Python.
 _FLAVOURLESS_BASES = frozenset({"Path", "PurePath"})
 _FLAVOUR_FIX = "below Python 3.12 Path.__new__ needs _flavour on the subclass (AttributeError on 3.10 and 3.11)"
+
+#: Arm E: the two spellings a path can carry. RESOLVED passed through
+#: ``.resolve()`` / ``os.path.realpath`` (or a same-file helper that returns
+#: one); AS_GIVEN is the host's own answer, which keeps a symlinked prefix.
+RESOLVED = "resolved"
+AS_GIVEN = "as given"
+#: Calls whose answer keeps the spelling the host hands out (macOS: /var, not /private/var).
+_HOST_SPELLINGS = (
+    "Path.home",
+    "Path.cwd",
+    "os.getcwd",
+    "tempfile.gettempdir",
+    "tempfile.mkdtemp",
+    "tempfile.TemporaryDirectory",
+)
+#: Calls and methods that carry their first argument's (or receiver's) spelling through.
+_CARRYING_WRAPPERS = frozenset({"str", "Path", "PurePath", "PosixPath", "os.fspath", "os.path.join"})
+_CARRYING_METHODS = frozenset({"as_posix", "joinpath", "absolute", "with_name", "with_suffix"})
+#: Methods that compare two paths' spellings.
+_PATH_COMPARISONS = frozenset({"relative_to", "is_relative_to", "startswith"})
+_SPELLING_FIX = (
+    "one side passes through resolve(), the other is Path.home()/Path.cwd()/os.getcwd()/tempfile as given; "
+    "a symlinked prefix (macOS /var -> /private/var) makes them differ - resolve both"
+)
 
 
 # =============================================
@@ -855,6 +896,182 @@ def _flavourless_subclasses(tree: ast.Module) -> List[Tuple[int, str]]:
 
 
 # =============================================
+# ARM E - A RESOLVED PATH COMPARED WITH ONE TAKEN AS GIVEN (file-local)
+# =============================================
+
+
+def _dotted(node: ast.expr) -> str:
+    """``a.b.c`` for a Name/Attribute chain, else ''."""
+    parts: List[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return ""
+
+
+def _is_host_spelling(call: ast.Call) -> bool:
+    """Path.home() / Path.cwd() / os.getcwd() / tempfile.* as the host hands it out."""
+    dotted = _dotted(call.func)
+    return any(dotted == name or dotted.endswith("." + name) for name in _HOST_SPELLINGS)
+
+
+def _call_spelling(call: ast.Call, env: Dict[str, str], funcs: Dict[str, str]) -> str:
+    """The spelling a call's result carries: RESOLVED, AS_GIVEN or '' (unknown)."""
+    func = call.func
+    if isinstance(func, ast.Attribute) and func.attr == "resolve":
+        return RESOLVED
+    if _dotted(func) == "os.path.realpath":
+        return RESOLVED
+    if _is_host_spelling(call):
+        return AS_GIVEN
+    if isinstance(func, ast.Name) and func.id in funcs:
+        return funcs[func.id]
+    if (_dotted(func) in _CARRYING_WRAPPERS or _tail_name(func) in _CARRYING_WRAPPERS) and call.args:
+        return _spelling(call.args[0], env, funcs)
+    if isinstance(func, ast.Attribute) and func.attr in _CARRYING_METHODS:
+        return _spelling(func.value, env, funcs)
+    return ""
+
+
+def _spelling(node: ast.expr, env: Dict[str, str], funcs: Dict[str, str]) -> str:
+    """RESOLVED when the value passed through resolve(), AS_GIVEN when it is the host's spelling, else ''."""
+    if isinstance(node, ast.Call):
+        return _call_spelling(node, env, funcs)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _spelling(node.left, env, funcs)
+    if isinstance(node, ast.Attribute) and node.attr in ("parent", "parents"):
+        return _spelling(node.value, env, funcs)
+    if isinstance(node, ast.Subscript):
+        return _spelling(node.value, env, funcs)
+    if isinstance(node, ast.Name):
+        return env.get(node.id, "")
+    if isinstance(node, (ast.Tuple, ast.List)) and node.elts:
+        kinds = {_spelling(element, env, funcs) for element in node.elts}
+        return kinds.pop() if len(kinds) == 1 else ""
+    if isinstance(node, (ast.GeneratorExp, ast.ListComp)):
+        return _spelling(node.elt, env, funcs)
+    return ""
+
+
+def _bind(target: ast.expr, value: ast.expr, env: Dict[str, str], funcs: Dict[str, str]) -> None:
+    """Record the spelling each assigned name now carries (last assignment wins)."""
+    if isinstance(target, ast.Name):
+        env[target.id] = _spelling(value, env, funcs)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
+            kinds = [_spelling(element, env, funcs) for element in value.elts]
+        else:
+            kinds = [_spelling(value, env, funcs)] * len(target.elts)
+        for element, kind in zip(target.elts, kinds):
+            if isinstance(element, ast.Name):
+                env[element.id] = kind
+
+
+def _own_nodes(func: ast.AST) -> List[ast.AST]:
+    """Every node in *func*'s body, nested defs and lambdas excluded, in source order."""
+    found: List[ast.AST] = []
+    stack = list(ast.iter_child_nodes(func))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        found.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return sorted(found, key=lambda node: (getattr(node, "lineno", 0), getattr(node, "col_offset", 0)))
+
+
+def _compared_pairs(node: ast.AST) -> List[Tuple[ast.expr, ast.expr]]:
+    """The (left, right) operand pairs a node compares as paths, else []."""
+    if isinstance(node, ast.Compare):
+        pairs: List[Tuple[ast.expr, ast.expr]] = []
+        operands = [node.left, *node.comparators]
+        for left, op, right in zip(operands, node.ops, operands[1:]):
+            if isinstance(op, (ast.Eq, ast.NotEq)):
+                pairs.append((left, right))
+            elif isinstance(op, (ast.In, ast.NotIn)) and isinstance(right, ast.Attribute) and right.attr == "parents":
+                pairs.append((left, right.value))
+        return pairs
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _PATH_COMPARISONS
+        and len(node.args) == 1
+        and not isinstance(node.args[0], ast.Tuple)
+    ):
+        return [(node.func.value, node.args[0])]
+    return []
+
+
+def _bind_statement(node: ast.AST, env: Dict[str, str], funcs: Dict[str, str]) -> None:
+    """Apply one assignment, annotated assignment or ``with ... as`` to *env*."""
+    if isinstance(node, ast.Assign):
+        for target in node.targets:
+            _bind(target, node.value, env, funcs)
+    elif isinstance(node, ast.AnnAssign) and node.value is not None:
+        _bind(node.target, node.value, env, funcs)
+    elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+        _bind(node.optional_vars, node.context_expr, env, funcs)
+
+
+def _walk_function(func: ast.AST, funcs: Dict[str, str]) -> Tuple[List[str], List[Tuple[int, ast.AST]]]:
+    """One pass over *func* in source order: (spellings of its returns, mixed comparisons)."""
+    env: Dict[str, str] = {}
+    returns: List[str] = []
+    mixed: List[Tuple[int, ast.AST]] = []
+    for node in _own_nodes(func):
+        kinds = [{_spelling(left, env, funcs), _spelling(right, env, funcs)} for left, right in _compared_pairs(node)]
+        if {RESOLVED, AS_GIVEN} in kinds:
+            mixed.append((getattr(node, "lineno", 0), node))
+        if isinstance(node, ast.Return) and node.value is not None:
+            returns.append(_spelling(node.value, env, funcs))
+        _bind_statement(node, env, funcs)
+    return returns, mixed
+
+
+def _function_spellings(tree: ast.Module) -> Dict[str, str]:
+    """Same-file module-level functions whose every known return carries one spelling.
+
+    ``aipass_home()`` returns ``_absolute(raw)`` (RESOLVED) or None: RESOLVED.
+    ``_search_bounds()`` returns ``Path.cwd(), Path.home()``: AS_GIVEN. Iterated to
+    a fixed point so a helper of a helper is followed, inside this file only.
+    """
+    defs = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    funcs: Dict[str, str] = {}
+    for _round in range(len(defs) + 1):
+        changed = False
+        for func in defs:
+            kinds = {kind for kind in _walk_function(func, funcs)[0] if kind}
+            spelling = kinds.pop() if len(kinds) == 1 else ""
+            if spelling and funcs.get(func.name) != spelling:
+                funcs[func.name] = spelling
+                changed = True
+        if not changed:
+            break
+    return funcs
+
+
+def _mixed_spelling_comparisons(tree: ast.Module) -> List[Tuple[int, str]]:
+    """In one function, a resolve()d path compared with Path.home()/cwd()/tempfile as given."""
+    funcs = _function_spellings(tree)
+    violations: List[Tuple[int, str]] = []
+    seen: Set[int] = set()
+    for func in ast.walk(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for lineno, node in _walk_function(func, funcs)[1]:
+            if lineno in seen:
+                continue
+            seen.add(lineno)
+            text = ast.unparse(node)
+            text = text if len(text) <= 80 else text[:77] + "..."
+            violations.append((lineno, f"`{text}` - {_SPELLING_FIX}"))
+    return violations
+
+
+# =============================================
 # CORPUS
 # =============================================
 
@@ -887,7 +1104,7 @@ def _relative(path: Path, branch_root: Path) -> str:
 
 
 def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
-    """All three arms over one file. Returns (violations, acquitted binary sites).
+    """Every arm (A to E) over one file. Returns (violations, acquitted binary sites).
 
     A file that cannot be read or parsed reports NOTHING rather than a
     violation: this standard is about what the code does, and an unparseable
@@ -912,6 +1129,7 @@ def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
     violations.extend(binary_violations)
     violations.extend(_gate_violations(tree, aliases, module_marks))
     violations.extend(_flavourless_subclasses(tree))
+    violations.extend(_mixed_spelling_comparisons(tree))
     violations.sort(key=lambda row: row[0])
     return violations, acquitted
 

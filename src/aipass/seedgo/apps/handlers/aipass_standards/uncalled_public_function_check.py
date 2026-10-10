@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: uncalled_public_function_check.py
 # Description: Uncalled Public Function Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-22
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -42,6 +42,11 @@ THE CRISP PART IS WHAT COUNTS AS CALLED, and it is the whole rule:
   A name-level graph collapses two modules that both define ``run``, so it
   over-acquits rather than under-acquits. For a SCORED rule that is the right
   direction, and the number it acquits is reported rather than hidden.
+
+A RETIRED TEST CALLS NOTHING (2026-10-10, devpulse d13d7c68 item A). Only live
+test files are read -- ``tests/.archive`` and every SOURCE_SKIP_DIRS dir are
+out, both in the call tally and in the unpatched-run pass -- the same cure
+unused_conftest_fixture 1.1.0 got. See ``_live_test_files``.
 
 CHECK FIRST, measured 2026-09-22 over the fleet:
 
@@ -227,13 +232,24 @@ def _named_target(node: ast.AST) -> str:
     return _tail_name(node)
 
 
+def _live_test_files(tests_dir: Path) -> List[Path]:
+    """Every ``.py`` under ``tests/`` that CI runs: ``.archive`` and every SOURCE_SKIP_DIRS dir out.
+
+    A retired test calls nothing. ``tests/.archive`` is git-ignored, so a clean
+    checkout does not have it: memory's ``validate_memory_file_structure`` read
+    100 on memory's seat and 98 in CI because its one naming test sat there
+    (devpulse d13d7c68 item A). The same cure as unused_conftest_fixture 1.1.0.
+    """
+    return [path for path in sorted(tests_dir.rglob("*.py")) if not in_skipped_dir(path, tests_dir)]
+
+
 def _read_tests(tests_dir: Path, branch_root: Path) -> Tuple[Set[str], Set[str], Set[str], List[Path]]:
     """(called, replaced, named outside a patch, every declared subject)."""
     called: Set[str] = set()
     replaced: Set[str] = set()
     elsewhere: Set[str] = set()
     subjects: List[Path] = []
-    for path in sorted(tests_dir.rglob("*.py")):
+    for path in _live_test_files(tests_dir):
         tree = _parse(path)
         if tree is None:
             continue
@@ -399,7 +415,7 @@ def run_unpatched(tests_dir: Path, graph: Dict[str, Set[str]]) -> Set[str]:
     name for a test: its body and decorators, its class's decorators, the
     fixtures it names, and every autouse fixture under tests/.
     """
-    trees = [tree for tree in (_parse(p) for p in sorted(tests_dir.rglob("*.py"))) if tree is not None]
+    trees = [tree for tree in (_parse(p) for p in _live_test_files(tests_dir)) if tree is not None]
     helpers: Dict[str, Set[str]] = {}
     patches: Dict[str, Set[str]] = {}
     autouse: Set[str] = set()
