@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-05-04
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -44,26 +44,30 @@ from aipass.aipass.tests.support_bootstrap import _expected_aipass_home
 
 
 @pytest.mark.parametrize(
-    "raw,registry_name",
+    "raw,registry_name,package",
     [
-        ("my_project", "MY_PROJECT"),  # lowercase is uppercased
-        ("my-project", "MY-PROJECT"),  # hyphens are kept
-        ("my project!v2", "MY_PROJECT_V2"),  # other characters become underscores
-        ("foo.bar/baz", "FOO_BAR_BAZ"),  # dots and slashes too
-        ("...name...", "NAME"),  # leading and trailing underscores are stripped
-        ("hello world", "HELLO_WORLD"),  # spaces become underscores
-        ("ALPHA", "ALPHA"),  # uppercase passes through
+        ("my_project", "MY_PROJECT", "my_project"),  # lowercase is uppercased
+        ("my-project", "MY-PROJECT", "my_project"),  # hyphens are kept
+        ("my project!v2", "MY_PROJECT_V2", "my_project_v2"),  # other characters become underscores
+        ("foo.bar/baz", "FOO_BAR_BAZ", "foo_bar_baz"),  # dots and slashes too
+        ("...name...", "NAME", "name"),  # leading and trailing underscores are stripped
+        ("hello world", "HELLO_WORLD", "hello_world"),  # spaces become underscores
+        ("ALPHA", "ALPHA", "alpha"),  # uppercase passes through
     ],
 )
-def test_project_name_is_sanitized_into_the_registry_name(tmp_path, raw: str, registry_name: str):
-    """The registry file init writes carries the sanitized name, and no other registry lands.
+def test_project_name_is_sanitized_into_the_registry_name(tmp_path, raw: str, registry_name: str, package: str):
+    """The registry file and the src/ package carry the sanitized name, and no other registry lands.
 
-    Mutant: _sanitize_name's .upper() dropped -> red.
+    Mutant: _sanitize_name's .upper() dropped -> red. Mutant: package_name read off the
+    raw name again -> the punctuated cases red (a trailing-dot directory crashed on Windows).
     """
     target = tmp_path / "proj"
     target.mkdir()
     init_project(target, project_name=raw)
     assert [p.name for p in registries_in(target)] == [f"{registry_name}_REGISTRY.json"]
+    packages = sorted(p.parent.relative_to(target / "src").as_posix() for p in (target / "src").rglob("__init__.py"))
+    assert packages == [package]
+    assert package.isidentifier()
 
 
 @pytest.mark.parametrize("raw", ["!!!", "___"])

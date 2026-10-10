@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-03-14
-# Modified: 2026-09-28
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -391,7 +391,9 @@ def init_project(
         created.append(str(prep_path))
 
     # 10. src/<project>/ package structure (pip-installable from day one)
-    package_name = raw_name.lower().replace("-", "_").replace(" ", "_")
+    # From the sanitized name, never the raw one: a raw name nested a slash, kept
+    # punctuation no import accepts, and crashed on Windows on a trailing dot.
+    package_name = name.lower().replace("-", "_")
     src_dir = target / "src"
     src_dir.mkdir(exist_ok=True)
     package_dir = src_dir / package_name
