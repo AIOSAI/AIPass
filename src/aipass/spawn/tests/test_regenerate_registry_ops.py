@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_regenerate_registry_ops.py
 # Description: Tests for regenerate_registry_ops handler
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-04-03
-# Modified: 2026-10-02
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/regenerate_registry_ops.py and apps/modules/regenerate_registry.py."""
@@ -704,7 +704,7 @@ class TestLastUpdatedTracksContentNotTheCalendar:
     def _registry(template: Path) -> dict:
         return json.loads((template / ".spawn" / ".template_registry.json").read_text(encoding="utf-8"))
 
-    def _settled(self, tmp_path: Path, date: str = "2026-01-01") -> Path:
+    def _settled(self, tmp_path: Path, date: str = "2026-01-01", newline: str = "\n") -> Path:
         """A template whose registry is already stable, stamped on a day that is not today.
 
         The FIRST regenerate creates .spawn/, which the scanner then tracks as a
@@ -712,6 +712,8 @@ class TestLastUpdatedTracksContentNotTheCalendar:
         the run under test a genuine no-change run rather than a disguised one.
         The stamp is then backdated ON DISK, in the product's own serialisation,
         so the run under test happens on a different calendar day than the stamp.
+        The newline is explicit: write_text without one writes os.linesep, so this
+        fixture was CRLF on Windows and LF here, and only Windows saw a CRLF file.
         """
         template = _make_template(tmp_path, files={"README.md": "hello"})
         self._regenerate(template)
@@ -719,7 +721,7 @@ class TestLastUpdatedTracksContentNotTheCalendar:
         registry = self._registry(template)
         registry["metadata"]["last_updated"] = date
         (template / ".spawn" / ".template_registry.json").write_text(
-            json.dumps(registry, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
+            json.dumps(registry, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8", newline=newline
         )
         return template
 
@@ -731,8 +733,14 @@ class TestLastUpdatedTracksContentNotTheCalendar:
 
         assert self._registry(template)["metadata"]["last_updated"] == "2026-01-01"
 
-    def test_no_change_regenerate_is_byte_identical(self, tmp_path):
-        template = self._settled(tmp_path)
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    def test_no_change_regenerate_is_byte_identical(self, tmp_path, newline):
+        """A no-op keeps every byte, line endings included (CRLF: a Windows checkout).
+
+        Mutant: a no-change regenerate stamps today's date -> red, both endings.
+        Mutant: the writer always writes LF -> red on crlf.
+        """
+        template = self._settled(tmp_path, newline=newline)
         registry_path = template / ".spawn" / ".template_registry.json"
         before = registry_path.read_bytes()
 

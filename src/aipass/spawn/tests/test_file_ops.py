@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_file_ops.py
 # Description: Tests for file_ops handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-03
-# Modified: 2026-09-29
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/file_ops.py."""
@@ -359,6 +359,8 @@ class TestReplacePathPlaceholders:
         """Placeholder tokens in path components are replaced.
 
         Mutant: path components copied without placeholder replacement -> red.
+        Mutant: the directory entry loses its " (dir)" suffix -> red.
+        Mutant: the listing spelled with str() (a backslash on Windows) -> red there.
         """
         _ = mock_json_handler
         template = tmp_path / "template"
@@ -370,11 +372,15 @@ class TestReplacePathPlaceholders:
         copied, _skipped = copy_template(template, target, REPLACEMENTS)
 
         assert (target / "testagent_json" / "TESTAGENT_config.py").is_file()
-        assert "testagent_json/TESTAGENT_config.py" in copied
+        assert copied == ["testagent_json/ (dir)", "testagent_json/TESTAGENT_config.py"]
         assert not (target / "{{BRANCH}}_json").exists()
 
     def test_replace_path_placeholders_no_match(self, tmp_path: Path, mock_json_handler) -> None:
-        """Paths without placeholders pass through unchanged."""
+        """Paths without placeholders pass through unchanged, listed one spelling on every host.
+
+        Mutant: a native path joined to the literal "/ (dir)" suffix -> red on Windows
+        ('apps\\handlers/ (dir)', the mixed list CI run 38078052852 showed).
+        """
         _ = mock_json_handler
         template = tmp_path / "template"
         (template / "apps" / "handlers").mkdir(parents=True)
@@ -385,7 +391,7 @@ class TestReplacePathPlaceholders:
         copied, _skipped = copy_template(template, target, REPLACEMENTS)
 
         assert (target / "apps" / "handlers" / "init.py").is_file()
-        assert "apps/handlers/init.py" in copied
+        assert copied == ["apps/ (dir)", "apps/handlers/ (dir)", "apps/handlers/init.py"]
 
     def test_replace_path_placeholders_empty(self, tmp_path: Path, mock_json_handler) -> None:
         """With no replacements, a single-component path keeps its name."""

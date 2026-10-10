@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: regenerate_registry_ops.py
 # Description: Regenerate .template_registry.json for spawn template directories
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-25
-# Modified: 2026-10-02
+# Modified: 2026-10-10
 # =============================================
 
 """Regenerate template registry — walk template directory, hash files, build registry.
@@ -50,6 +50,21 @@ def _registry_date() -> str:
     DPLAN-0354 leg 3.
     """
     return datetime.now().strftime("%Y-%m-%d")
+
+
+def _existing_newline(registry_path: Path) -> str:
+    """The line ending the manifest on disk already uses: CRLF if it has one, else LF.
+
+    Args:
+        registry_path: The .template_registry.json about to be written.
+
+    Returns:
+        "\\r\\n" when the existing file holds a CRLF, "\\n" otherwise or when absent.
+    """
+    try:
+        return "\r\n" if b"\r\n" in registry_path.read_bytes() else "\n"
+    except FileNotFoundError:
+        return "\n"
 
 
 # =============================================================================
@@ -133,10 +148,11 @@ def regenerate_template_registry(template_dir: Path) -> dict:
         # Staged under a unique mkstemp name rather than a fixed ".tmp": two
         # concurrent regenerations used to share one staging path, and a failed
         # write left that path orphaned beside the registry.
-        atomic_write_text(
-            registry_path,
-            json.dumps(registry, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        )
+        # The manifest keeps the line endings it already has: a CRLF checkout
+        # (Windows, autocrlf) rewritten as LF is every line changed on a no-op.
+        # json.dumps escapes newlines inside strings, so every "\n" is a line end.
+        text = json.dumps(registry, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+        atomic_write_text(registry_path, text.replace("\n", _existing_newline(registry_path)))
     except (IOError, OSError) as exc:
         logger.error(f"Failed to write template registry: {exc}")
         return {"error": f"Failed to write registry: {exc}"}

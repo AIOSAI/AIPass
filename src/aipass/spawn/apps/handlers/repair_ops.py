@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair_ops.py
 # Description: Repair handler — move branches, update registry paths, clean pollution
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-05-15
-# Modified: 2026-09-27
+# Modified: 2026-10-10
 # =============================================
 
 """Repair handler implementation for project structure fixes.
@@ -14,11 +14,17 @@ pollution (duplicate nested directories).
 """
 
 import shutil
-import sys
 from datetime import datetime
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+
+# POSIX only: Windows has no fcntl, so update_registry_path takes no lock there.
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
+    logger.info("[repair] fcntl unavailable (Windows) — update_registry_path runs unlocked")
 
 from aipass.spawn.apps.handlers.registry import (
     find_registry,
@@ -100,9 +106,7 @@ def update_registry_path(registry_path, branch_name, new_path):
     lock_path = registry_path.parent / f".{registry_path.stem}.lock"
 
     lock_fd = None
-    if sys.platform != "win32":
-        import fcntl  # noqa: windows_compat — guarded by platform check
-
+    if fcntl is not None:
         lock_fd = open(lock_path, "w", encoding="utf-8")
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
@@ -133,9 +137,7 @@ def update_registry_path(registry_path, branch_name, new_path):
         registry["branches"] = branch_list
         return save_registry(registry_path, registry)
     finally:
-        if lock_fd is not None:
-            # fcntl is already bound: lock_fd is only ever assigned in the
-            # sys.platform != "win32" branch above, which imports it there.
+        if lock_fd is not None and fcntl is not None:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             lock_fd.close()
 

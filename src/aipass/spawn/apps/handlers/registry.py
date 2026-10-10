@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: *_REGISTRY.json discovery and CRUD operations
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-09-29
+# Modified: 2026-10-10
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -34,13 +34,19 @@ Identity model (DPLAN-0239, settled 2026-07-11):
       signature, this flag); the lane stays dark unless all five pass.
 """
 
-import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.json import json_handler
+
+# POSIX only: Windows has no fcntl, so add_to_registry takes no lock there.
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
+    logger.info("[registry] fcntl unavailable (Windows) — add_to_registry runs unlocked")
 
 
 _PROTECTED_FLOOR = frozenset({"spawn", "devpulse", "drone"})
@@ -375,11 +381,9 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
     lock_path = registry_path.parent / f".{registry_path.stem}.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if sys.platform == "win32":
+    if fcntl is None:
         lock_fd = None
     else:
-        import fcntl
-
         lock_fd = open(lock_path, "w", encoding="utf-8")
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
@@ -446,9 +450,7 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
 
         return save_registry(registry_path, registry)
     finally:
-        if lock_fd is not None and sys.platform != "win32":
-            import fcntl
-
+        if lock_fd is not None and fcntl is not None:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             lock_fd.close()
 
