@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_testwrite_gate.py
-# Version: 1.1.3
+# Version: 1.1.4
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
@@ -898,6 +898,7 @@ class TestAnOperandPathlibCannotExpand:
         return Path(seat) / os.path.expanduser(self.OPERAND)
 
     def test_a_redirect_into_an_unknown_users_home_names_the_target_under_cwd(self, project: dict):
+        """The new test file is refused wherever the platform reads it (Windows reads it off the seat, PR #774)."""
         _policy(project)
         expected = self._expected(project["seat"])
         command = f"echo x > {self.OPERAND}"
@@ -906,7 +907,8 @@ class TestAnOperandPathlibCannotExpand:
         result = _run(project["seat"], command=command)
 
         assert targets == [expected]
-        assert _blocked(result) is (Path(project["seat"]) in expected.parents)
+        assert _blocked(result)
+        assert "New test file blocked" in _reason(result)
 
     def test_the_same_word_for_an_existing_file_is_judged_as_an_edit(self, project: dict):
         """The path pin: the literal directory exists under the seat, so the write edits a test."""
@@ -918,7 +920,9 @@ class TestAnOperandPathlibCannotExpand:
 
         result = _run(project["seat"], command=f"echo x >> {self.OPERAND}")
 
-        assert _blocked(result) is (expected == literal)
+        # Refused either way; the platform's reading decides which refusal (Windows: a new file, PR #774).
+        assert _blocked(result)
+        assert ("Test file edit blocked" in _reason(result)) is (expected == literal)
 
 
 class TestTheTemplatePointer:

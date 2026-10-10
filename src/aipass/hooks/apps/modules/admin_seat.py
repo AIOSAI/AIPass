@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: admin_seat.py
-# Version: 1.1.2
+# Version: 1.1.3
 # Description: The verified admin-seat exemption and the caller's name, read once for every gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Answers one question for every security gate: is this session the admin seat?
@@ -95,7 +95,7 @@ def caller_name(cwd: str) -> str | None:
     if not cwd:
         return None
     search = Path(cwd).resolve()
-    home = Path.home()
+    home = Path.home().resolve()  # both sides resolved: a symlinked home never stopped the walk (PR #774)
     while search != home and search.parent != search:
         passport = search / ".trinity" / "passport.json"
         if passport.exists():

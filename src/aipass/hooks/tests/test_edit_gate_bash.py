@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.6.0
+# Version: 1.6.1
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
@@ -383,7 +383,7 @@ class TestScriptedLaneDoesNotOverreach:
         sed without -i was allowed until phase 4; its script can still write (w) or run (e),
         so it is no longer read as a filter. grep and cat are.
         """
-        foreign = sibling_projects["foreign_file"]
+        foreign = Path(sibling_projects["foreign_file"]).as_posix()  # bash eats an unquoted backslash (PR #774)
         assert self._run_plain(sibling_projects, f"sed s/a/b/ {foreign}")["exit_code"] == 2
         assert self._run_plain(sibling_projects, f"grep a {foreign}")["exit_code"] == 0
         assert self._run_plain(sibling_projects, f"cat {foreign}")["exit_code"] == 0

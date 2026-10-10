@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_reader.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: The one shell-word reader: every program a Bash command runs, as the shell runs it (rm_gate, git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-01
+# Modified: 2026-10-10
 # =============================================
 
 """What a Bash command RUNS, read the way bash reads it (DPLAN-0356 phase 3, R3 to R6).
@@ -812,7 +812,9 @@ def _command_candidates(word: _Word, text: str, ctx: _Ctx) -> list[str]:
     """The program names an unquoted glob in the command word can become, against the cwd and PATH."""
     if not _globby(word):
         return [text]
-    found: set[str] = set()
+    # A watched verb the glob's last part can spell counts whatever the gate's disk shows: Git Bash's
+    # /bin is a mount Windows cannot list, so /bin/r? ran rm and read as r? (CI red, PR #774).
+    found = {verb for verb in WATCHED_VERBS if fnmatch.fnmatchcase(verb, text.rsplit("/", 1)[-1])}
     if "/" in text:
         pattern = Path(text).expanduser()
         if not pattern.is_absolute() and ctx.cwd is not None:

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 3.1.1
+# Version: 3.2.0
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/security/rm_gate.py."""
@@ -33,6 +33,13 @@ LIVE_RECORDS = (
     _BRANCH / "logs" / "rm_gate.log",
     _BRANCH.parents[2] / "system_logs" / "hooks_rm_gate.log",
 )
+
+
+def _home_through_a_link(real: Path, link: Path, monkeypatch) -> None:
+    """HOME (USERPROFILE on Windows) spelled through *link*, a directory symlink to *real*, as macOS's /var is."""
+    link.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("HOME", str(link))
+    monkeypatch.setenv("USERPROFILE", str(link))
 
 
 @pytest.fixture(autouse=True)
@@ -284,6 +291,20 @@ class TestDeletionRecord:
             result = self._bash("rm notes.txt", cwd=str(project))
 
         assert result["exit_code"] == 2
+        records = self._audit_records(caplog)
+        assert len(records) == 1 and "branch=unnamed" in records[0].getMessage()
+
+    def test_a_passport_at_a_symlinked_home_names_no_one(self, caplog, tmp_path, monkeypatch):
+        """host_portability (PR #774): the resolved walk never met an unresolved home and read home's passport."""
+        real = tmp_path / "real_home"
+        (real / ".trinity").mkdir(parents=True)
+        (real / ".trinity" / "passport.json").write_text('{"branch_info": {"branch_name": "squatter"}}', "utf-8")
+        (real / "work").mkdir()
+        _home_through_a_link(real, tmp_path / "home", monkeypatch)
+
+        with caplog.at_level(logging.INFO):
+            self._bash("rm notes.txt", cwd=str(real / "work"))
+
         records = self._audit_records(caplog)
         assert len(records) == 1 and "branch=unnamed" in records[0].getMessage()
 
@@ -656,6 +677,17 @@ class TestTheShellSpellingIsReadTheWayTheShellRunsIt:
 
         assert result["exit_code"] == 2, command
         assert "Raw rm is refused" in json.loads(result["stdout"])["reason"], command
+
+    def test_a_glob_that_matches_nothing_the_gate_can_list_is_read_as_the_verb_it_names(self, tmp_path):
+        """CI red PR #774 (Windows): Git Bash's /bin is a mount the gate cannot list, so /bin/r? read as r?."""
+        unlisted = tmp_path / "bin"
+        unlisted.mkdir()
+        command = f"{unlisted.as_posix()}/r? notes.txt"
+        with patch(_RAIL, return_value=False):
+            result = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": _seat(tmp_path, "canary")})
+
+        assert result["exit_code"] == 2
+        assert "Raw rm is refused" in json.loads(result["stdout"])["reason"]
 
     @pytest.mark.parametrize("command", ("$UNSET notes.txt", "echo 'rm notes.txt' | bash", "$(cat verb) notes.txt"))
     def test_a_program_the_reader_cannot_name_is_refused_off_the_admin_seat(self, tmp_path, command):

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_identity.py
-# Version: 1.3.2
+# Version: 1.3.3
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-05
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/prompt/identity.py."""
@@ -142,6 +142,20 @@ class TestIdentityHandler:
         assert "orchestration_hub" in result["stdout"]
         assert "Pragmatic" in result["stdout"]
         assert result["sound"] == "identity"
+
+    def test_a_passport_at_a_symlinked_home_is_not_read(self, tmp_path, monkeypatch):
+        """host_portability (PR #774): the resolved walk never met an unresolved home and read home's passport."""
+        real = tmp_path / "real_home"
+        (real / ".trinity").mkdir(parents=True)
+        (real / ".trinity" / "passport.json").write_text(json.dumps(SAMPLE_PASSPORT), encoding="utf-8")
+        (real / "work").mkdir()
+        (tmp_path / "home").symlink_to(real, target_is_directory=True)
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+        result = handle({"cwd": str(real / "work")})
+
+        assert result["stdout"] == ""
 
     def test_returns_empty_when_no_passport(self, tmp_path):
 

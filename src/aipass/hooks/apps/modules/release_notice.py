@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: release_notice.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Manager-only "AIPass release available" notice builder (DPLAN-0335 leg 2)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-09
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # =============================================
 
 """Builds the manager-only notice that a project's scaffold is behind AIPass.
@@ -74,7 +74,7 @@ def _find_passport(start: Path) -> Path | None:
     except OSError as exc:
         logger.info("[HOOKS] release_notice: passport walk unresolvable for %s: %s", start, exc)
         return None
-    home = Path.home()
+    home = Path.home().resolve()  # both sides resolved: a symlinked home never stopped the walk (PR #774)
     while search != home and search.parent != search:
         passport = search / ".trinity" / "passport.json"
         if passport.exists():

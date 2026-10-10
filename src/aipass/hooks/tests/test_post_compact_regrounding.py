@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_post_compact_regrounding.py
-# Version: 1.2.3
+# Version: 1.2.4
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-10-05
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -465,6 +465,19 @@ class TestReleaseNoticeModule:
         iso_notice = _notice(iso)
         assert "(2026-09-01)" in iso_notice
         assert "07:55" not in iso_notice
+
+    def test_a_manager_passport_at_a_symlinked_home_is_not_read(self, tmp_path, monkeypatch):
+        """host_portability (PR #774): the resolved walk never met an unresolved home and read home's passport."""
+        real = tmp_path / "real_home"
+        (real / ".trinity").mkdir(parents=True)
+        (real / ".trinity" / "passport.json").write_text(MANAGER_PASSPORT, encoding="utf-8")
+        (real / "PROJ_REGISTRY.json").write_text("{}", encoding="utf-8")
+        (real / "work").mkdir()
+        (tmp_path / "home").symlink_to(real, target_is_directory=True)
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+        assert _notice(real / "work") == ""
 
     def test_current_scaffold_is_silent(self, tmp_path):
         assert _notice(_make_project(tmp_path / "proj", stamped="2.8.4")) == ""

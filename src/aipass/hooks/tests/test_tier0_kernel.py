@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_tier0_kernel.py
-# Version: 1.2.3
+# Version: 1.2.4
 # Description: Tests for tier0_kernel prompt handler
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-10-05
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/prompt/tier0_kernel.py."""
@@ -267,6 +267,19 @@ class TestDegradedGroundingIsLoud:
 
         assert failures and str(Path.home()) not in failures[0]
         assert "~/x" in failures[0]
+
+    def test_a_trinity_at_a_symlinked_home_is_not_this_seats(self, tmp_path, monkeypatch):
+        """host_portability (PR #774): the resolved walk never met an unresolved home and read home's .trinity/."""
+        real = tmp_path / "real_home"
+        (real / ".trinity").mkdir(parents=True)
+        (real / "work").mkdir()
+        (tmp_path / "home").symlink_to(real, target_is_directory=True)
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+        _, failures = grounding_content.grounding_report({"cwd": str(real / "work")})
+
+        assert [line for line in failures if line.startswith("identity:")] == []
 
 
 class TestCadenceDegradedMode:

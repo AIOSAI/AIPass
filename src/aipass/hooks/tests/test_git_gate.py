@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.2.0
+# Version: 5.2.1
 # Description: Tests for git_gate: raw git and gh refused for every seat; protected config writes the admin seat's
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -28,6 +28,12 @@ from aipass.hooks.apps.handlers.security.git_gate import handle
 # this checkout, and a hardcoded home path makes the suite a property of one
 # machine. parents[4] is the repo root — tests -> hooks -> aipass -> src -> root.
 _REPO = Path(__file__).resolve().parents[4]
+
+
+def _word(path) -> str:
+    """A path as a command string spells it on every host: bash eats an unquoted backslash (CI red PR #774)."""
+    return Path(path).as_posix()
+
 
 CWD = str(_REPO / "src" / "aipass" / "api")
 DEVPULSE_CWD = str(_REPO / "src" / "aipass" / "devpulse")
@@ -817,8 +823,8 @@ class TestAProtectedFileIsProtectedUnderEveryName:
     def test_making_a_hard_link_to_one_is_refused_in_shell_and_interpreter_forms(self, tmp_path, trust_home):
         seat = _seat(tmp_path, "canary")
         for command in (
-            f"ln {trust_home} mine.json",
-            f"python3 -c \"import os; os.link('{trust_home}', 'mine.json')\"",
+            f"ln {_word(trust_home)} mine.json",
+            f"python3 -c \"import os; os.link('{_word(trust_home)}', 'mine.json')\"",
         ):
             _assert_blocked(_canary_bash(command, seat))
 
@@ -840,18 +846,19 @@ class TestTheProtectedLaneRefusesDeletesAndMovesOnItsOwn:
     def test_a_delete_a_move_away_and_a_move_over_are_each_refused(self, tmp_path, trust_home):
         seat = _seat(tmp_path, "canary")
         for command in (
-            f"unlink {trust_home}",
-            f"shred -u {trust_home}",
-            f"mv {trust_home} {tmp_path / 'elsewhere.json'}",
-            f"mv new.json {trust_home}",
-            f"python3 -c \"import os; os.remove('{trust_home}')\"",
+            f"unlink {_word(trust_home)}",
+            f"shred -u {_word(trust_home)}",
+            f"mv {_word(trust_home)} {_word(tmp_path / 'elsewhere.json')}",
+            f"mv new.json {_word(trust_home)}",
+            f"python3 -c \"import os; os.remove('{_word(trust_home)}')\"",
         ):
             result = _canary_bash(command, seat)
             _assert_blocked(result)
             assert "is protected" in json.loads(result["stdout"])["reason"], command
 
     def test_moving_the_directory_that_holds_one_is_refused(self, tmp_path, trust_home):
-        _assert_blocked(_canary_bash(f"mv {trust_home.parent} {tmp_path / 'y'}", _seat(tmp_path, "canary")))
+        command = f"mv {_word(trust_home.parent)} {_word(tmp_path / 'y')}"
+        _assert_blocked(_canary_bash(command, _seat(tmp_path, "canary")))
 
     def test_moving_an_ordinary_file_is_allowed(self, tmp_path, trust_home):
         _assert_allowed(_canary_bash("mv old.json new.json", _seat(tmp_path, "canary")))
@@ -917,10 +924,10 @@ class TestProtectedPathsAreDefaultDeny:
 
     def _members(self) -> list[str]:
         return [
-            str(Path.home() / ".aipass" / "trusted_projects.json"),
-            str(_REPO / ".git" / "config"),
-            str(_REPO / ".git" / "refs" / "heads" / "main"),
-            str(_REPO / "AIPASS_REGISTRY.json"),
+            _word(Path.home() / ".aipass" / "trusted_projects.json"),
+            _word(_REPO / ".git" / "config"),
+            _word(_REPO / ".git" / "refs" / "heads" / "main"),
+            _word(_REPO / "AIPASS_REGISTRY.json"),
         ]
 
     def test_a_program_nobody_listed_is_refused_naming_one(self, tmp_path):

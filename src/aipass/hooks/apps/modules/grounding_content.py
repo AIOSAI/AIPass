@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Shared content loaders for grounding prompt injections (DPLAN-0276), each rendered under its cap
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-09-30
+# Modified: 2026-10-10
 # =============================================
 
 """Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating.
@@ -221,7 +221,7 @@ def load_branch(hook_data: dict) -> str:
 def _find_passport(cwd: str) -> Path | None:
     """Walk up from CWD looking for .trinity/passport.json."""
     search = Path(cwd).resolve()
-    home = Path.home()
+    home = Path.home().resolve()  # both sides resolved: a symlinked home never stopped the walk (PR #774)
     while search != home and search.parent != search:
         passport = search / ".trinity" / "passport.json"
         if passport.exists():
@@ -402,7 +402,7 @@ def _branch_failure(hook_data: dict) -> str | None:
 def _branch_has_trinity(cwd: str) -> Path | None:
     """The nearest .trinity/ above *cwd*, stopping at home."""
     search = Path(cwd).resolve()
-    home = Path.home()
+    home = Path.home().resolve()  # both sides resolved: a symlinked home never stopped the walk (PR #774)
     while search != home and search.parent != search:
         candidate = search / ".trinity"
         if candidate.is_dir():
