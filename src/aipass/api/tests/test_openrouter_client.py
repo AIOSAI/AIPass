@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_openrouter_client.py
 # Description: Tests for OpenRouter client module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/modules/openrouter_client.py and create_client in apps/handlers/openrouter/client.py."""
@@ -16,7 +16,7 @@
 # - log_operation called on every valid command
 # - test_connection success / no-key / API-failure paths
 # - list_models success / no-key / --all limiter
-# - check_status with key / without key
+# - check_status with key / without key, the latter with the OpenAI SDK installed and absent
 # - get_response delegation to client handler
 
 # The declared pass — what is NOT tested here, and what covers it instead:
@@ -24,6 +24,8 @@
 # seedgo: no-test-needed(duplicate_test) — detect_caller_from_stack() itself, tests/test_caller_detection.py
 # seedgo: no-test-needed(through_the_command) — the real network request behind make_call(), mocked at the edge
 
+import sys
+import types
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -386,11 +388,27 @@ def test_check_status_with_key(mock_header, mock_keys, mock_client, capsys):
     assert "Cached clients: 2/5" in out
 
 
+@pytest.mark.parametrize(
+    ("sdk", "expected_err"),
+    [
+        (types.ModuleType("openai"), ["⚠️  API key not configured"]),
+        (None, ["⚠️  API key not configured", "⚠️  OpenAI SDK not installed"]),
+    ],
+    ids=["sdk_installed", "sdk_absent"],
+)
+@patch(f"{_MOD}.logger")
 @patch(f"{_MOD}.client", autospec=True)
 @patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
-def test_check_status_no_key(mock_header, mock_keys, mock_client, capsys):
-    """When API key is missing, status warns and shows the diagnosis."""
+def test_check_status_no_key(mock_header, mock_keys, mock_client, mock_logger, sdk, expected_err, capsys, monkeypatch):
+    """
+    When API key is missing, status warns and shows the diagnosis.
+
+    The SDK's presence is set here, not inherited: CI installs no llm extra, so
+    import openai fails there and a second warning follows the key line
+    (DPLAN-0354, PR #774). A stub module is the installed case, None the absent one.
+    """
+    monkeypatch.setitem(sys.modules, "openai", sdk)
     mock_keys.get_api_key.return_value = None
     mock_keys.diagnose_key.return_value = "OPENROUTER_API_KEY not set"
     mock_client.get_cache_stats.return_value = {"cached_clients": 0, "max_cache_size": 5}
@@ -400,7 +418,7 @@ def test_check_status_no_key(mock_header, mock_keys, mock_client, capsys):
     out, err = capsys.readouterr()
     # cli's warning() writes to stderr: pinned there, whole, and absent from stdout
     # (api, fleet green leg 4 - either stream used to pass).
-    assert err.splitlines() == ["⚠️  API key not configured"]
+    assert err.splitlines() == expected_err
     assert "API key not configured" not in out
     assert "Reason:          OPENROUTER_API_KEY not set" in out
     assert "Key configured" not in out

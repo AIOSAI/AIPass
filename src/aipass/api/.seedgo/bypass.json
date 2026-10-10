@@ -264,8 +264,8 @@
     {
       "file": "tests/conftest.py",
       "standard": "through_the_command",
-      "lines": [225, 227, 494, 496],
-      "reason": "_refusals._reset_refusals() empties the refusal memory around every test (494, 496), so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12). 225, 227: the git-changes ReadCache (host_git._changes) cleared around each case, the same ruling; moved with _clean_git_changes_cache from test_host_read_lane.py:153, 155 in the oversize split (api, 2026-10-08), named and requested per file since 2026-10-09."
+      "lines": [225, 227, 466, 468],
+      "reason": "_refusals._reset_refusals() empties the refusal memory around every test (466, 468), so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12). 225, 227: the git-changes ReadCache (host_git._changes) cleared around each case, the same ruling; moved with _clean_git_changes_cache from test_host_read_lane.py:153, 155 in the oversize split (api, 2026-10-08), named and requested per file since 2026-10-09."
     }
   ],
   "notes": {

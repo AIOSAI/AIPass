@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for api tests
-# Version: 2.1.1
+# Version: 2.1.2
 # Created: 2026-03-05
-# Modified: 2026-10-09
+# Modified: 2026-10-10
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -189,8 +189,8 @@ def seated(tmp_path: Path, monkeypatch: Any):
 # The read lane's shared fixtures. They moved here whole from
 # test_host_read_lane.py when it split into four files along the unit under
 # test, because two or more of the four use each (api, the oversize split leg,
-# 2026-10-08). The git-changes cache clear is autouse, so it now runs around
-# every case in the suite, beside the fleet and refusal resets below.
+# 2026-10-08). The git-changes cache clear is a named fixture, requested by
+# the files that reach the cache through a module pytestmark (2026-10-09).
 # ---------------------------------------------------------------------------
 from aipass.api.apps.handlers.host import git_reads as host_git
 from aipass.api.tests.support_host_read_lane import _BranchNotFound, _RegistryBroken, remote_document
@@ -339,34 +339,6 @@ collect_ignore_glob = [".archive/*", "**/.archive/*"]
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def temp_test_dir(tmp_path: Path) -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
-    test_dir = tmp_path / "test_workspace"
-    test_dir.mkdir(parents=True, exist_ok=True)
-    yield test_dir
-    for child in test_dir.iterdir():
-        if child.is_file():
-            child.unlink()
-
-
-@pytest.fixture()
-def sample_test_data() -> dict:
-    """Provides sample test data"""
-    return {
-        "created": "2026-01-01",
-        "last_updated": "2026-01-15",
-        "entries": [
-            {"id": 1, "name": "alpha", "status": "active"},
-            {"id": 2, "name": "beta", "status": "pending"},
-        ],
-        "metadata": {
-            "source": "test_fixture",
-            "version": "1.0.0",
-        },
-    }
 
 
 @pytest.fixture(autouse=True)
