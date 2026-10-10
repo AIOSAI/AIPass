@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_sandbox_check.py
 # Description: Tests for sandbox prerequisite checker and doctor integration
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-06-10
-# Modified: 2026-09-29
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/sandbox_check/sandbox_checker.py and the doctor integration it drives."""
@@ -41,7 +41,12 @@ from aipass.aipass.apps.modules.doctor import run_doctor
 
 
 def _path_with(monkeypatch, tmp_path: Path, *names: str) -> dict[str, str]:
-    """PATH holds only a tmp bin dir with these executables; returns name -> path shutil.which will answer."""
+    """PATH holds only a tmp bin dir with these executables; returns name -> the path planted.
+
+    shutil.which answers in the host's spelling: on Windows the extension comes from
+    PATHEXT (bwrap.EXE for a planted bwrap.exe), so a path is compared through
+    os.path.normcase on both sides, which is the identity on POSIX.
+    """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     found = {}
@@ -111,7 +116,7 @@ class TestCheckBwrapPresent:
         bins = _path_with(monkeypatch, tmp_path, "bwrap")
         result = check_bwrap_present()
         assert result["found"] is True
-        assert result["path"] == bins["bwrap"]
+        assert os.path.normcase(result["path"]) == os.path.normcase(bins["bwrap"])
 
     def test_bwrap_not_found(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path, "node")
@@ -149,7 +154,7 @@ class TestCheckBwrapFunctional:
             result = check_bwrap_functional()
         assert result["ok"] is True
         argv = mock_run.call_args[0][0]
-        assert argv[0] == bins["bwrap"]
+        assert os.path.normcase(argv[0]) == os.path.normcase(bins["bwrap"])
         assert "--ro-bind" in argv
         assert "true" in argv
 
@@ -204,7 +209,7 @@ class TestCheckNodePresent:
         bins = _path_with(monkeypatch, tmp_path, "node")
         result = check_node_present()
         assert result["found"] is True
-        assert result["path"] == bins["node"]
+        assert os.path.normcase(result["path"]) == os.path.normcase(bins["node"])
 
     def test_node_not_found(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path, "bwrap")
@@ -252,7 +257,7 @@ class TestCheckSrtResolvable:
         assert "sandbox-runtime" in result["path"]
         assert result["install_hint"] == ""
         argv = mock_run.call_args[0][0]
-        assert argv[0] == bins["node"]
+        assert os.path.normcase(argv[0]) == os.path.normcase(bins["node"])
         assert argv[1] == str(resolver)
         assert argv[2] == "--resolve"
 
@@ -371,7 +376,9 @@ class TestSrtInstallHint:
             return_value=mock_proc,
         ) as mock_run:
             hint = check_srt_resolvable(_hooks_package_at(None))["install_hint"]
-        assert mock_run.call_args[0][0] == [bins["npm"], "root", "-g"]
+        npm, *rest = mock_run.call_args[0][0]
+        assert os.path.normcase(npm) == os.path.normcase(bins["npm"])
+        assert rest == ["root", "-g"]
         assert "/usr/local/lib/node_modules" in hint
         assert "npm install -g @anthropic-ai/sandbox-runtime" in hint
 
@@ -396,7 +403,7 @@ class TestCheckRgPresent:
         bins = _path_with(monkeypatch, tmp_path, "rg")
         result = check_rg_present()
         assert result["found"] is True
-        assert result["path"] == bins["rg"]
+        assert os.path.normcase(result["path"]) == os.path.normcase(bins["rg"])
 
     def test_rg_not_on_path_but_in_local_bin(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path)
