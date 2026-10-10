@@ -3,17 +3,17 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-10-08
-# Version: 1.5.0
+# Modified: 2026-10-10
+# Version: 1.5.1
 # Category: trigger/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.5.1 (2026-10-10): Spawn-template temp_test_dir and sample_test_data removed; no live test requested them
 #   - v1.5.0 (2026-10-08): Escalation lane fixtures moved from test_escalation.py; log_watcher_infrastructure
 #     moved from test_log_watcher.py (its _mock_infrastructure); both at the oversize_test_file splits
 #   - v1.4.0 (2026-09-27): Template C1/C2 fixtures - pinned console width, command state reset
 #   - v1.3.0 (2026-09-12): Autouse catch-up state isolation (DPLAN-0339 step 2c)
 #   - v1.2.0 (2026-08-08): Autouse resync of parent-package attrs after sys.modules surgery (CI xdist red)
-#   - v1.1.0 (2026-08-08): Suite-wide escalation lane isolation
 #
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
@@ -31,7 +31,6 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import json
 import pytest
-import shutil
 import sys
 import types
 from pathlib import Path
@@ -197,24 +196,6 @@ def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data
-
-    Customize this fixture for your module's needs
-    """
-    return {"test_key": "test_value", "sample_data": "example"}
 
 
 @pytest.fixture(autouse=True)

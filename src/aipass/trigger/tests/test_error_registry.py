@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_error_registry.py
 # Description: Unit tests for the error_registry handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-02
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -1474,7 +1474,8 @@ def _refuse_once(mp, er):
     """
     state = {"left": 1, "seen": 0}
 
-    class _RefusingPath(Path):
+    # The concrete flavour (PosixPath or WindowsPath): before 3.12 a bare Path subclass has no _flavour.
+    class _RefusingPath(type(Path())):
         """The registry path, refusing its first read; only er.REGISTRY_FILE is swapped."""
 
         def read_text(self, *args, **kwargs):
