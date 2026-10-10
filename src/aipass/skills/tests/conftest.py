@@ -1,12 +1,13 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Skills test configuration
-# Version: 3.2.0
+# Version: 3.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v3.3.0 (2026-10-10): sample_data retired - requested only by the .archive scaffold (seedgo, PR #774)
 #   - v3.2.0 (2026-10-04): audit_guard - file denials ride an audit hook, no stdlib name replaced
 #   - v3.1.0 (2026-09-27): C1 console width pin, C2 command-state reset; unused temp_dir, mock_logger removed
 #   - v3.0.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam - no attribute to patch (DPLAN-0325)
@@ -58,28 +59,6 @@ collect_ignore_glob = [".archive/*", "**/.archive/*"]
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def sample_data() -> dict:
-    """Sample test data for JSON operations."""
-    return {
-        "config": {
-            "module_name": "test_module",
-            "version": "1.0.0",
-            "config": {"max_log_entries": 50},
-            "timestamp": "2026-03-28",
-        },
-        "data": {
-            "module_name": "test_module",
-            "created": "2026-03-28",
-            "last_updated": "2026-03-28",
-            "operations_total": 0,
-            "operations_successful": 0,
-            "operations_failed": 0,
-        },
-        "log": [{"timestamp": "2026-03-28T10:00:00", "operation": "test"}],
-    }
 
 
 @pytest.fixture(autouse=True)

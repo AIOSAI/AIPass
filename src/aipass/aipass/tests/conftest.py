@@ -1,11 +1,12 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for aipass tests — json and profile redirects, console width, command state
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-05-04
-# Modified: 2026-10-05
+# Modified: 2026-10-10
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.4.0 (2026-10-10): temp_test_dir, sample_test_data retired - requested only by the .archive scaffold (PR #774)
 #   - v1.3.0 (2026-10-05): tools_on_path writes PATH so shutil.which answers for real (DPLAN-0354 leg 8)
 #   - v1.2.0 (2026-09-28): header_events recorder keeps cli's header off the real trigger bus (DPLAN-0354 leg 3)
 #   - v1.1.0 (2026-09-27): template C1/C2 fixtures; unused mock_json_handler removed (DPLAN-0354)
@@ -15,7 +16,6 @@
 """Shared pytest fixtures for aipass tests."""
 
 import os
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator
@@ -34,15 +34,6 @@ import pytest
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.modules import profile as profile_mod
 from aipass.cli.apps.modules import display
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after."""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
 
 
 @pytest.fixture(autouse=True)
@@ -94,12 +85,6 @@ def isolate_profile_store(tmp_path_factory) -> Generator[Path, None, None]:
         patch.object(profile_mod, "_LEGACY_LOCAL_JSON", store_dir / "local.json"),
     ):
         yield store_dir
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data."""
-    return {"test_key": "test_value", "sample_data": "example"}
 
 
 @pytest.fixture

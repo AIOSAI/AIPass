@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-09-28
+# Modified: 2026-10-10
 # =============================================
 
 """Shared pytest fixtures for flow tests"""
@@ -18,7 +18,6 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 import json
-import shutil
 from pathlib import Path
 from typing import Callable, Generator
 import sys
@@ -257,32 +256,6 @@ def mock_json_handler(request):
 
     with patch("aipass.flow.apps.handlers.json.json_handler.log_operation") as mock_log_op:
         yield mock_log_op
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Reusable sample data shaped like a valid 'data' JSON document.
-
-    The branch template ships this and 17 of 18 branches carry it; flow's
-    conftest had lost it, and the gap was invisible because an unrelated
-    handler test happened to mention the name. Restored with the sweep that
-    archived that test (DPLAN-0325 pair 7) rather than left to look covered.
-    """
-    return {
-        "created": "2026-09-04",
-        "last_updated": "2026-09-04",
-        "test_key": "test_value",
-        "sample_data": "example",
-    }
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
 
 
 @pytest.fixture

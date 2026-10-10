@@ -2,12 +2,13 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for daemon tests - host-state seals, sentinels, console pin
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-06
+# Modified: 2026-10-10
 # Category: daemon/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.3.0 (2026-10-10): temp_test_dir, sample_test_data retired - requested only by the .archive scaffold (PR #774)
 #   - v1.2.0 (2026-10-06): timer seal keeps the real systemctl wrapper behind an empty PATH for systemctl_on_path
 #   - v1.1.0 (2026-09-27): Console width pin + command-state reset (item 20); catches log; unused fixtures removed
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
@@ -32,7 +33,6 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 import pytest
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Generator
@@ -439,21 +439,3 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data
-
-    Customize this fixture for your module's needs
-    """
-    return {"test_key": "test_value", "sample_data": "example"}
