@@ -507,14 +507,14 @@
     {
       "file": "tests/conftest.py",
       "standard": "import_site",
-      "lines": [94, 95, 96, 97, 121, 122, 129, 130, 131, 132],
-      "reason": "The stub is the cure (compass 493; @devpulse's leg 11 ruling (a)). Each keeps a far side off the disk or the bus. 94-97 aipass.prax: the real logger writes every module's log file under logs/, and its json service writes operation logs. 121-122 handlers.json.json_handler: log_operation writes memory_json operation logs. 129-132 aipass.trigger: Trigger.fire posts real events to the bus. Leg 11 of DPLAN-0354; lines moved +1 by the four-rows split (2026-10-08), which added the support_config_verbs import."
+      "lines": [88, 89, 90, 91, 115, 116, 123, 124, 125, 126],
+      "reason": "The stub is the cure (compass 493; @devpulse's leg 11 ruling (a)). Each keeps a far side off the disk or the bus. 88-91 aipass.prax: the real logger writes every module's log file under logs/, and its json service writes operation logs. 115-116 handlers.json.json_handler: log_operation writes memory_json operation logs. 123-126 aipass.trigger: Trigger.fire posts real events to the bus. Leg 11 of DPLAN-0354; lines moved +1 by the four-rows split (2026-10-08), which added the support_config_verbs import; moved -6 when the three unrequested fixtures and their imports were cut (2026-10-10)."
     },
     {
       "file": "tests/conftest.py",
       "standard": "through_the_command",
-      "lines": [219],
-      "reason": "Ruling (b): a read, not a patch. The live-state guard reads trinity_push._REPO_ROOT to check that the push lane's own root holds a core registry with rows before a live-fleet test runs. No public name carries that root (registry_scope.REPO_ROOT is the other lane, read beside it), and no door is added for the guard. Leg 11 of DPLAN-0354; line moved +1 by the four-rows split (2026-10-08)."
+      "lines": [161],
+      "reason": "Ruling (b): a read, not a patch. The live-state guard reads trinity_push._REPO_ROOT to check that the push lane's own root holds a core registry with rows before a live-fleet test runs. No public name carries that root (registry_scope.REPO_ROOT is the other lane, read beside it), and no door is added for the guard. Leg 11 of DPLAN-0354; line moved +1 by the four-rows split (2026-10-08), -58 by the fixture cut (2026-10-10)."
     },
     {
       "file": "tests/test_config_loader.py",

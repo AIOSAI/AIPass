@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # Category: memory/tests
 # =============================================
 
@@ -19,7 +19,6 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import json
 import pytest
-import shutil
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Generator
@@ -31,7 +30,7 @@ from unittest.mock import MagicMock
 # fixture below must carry it, or any test that reimports the json package (the
 # _fresh_module pattern) would hit ImportError on a mocked prax (DPLAN-0325).
 # It is stdlib-only and resolves its directory per call, so holding it here is
-# safe and lets mock_infrastructure measure the true sandbox off the live service.
+# safe.
 from aipass.prax import json_handler as _prax_json_service
 
 # The write fence, captured once at collection so its logger is the real one and
@@ -41,11 +40,6 @@ from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.templates import trinity_push
 from aipass.cli.apps.modules import display
 from aipass.memory.tests.support_config_verbs import _real_verbs
-
-# The branch shim's own file, so the service can resolve memory's json directory
-# the way the shim does, without importing (and caching) the memory json package
-# at collection.
-_SHIM_FILE = str(Path(__file__).resolve().parents[1] / "apps" / "handlers" / "json" / "json_handler.py")
 
 # Nothing under .archive/ is a test: the old handler and the subsumed tests live
 # there as gitignored disposal (DPLAN-0325). Keep pytest from discovering them.
@@ -130,58 +124,6 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps", MagicMock())
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules", MagicMock())
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
-
-
-@pytest.fixture
-def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect the shim's json writes into a temp dir, and return that dir.
-
-    The DPLAN-0325 shim wiring test (test_json_handler.py) requests this to pin
-    that get_json_path lands in the branch's redirected sandbox. Deliberately
-    NOT autouse: the whole memory suite runs against the wholesale json_handler
-    mock in ``_mock_infrastructure`` above, and only the wiring test wants the
-    live service. The service recomputes its directory per call, so setting the
-    seam here - after import - still takes effect, and the sandbox is measured
-    off the real shim so it cannot drift from what the service does.
-
-    The service spells the sandbox <seam>/<branch>/<branch>_json, so the seam is
-    its own subdir of tmp_path rather than tmp_path itself, to avoid colliding
-    with a test that builds a directory of the branch's own name.
-
-    Returns:
-        The sandbox directory the handler now writes into.
-    """
-    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
-    handle = _prax_json_service.for_module(_SHIM_FILE)
-    sandbox = handle.get_json_path("probe", "config").parent
-    sandbox.mkdir(parents=True, exist_ok=True)
-    return sandbox
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after."""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides reusable sample data for general test assertions."""
-    return {
-        "created": "2026-01-01",
-        "last_updated": "2026-01-15",
-        "entries": [
-            {"id": 1, "name": "alpha", "status": "active"},
-            {"id": 2, "name": "beta", "status": "pending"},
-        ],
-        "metadata": {
-            "source": "test_fixture",
-            "version": "1.0.0",
-        },
-    }
 
 
 @pytest.fixture

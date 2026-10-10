@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_tab_renderer.py
 # Description: Tests for tab_renderer handler (FPLAN-0285)
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-06-25
-# Modified: 2026-09-29
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/tracking/tab_renderer.py."""
@@ -23,6 +23,7 @@
 # seedgo: no-test-needed(covered_elsewhere) — template_usage(), template_semantics(): tests/test_trinity_standard.py
 # seedgo: no-test-needed(covered_elsewhere) — receipt.bump_config_rendered() per refresh: tests/test_trinity_standard.py
 
+import importlib
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -50,6 +51,17 @@ def _quiet_tab_renderer(monkeypatch):
     """
     monkeypatch.setattr(tab_renderer, "json_handler", MagicMock())
     monkeypatch.setattr(tab_renderer, "logger", MagicMock())
+
+
+def _read_at_call(name: str):
+    """The module the renderer's in-function import reads: sys.modules[name].
+
+    A dotted ``patch("pkg.mod.attr")`` on 3.10/3.11 walks package attributes;
+    on 3.12+ it reads sys.modules. A test that evicts and re-imports the json
+    package leaves the two pointing at different modules, so a string patch
+    missed on 3.10/3.11 only (CI, PR #774). Patching this object cannot miss.
+    """
+    return importlib.import_module(name)
 
 
 # ---------------------------------------------------------------------------
@@ -483,16 +495,19 @@ class TestRefreshAllTabs:
         }
 
         with (
-            patch(
-                "aipass.memory.apps.handlers.json.config_loader.load",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.json.config_loader"),
+                "load",
                 return_value=mock_config,
             ),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._read_registry",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
+                "_read_registry",
                 return_value=mock_branches,
             ),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._get_memory_file_path",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
+                "_get_memory_file_path",
                 side_effect=mock_get_path,
             ),
         ):
@@ -540,13 +555,17 @@ class TestRefreshAllTabs:
 
         mock_config = {"rollover": SAMPLE_ROLLOVER_CFG, "entry_limits": SAMPLE_ENTRY_LIMITS_CFG}
         with (
-            patch("aipass.memory.apps.handlers.json.config_loader.load", return_value=mock_config),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._read_registry",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.json.config_loader"), "load", return_value=mock_config
+            ),
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
+                "_read_registry",
                 return_value=[{"name": "x", "path": str(branch_dir)}],
             ),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._get_memory_file_path",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
+                "_get_memory_file_path",
                 side_effect=mock_get_path,
             ),
         ):
@@ -590,16 +609,19 @@ class TestRefreshAllTabs:
         }
 
         with (
-            patch(
-                "aipass.memory.apps.handlers.json.config_loader.load",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.json.config_loader"),
+                "load",
                 return_value=mock_config,
             ),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._read_registry",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
+                "_read_registry",
                 return_value=mock_branches,
             ),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._get_memory_file_path",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
+                "_get_memory_file_path",
                 side_effect=mock_get_path,
             ),
         ):
@@ -628,12 +650,14 @@ class TestRefreshAllTabs:
         }
 
         with (
-            patch(
-                "aipass.memory.apps.handlers.json.config_loader.load",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.json.config_loader"),
+                "load",
                 return_value=mock_config,
             ),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._read_registry",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
+                "_read_registry",
                 return_value=[],
             ),
         ):
@@ -651,12 +675,14 @@ class TestRefreshAllTabs:
             "entry_limits": SAMPLE_ENTRY_LIMITS_CFG,
         }
         with (
-            patch(
-                "aipass.memory.apps.handlers.json.config_loader.load",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.json.config_loader"),
+                "load",
                 return_value=mock_config,
             ),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._read_registry",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
+                "_read_registry",
                 return_value=[],
             ),
         ):
@@ -685,16 +711,19 @@ class TestRefreshAllTabs:
         }
 
         with (
-            patch(
-                "aipass.memory.apps.handlers.json.config_loader.load",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.json.config_loader"),
+                "load",
                 return_value=mock_config,
             ),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._read_registry",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
+                "_read_registry",
                 return_value=mock_branches,
             ),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._get_memory_file_path",
+            patch.object(
+                _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
+                "_get_memory_file_path",
                 side_effect=mock_get_path,
             ),
         ):
@@ -717,8 +746,9 @@ class TestRenderAllMetaTabs:
             "rollover": SAMPLE_ROLLOVER_CFG,
             "entry_limits": SAMPLE_ENTRY_LIMITS_CFG,
         }
-        with patch(
-            "aipass.memory.apps.handlers.json.config_loader.load",
+        with patch.object(
+            _read_at_call("aipass.memory.apps.handlers.json.config_loader"),
+            "load",
             return_value=mock_config,
         ):
             tabs = mod.render_all_meta_tabs()
@@ -736,8 +766,9 @@ class TestRenderAllMetaTabs:
             "rollover": SAMPLE_ROLLOVER_CFG,
             "entry_limits": SAMPLE_ENTRY_LIMITS_CFG,
         }
-        with patch(
-            "aipass.memory.apps.handlers.json.config_loader.load",
+        with patch.object(
+            _read_at_call("aipass.memory.apps.handlers.json.config_loader"),
+            "load",
             return_value=mock_config,
         ):
             tabs = mod.render_all_meta_tabs()
@@ -754,7 +785,9 @@ class TestRenderAllMetaTabs:
             mod.todo_roll, "backlog_path_for", lambda branch_dir, backup_root=None: tmp_path / "no.json"
         )
         mock_config = {"rollover": PAD_ROLLOVER_CFG, "entry_limits": SAMPLE_ENTRY_LIMITS_CFG}
-        with patch("aipass.memory.apps.handlers.json.config_loader.load", return_value=mock_config):
+        with patch.object(
+            _read_at_call("aipass.memory.apps.handlers.json.config_loader"), "load", return_value=mock_config
+        ):
             tabs = mod.render_all_meta_tabs(branch_dir="newborn")
 
         assert tabs["TODOS_META"] == (
@@ -767,8 +800,9 @@ class TestRenderAllMetaTabs:
             "rollover": SAMPLE_ROLLOVER_CFG,
             "entry_limits": SAMPLE_ENTRY_LIMITS_CFG,
         }
-        with patch(
-            "aipass.memory.apps.handlers.json.config_loader.load",
+        with patch.object(
+            _read_at_call("aipass.memory.apps.handlers.json.config_loader"),
+            "load",
             return_value=mock_config,
         ):
             tabs = mod.render_all_meta_tabs()

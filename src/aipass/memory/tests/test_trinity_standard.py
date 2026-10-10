@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_standard.py
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-08-25
-# Modified: 2026-10-02
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py and the trinity-standard handlers around it."""
@@ -454,11 +454,11 @@ class TestNoHealthStamping:
         silently supplies another test's precondition is worse than no test.
         """
         import importlib
-        import sys
 
+        handlers_pkg = sys.modules["aipass.memory.apps.handlers"]  # the re-import rebinds .json; 3.11 patch() reads it
+        monkeypatch.setattr(handlers_pkg, "json", handlers_pkg.json)
         for name in [n for n in sys.modules if n.startswith("aipass.memory.apps.handlers.json")]:
             monkeypatch.delitem(sys.modules, name, raising=False)
-
         memory_files = importlib.import_module("aipass.memory.apps.handlers.json.memory_files")
         importlib.reload(memory_files)
 
