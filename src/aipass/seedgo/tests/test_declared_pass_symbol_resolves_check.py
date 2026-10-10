@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_declared_pass_symbol_resolves_check.py
 # Description: declared_pass_symbol_resolves_check — a declared-pass name that resolves nowhere
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-25
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/declared_pass_symbol_resolves_check.py."""
@@ -20,6 +20,10 @@ from aipass.seedgo.apps.handlers.aipass_standards import declared_pass_symbol_re
 
 #: The model file for the whole per-item series.
 MODEL = Path(__file__).resolve().parent / "test_readme_update.py"
+
+#: The parse warning's text on every Python we support. Its CATEGORY is not:
+#: DeprecationWarning before 3.12, SyntaxWarning after (PR #774, CI 3.10 and 3.11).
+INVALID_ESCAPE = "invalid escape sequence"
 
 #: What @backup's ceiling handler does with the filesystem: getsize, never scandir.
 PRODUCT = "import os\n\n\ndef total(path):\n    return os.path.getsize(path)\n"
@@ -145,7 +149,7 @@ class TestArchivedCodeIsNotProduct:
             tmp_path, "# seedgo: no-test-needed(stdlib) — os.path.getsize()", product=PRODUCT + 'P = "\\d"\n'
         )
         _verdict(path)
-        assert {Path(w.filename).name for w in recwarn if issubclass(w.category, SyntaxWarning)} == {"ceiling.py"}
+        assert {Path(w.filename).name for w in recwarn if INVALID_ESCAPE in str(w.message)} == {"ceiling.py"}
 
 
 class TestAWordInProseIsNotAModule:

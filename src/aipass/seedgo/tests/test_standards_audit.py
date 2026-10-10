@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_standards_audit.py
 # Description: Unit tests for the standards_audit module and the seedgo-audit CI gate
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/modules/standards_audit.py and the seedgo-audit CI gate."""
@@ -32,6 +32,7 @@ from typing import cast
 #: genuine module for the tests that exercise discovery's own rules directly.
 from aipass.seedgo.apps.handlers.audit import discovery as real_discovery
 from aipass.seedgo.apps.handlers.bypass import bypass_handler
+from aipass.cli.apps.modules import display
 from aipass.cli.apps.modules import warning as real_warning
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.handlers.context_standards import startup_budget_check
@@ -322,9 +323,17 @@ def test_normal_run_makes_no_bypass_claim(monkeypatch, capsys: pytest.CaptureFix
 
 
 def _audit_reading_the_registry(tmp_path, monkeypatch, content):
-    """An audit whose branch run reads the registry through the real get_branch_from_path."""
-    registry = tmp_path / "AIPASS_REGISTRY.json"
+    """An audit whose branch run reads the registry through the real get_branch_from_path.
+
+    The registry sits under a 100-character directory: macOS's tmp path pushed
+    the note past the pinned console width and the path wrapped (PR #774). The
+    consoles are pinned wider than any path, so no line search depends on a wrap.
+    """
+    registry = tmp_path / ("d" * 100) / "AIPASS_REGISTRY.json"
+    registry.parent.mkdir()
     registry.write_text(content, encoding="utf-8")
+    for console in (display.CONSOLE, display.err_console):
+        monkeypatch.setattr(console, "width", 10_000)
     monkeypatch.setattr(bypass_handler, "_find_registry", lambda: registry)
     monkeypatch.setattr(bypass_handler, "UNREADABLE_REGISTRIES", {})
     # The module's autouse stand-in swallows warning(); the note is read off the real one.

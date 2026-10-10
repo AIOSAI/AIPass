@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_content.py
 # Description: Host Portability Standards Content Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-09-12
-# Modified: 2026-10-03
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -62,6 +62,11 @@ def get_host_portability_standards() -> str:
         "     a row were this shape (prax instance_lock, skills test_runner x4).",
         "     Reason prose names the RECIPE unavailable, not the state:",
         "     [dim]reason='reads boot_id - no procfs on this host'[/dim]",
+        "",
+        "  [red]ARM D -- a direct pathlib.Path subclass (the host's Python)[/red]",
+        "     [dim]class X(Path)[/dim] or [dim]class X(PurePath)[/dim] with no [dim]_flavour[/dim]:",
+        "     [yellow]AttributeError _flavour[/yellow] on 3.10 and 3.11, fine on 3.12+.",
+        "     A concrete flavour ([dim]PureWindowsPath[/dim]) is acquitted.",
         "",
         f"  Arm A also follows a name bound to a {_PROC} literal to where it is",
         "  READ; a bound [dim]Path()[/dim] is judged at its read, not its constructor.",

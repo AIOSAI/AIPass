@@ -161,7 +161,7 @@
   ],
   "PreToolUse": [
     {
-      "matcher": "Bash|Edit|MultiEdit|Write|Read|Grep|Glob|WebSearch|WebFetch|Task",
+      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|WebSearch|WebFetch|Task",
       "hooks": [
         {
           "type": "command",

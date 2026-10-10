@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_hooks_snapshot.py
 # Description: Snapshot tests for hook configurations across provider, project, and branch levels
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-05-07
-# Modified: 2026-09-27
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for the hook wiring .claude/provider_manifest.json gives hooks/apps/handlers/bridges/claude.py."""
@@ -14,7 +14,7 @@
 # Baselines in tests/fixtures/*_hooks_snapshot.json.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(generated) — what the claude bridge does when a hook fires; @hooks tests/test_engine.py covers it
+# seedgo: no-test-needed(generated) — what the bridge does when a hook fires; @hooks tests/test_engine.py covers it
 
 import json
 import re
@@ -318,3 +318,17 @@ class TestTheSnapshotTracksTheManifest:
             "The manifest is the source of truth for what setup.sh installs; regenerate the "
             f"fixture from it.\nManifest: {expected}\nFixture: {actual}"
         )
+
+    def test_fixture_matchers_match_the_manifest(self):
+        """Every matcher the installer writes is the fixture's, on every host.
+
+        Commands were pinned and matchers were not: the manifest's PreToolUse
+        matcher gained NotebookEdit, the fixture kept the old one, and only the
+        macOS runner (the one host that installs fresh) saw it (PR #774).
+        """
+        manifest = json.loads((_REPO_ROOT / ".claude" / "provider_manifest.json").read_text(encoding="utf-8"))
+        expected: dict[str, list[str]] = {}
+        for hook in manifest["cli"]["claude"]["hooks"]:
+            expected.setdefault(hook["event"], []).append(hook.get("matcher", "*"))
+        actual = _extract_hook_matchers(_load_fixture("provider_hooks_snapshot.json"))
+        assert {event: sorted(matchers) for event, matchers in expected.items()} == actual

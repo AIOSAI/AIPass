@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_declared_pass_contradiction_check.py
 # Description: declared_pass_contradiction_check — crack class H, a declared pass the file breaks
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-09-23
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/declared_pass_contradiction_check.py."""
@@ -22,6 +22,10 @@ from aipass.seedgo.apps.modules import checklist
 
 #: The model file for the whole per-item series.
 MODEL = Path(__file__).resolve().parent / "test_readme_update.py"
+
+#: The parse warning's text on every Python we support. Its CATEGORY is not:
+#: DeprecationWarning before 3.12, SyntaxWarning after (PR #774, CI 3.10 and 3.11).
+INVALID_ESCAPE = "invalid escape sequence"
 
 #: A declared pass that names a constant, the category a value can contradict.
 DECLARES = "# seedgo: no-test-needed(constant) — TRACKER_FILENAME's string\n"
@@ -174,7 +178,7 @@ class TestArchivedCodeIsNotProduct:
     def test_a_product_file_that_warns_on_parse_names_its_file(self, tmp_path, recwarn):
         path = _branch(tmp_path, 'TRACKER_FILENAME = "\\d"\n', "def test_it():\n    assert run() == 1\n")
         checker.scan(path.read_text(encoding="utf-8"), tmp_path)
-        assert {Path(w.filename).name for w in recwarn if issubclass(w.category, SyntaxWarning)} == {"names.py"}
+        assert {Path(w.filename).name for w in recwarn if INVALID_ESCAPE in str(w.message)} == {"names.py"}
 
 
 class TestWhatIsCountedAndNotScored:

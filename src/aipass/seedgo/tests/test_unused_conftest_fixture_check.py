@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_unused_conftest_fixture_check.py
 # Description: unused_conftest_fixture_check — crack class G, a shared fixture nothing requests
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/unused_conftest_fixture_check.py."""
@@ -106,6 +106,18 @@ class TestEveryWayAFixtureCanBeRequested:
         conftest = "import pytest\n\n\n@pytest.fixture(autouse=True)\ndef seal():\n    return 1\n"
         root = _branch(tmp_path, conftest=conftest, test_a="def test_it():\n    assert True\n")
         assert unused_conftest_fixture_check.scan(root) == []
+
+
+class TestARetiredTestRequestsNothing:
+    """tests/.archive is git-ignored: CI never sees it (seedgo, PR #774 CI red)."""
+
+    def test_a_fixture_requested_only_from_the_archive_is_convicted(self, tmp_path):
+        """seedgo's sample_test_data: its one requester was .archive/test_scaffold.py."""
+        root = _branch(tmp_path, test_a="def test_it():\n    assert True\n")
+        archive = root / "tests" / ".archive"
+        archive.mkdir()
+        (archive / "test_retired.py").write_text("def test_old(temp_dir):\n    assert temp_dir\n", encoding="utf-8")
+        assert _names(unused_conftest_fixture_check.scan(root)) == ["temp_dir"]
 
 
 class TestWhatIsNotJudged:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-09-12
-# Modified: 2026-10-05
+# Modified: 2026-10-10
 # =============================================
 
 """Host Portability Standards Checker Handler.
@@ -88,6 +88,14 @@ The same rule now binds arm A: a skip acquits a /proc read only when its
 predicate names the host that HAS the recipe (``!= "linux"``, ``"darwin"``,
 a /proc probe, ``shutil.which``). ``os.name == "nt"`` names Windows and no
 longer launders a read macOS will fail.
+
+ARM D IS THE HOST'S PYTHON, not its OS (PR #774). A class whose base is
+``Path`` or ``PurePath`` itself raises AttributeError ``_flavour`` on 3.10 and
+3.11 and runs on every 3.12 seat, so the leg that wrote it never saw it: backup
+``_ResolveDeniedPath`` and trigger ``_RefusingPath``. A concrete flavour
+(``PureWindowsPath``, memory's) or a body that sets ``_flavour`` is acquitted.
+It lives here and not in a new standard because CI's hosts differ by Python as
+well as by OS, and a new standard would move EXPECTED_STANDARDS mid-train.
 
 Interface: AUDIT_SCOPE = "branch_level", entry point ``check_branch``.
 The corpus is ``apps/``, ``tests/`` AND ``lib/`` — a test that reads /proc is
@@ -212,6 +220,11 @@ _SUBPROCESS_RUNNERS = frozenset({"run", "Popen", "check_output", "call", "check_
 
 #: Below this the branch fails the standard, matching every other checker here.
 PASS_THRESHOLD = 75
+
+#: Arm D: the generic classes whose __new__ picks a flavour. A concrete flavour
+#: (PosixPath, PureWindowsPath, ...) carries its own _flavour on every Python.
+_FLAVOURLESS_BASES = frozenset({"Path", "PurePath"})
+_FLAVOUR_FIX = "below Python 3.12 Path.__new__ needs _flavour on the subclass (AttributeError on 3.10 and 3.11)"
 
 
 # =============================================
@@ -824,6 +837,24 @@ def _gate_violations(
 
 
 # =============================================
+# ARM D - A DIRECT pathlib.Path SUBCLASS (the host's Python)
+# =============================================
+
+
+def _flavourless_subclasses(tree: ast.Module) -> List[Tuple[int, str]]:
+    """Classes whose base is ``Path`` or ``PurePath`` itself and carry no ``_flavour``."""
+    violations: List[Tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        bases = {_tail_name(base) for base in node.bases} & _FLAVOURLESS_BASES
+        carried = any("_flavour" in ast.dump(statement) for statement in node.body)
+        if bases and not carried:
+            violations.append((node.lineno, f"class {node.name}({min(bases)}) - {_FLAVOUR_FIX}"))
+    return violations
+
+
+# =============================================
 # CORPUS
 # =============================================
 
@@ -880,6 +911,7 @@ def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
     binary_violations, acquitted = _binary_violations(tree, predicates)
     violations.extend(binary_violations)
     violations.extend(_gate_violations(tree, aliases, module_marks))
+    violations.extend(_flavourless_subclasses(tree))
     violations.sort(key=lambda row: row[0])
     return violations, acquitted
 
@@ -909,7 +941,7 @@ def _violation_items(rows: Iterable[Tuple[str, int, str]]) -> List[Dict]:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a branch for Linux-only host assumptions.
+    """Check a branch for host assumptions: Linux-only OS calls and a 3.12-only Path subclass.
 
     Args:
         branch_path: Path to branch root (e.g., src/aipass/seedgo)
@@ -965,8 +997,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
                 "name": "Host portability",
                 "passed": False,
                 "message": (
-                    f"{len(rows)} Linux-only host assumption(s) in {len(dirty_files)}/{len(files)} "
-                    f"files: {preview}{suffix}"
+                    f"{len(rows)} host assumption(s) in {len(dirty_files)}/{len(files)} files: {preview}{suffix}"
                 ),
                 "violations": _violation_items(rows),
             }

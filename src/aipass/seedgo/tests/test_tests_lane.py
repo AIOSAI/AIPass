@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_tests_lane.py
 # Description: Template v1 — tests_lane module, retire_ops and template_ops
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-21
-# Modified: 2026-09-28
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/modules/tests_lane.py and the handlers it drives."""
@@ -19,6 +19,7 @@ import json
 
 import pytest
 
+from aipass.cli.apps.modules import display
 from aipass.seedgo.apps.handlers import registry_scan
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.tests_lane import template_ops
@@ -36,20 +37,23 @@ def fleet(tmp_path, monkeypatch):
 
     The seam is registry_scan, which both discovery and retire_ops resolve
     through, so one patch moves the repo root AND the branch list at once.
+    The root sits 60 characters deep: macOS's long tmp path pushed a printed
+    receipt path past the pinned console width and it wrapped (PR #774).
     """
+    root = tmp_path / ("d" * 60)
     for name in ("alpha", "beta"):
-        branch = tmp_path / "src" / "aipass" / name
+        branch = root / "src" / "aipass" / name
         (branch / "apps").mkdir(parents=True)
         (branch / "apps" / f"{name}.py").write_text("# entry point\n", encoding="utf-8")
-    (tmp_path / "src" / "aipass" / "alpha" / "tests").mkdir()
+    (root / "src" / "aipass" / "alpha" / "tests").mkdir()
 
-    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry = root / "AIPASS_REGISTRY.json"
     registry.write_text(
         json.dumps(
             {
                 "branches": [
-                    {"name": "ALPHA", "path": str(tmp_path / "src" / "aipass" / "alpha")},
-                    {"name": "BETA", "path": str(tmp_path / "src" / "aipass" / "beta")},
+                    {"name": "ALPHA", "path": str(root / "src" / "aipass" / "alpha")},
+                    {"name": "BETA", "path": str(root / "src" / "aipass" / "beta")},
                 ]
             }
         ),
@@ -58,7 +62,7 @@ def fleet(tmp_path, monkeypatch):
     monkeypatch.setattr(registry_scan, "find_registry", lambda: registry)
     monkeypatch.setattr(registry_scan, "caller_registries", list)
     monkeypatch.setattr(tests_lane, "BRANCH", "alpha")
-    return tmp_path
+    return root
 
 
 @pytest.fixture
@@ -406,13 +410,16 @@ class TestTemplateBump:
         }
         assert template_ops.read_receipt(fleet / "src" / "aipass" / "alpha") is None
 
-    def test_the_command_prints_the_error_of_a_failed_stamp(self, capsys, fleet, gold, refused_receipts):
+    def test_the_command_prints_the_error_of_a_failed_stamp(self, capsys, fleet, gold, refused_receipts, monkeypatch):
         """A failed row's reason reaches the user, and the shell reads the failure.
 
         The command exited 0 with a branch unstamped, so drone and a script
         saw success (seedgo's decision, leg 4: exit 2, a lane that could not run).
         Mutant L1: _run_bump's error print replaced by pass — killed (leg 4).
+        The console is pinned wider than any path, so the line search below does
+        not depend on where Rich wraps (PR #774, macOS).
         """
+        monkeypatch.setattr(display.CONSOLE, "width", 10_000)
         with pytest.raises(CommandRefused) as refusal:
             tests_lane.handle_command("tests", ["template", "bump", "@alpha", "--confirm"])
 

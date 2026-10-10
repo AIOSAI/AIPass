@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.0.5
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-05
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -1181,6 +1181,29 @@ def test_platform_dispatch_into_a_variable_argv0_is_not_convicted(tmp_path):
 
     assert violations == []
     assert acquitted == 0
+
+
+def test_a_direct_pathlib_path_subclass_is_convicted_below_3_12(tmp_path):
+    """trigger tests/test_error_registry.py:1477 class _RefusingPath(Path) (PR #774).
+
+    Below 3.12 Path.__new__ needs _flavour on the subclass: AttributeError on
+    CI's 3.10 and 3.11, green on every 3.12 seat.
+    """
+    source = "from pathlib import Path, PurePath\n\n\nclass _RefusingPath(Path):\n    pass\n"
+    source += "\n\nclass _Pure(PurePath):\n    pass\n"
+    violations, _acquitted = _scan_source(tmp_path, source)
+    assert _lines(violations) == [4, 8]
+    assert "_flavour" in violations[0][1]
+
+
+def test_a_concrete_flavour_or_a_carried_flavour_is_acquitted(tmp_path):
+    """memory tests/test_roots_lifecycle.py:450 subclasses PureWindowsPath, which carries _flavour."""
+    source = (
+        "import pathlib\nfrom pathlib import Path, PureWindowsPath\n\n\n"
+        "class _WindowsFlavour(PureWindowsPath):\n    pass\n\n\n"
+        "class _Carried(pathlib.Path):\n    _flavour = type(Path())._flavour\n"
+    )
+    assert _scan_source(tmp_path, source)[0] == []
 
 
 def test_a_portable_binary_is_never_read(tmp_path):

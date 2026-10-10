@@ -1,5 +1,5 @@
 # Host Portability
-**Status:** Draft v1.1 (arm C, lib/ corpus — FPLAN-0554 round three)
+**Status:** Draft v1.2 (arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
 **Date:** 2026-10-03
 
 ---
@@ -104,6 +104,19 @@ module's `Path`, `read_text`). Its gate is not what makes it portable.
 **Write the reason as the recipe unavailable, not the state** (drone's
 `WINDOWS_CWD_REASON`, now prax's):
 `reason="reads /proc/sys/kernel/random/boot_id - no procfs on this host"`.
+
+### Arm D — a direct `pathlib.Path` subclass (the host's Python)
+
+A class whose base is `Path` or `PurePath` itself. Below Python 3.12
+`Path.__new__` needs `_flavour` on the subclass, so it raises
+`AttributeError: ... has no attribute '_flavour'` on 3.10 and 3.11 and runs on
+every 3.12 seat (PR #774, Linux 3.10/3.11): backup `_ResolveDeniedPath`, trigger
+`tests/test_error_registry.py:1477 _RefusingPath`.
+
+**Acquitted:** a concrete flavour (`PosixPath`, `PureWindowsPath` — memory
+`tests/test_roots_lifecycle.py:450`), or a class body that sets `_flavour`.
+**Cure:** wrap a real `Path` instead of subclassing, or patch the one method on
+the instance's class with `monkeypatch`.
 
 ### Valid guards (recognized by checker)
 - a platform test anywhere in the enclosing function: `sys.platform`, `os.name`,

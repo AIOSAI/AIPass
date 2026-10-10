@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_conftest_fixture_check.py
 # Description: Unused Conftest Fixture Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-09-25
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -28,6 +28,11 @@ THREE WAYS TO REQUEST A FIXTURE, and all three count as use:
 
 ``autouse=True`` is never convicted. Nothing requests it by design; that is
 what autouse means.
+
+A RETIRED TEST REQUESTS NOTHING. ``tests/.archive`` and the other
+SOURCE_SKIP_DIRS are not read: .archive is git-ignored, so CI never sees it.
+seedgo's own ``sample_test_data`` passed locally on a request from
+``.archive/test_scaffold.py`` and failed on every CI runner (PR #774).
 
 BUILT ALONE, NOT INSIDE ``conftest_fixtures``, and the dispatch asked me to say
 which and why. ``conftest_fixtures`` is ``all_files`` and judges one
@@ -60,6 +65,7 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -130,6 +136,8 @@ def _read_branch(tests_dir: Path) -> Tuple[Dict[str, Tuple[Path, int]], Set[str]
     fixtures: Dict[str, Tuple[Path, int]] = {}
     requested: Set[str] = set()
     for path in sorted(tests_dir.rglob("*.py")):
+        if in_skipped_dir(path, tests_dir):
+            continue
         tree = _parse(path)
         if tree is None:
             continue

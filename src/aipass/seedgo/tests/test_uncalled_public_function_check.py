@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_uncalled_public_function_check.py
 # Description: uncalled_public_function_check — crack class O, a subject's untested export
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-22
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/uncalled_public_function_check.py."""
@@ -21,6 +21,10 @@ from aipass.seedgo.apps.handlers.aipass_standards import uncalled_public_functio
 
 #: A subject module with one public export and one private helper.
 SUBJECT = "def discover():\n    return []\ndef _hidden():\n    return 1\n"
+
+#: The parse warning's text on every Python we support. Its CATEGORY is not:
+#: DeprecationWarning before 3.12, SyntaxWarning after (PR #774, CI 3.10 and 3.11).
+INVALID_ESCAPE = "invalid escape sequence"
 
 #: The docstring line that makes a test file declare what it tests — template item 6.
 DECLARES = '"""Tests for apps/modules/thing.py."""\n'
@@ -182,14 +186,14 @@ class TestArchivedCodeIsNotProduct:
         branch = _branch(tmp_path, tests=DECLARES + "def test_it():\n    discover()\n")
         self._archive(branch, 'PATTERN = "\\d"\n')
         uncalled_public_function_check.scan(branch)
-        assert [w for w in recwarn if issubclass(w.category, SyntaxWarning)] == []
+        assert [w for w in recwarn if INVALID_ESCAPE in str(w.message)] == []
 
     def test_a_live_file_that_warns_on_parse_names_its_file(self, tmp_path, recwarn):
         branch = _branch(
             tmp_path, tests=DECLARES + "def test_it():\n    discover()\n", extra={"loud.py": 'P = "\\d"\n'}
         )
         uncalled_public_function_check.scan(branch)
-        warned = {Path(w.filename).name for w in recwarn if issubclass(w.category, SyntaxWarning)}
+        warned = {Path(w.filename).name for w in recwarn if INVALID_ESCAPE in str(w.message)}
         assert warned == {"loud.py"}
 
 
