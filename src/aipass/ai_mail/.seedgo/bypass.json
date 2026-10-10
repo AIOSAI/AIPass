@@ -299,12 +299,6 @@
       "reason": "monitor_alive (ai_mail, fleet green legs 9 and 10, os.kill family): PermissionError from os.kill(pid, 0) means the process exists under another user, so True at 207 is the answer. 210 answers None, 'could not probe', a third value the success path never returns (it answers True or False), and the register's readers show it as unknown; the checker reads a tri-state as a fallback."
     },
     {
-      "file": "tests/test_dispatch_monitor_helpers.py",
-      "standard": "literal_path",
-      "lines": [498],
-      "reason": "(ai_mail, fleet green leg 9; re-lined 2026-10-04; moved with its test from test_dispatch_monitor.py 1566 in the 2026-10-08 split) The literal is the subject: _get_jsonl_projects_dir encodes a cwd STRING into Claude's project-dir name (separators to '-'). No file system is asked and nothing is read or written at that path; built from tmp_path the expected name would have to re-implement the encoding under test. Kept as the subject since leg 5; devpulse accepted it as a string parse in the leg 7 ruling."
-    },
-    {
       "file": "tests/test_notify.py",
       "standard": "through_the_command",
       "lines": [280],
@@ -314,7 +308,7 @@
       "file": "tests/test_session_pointer.py",
       "standard": "literal_path",
       "lines": [105],
-      "reason": "(ai_mail, fleet green leg 9; re-lined leg 17) Same as test_dispatch_monitor_helpers.py 498: transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
+      "reason": "(ai_mail, fleet green leg 9; re-lined leg 17; its twin in test_dispatch_monitor_helpers.py retired 2026-10-10) transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
     },
     {
       "file": "apps/handlers/dispatch/session_pointer.py",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_helpers.py
 # Description: Tests for the dispatch monitor's units - rate limit, fresh cmd, startup check, kill, logs, lock, JSONL
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's units: startup check, kill, result logs, own lock, JSONL."""
@@ -16,99 +16,17 @@
 # seedgo: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
 
 import json
-import os
 import subprocess
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
-from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
-    _check_jsonl_activity,
-    _check_rate_limited,
-    _cleanup_own_lock,
-    _get_jsonl_projects_dir,
-    _kill_process,
-    _make_fresh_cmd,
-    _parse_result_json,
-    _read_stderr_segment,
-    _rotate_attempt_stdout,
-    run_with_startup_check,
-    _snapshot_jsonl_sizes,
-    _summarize_result_json,
-)
+from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import cmd_for_attempt, run_with_startup_check
+from aipass.ai_mail.tests.support_dispatch_monitor import _run_main
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
-
-
-# --- _check_rate_limited tests ----------------------------------------
-
-
-def test_check_rate_limited_429(tmp_path):
-    """Returns True when stderr contains '429'."""
-    log = tmp_path / "stderr.log"
-    log.write_text("Error: API returned 429 Too Many Requests", encoding="utf-8")
-    assert _check_rate_limited(str(log)) is True
-
-
-def test_check_rate_limited_rate_limit(tmp_path):
-    """Returns True when stderr contains 'rate_limit'."""
-    log = tmp_path / "stderr.log"
-    log.write_text("error: rate_limit exceeded", encoding="utf-8")
-    assert _check_rate_limited(str(log)) is True
-
-
-def test_check_rate_limited_overloaded(tmp_path):
-    """Returns True when stderr contains 'overloaded'."""
-    log = tmp_path / "stderr.log"
-    log.write_text("API is overloaded, please retry", encoding="utf-8")
-    assert _check_rate_limited(str(log)) is True
-
-
-def test_check_rate_limited_529(tmp_path):
-    """Returns True when stderr contains '529'."""
-    log = tmp_path / "stderr.log"
-    log.write_text("HTTP 529 Service Unavailable", encoding="utf-8")
-    assert _check_rate_limited(str(log)) is True
-
-
-def test_check_rate_limited_normal_content(tmp_path):
-    """Returns False for normal stderr content."""
-    log = tmp_path / "stderr.log"
-    log.write_text("Starting agent...\nProcessing task\nDone", encoding="utf-8")
-    assert _check_rate_limited(str(log)) is False
-
-
-def test_check_rate_limited_missing_file(tmp_path):
-    """Returns False when file doesn't exist."""
-    assert _check_rate_limited(str(tmp_path / "nonexistent.log")) is False
-
-
-# --- _make_fresh_cmd tests --------------------------------------------
-
-
-def test_make_fresh_cmd_removes_c_flag():
-    """Removes -c flag from command."""
-    cmd = ["claude", "-c", "--model", "opus"]
-    result = _make_fresh_cmd(cmd)
-    assert result == ["claude", "--model", "opus"]
-
-
-def test_make_fresh_cmd_no_c_flag():
-    """Returns same command if no -c flag."""
-    cmd = ["claude", "--model", "opus"]
-    result = _make_fresh_cmd(cmd)
-    assert result == ["claude", "--model", "opus"]
-
-
-def test_make_fresh_cmd_does_not_remove_c_value():
-    """Doesn't remove -c from positions where it's a standalone flag."""
-    # _make_fresh_cmd removes all standalone "-c" args. If -c only appears
-    # as the flag itself, it gets removed. Other args containing "c" are kept.
-    cmd = ["claude", "-c", "--config", "c_file.json"]
-    result = _make_fresh_cmd(cmd)
-    assert result == ["claude", "--config", "c_file.json"]
-    assert "-c" not in result
 
 
 # --- run_with_startup_check tests (mock Popen) -----------------------
@@ -136,7 +54,7 @@ def test_run_startup_check_success(tmp_path, monkeypatch):
         activity_calls[0] += 1
         return activity_calls[0] >= 1  # Active from first call
 
-    monkeypatch.setattr(mod, "_get_jsonl_projects_dir", lambda cwd: tmp_path / "projects")
+    monkeypatch.setattr(mod.session_pointer, "transcript_dir", lambda cwd: tmp_path / "projects")
     monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: {})
     monkeypatch.setattr(mod, "_check_jsonl_activity", fake_activity)
 
@@ -215,7 +133,7 @@ def test_run_startup_check_process_exits_during_startup_with_output(tmp_path, mo
 
     monkeypatch.setattr(mod.subprocess, "Popen", lambda *a, **kw: mock_proc)
     # Simulate JSONL activity so started=True
-    monkeypatch.setattr(mod, "_get_jsonl_projects_dir", lambda cwd: tmp_path / "projects")
+    monkeypatch.setattr(mod.session_pointer, "transcript_dir", lambda cwd: tmp_path / "projects")
     sizes = {"seen.jsonl": 7}
     monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: sizes)
     # The activity probe is asserted on what it was asked: the projects dir and the
@@ -256,7 +174,7 @@ def test_run_startup_check_hard_timeout(tmp_path, monkeypatch):
     mock_kill = MagicMock()
     monkeypatch.setattr(mod, "_kill_process", mock_kill)
     # Simulate JSONL activity so startup succeeds and we reach the hard timeout
-    monkeypatch.setattr(mod, "_get_jsonl_projects_dir", lambda cwd: tmp_path / "projects")
+    monkeypatch.setattr(mod.session_pointer, "transcript_dir", lambda cwd: tmp_path / "projects")
     sizes = {"seen.jsonl": 7}
     monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: sizes)
     activity = MagicMock(return_value=True)
@@ -287,279 +205,258 @@ def test_run_startup_check_spawn_failure(tmp_path, monkeypatch):
     assert startup_failed is False
 
 
-# --- _kill_process tests -----------------------------------------------
+# --- The pause before a retry, through main() ------------------------------
 
 
-def test_kill_process_terminate_succeeds():
-    """SIGTERM succeeds within 10s — no SIGKILL needed."""
-    mock_proc = MagicMock()
-    mock_proc.terminate = MagicMock()
-    mock_proc.wait = MagicMock(return_value=None)
-    mock_proc.kill = MagicMock()
+def _fails_after_writing_stderr(stderr_log, text):
+    """An attempt that writes text to the dispatch stderr log, then exits 1."""
 
-    _kill_process(mock_proc, "@test")
+    def attempt(stdout_log):
+        with open(stderr_log, "a", encoding="utf-8") as f:
+            f.write(text)
+        return 1
 
-    mock_proc.terminate.assert_called_once()
-    mock_proc.wait.assert_called_once_with(timeout=10)
-    mock_proc.kill.assert_not_called()
+    return attempt
 
 
-def test_kill_process_terminate_timeout_falls_back_to_sigkill():
-    """SIGTERM times out — falls back to SIGKILL."""
-    mock_proc = MagicMock()
-    mock_proc.terminate = MagicMock()
-    mock_proc.wait = MagicMock(side_effect=[subprocess.TimeoutExpired(cmd="claude", timeout=10), None])
-    mock_proc.kill = MagicMock()
+@pytest.mark.parametrize(
+    "stderr_text",
+    [
+        "Error: API returned 429 Too Many Requests\n",
+        "error: rate_limit exceeded\n",
+        "API is overloaded, please retry\n",
+        "HTTP 529 Service Unavailable\n",
+    ],
+)
+def test_a_rate_limited_attempt_waits_the_long_delay_before_the_retry(monkeypatch, main_argv, tmp_path, stderr_text):
+    argv, _, stderr_log = main_argv
+    attempts = [_fails_after_writing_stderr(stderr_log, stderr_text), lambda stdout_log: 0]
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
 
-    _kill_process(mock_proc, "@test")
+    code, clock = _run_main(monkeypatch, argv, tmp_path, attempts)
 
-    mock_proc.terminate.assert_called_once_with()
-    mock_proc.kill.assert_called_once_with()
-    assert [c.kwargs for c in mock_proc.wait.call_args_list] == [{"timeout": 10}, {"timeout": 5}]
+    assert code == 0
+    clock.sleep.assert_called_once_with(mod.RATE_LIMIT_DELAY)
+    bounce.assert_not_called()
 
 
-# --- _rotate_attempt_stdout tests --------------------------------------
+def test_an_ordinary_failure_waits_only_the_short_pause(monkeypatch, main_argv, tmp_path):
+    argv, _, stderr_log = main_argv
+    attempts = [_fails_after_writing_stderr(stderr_log, "Starting agent...\nProcessing task\nDone\n"), lambda s: 0]
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
 
+    code, clock = _run_main(monkeypatch, argv, tmp_path, attempts)
 
-def test_rotate_attempt_stdout_moves_file(tmp_path):
-    """Non-empty stdout log is preserved as dispatch_stdout.attempt-N.log."""
-    stdout_log = tmp_path / "dispatch_stdout.log"
-    stdout_log.write_text('{"is_error":true}', encoding="utf-8")
+    assert code == 0
+    clock.sleep.assert_called_once_with(5)
+    bounce.assert_not_called()
 
-    _rotate_attempt_stdout(str(stdout_log), 1)
 
-    preserved = tmp_path / "dispatch_stdout.attempt-1.log"
-    assert not stdout_log.exists()
-    assert preserved.exists()
-    assert preserved.read_text(encoding="utf-8") == '{"is_error":true}'
+def test_a_stderr_log_that_cannot_be_opened_reads_as_no_rate_limit(monkeypatch, main_argv, tmp_path):
+    argv, _, _ = main_argv
+    argv = argv[:4] + [str(tmp_path / "absent" / "stderr.log")] + argv[5:]
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
 
+    code, clock = _run_main(monkeypatch, argv, tmp_path, [lambda s: 1, lambda s: 0])
 
-def test_rotate_attempt_stdout_skips_empty(tmp_path):
-    """Empty stdout log is left in place — nothing worth preserving."""
-    stdout_log = tmp_path / "dispatch_stdout.log"
-    stdout_log.write_text("", encoding="utf-8")
+    assert code == 0
+    clock.sleep.assert_called_once_with(5)
+    bounce.assert_not_called()
 
-    _rotate_attempt_stdout(str(stdout_log), 1)
 
-    assert stdout_log.exists()
-    assert not (tmp_path / "dispatch_stdout.attempt-1.log").exists()
+# --- What a failed attempt leaves behind, through main() -------------------
 
 
-def test_rotate_attempt_stdout_missing_file_no_raise(tmp_path):
-    """Missing stdout log does not raise."""
-    _rotate_attempt_stdout(str(tmp_path / "nope.log"), 2)
+def test_an_empty_attempt_stdout_is_left_in_place_not_preserved(monkeypatch, main_argv, tmp_path):
+    argv, lock_file, _ = main_argv
+    logs_dir = lock_file.parent.parent / "logs"
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
 
-    assert not (tmp_path / "dispatch_stdout.attempt-2.log").exists()
+    def writes_nothing(stdout_log):
+        Path(stdout_log).write_text("", encoding="utf-8")
+        return 1
 
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [writes_nothing, lambda s: 0])
 
-# --- _parse_result_json / _summarize_result_json tests ------------------
+    assert code == 0
+    assert (logs_dir / "dispatch_stdout.log").exists()
+    assert not (logs_dir / "dispatch_stdout.attempt-1.log").exists()
+    bounce.assert_not_called()
 
 
-def test_parse_result_json_whole_file(tmp_path):
-    """Single JSON object filling the file parses directly."""
-    log = tmp_path / "stdout.log"
-    log.write_text('{"is_error": true, "api_error_status": 529}', encoding="utf-8")
+def _bounce_reason(monkeypatch, argv, tmp_path, stdout_text):
+    """Run main() through three failed attempts that each print stdout_text; returns the bounce reason."""
 
-    result = _parse_result_json(str(log))
+    def prints(stdout_log):
+        Path(stdout_log).write_text(stdout_text, encoding="utf-8")
+        return 1
 
-    assert result == {"is_error": True, "api_error_status": 529}
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [prints, prints, prints])
+    assert code == 1
+    bounce.assert_called_once()
+    return bounce.call_args.args[1]
 
 
-def test_parse_result_json_last_line_fallback(tmp_path):
-    """Result JSON on the last line is found when earlier output precedes it."""
-    log = tmp_path / "stdout.log"
-    log.write_text('some banner text\n{"is_error": false, "result": "done"}\n', encoding="utf-8")
+def test_unparseable_stdout_is_reported_as_no_result_json(monkeypatch, main_argv, tmp_path):
+    reason = _bounce_reason(monkeypatch, main_argv[0], tmp_path, "not json at all\nstill not json")
 
-    result = _parse_result_json(str(log))
+    assert reason.endswith("Last attempt result JSON: (no result JSON captured)")
 
-    assert result == {"is_error": False, "result": "done"}
 
+def test_the_bounce_names_every_error_field_of_the_result_json(monkeypatch, main_argv, tmp_path):
+    result = {"is_error": True, "subtype": "error_during_execution", "api_error_status": 529, "result": "API overload"}
 
-def test_parse_result_json_garbage_returns_empty(tmp_path):
-    """Non-JSON content returns {}."""
-    log = tmp_path / "stdout.log"
-    log.write_text("not json at all\nstill not json", encoding="utf-8")
+    reason = _bounce_reason(monkeypatch, main_argv[0], tmp_path, json.dumps(result))
 
-    assert _parse_result_json(str(log)) == {}
+    assert "is_error=True" in reason
+    assert "subtype=error_during_execution" in reason
+    assert "api_error_status=529" in reason
+    assert "API overload" in reason
 
 
-def test_parse_result_json_missing_file_returns_empty(tmp_path):
-    """Missing file returns {}."""
-    assert _parse_result_json(str(tmp_path / "nope.log")) == {}
+# --- The end-of-run lock and the attempt's stderr slice, through main() ----
 
 
-def test_summarize_result_json_includes_error_fields(tmp_path):
-    """Summary names is_error, subtype, api_error_status and the result snippet."""
-    log = tmp_path / "stdout.log"
-    log.write_text(
-        '{"is_error": true, "subtype": "error_during_execution", "api_error_status": 529, "result": "API overload"}',
-        encoding="utf-8",
-    )
+def test_a_lock_gone_before_cleanup_is_not_recreated(monkeypatch, main_argv, tmp_path):
+    argv, lock_file, _ = main_argv
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
 
-    summary = _summarize_result_json(str(log))
+    def removes_the_lock(stdout_log):
+        lock_file.unlink()
+        return 0
 
-    assert "is_error=True" in summary
-    assert "subtype=error_during_execution" in summary
-    assert "api_error_status=529" in summary
-    assert "API overload" in summary
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [removes_the_lock])
 
+    assert code == 0
+    bounce.assert_not_called()
+    assert not lock_file.exists()
+    # Narrower than "the directory is empty": main() writes its logs beside the lock's home.
+    assert list(lock_file.parent.glob("*.lock")) == []
 
-def test_summarize_result_json_no_file(tmp_path):
-    """Missing result JSON produces the explicit placeholder."""
-    assert _summarize_result_json(str(tmp_path / "nope.log")) == "(no result JSON captured)"
 
+# POSIX only: the route is a stderr log removed while the monitor holds it open,
+# and Windows refuses to remove an open file.
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows refuses to remove a file the monitor holds open")
+def test_a_stderr_log_removed_mid_attempt_is_no_background_task_marker(monkeypatch, main_argv, tmp_path):
+    argv, _, stderr_log = main_argv
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
 
-# --- _read_stderr_segment tests -----------------------------------------
+    def removes_the_stderr_log(stdout_log):
+        stderr_log.unlink()
+        return 0
 
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [removes_the_stderr_log])
 
-def test_read_stderr_segment_returns_content_after_offset(tmp_path):
-    """Only content written after the byte offset is returned."""
-    log = tmp_path / "stderr.log"
-    log.write_text("old attempt output\n", encoding="utf-8")
-    offset = log.stat().st_size
-    with open(log, "a", encoding="utf-8") as f:
-        f.write("new attempt output\n")
+    assert code == 0
+    bounce.assert_not_called()
 
-    segment = _read_stderr_segment(str(log), offset)
 
-    assert segment == "new attempt output\n"
-    assert "old attempt" not in segment
+# --- The startup probe and the kill, through run_with_startup_check() ------
 
 
-def test_read_stderr_segment_missing_file(tmp_path):
-    """Missing stderr log returns empty string."""
-    assert _read_stderr_segment(str(tmp_path / "nope.log"), 0) == ""
+def _startup_run(monkeypatch, tmp_path, process):
+    """Run one attempt over `process` with the transcript dir at tmp_path/projects; returns (exit, startup_failed)."""
+    monkeypatch.setattr(mod, "STARTUP_TIMEOUT", 0.3)
+    monkeypatch.setattr(mod, "POLL_INTERVAL", 0.02)
+    monkeypatch.setattr(mod, "HARD_TIMEOUT", 5)
+    monkeypatch.setattr(mod.subprocess, "Popen", lambda *a, **kw: process)
+    cwd = str(tmp_path / "branch")
+    transcript_dir = MagicMock(return_value=tmp_path / "projects")
+    monkeypatch.setattr(mod.session_pointer, "transcript_dir", transcript_dir)
+    result = run_with_startup_check(["claude"], str(tmp_path / "stdout.log"), MagicMock(), cwd, {}, "@test")
+    transcript_dir.assert_called_once_with(cwd)
+    return result
 
 
-# --- _cleanup_own_lock tests ---------------------------------------------
+def _process(polls):
+    """A mock agent whose poll() plays `polls` in order (a callable is called, its answer returned), exit code 0."""
+    queue = list(polls)
+    process = MagicMock(returncode=0)
+    process.wait = MagicMock(return_value=0)
 
+    def poll():
+        step = queue.pop(0) if len(queue) > 1 else queue[0]
+        return step() if callable(step) else step
 
-def test_cleanup_own_lock_deletes_when_owner(tmp_path):
-    """Lock holding our PID is deleted."""
-    lock = tmp_path / ".dispatch.lock"
-    lock.write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
+    process.poll = poll
+    return process
 
-    _cleanup_own_lock(str(lock))
 
-    assert not lock.exists()
+def test_a_transcript_that_appears_after_the_spawn_marks_the_agent_started(monkeypatch, tmp_path):
+    projects = tmp_path / "projects"
+    projects.mkdir()
 
+    def writes_a_new_transcript():
+        (projects / "new_session.jsonl").write_text("data\n", encoding="utf-8")
 
-def test_cleanup_own_lock_leaves_foreign_pid(tmp_path):
-    """Lock owned by another PID (successor monitor) is left in place."""
-    lock = tmp_path / ".dispatch.lock"
-    lock.write_text(json.dumps({"pid": 999999999}), encoding="utf-8")
+    assert _startup_run(monkeypatch, tmp_path, _process([writes_a_new_transcript, 1])) == (0, False)
 
-    _cleanup_own_lock(str(lock))
 
-    assert lock.exists()
+def test_a_transcript_that_grows_after_the_spawn_marks_the_agent_started(monkeypatch, tmp_path):
+    projects = tmp_path / "projects"
+    projects.mkdir()
+    session = projects / "session.jsonl"
+    session.write_text("line1\n", encoding="utf-8")
 
+    def grows_the_transcript():
+        with open(session, "a", encoding="utf-8") as fh:
+            fh.write("line2\n")
 
-def test_cleanup_own_lock_leaves_unreadable(tmp_path):
-    """Unparseable lock is left for stale-lock cleanup, not deleted blind."""
-    lock = tmp_path / ".dispatch.lock"
-    lock.write_text("not json{{{", encoding="utf-8")
+    assert _startup_run(monkeypatch, tmp_path, _process([grows_the_transcript, 1])) == (0, False)
 
-    _cleanup_own_lock(str(lock))
 
-    assert lock.exists()
+def test_a_transcript_left_untouched_is_a_startup_failure(monkeypatch, tmp_path):
+    projects = tmp_path / "projects"
+    projects.mkdir()
+    (projects / "session.jsonl").write_text("line1\n", encoding="utf-8")
 
+    assert _startup_run(monkeypatch, tmp_path, _process([1])) == (0, True)
 
-def test_cleanup_own_lock_missing_noop(tmp_path):
-    """A missing lock is a no-op — it is not created on the way past.
 
-    Had no oracle: the trailing comment said "must not raise" and nothing
-    checked anything. A cleanup that touched the path, or wrote an empty lock
-    before deciding it was absent, would have passed — and would then hold a
-    lock nobody owns.
-    """
-    lock = tmp_path / ".dispatch.lock"
+def test_a_run_with_no_transcript_dir_is_a_startup_failure_not_a_crash(monkeypatch, tmp_path):
+    assert not (tmp_path / "projects").exists()
 
-    _cleanup_own_lock(str(lock))
+    assert _startup_run(monkeypatch, tmp_path, _process([1])) == (0, True)
 
-    assert not lock.exists()
-    # Narrower than "tmp_path is empty" on purpose: this branch's conftest
-    # plants its own seam directories in tmp_path, so an empty-directory
-    # assertion would be pinning the fixture, not the cleanup.
-    assert list(tmp_path.glob("*.lock")) == []
 
+def test_a_startup_timeout_terminates_the_agent_without_a_sigkill(monkeypatch, tmp_path):
+    process = _process([None])
+    process.wait = MagicMock(return_value=None)
 
-# --- JSONL helper tests ----------------------------------------------------
+    assert _startup_run(monkeypatch, tmp_path, process) == (-3, True)
 
+    process.terminate.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=10)
+    process.kill.assert_not_called()
 
-def test_get_jsonl_projects_dir():
-    """Verifies path encoding: / replaced with -, _ replaced with -.
 
-    The sample cwd is deliberately NOT home-shaped. It used to be
-    "/home/user/my_project", which the hardcoded-path guard reads as this
-    machine's real home; the encoding under test cares only about the
-    separators, so a neutral path exercises it identically and lets both the
-    input and the expected answer stay written out as literals.
-    """
-    result = _get_jsonl_projects_dir("/srv/data/my_project")
-    expected = Path.home() / ".claude" / "projects" / "-srv-data-my-project"
-    assert result == expected
+def test_a_startup_timeout_sigkills_an_agent_that_ignores_the_terminate(monkeypatch, tmp_path):
+    process = _process([None])
+    process.wait = MagicMock(side_effect=[subprocess.TimeoutExpired(cmd="claude", timeout=10), None])
 
+    assert _startup_run(monkeypatch, tmp_path, process) == (-3, True)
 
-def test_snapshot_jsonl_sizes(tmp_path):
-    """Creates .jsonl files in tmp_path and verifies correct size dict."""
-    f1 = tmp_path / "session1.jsonl"
-    f2 = tmp_path / "session2.jsonl"
-    f1.write_text("line1\n", encoding="utf-8")
-    f2.write_text("line1\nline2\n", encoding="utf-8")
+    process.terminate.assert_called_once_with()
+    process.kill.assert_called_once_with()
+    assert [c.kwargs for c in process.wait.call_args_list] == [{"timeout": 10}, {"timeout": 5}]
 
-    sizes = _snapshot_jsonl_sizes(tmp_path)
-    assert sizes["session1.jsonl"] == f1.stat().st_size
-    assert sizes["session2.jsonl"] == f2.stat().st_size
-    assert len(sizes) == 2
 
+# --- The fresh command, through cmd_for_attempt() --------------------------
 
-def test_snapshot_jsonl_sizes_empty_dir(tmp_path):
-    """Returns empty dict for a directory with no .jsonl files."""
-    sizes = _snapshot_jsonl_sizes(tmp_path)
-    assert sizes == {}
 
+def test_attempt_3_strips_the_bare_dash_c_and_keeps_an_option_that_contains_it(tmp_path):
+    branch = tmp_path / "branch"
+    branch.mkdir()
 
-def test_snapshot_jsonl_sizes_missing_dir(tmp_path):
-    """Returns empty dict for a nonexistent directory."""
-    sizes = _snapshot_jsonl_sizes(tmp_path / "does_not_exist")
-    assert sizes == {}
+    built, _ = cmd_for_attempt(["claude", "-c", "--config", "c_file.json"], 3, branch)
 
-
-def test_check_jsonl_activity_new_file(tmp_path):
-    """New file appears after snapshot -> True."""
-    initial = _snapshot_jsonl_sizes(tmp_path)
-    assert initial == {}
-
-    # New file appears
-    (tmp_path / "new_session.jsonl").write_text("data\n", encoding="utf-8")
-
-    assert _check_jsonl_activity(tmp_path, initial) is True
-
-
-def test_check_jsonl_activity_file_grew(tmp_path):
-    """Existing file larger than snapshot -> True."""
-    f = tmp_path / "session.jsonl"
-    f.write_text("line1\n", encoding="utf-8")
-
-    initial = _snapshot_jsonl_sizes(tmp_path)
-
-    # File grows
-    with open(f, "a", encoding="utf-8") as fh:
-        fh.write("line2\n")
-
-    assert _check_jsonl_activity(tmp_path, initial) is True
-
-
-def test_check_jsonl_activity_no_change(tmp_path):
-    """No change -> False."""
-    f = tmp_path / "session.jsonl"
-    f.write_text("line1\n", encoding="utf-8")
-
-    initial = _snapshot_jsonl_sizes(tmp_path)
-
-    assert _check_jsonl_activity(tmp_path, initial) is False
-
-
-def test_check_jsonl_activity_missing_dir(tmp_path):
-    """Nonexistent directory -> False."""
-    assert _check_jsonl_activity(tmp_path / "nope", {}) is False
+    assert built[:3] == ["claude", "--config", "c_file.json"]
+    assert "-c" not in built

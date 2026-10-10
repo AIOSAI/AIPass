@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_pointer.py
 # Description: Tests for the dispatch monitor's session-pointer aware retry loop
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's session-pointer aware retry loop and reconciliation."""
@@ -21,14 +21,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
-from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
-    cmd_for_attempt,
-    _has_resume,
-    _make_fresh_cmd,
-    reconcile_pointer,
-    _session_id_in,
-    main,
-)
+from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import cmd_for_attempt, main, reconcile_pointer
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
 
@@ -72,91 +65,6 @@ def _plant_transcript(branch_path, session_id):
     transcript.parent.mkdir(parents=True, exist_ok=True)
     transcript.write_text("{}\n", encoding="utf-8")
     return transcript
-
-
-def test_has_resume_detects_dash_c():
-    """The original form: continue whatever transcript was modified last."""
-    assert _has_resume(["claude", "-c", "-p", "hi"]) is True
-
-
-def test_has_resume_detects_long_resume_flag():
-    """--resume was invisible to the old check, so a resumed run logged as fresh
-    and never earned its strike-3 fresh switch."""
-    assert _has_resume(["claude", "--resume", "abc", "-p", "hi"]) is True
-
-
-def test_has_resume_detects_short_resume_flag():
-    """-r is the same flag; the CLI accepts it and so must we."""
-    assert _has_resume(["claude", "-r", "abc", "-p", "hi"]) is True
-
-
-def test_has_resume_false_for_a_fresh_command():
-    """A minted session is not a resume — --session-id starts something new."""
-    assert _has_resume(["claude", "-p", "hi", "--session-id", "abc"]) is False
-
-
-def test_session_id_in_reads_the_value():
-    assert _session_id_in(["claude", "--session-id", "abc", "-p", "hi"]) == "abc"
-
-
-def test_session_id_in_none_when_absent():
-    assert _session_id_in(["claude", "-c", "-p", "hi"]) is None
-
-
-def test_session_id_in_none_when_flag_has_no_value():
-    """A truncated command must read as "no id", not raise on the way past."""
-    assert _session_id_in(["claude", "-p", "hi", "--session-id"]) is None
-
-
-def test_make_fresh_cmd_removes_resume_pair():
-    """The uuid goes with its flag — orphaned, it becomes a positional prompt."""
-    cmd = ["claude", "--resume", "abc-123", "-p", "hi", "--model", "opus"]
-    assert _make_fresh_cmd(cmd) == ["claude", "-p", "hi", "--model", "opus"]
-
-
-def test_make_fresh_cmd_removes_short_resume_pair():
-    cmd = ["claude", "-r", "abc-123", "-p", "hi", "--model", "opus"]
-    assert _make_fresh_cmd(cmd) == ["claude", "-p", "hi", "--model", "opus"]
-
-
-def test_make_fresh_cmd_removes_session_id_pair():
-    cmd = ["claude", "-p", "hi", "--model", "opus", "--session-id", "abc-123"]
-    assert _make_fresh_cmd(cmd) == ["claude", "-p", "hi", "--model", "opus"]
-
-
-def test_make_fresh_cmd_leaves_everything_else_byte_identical():
-    """Strip the bindings and nothing else — the prompt and every option survive."""
-    cmd = [
-        "claude",
-        "-c",
-        "--resume",
-        "abc-123",
-        "--session-id",
-        "def-456",
-        "-p",
-        "check inbox",
-        "--model",
-        "opus",
-        "--max-turns",
-        "100",
-        "--permission-mode",
-        "bypassPermissions",
-        "--output-format",
-        "json",
-    ]
-    assert _make_fresh_cmd(cmd) == [
-        "claude",
-        "-p",
-        "check inbox",
-        "--model",
-        "opus",
-        "--max-turns",
-        "100",
-        "--permission-mode",
-        "bypassPermissions",
-        "--output-format",
-        "json",
-    ]
 
 
 def test_attempt_1_is_the_command_as_built(tmp_path, pointer_home):
@@ -360,6 +268,40 @@ def test_attempt_3_of_an_unbound_command_is_unchanged(tmp_path, pointer_home):
     built, mode = cmd_for_attempt(cmd, 3, tmp_path)
     assert built == cmd
     assert mode == "fresh"
+
+
+def test_attempt_1_of_a_dash_r_run_is_labelled_a_resume(tmp_path, pointer_home):
+    """-r is --resume's short form; the CLI accepts it and so must the attempt label."""
+    cmd = ["claude", "-r", "abc", "-p", "hi"]
+    assert cmd_for_attempt(cmd, 1, tmp_path) == (cmd, "resume")
+
+
+def test_a_command_ending_in_a_bare_session_id_flag_runs_as_built(tmp_path, pointer_home):
+    """A truncated command reads as "no id", not as a crash on the way past."""
+    cmd = ["claude", "-p", "hi", "--session-id"]
+    assert cmd_for_attempt(cmd, 1, tmp_path) == (cmd, "fresh")
+
+
+def test_attempt_3_of_a_dash_r_run_drops_the_flag_with_its_id(tmp_path, pointer_home):
+    branch = tmp_path / "branch"
+    branch.mkdir()
+
+    built, _ = cmd_for_attempt(["claude", "-r", "abc-123", "-p", "hi", "--model", "opus"], 3, branch)
+
+    assert built[:5] == ["claude", "-p", "hi", "--model", "opus"]
+    assert "-r" not in built and "abc-123" not in built
+
+
+def test_attempt_3_strips_every_binding_and_keeps_every_other_argument_in_order(tmp_path, pointer_home):
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    kept = ["-p", "check inbox", "--model", "opus", "--max-turns", "100", "--permission-mode", "bypassPermissions"]
+    cmd = ["claude", "-c", "--resume", "abc-123", "--session-id", "def-456", *kept, "--output-format", "json"]
+
+    built, _ = cmd_for_attempt(cmd, 3, branch)
+
+    new_id = built[built.index("--session-id") + 1]
+    assert built == ["claude", *kept, "--output-format", "json", "--session-id", new_id]
 
 
 _AIMED_CMD = ["claude", "--resume", "aimed-id", "-p", "hi"]

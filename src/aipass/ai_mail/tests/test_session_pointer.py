@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_session_pointer.py
 # Description: Tests for the durable per-branch session pointer
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-20
-# Modified: 2026-10-06
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
@@ -134,12 +134,10 @@ def test_transcript_file_appends_the_jsonl_name(fake_home, tmp_path):
     assert result.parent == transcript_dir(sample)
 
 
-# Retired here (ai_mail, leg 17): the test that read dispatch_monitor's private
-# _get_jsonl_projects_dir to pin that it delegates to transcript_dir. No public
-# door reaches that helper with a chosen cwd: its one caller is the monitor's
-# main(), which spawns the agent first. The helper is the one-line delegate its
-# docstring describes, so the encoding's pin lives with transcript_dir, in the
-# tests above, where the one copy of the encoding is.
+# dispatch_monitor's _get_jsonl_projects_dir copy was retired on 2026-10-10: its one
+# caller, run_with_startup_check, asks transcript_dir directly, and
+# tests/test_dispatch_monitor_helpers.py's _startup_run asserts that call. The
+# encoding's pin lives here, in the tests above, where the one copy of it is.
 
 
 # --- pointer_path ----------------------------------------------------

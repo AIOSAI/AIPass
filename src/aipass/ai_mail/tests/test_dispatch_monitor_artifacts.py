@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_artifacts.py
 # Description: Tests for what each dispatch attempt leaves behind - stdout, exit codes, result JSON, the lock
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's attempt artifacts: stdout, stderr, result JSON, lock."""
@@ -22,15 +22,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
-from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
-    BG_TASKS_MARKER,
-    _cleanup_own_lock,
-    _parse_result_json,
-    _read_stderr_segment,
-    _rotate_attempt_stdout,
-    _summarize_result_json,
-    main,
-)
+from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import BG_TASKS_MARKER, main
+from aipass.ai_mail.tests.support_dispatch_monitor import _run_main
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
 
@@ -38,26 +31,8 @@ pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_si
 # --- Fix 1: per-attempt stdout preservation ---------------------------
 
 
-def test_rotate_attempt_stdout_preserves_content(tmp_path):
-    """A non-empty stdout log is renamed to dispatch_stdout.attempt-N.log."""
-    stdout_log = tmp_path / "dispatch_stdout.log"
-    stdout_log.write_text('{"result": "boom"}', encoding="utf-8")
-
-    _rotate_attempt_stdout(str(stdout_log), 2)
-
-    assert not stdout_log.exists()
-    preserved = tmp_path / "dispatch_stdout.attempt-2.log"
-    assert preserved.read_text(encoding="utf-8") == '{"result": "boom"}'
-
-
-# test_rotate_attempt_stdout_empty_file_noop retired under compass 443 (2026-09-27):
-# a line-for-line copy of its survivor, test_rotate_attempt_stdout_skips_empty.
-
-
-def test_rotate_attempt_stdout_missing_file_noop(tmp_path):
-    """No error when there's no stdout log yet."""
-    _rotate_attempt_stdout(str(tmp_path / "missing.log"), 1)
-    assert not (tmp_path / "dispatch_stdout.attempt-1.log").exists()
+# The direct _rotate_attempt_stdout units retired 2026-10-10 (dispatch 0c8667bf) to
+# tests/.archive/retired_2026-10-10_test_dispatch_monitor_artifacts.py; main() reaches them below.
 
 
 def test_stdout_preserved_across_retries(monkeypatch, main_argv, tmp_path):
@@ -150,33 +125,6 @@ def test_per_attempt_startup_timeout_noted_in_stderr_log(monkeypatch, main_argv,
 # --- Fix 3: parsed stdout result JSON reaches the bounce reason -------
 
 
-def test_parse_result_json_from_whole_file(tmp_path):
-    """The whole stdout file parses as the print-mode result object."""
-    stdout_log = tmp_path / "stdout.log"
-    stdout_log.write_text('{"is_error": true, "result": "boom"}', encoding="utf-8")
-    assert _parse_result_json(str(stdout_log)) == {"is_error": True, "result": "boom"}
-
-
-def test_parse_result_json_last_line_when_output_precedes_it(tmp_path):
-    """When earlier stdout precedes the JSON, only the last line is the result object."""
-    stdout_log = tmp_path / "stdout.log"
-    stdout_log.write_text('some banner text\n{"is_error": false, "result": "ok"}', encoding="utf-8")
-    assert _parse_result_json(str(stdout_log)) == {"is_error": False, "result": "ok"}
-
-
-def test_parse_result_json_empty_or_missing_returns_empty_dict(tmp_path):
-    """Missing or empty stdout log parses to {} rather than raising."""
-    assert _parse_result_json(str(tmp_path / "missing.log")) == {}
-    empty = tmp_path / "empty.log"
-    empty.write_text("", encoding="utf-8")
-    assert _parse_result_json(str(empty)) == {}
-
-
-def test_summarize_result_json_no_capture(tmp_path):
-    """No result JSON captured is reported explicitly, not as a blank string."""
-    assert _summarize_result_json(str(tmp_path / "nonexistent" / "path.log")) == "(no result JSON captured)"
-
-
 def test_bounce_reason_includes_parsed_stdout_result(monkeypatch, main_argv, tmp_path):
     """Bounce reason names the actual failure cause from the result JSON,
     not just the bare exit code."""
@@ -213,35 +161,9 @@ def test_bounce_reason_includes_parsed_stdout_result(monkeypatch, main_argv, tmp
 # --- Fix 4: lock-ownership-verified cleanup ----------------------------
 
 
-# test_cleanup_own_lock_deletes_when_pid_matches retired under compass 443 (2026-09-27):
-# a line-for-line copy of its survivor, test_cleanup_own_lock_deletes_when_owner.
-
-
-def test_cleanup_own_lock_preserves_foreign_pid(tmp_path):
-    """A lock re-owned by a successor monitor (different PID) is left alone --
-    unconditional unlink previously let one monitor steal a successor's lock."""
-    lock = tmp_path / ".dispatch.lock"
-    foreign_pid = os.getpid() + 1
-    lock.write_text(json.dumps({"pid": foreign_pid}), encoding="utf-8")
-
-    _cleanup_own_lock(str(lock))
-
-    assert lock.exists()
-    assert json.loads(lock.read_text(encoding="utf-8"))["pid"] == foreign_pid
-
-
-# The missing-lock no-op is pinned once, at test_cleanup_own_lock_missing_noop.
-# A second copy sat here under a longer name (DPLAN-0323, merged FPLAN-0492).
-
-
-def test_cleanup_own_lock_unreadable_json_preserved(tmp_path):
-    """Corrupt lock content is left in place rather than blindly deleted."""
-    lock = tmp_path / ".dispatch.lock"
-    lock.write_text("not json", encoding="utf-8")
-
-    _cleanup_own_lock(str(lock))
-
-    assert lock.exists()
+# The owner-deletes and missing-lock cases are pinned once, through main(), in
+# tests/test_dispatch_monitor.py::test_lock_cleanup_on_success and
+# tests/test_dispatch_monitor_helpers.py::test_a_lock_gone_before_cleanup_is_not_recreated.
 
 
 def test_main_does_not_steal_successor_lock(monkeypatch, main_argv, tmp_path):
@@ -272,20 +194,6 @@ def test_main_does_not_steal_successor_lock(monkeypatch, main_argv, tmp_path):
 
 
 # --- Fix 5: orphaned background tasks are not a silent success --------
-
-
-def test_read_stderr_segment_only_after_offset(tmp_path):
-    """Only content written after the given byte offset is returned."""
-    log = tmp_path / "stderr.log"
-    log.write_text("before\n", encoding="utf-8")
-    offset = log.stat().st_size
-    with open(log, "a", encoding="utf-8") as f:
-        f.write("after\n")
-
-    segment = _read_stderr_segment(str(log), offset)
-
-    assert "after" in segment
-    assert "before" not in segment
 
 
 def test_bg_tasks_still_running_treated_as_incomplete(monkeypatch, main_argv, tmp_path):
@@ -349,3 +257,74 @@ def test_bg_tasks_marker_from_prior_attempt_does_not_leak_forward(monkeypatch, m
 
     assert exc_info.value.code == 0
     mock_bounce.assert_not_called()
+
+
+# --- The same artifacts, each reached through main() -------------------------
+
+
+def test_a_failed_attempts_stdout_is_moved_aside_not_copied(monkeypatch, main_argv, tmp_path):
+    argv, lock_file, _ = main_argv
+    logs_dir = lock_file.parent.parent / "logs"
+    stdout_there_at_start = []
+
+    def fails_printing(stdout_log):
+        stdout_there_at_start.append(Path(stdout_log).exists())
+        Path(stdout_log).write_text('{"result": "boom"}', encoding="utf-8")
+        return 1
+
+    def succeeds(stdout_log):
+        stdout_there_at_start.append(Path(stdout_log).exists())
+        return 0
+
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [fails_printing, succeeds])
+
+    assert code == 0
+    assert stdout_there_at_start == [False, False]
+    assert (logs_dir / "dispatch_stdout.attempt-1.log").read_text(encoding="utf-8") == '{"result": "boom"}'
+    bounce.assert_not_called()
+
+
+def _bounce_reason(monkeypatch, argv, tmp_path, attempt):
+    """Run main() through three failed attempts played by `attempt`; returns the bounce reason."""
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [attempt, attempt, attempt])
+    assert code == 1
+    bounce.assert_called_once()
+    return bounce.call_args.args[1]
+
+
+def test_a_result_json_after_banner_text_still_reaches_the_bounce(monkeypatch, main_argv, tmp_path):
+    def prints_a_banner_first(stdout_log):
+        Path(stdout_log).write_text('some banner text\n{"is_error": false, "result": "ok"}', encoding="utf-8")
+        return 1
+
+    reason = _bounce_reason(monkeypatch, main_argv[0], tmp_path, prints_a_banner_first)
+
+    assert "is_error=False" in reason
+    assert "result: ok" in reason
+
+
+def test_a_dispatch_that_printed_nothing_bounces_with_no_result_json(monkeypatch, main_argv, tmp_path):
+    reason = _bounce_reason(monkeypatch, main_argv[0], tmp_path, lambda stdout_log: 1)
+
+    assert reason.endswith("Last attempt result JSON: (no result JSON captured)")
+
+
+def test_a_lock_turned_unreadable_mid_run_is_left_in_place(monkeypatch, main_argv, tmp_path):
+    argv, lock_file, _ = main_argv
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
+
+    def corrupts_the_lock(stdout_log):
+        lock_file.write_text("not json", encoding="utf-8")
+        return 0
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [corrupts_the_lock])
+
+    assert code == 0
+    assert lock_file.read_text(encoding="utf-8") == "not json"
+    bounce.assert_not_called()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor.py
 # Description: Tests for dispatch monitor lifecycle handler
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-04-02
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's main(): the attempts, the bounce, the completion fire."""
@@ -28,12 +28,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
-from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
-    BG_TASKS_MARKER,
-    _send_bounce,
-    main,
-)
-from aipass.ai_mail.tests.support_dispatch_monitor import _assert_sent_as_ai_mail
+from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import BG_TASKS_MARKER, main
+from aipass.ai_mail.tests.support_dispatch_monitor import _assert_sent_as_ai_mail, _run_main
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
 
@@ -261,71 +257,54 @@ def test_main_rate_limit_delay(monkeypatch, main_argv, tmp_path):
     bounce.assert_not_called()
 
 
-# --- _send_bounce tests -----------------------------------------------
+# --- The bounce, through main() -----------------------------------------
 
 
-def test_send_bounce_success(tmp_path, monkeypatch):
-    """Successful bounce sends email via drone subprocess, as ai_mail (2026-10-04)."""
+def test_a_failed_dispatch_bounces_to_the_sender_as_ai_mail(monkeypatch, main_argv, tmp_path):
+    argv, lock_file, stderr_log = main_argv
     monkeypatch.setenv("AIPASS_BRANCH_NAME", "trigger")
-    stderr_log = tmp_path / "stderr.log"
-    stderr_log.write_text("some error output\nmore lines\n", encoding="utf-8")
+    sends = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr(mod.subprocess, "run", sends)
 
-    lock = tmp_path / "branch" / ".ai_mail.local" / ".dispatch.lock"
-    lock.parent.mkdir(parents=True)
-    lock.write_text("{}", encoding="utf-8")
+    def fails_with_stderr(stdout_log):
+        with open(stderr_log, "a", encoding="utf-8") as f:
+            f.write("some error output\nmore lines\n")
+        return 1
 
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_sub_run = MagicMock(return_value=mock_result)
-    monkeypatch.setattr(mod.subprocess, "run", mock_sub_run)
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [fails_with_stderr] * 3)
 
-    result = _send_bounce("@test", "failed", "@sender", str(lock), str(stderr_log))
-    assert result is True
-    mock_sub_run.assert_called_once()
-    _assert_sent_as_ai_mail(mock_sub_run)
+    assert code == 1
+    _assert_sent_as_ai_mail(sends)
+    assert not (lock_file.parent / "last_bounce.json").exists()
 
 
-def test_send_bounce_falls_back_to_file(tmp_path, monkeypatch):
-    """Failed drone send falls back to bounce file."""
-    stderr_log = tmp_path / "stderr.log"
-    stderr_log.write_text("error output\n", encoding="utf-8")
-
-    lock = tmp_path / "branch" / ".ai_mail.local" / ".dispatch.lock"
-    lock.parent.mkdir(parents=True)
-    lock.write_text("{}", encoding="utf-8")
+def test_a_bounce_that_cannot_be_sent_is_written_beside_the_lock(monkeypatch, main_argv, tmp_path):
+    argv, lock_file, _ = main_argv
 
     def raise_error(*a, **kw):
         raise subprocess.SubprocessError("drone failed")
 
     monkeypatch.setattr(mod.subprocess, "run", raise_error)
 
-    result = _send_bounce("@test", "failed", "@sender", str(lock), str(stderr_log))
-    assert result is False
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [lambda stdout_log: 1] * 3)
 
-    bounce_file = lock.parent / "last_bounce.json"
-    assert bounce_file.exists()
-    data = json.loads(bounce_file.read_text(encoding="utf-8"))
-    assert data["branch"] == "@test"
-    assert data["reason"] == "failed"
+    assert code == 1
+    data = json.loads((lock_file.parent / "last_bounce.json").read_text(encoding="utf-8"))
+    assert data["branch"] == "@test_branch"
+    assert data["reason"].startswith("All 3 attempts failed")
 
 
-def test_send_bounce_missing_stderr(tmp_path, monkeypatch):
-    """Missing stderr log handled gracefully."""
-    lock = tmp_path / "branch" / ".ai_mail.local" / ".dispatch.lock"
-    lock.parent.mkdir(parents=True)
-    lock.write_text("{}", encoding="utf-8")
+def test_a_bounce_with_no_stderr_log_says_none_was_captured(monkeypatch, main_argv, tmp_path):
+    argv, _, _ = main_argv
+    argv = argv[:4] + [str(tmp_path / "absent" / "stderr.log")] + argv[5:]
+    sends = MagicMock(return_value=MagicMock(returncode=0))
+    monkeypatch.setattr(mod.subprocess, "run", sends)
 
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_sub_run = MagicMock(return_value=mock_result)
-    monkeypatch.setattr(mod.subprocess, "run", mock_sub_run)
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [lambda stdout_log: 1] * 3)
 
-    # Pass a nonexistent stderr log
-    result = _send_bounce("@test", "failed", "@sender", str(lock), str(tmp_path / "nonexistent.log"))
-    assert result is True
-    # The body should contain "(no stderr captured)" fallback
-    call_args = mock_sub_run.call_args
-    body = call_args[0][0][5]  # ["drone", "@ai_mail", "send", sender, subject, body]
+    assert code == 1
+    sends.assert_called_once()
+    body = sends.call_args[0][0][5]  # ["drone", "@ai_mail", "send", sender, subject, body]
     assert "no stderr captured" in body
 
 
@@ -882,8 +861,9 @@ def test_auto_compact_window_pinned_to_350k(monkeypatch, main_argv, tmp_path):
 # --- _kill_process tests (named per spec) ----------------------------------
 
 
-# _kill_process's two outcomes are pinned once, at test_kill_process_terminate_succeeds
-# and test_kill_process_terminate_timeout_falls_back_to_sigkill. This file carried a
+# _kill_process's two outcomes are pinned once, through run_with_startup_check, at
+# test_a_startup_timeout_terminates_the_agent_without_a_sigkill and
+# test_a_startup_timeout_sigkills_an_agent_that_ignores_the_terminate. This file carried a
 # second line-for-line copy of both, 640 lines apart under SIGTERM/SIGKILL names
 # (DPLAN-0323 contested band, merged FPLAN-0492).
 

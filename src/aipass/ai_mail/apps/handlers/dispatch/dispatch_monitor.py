@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.8.0
+# Version: 2.8.1
 # Created: 2026-03-02
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -664,26 +664,6 @@ def _cleanup_own_lock(lock_file: str) -> None:
         logger.info("[monitor] Failed to clean up lock file %s", lock_file)
 
 
-def _get_jsonl_projects_dir(cwd: str) -> Optional[Path]:
-    """Get Claude's JSONL projects directory for a branch CWD.
-
-    Claude encodes the cwd by replacing path separators and ':' with '-'.
-    Windows path ``C:\\repo\\AIPass`` becomes ``C--repo-AIPass``.
-
-    The encoding itself lives in session_pointer.transcript_dir. It used to be
-    duplicated here byte-for-byte; the day Claude changes how it encodes a cwd
-    there must be one line to fix, not two that drift apart silently.
-
-    None when the machine cannot name its home directory (@hooks, 2026-08-23).
-    THIS CALL SITE IS THE SHARPER ONE: it runs AFTER the agent has been spawned,
-    so the bare Path.home() it used to inherit would have killed the monitor
-    with a live agent still running — the dispatch orphaned, no report written,
-    the lock left held. Losing the startup poll costs a slower start; raising
-    here costs the whole dispatch.
-    """
-    return session_pointer.transcript_dir(cwd)
-
-
 def _snapshot_jsonl_sizes(projects_dir: Path) -> dict:
     """Snapshot current sizes of all JSONL files in the projects directory."""
     sizes = {}
@@ -778,11 +758,14 @@ def run_with_startup_check(
     # Phase 1: Startup check — poll JSONL session files for activity.
     # stdout is buffered by --output-format json, so we can't use it.
     # Claude writes to ~/.claude/projects/{encoded-cwd}/*.jsonl continuously.
-    projects_dir = _get_jsonl_projects_dir(cwd)
+    # The cwd encoding has one home, session_pointer.transcript_dir (2026-10-10).
+    projects_dir = session_pointer.transcript_dir(cwd)
     if projects_dir is None:
-        # No home means no transcripts to watch. The startup probe is an
-        # OPTIMISATION — it notices the agent is alive sooner — so its absence
-        # degrades the wait, never the dispatch. _claude_home already warned.
+        # No home means no transcripts to watch (@hooks, 2026-08-23). This runs
+        # AFTER the spawn, so raising here would orphan a live agent with the lock
+        # held. The startup probe is an OPTIMISATION — it notices the agent is
+        # alive sooner — so its absence degrades the wait, never the dispatch.
+        # _claude_home already warned.
         logger.warning("[monitor] no home directory — skipping the JSONL startup probe for %s", cwd)
     initial_sizes = _snapshot_jsonl_sizes(projects_dir) if projects_dir else {}
     deadline = time.time() + STARTUP_TIMEOUT

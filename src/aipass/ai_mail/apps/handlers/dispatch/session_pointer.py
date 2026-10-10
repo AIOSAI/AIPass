@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: session_pointer.py
 # Description: Durable per-branch "current session" pointer for dispatch
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-20
-# Modified: 2026-08-20
+# Modified: 2026-10-10
 # =============================================
 
 """Durable per-branch current-session pointer.
@@ -148,9 +148,9 @@ def transcript_dir(cwd: str | Path) -> Optional[Path]:
     the encoding replaces ``\\``, ``/``, ``:``, ``_`` and ``.`` with ``-``. A
     Windows path ``C:\\repo\\AIPass`` becomes ``C--repo-AIPass``.
 
-    This module is the CANONICAL home for that encoding.
-    ``dispatch_monitor._get_jsonl_projects_dir`` carries an identical copy and
-    is being pointed here, so the rule lives in one place: the day Claude
+    This module is the ONLY home for that encoding. dispatch_monitor's
+    run_with_startup_check asks here directly; its old copy was retired on
+    2026-10-10, so the rule lives in one place: the day Claude
     changes how it encodes a cwd, there is a single line to fix rather than a
     search for every branch that guessed.
 

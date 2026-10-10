@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_dispatch_monitor.py
-# Description: Shared helper for test_dispatch_monitor.py and its split siblings - the one-identity send check
-# Version: 1.0.0
+# Description: Shared helpers for test_dispatch_monitor.py and its siblings - the one-identity send check, a main() run
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Helper for the tests of apps/handlers/dispatch/dispatch_monitor.py (no test_ prefix: never collected)."""
@@ -11,9 +11,33 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the module parses and imports
 
+import time
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
+
+
+def _run_main(monkeypatch, argv, tmp_path, attempts):
+    """Run main() with attempt N played by attempts[N-1], which gets the stdout log path and returns the exit code.
+
+    Returns (main's exit code, the time mock): the pauses between attempts are recorded, never slept.
+    """
+    queue = list(attempts)
+
+    def fake_run(cmd, stdout_log, *args, **kwargs):
+        return queue.pop(0)(stdout_log), False
+
+    clock = MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock())
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "time", clock)
+    monkeypatch.setattr("aipass.ai_mail.apps.handlers.paths.find_repo_root", MagicMock(return_value=tmp_path / "repo"))
+    with pytest.raises(SystemExit) as exc_info:
+        mod.main()
+    return exc_info.value.code, clock
 
 
 def _assert_sent_as_ai_mail(run_mock):
