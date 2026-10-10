@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -650,6 +650,31 @@ def _operands(segment: list[str]) -> list[str]:
     return out
 
 
+def _sed_short_letters(flag: str) -> str:
+    """A short cluster's option letters: an i ends them, the rest is its backup suffix (-ni.bak reads ni)."""
+    letters = flag[1:]
+    return letters[: letters.index("i") + 1] if "i" in letters else letters
+
+
+def _sed_in_place_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:
+    """Every file `sed -i` edits, never its script (pad row 87, devpulse 953c8a70).
+
+    In place is any short cluster holding i (-i, -ni, -Ei, -i.bak) or --in-place[=suffix].
+    The script is the first plain word, read before the path filter: `68,90p` does not look
+    like a path, and filtering first dropped the real file in its place. A script given by
+    -e, -f, --expression or --file leaves every path-looking word a target, as before.
+    """
+    flags = [token for token in segment[1:] if token.startswith("-") and token != "-"]
+    longs = {flag.split("=", 1)[0] for flag in flags if flag.startswith("--")}
+    shorts = "".join(_sed_short_letters(flag) for flag in flags if not flag.startswith("--"))
+    if not (longs & _INPLACE_FLAGS or "i" in shorts):
+        return []
+    words = _operands(segment)
+    script_given = bool(longs & {"--expression", "--file"}) or "e" in shorts or "f" in shorts
+    files = words if script_given else words[1:]
+    return [(t, "sed -i") for t in (_resolve(o, cwd) for o in files if _looks_like_path(o)) if t is not None]
+
+
 def _verb_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:
     """Collect write targets named by a known verb's own grammar."""
     verb = verb_name(segment[0])
@@ -665,11 +690,7 @@ def _verb_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:
         return hits
 
     if verb == "sed":
-        if not any(flag in _INPLACE_FLAGS or flag.startswith("-i") for flag in segment[1:] if flag.startswith("-")):
-            return hits
-        # The first operand is the script when it was not given via -e/-f.
-        targets = operands if any(f.startswith(("-e", "-f")) for f in segment[1:]) else operands[1:]
-        return [(t, "sed -i") for t in (_resolve(o, cwd) for o in targets) if t is not None]
+        return _sed_in_place_targets(segment, cwd)
 
     if verb in _ALL_OPERANDS:
         return [(t, verb) for t in (_resolve(o, cwd) for o in operands) if t is not None]

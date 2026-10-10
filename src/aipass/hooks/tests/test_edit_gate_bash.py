@@ -652,6 +652,24 @@ class TestBashWritesParser:
         else:
             assert write_targets("echo hi > out.txt", "") == [(gone / "out.txt", "redirection (>)")]
 
+    @pytest.mark.parametrize(
+        ("command", "named"),
+        [
+            ("sed -i 68,90p other/branch/file.py", ["other/branch/file.py"]),
+            ("sed -ni 1p file.py", ["file.py"]),
+            ("sed -i.bak 1d file.py", ["file.py"]),
+            ("sed -Ei 's/a/b/' file.py", ["file.py"]),
+            ("sed -e 1d -i file.py", ["file.py"]),
+            ("sed -i 1d a.py b.py", ["a.py", "b.py"]),
+            ("sed -i s/a/b/ file.py", ["file.py"]),
+            ("sed -n 68,90p file.py", []),
+        ],
+        ids=["non-path-script", "ni-cluster", "i-suffix", "Ei-cluster", "e-script", "two-files", "script", "read"],
+    )
+    def test_sed_in_place_names_every_file_and_never_its_script(self, tmp_path: Path, command: str, named: list):
+        """Pad row 87 (devpulse 953c8a70): a non-path script dropped the real target, and -ni was not in place."""
+        assert write_targets(command, str(tmp_path)) == [(tmp_path / name, "sed -i") for name in named]
+
 
 class TestEveryLineIsACommand:
     """2026-09-10, found measuring devpulse's 213c64fd: a newline never separated.
@@ -1199,7 +1217,7 @@ class TestASedPrintScriptIsARead:
 
     @pytest.mark.parametrize("flags", ["-i -n", "-ni", "--in-place -n", "-n -i.bak"])
     def test_sed_in_place_on_the_same_path_stays_refused(self, registered_projects: dict, grant_withheld, flags: str):
-        """Mutant: every sed read as a read. bash_writes' sed -i lane misses all four shapes; this lane holds them."""
+        """Both lanes hold all four: every sed read as a read still refuses here, through bash_writes (pad row 87)."""
         manifest = self._manifest(registered_projects)
         result = _run(registered_projects["hooks"], command=f"sed {flags} 68,90p {manifest}")
         assert _blocked(result)

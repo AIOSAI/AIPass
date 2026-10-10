@@ -1594,7 +1594,7 @@
     {
       "file": "tests/test_edit_gate_bash.py",
       "standard": "stdlib_patch",
-      "lines": [974],
+      "lines": [992],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
     },
     {
