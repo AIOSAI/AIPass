@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import defect — safe path helper, both worlds, the fence with its cwd removed
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/path/module_paths.py and the fence in apps/handlers/__init__.py under a dead cwd."""
@@ -151,13 +151,15 @@ class TestImportsSurviveADeadCwd:
         assert _run_probe(world)["red"] == {}
 
 
-class _ResolveDeniedPath(Path):
+class _ResolveDeniedPath(type(Path())):
     """A ``Path`` whose ``resolve()`` refuses, standing in for the dead cwd.
 
     Installed over ``module_paths.Path`` (the module's own ``from pathlib import
     Path`` binding), it denies ``resolve()`` to the module under test and to
     nothing else. ``module_file``'s fallback is reached through the same
     binding, so it returns one of these: a real ``Path`` in every other respect.
+    It subclasses the concrete class (PosixPath or WindowsPath): on Python 3.10
+    and 3.11 a direct ``Path`` subclass has no ``_flavour`` and cannot be built.
     """
 
     def resolve(self, strict: bool = False) -> Path:

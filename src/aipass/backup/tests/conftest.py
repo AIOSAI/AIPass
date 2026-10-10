@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync
-# Version: 1.3.3
+# Version: 1.3.4
 # Created: 2026-06-12
-# Modified: 2026-09-27
+# Modified: 2026-10-10
 # =============================================
 
 """Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync."""
@@ -180,7 +180,9 @@ def sealed_google_edge(monkeypatch: pytest.MonkeyPatch) -> None:
     as module attributes of ``handlers/drive/client.py`` at import time, so one
     monkeypatch on that one module closes both doors for the whole process.
     ``googleapiclient.http.MediaFileUpload`` opens the local file for a
-    resumable upload, so it is replaced as well.
+    resumable upload, so it is replaced as well, and ``MEDIA_UPLOAD_AVAILABLE``
+    is set beside it: CI installs no drive extra, so the import guard leaves the
+    flag False and every upload returned failure before reaching the stand-in.
 
     A call that gets through RAISES rather than dials, so the seal is
     self-reporting: reaching the edge is a loud RuntimeError, never a quiet
@@ -193,3 +195,4 @@ def sealed_google_edge(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(drive_client, "get_drive_service", _no_live_google)
     monkeypatch.setattr(drive_client, "api_call_with_retry", _no_live_google)
     monkeypatch.setattr(drive_upload, "MediaFileUpload", MagicMock(name="MediaFileUpload"))
+    monkeypatch.setattr(drive_upload, "MEDIA_UPLOAD_AVAILABLE", True)
