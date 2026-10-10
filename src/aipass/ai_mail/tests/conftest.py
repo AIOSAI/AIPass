@@ -1,11 +1,12 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
-# Version: 1.7.1
+# Version: 1.7.2
 # Created: 2026-03-05
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
+#   - v1.7.2 (2026-10-10): temp_test_dir, sample_test_data removed - spawn template leftovers no live test requests
 #   - v1.7.1 (2026-10-08): monitor_wake_stubbed patches the public doors wake_sender, log_wake_result
 #   - v1.7.0 (2026-10-08): wake_log_operation_suppressed, repo_root - test_wake.py's own
 #     fixtures, shared by its split siblings; monitor_json_silenced, monitor_logger_silenced,
@@ -14,7 +15,6 @@
 #     email_json_silenced - the autouse pairs of test_daemon.py and test_email_module.py,
 #     shared by their split siblings through pytestmark
 #   - v1.5.1 (2026-09-29): sandboxed_central docstring names the live caller, not a retired name
-#   - v1.5.0 (2026-09-27): recorded_bus - no test fires on the real trigger bus
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
@@ -30,7 +30,6 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 import pytest
-import shutil
 import sys
 from pathlib import Path
 from typing import Generator
@@ -408,21 +407,3 @@ def _isolate_contacts_file(tmp_path, monkeypatch):
     mailbox in place of a real one (found live, 2026-08-16, @devpulse).
     """
     monkeypatch.setattr(contacts_mod, "CONTACTS_FILE", tmp_path / "contacts" / "contacts.json")
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data
-
-    Customize this fixture for your module's needs
-    """
-    return {"test_key": "test_value", "sample_data": "example"}

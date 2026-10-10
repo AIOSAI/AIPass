@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-29
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model and marking."""
@@ -97,7 +97,17 @@ class TestWakeBranchSpawnEnv:
         notify = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
 
+        # The test owns the binary it needs: a CI runner has no claude anywhere, and a
+        # host lookup made this pass only where ~/.local/bin/claude exists (PR #774).
+        claude_bin = tmp_path / "bin" / "claude"
+        claude_bin.parent.mkdir()
+        claude_bin.touch()
+        which = MagicMock(side_effect=lambda name: str(claude_bin) if name == "claude" else None)
+        monkeypatch.setattr(wake_mod.shutil, "which", which)
+
         wake_mod.wake_branch("@testbranch", fresh=True)
+
+        which.assert_any_call("claude")
 
         sleep.assert_called_once_with(2)
         notify.assert_called_once_with(
