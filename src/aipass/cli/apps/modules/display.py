@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: CLI Display Module — public API for Rich terminal output formatting
-# Version: 0.5.2
+# Version: 0.5.3
 # Created: 2025-11-12
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -39,14 +39,34 @@ from aipass.cli.apps.handlers.cli.help_flags import wants_help
 # NOTE: Cannot import prax here — circular import (prax depends on cli)
 # Silent catches in this file are bypassed via .seedgo/bypass.json
 
-# Detect if output is a TTY (interactive terminal) vs piped/redirected
-# When piped, disable force_terminal to let Rich auto-detect and strip ANSI codes
-_IS_TTY = sys.stdout.isatty()
+
+class _LiveConsole(Console):
+    """A Console that decides colour at each print, against the live stream.
+
+    An isatty() read at import pinned the answer for the life of the process: a
+    conftest imported while pytest's capture was suspended read an xdist
+    worker's NUL, which Windows calls a terminal, and every later capture carried
+    escape codes (CI on PR #774, 2026-10-10). Leaving force_terminal unset makes
+    is_terminal live, but Rich still fixes its colour system once, in __init__,
+    so the colour system is re-detected here every time Rich reads it - once per
+    rendered print. Measured against rich 15.0.0.
+    """
+
+    @property
+    def _color_system(self):
+        """The colour system for the stream as it is now, or None for a pipe or capture."""
+        return self._detect_color_system()
+
+    # Rich declares _color_system as an attribute; replacing it with a property is the cure.
+    @_color_system.setter
+    def _color_system(self, _value) -> None:  # pyright: ignore[reportIncompatibleVariableOverride]
+        """Console.__init__ assigns its import-time answer here; it is not kept."""
+
 
 # Initialize Rich console (lowercase follows service instance pattern)
-CONSOLE = Console(force_terminal=_IS_TTY)  # TTY=colors, piped=plain
+CONSOLE = _LiveConsole()  # terminal=colour, pipe or capture=plain, decided per print
 console = CONSOLE  # Primary export (lowercase service instance pattern)
-err_console = Console(stderr=True, force_terminal=sys.stderr.isatty())  # Stderr auto-detect
+err_console = _LiveConsole(stderr=True)  # same, against the live sys.stderr
 
 # Trigger loaded lazily to avoid circular import
 _TRIGGER = None

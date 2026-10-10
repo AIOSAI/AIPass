@@ -58,6 +58,7 @@ Three lines in `main()`, in order: `reset_command_state()` on entry, route, then
 These are the things that have actually broken here.
 
  - The handlers fence is only as good as the packages above it. `apps/__init__.py` imports nothing and the package `__init__.py` loads display lazily; an eager import in either puts kin in every stack and opens the fence. `tests/test_handlers_fence.py` pins both.
+ - Colour is decided per print against the live stream (`_LiveConsole` in `display.py`). Never read `isatty()` at import or pass `force_terminal`: Rich fixes its colour system in `__init__`, and an import-time answer leaked escape codes into every Windows capture (PR #774).
  - `apps/modules/` must not import `aipass.prax` — circular, prax depends on this branch. Bypassed in `.seedgo/bypass.json`. The json shim is the one exception and is safe only because prax's `__init__` is lazy.
  - The json shim binds names (`log_operation = _h.log_operation`) and never wraps them. A `def` wrapper adds a frame and the service then logs to the wrong document.
  - Import the json handler as a module, then call through it. The seedgo AST checker matches that exact shape.

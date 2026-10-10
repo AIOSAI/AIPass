@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display.py
-# Description: The display module — messages, header, routing, demo, exit seam, escape
-# Version: 1.1.1
+# Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
@@ -12,7 +12,9 @@
 # seedgo: no-test-needed(documentation) — that display.header and the other public functions carry docstrings
 # seedgo: no-test-needed(rich_markup) — that display.print_help's own literals keep their brackets
 
+import contextlib
 import importlib
+import io
 import sys
 from unittest.mock import patch, MagicMock
 
@@ -723,3 +725,49 @@ class TestEscapeExport:
     def test_text_functions_must_not_be_escaped(self, fn):
         assert "log [count]" in _render(fn, self.PLACEHOLDER)
         assert "\\[count]" in _render(fn, modules.escape(self.PLACEHOLDER))
+
+
+# =============================================================================
+# COLOUR IS DECIDED PER PRINT
+# =============================================================================
+
+
+class _TerminalStream(io.StringIO):
+    """A stream that answers isatty() True, as a terminal does."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+class TestColourFollowsTheLiveStream:
+    """Both consoles decide colour at each print, against the stream as it is then.
+
+    CI on PR #774, 2026-10-10: the consoles were built once, at import, with the
+    stream's isatty() as it was then. A conftest imported while pytest's capture
+    was suspended read an xdist worker's NUL, which Windows calls a terminal, and
+    every later capture in the run carried escape codes. Rich fixes its colour
+    system in __init__ too, so leaving force_terminal unset alone does not cure it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _a_colour_terminal(self, monkeypatch):
+        """TERM=dumb or an unset TERM would make a terminal answer plain."""
+        monkeypatch.setenv("TERM", "xterm-256color")
+
+    def test_console_colours_a_terminal_then_prints_plain_into_capture(self, capsys):
+        terminal = _TerminalStream()
+        with contextlib.redirect_stdout(terminal):
+            display.console.print("[bold]live[/bold]")
+        display.console.print("[bold]live[/bold]")
+        out, _err = capsys.readouterr()
+        assert "\x1b[" in terminal.getvalue()
+        assert out == "live\n"
+
+    def test_err_console_colours_a_terminal_then_prints_plain_into_capture(self, capsys):
+        terminal = _TerminalStream()
+        with contextlib.redirect_stderr(terminal):
+            display.err_console.print("[bold]live[/bold]")
+        display.err_console.print("[bold]live[/bold]")
+        _out, err = capsys.readouterr()
+        assert "\x1b[" in terminal.getvalue()
+        assert err == "live\n"
