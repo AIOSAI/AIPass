@@ -48,3 +48,44 @@ jobs:
         with:
           languages: python
       - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        id: analyze
+      # The SARIF's own paths, in the job log. GitHub's check annotates the sink
+      # alone (prax logger.py:135 for every clear-text-logging flow) and the
+      # code-scanning API needs an auth drone does not carry, so three rounds of
+      # PR #774 cured guessed sources. drone @git run view <id> --log reads this.
+      # Locations and CodeQL's own step messages only, never source text.
+      - name: CodeQL result paths
+        if: always()
+        env:
+          SARIF_DIR: ${{ steps.analyze.outputs.sarif-output }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          root = pathlib.Path(os.environ["SARIF_DIR"])
+          for sarif in sorted(root.glob("*.sarif")):
+              data = json.loads(sarif.read_text(encoding="utf-8"))
+              for run in data.get("runs", []):
+                  results = run.get("results", [])
+                  print(f"{sarif.name}: {len(results)} result(s)")
+                  for result in results:
+                      text = (result.get("message") or {}).get("text", "")
+                      print("RESULT", result.get("ruleId"), result.get("level"), text[:200])
+                      for loc in result.get("locations", []):
+                          where = loc.get("physicalLocation", {})
+                          uri = where.get("artifactLocation", {}).get("uri")
+                          print("  SINK", uri, where.get("region", {}).get("startLine"))
+                      for number, flow in enumerate(result.get("codeFlows", []), 1):
+                          for thread in flow.get("threadFlows", []):
+                              steps = thread.get("locations", [])
+                              print(f"  PATH {number} ({len(steps)} steps)")
+                              for step in steps:
+                                  location = step.get("location", {})
+                                  where = location.get("physicalLocation", {})
+                                  uri = where.get("artifactLocation", {}).get("uri")
+                                  line = where.get("region", {}).get("startLine")
+                                  note = (location.get("message") or {}).get("text", "")
+                                  print("   ", uri, line, note[:90])
+          PY
