@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_secrets.py
 # Description: Tests for secrets handler and get_secret_cmd orchestrator
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-06-15
-# Modified: 2026-10-10
+# Modified: 2026-10-11
 # =============================================
 
 """Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
@@ -174,13 +174,18 @@ class TestGetSecret:
             result = get_secret("telegram", "bot")
 
         assert result is None
-        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
-        assert len(warnings) == 2
-        # Which secret is the next line's job; where it lives is on neither
-        # (seedgo clear_text_secret_logging, PR #774).
+        calls = mock_logger.warning.call_args_list
+        assert len(calls) == 2
+        warnings = [c.args[0] % tuple(c.args[1:]) for c in calls]
+        # Where it lives is on neither line; which slug is the caller's to
+        # name, never this line's: a slug handed in is a name listed out of
+        # the store (seedgo clear_text_secret_logging; CodeQL
+        # py/clear-text-logging-sensitive-data, PR #774 round eleven).
         assert warnings[0].startswith("Error reading a JSON secret file: ")
         assert not any(str(tmp_path) in warning for warning in warnings)
-        assert warnings[1] == "Secret not found: telegram/bot"
+        assert warnings[1] == "Secret not found under provider telegram: no JSON or raw document for the requested slug"
+        assert "bot" not in warnings[1]
+        assert "bot" not in calls[1].args[0]
 
     @pytest.mark.skipif(
         sys.platform == "win32",

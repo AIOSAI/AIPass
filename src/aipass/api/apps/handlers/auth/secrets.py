@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: secrets.py
 # Description: Secrets Store Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-06-15
-# Modified: 2026-10-10
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -80,7 +80,13 @@ def get_secret(provider: str, slug: str, as_json: bool = False) -> Optional[Any]
             json_handler.log_operation("secret_retrieved", {"provider": provider, "slug": slug, "format": "raw"})
             return result
 
-    logger.warning(f"Secret not found: {provider}/{slug}")
+    # The provider only, as an argument. The slug is the caller's to name:
+    # callers list slugs out of the store (list_secrets) and hand them back
+    # here, so a slug on this line is a value read out of the secrets store
+    # reaching a log (CodeQL py/clear-text-logging-sensitive-data, PR #774
+    # round eleven: telegram list_bot_configs -> migrate_bot_config ->
+    # _get_secret -> get_secret -> this f-string -> prax logger.py:135).
+    logger.warning("Secret not found under provider %s: no JSON or raw document for the requested slug", provider)
     return None
 
 
