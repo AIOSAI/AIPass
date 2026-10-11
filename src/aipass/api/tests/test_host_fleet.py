@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-08-14
 # Modified: 2026-10-10
 # =============================================
@@ -1193,10 +1193,10 @@ def _macos_vitals(sampled_at: str = "2026-09-13T07:20:00.000+00:00") -> dict:
 def machine_door():
     """A stand-in for @skills' door, with a cold cache on both sides of the case."""
     with patch(PATCH_MACHINE_LOGGER), patch(PATCH_MACHINE_JSON), patch(PATCH_CACHE_JSON):
-        host_machine._vitals.clear()
+        host_machine.forget()
         with patch(PATCH_VITALS_DOOR, autospec=True) as door:
             yield door
-        host_machine._vitals.clear()
+        host_machine.forget()
 
 
 @fastapi_required
@@ -1439,10 +1439,10 @@ def _cannot_tell(reason: str = screen_lock.REASON_NO_SESSION) -> dict:
 def lock_door():
     """A stand-in for @skills' door, with a cold cache on both sides of the case."""
     with patch(PATCH_LOCK_LOGGER), patch(PATCH_LOCK_JSON), patch(PATCH_CACHE_JSON):
-        host_lock._state.clear()
+        host_lock.forget()
         with patch(PATCH_LOCK_DOOR, autospec=True) as door:
             yield door
-        host_lock._state.clear()
+        host_lock.forget()
 
 
 @fastapi_required

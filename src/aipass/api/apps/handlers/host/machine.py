@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: machine.py
 # Description: Host API Machine Handler — the phone's vitals, proxied from @skills
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-13
 # Modified: 2026-10-10
 # =============================================
@@ -77,6 +77,7 @@ Classes:
 
 Functions:
     read_machine() - The machine's vitals, at most one read per second
+    forget()       - Drop the cached reading so the next read asks @skills' machine_vitals() again
 """
 
 from typing import Any, Dict
@@ -136,6 +137,11 @@ def read_machine() -> Dict[str, Any]:
         MachineDoorFailed: The door raised or broke its shape. Never cached.
     """
     return _vitals.get(_VITALS_KEY, _ask_the_skill)
+
+
+def forget() -> None:
+    """Drop the cached reading so the next read asks @skills' machine_vitals() again."""
+    _vitals.clear()
 
 
 def _ask_the_skill() -> Dict[str, Any]:

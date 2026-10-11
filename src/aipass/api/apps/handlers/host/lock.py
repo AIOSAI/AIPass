@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lock.py
 # Description: Host API Lock Handler — the screen lock's position, proxied from @skills
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-13
 # Modified: 2026-10-10
 # =============================================
@@ -78,6 +78,7 @@ Classes:
 
 Functions:
     read_lock() - The screen lock's position, at most one read per second
+    forget()    - Drop the cached reading so the next read asks @skills' lock_state() again
 """
 
 from typing import Any, Dict
@@ -118,6 +119,11 @@ def read_lock() -> Dict[str, Any]:
         LockDoorFailed: The door raised or broke its shape. Never cached.
     """
     return _state.get(_STATE_KEY, _ask_the_skill)
+
+
+def forget() -> None:
+    """Drop the cached reading so the next read asks @skills' lock_state() again."""
+    _state.clear()
 
 
 def _ask_the_skill() -> Dict[str, Any]:
