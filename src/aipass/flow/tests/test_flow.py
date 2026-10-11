@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_flow.py
 # Description: Tests for flow.py CLI entry point
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-10-05
+# Modified: 2026-10-11
 # =============================================
 
 """Tests for apps/flow.py."""
@@ -13,6 +13,8 @@
 # seedgo: no-test-needed(stdlib) — the `if __name__ == "__main__":` guard's sys.exit() and os._exit() calls
 
 import importlib
+import signal
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -21,6 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.cli.apps.modules import reset_command_state
+from aipass.flow.apps import flow as flow_entry
 from aipass.flow.apps.flow import (
     discover_modules,
     main,
@@ -422,6 +425,64 @@ class TestMain:
             with patch("sys.argv", ["flow"]):
                 result = main()
         assert result == 1
+
+
+# ===========================================================================
+# SIGPIPE disposition
+# ===========================================================================
+
+_NO_SIGPIPE = "this platform has no SIGPIPE, and flow.py sets nothing where it is missing"
+
+
+def _child(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    """Run ``code`` in a fresh interpreter, the only one whose import of flow.py is still to come.
+
+    Returns:
+        The finished child, its output decoded as UTF-8.
+    """
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGPIPE"), reason=_NO_SIGPIPE)
+class TestSigpipeDisposition:
+    """Importing flow.py leaves SIGPIPE alone; the started program sets the kernel default (CI 38132534544)."""
+
+    def test_importing_the_entry_leaves_sigpipe_as_the_interpreter_set_it(self, tmp_path: Path) -> None:
+        """An import in a pytest worker must not hand the worker a SIGPIPE that kills it silently."""
+        code = (
+            "import signal\n"
+            "before = int(signal.getsignal(signal.SIGPIPE))\n"
+            "import aipass.flow.apps.flow\n"
+            "print(before, int(signal.getsignal(signal.SIGPIPE)))\n"
+        )
+        child = _child(code, tmp_path)
+
+        assert child.returncode == 0, child.stderr
+        before, after = (int(n) for n in child.stdout.split())
+        assert before == int(signal.SIG_IGN)
+        assert after == before
+
+    def test_the_started_program_restores_the_kernel_default(self, tmp_path: Path) -> None:
+        """Run as a program, flow still ends quietly on a pipe to head: SIGPIPE is SIG_DFL by exit."""
+        code = (
+            "import atexit, runpy, signal, sys\n"
+            "atexit.register(lambda: print('SIGPIPE', int(signal.getsignal(signal.SIGPIPE)), file=sys.stderr))\n"
+            "sys.argv = ['flow.py', '--version']\n"
+            f"runpy.run_path({flow_entry.__file__!r}, run_name='__main__')\n"
+        )
+        child = _child(code, tmp_path)
+
+        assert child.returncode == 0, child.stderr
+        reported = [line for line in child.stderr.splitlines() if line.startswith("SIGPIPE ")]
+        assert reported == [f"SIGPIPE {int(signal.SIG_DFL)}"], child.stderr
 
 
 # ===========================================================================

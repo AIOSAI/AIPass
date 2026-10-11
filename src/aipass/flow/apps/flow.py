@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: flow.py
 # Description: Entry point CLI for drone @flow — plan lifecycle management
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-09-28
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -39,11 +39,6 @@ from pathlib import Path
 import importlib
 import signal
 from typing import List, Any
-
-# Handle broken pipe gracefully (e.g. output piped to head)
-# SIGPIPE does not exist on Windows
-if hasattr(signal, "SIGPIPE"):
-    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -371,6 +366,12 @@ def print_module_help(command: str, modules: List[Any]):
 
 
 if __name__ == "__main__":
+    # Handle broken pipe gracefully (e.g. output piped to head). Set here, where
+    # the process starts, never at import: a pytest worker that imports this
+    # module would otherwise die silently on its first EPIPE (CI 38132534544).
+    # SIGPIPE does not exist on Windows.
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     try:
         sys.exit(main())
     except BrokenPipeError:
