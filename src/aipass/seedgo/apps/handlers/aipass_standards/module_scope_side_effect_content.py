@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_scope_side_effect_content.py
 # Description: Module Scope Side Effect Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -40,8 +40,15 @@ def get_module_scope_side_effect_standards() -> str:
         "  on an imported X  [red]cwd_change[/red] os.chdir  [red]global_recorder[/red] a name a function",
         "  rebinds via `global`. Constants, pytestmark, fixtures and imports are not judged.",
         "",
+        "[bold cyan]THE NINTH SHAPE, JUDGED IN EVERY FILE (1.1.0):[/bold cyan]",
+        "  [red]signal_disposition[/red] signal.signal / signal.alarm / signal.setitimer at module scope.",
+        "  A module a test imports runs its module scope in the pytest worker: ai_mail, commons",
+        "  and flow reset SIGPIPE to SIG_DFL at import, so one EPIPE ended a worker with no",
+        "  traceback (CI 38132534544, 38128154826). Production files and conftest.py are",
+        "  judged for this shape alone. signal.getsignal reads and is not judged.",
+        "",
         "[bold cyan]NOT JUDGED:[/bold cyan]",
-        "  [yellow]conftest.py[/yellow] -- its module scope is the declared once-per-session harness",
+        "  [yellow]conftest.py[/yellow] (first eight shapes) -- the declared once-per-session harness",
         "  (template v1 conftest C0 requires the AIPASS_TEST_LOG_DIR write there).",
         "",
         "[bold cyan]CHECK FIRST (2026-09-25):[/bold cyan]",
@@ -54,6 +61,7 @@ def get_module_scope_side_effect_standards() -> str:
         "",
         "[bold cyan]THE CURE:[/bold cyan]",
         "  [green]Move it into a fixture (monkeypatch / tmp_path) or into the test that needs it.[/green]",
+        "  [green]signal_disposition: set it where the process starts, under the __main__ guard.[/green]",
     ]
 
     json_handler.log_operation("content_served", {"standard": "module_scope_side_effect"})
