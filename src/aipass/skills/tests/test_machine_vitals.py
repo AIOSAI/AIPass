@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_machine_vitals.py
 # Description: The machine_vitals() contract
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-12
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # Category: skills/tests
 # =============================================
 
@@ -439,7 +439,9 @@ class TestAbsenceIsPerSection:
         result = status.machine_vitals()
 
         assert result["ok"] is True
-        assert result[section] == _expected(section, "read_failed", detail=f"OSError: {call} went away")
+        assert result[section] == _expected(
+            section, "read_failed", detail=f"The {section} reading failed (OSError); the error is in the host log."
+        )
         assert [name for name in status.SECTIONS if result[name]["reason"] == "read_failed"] == [section]
         assert result["swap"] == _expected(
             "swap", total_bytes=4 * GIB, used_bytes=1 * GIB, free_bytes=3 * GIB, percent=25.0
@@ -503,10 +505,37 @@ class TestTheWholeFunctionRefusal:
         assert list(result) == ["ok", "reason", "detail"]
         assert result["ok"] is False
         assert result["reason"] == "switched_off"
-        assert complaint in result["detail"]
-        assert switch_handler.STATE_FILENAME in result["detail"]
+        assert result["detail"] == (
+            f"The switch state {switch_handler.STATE_FILENAME} could not be read (SwitchStateUnreadable), "
+            f"so this skill counts as switched OFF; the error is in the host log."
+        )
         assert untouchable.touched == []
         assert state_path.read_text(encoding="utf-8") == document
+
+    @pytest.mark.parametrize(
+        ("document", "complaint"),
+        [
+            ("{not json", "not valid JSON"),
+            ('{"skills": []}', "no 'skills' map"),
+        ],
+    )
+    def test_the_exception_words_go_to_the_host_log_never_to_the_handset(self, monkeypatch, document, complaint):
+        """detail rides verbatim to the handset (CodeQL py/stack-trace-exposure, 2026-10-10):
+        the switch handler's own complaint is logged with its traceback, not published."""
+        logged = []
+        monkeypatch.setattr(status.logger, "error", lambda msg, *a, **k: logged.append((msg, a, k)))
+        monkeypatch.setattr(status, "psutil", _UntouchableMachine())
+        state_path = switch_handler.get_state_path()
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(document, encoding="utf-8")
+
+        result = status.machine_vitals()
+
+        assert complaint not in result["detail"]
+        assert len(logged) == 1
+        _msg, args, kwargs = logged[0]
+        assert complaint in str(args[0])
+        assert kwargs == {"exc_info": True}
 
 
 class TestTheSkillOwnsItsBaseline:
@@ -806,7 +835,7 @@ class TestTheCores:
         cpu = _two_reads(clock)["cpu"]
         assert cpu == _expected(
             "cpu",
-            detail=f"cpu_freq: {type(error).__name__}: {error}",
+            detail=f"cpu_freq read failed ({type(error).__name__}); the error is in the host log.",
             percent=50.0,
             window_s=2.0,
             cores=CORES_OVER_0_TO_2,

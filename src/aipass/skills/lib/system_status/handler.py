@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handler.py
 # Description: System Status skill handler - disk, memory, uptime, processes, machine_vitals()
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-03-07
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -351,14 +351,18 @@ def machine_vitals():
     # in-process caller reads a skill an operator switched off. Imported here so
     # the text actions, and every importer that never calls this door, stay
     # stdlib + psutil + prax.
-    from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, is_enabled
+    from aipass.skills.apps.handlers.switch_handler import STATE_FILENAME, SwitchStateUnreadable, is_enabled
 
     try:
         enabled = is_enabled(SKILL_NAME)
     except SwitchStateUnreadable as exc:
         # Cannot tell whether it is off, so it is off - the runner's answer.
-        logger.error("Refusing machine_vitals - switch state unreadable: %s", exc)
-        return _refusal("switched_off", str(exc))
+        logger.error("Refusing machine_vitals - switch state unreadable: %s", exc, exc_info=True)
+        return _refusal(
+            "switched_off",
+            f"The switch state {STATE_FILENAME} could not be read ({_describe(exc)}), so this skill "
+            f"counts as switched OFF; the error is in the host log.",
+        )
 
     if not enabled:
         return _refusal(
@@ -391,8 +395,9 @@ def machine_vitals():
             vitals[name] = readers[name](psutil)
         except Exception as exc:
             # One failed reading costs its own section, never its siblings.
-            logger.warning("machine_vitals: the %s reading failed: %s", name, exc)
-            vitals[name] = _section(name, "read_failed", detail=_describe(exc))
+            logger.warning("machine_vitals: the %s reading failed: %s", name, exc, exc_info=True)
+            detail = f"The {name} reading failed ({_describe(exc)}); the error is in the host log."
+            vitals[name] = _section(name, "read_failed", detail=detail)
     return vitals
 
 
@@ -431,8 +436,13 @@ def _section(name, reason=None, detail=None, available=None, **values):
 
 
 def _describe(exc):
-    """Name an exception the way detail carries it."""
-    return f"{type(exc).__name__}: {exc}"
+    """Name an exception the way detail carries it: its class, never its words.
+
+    detail travels verbatim to the handset through api's host server, so the
+    exception's own text (paths, OS messages) stays in the host log, where each
+    site that caught it logs it with exc_info (CodeQL py/stack-trace-exposure).
+    """
+    return type(exc).__name__
 
 
 def _clamp_percent(value):
@@ -531,8 +541,8 @@ def _cpu_facts(ps):
     except (OSError, NotImplementedError) as exc:
         # psutil's Linux reader raises both when a cpufreq file is missing. The
         # frequency is lost; the percent and the cores are not.
-        logger.warning("machine_vitals: the cpu frequency read failed: %s", exc)
-        return facts, f"cpu_freq: {_describe(exc)}"
+        logger.warning("machine_vitals: the cpu frequency read failed: %s", exc, exc_info=True)
+        return facts, f"cpu_freq read failed ({_describe(exc)}); the error is in the host log."
 
     if freq is not None:
         # psutil's /proc/cpuinfo fallback reports max as 0.0 - that is no ceiling, not a zero.
@@ -718,15 +728,23 @@ def _fan_range(chip, label):
     try:
         folder, stem = _locate_fan(chip, label)
     except LookupError as exc:
-        return None, str(exc)
+        logger.info("machine_vitals: no fan range for %r %r: %s", chip, label, exc, exc_info=True)
+        return None, (
+            f"No single sysfs fan input on chip {chip!r} carries the label {label!r}, "
+            f"so no range can be attributed to that fan; the count is in the host log."
+        )
     except (OSError, ValueError) as exc:
-        return None, _describe(exc)
+        logger.info("machine_vitals: the sysfs fan walk for %r failed: %s", chip, exc, exc_info=True)
+        return None, f"The sysfs fan walk for chip {chip!r} failed ({_describe(exc)}); the error is in the host log."
 
-    try:
-        low = int(_read_sysfs(folder / f"{stem}_min"))
-        high = int(_read_sysfs(folder / f"{stem}_max"))
-    except (OSError, ValueError) as exc:
-        return None, _describe(exc)
+    bounds = {}
+    for bound in ("min", "max"):
+        try:
+            bounds[bound] = int(_read_sysfs(folder / f"{stem}_{bound}"))
+        except (OSError, ValueError) as exc:
+            logger.info("machine_vitals: %s_%s could not be read: %s", stem, bound, exc, exc_info=True)
+            return None, f"{stem}_{bound} could not be read ({_describe(exc)}); the error is in the host log."
+    low, high = bounds["min"], bounds["max"]
 
     if low >= high:
         return None, f"{stem}_min {low} is not below {stem}_max {high}."

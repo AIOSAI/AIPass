@@ -2,7 +2,8 @@
 # META DATA HEADER
 # Name: handler.py - Screen Lock skill handler
 # Date: 2026-08-14
-# Version: 1.1.0
+# Version: 1.2.0
+# Modified: 2026-10-10
 # Category: skills/lib/screen_lock
 # =============================================
 
@@ -208,8 +209,9 @@ def _resolve_session() -> Tuple[Optional[str], Optional[str], Optional[str]]:
         logger.warning("Could not list logind sessions: %s", e)
         return None, REASON_NO_READER, "loginctl is not installed."
     except (OSError, subprocess.SubprocessError) as e:
-        logger.warning("Could not list logind sessions: %s", e)
-        return None, REASON_READ_FAILED, f"loginctl could not list sessions ({_describe(e)})."
+        logger.warning("Could not list logind sessions: %s", _host_log_words(e), exc_info=True)
+        sentence = f"loginctl could not list sessions ({_describe(e)}); the error is in the host log."
+        return None, REASON_READ_FAILED, sentence
 
     our_uid = str(os.getuid())
     for line in listed.stdout.splitlines():
@@ -255,8 +257,16 @@ def _read_locked_hint(session_id: str) -> Tuple[Optional[bool], Optional[str], O
         logger.info("lock_state: loginctl not found, trying the D-Bus screensaver read")
         return None, REASON_NO_READER, "loginctl is not installed."
     except (OSError, subprocess.SubprocessError) as e:
-        logger.info("lock_state: LockedHint read of session %s failed: %s", session_id, e)
-        return None, REASON_READ_FAILED, f"loginctl could not read LockedHint of session {session_id} ({_describe(e)})."
+        # info, not warning: lock_state is polled, and a WARNING per poll is the
+        # shipped defect test_a_cannot_tell_is_logged_as_an_answer_not_a_warning pins.
+        logger.info(
+            "lock_state: LockedHint read of session %s failed: %s", session_id, _host_log_words(e), exc_info=True
+        )
+        sentence = (
+            f"loginctl could not read LockedHint of session {session_id} ({_describe(e)}); "
+            f"the error is in the host log."
+        )
+        return None, REASON_READ_FAILED, sentence
 
     said = shown.stdout.strip()
     if said == "LockedHint=yes":
@@ -285,8 +295,9 @@ def _read_screensaver_active() -> Tuple[Optional[bool], Optional[str], Optional[
         logger.info("lock_state: gdbus not found")
         return None, REASON_NO_READER, "gdbus is not installed."
     except (OSError, subprocess.SubprocessError) as e:
-        logger.info("lock_state: GNOME ScreenSaver GetActive failed: %s", e)
-        return None, REASON_READ_FAILED, f"GNOME ScreenSaver did not answer ({_describe(e)})."
+        logger.info("lock_state: GNOME ScreenSaver GetActive failed: %s", _host_log_words(e), exc_info=True)
+        sentence = f"GNOME ScreenSaver did not answer ({_describe(e)}); the error is in the host log."
+        return None, REASON_READ_FAILED, sentence
 
     said = shown.stdout.strip()
     if said == "(true,)":
@@ -318,7 +329,19 @@ def _word(locked: bool) -> str:
 
 
 def _describe(exc: Exception) -> str:
-    """One line naming what a failed reader said."""
+    """Name a failed reader for a published sentence: its class, and its exit code when it had one.
+
+    detail travels verbatim to the handset through api's host server, so the
+    reader's own words (stderr, the OS message) never ride in it; the site that
+    caught the error logs them (CodeQL py/stack-trace-exposure).
+    """
+    if isinstance(exc, subprocess.CalledProcessError):
+        return f"{type(exc).__name__}, exit {exc.returncode}"
+    return type(exc).__name__
+
+
+def _host_log_words(exc: Exception) -> str:
+    """What a failed reader said, for the host log only - never for a published sentence."""
     if isinstance(exc, subprocess.CalledProcessError):
         stderr = exc.stderr
         if isinstance(stderr, bytes):

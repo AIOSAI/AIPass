@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_screen_lock.py
 # Description: Tests for the screen_lock skill — lock paths, the lock-state read, honest failure, doctrine
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -374,7 +374,7 @@ class TestLockStateCannotTell:
             (FileNotFoundError(), "gdbus is not installed."),
             (
                 _cpe(_GET_ACTIVE, stderr="Error: Cannot autolaunch D-Bus without X11 $DISPLAY\n"),
-                "GNOME ScreenSaver did not answer (exit 1: Error: Cannot autolaunch D-Bus without X11 $DISPLAY).",
+                "GNOME ScreenSaver did not answer (CalledProcessError, exit 1); the error is in the host log.",
             ),
         ],
     )
@@ -456,7 +456,7 @@ class TestLockStateCannotTell:
         assert result["session"] == "3"
         assert result["detail"] == (
             "Cannot tell whether the screen is locked. loginctl could not read LockedHint of session 3 "
-            "(exit 1: Failed to get path for session '3': No session '3' known). gdbus is not installed."
+            "(CalledProcessError, exit 1); the error is in the host log. gdbus is not installed."
         )
 
     def test_logind_down_is_read_failed_not_no_session(self):
@@ -473,8 +473,26 @@ class TestLockStateCannotTell:
         assert result["session"] is None
         assert result["detail"] == (
             "Cannot tell whether the screen is locked. loginctl could not list sessions "
-            "(exit 1: System has not been booted with systemd as init system (PID 1).). gdbus is not installed."
+            "(CalledProcessError, exit 1); the error is in the host log. gdbus is not installed."
         )
+
+    def test_the_readers_words_go_to_the_host_log_never_to_the_handset(self, monkeypatch):
+        """detail rides verbatim to the handset (CodeQL py/stack-trace-exposure, 2026-10-10): loginctl's
+        stderr is logged with the traceback at the site that caught it, and the sentence names only the
+        class and the exit code."""
+        words = "System has not been booted with systemd as init system (PID 1)."
+        recorder = MagicMock()
+        monkeypatch.setattr(screen_lock, "logger", recorder)
+        stub = _state_stub(list_error=_cpe(["loginctl"], stderr=words + "\n"), active_error=FileNotFoundError())
+
+        with patch("subprocess.run", side_effect=stub):
+            result = screen_lock.lock_state()
+
+        assert words not in result["detail"]
+        assert "(CalledProcessError, exit 1)" in result["detail"]
+        [listing] = [c for c in recorder.warning.call_args_list if c.args[0] == "Could not list logind sessions: %s"]
+        assert words in listing.args[1]
+        assert listing.kwargs == {"exc_info": True}
 
     def test_loginctl_missing_and_the_screensaver_refusing_is_read_failed(self):
         stub = _state_stub(list_error=FileNotFoundError(), active_error=_cpe(_GET_ACTIVE))
@@ -490,7 +508,7 @@ class TestLockStateCannotTell:
             "reason": "read_failed",
             "detail": (
                 "Cannot tell whether the screen is locked. loginctl is not installed. "
-                "GNOME ScreenSaver did not answer (exit 1)."
+                "GNOME ScreenSaver did not answer (CalledProcessError, exit 1); the error is in the host log."
             ),
         }
 
