@@ -48,7 +48,12 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 80  # -1 on 2026-10-10: handler_import retired to .archive by b0160081 (DPLAN-0404 leg 19; the
+EXPECTED_STANDARDS = 82  # +2 on 2026-10-10: clear_text_secret_logging and exception_text_in_response, seedgo's
+#                          checkers for the two CodeQL species that went red on PR #774 round seven (HIGH
+#                          py/clear-text-logging-sensitive-data into prax's warning(); py/stack-trace-exposure
+#                          in api's host routes). exception_text_in_response DECLINES every file without a
+#                          fastapi/starlette import or a route, so most branches consult it as not_applicable.
+#                          -1 on 2026-10-10: handler_import retired to .archive by b0160081 (DPLAN-0404 leg 19; the
 #                          eager 'from . import handlers' it demanded is what the handlers fence replaced). The
 #                          tripwire fired on the 2026-10-10 merge train (PPLAN-0061): every branch consulted 80.
 #                          +1 on 2026-10-04: developer_home (no developer home path in tracked text; public repo).
