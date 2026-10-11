@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Host API Config Handler — server config, bind-address and face-dir validation
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-09-13
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -147,7 +147,9 @@ def save_config(config: Dict[str, Any]) -> str:
         Path to the written file, as a string.
     """
     path = secrets_store.set_secret(CONFIG_PROVIDER, CONFIG_SLUG, config, as_json=True)
-    logger.info("[host_api] config saved to %s", path)
+    # Named in words: the path is the result of a secret-named call, which
+    # CodeQL follows into the log as clear-text secret data (PR #774 r10).
+    logger.info("[host_api] config saved to the host_api config in the secrets store")
     return str(path)
 
 

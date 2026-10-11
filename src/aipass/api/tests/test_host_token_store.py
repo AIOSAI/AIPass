@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_token_store.py
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-10
+# Modified: 2026-10-11
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -246,6 +246,28 @@ class TestLastUsedAnswersLiveOrDormant:
 
         assert _record(record["id"])["last_used"] != first
 
+    def test_an_unreadable_stamp_is_rewritten_and_said_without_its_value(self, store: Path) -> None:
+        """
+        A hand-edited stamp is due, rewritten readable, and named in words only.
+
+        The stamp is read out of the credential store, and ValueError's own text
+        quotes it, so neither reaches the log line (PR #774 r10).
+        """
+        record, _ = host_tokens.issue_token("pixel-8", scope="read")
+        records = host_tokens.load_tokens()
+        for stored in records:
+            stored["last_used"] = "not-a-date"
+        host_tokens.save_tokens(records)
+
+        with patch(PATCH_TOKENS_LOGGER) as log:
+            host_tokens.touch_token(record["id"])
+
+        assert _record(record["id"])["last_used"] != "not-a-date"
+        message, *values = log.warning.call_args.args
+        logged = message % tuple(values)
+        assert "unreadable last_used stamp, treating as due" in logged
+        assert "not-a-date" not in logged
+
     def test_touching_an_unknown_id_changes_nothing(self, store: Path) -> None:
         """No record created, no error raised."""
         host_tokens.issue_token("pixel-8", scope="read")
@@ -344,9 +366,17 @@ class TestTelemetryNeverUndoesSecurity:
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
 
         with patch.object(host_tokens, "_store_lock", side_effect=OSError("lock is held")):
-            host_tokens.touch_token(record["id"])
+            with patch(PATCH_TOKENS_LOGGER) as log:
+                host_tokens.touch_token(record["id"])
 
         assert _record(record["id"])["last_used"] is None
+        # Said out loud, but never with the id: it is read out of the credential
+        # store (CodeQL py/clear-text-logging-sensitive-data, PR #774 r10).
+        message, *values = log.warning.call_args.args
+        logged = message % tuple(values)
+        assert "could not record last_used for the presented token" in logged
+        assert "lock is held" in logged
+        assert record["id"] not in logged
 
 
 # ==============================================
@@ -824,6 +854,29 @@ class TestTheListingSaysWhatTheStoreNowKnows:
         # 'never used', and the stamp format each changed.
         lines = {line.strip() for line in self._listing(capsys).splitlines()}
         assert provenance in lines
+
+    def test_an_unparseable_stamp_is_logged_without_its_value(self, store: Path, capsys: pytest.CaptureFixture) -> None:
+        """
+        The listing shows the odd stamp to the operator; the log line only names it.
+
+        The value and ValueError's text are read out of the credential store, and
+        nothing read from there reaches a log (PR #774 r10).
+        """
+        host_tokens.issue_token("one-token", scope="read")
+        records = host_tokens.load_tokens()
+        for stored in records:
+            stored["last_used"] = "not-a-date"
+        host_tokens.save_tokens(records)
+        capsys.readouterr()
+
+        with patch.object(host_api_module, "logger") as log:
+            listing = self._listing(capsys)
+
+        assert "last used not-a-date" in listing
+        message, *values = log.warning.call_args.args
+        logged = message % tuple(values)
+        assert "unreadable timestamp in the token store" in logged
+        assert "not-a-date" not in logged
 
 
 def test_the_reserved_comment_is_gone(store: Any) -> None:

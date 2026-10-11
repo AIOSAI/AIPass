@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api.py
 # Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-08
+# Modified: 2026-10-11
 # =============================================
 
 """Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""
@@ -932,6 +932,22 @@ class TestSetConfigCommand:
 
         quiet_module["error"].assert_not_called()
         assert host_config.face_dir() == bundle
+
+    def test_a_save_is_logged_without_the_store_path(self, store: Path) -> None:
+        """
+        The caller gets the path back; the log line names the store in words.
+
+        The path is the result of a secret-named call, which CodeQL follows into
+        a log as clear-text secret data (PR #774 r10).
+        """
+        with patch(PATCH_CONFIG_LOGGER) as log:
+            written = host_config.save_config({"host": UNHELD_ADDRESS, "port": 8787})
+
+        assert Path(written).exists()
+        logged = " ".join(str(arg) for arg in log.info.call_args.args)
+        assert "config saved to the host_api config in the secrets store" in logged
+        assert written not in logged
+        assert str(store) not in logged
 
     def test_a_home_relative_face_dir_is_expanded(
         self, store: Path, quiet_module: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

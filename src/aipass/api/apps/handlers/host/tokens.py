@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tokens.py
 # Description: Host API Token Handler — bearer token issue, verify, revoke
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-14
-# Modified: 2026-10-10
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -627,8 +627,10 @@ def touch_token(token_id: str) -> None:
                 save_tokens(records)
                 return
     except OSError as e:
-        # Deliberately swallowed. See the rule above.
-        logger.warning("[host_api] could not record last_used for %s: %s", token_id, e)
+        # Deliberately swallowed. See the rule above. No id on the line: it is
+        # read out of the credential store, and nothing read from there reaches
+        # a log (CodeQL py/clear-text-logging-sensitive-data, PR #774 r10).
+        logger.warning("[host_api] could not record last_used for the presented token: %s", e)
 
 
 def _is_due(last_used: Any) -> bool:
@@ -651,8 +653,10 @@ def _is_due(last_used: Any) -> bool:
         # Due, not fatal: an unreadable stamp gets overwritten with a readable
         # one on this request. Logged because the only way this fires is a
         # hand-edited store or a shape change nobody migrated, and both are
-        # things an operator should see once rather than never.
-        logger.warning("[host_api] unreadable last_used %r, treating as due: %s", last_used, e)
+        # things an operator should see once rather than never. The stamp itself
+        # stays off the line, and so does ValueError's text, which quotes it:
+        # it is a value read out of the credential store (PR #774 r10).
+        logger.warning("[host_api] unreadable last_used stamp, treating as due (%s)", type(e).__name__)
         return True
 
     return age >= LAST_USED_GRANULARITY_SECONDS
