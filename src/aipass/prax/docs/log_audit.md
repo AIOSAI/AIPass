@@ -85,7 +85,7 @@ delete takes 1.2 s. So the cost is about 54 ms per deleted file, because each on
 writes a ledger row and a log line. At that rate 120 s covers about 2,100 files a
 week. A timeout marks the row FAILED but keeps whatever it already deleted.
 
-**Where the orphans come from (measured 2026-09-11, cured 2026-09-12).** Each
+**Where the orphans come from (measured 2026-09-11).** Each
 new-era `.<pid>_<n>.tmp` still holds the document it was staging, so its content
 names the writer. Of the 442 in `prax_json/` (09-04 to 09-11), **384 (87%)**
 were staging one record: `discovery_watcher_event` with `action: started`. That
@@ -127,6 +127,6 @@ is load-dependent — the same 40-process run that gave 3 of 40 on 09-11 gave 0 
 
 What is deliberately NOT in this step: the `died` record, `trigger.fire(
 "startup")` on the first log line (94% of that line's cost), and the background
-watcher start itself. Those are separate, separately ruled. The startup fire went
-in step 3, immediately below; the other two are still open.
+watcher start itself. Those are separate, separately ruled. The startup fire is
+step 3, immediately below.
 

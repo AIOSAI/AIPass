@@ -195,9 +195,9 @@ Callers need do nothing and should change nothing. Reported shares — @drone 76
 
 ## The first log line no longer fires a startup event
 
-**DPLAN-0339 step 3, 2026-09-12.** `SystemLogger._ensure_watcher` used to end
-with `trigger.fire("startup")`, so every process in the fleet fired a startup
-event on its first log line. That fire *was* the first log line: **0.339 s of its
+**DPLAN-0339 step 3, 2026-09-12.** `SystemLogger._ensure_watcher` does not call
+`trigger.fire("startup")`. With that call, every process in the fleet fired a
+startup event on its first log line, and the fire *was* the first log line: **0.339 s of its
 0.361 s, 94%**, nearly all of it importing the `aipass.trigger` graph so that one
 event could reach one handler.
 

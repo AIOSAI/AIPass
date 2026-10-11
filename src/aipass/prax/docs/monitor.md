@@ -25,9 +25,9 @@ logging does not depend on it: `system_logs/` and the branch-local logs are
 written by the logging handlers whether or not a monitor is running. Start it
 when you want to watch, quit it when you are done.
 
-The `prax-monitor.service` systemd unit that used to run it always-on is
-**retired and deleted from the repo**, which under the owner's archive doctrine
-(2026-08-18) is what retired means: *`.archive/` is always ignored, no
+No systemd unit runs it always-on: `prax-monitor.service` is
+**retired and deleted from the repo**, which is what retired means under the
+owner's archive doctrine: *`.archive/` is always ignored, no
 exceptions — and files there are not safe, they get cleaned without warning.*
 So the retirement record lives here, in tracked prose, rather than in an archive
 directory that neither ships nor survives. A convenience copy may sit in
@@ -91,10 +91,10 @@ DAEMON, DEVPULSE, DRONE, FLOW, HOOKS, MEMORY, PRAX, SEEDGO, SKILLS, SPAWN,
 TRIGGER) plus the four project citizens that ship a registry today: BAUD,
 EARMARK, AIPASS_SITE and FINCH.
 
-Two names this page used to list are no longer resolvable, and the tree
+Two names an earlier revision of this page listed are not resolvable, and the tree
 explains both without naming anyone: `projects/` now holds exactly four
 directories (`aipass-site`, `baud`, `earmark`, `finch`), so **MARKETSTAND** has
-no registry to declare it and `projects/speakeasy(on_hold)/` — previously cited
+no registry to declare it and `projects/speakeasy(on_hold)/` — once cited
 here as an empty-`branches[]` citizen — is not in the tree at all. The count
 moved because the declarations moved; the rule did not change. Earlier revisions
 also listed a `TESTING` citizen — no such project registry exists.
