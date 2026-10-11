@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-04-25
 # Modified: 2026-10-10
 # =============================================
@@ -16,7 +16,7 @@
 # seedgo: no-test-needed(ruff) — that each checker in handlers/aipass_standards/ parses and imports
 # seedgo: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
 
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 import pytest
 
@@ -585,11 +585,11 @@ class TestAWindowsPathIsReadLikeAPosixOne:
     so the string Windows produces is reproduced exactly; the proof on Windows
     itself is the next CI run.
 
-    The file is written as a real tree (CI round three: a backslashed NAME is a
-    tree on Windows, its parents did not exist, and write_text raised before the
-    checker ran). The checker is handed the Windows spelling of that tree, and
-    its Path reads a backslash as Windows does, so the file it opens is the one
-    written; the string its module test searches keeps every backslash.
+    The file is written AT the Windows spelling, parents made first (CI round
+    three: on Windows a backslashed name is a tree whose parents did not exist).
+    On Linux that string is one name inside tmp_path; on Windows it is the real
+    tree. No class is patched (CI round four: a lambda standing in for the
+    checker's Path had no cwd, reached only where AIPASS_REGISTRY.json is absent).
     """
 
     _DOOR = (
@@ -599,15 +599,13 @@ class TestAWindowsPathIsReadLikeAPosixOne:
     )
 
     def _windows_spelled(self, tmp_path, monkeypatch, *parts):
-        """Write the door under tmp_path/aipass/memory/apps/<parts>; return its path as Windows spells it."""
-        door = tmp_path.joinpath("aipass", "memory", "apps", *parts)
-        door.parent.mkdir(parents=True, exist_ok=True)
-        door.write_text(self._DOOR, encoding="utf-8")
-        # The checker's file reads parse a backslash as a separator, as on Windows (no-op there).
-        monkeypatch.setattr(encapsulation_check, "Path", lambda *a: Path(*(str(p).replace("\\", "/") for p in a)))
+        """Write the door at tmp_path\\aipass\\memory\\apps\\<parts>, spelled as Windows spells it; return it."""
+        door = "\\".join([str(tmp_path), "aipass", "memory", "apps", *parts])
+        Path(door).parent.mkdir(parents=True, exist_ok=True)
+        Path(door).write_text(self._DOOR, encoding="utf-8")
         # Windows infers the branch from Path.parts; this pins it on every host.
         monkeypatch.setattr(encapsulation_check, "get_branch_from_path", lambda fp: {"name": "memory", "path": "x"})
-        return str(PureWindowsPath(door))
+        return door
 
     def test_a_door_under_a_backslashed_modules_path_passes(self, tmp_path, monkeypatch):
         """Mutant: the separator normalisation dropped from check_module's module test — killed."""

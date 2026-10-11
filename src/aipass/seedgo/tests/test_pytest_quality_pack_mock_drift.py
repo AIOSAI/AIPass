@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack_mock_drift.py
 # Description: pytest_quality pack, mock_drift checker pins (split from test_pytest_quality_pack.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/mock_drift_check.py."""
@@ -12,6 +12,8 @@
 # seedgo: no-test-needed(constant) — the content page prose, pytest_quality_standards/mock_drift_content.py
 
 from pathlib import Path
+
+import pytest
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus, mock_drift_check
 from aipass.seedgo.tests.support_pytest_quality_pack import _write
@@ -467,7 +469,7 @@ class TestMockDriftBranchCheck:
         """
         result = mock_drift_check.check_branch(str(_mock_drift_project(tmp_path)))
 
-        assert [check["name"] for check in result["checks"]] == ["Patch target"]
+        assert [check["name"] for check in result["checks"]] == ["Patch target", "Class stand-in"]
 
     def test_a_project_with_no_tests_is_not_applicable_not_zero_quality(self, tmp_path):
         """ZERO TESTS MEASURED IS NOT ZERO QUALITY FOUND.
@@ -500,3 +502,156 @@ class TestMockDriftBranchCheck:
         assert "no test files found" not in result["checks"][0]["message"]
         assert "unparseable" in result["checks"][0]["message"]
         assert any("test_broken.py" in check["message"] for check in result["checks"])
+
+
+# =============================================================================
+# CLASS STAND-IN - A FUNCTION PATCHED OVER A CLASS THE MODULE READS AS A CLASS
+# =============================================================================
+#
+# Minimised from seedgo tests/test_checkers_batch7.py at 1.3.1 (`_windows_spelled`):
+# a lambda over encapsulation_check.Path, whose `_find_registry` reaches
+# `Path.cwd()` only when the git-ignored registry marker is absent - green on
+# every dev seat, red on every clean checkout (PR #774 CI round four).
+
+_FINDER = """
+from pathlib import Path
+
+
+def find_registry():
+    return Path.cwd() / "REGISTRY.json"
+
+
+def read(path):
+    return Path(path).read_text(encoding="utf-8")
+"""
+
+_CONSTRUCTOR_ONLY = """
+from pathlib import Path
+
+
+def read(path):
+    return Path(path).read_text(encoding="utf-8")
+"""
+
+
+def _standin_rows(root: Path) -> list:
+    """Every class stand-in finding in a written-out project."""
+    return mock_drift_check.find_class_standins(
+        corpus.build(root, test_dirs=mock_drift_check.TEST_DIRS, with_production=True)
+    )
+
+
+def _standin_project(root: Path, product: str, replacement: str) -> Path:
+    """A product module plus a test whose helper patches the module's Path with `replacement`."""
+    _write(root, "src/mypkg/finder.py", product)
+    _write(
+        root,
+        "tests/test_finder.py",
+        f"""
+        import functools
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
+        from mypkg import finder
+
+
+        def _posix(*parts):
+            return Path(*(str(p).replace("\\\\", "/") for p in parts))
+
+
+        class _FakePath(type(Path())):
+            pass
+
+
+        class TestRead:
+            def _windows_spelled(self, monkeypatch):
+                monkeypatch.setattr(finder, "Path", {replacement})
+
+            def test_reads(self, monkeypatch):
+                self._windows_spelled(monkeypatch)
+                assert finder.read is not None
+        """,
+    )
+    return root
+
+
+class TestMockDriftClassStandIn:
+    """A lambda or plain function patched over a class the module also reads as a class."""
+
+    def test_the_batch7_lambda_over_path_is_convicted_at_its_helper(self, tmp_path):
+        """MUTATION CAUGHT: the `Attribute` arm of `_class_uses` disabled - `Path.cwd()` reads as no use."""
+        _standin_project(tmp_path, _FINDER, 'lambda *a: Path(*(str(p).replace("\\\\", "/") for p in a))')
+
+        rows = _standin_rows(tmp_path)
+
+        assert [(row["nodeid"], row["target"], row["species"]) for row in rows] == [
+            ("tests/test_finder.py::TestRead::_windows_spelled", "mypkg.finder.Path", "CLASS-STANDIN")
+        ]
+        assert "Path.cwd" in rows[0]["reason"]
+        assert "src/mypkg/finder.py:5" in rows[0]["reason"]
+
+    @pytest.mark.parametrize("replacement", ["_posix", "functools.partial(Path)"])
+    def test_a_plain_function_or_a_partial_is_convicted_like_a_lambda(self, tmp_path, replacement):
+        _standin_project(tmp_path, _FINDER, replacement)
+
+        assert [row["target"] for row in _standin_rows(tmp_path)] == ["mypkg.finder.Path"]
+
+    @pytest.mark.parametrize(
+        "use",
+        [
+            "isinstance(value, Path)",
+            "issubclass(value, (str, Path))",
+        ],
+    )
+    def test_an_isinstance_or_issubclass_second_argument_is_a_class_use(self, tmp_path, use):
+        product = f"from pathlib import Path\n\n\ndef check(value):\n    return {use}"
+        _standin_project(tmp_path, product, "_posix")
+
+        assert [row["target"] for row in _standin_rows(tmp_path)] == ["mypkg.finder.Path"]
+
+    def test_a_base_in_a_class_statement_is_a_class_use(self, tmp_path):
+        product = "from pathlib import Path\n\n\nclass Door(Path):\n    pass"
+        _standin_project(tmp_path, product, "_posix")
+
+        assert "used as a base" in _standin_rows(tmp_path)[0]["reason"]
+
+    @pytest.mark.parametrize("replacement", ["_FakePath", "type(Path())", "MagicMock()"])
+    def test_a_class_or_a_mock_standing_in_is_acquitted(self, tmp_path, replacement):
+        _standin_project(tmp_path, _FINDER, replacement)
+
+        assert _standin_rows(tmp_path) == []
+
+    def test_a_target_the_module_only_constructs_is_acquitted(self, tmp_path):
+        """The 14 fleet sites: `Name(...)` only, so the stand-in is never asked for an attribute."""
+        _standin_project(tmp_path, _CONSTRUCTOR_ONLY, "lambda *a: Path(*a)")
+
+        assert _standin_rows(tmp_path) == []
+
+    def test_a_target_reached_through_a_stdlib_module_is_not_read(self, tmp_path):
+        """`mod.subprocess` is not in the corpus, so its Popen surface cannot be read."""
+        _write(tmp_path, "src/mypkg/runner.py", "import subprocess\n\n\ndef run():\n    return subprocess.Popen.wait")
+        _write(
+            tmp_path,
+            "tests/test_runner.py",
+            """
+            from mypkg import runner
+
+
+            def test_runs(monkeypatch):
+                monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: None)
+                assert runner.run is not None
+            """,
+        )
+
+        assert _standin_rows(tmp_path) == []
+
+    def test_a_cured_project_scores_full_and_a_stand_in_costs_its_place(self, tmp_path):
+        """MUTATION CAUGHT: `check_branch` dropping the stand-in rows from its score."""
+        _standin_project(tmp_path, _FINDER, "_FakePath")
+        cured = mock_drift_check.check_branch(str(tmp_path))
+        _standin_project(tmp_path, _FINDER, "_posix")
+        convicted = mock_drift_check.check_branch(str(tmp_path))
+
+        assert (cured["score"], cured["checks"][1]["passed"]) == (100, True)
+        assert (convicted["score"], convicted["checks"][1]["passed"]) == (0, False)
+        assert "tests/test_finder.py::TestRead::_windows_spelled" in convicted["checks"][1]["message"]

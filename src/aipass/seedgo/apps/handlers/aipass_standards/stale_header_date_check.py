@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stale_header_date_check.py
 # Description: Stale Header Date Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -139,6 +139,11 @@ def history(directory: Path) -> Tuple[Dict[str, str], FrozenSet[str]] | str:
     return dates, frozenset(changed.splitlines()) | frozenset(untracked.splitlines())
 
 
+def _today() -> str:
+    """Today's ISO date, read at call: the one clock a test freezes to judge the working tree."""
+    return datetime.date.today().isoformat()
+
+
 def truth_date(path: Path) -> Tuple[str | None, str]:
     """(the date the file's content is from, what that date is), or (None, why not)."""
     known = history(path.resolve().parent)
@@ -146,7 +151,7 @@ def truth_date(path: Path) -> Tuple[str | None, str]:
         return None, known
     dates, changed = known
     if path.name in changed:
-        return datetime.date.today().isoformat(), "its uncommitted change, today"
+        return _today(), "its uncommitted change, today"
     if path.name in dates:
         return dates[path.name], "its last commit"
     return None, "git has no history for this file"

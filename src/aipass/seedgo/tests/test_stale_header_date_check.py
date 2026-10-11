@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_stale_header_date_check.py
 # Description: stale_header_date_check — a Modified: date older than the file's own history
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/stale_header_date_check.py."""
@@ -27,8 +27,6 @@ MODEL = Path(__file__).resolve().parent / "test_readme_update.py"
 
 #: Every test here builds a real repository; without git there is nothing to build.
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
-
-TODAY = datetime.date.today().isoformat()
 
 
 def _git(repo: Path, *argv: str, date: str = "2026-09-23") -> None:
@@ -89,17 +87,24 @@ class TestThePlantedSpecimen:
 
 
 class TestTheWorkingTreeIsJudgedAsOfToday:
-    def test_an_uncommitted_change_that_left_the_date_is_convicted_at_the_edit(self, tmp_path):
+    @pytest.fixture
+    def frozen_today(self, monkeypatch):
+        """Tomorrow, on purpose: the checker's clock across midnight from the real one (Windows CI, 2026-10-11)."""
+        frozen = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        monkeypatch.setattr(checker, "_today", lambda: frozen)
+        return frozen
+
+    def test_an_uncommitted_change_that_left_the_date_is_convicted_at_the_edit(self, tmp_path, frozen_today):
         path = _repo(tmp_path, modified="2026-09-23", committed="2026-09-23")
         path.write_text(_header("2026-09-23", "x = 1\n"), encoding="utf-8")
         checker.history.cache_clear()
         result = checker.check_module(str(path))
         assert result["score"] == 0
-        assert f"its uncommitted change, today ({TODAY})" in result["checks"][0]["message"]
+        assert f"its uncommitted change, today ({frozen_today})" in result["checks"][0]["message"]
 
-    def test_an_uncommitted_change_that_moved_the_date_passes_at_once(self, tmp_path):
+    def test_an_uncommitted_change_that_moved_the_date_passes_at_once(self, tmp_path, frozen_today):
         path = _repo(tmp_path, modified="2026-09-23", committed="2026-09-23")
-        path.write_text(_header(TODAY, "x = 1\n"), encoding="utf-8")
+        path.write_text(_header(frozen_today, "x = 1\n"), encoding="utf-8")
         checker.history.cache_clear()
         assert checker.check_module(str(path))["score"] == 100
 
