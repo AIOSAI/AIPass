@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_module_scope_side_effect_check.py
 # Description: module_scope_side_effect_check — a side effect a test file runs at collection
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-25
 # Modified: 2026-10-11
 # =============================================
@@ -208,6 +208,23 @@ class TestWhichFilesAreJudged:
 
     def test_a_file_named_with_the_test_suffix_is_judged(self, tmp_path):
         assert _verdict(tmp_path, IMPORTS + "os.chdir('/')\n", "routing_test.py")[0] == 0
+
+    def test_a_test_named_product_module_under_apps_is_judged_for_signals_alone(self, tmp_path):
+        """@ai_mail's apps/handlers/dispatch/test_token.py:27 was convicted under 1.1.0 by its name."""
+        body = "import os\n\nos.environ.setdefault('PYTHONUTF8', '1')\n"
+        assert _verdict_at(tmp_path, body, "apps/handlers/test_token.py") == (100, ONLY_SIGNALS)
+
+    def test_the_same_body_in_a_tests_tree_is_convicted(self, tmp_path):
+        body = "import os\n\nos.environ.setdefault('PYTHONUTF8', '1')\n"
+        score, message = _verdict_at(tmp_path, body, "tests/test_token.py")
+        assert score == 0
+        assert "test_token.py:3 environ_write: os.environ.setdefault('PYTHONUTF8', '1')" in message
+
+    def test_a_signal_line_in_a_test_named_product_module_is_still_convicted(self, tmp_path):
+        body = "import signal\n\nsignal.signal(signal.SIGPIPE, signal.SIG_DFL)\n"
+        score, message = _verdict_at(tmp_path, body, "apps/handlers/test_token.py")
+        assert score == 0
+        assert "test_token.py:3 signal_disposition: signal.signal(signal.SIGPIPE, signal.SIG_DFL)" in message
 
 
 ONLY_SIGNALS = "Not a collected test file: only signal_disposition is judged here, and nothing sets one"

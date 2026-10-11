@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: module_scope_side_effect_content.py
 # Description: Module Scope Side Effect Standards Content Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-25
 # Modified: 2026-10-11
 # =============================================
@@ -46,6 +46,8 @@ def get_module_scope_side_effect_standards() -> str:
         "  and flow reset SIGPIPE to SIG_DFL at import, so one EPIPE ended a worker with no",
         "  traceback (CI 38132534544, 38128154826). Production files and conftest.py are",
         "  judged for this shape alone. signal.getsignal reads and is not judged.",
+        "  A test file is a test_*.py IN A TESTS TREE (1.1.1): a test-named module under",
+        "  apps/ is a product module and gets this shape alone.",
         "",
         "[bold cyan]NOT JUDGED:[/bold cyan]",
         "  [yellow]conftest.py[/yellow] (first eight shapes) -- the declared once-per-session harness",

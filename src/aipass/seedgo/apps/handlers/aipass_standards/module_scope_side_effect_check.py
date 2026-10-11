@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: module_scope_side_effect_check.py
 # Description: Module Scope Side Effect Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-25
 # Modified: 2026-10-11
 # =============================================
@@ -82,7 +82,11 @@ worker as "node down: Not properly terminated"; memory's crashed test does
 exactly that write. @ai_mail's ``dispatch/daemon.py:71-72`` replace SIGTERM and
 SIGINT the same way. So this one shape is judged in EVERY file the checker is
 handed -- production modules and conftest.py too -- while the other eight stay
-test-file-only, where their reasoning lives. Reading a disposition
+test-file-only, where their reasoning lives. A TEST FILE MEANS ONE IN A TESTS
+TREE (``applicability.is_test_path``), not a test-shaped name anywhere: 1.1.0
+decided by name alone and convicted @ai_mail's product module
+``apps/handlers/dispatch/test_token.py:27`` for an environ write its 19
+siblings carry unjudged (1.1.1, @devpulse dispatch 125bec60). Reading a disposition
 (``signal.getsignal``) changes nothing and is not judged.
 
 CHECK FIRST (2026-09-25, before the rule landed). 557 ``test_*.py`` files
@@ -104,6 +108,7 @@ from pathlib import Path
 from typing import Dict, Iterator, List, Set, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_test_path
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -408,8 +413,9 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """Check that a file does nothing at import that outlives the tests that import it.
 
-    A collected test file is judged for every shape; any other file, conftest.py
-    included, for EVERYWHERE_SHAPES alone.
+    A collected test file in a tests tree is judged for every shape; any other
+    file, conftest.py and a test-named product module included, for
+    EVERYWHERE_SHAPES alone.
 
     Args:
         module_path: Path to the file to check.
@@ -422,7 +428,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
     path = Path(module_path)
-    every_shape = path.name != EXEMPT and is_collected_test(path.name)
+    every_shape = path.name != EXEMPT and is_collected_test(path.name) and is_test_path(str(path))
     if not path.exists():
         return _result(False, _one_check(False, f"File not found: {module_path}"), 0)
 
