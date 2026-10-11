@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: clear_text_secret_logging_content.py
 # Description: Clear Text Secret Logging Standards Content Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-10
 # Modified: 2026-10-11
 # =============================================
@@ -56,6 +56,13 @@ def get_clear_text_secret_logging_standards() -> str:
         "     non_/not_ prefix acquits nothing. Why so narrow: a parameter or loop var called token is a",
         "     shell word as often as a credential (and token_hex, issue_token return no secret); arm 1",
         "     judges its name wherever it is logged.",
+        "  [red]3. a secret reader's document name in the MESSAGE[/red] (1.3.0, CodeQL round eleven): in a",
+        "     file that defines a secret LISTER ([yellow]list_secrets(provider)[/yellow]), inside a def named",
+        "     get/read/load/fetch + secret(s)/trusted/confidential (no setter verb, no list segment), a",
+        "     required positional parameter the lister does not take ([yellow]slug[/yellow], never",
+        "     [yellow]provider[/yellow]) reaching the log call's first argument: an f-string piece, a % or +",
+        "     side, .format(), str()/repr(). Message only: a %s argument is not this arm's row. The one",
+        "     parameter seed; a rebound parameter, len() or a short slice acquits.",
         "",
         "[bold cyan]NOT A ROW:[/bold cyan]",
         "  An identifier of a secret: a segment beside the word says what it is - token_id,",
@@ -80,6 +87,10 @@ def get_clear_text_secret_logging_standards() -> str:
         "  Round ten (1.2.0): @api host/tokens.py, get_secret -> .get('tokens') -> loop ->",
         "  _is_due(record.get('last_used')) -> the last_used %r warning; the pre-cure file convicts at",
         "  :655 only, the cure acquits. Fleet 0 rows before and after, each sub-arm 0 alone.",
+        "  Round eleven (1.3.0): CodeQL's own SARIF path, telegram list_secrets -> handler.py loop ->",
+        "  _get_secret -> api get_secret -> auth/secrets.py:83 f'Secret not found: {provider}/{slug}'.",
+        "  CodeQL's reach is the MESSAGE only (rounds eight to ten were %s arguments); this rule stays",
+        "  stricter for arms 1 and 2. Arm 3 convicts the pre-cure :83 only; the cure acquits; fleet 0.",
         "",
         "[bold cyan]SCORING:[/bold cyan]",
         "  SCORED, per file: 0 on any row, else 100. Every row on ONE check.",

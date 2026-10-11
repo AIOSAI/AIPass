@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch5.py
 # Description: Unit tests for ruff_check and clear_text_secret_logging checker handlers (batch 5)
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-04-16
 # Modified: 2026-10-11
 # =============================================
@@ -801,3 +801,125 @@ class TestAnAddOfABuiltValueBindsTheCollection:
     def test_a_clean_value_or_a_built_index_leaves_the_collection_clean(self, body: str) -> None:
         rows, _log_line = _built_rows(body)
         assert rows == []
+
+
+# =============================================
+# 7. clear_text_secret_logging secret-reader-parameter arm (dispatch 4bb9a4c9, CodeQL round eleven)
+# =============================================
+
+#: @api apps/handlers/auth/secrets.py BEFORE its round-eleven cure (HEAD 6c3aa9aa), cut:
+#: get_secret's provider-only warning (:64), its "Secret not found" f-string (:83, the
+#: caller line CodeQL drew), list_secrets (:87) and the exception-only lines (:191, :220).
+AUTH_SECRETS_R11_SPECIMEN = """import json
+from pathlib import Path
+from aipass.prax import logger
+
+SECRETS_BASE = Path.home() / ".secrets" / "aipass"
+
+
+def get_secret(provider, slug, as_json=False):
+    provider_dir = SECRETS_BASE / provider
+    if not provider_dir.exists():
+        logger.warning(f"Provider directory not found under the secrets base: {provider}")
+        return None
+    json_path = provider_dir / f"{slug}.json"
+    if json_path.exists():
+        return _read_json_secret(json_path, as_json)
+    raw_path = provider_dir / slug
+    if raw_path.exists():
+        return _read_raw_secret(raw_path)
+    logger.warning(f"Secret not found: {provider}/{slug}")
+    return None
+
+
+def list_secrets(provider):
+    provider_dir = SECRETS_BASE / provider
+    if not provider_dir.exists():
+        return []
+    return sorted(entry.name.removesuffix(".json") for entry in provider_dir.iterdir())
+
+
+def _read_json_secret(path, as_json):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Error reading a JSON secret file: {e}")
+        return None
+    return data
+
+
+def _read_raw_secret(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError as e:
+        logger.warning(f"Error reading a raw secret file: {e}")
+        return None
+"""
+
+#: The cure @api shipped (83f812c9): the slug leaves the line, the provider stays as a %s argument.
+AUTH_SECRETS_R11_CURED = AUTH_SECRETS_R11_SPECIMEN.replace(
+    'f"Secret not found: {provider}/{slug}"',
+    '"Secret not found under provider %s: no JSON or raw document for the requested slug", provider',
+)
+
+
+def _reader_rows(reader: str, message: str, lister: str = "list_secrets") -> list:
+    """The convicted lines of a file defining ``lister(provider)`` and ``reader(provider, slug)`` that logs ``message``."""
+    return _secret_rows(
+        f"from aipass.prax import logger\n\n\ndef {lister}(provider):\n    return []\n\n\n"
+        f"def {reader}(provider, slug):\n    logger.warning({message})\n"
+    )
+
+
+class TestASecretReadersDocumentNameInTheMessageIsConvicted:
+    def test_the_pre_cure_not_found_line_is_convicted_and_only_it(self) -> None:
+        assert secret_logging.scan(AUTH_SECRETS_R11_SPECIMEN) == [
+            (19, "slug (a document name the secret reader get_secret() is handed)")
+        ]
+
+    def test_the_cured_line_carrying_provider_as_an_argument_is_acquitted(self) -> None:
+        assert _secret_rows(AUTH_SECRETS_R11_CURED) == []
+
+    def test_the_slug_as_a_percent_s_argument_is_not_this_arms_row(self) -> None:
+        assert _reader_rows("get_secret", '"Secret not found: %s/%s", provider, slug') == []
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            'f"missing {slug}"',
+            '"missing %s" % slug',
+            '"missing {}".format(slug)',
+            '"missing " + slug',
+            "str(slug).strip()",
+        ],
+    )
+    def test_every_message_shape_holding_the_document_name_is_convicted(self, message: str) -> None:
+        assert _reader_rows("get_secret", message) == [9]
+
+    @pytest.mark.parametrize("message", ['f"missing {provider}"', 'f"missing {len(slug)}"', 'f"missing {slug[-4:]}"'])
+    def test_the_listers_own_parameter_or_a_redaction_is_acquitted(self, message: str) -> None:
+        assert _reader_rows("get_secret", message) == []
+
+    @pytest.mark.parametrize("reader", ["read_secret", "load_secret", "fetch_secret", "_get_secret", "load_trusted"])
+    def test_every_secret_reader_name_is_convicted(self, reader: str) -> None:
+        assert _reader_rows(reader, 'f"missing {slug}"') == [9]
+
+    @pytest.mark.parametrize(
+        "reader",
+        ["set_secret", "write_secret", "delete_secret", "describe_secret", "get_user_secret", "get_secret_path"],
+    )
+    def test_a_setter_a_verbless_an_excluded_or_an_identifier_def_is_acquitted(self, reader: str) -> None:
+        assert _reader_rows(reader, 'f"missing {slug}"') == []
+
+    def test_a_file_without_a_secret_lister_is_acquitted(self) -> None:
+        assert _reader_rows("get_secret", 'f"missing {slug}"', lister="list_providers") == []
+
+    def test_a_rebound_document_parameter_is_acquitted(self) -> None:
+        source = AUTH_SECRETS_R11_SPECIMEN.replace(
+            "    provider_dir = SECRETS_BASE / provider\n    if not provider_dir.exists():\n        logger",
+            '    slug = "bot"\n    provider_dir = SECRETS_BASE / provider\n    if not provider_dir.exists():\n        logger',
+            1,
+        )
+        assert _secret_rows(source) == []

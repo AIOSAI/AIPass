@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: clear_text_secret_logging_check.py
 # Description: Clear Text Secret Logging Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-10
 # Modified: 2026-10-11
 # =============================================
@@ -60,6 +60,21 @@ its message -- a positional argument, an f-string piece, a ``%`` operand, a
      holding a built key or value is built. A ``non_``/``not_`` prefix acquits nothing. This arm
      is what reaches the CodeQL rows: no name on those log lines says secret,
      the source they were built from does.
+  3. (1.3.0, dispatch 4bb9a4c9, CodeQL round eleven) A SECRET READER'S
+     DOCUMENT NAME IN THE MESSAGE. Inside a def named as a secret reader
+     (``READER_VERBS`` get/read/load/fetch as a segment, on ``_call_seeds``'
+     words: secret(s)/trusted/confidential, no exclusion word, no setter verb;
+     a ``list`` segment makes it a lister, never a reader), in a file that
+     defines a secret LISTER (list_secrets: the file's own defs say secrets
+     store), a required positional parameter the lister does NOT take reaches
+     the log call's MESSAGE -- the first argument (or msg=): an f-string piece,
+     either side of a ``%`` or ``+`` in it, ``.format()`` on it, str()/repr()
+     and the string methods. The lister's parameters are the namespace the
+     caller chose (provider); the reader's others are the document names the
+     listing hands back (slug). MESSAGE ONLY for this arm, the narrowest form:
+     a ``%s`` argument is not its row (arms 1 and 2 still judge arguments). A
+     rebound parameter, a redaction, len() or a short slice acquits. This is
+     the one parameter seed: the ruling below stands for everything else.
 
 WHY ARM 2 STARTS SO NARROWLY. A parameter or loop variable called ``token``
 is a shell word or a counter as often as a credential (drone's
@@ -99,6 +114,21 @@ convicts at :655 and only there (:631's token_id crosses from server.py);
 @api's cure acquits. Live fleet 0 rows before and after; every sub-arm
 (each read, each add, the dict literal) measured alone: 0 rows.
 
+ROUND ELEVEN (1.3.0, 2026-10-11, 1,383 files): CodeQL's SARIF path, printed
+into the job log, runs from telegram's ``_api_list_secrets`` through
+handler.py's loop, ``migrate_bot_config``, ``_get_secret`` and api's modules
+``get_secret`` to api ``handlers/auth/secrets.py:83``,
+``logger.warning(f"Secret not found: {provider}/{slug}")``, and into prax
+logger.py:135 at the MESSAGE parameter's columns. CodeQL's reach is the
+message only (why rounds eight to ten, all %s arguments, never moved the
+count); this rule stays stricter for arms 1 and 2. Arm 3 convicts the pre-cure
+file (HEAD 6c3aa9aa) at :83 and only there (:64 logs provider, the lister's
+own parameter; :191 and :220 log ``e``); @api's cure (83f812c9) acquits.
+Fleet 0 rows before and after. Without the lister's namespace (every required
+parameter of a reader, gated or not): 1 false row, :64 ``provider``; the
+last required parameter alone, ungated: 0 rows, kept out as a guess of
+position where the lister is the file's own statement.
+
 NOT A ROW, each for its reason:
   * An IDENTIFIER of a secret rather than the secret: a segment beside the
     word says what it is (``IDENTIFIER_SEGMENTS``: token_id, token_count,
@@ -111,7 +141,9 @@ NOT A ROW, each for its reason:
     does not carry one.
   * Any other receiver, ``print`` included: ``output_routing`` owns those.
   * Flow through another file's function: the derived arm is file-local, so a
-    value that crosses a module boundary is judged again by its name there.
+    value that crosses a module boundary is judged again by its name there
+    (telegram handler.py's loop over the listing is out of reach; arm 3
+    convicts where the document name lands in a reader's message instead).
 
 WHY NAMES RULE. A scanner and a stranger both read the name. A name that says
 secret on a log line is a leak in the reader's eyes even when the value is
@@ -243,6 +275,17 @@ FOLLOWED_ADDS = frozenset({"append", "extend", "add", "insert"})
 
 #: Whether a dict literal holding a built key or value is built (1.2.0).
 FOLLOW_DICT_LITERALS = True
+
+#: Verbs of a def that READS a secret document out of a store (1.3.0, dispatch
+#: 4bb9a4c9): get_secret, _get_secret, read_secret, load_secret, fetch_secret.
+READER_VERBS = frozenset({"get", "read", "load", "fetch"})
+
+#: The verb of a def that LISTS a store's documents (list_secrets): it returns
+#: names, never a secret, so it is no reader; its parameters are the namespace.
+LISTER_VERBS = frozenset({"list"})
+
+#: Message keywords a log call may pass its message under instead of the first argument.
+MESSAGE_KEYWORDS = frozenset({"msg", "message"})
 
 #: Comprehensions: their result is built from what they iterate.
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
@@ -737,6 +780,111 @@ def _is_log_call(node: ast.Call, loggers: Set[str]) -> bool:
     )
 
 
+# =============================================
+# ARM 3: A SECRET READER'S DOCUMENT NAME IN THE MESSAGE (1.3.0)
+# =============================================
+
+
+def _is_secret_def(name: str, verbs: frozenset) -> bool:
+    """A def named on CodeQL's source words (as _call_seeds reads them) with one of ``verbs`` as a segment."""
+    return _call_seeds(name) and any(part in verbs for part in segments(name))
+
+
+def _required_positional(function: ast.FunctionDef | ast.AsyncFunctionDef) -> List[str]:
+    """Positional parameters without a default, ``self``/``cls`` left out."""
+    params = _parameters(function)
+    required = params[: len(params) - len(function.args.defaults)]
+    return [param for param in required if param not in ("self", "cls")]
+
+
+def _document_parameters(tree: ast.Module) -> Dict[ast.AST, Set[str]]:
+    """Each secret reader's DOCUMENT parameters: the names its callers list out of the store.
+
+    Only in a file that defines a secret LISTER (list_secrets): the file's own
+    defs say it is a secrets store, and the lister's parameters are the
+    namespace a caller chooses (provider). A reader's required positional
+    parameters the lister does not take are the document names the listing
+    hands back (slug). A parameter the reader rebinds is not followed.
+    """
+    defs = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    listers = [node for node in defs if _is_secret_def(node.name, LISTER_VERBS)]
+    if not listers:
+        return {}
+    namespace = {param for lister in listers for param in _parameters(lister)}
+    documents: Dict[ast.AST, Set[str]] = {}
+    for node in defs:
+        if not _is_secret_def(node.name, READER_VERBS) or _is_secret_def(node.name, LISTER_VERBS):
+            continue
+        rebound = {name for child in _scoped_nodes(node.body) for bound, _value in _bindings(child) for name in bound}
+        names = {param for param in _required_positional(node) if param not in namespace and param not in rebound}
+        if names:
+            documents[node] = names
+    return documents
+
+
+def _message(call: ast.Call) -> ast.expr | None:
+    """A log call's MESSAGE: its first positional argument, or a msg=/message= keyword."""
+    if call.args:
+        return None if isinstance(call.args[0], ast.Starred) else call.args[0]
+    return next((kw.value for kw in call.keywords if kw.arg in MESSAGE_KEYWORDS), None)
+
+
+def _named_in_message(expr: ast.expr, names: Set[str]) -> str | None:
+    """The document parameter a message expression writes, or None.
+
+    Reads the f-string pieces, both sides of a ``%`` or ``+``, ``.format()``'s
+    receiver and arguments, str()/repr() and the string methods; a redaction,
+    len() or a slice of four characters or fewer acquits; any other call does too.
+    """
+    if isinstance(expr, ast.Name):
+        return expr.id if expr.id in names else None
+    for piece in _message_parts(expr):
+        found = _named_in_message(piece, names)
+        if found is not None:
+            return found
+    return None
+
+
+def _message_parts(expr: ast.expr) -> List[ast.expr]:
+    """The sub-expressions of a message piece whose text the message carries."""
+    if isinstance(expr, ast.JoinedStr):
+        return [piece.value for piece in expr.values if isinstance(piece, ast.FormattedValue)]
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Add, ast.Mod)):
+        return [expr.left, expr.right]
+    if isinstance(expr, ast.Tuple):
+        return list(expr.elts)
+    if isinstance(expr, ast.Subscript):
+        shows_little = isinstance(expr.slice, ast.Slice) and _shows_little(expr.slice)
+        return [] if shows_little else [expr.value]
+    if isinstance(expr, ast.Call):
+        return _message_call_pieces(expr)
+    return []
+
+
+def _message_call_pieces(call: ast.Call) -> List[ast.expr]:
+    """What a call inside the message hands on unchanged: str()/repr(), string methods, .format()."""
+    func = call.func
+    if isinstance(func, ast.Attribute) and func.attr in STRING_METHODS:
+        return [func.value]
+    if isinstance(func, ast.Attribute) and func.attr == "format":
+        return [func.value, *call.args, *(kw.value for kw in call.keywords)]
+    if isinstance(func, ast.Name) and func.id in ("str", "repr"):
+        return list(call.args)
+    return []
+
+
+def _reader_row(call: ast.Call, scope: ast.AST, documents: Dict[ast.AST, Set[str]]) -> str | None:
+    """Arm 3: what a log line inside a secret reader writes of a document parameter in its MESSAGE."""
+    names = documents.get(scope)
+    message = _message(call)
+    if not names or message is None:
+        return None
+    found = _named_in_message(message, names)
+    if found is None:
+        return None
+    return f"{found} (a document name the secret reader {getattr(scope, 'name', '?')}() is handed)"
+
+
 def _shown(piece: ast.expr, origin: str) -> str:
     """What a row says is logged: the piece, and the secret name it was built from when that differs."""
     text = _source_text(piece)
@@ -755,11 +903,16 @@ def scan(source: str) -> List[Tuple[int, str]]:
         if not _derive_pass(file, scopes):
             break
     file.reading_log_line = True
+    documents = _document_parameters(tree)
     rows: List[Tuple[int, str]] = []
     for scope, body in scopes:
         calls = [node for node in _scoped_nodes(body) if isinstance(node, ast.Call)]
         for call in calls:
             if not _is_log_call(call, file.loggers):
+                continue
+            handed = _reader_row(call, scope, documents)
+            if handed is not None:
+                rows.append((call.lineno, handed))
                 continue
             for piece in _message_pieces(call):
                 origin = file.leak(piece, scope)

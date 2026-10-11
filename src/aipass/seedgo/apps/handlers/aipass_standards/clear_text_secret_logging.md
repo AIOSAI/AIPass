@@ -1,5 +1,5 @@
 # Clear Text Secret Logging Standards
-**Status:** v1.2 (checker 1.2.0: arm 2 follows reads and adds on a built value, CodeQL round ten)
+**Status:** v1.3 (checker 1.3.0: arm 3, a secret reader's document name in the message, CodeQL round eleven)
 **Date:** 2026-10-10 · **Modified:** 2026-10-11
 
 ---
@@ -27,7 +27,8 @@ logger.warning("[host_api] breaking a stale token store lock at %s", path)      
 
 A prax logger call, `logger.debug/info/warning/error/critical/exception` (the receiver named
 `logger`, or bound by `from aipass.prax... import logger|system_logger as <name>`), is a row
-when a piece of its message is one of the two below. The pieces read: every positional argument,
+when a piece of its message is one of the two below, or (arm 3) its MESSAGE writes a secret
+reader's document name. The pieces read: every positional argument,
 the message keywords (`exc_info`, `stack_info`, `stacklevel` and `extra` are not message), every
 f-string piece, every `%` operand, every `.format()` argument, every `+` operand.
 
@@ -86,6 +87,25 @@ f-string piece, every `%` operand, every `.format()` argument, every `+` operand
 
    A subscript or attribute target (`entry["k"] = token`) binds no name. A `non_` or `not_` prefix on
    a function says what it filters, not that its return is clean: it acquits nothing.
+3. **A secret reader's document name in the message** (1.3.0, CodeQL round eleven). The one
+   parameter seed, as narrow as it can be held:
+   - **the file** defines a secret LISTER: a def whose name holds `list` as a segment beside
+     CodeQL's source words (`list_secrets`). The file's own defs say it is a secrets store;
+   - **the def** is a secret READER: its name holds `get`, `read`, `load` or `fetch` as a segment
+     beside secret(s)/trusted/confidential (`get_secret`, `_get_secret`, `read_secret`,
+     `load_secret`, `fetch_secret`), read as the call seed reads a name: no CodeQL exclusion word,
+     no setter verb (set/write/save/put/delete/remove/drop/rotate/revoke), no identifier segment
+     (`get_secret_path`), and no `list` segment (a lister returns names, it reads no secret);
+   - **the parameter** is a required positional one (no default, not `self`/`cls`) that no lister
+     in the file takes, and the reader never rebinds. The lister's parameters are the namespace a
+     caller chooses (`provider`); the reader's others are the document names the listing hands
+     back (`slug`). This is how the arm tells slug from provider: by the file's own lister, not by
+     a guess at position or a list of names;
+   - **the position** is the MESSAGE only: the log call's first argument (or `msg=`/`message=`),
+     read through its f-string pieces, both sides of a `%` or `+`, `.format()`'s receiver and
+     arguments, `str()`/`repr()` and the string methods. A `%s` argument is not this arm's row (it
+     is CodeQL's reach; arms 1 and 2 still judge arguments). `len()`, a redaction or a slice of four
+     characters or fewer acquits; any other call in the message does too.
 
 **Why arm 2 starts so narrowly.** A parameter or loop variable called `token` is a shell word or a
 counter as often as a credential. @drone's `_resolve_mail_token(token)` hands its argument back,
@@ -197,6 +217,69 @@ disk) at **0 rows** before and **0 rows** after. Each sub-arm alone, every other
 
 No narrowing was needed: no sub-arm convicted a wrong row. The fixtures pin the arms: the pre-cure
 tokens cut goes red with `.get` disabled, the appended-keys fixture with `.append` disabled.
+
+### Round eleven (checker 1.3.0)
+
+PR #774 round eleven: ground truth. @devpulse printed CodeQL's SARIF paths into the Security job
+log (45ba6aa0). The one HIGH `py/clear-text-logging-sensitive-data` alert reads, every step
+CodeQL's own:
+
+| step | where | what |
+|---|---|---|
+| source 1 | @skills `lib/telegram/apps/handlers/config.py:412` | `_api_list_secrets("telegram")`, a secret-named call result |
+| source 2 | @api `apps/modules/secrets.py:136` | `_handler.list_secrets(provider)`, the same listing one frame deeper |
+| | @skills `lib/telegram/handler.py:155` | `targets = [...] or list_bot_configs()` |
+| | `handler.py:160` | `for bot_id in sorted(targets)` (list element) |
+| | `handler.py:161` | `migrate_bot_config(bot_id, ...)` |
+| | `config.py:197` -> `:215` | `def migrate_bot_config(bot_id)` -> `_get_secret(bot_id)` |
+| | `config.py:69` -> `:83` | `def _get_secret(bot_id)` -> `_api_get_secret("telegram", bot_id, as_json=True)` |
+| | @api `apps/modules/secrets.py:82` -> `:97` | `def get_secret(provider, slug)` -> `_handler.get_secret(provider, slug, ...)` |
+| | @api `apps/handlers/auth/secrets.py:40` | `def get_secret(provider, slug)` |
+| the caller line | `auth/secrets.py:83` | `logger.warning(f"Secret not found: {provider}/{slug}")`: slug in the MESSAGE f-string |
+| the sink | @prax `apps/modules/logger.py:131` -> `:135` | `message` -> `logger.warning(message, *args, **kwargs)`, columns 24-31 = `message` |
+
+**CodeQL's reach is the MESSAGE only.** The sink's columns are the message parameter; a value in
+the `%s` arguments never reached it through prax's two wrappers. That is why rounds eight, nine and
+ten (the `SECRETS_BASE` paths, the telegram strays, the token store: all `%s` arguments) never
+moved the count. This is recorded as CodeQL's reach, **not** as this standard's rule: arms 1 and 2
+stay stricter (an argument is a row too), because the log line carries the value either way.
+
+**The new arm.** The file-local arms could not see the path: the slug is a parameter of
+`get_secret`, and the names come out of the store's own listing in another file. Arm 3 (above)
+convicts where the listing's names land: a secret reader's document parameter in its message.
+What it does with each line of the pre-cure file (HEAD 6c3aa9aa):
+
+| line | text | verdict |
+|---|---|---|
+| :64 | `f"Provider directory not found under the secrets base: {provider}"` | acquitted: `provider` is `list_secrets(provider)`'s own parameter, the namespace the caller chose |
+| :83 | `f"Secret not found: {provider}/{slug}"` | **convicted** on `slug`, the document name; `provider` in the same f-string is acquitted on its own and is not what the row names |
+| :191, :220 | `f"Error reading a ... secret file: {e}"` | acquitted: `e` is no parameter |
+
+@api's cure (83f812c9), `"Secret not found under provider %s: no JSON or raw document for the
+requested slug", provider`, acquits: the slug is gone and provider is a `%s` argument, which this
+arm does not read. The telegram `handler.py` loop crosses files and stays out of file-local reach;
+no change is asked there.
+
+Measured over 1,383 product files (`src/aipass/*/apps` and `*/lib`), the live fleet (api's cure on
+disk) at **0 rows** before and **0 rows** after. The variants, each against the fleet and the pre-cure
+file:
+
+| variant | fleet rows | pre-cure `auth/secrets.py` |
+|---|---|---|
+| shipped: lister-gated, the lister's parameters as namespace | 0 | :83 (`slug`) only |
+| every required parameter of every reader, no gate | 1 (@api `auth/secrets.py:64`, `provider`: false) | :64 and :83, both on `provider` |
+| lister gate, every required parameter | 1 (the same false `provider` row) | :64 and :83 on `provider` |
+| no gate, the last required parameter only | 0 | :83 (`slug`) only |
+
+The namespace from the lister is what acquits `provider`; the last-parameter variant matches today
+but guesses at position (a one-parameter reader such as @api `auth/keys.py`
+`_read_key_from_secrets(provider)` would be read as handed a document name), so the file's own
+lister rules. The reader defs in the fleet today: @api `auth/secrets.py` `get_secret`,
+`_read_json_secret`, `_read_raw_secret` and `modules/secrets.py` `get_secret` (both files define
+`list_secrets`), @api `auth/keys.py` `_read_key_from_secrets`, @skills telegram `config.py`
+`_get_secret` and `telethon_auth.py` `_get_secret` (no lister: out). The fixtures pin both shapes:
+the pre-cure cut convicts :83 and only it, the cured line acquits; disabling the arm turns
+`test_the_pre_cure_not_found_line_is_convicted_and_only_it` red.
 
 ## Scoring
 
