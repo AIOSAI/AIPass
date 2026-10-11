@@ -56,8 +56,8 @@ refresh also builds an `ai_mail` section from `AI_MAIL.central.json`, but
 nothing reads it and it is popped before save. So a branch with no central row,
 which is every external branch today, still gets its true count. Pinned in
 `tests/test_operations.py`: a central listing only FLOW, a branch inbox with 3
-new, and `new_mail` 3. The comment in `refresh.py` used to say the section fed
-the counts, and it misled a measurement that same day. It has been corrected.
+new, and `new_mail` 3. The `ai_mail` section feeds no count; the comment in
+`refresh.py` says so.
 
 ## Programmatic Dashboard API
 
@@ -89,19 +89,14 @@ again. `total_plans` is the one key prax has no honest source for, so it carries
 closed universe, and reports 5 for a branch with 104 closed plans.
 
 `action_required` is true when any counter the block renders in `summary` is
-non-zero, todos included. It previously ignored `todo_count`, so a branch could
-publish `"1 todos"` and `action_required: false` side by side — measured by
-@flow against their own writer, which does count them.
+non-zero, todos included, so a branch never publishes `"1 todos"` beside
+`action_required: false`. @flow's writer counts them the same way.
 
-`push-template` was the last independent copy, and the most dangerous one
-because it writes every branch in the registry. It carried its own calculator
-with no `todo_count`, assigned the block wholesale rather than merging, and
-listed `commons_mentions` as a *deprecated key to delete*. prax did once own
-that key, but @flow took it over instead of retiring it, so the list outlived
-the ownership change: one push would have deleted a live key fleet-wide by
-declared policy. Fixed 2026-08-13 — `template_pusher.DEPRECATED_QUICK_STATUS_KEYS`
-now holds only `pending_bulletins`, and a key qualifies for it only when nobody
-writes it.
+`push-template` writes every branch in the registry, so its deprecated list is
+the most dangerous constant here: a live key on it is deleted fleet-wide by
+declared policy. `template_pusher.DEPRECATED_QUICK_STATUS_KEYS` holds only
+`pending_bulletins`, and a key qualifies for it only when nobody writes it.
+`commons_mentions` is live — @flow writes it — and stays off the list.
 
 `template_differ.py` reads the same list from the pusher (one constant, pinned in
 `tests/test_dashboard_merge.py`), so `diff-template` recommends only what
