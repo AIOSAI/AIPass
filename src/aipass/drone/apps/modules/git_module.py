@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-17
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -958,10 +958,10 @@ def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
 
     root = repo_root if repo_root is not None else lock_handler.find_repo_root()
     rev_range: str | None = None
-    for token, must_exist in path_tokens:
-        if must_exist and ".." in token and log_handler.is_commit_range(token, root):
-            rev_range = token
-            path_tokens.remove((token, must_exist))
+    for argument, must_exist in path_tokens:
+        if must_exist and ".." in argument and log_handler.is_commit_range(argument, root):
+            rev_range = argument
+            path_tokens.remove((argument, must_exist))
             break
 
     if count is None and rev_range is None:
@@ -975,17 +975,17 @@ def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
     paths: list[str] = []
     if path_tokens:
         cwd = None if repo_root is not None else caller_cwd()
-        for token, must_exist in path_tokens:
-            resolved = log_handler.resolve_log_path(token, root, cwd, must_exist)
+        for argument, must_exist in path_tokens:
+            resolved = log_handler.resolve_log_path(argument, root, cwd, must_exist)
             if resolved is None:
                 # The owner's standing ruling: an unknown argument FAILS by name.
                 # It once logged a WARNING and carried on with the default 10, so
                 # `log not_a_real_count` printed what plain `log` prints, exit 0.
                 message = (
-                    f"Unknown argument for 'log': {token} (not a count, not a range of commits, and no such path; "
+                    f"Unknown argument for 'log': {argument} (not a count, not a range of commits, and no such path; "
                     "a path that no longer exists goes after --)"
                 )
-                logger.warning("git log refused unknown argument '%s'", token)
+                logger.warning("git log refused unknown argument '%s'", argument)
                 if as_json:
                     return _json_document({"commits": [], "count": 0, "message": message}, ok=False)
                 return {"stdout": "", "stderr": message, "exit_code": 1}
