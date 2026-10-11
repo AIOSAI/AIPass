@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 5.1.0
+# Version: 5.1.1
 # Description: Raw git and gh, GitHub API writes and credentials for every seat; protected file changes (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-04
+# Modified: 2026-10-10
 # =============================================
 
 """Blocks raw git and gh, GitHub writes without gh, the gh credential, and changes to the protected files.
@@ -361,17 +361,17 @@ def _httpie_write(program: str, args) -> str:
 
 def _program_refusal(invocations: list, reader, seat: _Seat) -> dict | None:
     """R5 and R6, for every seat: git/gh from an interpreter, the gh credential, GitHub API writes."""
-    launches, credentials, writes = [], [], []
+    launches, reader_commands, writes = [], [], []
     for inv in invocations:
         launches.append(reader.program_launch(inv))
-        credentials.append(_credential_read(inv, reader))
+        reader_commands.append(_credential_read(inv, reader))
         writes.extend((_http_write(inv), reader.program_github_write(inv)))
-    launches, credentials, writes = ([x for x in found if x] for found in (launches, credentials, writes))
-    if not (launches or credentials or writes):
+    launches, reader_commands, writes = ([x for x in found if x] for found in (launches, reader_commands, writes))
+    if not (launches or reader_commands or writes):
         return None
-    if credentials:
-        logger.warning("[HOOKS] git_gate: credential read refused: %s", credentials[0])
-        return _block(CREDENTIAL_REFUSED.format(caller=seat.named, what=credentials[0]))
+    if reader_commands:
+        logger.warning("[HOOKS] git_gate: credential read refused: %s", reader_commands[0])
+        return _block(CREDENTIAL_REFUSED.format(caller=seat.named, what=reader_commands[0]))
     if writes:
         return _block(GITHUB_HTTP_REFUSED.format(caller=seat.named, what=writes[0]))
     return _block(INTERPRETER_GIT_REFUSED.format(caller=seat.named, what=launches[0]))

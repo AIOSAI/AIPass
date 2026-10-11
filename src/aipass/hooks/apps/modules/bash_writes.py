@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 2.3.0
+# Version: 2.3.1
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
@@ -584,14 +584,14 @@ def _looks_like_path(token: str) -> bool:
     return "/" in token or "\\" in token or "." in token or token.isidentifier()
 
 
-def _resolve(token: str, cwd: Path) -> Path | None:
+def _resolve(word: str, cwd: Path) -> Path | None:
     """Resolve one operand against the segment's working directory.
 
     None, which no resolved operand is, means the word could not be read as a path
     at all, even literally (logged; in NOT_CAUGHT). Every caller drops it.
     """
-    token = token.strip().strip(_TRAILING_JUNK)
-    if not token:
+    word = word.strip().strip(_TRAILING_JUNK)
+    if not word:
         return None
     # A Windows path cannot hold a Git Bash drive (FPLAN-0537, measured under a
     # Windows flavour): WindowsPath("/c/Users/me") has a root but no drive, so
@@ -602,8 +602,8 @@ def _resolve(token: str, cwd: Path) -> Path | None:
     # Paths lifted out of interpreter source get the same reading, though python
     # itself would not translate them. That reading is broader than the write,
     # the safe way for a fence to be wrong.
-    if isinstance(cwd, PureWindowsPath) and (drive := _GIT_BASH_DRIVE.match(token)):
-        token = f"{drive.group(1).upper()}:/{token[drive.end() :].lstrip('/')}"
+    if isinstance(cwd, PureWindowsPath) and (drive := _GIT_BASH_DRIVE.match(word)):
+        word = f"{drive.group(1).upper()}:/{word[drive.end() :].lstrip('/')}"
     # Separators are normalised on EVERY OS, not just Windows. pathlib accepts
     # "/" natively on Windows (WindowsPath("C:/a/b") is absolute and correct),
     # so one spelling reaches Path from both dialects and the parser's reading
@@ -611,19 +611,19 @@ def _resolve(token: str, cwd: Path) -> Path | None:
     # does NOT become portable is the ROOT: a drive letter names nothing on
     # Linux, so it resolves relative and reads as local — published in
     # NOT_CAUGHT rather than left to be discovered.
-    token = token.replace("\\", "/")
+    word = word.replace("\\", "/")
     try:
-        candidate = Path(token).expanduser()
+        candidate = Path(word).expanduser()
     except (OSError, ValueError, RuntimeError) as exc:
         # The shell leaves a tilde word it cannot expand (~nosuchuser) as it is, so
         # the write lands under the working directory in a directory of that literal
         # name, and both fences judge it there (devpulse's decision C, leg 4). Only a
         # word that cannot be read literally either is dropped: NOT_CAUGHT says so.
-        logger.info("[HOOKS] bash_writes: operand %r not expandable (%s), read literally", token, exc)
+        logger.info("[HOOKS] bash_writes: operand %r not expandable (%s), read literally", word, exc)
         try:
-            candidate = Path(token)
+            candidate = Path(word)
         except (OSError, ValueError, RuntimeError) as literal_exc:
-            logger.info("[HOOKS] bash_writes: unresolvable operand %r: %s", token, literal_exc)
+            logger.info("[HOOKS] bash_writes: unresolvable operand %r: %s", word, literal_exc)
             return None
     return candidate if candidate.is_absolute() else (cwd / candidate)
 

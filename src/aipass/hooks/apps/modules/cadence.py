@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.9.1
+# Version: 2.9.2
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-09-30
+# Modified: 2026-10-10
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -716,13 +716,13 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
 
         debounced = elapsed is not None and elapsed < _REGROUP_DEBOUNCE_S
         if debounced:
-            token = data.get("regroup_token")
+            regroup_stamp = data.get("regroup_token")
             armed_at = prior_armed_at
         else:
-            token = f"{int(now * 1000)}-{pid}"
+            regroup_stamp = f"{int(now * 1000)}-{pid}"
             armed_at = now
 
-        state = {"turn": -1, "token": -1, "regroup_token": token, "regroup_armed_at": armed_at}
+        state = {"turn": -1, "token": -1, "regroup_token": regroup_stamp, "regroup_armed_at": armed_at}
         if debounced:
             # A duplicate reset on the SAME compact boundary must not cancel the
             # re-ground parts still queued for it (issue #752); a new compaction
@@ -753,7 +753,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
                 "session=%s prev_turn=%d",
                 caller,
                 pid,
-                token,
+                regroup_stamp,
                 session_short,
                 old_turn,
             )
@@ -823,22 +823,22 @@ def stamp_regroup_complete(hook_data: dict | None = None) -> None:
     """
     session_id = (hook_data or {}).get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     window = window_opened_at(hook_data)
-    token = _get_turn_token(hook_data or {})
-    if not session_id or window is None or token <= 0:
+    transcript_mark = _get_turn_token(hook_data or {})
+    if not session_id or window is None or transcript_mark <= 0:
         logger.info(
             "[HOOKS] cadence: regroup completion NOT stamped (session=%s window=%s token=%d), fire-all stays",
             session_id[:8] or "none",
             window,
-            token,
+            transcript_mark,
         )
         return
     try:
-        stamp = {"window": window, "token": token, "used_token": None}
+        stamp = {"window": window, "token": transcript_mark, "used_token": None}
         _regroup_done_path(session_id).write_text(json.dumps(stamp), encoding="utf-8")
     except OSError as exc:
         logger.info("[HOOKS] cadence: regroup completion stamp write FAILED session=%s: %s", session_id[:8], exc)
         return
-    logger.info("[HOOKS] cadence: regroup complete, stamped token=%d session=%s", token, session_id[:8])
+    logger.info("[HOOKS] cadence: regroup complete, stamped token=%d session=%s", transcript_mark, session_id[:8])
 
 
 def _stands_in(stamp: dict, window: float | None, token: int, distance: int) -> bool:
@@ -929,8 +929,8 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
         fd.seek(0)
         content = fd.read()
         data = json.loads(content) if content.strip() else {}
-        token = data.get("regroup_token")
-        pending = bool(token)
+        regroup_stamp = data.get("regroup_token")
+        pending = bool(regroup_stamp)
 
         if pending:
             data["regroup_token"] = None
@@ -946,7 +946,7 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
             logger.info(
                 "[HOOKS] cadence: regroup_pending consumed (mid-turn backstop) pid=%d token=%s session=%s",
                 pid,
-                token,
+                regroup_stamp,
                 session_short,
             )
         return pending
