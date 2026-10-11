@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: clear_text_secret_logging_check.py
 # Description: Clear Text Secret Logging Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-10
 # Modified: 2026-10-10
 # =============================================
@@ -34,15 +34,25 @@ its message -- a positional argument, an f-string piece, a ``%`` operand, a
      (``.strip()`` ...) are looked through.
   2. BUILT IN THIS FILE FROM A SECRET-NAMED SOURCE. The derivation STARTS
      only from a secret-named module-level binding (``SECRETS_BASE = ...`` at
-     the file's top level, read where no local shadows it) or a secret-named
-     attribute read (``secrets_store.SECRETS_BASE``, ``self.api_key``). It
-     never starts from a parameter, a loop or ``with`` target, a function-local
-     name or a secret-named call. From a source it FOLLOWS: assignments (and
-     loops or ``with`` items over a built value), a same-file function whose
-     ``return`` hands a built value back, a same-file parameter handed one, and
-     an attribute of a built name (``target.parent``). This arm is what reaches
-     the CodeQL rows: no name on those log lines says secret, the source they
-     were built from does.
+     the file's top level, read where no local shadows it), a secret-named
+     attribute read (``secrets_store.SECRETS_BASE``, ``self.api_key``) -- a
+     token word seeds neither (``QUIET_SEED_WORDS``) -- or, since 1.1.0
+     (dispatch 39bfe173, CodeQL round nine), the RESULT of a call named by
+     CodeQL's source words (``_get_secret(bot_id)``, ``load_trusted_keys()``;
+     ``_call_seeds``: secret(s), trusted, confidential, none of CodeQL's
+     exclusion words, no setter verb). It never starts from a parameter, a
+     loop or ``with`` target or a function-local name. From a source it
+     FOLLOWS: assignments (and loops or ``with`` items over a built value),
+     comprehensions over a built value (their element read with the target
+     bound to it), the wrappers sorted/list/tuple/set/dict/str/repr/join/
+     format/f-strings, a same-file function whose ``return`` hands a built
+     value back, a same-file parameter handed one, THE SAME-FILE HOP (a call
+     whose argument is built, to a function that returns that parameter: the
+     only place a parameter is followed, and per call -- a clean argument
+     through the same helper stays clean), and an attribute of a built name
+     (``target.parent``). A ``non_``/``not_`` prefix acquits nothing. This arm
+     is what reaches the CodeQL rows: no name on those log lines says secret,
+     the source they were built from does.
 
 WHY ARM 2 STARTS SO NARROWLY. A parameter or loop variable called ``token``
 is a shell word or a counter as often as a credential (drone's
@@ -58,6 +68,19 @@ debug on the same lock path), drone 1, hooks 7, skills lib 1 (all arm 1).
 Narrowings while measuring, each for a stated reason: 17 rows spread from
 secret-named calls, 6 from a subscript target whose index was read as a
 binding, and 9 from parameter, loop and local sources (the ruling above).
+
+ROUND NINE (1.1.0, 2026-10-10, 1,302 files, the fleet at 0 rows before): CodeQL
+traced @skills telegram ``config.py`` load_bot_config -- ``secret =
+_get_secret(bot_id)``, ``strays = non_secret_keys(secret)`` (a sorted generator
+over the document), ``strays`` on a warning -- which 1.0.0 missed. After the
+widening: 0 rows on the live fleet (@skills had cured the line); the pre-cure
+config.py convicts at its warning. Measured, each narrowing kept for its row:
+call seeds from every secret word 10 (token_hex x4, issue_token,
+context_fill_tokens x2, _get_turn_token x2, _without_credentials); adding
+credential(s) to the call words 1 (_without_credentials); no setter-verb
+exclusion 1 (@api host/config.py:150 from set_secret); token-word binding and
+attribute seeds 1 (@prax monitor.py:274, argparse's ``args.tokens``). Arm 1's
+new words trusted and confidential: 0 new rows.
 
 NOT A ROW, each for its reason:
   * An IDENTIFIER of a secret rather than the secret: a segment beside the
@@ -121,7 +144,38 @@ SECRET_WORDS: Tuple[Tuple[str, ...], ...] = (
     ("auth", "header"),
     ("access", "key"),
     ("private", "key"),
+    ("trusted",),
+    ("confidential",),
 )
+
+#: The secret words whose CALL result seeds arm 2: CodeQL's own source words
+#: (secret|trusted|confidential; ``untrusted`` is its own segment, so never
+#: matches). token and password calls stay arm 1 only: token_hex, issue_token.
+CALL_SOURCE_WORDS = frozenset({"secret", "secrets", "trusted", "confidential"})
+
+#: CodeQL's not-a-source words: a call name holding one anywhere seeds nothing.
+SOURCE_EXCLUSIONS = (
+    "hash",
+    "md5",
+    "sha",
+    "random",
+    "encode",
+    "encrypt",
+    "public",
+    "user",
+    "login",
+    "logging",
+    "clear",
+    "redact",
+)
+
+#: Words that never SEED arm 2 from a binding or an attribute (arm 1 still reads
+#: them on the log line): measured, a token is a parser word in this fleet --
+#: argparse's ``args.tokens`` in prax monitor.py reached a log line as ``args``.
+QUIET_SEED_WORDS = frozenset({"token", "tokens"})
+
+#: Verbs of a call that PUTS a secret somewhere: its result is a status, not the secret.
+SETTER_VERBS = frozenset({"set", "write", "save", "put", "delete", "remove", "drop", "rotate", "revoke"})
 
 #: A segment beside the secret word that makes the identifier name the secret, not hold it.
 IDENTIFIER_SEGMENTS = frozenset(
@@ -157,7 +211,12 @@ REDACTIONS = frozenset({"redact", "redacted", "mask", "masked", "scrub", "scrubb
 MAX_SHOWN = 4
 
 #: Calls that hand their argument's value on unchanged, for this rule's purpose.
-PASS_THROUGH_CALLS = frozenset({"str", "repr", "Path", "fspath"})
+PASS_THROUGH_CALLS = frozenset(
+    {"str", "repr", "Path", "fspath", "sorted", "list", "tuple", "set", "frozenset", "dict", "reversed"}
+)
+
+#: Comprehensions: their result is built from what they iterate.
+COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 
 #: String methods whose result is still the value they were called on.
 STRING_METHODS = frozenset({"strip", "lstrip", "rstrip", "lower", "upper", "casefold", "decode", "encode"})
@@ -221,6 +280,37 @@ def _is_redaction(name: str) -> bool:
     return any(part in REDACTIONS for part in segments(name))
 
 
+def _call_seeds(name: str) -> bool:
+    """Whether a call so named returns a secret, by CodeQL's source model.
+
+    Its secret word is one of CALL_SOURCE_WORDS, kept by secret_word() (so
+    secret_path() and redact_secret() acquit), no SOURCE_EXCLUSIONS word is in
+    it anywhere (hash_secret, get_user_secret) and no SETTER_VERBS segment says
+    it stores rather than returns (set_secret, delete_secret).
+    """
+    if secret_word(name) not in CALL_SOURCE_WORDS:
+        return False
+    if any(word in name.lower() for word in SOURCE_EXCLUSIONS):
+        return False
+    return not any(part in SETTER_VERBS for part in segments(name))
+
+
+class _Handed(str):
+    """A derived origin that reached a function through its parameter ``param``.
+
+    A return built from it says the function passes that parameter through;
+    it does not taint every call of the function, only a call that hands the
+    parameter a derived value (the same-file hop).
+    """
+
+    param: str
+
+    def __new__(cls, origin: str, param: str) -> "_Handed":
+        handed = super().__new__(cls, origin)
+        handed.param = param
+        return handed
+
+
 def _int_bound(node: ast.expr | None) -> int | None:
     """A slice bound as an int, or None when it is absent or not a literal."""
     if isinstance(node, ast.Constant) and isinstance(node.value, int):
@@ -264,21 +354,31 @@ class _File:
                 self.functions.setdefault(node.name, node)
         self.derived: Dict[ast.AST, Dict[str, str]] = {tree: {}}
         self.returns: Dict[ast.AST, str] = {}
+        # The same-file hop: the parameters a function hands back in its
+        # return. A call's result is derived when it hands one of these a
+        # derived value; a call that hands them clean values stays clean.
+        self.passes: Dict[ast.AST, Set[str]] = {}
+        # Comprehension targets bound to what they iterate, while one is read.
+        self.overlay: Dict[str, str] = {}
         self.loggers = _logger_names(tree)
         # Arm 2 STARTS only from a secret-named module-level binding
-        # (SECRETS_BASE = ...) or a secret-named attribute read
-        # (secrets_store.SECRETS_BASE, self.api_key). Never from a parameter,
-        # a loop or with target, a function-local name or a secret-named call:
-        # those convicted drone's `command` through _resolve_mail_token(token)
-        # and memory's `message` on lines whose own names say nothing
-        # (coordinator ruling 2026-10-10). Every secret-named Name, Attribute
-        # or Call ON the log line is still arm 1. scan() sets this to read.
+        # (SECRETS_BASE = ...), a secret-named attribute read
+        # (secrets_store.SECRETS_BASE, self.api_key) or the result of a call
+        # _call_seeds() names a source (_get_secret(bot_id); dispatch 39bfe173).
+        # Never from a parameter, a loop or with target or a function-local
+        # name: those convicted drone's `command` through
+        # _resolve_mail_token(token) and memory's `message` on lines whose own
+        # names say nothing (coordinator ruling 2026-10-10). Every secret-named
+        # Name, Attribute or Call ON the log line is still arm 1. scan() sets
+        # this to read.
         self.reading_log_line = False
         self.module_secrets = _module_secret_bindings(tree)
         self.scope_locals: Dict[ast.AST, Set[str]] = {tree: set()}
 
     def _starts_arm_two(self, expr: ast.Name | ast.Attribute, scope: ast.AST) -> bool:
         """Whether a secret-named reference may seed the derivation (see __init__)."""
+        if secret_word(_identifier(expr) or "") in QUIET_SEED_WORDS:
+            return False
         if isinstance(expr, ast.Attribute):
             return True
         if expr.id not in self.module_secrets:
@@ -289,7 +389,9 @@ class _File:
 
     def lookup(self, scope: ast.AST, name: str) -> str | None:
         """Where a name in a scope was derived from, falling back to the module's."""
-        found = self.derived.get(scope, {}).get(name)
+        found = self.overlay.get(name)
+        if found is None:
+            found = self.derived.get(scope, {}).get(name)
         return found if found is not None else self.derived[self.tree].get(name)
 
     def callee(self, call: ast.Call) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
@@ -324,7 +426,29 @@ class _File:
             return self._first(expr.elts, scope)
         if isinstance(expr, ast.IfExp):
             return self._first((expr.body, expr.orelse), scope)
+        if isinstance(expr, COMPREHENSIONS):
+            return self._comprehension_leak(expr, scope)
         return None
+
+    def _comprehension_leak(
+        self, expr: ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp, scope: ast.AST
+    ) -> str | None:
+        """A comprehension: its element, read with each target bound to what it iterates.
+
+        ``sorted(key for key in document)`` carries the document's keys; a filter
+        (``if key not in SECRET_FIELDS``) acquits nothing; ``len(key)`` as the
+        element is a redaction like anywhere else.
+        """
+        saved = dict(self.overlay)
+        try:
+            for generator in expr.generators:
+                origin = self.leak(generator.iter, scope)
+                if origin is not None:
+                    self.overlay.update((name, origin) for name in _target_names(generator.target))
+            parts = [expr.key, expr.value] if isinstance(expr, ast.DictComp) else [expr.elt]
+            return self._first(parts, scope)
+        finally:
+            self.overlay = saved
 
     def _first(self, exprs, scope: ast.AST) -> str | None:
         """The first leak among several expressions."""
@@ -351,7 +475,7 @@ class _File:
         return None
 
     def _call_leak(self, call: ast.Call, scope: ast.AST) -> str | None:
-        """A call: a redaction, a pass-through, a secret-named call, or a same-file derived return."""
+        """A call: a redaction, a pass-through, a same-file derived return, or a secret-named call."""
         name = _identifier(call.func)
         if name is not None and _is_redaction(name):
             return None
@@ -359,14 +483,24 @@ class _File:
             return self.leak(call.func.value, scope)
         if isinstance(call.func, ast.Attribute) and call.func.attr == "format":
             return self._first([call.func.value, *call.args, *(kw.value for kw in call.keywords)], scope)
-        if name in PASS_THROUGH_CALLS:
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "join":
             return self._first(call.args, scope)
-        if self.reading_log_line and name is not None and secret_word(name) is not None:
-            return _source_text(call)
+        if name in PASS_THROUGH_CALLS:
+            return self._first([*call.args, *(kw.value for kw in call.keywords)], scope)
         target = self.callee(call)
         if target is not None:
-            return self.returns.get(target)
+            found = self.returns.get(target) or self._hop(call, target, scope)
+            if found is not None:
+                return found
+        if name is not None and secret_word(name) is not None:
+            if self.reading_log_line or _call_seeds(name):
+                return _source_text(call)
         return None
+
+    def _hop(self, call: ast.Call, target: ast.FunctionDef | ast.AsyncFunctionDef, scope: ast.AST) -> str | None:
+        """The same-file hop: what this call hands a parameter the callee returns."""
+        passed = self.passes.get(target, set())
+        return self._first((value for param, value in _handed(call, target) if param in passed), scope)
 
 
 def _logger_names(tree: ast.Module) -> Set[str]:
@@ -380,8 +514,13 @@ def _logger_names(tree: ast.Module) -> Set[str]:
 
 
 def _scoped_nodes(body: List[ast.stmt]) -> Iterator[ast.AST]:
-    """Every node of a scope's body, not descending into nested functions or classes' functions."""
-    stack: List[ast.AST] = list(body)
+    """Every node of a scope's body, not descending into nested functions or classes' functions.
+
+    The module's own top-level ``def`` statements are skipped too: each function
+    is its own scope, and reading its body again as the module's made one
+    function's locals every function's (a log line was reported twice).
+    """
+    stack: List[ast.AST] = [node for node in body if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
     while stack:
         node = stack.pop()
         yield node
@@ -464,19 +603,25 @@ def _derive_bindings(file: _File, node: ast.AST, scope: ast.AST) -> bool:
         if origin is None:
             continue
         for name in names:
-            if name not in known and secret_word(name) is None:
+            if name not in known:
                 known[name] = origin
                 changed = True
     return changed
 
 
 def _derive_return(file: _File, node: ast.AST, scope: ast.AST) -> bool:
-    """Mark a function whose return hands back a secret-derived value."""
+    """Mark a function whose return hands back a secret-derived value, or a parameter's."""
     if not isinstance(node, ast.Return) or node.value is None or scope in file.returns:
         return False
     origin = file.leak(node.value, scope)
     if origin is None:
         return False
+    if isinstance(origin, _Handed):
+        passed = file.passes.setdefault(scope, set())
+        if origin.param in passed:
+            return False
+        passed.add(origin.param)
+        return True
     file.returns[scope] = origin
     return True
 
@@ -498,21 +643,26 @@ def _derive_parameters(file: _File, call: ast.Call, scope: ast.AST) -> bool:
     target = file.callee(call)
     if target is None:
         return False
+    known = file.derived.setdefault(target, {})
+    changed = False
+    for param, value in _handed(call, target):
+        if param in known:
+            continue
+        origin = file.leak(value, scope)
+        if origin is not None:
+            known[param] = _Handed(origin, param)
+            changed = True
+    return changed
+
+
+def _handed(call: ast.Call, target: ast.FunctionDef | ast.AsyncFunctionDef) -> List[Tuple[str, ast.expr]]:
+    """(parameter, the argument a call hands it) for a same-file callee; ``*args`` hands nothing."""
     params = _parameters(target)
     if isinstance(call.func, ast.Attribute) and params and params[0] in ("self", "cls"):
         params = params[1:]
     handed = list(zip(params, call.args))
     handed += [(kw.arg, kw.value) for kw in call.keywords if kw.arg is not None]
-    known = file.derived.setdefault(target, {})
-    changed = False
-    for param, value in handed:
-        if param in known or isinstance(value, ast.Starred):
-            continue
-        origin = file.leak(value, scope)
-        if origin is not None:
-            known[param] = origin
-            changed = True
-    return changed
+    return [(param, value) for param, value in handed if not isinstance(value, ast.Starred)]
 
 
 def _message_pieces(call: ast.Call) -> List[ast.expr]:

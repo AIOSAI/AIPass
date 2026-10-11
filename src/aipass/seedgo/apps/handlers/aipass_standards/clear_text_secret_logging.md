@@ -1,6 +1,6 @@
 # Clear Text Secret Logging Standards
-**Status:** v1
-**Date:** 2026-10-10
+**Status:** v1.1 (checker 1.1.0: arm 2's call-result seed and same-file hop, CodeQL round nine)
+**Date:** 2026-10-10 · **Modified:** 2026-10-10
 
 ---
 
@@ -34,7 +34,8 @@ f-string piece, every `%` operand, every `.format()` argument, every `+` operand
 1. **Named as a secret.** A Name, Attribute or Call whose identifier holds a secret word as a
    whole segment, snake_case and camelCase both split: `secret`, `secrets`, `token`, `tokens`,
    `password`, `passwords`, `passwd`, `api_key`, `apikey`, `credential`, `credentials`, `bearer`,
-   `auth_header`, `access_key`, `private_key`. The two-word ones match as consecutive segments.
+   `auth_header`, `access_key`, `private_key`, `trusted`, `confidential` (`untrusted` is its own
+   segment and never matches). The two-word ones match as consecutive segments.
    `credentials[0]` reads the collection; `str()`, `repr()`, `Path()`, `os.fspath()` and the
    string methods (`.strip()`, `.lower()`, `.encode()` ...) are looked through.
 2. **Built in this file from a secret-named source.** File-local, settled in at most ten passes.
@@ -43,16 +44,39 @@ f-string piece, every `%` operand, every `.format()` argument, every `+` operand
    - a secret-named **module-level binding**: an assignment at the file's top level
      (`SECRETS_BASE = Path.home() / ".secrets" / "aipass"`), read where no parameter or local of
      the same name shadows it;
-   - a secret-named **attribute read**: `secrets_store.SECRETS_BASE`, `self.api_key`.
+   - a secret-named **attribute read**: `secrets_store.SECRETS_BASE`, `self.api_key`;
+   - the **result of a call** named by CodeQL's source words (1.1.0): `secret = _get_secret(bot_id)`,
+     `doc = secrets_store.get_secret(a, b)`, `load_trusted_keys()`, `read_confidential()`, assigned to
+     any name, local or module. The call's secret word must be `secret`, `secrets`, `trusted` or
+     `confidential` (never token or password: `secrets.token_hex`, `issue_token`); the identifier
+     acquittals still apply (`secret_path()`, `redact_secret()`); a name that holds hash, md5, sha,
+     random, encode, encrypt, public, user, login, logging, clear or redact anywhere is not a source
+     (CodeQL's exclusions); and a setter verb segment (set, write, save, put, delete, remove, drop,
+     rotate, revoke) says the call stores the secret and returns a status, so it seeds nothing.
 
-   It never starts from a parameter, a loop or `with` target, a function-local name, a function's
-   return or a secret-named call. From a source it **follows**:
-   - a local assigned, looped, `with`-bound or walrus-bound from a built value;
+   A token word (`token`, `tokens`) seeds neither a binding nor an attribute: measured, argparse's
+   `args.tokens` in @prax `monitor.py` is a list of branch names. Arm 1 still reads it on the line.
+
+   It never starts from a parameter, a loop or `with` target or a function-local name. From a
+   source it **follows**:
+   - a local assigned, looped, `with`-bound or walrus-bound from a built value (a secret-named
+     local too: `secret = _get_secret(bot_id)` carries the call's taint on);
+   - a comprehension or generator over a built value: its element is read with the target bound to
+     what it iterates (`key for key in document` carries the document's keys); a filter acquits
+     nothing, `len(key)` as the element is still a redaction;
+   - the wrappers `sorted`, `list`, `tuple`, `set`, `frozenset`, `dict`, `reversed`, `str`, `repr`,
+     `", ".join(...)`, `.format()`, f-strings and `%`;
    - a same-file function whose `return` hands a built value back (calls by name, or `self.`/`cls.`);
-   - a parameter of a same-file function that some same-file call hands a built value;
+   - a parameter of a same-file function that some same-file call hands a built value (a log line
+     inside that function is judged with it);
+   - **the same-file hop**: a call that hands a built value to a same-file function whose `return`
+     is built from that parameter has a built result (`strays = non_secret_keys(secret)`). This is
+     the only place a parameter is followed back out, and it is per call: the same helper handed a
+     clean argument returns clean;
    - an attribute or subscript of a built name (`target.parent`).
 
-   A subscript or attribute target (`entry["k"] = token`) binds no name.
+   A subscript or attribute target (`entry["k"] = token`) binds no name. A `non_` or `not_` prefix on
+   a function says what it filters, not that its return is clean: it acquits nothing.
 
 **Why arm 2 starts so narrowly.** A parameter or loop variable called `token` is a shell word or a
 counter as often as a credential. @drone's `_resolve_mail_token(token)` hands its argument back,
@@ -60,9 +84,9 @@ and spreading from that parameter convicted `command`, `args[idx + 1]`, `message
 log lines that say nothing secret. Its name is still judged by arm 1 wherever it reaches a log line
 itself, and there the rename is the cure. A module-level binding and an attribute are where a file
 names its secret stores, and they are CodeQL's sources too (`SensitiveVariableAssignment`,
-`SensitiveAttributeAccess`). Spreading from secret-named calls was dropped for the same reason: a
-function named for a token (`secrets.token_hex`, `issue_token`) returns what its name says only
-sometimes.
+`SensitiveAttributeAccess`). Spreading from every secret-named call was dropped for the same reason:
+a function named for a token (`secrets.token_hex`, `issue_token`) returns what its name says only
+sometimes. 1.1.0 re-admits calls on CodeQL's own source words only, the narrowing measured below.
 
 Arm 2 is what reaches the CodeQL rows: no name on those log lines says secret; the source they were
 built from does.
@@ -111,6 +135,31 @@ calls such a source reaches are exactly six, and the rule convicts all six: @api
 and :267 (`lock_path`), two sources, which matches the alert's two; and `auth/secrets.py`
 :62 :187 :216, from the `SECRETS_BASE` assignment at :29. Which pair CodeQL drew could not be
 replayed here. Either way, both are convicted.
+
+### Round nine (checker 1.1.0)
+
+PR #774 round eight: the alert stayed after @api's cure. The live path was @skills
+`lib/telegram/apps/handlers/config.py`, `load_bot_config`: `secret = _get_secret(bot_id)` (a
+secret-named call into a local), `strays = non_secret_keys(secret)` (a same-file function returning
+`sorted(key for key in document if key not in SECRET_FIELDS)`), and `strays` on a warning. 1.0.0
+never seeded from the call. 1.1.0 convicts the pre-cure shape at the warning; the cure @skills
+shipped (the count, `len(strays)`, without the names) is acquitted.
+
+Measured over 1,302 product files, the fleet at **0 rows** before and **0 rows** after (the config
+line was already cured on disk). Each narrowing below was kept because dropping it convicted a false
+row:
+
+| variant | rows | the false rows |
+|---|---|---|
+| call seed from every secret word | 10 | `secrets.token_hex` (@api `uploads.py` :219 :281 :300, @devpulse `registry.py` :344), `issue_token` (@api `host_api.py` :374), `context_fill_tokens` (@hooks `context_gauge.py` :106 :121), `_get_turn_token` (@hooks `cadence.py` :828 :841), `_without_credentials` (@api `git_reads.py` :1435) |
+| credential(s) added to the call words | 1 | `_without_credentials` (@api `git_reads.py` :1435) |
+| no setter-verb exclusion | 1 | @api `host/config.py` :150, from `secrets_store.set_secret(...)` |
+| token words seed bindings and attributes | 1 | @prax `monitor.py` :274, argparse's `args.tokens` through `list()` into `args` |
+| CodeQL's exclusion words dropped | 0 | (kept: they are CodeQL's model) |
+| arm 1 without trusted and confidential | 0 | the two new words convict nothing new today |
+
+So `creds = load_credentials()`, the dispatch's third example, does not seed: credential(s) is not a
+CodeQL source word, and admitting it convicted a false row. It is still arm 1 on the line.
 
 ## Scoring
 

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: clear_text_secret_logging_content.py
 # Description: Clear Text Secret Logging Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-10
 # Modified: 2026-10-10
 # =============================================
@@ -34,15 +34,23 @@ def get_clear_text_secret_logging_standards() -> str:
         "  piece, a % operand, a .format() argument or a + operand - is:",
         "  [red]1. named as a secret[/red]: a Name, Attribute or Call whose identifier holds, as a whole",
         "     segment, secret(s), token(s), password(s), passwd, api_key, apikey, credential(s),",
-        "     bearer, auth_header, access_key or private_key;",
+        "     bearer, auth_header, access_key, private_key, trusted or confidential (untrusted is not);",
         "  [red]2. built in this file from a secret-named source[/red]. It STARTS only from a module-level",
-        "     binding ([yellow]SECRETS_BASE = ...[/yellow]) or an attribute read",
-        "     ([yellow]secrets_store.SECRETS_BASE[/yellow], [yellow]self.api_key[/yellow]) - never a parameter,",
-        "     loop or with target, local, or secret-named call.",
-        "     From there it FOLLOWS assignments, same-file returns and parameters, and attributes",
-        "     ([yellow]target.parent[/yellow]). Why: a parameter or loop var called token is a shell word or a",
-        "     counter as often as a credential; arm 1 judges its name wherever it is logged. A",
-        "     module binding or attribute is where a file names its secret store - CodeQL's source too.",
+        "     binding ([yellow]SECRETS_BASE = ...[/yellow]), an attribute read",
+        "     ([yellow]secrets_store.SECRETS_BASE[/yellow], [yellow]self.api_key[/yellow]) - a token word seeds",
+        "     neither - or the RESULT of a call named by CodeQL's source words: secret(s), trusted,",
+        "     confidential ([yellow]secret = _get_secret(bot_id)[/yellow]), unless the name also holds hash,",
+        "     md5, sha, random, encode, encrypt, public, user, login, logging, clear or redact, or a setter",
+        "     verb (set/write/save/put/delete/remove/drop/rotate/revoke: it returns a status). Never a",
+        "     parameter, loop or with target, or local.",
+        "     From there it FOLLOWS assignments, comprehensions over a built value, the wrappers",
+        "     sorted/list/tuple/set/dict/str/repr/join/format/f-strings, same-file returns and parameters,",
+        "     attributes ([yellow]target.parent[/yellow]) and [red]the same-file hop[/red]: a built argument to a",
+        "     function defined here taints that call's result when the parameter reaches its return",
+        "     ([yellow]strays = non_secret_keys(secret)[/yellow]). Per call: a clean argument stays clean. A",
+        "     non_/not_ prefix acquits nothing. Why so narrow: a parameter or loop var called token is a",
+        "     shell word as often as a credential (and token_hex, issue_token return no secret); arm 1",
+        "     judges its name wherever it is logged.",
         "",
         "[bold cyan]NOT A ROW:[/bold cyan]",
         "  An identifier of a secret: a segment beside the word says what it is - token_id,",
@@ -61,6 +69,9 @@ def get_clear_text_secret_logging_standards() -> str:
         "  (skills/lib is outside the audit corpus, so api, drone and hooks score under 100).",
         "  The CodeQL flows are among api's: host/tokens.py :324 :370 :438 and auth/secrets.py",
         "  :62 :187 :216, every one built from SECRETS_BASE.",
+        "  Round nine (1.1.0): CodeQL's next row was @skills telegram config.py load_bot_config,",
+        "  strays from _get_secret through non_secret_keys - the call seed and the hop convict it.",
+        "  Fleet after: 0 rows (the line was already cured); the narrowings each dropped a false row.",
         "",
         "[bold cyan]SCORING:[/bold cyan]",
         "  SCORED, per file: 0 on any row, else 100. Every row on ONE check.",

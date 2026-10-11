@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch5.py
 # Description: Unit tests for ruff_check and clear_text_secret_logging checker handlers (batch 5)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-16
 # Modified: 2026-10-10
 # =============================================
@@ -482,3 +482,151 @@ class TestTheSecretLoggingVerdict:
 
     def test_the_standard_is_declared_production_only(self) -> None:
         assert (secret_logging.APPLIES_TO, secret_logging.AUDIT_SCOPE) == ("production", "all_files")
+
+
+# =============================================
+# 5. clear_text_secret_logging arm 2 widened (dispatch 39bfe173, CodeQL round nine)
+# =============================================
+
+#: @skills lib/telegram/apps/handlers/config.py BEFORE its cure (2026-10-10), cut:
+#: load_bot_config's secret = _get_secret(bot_id) (:365) handed to non_secret_keys
+#: (:147), whose sorted generator over the document comes back as strays, logged at :376.
+TELEGRAM_CONFIG_SPECIMEN = """from aipass.prax import logger
+from aipass.api.apps.modules.secrets import get_secret as _api_get_secret
+
+SECRET_FIELDS = ("bot_token", "api_id", "api_hash")
+
+
+def _get_secret(bot_id):
+    return _api_get_secret("telegram", bot_id, as_json=True)
+
+
+def non_secret_keys(document):
+    if not isinstance(document, dict):
+        return []
+    return sorted(key for key in document if key not in SECRET_FIELDS)
+
+
+def load_bot_config(bot_id):
+    secret = _get_secret(bot_id)
+    strays = non_secret_keys(secret)
+    if strays:
+        logger.warning(
+            "Legacy secret document telegram/%s carries %d non-secret key(s) %s",
+            bot_id,
+            len(strays),
+            strays,
+        )
+    return dict(secret)
+"""
+
+#: The cure @skills shipped: the count stays on the line, the key names leave it.
+TELEGRAM_CONFIG_CURED = TELEGRAM_CONFIG_SPECIMEN.replace(" non-secret key(s) %s", " non-secret key(s)").replace(
+    "            len(strays),\n            strays,\n", "            len(strays),\n"
+)
+
+#: A secret document laundered through a neutrally named same-file helper.
+LAUNDERED_SPECIMEN = """from aipass.prax import logger
+from aipass.api.apps.modules.secrets import get_secret
+
+
+def describe(document):
+    names = [key for key in document]
+    return ", ".join(sorted(names))
+
+
+def report(provider):
+    doc = get_secret(provider, "bot")
+    summary = describe(doc)
+    logger.info("document keys: %s", summary)
+    logger.info("provider keys: %s", describe(provider))
+"""
+
+
+def _one_call_rows(call: str) -> list:
+    """The rows of a file that assigns one call's result to a neutral name and logs it."""
+    return _secret_rows(f"from aipass.prax import logger\n\nvalue = {call}\nlogger.info('%s', value)\n")
+
+
+class TestASecretNamedCallsResultSeedsArmTwo:
+    def test_the_telegram_config_strays_line_is_convicted(self, tmp_path: Path) -> None:
+        path = tmp_path / "apps" / "config.py"
+        _write_file(path, TELEGRAM_CONFIG_SPECIMEN)
+        message = secret_logging.check_module(str(path))["checks"][0]["message"]
+        assert message.startswith("config.py:21 logs strays (built from ") and len(message.splitlines()) == 1
+
+    def test_the_cured_count_only_line_is_acquitted(self) -> None:
+        assert _secret_rows(TELEGRAM_CONFIG_CURED) == []
+
+    @pytest.mark.parametrize(
+        "call",
+        ["get_secret(a, b)", "secrets_store.get_secret(a, b)", "load_trusted_keys()", "read_confidential()"],
+    )
+    def test_a_secret_named_call_assigned_to_a_neutral_name_is_convicted(self, call: str) -> None:
+        assert _one_call_rows(call) == [4]
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            "secrets.token_hex(16)",
+            "issue_token(seat)",
+            "secret_path(slug)",
+            "hash_secret(raw)",
+            "get_user_secret(seat)",
+            "load_untrusted()",
+            "set_secret(a, b, c)",
+            "delete_secret(a, b)",
+        ],
+    )
+    def test_a_token_word_identifier_excluded_or_setter_call_seeds_nothing(self, call: str) -> None:
+        assert _one_call_rows(call) == []
+
+
+class TestASameFileHelperCarriesItsArgumentsTaint:
+    def test_a_secret_laundered_through_a_same_file_helper_is_convicted(self) -> None:
+        assert secret_logging.scan(LAUNDERED_SPECIMEN) == [(13, "summary (built from get_secret(provider, 'bot'))")]
+
+    def test_a_clean_argument_through_the_same_helper_is_acquitted(self) -> None:
+        assert 14 not in _secret_rows(LAUNDERED_SPECIMEN)
+
+    def test_a_helper_that_drops_its_argument_returns_clean(self) -> None:
+        source = LAUNDERED_SPECIMEN.replace('return ", ".join(sorted(names))', "return str(len(names))")
+        assert _secret_rows(source) == []
+
+    def test_a_non_prefix_never_acquits_the_value_through_it(self) -> None:
+        source = LAUNDERED_SPECIMEN.replace("describe", "non_secret_keys")
+        assert 13 in _secret_rows(source)
+
+    def test_a_local_built_in_one_function_is_not_another_functions_name(self) -> None:
+        source = (
+            "from aipass.prax import logger\n\n\ndef fetch(slug):\n    value = get_secret(slug)\n    return None\n\n\n"
+            "def show(value):\n    logger.info('%s', value)\n"
+        )
+        assert _secret_rows(source) == []
+
+
+#: @prax apps/modules/monitor.py as on disk 2026-10-10, cut: argparse's positional
+#: `tokens` (branch names) through _standalone_run_args' list() reaches a log line as `args`.
+PARSER_TOKENS_SPECIMEN = """from aipass.prax import logger
+
+
+def _standalone_run_args(tokens):
+    tokens = list(tokens)
+    return ["run", *tokens]
+
+
+def _run_monitor(args):
+    logger.info(f"Starting unified monitoring (args: {args})")
+
+
+def main(args):
+    _run_monitor(_standalone_run_args(args.tokens))
+"""
+
+
+class TestATokenNamedBindingOrAttributeSeedsNothing:
+    def test_argparse_tokens_carried_into_a_neutral_name_are_acquitted(self) -> None:
+        assert _secret_rows(PARSER_TOKENS_SPECIMEN) == []
+
+    def test_a_secrets_named_attribute_through_the_same_path_is_convicted(self) -> None:
+        assert _secret_rows(PARSER_TOKENS_SPECIMEN.replace("args.tokens", "args.secrets")) == [10]
