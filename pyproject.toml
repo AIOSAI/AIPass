@@ -117,10 +117,18 @@ testpaths = ["tests", "src"]
 # recursed for tests — prevents conftest module-name collisions like a bundled
 # skill's .aipass/.../tests/conftest.py clashing with a branch's tests/conftest.py.
 norecursedirs = ["templates", "*.egg-info", ".*", "__pycache__", "my-project"]
+# Telegram is retired (the owner, 2026-09-14 and 2026-10-11: the code stays in
+# place, disabled, and nothing scans it). Every file or directory whose name
+# carries "telegram" is left out of collection: the skill lib under
+# src/aipass/skills/lib/telegram, prax's relay test, hooks' response tests and
+# the daemon's notifier. 1410 items on 2026-10-11. CodeQL carries the same
+# exclusion in .github/workflows/security.yml; seedgo's audit reads a
+# .seedgoignore in daemon, prax and hooks.
+addopts = ["--ignore-glob=*telegram*"]
 
 [tool.coverage.run]
 source = ["src/aipass"]
-omit = ["*/tests/*", "*/templates/*"]
+omit = ["*/tests/*", "*/templates/*", "*telegram*"]
 
 [tool.coverage.report]
 show_missing = true

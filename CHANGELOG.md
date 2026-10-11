@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-10-11] — after v2.8.12: telegram out of every scan
+
+### Changed
+
+- **telegram: retired code, out of pytest, seedgo and CodeQL** (223ef026 and the follow-up, 2026-10-11; the owner: "we leave the code, just not active, no test or ci should be scanning it"). The code stays in the tree, switched off since 08-18 (`skills_json/switch_state.json`, the 09-14 ruling recorded in it); no telegram unit, process or daemon schedule is live. Three exclusions, one name: anything called `*telegram*`. pytest: `addopts = ["--ignore-glob=*telegram*"]` in pyproject.toml, applied to every run from the root inifile (CI's three OS jobs, the coverage job, and each seat's own suite); 1410 items left collection across skills, prax, hooks and daemon (7178 → 5775). The seven that still carry the word are own-branch pins of the retired gate (skills' switch tests, screen_lock's "does not drag in the telegram stack", daemon's run-module notify pins) and stay. coverage `omit` carries the same glob. seedgo: a `.seedgoignore` with `*telegram*` in daemon, prax and hooks (the skill lib under `skills/lib/` was never in the audit corpus, which reads `apps/`, `shared/` and `tests/`). CodeQL: the Security workflow's init step carries a `paths-ignore` config for `**/telegram/**` and `**/*telegram*`. PR #774 spent five CI rounds on a clear-text-logging flow sourced in telegram's `list_bot_configs` walk of the secrets store; the api side is cured (83f812c9), the retired caller is now out of every scan. Removing the code is a separate call.
+
 ## [2026-10-10] — the fleet-green train: every one of the 18 branches at 100 under seedgo's gold-seal test pack (the checker legs, the oversize splits, ai_mail's doors and its 57 duplicate tests retired, the surfaced rows cured in the tests), the git lockdown (raw `git` and `gh` refused for every seat, reads included, `drone @git` twins for each, `drone rm` the one delete), the handlers fence restored fleet-wide through doors, hooks' gates grown (the scripted-write ownership lane, the memory lane, the per-leg test-write gate, a sed print script read as a read, bash_writes naming every `sed -i` file), aipass's branch prompt back under the injection cap, and the CI gate's tripwire moved for the retired handler_import standard (DPLAN-0354 / DPLAN-0356 / DPLAN-0403 / DPLAN-0404, merged as PR #774, v2.8.12)
 
 ### Added

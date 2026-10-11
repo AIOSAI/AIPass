@@ -47,6 +47,13 @@ jobs:
       - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           languages: python
+          # Telegram is retired (the owner, 2026-10-11): the skill lib, the
+          # daemon notifier, the prax relay and the hooks response module stay
+          # in the tree but are no longer scanned. Every other path is.
+          config: |
+            paths-ignore:
+              - "**/telegram/**"
+              - "**/*telegram*"
       - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         id: analyze
       # The SARIF's own paths, in the job log. GitHub's check annotates the sink
