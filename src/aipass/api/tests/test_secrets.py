@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_secrets.py
 # Description: Tests for secrets handler and get_secret_cmd orchestrator
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-15
-# Modified: 2026-09-27
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
@@ -176,7 +176,10 @@ class TestGetSecret:
         assert result is None
         warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
         assert len(warnings) == 2
-        assert warnings[0].startswith(f"Error reading secret file {provider_dir / 'bot.json'}: ")
+        # Which secret is the next line's job; where it lives is on neither
+        # (seedgo clear_text_secret_logging, PR #774).
+        assert warnings[0].startswith("Error reading a JSON secret file: ")
+        assert not any(str(tmp_path) in warning for warning in warnings)
         assert warnings[1] == "Secret not found: telegram/bot"
 
     @pytest.mark.skipif(

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_token_store.py
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-10-06
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -695,7 +695,11 @@ class TestTheLockIsRealNotDecorative:
         assert len(held) == len(refusals), "every refused unlink kept its handle open past the release"
         assert log.warning.call_count == 1
         message, *values = log.warning.call_args.args
-        assert str(lock) in message % tuple(values)
+        # Named in words, and the only value on the line is the OSError: the
+        # lock's path stays off it (seedgo clear_text_secret_logging, PR #774).
+        assert "token store lock" in message
+        assert len(values) == 1
+        assert isinstance(values[0], OSError)
 
     def test_a_lock_already_gone_at_release_stays_quiet(self, store: Path) -> None:
         """

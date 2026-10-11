@@ -42,7 +42,7 @@ api/
 │   │                               # git_reads.py, fleet.py, face.py, feed.py, attach.py,
 │   │                               # pump.py, uploads.py, statics.py, settings.py,
 │   │                               # lifetime.py, autostart.py, read_cache.py, refusals.py,
-│   │                               # machine.py, lock.py, memory_config.py
+│   │                               # machine.py, lock.py, memory_config.py, denials.py
 │   └── integrations/               # Private driver space (gitignored)
 └── tests/                          # conformance/settings/ holds the shared goldens
 ```

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-14
 # Modified: 2026-10-10
 # =============================================
@@ -24,6 +24,7 @@
 # seedgo: no-test-needed(constant) — SNAPSHOT_TIMEOUT_SECONDS and END_ROOM_TIMEOUT_SECONDS's values
 
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -35,6 +36,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import lock as host_lock
 from aipass.api.apps.handlers.host import machine as host_machine
@@ -1110,14 +1112,21 @@ class TestTheRosterRoute:
         assert response.json()["error"]["code"] == "fleet_unavailable"
         run.assert_not_called()
 
-    def test_their_failure_sentence_reaches_the_client(self, client, auth: dict, seated: Path) -> None:
-        """Exit 1: 503 carrying BAUD's own words."""
+    def test_their_failure_is_a_503_that_keeps_their_sentence_off_the_wire(
+        self, client, auth: dict, seated: Path
+    ) -> None:
+        """Exit 1: 503 fleet_unavailable; BAUD's own words go to the host log under a ref, not to the client."""
         failed = {"branches": [], "generated_at": "2026-08-16T16:57:31Z", "error": "no project registry found"}
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(1, json.dumps(failed))):
             response = client.get("/v1/roster", headers=auth)
 
         assert response.status_code == 503
-        assert "no project registry found" in response.json()["error"]["message"]
+        error = response.json()["error"]
+        assert error["code"] == "fleet_unavailable"
+        # seedgo exception_text_in_response, PR #774: the code's sentence, never theirs.
+        assert error["message"] == host_denials.SENTENCES["fleet_unavailable"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "no project registry found" not in response.text
 
     def test_a_usage_error_is_500_because_it_is_ours(self, client, auth: dict, seated: Path) -> None:
         """
@@ -1232,22 +1241,32 @@ class TestTheMachineRoute:
             ("a_code_from_the_future", "a refusal this server has never seen"),
         ],
     )
-    def test_a_refusal_is_a_503_with_its_code_and_detail_intact(
+    def test_a_refusal_is_a_503_with_its_code_intact_and_its_detail_off_the_wire(
         self, client, auth: dict, machine_door, reason: str, detail: str
     ) -> None:
         """
-        The skill said no: 503, its code in `reason`, its detail as the message.
+        The skill said no: 503, its code in `reason`, the fixed sentence as the message.
 
         switched_off is 503 by the kill-switch rule (a closed switch names itself,
         never a 200 dressed as a reading), and a code nobody here has seen is 503
-        with the code intact rather than guessed at.
+        with the code intact rather than guessed at. The skill's detail goes to
+        the host log under the ref; `reason` is the client contract.
         """
         machine_door.return_value = {"ok": False, "reason": reason, "detail": detail}
 
         response = client.get("/v1/machine", headers=auth)
 
         assert response.status_code == 503
-        assert response.json()["error"] == {"code": "machine_refused", "message": detail, "reason": reason}
+        error = response.json()["error"]
+        # seedgo exception_text_in_response, PR #774: the code survives, the words do not.
+        assert error == {
+            "code": "machine_refused",
+            "message": host_denials.SENTENCES["machine_refused"],
+            "reason": reason,
+            "ref": error["ref"],
+        }
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert detail not in response.text
 
     def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, machine_door) -> None:
         """
@@ -1480,8 +1499,8 @@ class TestTheLockRoute:
         """
         The skill never raises for a reading, so a raise is a defect in the door — named.
 
-        By code and fixed sentence, as the machine route does: the exception's
-        words go to the host log, never to the handset (CodeQL
+        By code and the code's fixed sentence: the exception's words, DOOR_RAISED
+        included, go to the host log under a ref, never to the handset (CodeQL
         py/stack-trace-exposure, PR #774).
         """
         lock_door.side_effect = RuntimeError("boom inside the door")
@@ -1492,7 +1511,10 @@ class TestTheLockRoute:
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "lock_door_failed"
-        assert error["message"] == host_lock.DOOR_RAISED
+        # seedgo exception_text_in_response, PR #774.
+        assert error["message"] == host_denials.SENTENCES["lock_door_failed"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert host_lock.DOOR_RAISED not in response.text
         assert "boom" not in response.text
         logged = log.error.call_args
         assert "RuntimeError: boom inside the door" in logged.args[0] % logged.args[1:]
@@ -1537,7 +1559,11 @@ class TestTheLockRoute:
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "lock_door_failed"
-        assert "published shape" in error["message"]
+        # The shape fault is the operator's to read, in the host log under the ref
+        # (seedgo exception_text_in_response, PR #774).
+        assert error["message"] == host_denials.SENTENCES["lock_door_failed"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "published shape" not in response.text
 
     def test_a_parameter_is_refused_not_dropped(self, client, auth: dict, lock_door) -> None:
         """A cache-buster the route ignored would read as a parameter that did something."""

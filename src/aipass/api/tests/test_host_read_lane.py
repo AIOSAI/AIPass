@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane.py
 # Description: Tests for the host API read lane — file reads, the whole diff, and the read lane's /v1 routes
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-14
-# Modified: 2026-10-09
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for the file and diff reads in apps/handlers/host/reads.py and git_reads.py, and their /v1 routes."""
@@ -79,6 +79,7 @@
 # seedgo: no-test-needed(covered_elsewhere) — token minting and the token store; tests/test_host_token_store.py
 # seedgo: no-test-needed(ruff) — that every module in apps/handlers/host/ parses and imports
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import git_reads as host_git
@@ -404,9 +406,10 @@ class TestReadLaneRoutes:
         """
         A branch this server can locate but cannot ask git about.
 
-        503 and drone's sentence, never 200 with an empty list: a clean badge
-        on a branch nothing was measured on is the one answer that would be
-        read as fact.
+        503, never 200 with an empty list: a clean badge on a branch nothing
+        was measured on is the one answer that would be read as fact. drone's
+        sentence goes to this host's log under the ref; the client gets the
+        code's fixed sentence.
         """
         api, raw = client
         completed = MagicMock()
@@ -422,8 +425,14 @@ class TestReadLaneRoutes:
             )
 
         assert response.status_code == 503
-        assert response.json()["error"]["code"] == "read_unavailable"
-        assert "cannot verify caller" in response.json()["error"]["message"]
+        error = response.json()["error"]
+        assert error["code"] == "read_unavailable"
+        # seedgo exception_text_in_response, PR #774: the exception's own words
+        # (drone's stderr) must not reach the client — this is the guard against
+        # str(e) returning to the read_unavailable denial.
+        assert error["message"] == host_denials.SENTENCES["read_unavailable"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "cannot verify caller" not in response.text
 
     def _completed(self, stdout: str) -> Any:
         completed = MagicMock()
@@ -480,7 +489,7 @@ class TestReadLaneRoutes:
         assert "thing.py" not in body["diff"]
 
     def test_diff_refuses_a_file_it_has_no_changes_for(self, client: Any, fake_repo: dict) -> None:
-        """A stale tap gets a sentence, not an empty patch that renders as calm."""
+        """A stale tap gets a refusal, not an empty patch that renders as calm."""
         api, raw = client
 
         with patch.object(subprocess, "run", return_value=self._completed(TWO_FILE_DIFF)):
@@ -491,7 +500,12 @@ class TestReadLaneRoutes:
             )
 
         assert response.status_code == 400
-        assert "absent.py" in response.json()["error"]["message"]
+        error = response.json()["error"]
+        assert error["code"] == "read_refused"
+        # seedgo exception_text_in_response, PR #774: the path stays in the log.
+        assert error["message"] == host_denials.SENTENCES["read_refused"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "absent.py" not in response.text
 
     def test_git_log_requires_auth(self, client: Any, fake_repo: dict) -> None:
         """History is not public either."""
@@ -516,7 +530,7 @@ class TestReadLaneRoutes:
         assert body["commits"][0]["sha"] == "b47462b7"
 
     def test_git_log_refuses_an_over_cap_limit_with_400(self, client: Any, fake_repo: dict) -> None:
-        """The cap is stated, not silently applied."""
+        """The cap refuses, never silently applies; the stated cap is in the host log."""
         api, raw = client
 
         with patch.object(subprocess, "run") as mock_run:
@@ -528,7 +542,12 @@ class TestReadLaneRoutes:
 
         mock_run.assert_not_called()
         assert response.status_code == 400
-        assert str(host_git.MAX_LOG_COMMITS) in response.json()["error"]["message"]
+        error = response.json()["error"]
+        assert error["code"] == "read_refused"
+        # seedgo exception_text_in_response, PR #774.
+        assert error["message"] == host_denials.SENTENCES["read_refused"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert f"serves 1 to {host_git.MAX_LOG_COMMITS}" not in response.text
 
     def test_commit_requires_auth(self, client: Any, fake_repo: dict) -> None:
         """Read scope, like every other lane here."""
@@ -609,7 +628,7 @@ class TestReadLaneRoutes:
 
     def test_remote_absent_is_400_in_the_envelope(self, client: Any, remote_repo: dict) -> None:
         """
-        Two real projects have no remote. The face gets a sentence it can show,
+        Two real projects have no remote. The face gets a refusal it can show,
         never an empty string it would render as a dead link.
         """
         api, raw = client
@@ -622,8 +641,12 @@ class TestReadLaneRoutes:
         )
 
         assert response.status_code == 400
-        assert response.json()["error"]["code"] == "read_refused"
-        assert "remote" in response.json()["error"]["message"]
+        error = response.json()["error"]
+        assert error["code"] == "read_refused"
+        # seedgo exception_text_in_response, PR #774.
+        assert error["message"] == host_denials.SENTENCES["read_refused"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "no remote configured" not in response.text
 
 
 class TestReadsFollowTheFleetLane:

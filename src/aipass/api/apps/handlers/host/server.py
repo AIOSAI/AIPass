@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-02
+# Modified: 2026-10-10
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -116,6 +116,7 @@ from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
@@ -130,22 +131,7 @@ from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.handlers.host import uploads as host_uploads
 from aipass.api.apps.handlers.host import verbs as host_verbs
-
-
-class UnavailableHTTPException(Exception):
-    """
-    Stand-in for FastAPI's HTTPException when the [host] extra is absent.
-
-    It mirrors the real signature because the name is both raised and handed to
-    @app.exception_handler(), which wants a class. Learning banked on d7330b00:
-    an import fallback that lands in a type position cannot be None.
-    """
-
-    def __init__(self, status_code: int = 500, detail: Any = None) -> None:
-        super().__init__(detail)
-        self.status_code = status_code
-        self.detail = detail
-
+from aipass.api.apps.handlers.host.denials import UnavailableHTTPException
 
 try:
     from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket
@@ -241,6 +227,12 @@ def _deny(status: int, code: str, message: str, **extra: Any) -> Any:
     error: Dict[str, Any] = {"code": code, "message": message}
     error.update(extra)
     return HTTPException(status_code=status, detail={"error": error})
+
+
+def _logged_denial(error: Exception, status: int, code: str, **extra: Any) -> Any:
+    """`_deny` for a caught exception: its words go to the host log under `ref`, the client gets the code's sentence."""
+    ref = host_denials.logged(error, status, code)
+    return _deny(status, code, host_denials.SENTENCES[code], ref=ref, **extra)
 
 
 def _peer(request: Any) -> str:
@@ -724,7 +716,7 @@ def create_app() -> Any:
         try:
             return host_feed.read_feed(since=since, limit=limit)
         except host_feed.FeedUnavailable as e:
-            raise _deny(503, "feed_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "feed_unavailable") from e
 
     @app.get("/v1/roots")
     def roots(record: dict = Depends(require_scope("read"))) -> dict:
@@ -733,7 +725,7 @@ def create_app() -> Any:
         try:
             return host_reads.list_roots()
         except host_reads.ReadUnavailable as e:
-            raise _deny(503, "roots_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "roots_unavailable") from e
 
     @app.get("/v1/files")
     def files(
@@ -750,9 +742,9 @@ def create_app() -> Any:
         try:
             return host_reads.read_file(branch=branch, file=file, project=project, root=root)
         except host_reads.ReadRefused as e:
-            raise _deny(400, "read_refused", str(e)) from e
+            raise _logged_denial(e, 400, "read_refused") from e
         except host_reads.ReadUnavailable as e:
-            raise _deny(503, "read_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "read_unavailable") from e
 
     @app.get("/v1/dir")
     def dir_listing(
@@ -766,9 +758,9 @@ def create_app() -> Any:
         try:
             return host_reads.list_dir(branch=branch, dir=dir, project=project, root=root)
         except host_reads.ReadRefused as e:
-            raise _deny(400, "read_refused", str(e)) from e
+            raise _logged_denial(e, 400, "read_refused") from e
         except host_reads.ReadUnavailable as e:
-            raise _deny(503, "read_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "read_unavailable") from e
 
     if MULTIPART_AVAILABLE:
 
@@ -794,7 +786,7 @@ def create_app() -> Any:
             except host_uploads.UploadRefused as e:
                 raise _deny(400, "upload_refused", str(e)) from e
             except host_uploads.UploadUnavailable as e:
-                raise _deny(503, "upload_unavailable", str(e)) from e
+                raise _logged_denial(e, 503, "upload_unavailable") from e
 
     else:
 
@@ -832,9 +824,9 @@ def create_app() -> Any:
                 ref=ref,
             )
         except host_reads.ReadRefused as e:
-            raise _deny(400, "read_refused", str(e)) from e
+            raise _logged_denial(e, 400, "read_refused") from e
         except host_reads.ReadUnavailable as e:
-            raise _deny(503, "read_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "read_unavailable") from e
 
     @app.get("/v1/git-changes")
     def git_changes(
@@ -847,9 +839,9 @@ def create_app() -> Any:
         try:
             return host_git.read_git_changes(branch=branch, project=project, grain=grain)
         except host_reads.ReadRefused as e:
-            raise _deny(400, "read_refused", str(e)) from e
+            raise _logged_denial(e, 400, "read_refused") from e
         except host_reads.ReadUnavailable as e:
-            raise _deny(503, "read_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "read_unavailable") from e
 
     @app.get("/v1/git-log")
     def git_log(
@@ -862,9 +854,9 @@ def create_app() -> Any:
         try:
             return host_git.read_git_log(branch=branch, project=project, limit=limit)
         except host_reads.ReadRefused as e:
-            raise _deny(400, "read_refused", str(e)) from e
+            raise _logged_denial(e, 400, "read_refused") from e
         except host_reads.ReadUnavailable as e:
-            raise _deny(503, "read_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "read_unavailable") from e
 
     @app.get("/v1/git-remote")
     def git_remote(
@@ -876,9 +868,9 @@ def create_app() -> Any:
         try:
             return host_git.read_git_remote(branch=branch, project=project)
         except host_reads.ReadRefused as e:
-            raise _deny(400, "read_refused", str(e)) from e
+            raise _logged_denial(e, 400, "read_refused") from e
         except host_reads.ReadUnavailable as e:
-            raise _deny(503, "read_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "read_unavailable") from e
 
     @app.get("/v1/commit")
     def commit(
@@ -891,9 +883,9 @@ def create_app() -> Any:
         try:
             return host_git.read_commit(branch=branch, ref=ref, project=project)
         except host_reads.ReadRefused as e:
-            raise _deny(400, "read_refused", str(e)) from e
+            raise _logged_denial(e, 400, "read_refused") from e
         except host_reads.ReadUnavailable as e:
-            raise _deny(503, "read_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "read_unavailable") from e
 
     @app.get("/v1/fleet")
     def fleet(
@@ -904,7 +896,7 @@ def create_app() -> Any:
         try:
             return host_fleet.read_snapshot(project=project)
         except host_fleet.FleetUnavailable as e:
-            raise _deny(503, "fleet_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "fleet_unavailable") from e
 
     @app.get("/v1/projects")
     def projects(
@@ -914,7 +906,7 @@ def create_app() -> Any:
         try:
             return host_fleet.list_projects()
         except host_fleet.FleetUnavailable as e:
-            raise _deny(503, "fleet_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "fleet_unavailable") from e
 
     @app.get("/v1/roster")
     def roster(
@@ -943,11 +935,11 @@ def create_app() -> Any:
         try:
             return host_fleet.read_roster()
         except host_fleet.FleetUnavailable as e:
-            raise _deny(503, "fleet_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "fleet_unavailable") from e
         except host_fleet.FleetMisuse as e:
             # Ours, not the caller's: this server built an argv the binary
             # refuses, and no retry makes that better.
-            raise _deny(500, "roster_misuse", str(e)) from e
+            raise _logged_denial(e, 500, "roster_misuse") from e
 
     @app.get("/v1/machine")
     def machine(
@@ -973,7 +965,7 @@ def create_app() -> Any:
         try:
             return host_machine.read_machine()
         except host_machine.MachineRefused as e:
-            raise _deny(503, "machine_refused", e.detail, reason=e.reason) from e
+            raise _logged_denial(e, 503, "machine_refused", reason=e.reason) from e
         except host_machine.MachineDoorFailed as e:
             raise _deny(503, "machine_door_failed", str(e)) from e
 
@@ -994,7 +986,7 @@ def create_app() -> Any:
         try:
             return host_lock.read_lock()
         except host_lock.LockDoorFailed as e:
-            raise _deny(503, "lock_door_failed", str(e)) from e
+            raise _logged_denial(e, 503, "lock_door_failed") from e
 
     @app.get("/v1/rooms")
     def rooms(
@@ -1005,7 +997,7 @@ def create_app() -> Any:
         try:
             return host_fleet.read_rooms(project=project)
         except host_fleet.FleetUnavailable as e:
-            raise _deny(503, "fleet_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "fleet_unavailable") from e
 
     # ── The memory-config lane (DPLAN-0302) ───────────────────────────────
     # @memory's rollover limits, read and written through @memory's own verbs.
@@ -1037,9 +1029,9 @@ def create_app() -> Any:
         try:
             return host_memory_config.read_config(branch=branch)
         except host_memory_config.MemoryConfigRefused as e:
-            raise _deny(400, "memory_config_refused", str(e), raw=e.raw, suggestion=e.suggestion) from e
+            raise _logged_denial(e, 400, "memory_config_refused") from e
         except host_memory_config.MemoryConfigUnavailable as e:
-            raise _deny(503, "memory_config_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "memory_config_unavailable") from e
 
     @app.post("/v1/memory-config/set")
     async def memory_config_set(
@@ -1054,9 +1046,9 @@ def create_app() -> Any:
                 count=payload.get("count"),
             )
         except host_memory_config.MemoryConfigRefused as e:
-            raise _deny(400, "memory_config_refused", str(e), raw=e.raw, suggestion=e.suggestion) from e
+            raise _logged_denial(e, 400, "memory_config_refused") from e
         except host_memory_config.MemoryConfigUnavailable as e:
-            raise _deny(503, "memory_config_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "memory_config_unavailable") from e
 
     @app.post("/v1/memory-config/set-default")
     async def memory_config_set_default(
@@ -1076,9 +1068,9 @@ def create_app() -> Any:
                 count=payload.get("count"),
             )
         except host_memory_config.MemoryConfigRefused as e:
-            raise _deny(400, "memory_config_refused", str(e), raw=e.raw, suggestion=e.suggestion) from e
+            raise _logged_denial(e, 400, "memory_config_refused") from e
         except host_memory_config.MemoryConfigUnavailable as e:
-            raise _deny(503, "memory_config_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "memory_config_unavailable") from e
 
     @app.post("/v1/memory-config/push")
     async def memory_config_push(
@@ -1088,9 +1080,9 @@ def create_app() -> Any:
         try:
             return host_memory_config.push_defaults()
         except host_memory_config.MemoryConfigRefused as e:
-            raise _deny(400, "memory_config_refused", str(e), raw=e.raw, suggestion=e.suggestion) from e
+            raise _logged_denial(e, 400, "memory_config_refused") from e
         except host_memory_config.MemoryConfigUnavailable as e:
-            raise _deny(503, "memory_config_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "memory_config_unavailable") from e
 
     # ── The verb lane (Phase 3) ───────────────────────────────────────────
     # POST only, operate scope only. Every one of these is a proxy: the branch
@@ -1122,7 +1114,7 @@ def create_app() -> Any:
         except host_verbs.VerbRefused as e:
             raise _deny(400, "verb_refused", str(e)) from e
         except host_verbs.VerbUnavailable as e:
-            raise _deny(503, "verb_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "verb_unavailable") from e
 
     @app.post("/v1/verbs/kill")
     async def verb_kill(
@@ -1138,7 +1130,7 @@ def create_app() -> Any:
         except host_verbs.VerbRefused as e:
             raise _deny(400, "verb_refused", str(e)) from e
         except host_verbs.VerbUnavailable as e:
-            raise _deny(503, "verb_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "verb_unavailable") from e
 
     @app.post("/v1/verbs/lock")
     async def verb_lock(
@@ -1165,9 +1157,9 @@ def create_app() -> Any:
         try:
             return host_settings.read_agent_settings(host_reads.resolve_branch_root(branch))
         except (host_reads.ReadRefused, host_settings.SettingsRefused) as e:
-            raise _deny(400, "settings_refused", str(e)) from e
+            raise _logged_denial(e, 400, "settings_refused") from e
         except (host_reads.ReadUnavailable, host_settings.SettingsUnavailable) as e:
-            raise _deny(503, "settings_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "settings_unavailable") from e
 
     @app.post("/v1/agent-settings")
     async def agent_settings_write(
@@ -1186,9 +1178,9 @@ def create_app() -> Any:
         try:
             return host_settings.write_agent_settings(host_reads.resolve_branch_root(branch), patch)
         except (host_reads.ReadRefused, host_settings.SettingsRefused) as e:
-            raise _deny(400, "settings_refused", str(e)) from e
+            raise _logged_denial(e, 400, "settings_refused") from e
         except (host_reads.ReadUnavailable, host_settings.SettingsUnavailable) as e:
-            raise _deny(503, "settings_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "settings_unavailable") from e
 
     @app.get("/v1/baud-settings")
     def baud_settings_read(
@@ -1198,9 +1190,9 @@ def create_app() -> Any:
         try:
             return host_settings.read_baud_settings(host_reads.repo_root())
         except host_settings.SettingsRefused as e:
-            raise _deny(400, "settings_refused", str(e)) from e
+            raise _logged_denial(e, 400, "settings_refused") from e
         except host_settings.SettingsUnavailable as e:
-            raise _deny(503, "settings_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "settings_unavailable") from e
 
     @app.post("/v1/baud-settings")
     async def baud_settings_write(
@@ -1214,9 +1206,9 @@ def create_app() -> Any:
         try:
             return host_settings.write_baud_settings(host_reads.repo_root(), patch)
         except host_settings.SettingsRefused as e:
-            raise _deny(400, "settings_refused", str(e)) from e
+            raise _logged_denial(e, 400, "settings_refused") from e
         except host_settings.SettingsUnavailable as e:
-            raise _deny(503, "settings_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "settings_unavailable") from e
 
     @app.get("/v1/hooks-sound")
     def hooks_sound_read(
@@ -1237,7 +1229,7 @@ def create_app() -> Any:
         try:
             return {"active": host_settings.hooks_sound_set(active)}
         except host_settings.SettingsUnavailable as e:
-            raise _deny(503, "settings_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "settings_unavailable") from e
 
     @app.websocket("/v1/room/attach")
     async def room_attach(websocket: WebSocket, branch: str = "", project: str = "", kind: str = "") -> None:
@@ -1359,10 +1351,11 @@ def create_app() -> Any:
         except host_fleet.FleetUnavailable as e:
             # The census could not answer — an unknown project name arrives
             # here too, carrying the binary's own "no project named ..."
-            # sentence, which is the most actionable words this refusal has.
+            # sentence. Those words are @baud's and can carry a host path, so
+            # they stay in the log and the audit; the close reason is fixed.
             logger.warning("[host_api] socket census failed for %s/%s: %s", project, branch, e)
             _audit_socket_refusal(websocket, str(e))
-            await websocket.close(code=1008, reason=str(e))
+            await websocket.close(code=1008, reason=host_denials.SOCKET_CENSUS_FAILED)
             return
         except (host_verbs.VerbUnavailable, host_attach.AttachUnavailable, host_reads.ReadUnavailable) as e:
             # 1011 is "server error" — ours, not the caller's, same split the
@@ -1374,7 +1367,7 @@ def create_app() -> Any:
                 "host_api_socket_unavailable",
                 {"branch": branch, "reason": str(e), "route": "/v1/room/attach"},
             )
-            await websocket.close(code=1011, reason=str(e))
+            await websocket.close(code=1011, reason=host_denials.SOCKET_UNAVAILABLE)
             return
 
         logger.info("[host_api] socket attached to %s for %s", session.room, target)
@@ -1431,7 +1424,7 @@ def create_app() -> Any:
         try:
             return host_statics.bundle_response(face.entry_file(), request.headers)
         except host_face.FaceUnavailable as e:
-            raise _deny(503, "face_unavailable", str(e)) from e
+            raise _logged_denial(e, 503, "face_unavailable") from e
 
     # NOT a catch-all. The bundle's own files get their own routes, so nothing
     # registered on this app — now or by a later caller — can be shadowed. See

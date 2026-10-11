@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_attach_route.py
 # Description: Tests for the attach route and its seats — opening, socket auth, watches, outside rooms, the ping
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
 # Modified: 2026-10-10
 # =============================================
@@ -29,6 +29,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.api.apps.handlers.host import attach as host_attach
+from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.handlers.host import verbs as host_verbs
@@ -484,7 +485,10 @@ class TestTheSocketRefusesBeforeItSpawns:
                     closed = socket.receive()
 
         assert closed["code"] == 1011
-        assert "tmux" in closed["reason"]
+        # The close reason is a response too: the fixed sentence, never the
+        # exception's words (seedgo exception_text_in_response, PR #774).
+        assert closed["reason"] == host_denials.SOCKET_UNAVAILABLE
+        assert "tmux" not in closed["reason"]
 
     def test_the_accepted_socket_carries_only_the_sentinel(self, store: Any) -> None:
         """

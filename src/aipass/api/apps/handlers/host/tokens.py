@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tokens.py
 # Description: Host API Token Handler — bearer token issue, verify, revoke
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-06
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -321,7 +321,10 @@ def save_tokens(records: List[Dict[str, Any]]) -> str:
         try:
             os.unlink(str(temporary))
         except OSError as cleanup_error:
-            logger.warning("[host_api] could not remove the temp store at %s: %s", temporary, cleanup_error)
+            # Named in words, never by its path: a path inside the secrets base
+            # reads as a secret's location (seedgo clear_text_secret_logging).
+            # This module keeps one store, so the words are enough to find it.
+            logger.warning("[host_api] could not remove the token store's temp file: %s", cleanup_error)
         raise
 
     return str(target)
@@ -367,7 +370,7 @@ def _store_lock(wait: Optional[float] = None) -> Iterator[None]:
             descriptor = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         except FileExistsError:
             if _lock_is_stale(path):
-                logger.warning("[host_api] breaking a stale token store lock at %s", path)
+                logger.warning("[host_api] breaking a stale token store lock")
                 _drop_lock(path)
                 continue
             if time.monotonic() >= deadline:
@@ -429,13 +432,13 @@ def _drop_lock(path: Path) -> None:
         os.unlink(str(path))
     except FileNotFoundError as e:
         # Tolerated: a stale-lock break may have removed it already.
-        logger.debug("[host_api] token store lock at %s was already gone: %s", path, e)
+        logger.debug("[host_api] the token store lock was already gone: %s", e)
     except OSError as e:
         # Not gone: refused, which is also Windows' answer for a lock already
         # being deleted. Never raised — a release that throws would mask
         # whatever the body was doing — but a warning, because a lock that
         # cannot be removed wedges every write until the staleness timeout.
-        logger.warning("[host_api] could not remove the token store lock at %s: %s", path, e)
+        logger.warning("[host_api] could not remove the token store lock: %s", e)
 
 
 # ==============================================

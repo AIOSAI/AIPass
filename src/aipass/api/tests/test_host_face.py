@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_face.py
 # Description: Tests for serving @baud's phone face from the host API origin
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-09
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/host/face.py and the face routes apps/handlers/host/server.py mounts."""
@@ -27,12 +27,14 @@
 # seedgo: no-test-needed(duplicate_test) — set_face_dir(), test_host_api_config.py; its config command, test_host_api.py
 # seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
 
+import re
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
@@ -492,12 +494,18 @@ class TestUnbuiltFace:
                     yield TestClient(host_server.create_app(), raise_server_exceptions=False)
 
     def test_root_reports_the_missing_bundle(self, bare_client) -> None:
-        """503 with the build command, not a blank page or a traceback."""
+        """503 face_unavailable with a ref into the log, not a blank page or a traceback."""
         response = bare_client.get("/")
 
         assert response.status_code == 503
-        assert response.json()["error"]["code"] == "face_unavailable"
-        assert "build:phone" in response.json()["error"]["message"]
+        error = response.json()["error"]
+        assert error["code"] == "face_unavailable"
+        # The build command is the exception's words: they stay in the host log,
+        # the client gets the code's sentence and a ref (seedgo
+        # exception_text_in_response, PR #774).
+        assert error["message"] == host_denials.SENTENCES["face_unavailable"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "build:phone" not in response.text
 
     def test_the_api_still_serves_without_a_face(self, bare_client) -> None:
         """The API is the product; the face is one of its clients."""
@@ -557,14 +565,15 @@ class TestTheServerResolvesTheFaceOnce:
         assert str(installed) in served[0]
         assert host_face.SOURCE_CONFIGURED in served[0]
 
-    def test_an_unservable_configured_dir_is_a_503_naming_it_not_the_checkout(
+    def test_an_unservable_configured_dir_is_a_503_named_in_the_log_not_the_checkout(
         self, built_face: Path, tmp_path: Path
     ) -> None:
         """
         The checkout build is right there, and is still not served.
 
         A server that fell back to it would show a face nobody chose while its
-        log read as healthy.
+        log read as healthy. The log names the configured dir; the client gets
+        the code's sentence and a ref, never the words that name it.
         """
         from fastapi.testclient import TestClient
 
@@ -577,7 +586,12 @@ class TestTheServerResolvesTheFaceOnce:
             response = client.get("/")
 
         assert response.status_code == 503
-        assert "configured face dir" in response.json()["error"]["message"]
+        error = response.json()["error"]
+        assert error["code"] == "face_unavailable"
+        # seedgo exception_text_in_response, PR #774: the dir is the operator's.
+        assert error["message"] == host_denials.SENTENCES["face_unavailable"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "configured face dir" not in response.text
         warned = _rendered(server_logger.warning)
         assert len(warned) == 1
         assert "configured face dir" in warned[0]

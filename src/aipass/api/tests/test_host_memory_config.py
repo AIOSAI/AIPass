@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_memory_config.py
 # Description: Tests for the host API memory-config lane — @memory's rollover limits
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-08-16
-# Modified: 2026-10-09
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/host/memory_config.py and its routes in apps/handlers/host/server.py."""
@@ -32,11 +32,13 @@
 # seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
 
 import importlib.util
+import re
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
@@ -861,9 +863,11 @@ class TestARefusalIsOneShapeWhereverItHappens:
     not carry it through, and the reason the shape leaked is written into the
     fixture names here so it does not re-form.
 
-    The rule now: a refusal is 400 memory_config_refused with their sentence,
-    whether it was caught here or spoken by @memory. 503 stays what it was —
-    @memory could not be reached at all.
+    The rule now: a refusal is 400 memory_config_refused, whether it was caught
+    here or spoken by @memory. 503 stays what it was — @memory could not be
+    reached at all. Either way the client gets the code's fixed sentence and a
+    ref; @memory's words (sentence, suggestion, raw stdout) go to this host's log
+    under that ref (seedgo exception_text_in_response, PR #774).
     """
 
     @pytest.fixture
@@ -891,8 +895,12 @@ class TestARefusalIsOneShapeWhereverItHappens:
             )
 
         assert response.status_code == 400
-        assert response.json()["error"]["code"] == "memory_config_refused"
-        assert "Unknown branch: @nosuchbranch" in response.json()["error"]["message"]
+        error = response.json()["error"]
+        assert error["code"] == "memory_config_refused"
+        # seedgo exception_text_in_response, PR #774: their sentence stays in the log.
+        assert error["message"] == host_denials.SENTENCES["memory_config_refused"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "Unknown branch: @nosuchbranch" not in response.text
 
     def test_before_and_after_routing_answer_identically(self, client, operate_auth: dict) -> None:
         """
@@ -959,30 +967,13 @@ class TestARefusalIsOneShapeWhereverItHappens:
         assert response.status_code == 400
         assert "ok" not in response.json()
 
-    def test_their_whole_payload_survives_the_refusal(self, client, operate_auth: dict) -> None:
+    def test_their_whole_payload_stays_off_the_wire_on_a_refusal(self, client, operate_auth: dict) -> None:
         """
-        The raw document must not be the price of the better status code.
+        A refusal carries no `raw`: their stdout is the operator's, not the client's.
 
-        Every answer carries their stdout verbatim, and a refusal is exactly
-        where this lane's reading of it is most likely to be the thing that is
-        wrong.
-        """
-        with patch.object(host_memory_config.drone, "route_command", return_value=_result(UNKNOWN_BRANCH_JSON)):
-            response = client.post(
-                "/v1/memory-config/set",
-                json={"branch": "nosuchbranch", "type": "sessions", "count": 5},
-                headers=operate_auth,
-            )
-
-        assert response.json()["error"]["raw"].strip() == UNKNOWN_BRANCH_JSON.strip()
-
-    def test_their_remedy_line_reaches_the_phone_as_its_own_field(self, client, operate_auth: dict) -> None:
-        """
-        A suggestion joined into one sentence can only be rendered as one.
-
-        @memory emits it separately, so a face that wants to show the fix on
-        its own line — or as a button — does not have to split their prose back
-        apart on a dash it does not own.
+        It used to ride along verbatim; another branch's JSON in a response is
+        exactly the exposure PR #774 closed. The operator reads it in this host's
+        log under the ref the client is handed.
         """
         with patch.object(host_memory_config.drone, "route_command", return_value=_result(UNKNOWN_BRANCH_JSON)):
             response = client.post(
@@ -991,16 +982,47 @@ class TestARefusalIsOneShapeWhereverItHappens:
                 headers=operate_auth,
             )
 
-        assert response.json()["error"]["suggestion"] == "Registry is truth — run 'drone systems' to list branches"
+        assert response.status_code == 400
+        error = response.json()["error"]
+        assert error["code"] == "memory_config_refused"
+        # seedgo exception_text_in_response, PR #774: no raw key, no trace of their JSON.
+        assert "raw" not in error
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "config get" not in response.text
+        assert "Unknown branch" not in response.text
+
+    def test_their_remedy_line_stays_off_the_wire(self, client, operate_auth: dict) -> None:
+        """
+        @memory's suggestion is their words, so a refusal no longer carries it.
+
+        It reached the phone as its own field once; it now goes to this host's
+        log with the rest of their answer, and the client gets the code's
+        sentence and a ref.
+        """
+        with patch.object(host_memory_config.drone, "route_command", return_value=_result(UNKNOWN_BRANCH_JSON)):
+            response = client.post(
+                "/v1/memory-config/set",
+                json={"branch": "nosuchbranch", "type": "sessions", "count": 5},
+                headers=operate_auth,
+            )
+
+        assert response.status_code == 400
+        error = response.json()["error"]
+        assert error["code"] == "memory_config_refused"
+        # seedgo exception_text_in_response, PR #774: no suggestion key, no trace of it.
+        assert "suggestion" not in error
+        assert error["message"] == host_denials.SENTENCES["memory_config_refused"]
+        assert "Registry is truth" not in response.text
+        assert "drone systems" not in response.text
 
     def test_a_refusal_decided_here_offers_no_suggestion_it_did_not_get(self, client, operate_auth: dict) -> None:
         """
-        The other half of one-shape: the field is present and null.
+        The other half of one-shape: no suggestion field here either.
 
         A bounds check on this side has no remedy line from @memory, and
         inventing one would put words in their mouth on a screen that reads as
-        theirs. Present-and-null is the honest shape, and it means the phone
-        renders both halves of the rule the same way.
+        theirs. Both halves of the rule now answer the same envelope — code,
+        fixed sentence, ref — so the phone renders them the same way.
         """
         with patch.object(host_memory_config.drone, "route_command") as route:
             response = client.post(
@@ -1010,7 +1032,13 @@ class TestARefusalIsOneShapeWhereverItHappens:
             )
 
         route.assert_not_called()
-        assert response.json()["error"]["suggestion"] is None
+        assert response.status_code == 400
+        error = response.json()["error"]
+        # seedgo exception_text_in_response, PR #774: the bounds sentence stays in the log.
+        assert "suggestion" not in error
+        assert error["message"] == host_denials.SENTENCES["memory_config_refused"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "Count must be between" not in response.text
 
     def test_unreachable_is_still_a_503_and_not_swept_in(self, client, operate_auth: dict) -> None:
         """

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_roots.py
 # Description: Tests for the roots roster and the widened name fence
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-18
-# Modified: 2026-10-09
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/handlers/host/reads.py's four-kind name fence and the /v1/roots route."""
@@ -111,6 +111,7 @@
 # seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -118,6 +119,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import server as host_server
@@ -882,9 +884,10 @@ class TestRootRoutes:
 
         `branch` had to stop being required by the signature, because `home`
         and `aipass` name nothing. So a request that names neither a root nor a
-        branch is refused by the fence (400, in words) where validation used to
-        refuse it (422). Both are refusals in the same envelope; the shape of
-        the answer moved, and this is where that is written down.
+        branch is refused by the fence (400; its words in the host log under a
+        ref) where validation used to refuse it (422). Both are refusals in the
+        same envelope; the shape of the answer moved, and this is where that is
+        written down.
         """
         api, raw = client
 
@@ -895,8 +898,12 @@ class TestRootRoutes:
         )
 
         assert response.status_code == 400
-        assert response.json()["error"]["code"] == "read_refused"
-        assert "branch" in response.json()["error"]["message"].lower()
+        error = response.json()["error"]
+        assert error["code"] == "read_refused"
+        # seedgo exception_text_in_response, PR #774: the fence's sentence stays in the log.
+        assert error["message"] == host_denials.SENTENCES["read_refused"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "branch name is required" not in response.text
 
     def test_no_root_at_all_answers_the_pre_roots_document(self, client: Any, world: dict) -> None:
         """The route-level half of the no-regression pin."""
