@@ -9,6 +9,16 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-10-11] — second train: the silent worker kills (SIGPIPE reset at import), seedgo 1.1.0
+
+### Fixed
+
+- **flow: SIGPIPE reset moves from import time to the `__main__` guard** (21ea2e1a, 2026-10-11; flow building, devpulse landing). `apps/flow.py` 1.2.1: the `signal.signal(SIGPIPE, SIG_DFL)` block left module scope and sits first inside the existing guard, where the process starts; a pipe to head still ends quietly, and importing the module changes nothing. `tests/test_flow.py` 1.1.0 pins both in a fresh interpreter each (the import leaves SIGPIPE as the interpreter set it, red before the cure; `--version` run as `__main__` reports SIG_DFL at exit). The logged_fallback bypass row moved with the cut (117 → 112). Suite 1084, mutant red on the import pin and the edit-time hook convicted it live with seedgo's new rule.
+
+### Changed
+
+- **seedgo: `module_scope_side_effect` 1.1.0 judges signal dispositions in every file** (e3dbc335, 2026-10-11; seedgo building, devpulse landing). Two CI runs lost an xdist worker with no traceback (38132534544, ubuntu, api's host-attach pong test; 38128154826, macOS, memory's no-match store test). Seedgo traced both to one enabling cause: ai_mail's `apps/ai_mail.py:33`, commons' `commons.py:68` and flow's `flow.py:46` run `signal.signal(SIGPIPE, SIG_DFL)` at module import; their tests import them, every xdist worker collects the whole suite, so every worker has had SIGPIPE at kernel default since collection, and Python's BrokenPipeError became a silent process death (status 141, nothing for faulthandler). Measured: `subprocess.run(input=...)` to a child that exits without reading survives as-is, dies after importing either entry. ai_mail's `dispatch/daemon.py:71-72` replace SIGTERM and SIGINT at import the same way. The ninth shape, `signal_disposition` (`signal.signal`, `signal.alarm`, `signal.setitimer` at module scope), is judged in every file, production and conftest included; the other eight stay test-file-only. APPLIES_TO tests → everywhere, cure text names the guard, checklist 41 → 42 on a production file. The fleet audit convicts exactly the five predicted lines; ai_mail, commons and flow read 99 until their cures land in this train. 10 pins red-first, 4 mutants killed; suite 5966.
+
 ## [2026-10-11] — after v2.8.12: telegram out of every scan
 
 ### Changed
