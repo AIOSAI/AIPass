@@ -1007,7 +1007,13 @@ class TestSecretStoreCarriesOnlyTheToken:
 
         assert loaded == legacy, "a legacy bot must not stop working"
         assert "non-secret key" in caplog.text
-        assert "branch_name" in caplog.text
+        # The count and the cure ride the warning; the key names never do: they are
+        # read out of a secret document (CodeQL py/clear-text-logging-sensitive-data,
+        # 2026-10-10). migrate_bot_config's dry-run report is where they are named.
+        assert "carries 3 non-secret key(s)" in caplog.text
+        assert "config.migrate_bot_config('old')" in caplog.text
+        for stray in ("bot_id", "branch_name", "work_dir"):
+            assert stray not in caplog.text, f"a key read out of the secret document reached the log: {stray}"
 
     def test_migrate_moves_the_strays_and_leaves_the_token(self, tmp_path, monkeypatch):
         """The cure for an already-deployed bot: config to the file, token stays put."""

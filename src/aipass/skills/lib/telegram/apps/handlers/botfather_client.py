@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: botfather_client.py
 # Description: Telethon-based BotFather automation client
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-15
-# Modified: 2026-06-15
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -106,7 +106,8 @@ def _load_telethon_config() -> dict:
     try:
         config["api_id"] = int(api_id)
     except (ValueError, TypeError) as e:
-        raise RuntimeError(f"Telethon config api_id is not a valid integer: {e}") from e
+        # The class, never the words: int()'s message quotes the api_id it refused.
+        raise RuntimeError(f"Telethon config api_id is not a valid integer ({type(e).__name__})") from e
 
     config["api_hash"] = str(api_hash)
 
@@ -442,12 +443,8 @@ class BotFatherClient:
             token_match = BOT_TOKEN_PATTERN.search(response)
             if token_match:
                 token = token_match.group()
-                logger.info(
-                    "Bot created successfully: @%s (token: %s...%s)",
-                    username,
-                    token[:8],
-                    token[-4:],
-                )
+                # No slice of the token reaches a log, not the head and not the tail.
+                logger.info("Bot created successfully: @%s (token received, %d chars)", username, len(token))
                 json_handler.log_operation("bot_created", {"username": username, "branch": branch_name})
                 return {
                     "token": token,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: notifier.py
 # Description: Telegram Push Notifications via scheduler bot
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-02-17
-# Modified: 2026-09-14
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -94,7 +94,9 @@ def send_telegram_notification(
             json_handler.log_operation("send_telegram_notification", {"chat_id": chat_id, "silent": silent})
             return result.get("ok", False)
     except (URLError, Exception) as e:
-        logger.warning("Failed to send Telegram notification: %s", e)
+        # The class, never the words: the request URL carries the bot token,
+        # and an error raised over it may quote it.
+        logger.warning("Failed to send Telegram notification (%s)", type(e).__name__)
         return False
 
 

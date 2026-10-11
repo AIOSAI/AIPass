@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Telegram bot config - the token in secrets, everything else in ordinary config
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-06-15
-# Modified: 2026-09-07
+# Modified: 2026-10-10
 # =============================================
 
 """Telegram bot configuration, split across a secret store and ordinary config.
@@ -89,7 +89,8 @@ def _get_secret(bot_id: str) -> dict | None:
             return None
         return result
     except Exception as e:
-        logger.error("Failed to fetch secret telegram/%s: %s", bot_id, e)
+        # The class, never the words: an error raised while reading a secret may quote it.
+        logger.error("Failed to fetch secret telegram/%s (%s)", bot_id, type(e).__name__)
         return None
 
 
@@ -161,7 +162,7 @@ def write_bot_config(bot_id: str, config: dict) -> bool:
     """
     leaked = [key for key in config if key in SECRET_FIELDS]
     if leaked:
-        logger.error("Refusing to write secret field(s) %s to plain config for '%s'", leaked, bot_id)
+        logger.error("Refusing to write %d secret field(s) to plain config for '%s'", len(leaked), bot_id)
         return False
 
     path = bot_config_path(bot_id)
@@ -232,7 +233,9 @@ def migrate_bot_config(bot_id: str, *, dry_run: bool = True) -> dict:
     try:
         _api_set_secret("telegram", bot_id, secret_half, as_json=True)
     except OSError as e:
-        logger.error("Migration wrote config for '%s' but could not shrink the secret document: %s", bot_id, e)
+        logger.error(
+            "Migration wrote config for '%s' but could not shrink the secret document (%s)", bot_id, type(e).__name__
+        )
         return {
             "bot_id": bot_id,
             "moved": moved,
@@ -242,7 +245,9 @@ def migrate_bot_config(bot_id: str, *, dry_run: bool = True) -> dict:
         }
 
     logger.info("Migrated telegram/%s: moved %d non-secret key(s) to %s", bot_id, len(moved), bot_config_path(bot_id))
-    json_handler.log_operation("telegram_bot_config_migrated", {"bot_id": bot_id, "moved": moved})
+    # The count, not the names: the names come from the secret document, and
+    # the report returned below is where an operator reads them.
+    json_handler.log_operation("telegram_bot_config_migrated", {"bot_id": bot_id, "moved_count": len(moved)})
     return {"bot_id": bot_id, "moved": moved, "kept": kept, "migrated": True, "reason": ""}
 
 
@@ -370,15 +375,17 @@ def load_bot_config(bot_id: str) -> dict | None:
             return None
         # A document written before the split, still carrying the lot. It is
         # read, because a deployed bot must keep running - but it is named,
-        # loudly, every single load, because "works" is not "correct".
+        # loudly, every single load, because "works" is not "correct". The line
+        # carries the count, never the key names: nothing read out of a secret
+        # document reaches a log (CodeQL py/clear-text-logging-sensitive-data).
+        # The dry run's report names them.
         strays = non_secret_keys(secret)
         if strays:
             logger.warning(
-                "Legacy secret document telegram/%s carries %d non-secret key(s) %s and has no config file at %s "
-                "- run config.migrate_bot_config('%s', dry_run=False) to split it",
+                "Legacy secret document telegram/%s carries %d non-secret key(s) and has no config file at %s "
+                "- config.migrate_bot_config('%s') names them; run it with dry_run=False to split it",
                 bot_id,
                 len(strays),
-                strays,
                 bot_config_path(bot_id),
                 bot_id,
             )
@@ -404,7 +411,7 @@ def list_bot_configs() -> list[str]:
     try:
         return _api_list_secrets("telegram")
     except Exception as e:
-        logger.error("Failed to list telegram secrets: %s", e)
+        logger.error("Failed to list telegram secrets (%s)", type(e).__name__)
         return []
 
 
