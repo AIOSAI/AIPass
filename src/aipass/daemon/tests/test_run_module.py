@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_module.py
 # Description: Tests for the drone @daemon run module
-# Version: 1.2.1
+# Version: 1.2.2
 # Created:2026-06-15
-# Modified: 2026-10-08
+# Modified: 2026-10-10
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -1045,9 +1045,13 @@ class TestCommandJobTick:
         assert (first["fired"], second["fired"]) == (1, 0)
         assert len(launches(journal)) == 1
 
-    def test_a_late_daily_command_job_is_caught_up_like_any_other(self, tmp_path, monkeypatch, telegram, no_wake):
+    @pytest.mark.parametrize("now", ["2026-10-11T03:00:00", "2026-10-11T12:00:00", "2026-10-11T23:59:00"])
+    def test_a_late_daily_command_job_is_caught_up_like_any_other(self, tmp_path, monkeypatch, telegram, no_wake, now):
         # catch_up is opt-in while RECOVERY_LANE_LIVE is False; opted in, the
-        # window closed unrun two days ago, so the real predicates say "late".
+        # window closed unrun long ago, so the real predicates say "late". The
+        # test owns the clock: unfrozen, it read the wall clock and answered
+        # (1, 0) in the minute before today's 00:01 window (CI, 2026-10-11T00:0xZ).
+        freeze_runstate_clock(monkeypatch, now)
         job = command_job_dict(tmp_path, schedule={"type": "daily", "time": "00:01", "catch_up": True})
         launcher, _ = fake_drone(tmp_path, "print('ok')\n")
         monkeypatch.setattr(command_job, "LAUNCHER", launcher)
