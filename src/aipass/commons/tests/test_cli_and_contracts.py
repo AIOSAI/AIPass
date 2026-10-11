@@ -2,12 +2,13 @@
 # META DATA HEADER
 # Name: test_cli_and_contracts.py - CLI Routing, Contracts, and Infrastructure Tests
 # Description: main()'s help/introspection/exit-code routing, route_command, and the json shim's contracts
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-28
-# Modified: 2026-10-05
+# Modified: 2026-10-11
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.3.0 (2026-10-11): SIGPIPE pins - an import leaves it alone, the started program sets SIG_DFL
 #   - v1.2.0 (2026-10-05): a help flag anywhere after the verb never runs it; help-aware verbs keep their own help
 #   - v1.1.0 (2026-09-27): fleet green - file top, product imports hoisted, capsys over err_console,
 #     router effects asserted, stdlib-only StringIO test retired
@@ -24,7 +25,10 @@
 # seedgo: no-test-needed(constant) — print_help's and print_introspection's display strings
 
 import importlib
+import signal
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -503,3 +507,60 @@ def test_discover_modules_returns_every_public_router_in_modules_dir():
     expected = sorted(p.stem for p in commons_main.MODULES_DIR.glob("*.py") if not p.name.startswith("_"))
     assert [m.__name__.rsplit(".", 1)[-1] for m in found] == expected
     assert all(callable(m.handle_command) for m in found)
+
+
+# ===========================================================================
+# SIGPIPE disposition: set by the started program, never by an import
+# ===========================================================================
+
+_NO_SIGPIPE = "this platform has no SIGPIPE, and commons.py sets nothing where it is missing"
+
+
+def _child(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    """Run code in a fresh interpreter: this process imported commons.py at collection."""
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGPIPE"), reason=_NO_SIGPIPE)
+def test_importing_the_entry_leaves_sigpipe_as_the_interpreter_set_it(tmp_path):
+    """An import set SIG_DFL in every xdist worker, so the first EPIPE killed it silently (CI 38132534544)."""
+    code = (
+        "import signal\n"
+        "before = int(signal.getsignal(signal.SIGPIPE))\n"
+        "import aipass.commons.apps.commons\n"
+        "print(before, int(signal.getsignal(signal.SIGPIPE)))\n"
+    )
+    child = _child(code, tmp_path)
+
+    assert child.returncode == 0, child.stderr
+    before, after = (int(n) for n in child.stdout.split())
+    assert before == int(signal.SIG_IGN)
+    assert after == before
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGPIPE"), reason=_NO_SIGPIPE)
+def test_the_started_program_restores_the_kernel_default(tmp_path):
+    """Run as a program, commons still ends quietly on a pipe to head; the database init is stubbed."""
+    code = (
+        "import atexit, runpy, signal, sys\n"
+        "import aipass.commons.apps.modules.database as database\n"
+        "database.init_db = lambda: None\n"
+        "database.close_db = lambda conn: None\n"
+        "atexit.register(lambda: print('SIGPIPE', int(signal.getsignal(signal.SIGPIPE)), file=sys.stderr))\n"
+        "sys.argv = ['commons.py', '--version']\n"
+        f"runpy.run_path({commons_main.__file__!r}, run_name='__main__')\n"
+    )
+    child = _child(code, tmp_path)
+
+    assert child.returncode == 0, child.stderr
+    assert f"THE_COMMONS v{commons_main.VERSION}" in child.stdout
+    reported = [line for line in child.stderr.splitlines() if line.startswith("SIGPIPE ")]
+    assert reported == [f"SIGPIPE {int(signal.SIG_DFL)}"], child.stderr

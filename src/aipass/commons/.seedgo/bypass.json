@@ -378,7 +378,7 @@
     {
       "file": "apps/commons.py",
       "standard": "logged_fallback",
-      "lines": [191],
+      "lines": [187],
       "reason": "True here means the command was claimed, not that it succeeded: the reader of stdout closed the pipe, so there is no caller left to tell (commons' decision, DPLAN-0354 leg 5)"
     },
     {
