@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Dispatch Daemon Handler
-# Version: 1.10.1
+# Version: 1.10.2
 # Created: 2026-02-17
-# Modified: 2026-10-04
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -66,10 +66,6 @@ def _handle_signal(signum, _frame):
     global SHUTDOWN
     logger.info(f"Received signal {signum}, shutting down gracefully...")
     SHUTDOWN = True
-
-
-signal.signal(signal.SIGTERM, _handle_signal)
-signal.signal(signal.SIGINT, _handle_signal)
 
 
 def _write_json(filepath: Path, data: Dict[str, Any]) -> bool:
@@ -594,6 +590,11 @@ def run_daemon() -> None:
 
     Exits gracefully on SIGTERM/SIGINT or kill switch.
     """
+    # The stop handlers belong to the daemon process, installed when it starts,
+    # never at import: importing this module must not take over an importer's
+    # signals (2026-10-11).
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
     json_handler.log_operation("run_daemon", {"pid": os.getpid()})
 
     if not _write_pid_file():

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help display
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-09-29
+# Modified: 2026-10-11
 # =============================================
 
 """Tests for apps/ai_mail.py's CLI routing: print_help, print_introspection, route_command, main."""
@@ -14,6 +14,9 @@
 # seedgo: no-test-needed(constant) — the "-V" version alias and the exact "AI_MAIL v1.0.0" banner text
 
 import json
+import os
+import signal
+import subprocess
 import sys
 
 import pytest
@@ -329,3 +332,43 @@ def test_main_resets_failure_flag_between_runs(monkeypatch):
     with patch.object(ai_mail_mod, "discover_modules", return_value=[OkModule]):
         result = main()
     assert result == 0
+
+
+# ---- SIGPIPE belongs to the program, never to an importer ---------------
+# Each runs in a fresh interpreter: this process imported the module at collection.
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no SIGPIPE")
+def test_importing_ai_mail_leaves_sigpipe_as_it_was():
+    probe = (
+        "import signal\n"
+        "before = repr(signal.getsignal(signal.SIGPIPE))\n"
+        "import aipass.ai_mail.apps.ai_mail\n"
+        "after = repr(signal.getsignal(signal.SIGPIPE))\n"
+        "print(before == after, before, after)\n"
+    )
+
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, encoding="utf-8", timeout=60)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("True "), result.stdout
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no SIGPIPE")
+def test_ai_mail_run_as_a_program_ends_quietly_on_a_closed_pipe():
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "aipass.ai_mail.apps.ai_mail", "--version"],
+            stdout=write_end,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            timeout=60,
+        )
+    finally:
+        os.close(write_end)
+
+    assert result.returncode < 0, result.stderr
+    assert signal.Signals(-result.returncode).name == "SIGPIPE"
+    assert "BrokenPipeError" not in result.stderr

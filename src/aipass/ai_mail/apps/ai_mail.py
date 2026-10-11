@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ai_mail.py
 # Description: Entry point CLI for drone @ai_mail — inter-branch email system
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-10-07
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -26,11 +26,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 # CLI services for display
 from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
-
-# Handle broken pipe gracefully (e.g. output piped to head)
-# SIGPIPE does not exist on Windows
-if hasattr(signal, "SIGPIPE"):
-    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Dashboard integration (optional, provided by prax)
 _UPDATE_SECTION = None  # type: ignore
@@ -305,4 +300,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # Handle broken pipe gracefully (e.g. output piped to head). Set here, never
+    # at import: an importer (a pytest worker) would die silently on its first
+    # EPIPE (2026-10-11). SIGPIPE does not exist on Windows.
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     sys.exit(main())
