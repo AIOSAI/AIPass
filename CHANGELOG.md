@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-10-11] — after v2.8.12: telegram out of the CodeQL scan
+
+### Changed
+
+- **ci: CodeQL skips the retired telegram tree** (223ef026, 2026-10-11; the owner: "telegram is retired"). The Security workflow's init step carries a `paths-ignore` config for `**/telegram/**` and `**/*telegram*`: the skill lib, the daemon telegram handler and notifier, the prax relay and the hooks response module with its tests are no longer scanned. Every other path is. The code stays in the tree; its removal is a separate call. PR #774 spent five CI rounds on a clear-text-logging flow sourced in telegram's `list_bot_configs` walk of the secrets store; the api side is cured (83f812c9), the retired caller is now out of the scan.
+
 ## [2026-10-10] — the fleet-green train: every one of the 18 branches at 100 under seedgo's gold-seal test pack (the checker legs, the oversize splits, ai_mail's doors and its 57 duplicate tests retired, the surfaced rows cured in the tests), the git lockdown (raw `git` and `gh` refused for every seat, reads included, `drone @git` twins for each, `drone rm` the one delete), the handlers fence restored fleet-wide through doors, hooks' gates grown (the scripted-write ownership lane, the memory lane, the per-leg test-write gate, a sed print script read as a read, bash_writes naming every `sed -i` file), aipass's branch prompt back under the injection cap, and the CI gate's tripwire moved for the retired handler_import standard (DPLAN-0354 / DPLAN-0356 / DPLAN-0403 / DPLAN-0404, merged as PR #774, v2.8.12)
 
 ### Added
