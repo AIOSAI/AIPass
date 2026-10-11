@@ -1,0 +1,5 @@
+# Telegram is retired (the owner, 2026-09-14 and 2026-10-11): the code stays in
+# place, disabled, and nothing scans it. The notifier schedule handler and the
+# empty telegram handler package are out of the seedgo audit, as they are out of
+# pytest collection (pyproject.toml addopts) and the CodeQL scan (security.yml).
+*telegram*
