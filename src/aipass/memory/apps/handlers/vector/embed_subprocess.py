@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: embed_subprocess.py
 # Description: Embedding Subprocess Handler
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-12
-# Modified: 2026-05-07
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -34,14 +34,13 @@ def main():
 
         model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
 
-        sorted_pairs = sorted(enumerate(texts), key=lambda x: len(x[1]))
-        sorted_indices, sorted_texts = zip(*sorted_pairs)
-
-        embeddings = list(model.embed(list(sorted_texts)))
-
-        ordered = [None] * len(texts)
-        for orig_idx, sorted_idx in enumerate(sorted_indices):
-            ordered[sorted_idx] = embeddings[orig_idx].tolist()
+        # One text per batch. The model's tokenizer pads to a fixed 128 tokens but
+        # truncates at 256, so a batch holding a text over 128 tokens beside a
+        # shorter one gives numpy rows of different lengths and the whole batch
+        # fails ("inhomogeneous shape"). ai_mail's sent folder met it on every purge
+        # from 2026-09-28 (trigger digest 15638146; leg 9 of DPLAN-0354). 229 mails
+        # embed in about 19 s this way.
+        ordered = [vector.tolist() for vector in model.embed(list(texts), batch_size=1)]
 
         print(json.dumps({"success": True, "embeddings": ordered, "count": len(ordered), "dimension": 384}))
 

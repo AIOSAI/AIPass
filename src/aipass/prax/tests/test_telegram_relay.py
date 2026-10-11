@@ -1,33 +1,33 @@
 # =================== AIPass ====================
 # Name: test_telegram_relay.py
 # Description: Tests for the Telegram relay handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-24
-# Modified: 2026-08-08
+# Modified: 2026-10-03
 # =============================================
 
-"""Tests for apps/handlers/monitoring/telegram_relay.py
+"""Tests for apps/handlers/monitoring/telegram_relay.py."""
 
-Covers:
-- Event formatting (log, command, hook types, PID labels)
-- init_relay: disabled path, missing config, incomplete config, successful start
-- Fail-silent-once: exactly one log line when config absent, zero sends
-- stop_relay: final flush and thread join, no-op when inactive
-- relay_event: buffering when active, no-op when inactive
-- Batching: 4000-char split across messages
-- Flood cap: truncation at 150 lines with suppression notice
-- _render_event calls relay_event in monitor.py
-- is_relay_enabled_by_env for env var detection
-- Offline backoff: doubles+caps, resets on success, log-once, never blocks
-- Control-file isolation: no test ever reads the operator's live pause state
-"""
+# Covers:
+# - Event formatting (log, command, hook types, PID labels)
+# - init_relay: disabled path, missing config, incomplete config, successful start
+# - Fail-silent-once: exactly one log line when config absent, zero sends
+# - stop_relay: final flush and thread join, no-op when inactive
+# - relay_event: buffering when active, no-op when inactive
+# - Batching: 4000-char split across messages
+# - Flood cap: truncation at 150 lines with suppression notice
+# - _render_event calls relay_event in monitor.py
+# - is_relay_enabled_by_env for env var detection
+# - Offline backoff: doubles+caps, resets on success, log-once, never blocks
+# - Control-file isolation: no test ever reads the operator's live pause state
 
-import importlib
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — _flush_loop, a threading.Event.wait timer around the tested _flush_buffer
+# seedgo: no-test-needed(json_structure) — init_relay's and stop_relay's log_operation records, covered by that row
+
 import json
-import ntpath
 import os
-import posixpath
-import sys
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -36,10 +36,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Captured at import, before any fixture redirects the home directory: this is the
-# real operator's file on this machine, and the one no test may ever touch.
-_REAL_HOME = Path.home()
-_OPERATOR_CONTROL_FILE = _REAL_HOME / ".aipass" / "telegram_bots" / "prax_monitor_control.json"
+from aipass.prax.apps.handlers.monitoring import telegram_relay
+from aipass.prax.apps.modules import monitor
+
+
+def _operator_control_file() -> Path:
+    """The real operator's control file on this machine, the one no test may ever touch.
+
+    Resolved when a test asks, never at import (prax, leg 8): a home that cannot be
+    resolved then fails the tests that need it, not every test in the file. No
+    fixture here moves HOME, so the answer is the operator's own.
+    """
+    return Path.home() / ".aipass" / "telegram_bots" / "prax_monitor_control.json"
 
 
 @dataclass
@@ -66,89 +74,66 @@ class FakeEvent:
 # filters the feed. _flush_buffer discards the whole buffer when paused=true, so a
 # test that flushes without re-pointing CONTROL_FILE inherits the operator's pause:
 # red on a machine where the bot is paused, green on CI where no control file exists.
-# Tests assert on relay behavior, never on operator state, so every import is aimed
-# at a per-test tmp path and _import_relay refuses to return a module still aimed
-# at the operator's home.
+# Tests assert on relay behavior, never on operator state, so the autouse fixture
+# aims CONTROL_FILE at a per-test tmp path through monkeypatch, and _import_relay
+# refuses to hand back a module still aimed at the operator's home.
 #
-# Isolation is belt AND braces, because each covers a different failure:
-#   braces — _import_relay re-points CONTROL_FILE after every reload (the module
-#            default is recomputed by the reload, so a one-time patch would lapse).
-#   belt   — the home directory itself is redirected while the reload runs, so even
-#            the recomputed default lands in tmp. If someone deletes the re-point
-#            line, the tests still cannot reach the operator's file.
-#
-# The belt must set HOME *and* USERPROFILE. Path.home() calls os.path.expanduser("~"),
-# which reads HOME on POSIX but USERPROFILE on Windows (ntpath.expanduser checks
-# USERPROFILE first, then HOMEDRIVE+HOMEPATH — HOME is never consulted). Setting only
-# HOME would leave Windows resolving the real profile. Pinned by
-# TestHomeRedirectIsPlatformHonest, which exercises both resolvers by name so the
-# Windows branch is proven on any platform.
-
-_ISOLATED_CONTROL_FILE: Optional[Path] = None
-_ISOLATED_HOME: Optional[Path] = None
-# CONTROL_FILE as the reload computed it, before _import_relay re-points it.
-_LAST_RELOAD_DEFAULT: Optional[Path] = None
+# The relay is imported once, at the top, and never reloaded (prax, leg 9). The
+# reload is what used to recompute the default from HOME on every call, which is
+# why the old helper also moved HOME while it ran; with no reload the default is
+# computed once, never read by a test, and re-pointed before each one.
 
 
 @pytest.fixture(autouse=True)
-def isolate_control_file(tmp_path):
-    """Point every relay import at a throwaway control file, never the operator's."""
-    global _ISOLATED_CONTROL_FILE, _ISOLATED_HOME, _LAST_RELOAD_DEFAULT
-    _ISOLATED_CONTROL_FILE = tmp_path / "relay_control.json"
-    _ISOLATED_HOME = tmp_path / "home"
-    yield
-    _ISOLATED_CONTROL_FILE = None
-    _ISOLATED_HOME = None
-    _LAST_RELOAD_DEFAULT = None
+def isolate_control_file(tmp_path, monkeypatch):
+    """A relay aimed at a throwaway control file, its state as a fresh import leaves it.
 
-
-def _isolated_home_env() -> dict:
-    """Env overrides that move Path.home() into tmp on every platform."""
-    return {"HOME": str(_ISOLATED_HOME), "USERPROFILE": str(_ISOLATED_HOME)}
+    Every name is set through monkeypatch, so the next test, and every other file
+    in the session, gets the module back as it found it.
+    """
+    lock = MagicMock()
+    lock.try_acquire = MagicMock(return_value=True)
+    monkeypatch.setattr(telegram_relay, "CONTROL_FILE", tmp_path / "relay_control.json")
+    monkeypatch.setattr(telegram_relay, "instance_lock", lock)
+    monkeypatch.setattr(telegram_relay, "logger", MagicMock())
+    monkeypatch.setattr(telegram_relay, "json_handler", MagicMock())
+    monkeypatch.setattr(telegram_relay, "_buffer", [])
+    monkeypatch.setattr(telegram_relay, "_stop_event", threading.Event())
+    monkeypatch.setattr(telegram_relay, "_thread", None)
+    monkeypatch.setattr(telegram_relay, "_bot_token", None)
+    monkeypatch.setattr(telegram_relay, "_chat_id", None)
+    monkeypatch.setattr(telegram_relay, "_RELAY_ACTIVE", False)
+    monkeypatch.setattr(telegram_relay, "_control_mtime", 0.0)
+    monkeypatch.setattr(telegram_relay, "_control_cache", {})
+    monkeypatch.setattr(telegram_relay, "_OFFLINE", False)
+    monkeypatch.setattr(telegram_relay, "_CURRENT_BACKOFF", telegram_relay._BACKOFF_INITIAL)
+    monkeypatch.setattr(telegram_relay, "_NEXT_RETRY", 0.0)
+    monkeypatch.setattr(telegram_relay, "_OFFLINE_SINCE", 0.0)
+    monkeypatch.setattr(telegram_relay, "_SUPPRESSED_COUNT", 0)
+    monkeypatch.setattr(telegram_relay, "_LAST_SUMMARY", 0.0)
 
 
 def _import_relay():
-    """Import (or reload) telegram_relay with mocked dependencies."""
-    if _ISOLATED_CONTROL_FILE is None:
+    """The relay the fixture isolated; refuses one still aimed at the operator's file."""
+    if telegram_relay.CONTROL_FILE == _operator_control_file():
         raise RuntimeError(
             "_import_relay() called outside the isolate_control_file fixture — "
             "the relay would read the operator's live control file"
         )
+    return telegram_relay
 
-    global _LAST_RELOAD_DEFAULT
 
-    fresh_mocks = {
-        "aipass.prax.apps.modules.logger": MagicMock(),
-        "aipass.prax.apps.handlers.json": MagicMock(),
-        "aipass.prax.apps.handlers.json.json_handler": MagicMock(),
-    }
-    # The home redirect wraps the reload because that is the only moment the module
-    # default is computed — scoping it here keeps every other test's environment real.
-    with patch.dict(os.environ, _isolated_home_env()), patch.dict(sys.modules, fresh_mocks):
-        if "aipass.prax.apps.handlers.monitoring.telegram_relay" in sys.modules:
-            mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.monitoring.telegram_relay"])
-        else:
-            mod = importlib.import_module("aipass.prax.apps.handlers.monitoring.telegram_relay")
+def _log(relay) -> MagicMock:
+    """The logger recorder the fixture put where the relay binds its logger."""
+    assert isinstance(relay.logger, MagicMock), "the relay is logging for real"
+    return relay.logger
 
-    _LAST_RELOAD_DEFAULT = mod.CONTROL_FILE
-    setattr(mod, "CONTROL_FILE", _ISOLATED_CONTROL_FILE)
 
-    lock_mock = MagicMock()
-    lock_mock.try_acquire = MagicMock(return_value=True)
-    lock_mock.release = MagicMock()
-    setattr(mod, "instance_lock", lock_mock)
-
-    setattr(mod, "_RELAY_ACTIVE", False)
-    setattr(mod, "_bot_token", None)
-    setattr(mod, "_chat_id", None)
-    mod._buffer.clear()
-    mod._stop_event.clear()
-    setattr(mod, "_thread", None)
-    setattr(mod, "_OFFLINE", False)
-    setattr(mod, "_CURRENT_BACKOFF", mod._BACKOFF_INITIAL)
-    setattr(mod, "_NEXT_RETRY", 0.0)
-    setattr(mod, "_SUPPRESSED_COUNT", 0)
-    return mod
+def _formatted(relay, event) -> str:
+    """The line _format_event makes; None (an event it drops) fails here, by name."""
+    line = relay._format_event(event)
+    assert line is not None, f"_format_event dropped {event!r}"
+    return line
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +148,7 @@ class TestFormatEvent:
         """Log event includes uppercased branch and message."""
         relay = _import_relay()
         event = FakeEvent(event_type="log", branch="seedgo", message="Audit started")
-        result = relay._format_event(event)
+        result = _formatted(relay, event)
         assert "[SEEDGO]" in result
         assert "Audit started" in result
 
@@ -171,14 +156,14 @@ class TestFormatEvent:
         """Log event with PID shows BRANCH:PID label."""
         relay = _import_relay()
         event = FakeEvent(event_type="log", branch="devpulse", message="Working", pid=12345)
-        result = relay._format_event(event)
+        result = _formatted(relay, event)
         assert "[DEVPULSE:12345]" in result
 
     def test_command_event(self):
         """Command event shows arrow prefix."""
         relay = _import_relay()
         event = FakeEvent(event_type="command", branch="drone", message="seedgo audit", action="")
-        result = relay._format_event(event)
+        result = _formatted(relay, event)
         assert "▶ seedgo audit" in result
 
     def test_command_event_with_caller_and_target(self):
@@ -191,7 +176,7 @@ class TestFormatEvent:
             action="run:prax",
             caller="devpulse",
         )
-        result = relay._format_event(event)
+        result = _formatted(relay, event)
         assert "devpulse → prax" in result
         assert "▶ seedgo audit" in result
 
@@ -204,35 +189,35 @@ class TestFormatEvent:
             message="test",
             caller="UNKNOWN",
         )
-        result = relay._format_event(event)
+        result = _formatted(relay, event)
         assert "UNKNOWN" not in result
 
     def test_hook_event_fired(self):
         """Fired hook event uses lightning bolt symbol."""
         relay = _import_relay()
         event = FakeEvent(event_type="hook", branch="hooks", message="cadence:fired", action="fired")
-        result = relay._format_event(event)
+        result = _formatted(relay, event)
         assert result == "⚡ HOOK cadence:fired"
 
     def test_hook_event_skipped(self):
         """Skipped hook event uses dot symbol."""
         relay = _import_relay()
         event = FakeEvent(event_type="hook", branch="hooks", message="cadence:skipped", action="skipped")
-        result = relay._format_event(event)
+        result = _formatted(relay, event)
         assert result == "· HOOK cadence:skipped"
 
     def test_hook_event_unknown_action(self):
         """Unknown hook action uses question mark symbol."""
         relay = _import_relay()
         event = FakeEvent(event_type="hook", branch="hooks", message="something", action="other")
-        result = relay._format_event(event)
+        result = _formatted(relay, event)
         assert result.startswith("? HOOK")
 
     def test_file_event(self):
         """File event formats like a log event with branch and message."""
         relay = _import_relay()
         event = FakeEvent(event_type="file", branch="prax", message="monitor.py modified")
-        result = relay._format_event(event)
+        result = _formatted(relay, event)
         assert "[PRAX]" in result
         assert "monitor.py modified" in result
 
@@ -262,7 +247,7 @@ class TestInitRelay:
         """Missing config produces exactly one info log, not per-cycle spam."""
         relay = _import_relay()
         relay.init_relay(enabled=True, config=None)
-        calls = [c for c in relay.logger.info.call_args_list if "inactive" in str(c)]
+        calls = [c for c in _log(relay).info.call_args_list if "inactive" in str(c)]
         assert len(calls) == 1
 
     def test_incomplete_config_missing_chat_id(self):
@@ -291,8 +276,10 @@ class TestInitRelay:
         """Valid config starts a named daemon thread."""
         relay = _import_relay()
         relay.init_relay(enabled=True, config={"bot_token": "t", "chat_id": 1})
-        assert relay._thread.daemon is True
-        assert relay._thread.name == "telegram-relay"
+        thread = relay._thread
+        assert thread is not None
+        assert thread.daemon is True
+        assert thread.name == "telegram-relay"
         relay.stop_relay()
 
 
@@ -353,31 +340,31 @@ class TestStopRelay:
 class TestBatching:
     """Test _send_batched 4000-char splitting."""
 
-    def test_single_message_under_limit(self):
+    def test_single_message_under_limit(self, monkeypatch):
         """Short content sends as one message."""
         relay = _import_relay()
         sent = []
-        setattr(relay, "_send_message", lambda text: sent.append(text) or True)
+        monkeypatch.setattr(relay, "_send_message", lambda text: sent.append(text) or True)
         relay._send_batched(["short line"])
         assert len(sent) == 1
         assert sent[0] == "short line"
 
-    def test_splits_at_4000_chars(self):
+    def test_splits_at_4000_chars(self, monkeypatch):
         """Lines exceeding 4000 chars are split across multiple messages."""
         relay = _import_relay()
         sent = []
-        setattr(relay, "_send_message", lambda text: sent.append(text) or True)
+        monkeypatch.setattr(relay, "_send_message", lambda text: sent.append(text) or True)
         lines = [f"line-{i:04d}-" + "x" * 90 for i in range(50)]
         relay._send_batched(lines)
         assert len(sent) > 1
         for msg in sent:
             assert len(msg) <= relay.TELEGRAM_MAX_LENGTH + 200
 
-    def test_empty_lines_sends_nothing(self):
+    def test_empty_lines_sends_nothing(self, monkeypatch):
         """Empty list sends no messages."""
         relay = _import_relay()
         sent = []
-        setattr(relay, "_send_message", lambda text: sent.append(text) or True)
+        monkeypatch.setattr(relay, "_send_message", lambda text: sent.append(text) or True)
         relay._send_batched([])
         assert len(sent) == 0
 
@@ -390,25 +377,25 @@ class TestBatching:
 class TestFloodCap:
     """Test flood cap truncation."""
 
-    def test_under_cap_sends_all(self):
+    def test_under_cap_sends_all(self, monkeypatch):
         """Lines under FLOOD_CAP are all delivered."""
         relay = _import_relay()
         setattr(relay, "_bot_token", "t")
         setattr(relay, "_chat_id", 1)
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
         relay._buffer.extend([f"line {i}" for i in range(100)])
         setattr(relay, "_RELAY_ACTIVE", True)
         relay._flush_buffer()
         assert len(sent) == 100
 
-    def test_over_cap_truncates_with_notice(self):
+    def test_over_cap_truncates_with_notice(self, monkeypatch):
         """Lines over FLOOD_CAP are truncated with a suppression notice."""
         relay = _import_relay()
         setattr(relay, "_bot_token", "t")
         setattr(relay, "_chat_id", 1)
         sent_lines = []
-        setattr(relay, "_send_batched", lambda lines: sent_lines.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent_lines.extend(lines))
         relay._buffer.extend([f"line {i}" for i in range(200)])
         setattr(relay, "_RELAY_ACTIVE", True)
         relay._flush_buffer()
@@ -424,40 +411,20 @@ class TestFloodCap:
 class TestRenderEventCallsRelay:
     """Test that monitor._render_event calls relay_event."""
 
-    def test_render_event_calls_relay(self):
-        """_render_event in monitor.py calls relay_event after console render."""
-        fresh_mocks = {
-            "aipass.prax.apps.handlers.monitoring": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.event_queue": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.filesystem_handler": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.log_watcher": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.unified_stream": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.module_tracker": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.branch_detector": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.interactive_filter": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.monitoring_filters": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.file_watcher_integration": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.telegram_relay": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.pid_cache": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.instance_lock": MagicMock(),
-        }
-        with patch.dict(sys.modules, fresh_mocks):
-            if "aipass.prax.apps.modules.monitor" in sys.modules:
-                mod = importlib.reload(sys.modules["aipass.prax.apps.modules.monitor"])
-            else:
-                mod = importlib.import_module("aipass.prax.apps.modules.monitor")
+    def test_render_event_calls_relay(self, monkeypatch):
+        """_render_event hands the event to the relay, then to the console.
+
+        monitor is imported once at the top; both sinks are doubled where monitor
+        binds them, so no reload and no stubbed package (prax, leg 10).
+        """
+        sinks: list[tuple[str, object]] = []
+        monkeypatch.setattr(monitor, "relay_event", lambda e: sinks.append(("relay", e)))
+        monkeypatch.setattr(monitor, "_print_event_to_console", lambda e: sinks.append(("console", e)))
 
         event = MagicMock()
-        event.event_type = "log"
-        event.branch = "TEST"
-        event.message = "hello"
-        event.level = "info"
-        event.action = ""
+        monitor._render_event(event)
 
-        with patch.object(mod, "_get_pid_for_branch", return_value=None):
-            mod._render_event(event)
-
-        mod.relay_event.assert_called_once_with(event)
+        assert sinks == [("relay", event), ("console", event)]
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +484,7 @@ class TestReadControl:
         """Valid JSON control file is read and returned."""
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
-        ctrl.write_text(json.dumps({"paused": True, "level": "errors"}))
+        ctrl.write_text(json.dumps({"paused": True, "level": "errors"}), encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         result = relay._read_control()
         assert result["paused"] is True
@@ -527,11 +494,11 @@ class TestReadControl:
         """Same mtime returns cached result without re-reading the file."""
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
-        ctrl.write_text(json.dumps({"paused": False}))
+        ctrl.write_text(json.dumps({"paused": False}), encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         first = relay._read_control()
         cached_mtime = ctrl.stat().st_mtime
-        ctrl.write_text("INVALID JSON")
+        ctrl.write_text("INVALID JSON", encoding="utf-8")
         os.utime(ctrl, (cached_mtime, cached_mtime))
         result = relay._read_control()
         assert result == first
@@ -540,10 +507,10 @@ class TestReadControl:
         """Changed mtime causes re-read of the control file."""
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
-        ctrl.write_text(json.dumps({"paused": False, "level": "all"}))
+        ctrl.write_text(json.dumps({"paused": False, "level": "all"}), encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         relay._read_control()
-        ctrl.write_text(json.dumps({"paused": True, "level": "errors"}))
+        ctrl.write_text(json.dumps({"paused": True, "level": "errors"}), encoding="utf-8")
         os.utime(ctrl, (ctrl.stat().st_mtime + 1, ctrl.stat().st_mtime + 1))
         result = relay._read_control()
         assert result["paused"] is True
@@ -553,21 +520,31 @@ class TestReadControl:
         """Malformed JSON returns empty dict and logs a warning."""
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
-        ctrl.write_text("{bad json!!!")
+        ctrl.write_text("{bad json!!!", encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         result = relay._read_control()
         assert result == {}
-        relay.logger.warning.assert_called_once()
+        assert _log(relay).warning.call_count == 1
+        assert (
+            _log(relay)
+            .warning.call_args.args[0]
+            .startswith("[telegram_relay] The Telegram relay could not read its control file (%s)")
+        )
 
     def test_non_dict_json_returns_empty_and_warns(self, tmp_path):
         """JSON that isn't a dict returns empty and logs warning."""
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
-        ctrl.write_text(json.dumps([1, 2, 3]))
+        ctrl.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         result = relay._read_control()
         assert result == {}
-        relay.logger.warning.assert_called_once()
+        assert _log(relay).warning.call_count == 1
+        assert (
+            _log(relay)
+            .warning.call_args.args[0]
+            .startswith("[telegram_relay] The Telegram relay could not read its control file (%s)")
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -586,30 +563,30 @@ class TestFlushControl:
         setattr(relay, "_RELAY_ACTIVE", True)
         ctrl = tmp_path / "control.json"
         if control_data is not None:
-            ctrl.write_text(json.dumps(control_data))
+            ctrl.write_text(json.dumps(control_data), encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         return relay
 
-    def test_paused_discards_buffer(self, tmp_path):
+    def test_paused_discards_buffer(self, tmp_path, monkeypatch):
         """Paused=true discards buffered lines, nothing sent."""
         relay = self._make_relay(tmp_path, {"paused": True, "level": "all"})
         relay._buffer.extend(["line 1", "line 2"])
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
         relay._flush_buffer()
         assert sent == []
         assert len(relay._buffer) == 0
 
-    def test_unpaused_sends_all(self, tmp_path):
+    def test_unpaused_sends_all(self, tmp_path, monkeypatch):
         """Paused=false with level=all sends everything."""
         relay = self._make_relay(tmp_path, {"paused": False, "level": "all"})
         relay._buffer.extend(["info line", "WARNING alert"])
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
         relay._flush_buffer()
         assert len(sent) == 2
 
-    def test_level_errors_filters_info_lines(self, tmp_path):
+    def test_level_errors_filters_info_lines(self, tmp_path, monkeypatch):
         """Level=errors drops lines without WARNING/ERROR/CRITICAL markers."""
         relay = self._make_relay(tmp_path, {"paused": False, "level": "errors"})
         relay._buffer.extend(
@@ -622,44 +599,44 @@ class TestFlushControl:
             ]
         )
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
         relay._flush_buffer()
         assert len(sent) == 3
         assert all(any(m in ln for m in ("WARNING", "ERROR", "CRITICAL")) for ln in sent)
 
-    def test_level_errors_all_filtered_sends_nothing(self, tmp_path):
+    def test_level_errors_all_filtered_sends_nothing(self, tmp_path, monkeypatch):
         """Level=errors with no matching lines sends nothing."""
         relay = self._make_relay(tmp_path, {"paused": False, "level": "errors"})
         relay._buffer.extend(["info line 1", "info line 2"])
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
         relay._flush_buffer()
         assert sent == []
 
-    def test_missing_control_file_sends_all(self, tmp_path):
+    def test_missing_control_file_sends_all(self, tmp_path, monkeypatch):
         """Missing control file = defaults (not paused, level=all)."""
         relay = self._make_relay(tmp_path)
         relay._buffer.extend(["line 1", "line 2"])
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
         relay._flush_buffer()
         assert len(sent) == 2
 
-    def test_missing_keys_use_defaults(self, tmp_path):
+    def test_missing_keys_use_defaults(self, tmp_path, monkeypatch):
         """Control file with empty dict = not paused, level=all."""
         relay = self._make_relay(tmp_path, {})
         relay._buffer.extend(["line 1"])
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
         relay._flush_buffer()
         assert len(sent) == 1
 
-    def test_flood_cap_still_applies_after_filter(self, tmp_path):
+    def test_flood_cap_still_applies_after_filter(self, tmp_path, monkeypatch):
         """FLOOD_CAP is enforced after level filtering."""
         relay = self._make_relay(tmp_path, {"paused": False, "level": "all"})
         relay._buffer.extend([f"line {i}" for i in range(200)])
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
         relay._flush_buffer()
         assert len(sent) == relay.FLOOD_CAP + 1
         assert "suppressed" in sent[-1]
@@ -680,12 +657,12 @@ class TestOfflineBackoff:
         setattr(relay, "_RELAY_ACTIVE", True)
         return relay
 
-    def test_network_error_enters_offline(self):
+    def test_network_error_enters_offline(self, monkeypatch):
         """First URLError sets _offline=True."""
         from urllib.error import URLError
 
         relay = self._make_relay()
-        setattr(relay, "_send_message", relay._send_message)
+        monkeypatch.setattr(relay, "_send_message", relay._send_message)
         with patch.object(relay, "_http_fetch", side_effect=URLError("DNS failed")):
             result = relay._send_message("hello")
         assert result is False
@@ -734,7 +711,7 @@ class TestOfflineBackoff:
         assert relay._CURRENT_BACKOFF == relay._BACKOFF_INITIAL
         assert relay._SUPPRESSED_COUNT == 0
 
-    def test_flush_suppresses_during_backoff(self):
+    def test_flush_suppresses_during_backoff(self, monkeypatch):
         """_flush_buffer skips _send_batched while offline and before next retry."""
         import time
 
@@ -743,12 +720,12 @@ class TestOfflineBackoff:
         setattr(relay, "_NEXT_RETRY", time.monotonic() + 9999)
         relay._buffer.extend(["line 1", "line 2", "line 3"])
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
         relay._flush_buffer()
         assert sent == []
         assert relay._SUPPRESSED_COUNT == 3
 
-    def test_flush_retries_after_backoff_expires(self):
+    def test_flush_retries_after_backoff_expires(self, monkeypatch):
         """_flush_buffer attempts send when backoff period has elapsed."""
         import time
 
@@ -757,7 +734,7 @@ class TestOfflineBackoff:
         setattr(relay, "_NEXT_RETRY", time.monotonic() - 1)
         relay._buffer.extend(["retry line"])
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
         relay._flush_buffer()
         assert len(sent) == 1
 
@@ -770,11 +747,11 @@ class TestOfflineBackoff:
             relay._send_message("a")
             relay._send_message("b")
             relay._send_message("c")
-        warning_calls = relay.logger.warning.call_args_list
+        warning_calls = _log(relay).warning.call_args_list
         offline_warnings = [c for c in warning_calls if "offline" in str(c).lower()]
         assert len(offline_warnings) == 1
 
-    def test_summary_logged_after_interval(self):
+    def test_summary_logged_after_interval(self, monkeypatch):
         """Suppression summary logged after _SUMMARY_INTERVAL elapses."""
         import time
 
@@ -783,9 +760,9 @@ class TestOfflineBackoff:
         setattr(relay, "_NEXT_RETRY", time.monotonic() + 9999)
         setattr(relay, "_LAST_SUMMARY", time.monotonic() - relay._SUMMARY_INTERVAL - 1)
         relay._buffer.extend(["line"])
-        setattr(relay, "_send_batched", lambda lines: None)
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: None)
         relay._flush_buffer()
-        info_calls = relay.logger.info.call_args_list
+        info_calls = _log(relay).info.call_args_list
         summary_calls = [c for c in info_calls if "suppressed" in str(c).lower()]
         assert len(summary_calls) >= 1
 
@@ -804,7 +781,7 @@ class TestOfflineBackoff:
         ok_response.__exit__ = MagicMock(return_value=False)
         with patch.object(relay, "_http_fetch", return_value=ok_response):
             relay._send_message("b")
-        info_calls = relay.logger.info.call_args_list
+        info_calls = _log(relay).info.call_args_list
         recovery_calls = [c for c in info_calls if "recovered" in str(c).lower()]
         assert len(recovery_calls) == 1
         assert "42" in str(recovery_calls[0])
@@ -821,93 +798,29 @@ class TestControlFileIsolation:
     def test_import_never_points_at_operator_file(self, tmp_path):
         """A freshly imported relay reads a tmp control file, not the operator's."""
         relay = _import_relay()
-        assert relay.CONTROL_FILE != _OPERATOR_CONTROL_FILE
+        assert relay.CONTROL_FILE != _operator_control_file()
         assert relay.CONTROL_FILE == tmp_path / "relay_control.json"
 
-    def test_reimport_re_isolates(self):
-        """Reload recomputes the default, so every import must re-point after it.
-
-        Asserted by path identity, never by ancestry. "not under home" was the
-        original check and it is a POSIX-only proxy: on Windows pytest's tmp_path
-        lives *inside* the user profile (…/AppData/Local/Temp/pytest-of-…), so the
-        home directory is an ancestor of the isolated file too. That check cannot
-        tell working isolation from lapsed isolation there, and it failed CI on
-        2026-08-08 while isolation was in fact holding.
-        """
-        _import_relay()
-        relay = _import_relay()
-        assert relay.CONTROL_FILE == _ISOLATED_CONTROL_FILE
-        assert relay.CONTROL_FILE != _OPERATOR_CONTROL_FILE
-
-    def test_reload_default_is_recomputed_not_inherited(self):
-        """The re-point is load-bearing: the reload really does rebuild the default."""
-        relay = _import_relay()
-        assert _LAST_RELOAD_DEFAULT is not None
-        assert _LAST_RELOAD_DEFAULT != _ISOLATED_CONTROL_FILE, "re-point would be decorative"
-        assert relay.CONTROL_FILE == _ISOLATED_CONTROL_FILE
-
-    def test_reload_default_lands_in_tmp_without_the_re_point(self):
-        """Belt alone holds: even the recomputed default is inside the isolated home."""
-        _import_relay()
-        assert _LAST_RELOAD_DEFAULT is not None
-        assert _ISOLATED_HOME is not None
-        assert _LAST_RELOAD_DEFAULT.is_relative_to(_ISOLATED_HOME)
-        assert _LAST_RELOAD_DEFAULT != _OPERATOR_CONTROL_FILE
-
-    def test_flush_ignores_a_paused_operator_file(self, tmp_path):
+    def test_flush_ignores_a_paused_operator_file(self, tmp_path, monkeypatch):
         """paused=true in the isolated file suppresses; the real file is never consulted."""
         relay = _import_relay()
         setattr(relay, "_bot_token", "t")
         setattr(relay, "_chat_id", 1)
         setattr(relay, "_RELAY_ACTIVE", True)
         sent = []
-        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+        monkeypatch.setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
 
         relay._buffer.extend(["line 1", "line 2"])
         relay._flush_buffer()
         assert len(sent) == 2, "no control file must mean 'not paused', whatever HOME says"
 
-        relay.CONTROL_FILE.write_text(json.dumps({"paused": True}))
+        relay.CONTROL_FILE.write_text(json.dumps({"paused": True}), encoding="utf-8")
         relay._buffer.extend(["line 3"])
         relay._flush_buffer()
         assert len(sent) == 2
 
     def test_helper_refuses_without_isolation(self, monkeypatch):
         """The helper fails loud rather than silently reading operator state."""
-        monkeypatch.setattr(sys.modules[__name__], "_ISOLATED_CONTROL_FILE", None)
+        monkeypatch.setattr(telegram_relay, "CONTROL_FILE", _operator_control_file())
         with pytest.raises(RuntimeError, match="operator's live control file"):
             _import_relay()
-
-
-class TestHomeRedirectIsPlatformHonest:
-    """The home redirect must hold on Windows, which nobody here can run locally.
-
-    Path.home() delegates to os.path.expanduser("~"), which is posixpath.expanduser
-    on Linux/macOS and ntpath.expanduser on Windows — two functions reading two
-    different environment variables. Calling both by name proves the Windows branch
-    from any platform, so this stays honest without a Windows box.
-    """
-
-    def test_both_resolvers_land_in_the_isolated_home(self):
-        """HOME covers POSIX, USERPROFILE covers Windows — the redirect sets both."""
-        with patch.dict(os.environ, _isolated_home_env()):
-            assert posixpath.expanduser("~") == str(_ISOLATED_HOME)
-            assert ntpath.expanduser("~") == str(_ISOLATED_HOME)
-
-    def test_home_alone_lapses_on_windows(self):
-        """The CI failure class, reproduced on any platform: HOME is not enough.
-
-        Setting only HOME leaves ntpath.expanduser reading the real USERPROFILE, so
-        a reload on Windows would rebuild CONTROL_FILE from the operator's profile.
-        This is why _isolated_home_env sets both.
-        """
-        operator_profile = r"C:\Users\runneradmin"
-        with patch.dict(os.environ, {"HOME": str(_ISOLATED_HOME), "USERPROFILE": operator_profile}):
-            assert posixpath.expanduser("~") == str(_ISOLATED_HOME)
-            assert ntpath.expanduser("~") == operator_profile
-
-    def test_import_relay_redirects_home_for_both_resolvers(self):
-        """The env the helper actually applies, not a hand-built copy."""
-        env = _isolated_home_env()
-        assert env["HOME"] == env["USERPROFILE"] == str(_ISOLATED_HOME)
-        assert not Path(env["HOME"]).is_relative_to(_REAL_HOME / ".aipass")

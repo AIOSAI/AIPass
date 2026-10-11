@@ -1,35 +1,40 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_parked_is_not_collected.py
-# Description: The parked directory contributes no tests, and can be proven to
-# Version: 1.0.0
+# Description: The parked directory contributes no tests, proven by running collection
+# Version: 1.2.0
 # Created: 2026-08-19
-# Modified: 2026-08-19
+# Modified: 2026-10-04
 # =============================================
 
-"""The park stays parked (archive doctrine, 2026-08-18).
+"""Tests for tests/parked/conftest.py — the barrier that keeps the park at zero collected tests."""
 
-`tests/parked/` holds `scaffold(disabled).py` — the spawn/seedgo template's
-scaffold smoke test, which never ran in this branch and was moved here rather
-than deleted (DPLAN-0304 item 4). It lives there because `.archive/` is
-The owner's disposal zone, cleaned without warning, so nothing durable may sit
-in one.
-
-WHY THIS FILE EXISTS. A park protected only by a naming habit is protected
-until someone renames a file into it. @memory found that a `test_`-prefixed
-file is collected regardless of an added `(disabled)` suffix (2026-08-19) —
-so the directory carries a real barrier (`collect_ignore_glob` in its own
-conftest) and this file is what notices when either the barrier or the
-reason for it stops being true. Deliberately NOT a check that the conftest
-exists: a test asserting a file is present passes while its contents do
-nothing. These run collection and read the answer.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the parked scaffold still parses; it is a template copy that never runs here
+# seedgo: no-test-needed(constant) — the README's prose beyond the word "archive"; a reader, not an assert, judges it
 
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+
+# The park stays parked (archive doctrine, 2026-08-18).
+#
+# `tests/parked/` holds `scaffold(disabled).py` — the spawn/seedgo template's
+# scaffold smoke test, which never ran in this branch and was moved here rather
+# than deleted (DPLAN-0304 item 4). It lives there because `.archive/` is
+# the owner's disposal zone, cleaned without warning, so nothing durable may sit
+# in one.
+#
+# WHY THIS FILE EXISTS. A park protected only by a naming habit is protected
+# until someone renames a file into it. @memory found that a `test_`-prefixed
+# file is collected regardless of an added `(disabled)` suffix (2026-08-19) —
+# so the directory carries a real barrier (`collect_ignore_glob` in its own
+# conftest) and this file is what notices when either the barrier or the
+# reason for it stops being true. Deliberately NOT a check that the conftest
+# exists: a test asserting a file is present passes while its contents do
+# nothing. These run collection and read the answer.
 
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -43,6 +48,7 @@ def _collect(target: Path) -> subprocess.CompletedProcess:
         cwd=str(TESTS_DIR.parent),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
 
@@ -72,23 +78,25 @@ class TestTheParkStaysParked:
 
         A park protected only by its filenames is protected until someone
         renames one. This drops a file that WOULD be collected anywhere else
-        into the park, proves the barrier still answers zero, and removes it —
-        so the guarantee is about the directory, not about today's names.
+        into a park, proves the barrier still answers zero — so the guarantee is
+        about the directory, not about today's names.
+
+        The park is rebuilt under tmp_path from the live barrier's own bytes, so
+        a broken barrier still reddens this and nothing is written into the tree
+        (the live-write plugin named the old in-tree intruder, fleet green leg 3).
         """
-        intruder = PARKED_DIR / "test_intruder_from_the_barrier_pin.py"
-        assert not intruder.exists(), "leftover from a previous run — remove it by hand"
+        park = tmp_path / "park"
+        park.mkdir()
+        (park / "conftest.py").write_text((PARKED_DIR / "conftest.py").read_text(encoding="utf-8"), encoding="utf-8")
+        source = "def test_would_be_collected_anywhere_else():\n    assert True\n"
+        (park / "test_intruder_from_the_barrier_pin.py").write_text(source, encoding="utf-8")
+        parked_result = _collect(park)
 
-        intruder.write_text("def test_would_be_collected_anywhere_else():\n    assert True\n", encoding="utf-8")
-        try:
-            parked_result = _collect(PARKED_DIR)
-
-            # The same bytes somewhere with no barrier, so the file itself is
-            # proven collectable and the zero above is the barrier's doing.
-            control = tmp_path / "test_intruder_from_the_barrier_pin.py"
-            control.write_text(intruder.read_text(encoding="utf-8"), encoding="utf-8")
-            control_result = _collect(control)
-        finally:
-            intruder.unlink()
+        # The same bytes somewhere with no barrier, so the file itself is
+        # proven collectable and the zero above is the barrier's doing.
+        control = tmp_path / "test_intruder_from_the_barrier_pin.py"
+        control.write_text(source, encoding="utf-8")
+        control_result = _collect(control)
 
         assert control_result.returncode == 0, (
             f"the control file was not collected either — this test proves nothing:\n{control_result.stdout[-2000:]}"

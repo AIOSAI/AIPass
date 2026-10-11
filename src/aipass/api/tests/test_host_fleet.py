@@ -1,24 +1,30 @@
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.1.0
+# Version: 1.1.3
 # Created: 2026-08-14
-# Modified: 2026-09-14
+# Modified: 2026-10-10
 # =============================================
 
-"""
-Tests for the Host API Fleet Lane
+"""Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
 
-The contract under test is @baud's, delivered 2026-08-14: `baud --snapshot`, one
-JSON envelope on stdout, three exit codes with distinct meanings.
+# Tests for the Host API Fleet Lane
+#
+# The contract under test is @baud's, delivered 2026-08-14: `baud --snapshot`, one
+# JSON envelope on stdout, three exit codes with distinct meanings.
+#
+# NOTHING HERE INVOKES THE REAL BINARY. It is a GUI application that this suite has
+# no business launching, and a test that shells a 5MB desktop binary is a test that
+# fails on a machine which has never built it. Every test drives a mocked
+# subprocess; the real binary is exercised by a live probe, recorded in FPLAN-0411.
 
-NOTHING HERE INVOKES THE REAL BINARY. It is a GUI application that this suite has
-no business launching, and a test that shells a 5MB desktop binary is a test that
-fails on a machine which has never built it. Every test drives a mocked
-subprocess; the real binary is exercised by a live probe, recorded in FPLAN-0411.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that fleet.py parses and imports
+# seedgo: no-test-needed(external) — the real baud binary; subprocess.run is scripted, a live probe covers it
+# seedgo: no-test-needed(constant) — SNAPSHOT_TIMEOUT_SECONDS and END_ROOM_TIMEOUT_SECONDS's values
 
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -30,6 +36,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import lock as host_lock
 from aipass.api.apps.handlers.host import machine as host_machine
@@ -1105,14 +1112,21 @@ class TestTheRosterRoute:
         assert response.json()["error"]["code"] == "fleet_unavailable"
         run.assert_not_called()
 
-    def test_their_failure_sentence_reaches_the_client(self, client, auth: dict, seated: Path) -> None:
-        """Exit 1: 503 carrying BAUD's own words."""
+    def test_their_failure_is_a_503_that_keeps_their_sentence_off_the_wire(
+        self, client, auth: dict, seated: Path
+    ) -> None:
+        """Exit 1: 503 fleet_unavailable; BAUD's own words go to the host log under a ref, not to the client."""
         failed = {"branches": [], "generated_at": "2026-08-16T16:57:31Z", "error": "no project registry found"}
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(1, json.dumps(failed))):
             response = client.get("/v1/roster", headers=auth)
 
         assert response.status_code == 503
-        assert "no project registry found" in response.json()["error"]["message"]
+        error = response.json()["error"]
+        assert error["code"] == "fleet_unavailable"
+        # seedgo exception_text_in_response, PR #774: the code's sentence, never theirs.
+        assert error["message"] == host_denials.SENTENCES["fleet_unavailable"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "no project registry found" not in response.text
 
     def test_a_usage_error_is_500_because_it_is_ours(self, client, auth: dict, seated: Path) -> None:
         """
@@ -1179,10 +1193,10 @@ def _macos_vitals(sampled_at: str = "2026-09-13T07:20:00.000+00:00") -> dict:
 def machine_door():
     """A stand-in for @skills' door, with a cold cache on both sides of the case."""
     with patch(PATCH_MACHINE_LOGGER), patch(PATCH_MACHINE_JSON), patch(PATCH_CACHE_JSON):
-        host_machine._vitals.clear()
+        host_machine.forget()
         with patch(PATCH_VITALS_DOOR, autospec=True) as door:
             yield door
-        host_machine._vitals.clear()
+        host_machine.forget()
 
 
 @fastapi_required
@@ -1227,33 +1241,55 @@ class TestTheMachineRoute:
             ("a_code_from_the_future", "a refusal this server has never seen"),
         ],
     )
-    def test_a_refusal_is_a_503_with_its_code_and_detail_intact(
+    def test_a_refusal_is_a_503_with_its_code_intact_and_its_detail_off_the_wire(
         self, client, auth: dict, machine_door, reason: str, detail: str
     ) -> None:
         """
-        The skill said no: 503, its code in `reason`, its detail as the message.
+        The skill said no: 503, its code in `reason`, the fixed sentence as the message.
 
         switched_off is 503 by the kill-switch rule (a closed switch names itself,
         never a 200 dressed as a reading), and a code nobody here has seen is 503
-        with the code intact rather than guessed at.
+        with the code intact rather than guessed at. The skill's detail goes to
+        the host log under the ref; `reason` is the client contract.
         """
         machine_door.return_value = {"ok": False, "reason": reason, "detail": detail}
 
         response = client.get("/v1/machine", headers=auth)
 
         assert response.status_code == 503
-        assert response.json()["error"] == {"code": "machine_refused", "message": detail, "reason": reason}
+        error = response.json()["error"]
+        # seedgo exception_text_in_response, PR #774: the code survives, the words do not.
+        assert error == {
+            "code": "machine_refused",
+            "message": host_denials.SENTENCES["machine_refused"],
+            "reason": reason,
+            "ref": error["ref"],
+        }
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert detail not in response.text
 
     def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, machine_door) -> None:
-        """The skill never raises for a reading, so a raise is a defect in the door — named."""
+        """
+        The skill never raises for a reading, so a raise is a defect in the door — named.
+
+        Named by its code and a fixed sentence, never by the exception's own
+        words: those can carry host paths to a handset (CodeQL
+        py/stack-trace-exposure, PR #774). The words and the traceback go to
+        the host log, where the operator reads them.
+        """
         machine_door.side_effect = RuntimeError("boom inside the door")
 
-        response = client.get("/v1/machine", headers=auth)
+        with patch(PATCH_MACHINE_LOGGER) as log:
+            response = client.get("/v1/machine", headers=auth)
 
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "machine_door_failed"
-        assert "RuntimeError: boom inside the door" in error["message"]
+        assert error["message"] == host_machine.DOOR_RAISED
+        assert "boom" not in response.text
+        logged = log.error.call_args
+        assert "RuntimeError: boom inside the door" in logged.args[0] % logged.args[1:]
+        assert logged.kwargs["exc_info"] is True
 
     @pytest.mark.parametrize("answer", [None, [], {"schema": 1}, {"ok": "yes"}])
     def test_an_answer_outside_the_published_shape_is_a_503(
@@ -1349,7 +1385,14 @@ class TestTheMachineCache:
             "import aipass.api.apps.handlers.host.machine\n"
             "print('aipass.skills.lib.system_status.handler' in sys.modules)\n"
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False)
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            check=False,
+        )
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip().splitlines()[-1] == "False"
@@ -1396,10 +1439,10 @@ def _cannot_tell(reason: str = screen_lock.REASON_NO_SESSION) -> dict:
 def lock_door():
     """A stand-in for @skills' door, with a cold cache on both sides of the case."""
     with patch(PATCH_LOCK_LOGGER), patch(PATCH_LOCK_JSON), patch(PATCH_CACHE_JSON):
-        host_lock._state.clear()
+        host_lock.forget()
         with patch(PATCH_LOCK_DOOR, autospec=True) as door:
             yield door
-        host_lock._state.clear()
+        host_lock.forget()
 
 
 @fastapi_required
@@ -1453,15 +1496,29 @@ class TestTheLockRoute:
         assert response.json() == _cannot_tell(reason)
 
     def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, lock_door) -> None:
-        """The skill never raises for a reading, so a raise is a defect in the door — named."""
+        """
+        The skill never raises for a reading, so a raise is a defect in the door — named.
+
+        By code and the code's fixed sentence: the exception's words, DOOR_RAISED
+        included, go to the host log under a ref, never to the handset (CodeQL
+        py/stack-trace-exposure, PR #774).
+        """
         lock_door.side_effect = RuntimeError("boom inside the door")
 
-        response = client.get("/v1/lock", headers=auth)
+        with patch(PATCH_LOCK_LOGGER) as log:
+            response = client.get("/v1/lock", headers=auth)
 
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "lock_door_failed"
-        assert "RuntimeError: boom inside the door" in error["message"]
+        # seedgo exception_text_in_response, PR #774.
+        assert error["message"] == host_denials.SENTENCES["lock_door_failed"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert host_lock.DOOR_RAISED not in response.text
+        assert "boom" not in response.text
+        logged = log.error.call_args
+        assert "RuntimeError: boom inside the door" in logged.args[0] % logged.args[1:]
+        assert logged.kwargs["exc_info"] is True
 
     @pytest.mark.parametrize(
         "answer",
@@ -1502,7 +1559,11 @@ class TestTheLockRoute:
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "lock_door_failed"
-        assert "published shape" in error["message"]
+        # The shape fault is the operator's to read, in the host log under the ref
+        # (seedgo exception_text_in_response, PR #774).
+        assert error["message"] == host_denials.SENTENCES["lock_door_failed"]
+        assert re.fullmatch("[0-9a-f]{12}", error["ref"])
+        assert "published shape" not in response.text
 
     def test_a_parameter_is_refused_not_dropped(self, client, auth: dict, lock_door) -> None:
         """A cache-buster the route ignored would read as a parameter that did something."""
@@ -1617,7 +1678,14 @@ class TestTheLockCache:
             "import aipass.api.apps.handlers.host.lock\n"
             "print('aipass.skills.lib.screen_lock.handler' in sys.modules)\n"
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False)
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            check=False,
+        )
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip().splitlines()[-1] == "False"

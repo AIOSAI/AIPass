@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unentered_assert_check.py
 # Description: v5 - assertions that may never execute (VACUOUS-GUARD, VACUOUS-LOOP)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-06
 # =============================================
 
 """Does this test's assertion ever actually run?
@@ -138,15 +138,98 @@ def guarding_if(unit: corpus.TestUnit) -> Optional[ast.If]:
     return None
 
 
-def has_floor(unit: corpus.TestUnit, loop: ast.For) -> bool:
+def _non_empty_literal(node: Optional[ast.expr]) -> bool:
+    """True for a list, tuple, set or dict literal holding at least one element."""
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return bool(node.elts)
+    if isinstance(node, ast.Dict):
+        return bool(node.keys)
+    return False
+
+
+def _names_bound_by(statement: ast.stmt) -> List[tuple]:
+    """(name, value) for each name one statement binds; value None for an import or def."""
+    if isinstance(statement, ast.Assign):
+        return [(target.id, statement.value) for target in statement.targets if isinstance(target, ast.Name)]
+    if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+        return [(statement.target.id, statement.value)]
+    if isinstance(statement, (ast.Import, ast.ImportFrom)):
+        return [((alias.asname or alias.name).split(".")[0], None) for alias in statement.names]
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return [(statement.name, None)]
+    return []
+
+
+def _bound_once(statements: List[ast.stmt]) -> Dict[str, Optional[ast.expr]]:
+    """Names bound exactly once among these statements, to the value assigned (None for an import or def)."""
+    counts: Dict[str, int] = {}
+    values: Dict[str, Optional[ast.expr]] = {}
+    for statement in statements:
+        for name, value in _names_bound_by(statement):
+            counts[name] = counts.get(name, 0) + 1
+            values[name] = value
+    return {name: values[name] for name, count in counts.items() if count == 1}
+
+
+def _local_literal(unit: corpus.TestUnit, name: str, loop: ast.For) -> Optional[bool]:
+    """Whether a name the unit binds itself is a non-empty literal; None when the unit never binds it.
+
+    The one binding must be an assignment in the unit's own body before the
+    loop; a parameter of that name, or a second binding anywhere, is not read.
+    """
+    arguments = unit.node.args
+    parameters = {arg.arg for arg in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    stores = [
+        node
+        for node in ast.walk(unit.node)
+        if isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Store)
+    ]
+    if name in parameters:
+        return False
+    if not stores:
+        return None
+    if len(stores) != 1:
+        return False
+    before = [statement for statement in unit.node.body if statement.lineno < loop.lineno]
+    return _non_empty_literal(_bound_once(before).get(name))
+
+
+def _iterates_a_literal_table(unit: corpus.TestUnit, loop: ast.For, test_file: Optional[corpus.TestFile]) -> bool:
+    """True when the loop iterates a name bound once to a non-empty literal (seedgo, fleet green leg 20).
+
+    ``NAME`` is read in the unit's own body first, then at module level;
+    ``self.NAME`` in the unit's own class body. A table computed by a call, a
+    comprehension or read from disk is not a literal and keeps the flag.
+    """
+    target = loop.iter
+    if isinstance(target, ast.Name):
+        local = _local_literal(unit, target.id, loop)
+        if local is not None:
+            return local
+        if test_file is None:
+            return False
+        return _non_empty_literal(_bound_once(test_file.tree.body).get(target.id))
+    if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == "self":
+        if test_file is None:
+            return False
+        for node in test_file.tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == unit.class_name:
+                return _non_empty_literal(_bound_once(node.body).get(target.attr))
+    return False
+
+
+def has_floor(unit: corpus.TestUnit, loop: ast.For, test_file: Optional[corpus.TestFile] = None) -> bool:
     """True when something proves this loop's iterable is non-empty.
 
-    A literal collection is a floor by construction. So is an assertion before
-    the loop that reads the iterable's size or truth - `assert rows`,
-    `assert len(rows) == 3`. Any of them means an empty iterable fails the test
-    rather than passing it silently.
+    A literal collection is a floor by construction, at the loop or behind a
+    name bound once to it (``test_file`` lets the module and class be read).
+    So is an assertion before the loop that reads the iterable's size or
+    truth - `assert rows`, `assert len(rows) == 3`. Any of them means an empty
+    iterable fails the test rather than passing it silently.
     """
     if isinstance(loop.iter, (ast.List, ast.Tuple, ast.Set, ast.Dict)):
+        return True
+    if _iterates_a_literal_table(unit, loop, test_file):
         return True
 
     for statement in _unconditional_statements(unit.node.body):
@@ -161,14 +244,14 @@ def has_floor(unit: corpus.TestUnit, loop: ast.For) -> bool:
     return False
 
 
-def vacuous_loop(unit: corpus.TestUnit) -> Optional[ast.For]:
+def vacuous_loop(unit: corpus.TestUnit, test_file: Optional[corpus.TestFile] = None) -> Optional[ast.For]:
     """The first floorless `for` holding an assertion, or None."""
     for node in ast.walk(unit.node):
         if not isinstance(node, ast.For):
             continue
         if not _asserts_anywhere_in([node]):
             continue
-        if has_floor(unit, node):
+        if has_floor(unit, node, test_file):
             continue
         return node
     return None
@@ -183,7 +266,17 @@ def find_unentered(scanned: corpus.Corpus) -> List[Dict]:
     """
     rows: List[Dict] = []
 
-    for unit in scanned.units():
+    for test_file in scanned.files:
+        rows.extend(_unentered_in(test_file))
+
+    return rows
+
+
+def _unentered_in(test_file: corpus.TestFile) -> List[Dict]:
+    """The rows of one file's units, the file handed on so a loop's table can be read."""
+    rows: List[Dict] = []
+
+    for unit in test_file.units:
         if not corpus.asserts_in(unit) or asserts_on_a_path_that_always_runs(unit):
             continue
 
@@ -205,7 +298,7 @@ def find_unentered(scanned: corpus.Corpus) -> List[Dict]:
             )
             continue
 
-        loop = vacuous_loop(unit)
+        loop = vacuous_loop(unit, test_file)
         if loop is not None:
             rows.append(
                 {

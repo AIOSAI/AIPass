@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: architecture_check.py
 # Description: Architecture Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-08-28
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -49,6 +49,11 @@ PACK_ROOT = module_file(__file__).parent.parent.parent  # aipass_standards/ -> h
 # PACK_ROOT = seedgo/apps/, so .parent.parent = src/aipass/
 _SRC_PKG_ROOT = PACK_ROOT.parent.parent  # apps/ -> seedgo/ -> src/aipass/
 SPAWN_TEMPLATES_DIR = _SRC_PKG_ROOT / "spawn" / "templates"
+
+# shared/ beside apps/ is a branch's pre-install library (aipass keeps project_home.py
+# there: it runs before prax can be imported). branch_audit reads it as product since
+# DPLAN-0404 leg 1, so this checker names it a layer rather than a stray.
+LIBRARY_LAYER = "Library layer (shared/, beside apps/)"
 
 # Template subtrees that are local-only and therefore never scored — see _is_local_only()
 LOCAL_ONLY_TEMPLATE_ROOTS = (".trinity",)
@@ -119,10 +124,11 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     is_module = "apps/modules/" in module_path
     is_handler = "apps/handlers/" in module_path
     is_init = path.name == "__init__.py"
+    is_library = is_library_file(path)
 
     # Check 1: 3-Layer Pattern - File location
     if not is_init:
-        layer_check = check_layer_location(module_path, is_entry_point, is_module, is_handler)
+        layer_check = check_layer_location(is_entry_point, is_module, is_handler, is_library)
         checks.append(layer_check)
 
     # Check 2: File size
@@ -164,14 +170,22 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "ARCHITECTURE"}
 
 
-def check_layer_location(module_path: str, is_entry_point: bool, is_module: bool, is_handler: bool) -> Dict:
+def is_library_file(path: Path) -> bool:
+    """Whether a file sits under a ``shared/`` directory that has ``apps/`` beside it."""
+    return any(parent.name == "shared" and (parent.parent / "apps").is_dir() for parent in path.parents)
+
+
+def check_layer_location(is_entry_point: bool, is_module: bool, is_handler: bool, is_library: bool = False) -> Dict:
     """
-    Check if file is in correct architectural layer
+    Check if file is in correct architectural layer. The caller decides the
+    layer from the path; the `module_path` this also took was never read and
+    was dropped (seedgo, fleet green leg 8).
 
     3-Layer Pattern:
     - apps/branch.py (entry point)
     - apps/modules/ (orchestration)
     - apps/handlers/ (implementation)
+    - shared/ beside apps/ (the pre-install library, LIBRARY_LAYER)
     """
     if is_entry_point:
         return {"name": "3-layer pattern", "passed": True, "message": "Entry point layer (apps/branch.py)"}
@@ -179,6 +193,8 @@ def check_layer_location(module_path: str, is_entry_point: bool, is_module: bool
         return {"name": "3-layer pattern", "passed": True, "message": "Module layer (apps/modules/)"}
     elif is_handler:
         return {"name": "3-layer pattern", "passed": True, "message": "Handler layer (apps/handlers/)"}
+    elif is_library:
+        return {"name": "3-layer pattern", "passed": True, "message": LIBRARY_LAYER}
     else:
         return {
             "name": "3-layer pattern",

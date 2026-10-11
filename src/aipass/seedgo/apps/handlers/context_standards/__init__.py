@@ -45,5 +45,5 @@ __version__ = "0.2.0"
 #: in-tree file names is indistinguishable from an abandoned one. Named here, the
 #: pack says which of its arms are part of it: the checker, found by the audit's
 #: `*_check.py` glob, and the two ratchets, imported by the CI runner.
-from aipass.seedgo.apps.handlers.context_standards import name_ratchet  # noqa: F401  (re-exported)
-from aipass.seedgo.apps.handlers.context_standards import startup_ratchet  # noqa: F401  (re-exported)
+from aipass.seedgo.apps.handlers.context_standards import name_ratchet  # (re-exported)
+from aipass.seedgo.apps.handlers.context_standards import startup_ratchet  # (re-exported)

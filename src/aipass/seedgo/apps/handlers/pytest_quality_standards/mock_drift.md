@@ -88,6 +88,42 @@ the second is a module patch.
 A target that resolves to no file in the project is also left alone. The rule
 reports what it can resolve and stays quiet about the rest.
 
+## Second species: a function standing in for a class
+
+Same family — a patch whose replacement does not match its target:
+
+```python
+from mypkg import finder          # finder.py: return Path.cwd() / "REGISTRY.json"
+
+def _windows_spelled(self, monkeypatch):
+    monkeypatch.setattr(finder, "Path", lambda *a: Path(*a))   # CLASS-STANDIN
+```
+
+`finder` uses `Path` as a class, so the lambda dies with `'function' object has
+no attribute 'cwd'` — but only on the path that reaches `Path.cwd()`. seedgo's
+batch7 test at 1.3.1 was this shape: the fallback ran only when the git-ignored
+registry marker was absent, so every dev seat was green and every clean checkout
+red (PR #774, CI round four).
+
+What it reads:
+
+- **The target module** is a bare name the test file binds by import, resolved to
+  exactly one production file through the corpus — never by importing. A target
+  reached through a stdlib module (`mod.subprocess`, `"Popen"`) is not in the
+  corpus and is skipped.
+- **A class use** in that module's own source: an attribute read off the name
+  (`Path.cwd`), the second argument of `isinstance`/`issubclass`, or a base in a
+  class statement. A constructor-only use (`Path(x)`) acquits — a function
+  answers a call. A name bound by plain `import` is a module and acquits.
+- **The stand-in**: a lambda, a name the test file binds only to a `def`, or
+  `functools.partial(...)` is convicted (a partial has no `.cwd` either). A class
+  (`class _FakePath(type(Path()))`), `type(...)` or a `MagicMock` acquits.
+- **Helpers too**, not only test units: the incident's patch lived in a helper.
+  The row names the def holding the call; the score is floored at 0.
+
+Not read: string targets (`setattr("pkg.mod.Path", ...)`), local shadowing of the
+name in the product module, `except Name`.
+
 ## How the target is resolved
 
 By **file**, never by import. This checker does not run the project it measures —

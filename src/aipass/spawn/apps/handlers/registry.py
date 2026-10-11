@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: *_REGISTRY.json discovery and CRUD operations
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-06-10
+# Modified: 2026-10-10
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -34,13 +34,19 @@ Identity model (DPLAN-0239, settled 2026-07-11):
       signature, this flag); the lane stays dark unless all five pass.
 """
 
-import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.json import json_handler
+
+# POSIX only: Windows has no fcntl, so add_to_registry takes no lock there.
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
+    logger.info("[registry] fcntl unavailable (Windows) — add_to_registry runs unlocked")
 
 
 _PROTECTED_FLOOR = frozenset({"spawn", "devpulse", "drone"})
@@ -375,12 +381,10 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
     lock_path = registry_path.parent / f".{registry_path.stem}.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if sys.platform == "win32":
+    if fcntl is None:
         lock_fd = None
     else:
-        import fcntl
-
-        lock_fd = open(lock_path, "w", encoding="utf-8")  # noqa: SIM115
+        lock_fd = open(lock_path, "w", encoding="utf-8")
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
     try:
@@ -446,14 +450,12 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
 
         return save_registry(registry_path, registry)
     finally:
-        if lock_fd is not None and sys.platform != "win32":
-            import fcntl
-
+        if lock_fd is not None and fcntl is not None:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             lock_fd.close()
 
 
-def fix_passport_registry_id(branch_dir: Path, registry_path: Path) -> bool:
+def fix_passport_registry_id(branch_dir: Path, registry_path: Path) -> bool | None:
     """Update passport.json registry_id if it doesn't match the current registry.
 
     Call when adopting an existing agent or during sync-registry --fix to repair
@@ -464,7 +466,13 @@ def fix_passport_registry_id(branch_dir: Path, registry_path: Path) -> bool:
         registry_path: Path to the project registry (*_REGISTRY.json)
 
     Returns:
-        True if passport was updated, False if already correct or failed.
+        True if the passport was updated. False if there was nothing to change:
+        no passport, no registry, a registry without an id, or ids already
+        equal. None if the fix FAILED: the registry or the passport could not
+        be read, or the passport could not be written. None is an answer the
+        success path never gives, so a caller can tell a failure from "already
+        correct" (spawn's decision, DPLAN-0354 leg 5); sync_registry names it
+        under ids_failed, adoption leaves it in this log.
     """
     passport_path = branch_dir / ".trinity" / "passport.json"
     if not passport_path.exists():
@@ -475,11 +483,11 @@ def fix_passport_registry_id(branch_dir: Path, registry_path: Path) -> bool:
     try:
         registry_data = json_handler.read_json(registry_path)
         if registry_data is None:
-            return False
+            raise ValueError("the registry could not be read as JSON")
         current_id = registry_data.get("metadata", {}).get("id", "")
     except Exception as e:
         logger.warning("[registry] Cannot read registry_id from %s: %s", registry_path.name, e)
-        return False
+        return None
 
     if not current_id:
         return False
@@ -487,24 +495,24 @@ def fix_passport_registry_id(branch_dir: Path, registry_path: Path) -> bool:
     try:
         passport = json_handler.read_json(passport_path)
         if passport is None:
-            return False
+            raise ValueError(f"passport at {passport_path} could not be read")
         old_id = passport.get("citizenship", {}).get("registry_id", "")
         if old_id == current_id:
             return False  # Already correct, no update needed
 
         passport.setdefault("citizenship", {})["registry_id"] = current_id
-        success = json_handler.write_json(passport_path, passport)
-        if success:
-            logger.info(
-                "[registry] Fixed registry_id for %s: %s → %s",
-                branch_dir.name,
-                old_id[:8] if old_id else "empty",
-                current_id[:8],
-            )
-        return success
+        if not json_handler.write_json(passport_path, passport):
+            raise OSError(f"passport at {passport_path} could not be written")
+        logger.info(
+            "[registry] Fixed registry_id for %s: %s → %s",
+            branch_dir.name,
+            old_id[:8] if old_id else "empty",
+            current_id[:8],
+        )
+        return True
     except Exception as e:
         logger.warning("[registry] Failed to fix registry_id for %s: %s", branch_dir.name, e)
-        return False
+        return None
 
 
 def pick_owner_branch(branches, project_root):

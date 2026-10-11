@@ -10,6 +10,16 @@
 
 **This gate sees only writes made through a tool call — Edit, Write, MultiEdit, NotebookEdit, and a Bash command whose write grammar it can read; a write a service makes from Python (a drone verb, @memory's rollover, any `python -m` door) never passes through it, so every service that writes files must carry its own fence.**
 
+**Default-deny on the Bash lane (DPLAN-0356 phase 4, P2).** Besides the write grammar it reads, every
+operand of a program that does not only read (`modules/shell_programs.READ_ONLY_PROGRAMS`) is judged by
+the same three rules: the project fence, whose file it is, and the `.trinity` memory rule. So a program
+nobody listed as a writer cannot name another branch's file or a memory file off the admin seat. `cat`,
+`grep`, `jq` and friends still read anywhere; `drone` is the router and passes; git and gh answer to
+git_gate. `awk` and `sed` are not read as filters: their scripts can write. The one exception is
+`sed` whose every script is addresses and `p`, `d`, `q`, `=` with only reading flags (`sed -n 68,90p f`).
+That shape reads anywhere, a memory file included (hooks todo 80). A `w` or `e` inside any other
+script is not read: its target or command passes unseen.
+
 ## Who may write whose files — the owner's ruling, 2026-09-18
 
 The owner ruled at 22:17, after @memory's rollover was found writing Vera Studio branches' `.trinity` files (devpulse 1d041cfc). `modules/write_ownership.py` encodes it for both lanes:
@@ -17,15 +27,15 @@ The owner ruled at 22:17, after @memory's rollover was found writing Vera Studio
 | Seat | May write | Never |
 |---|---|---|
 | @devpulse (verified admin grant) | anywhere, system-wide | — |
-| a project's manager (registry row `owner: true`: @devpulse in AIPass, @vera in Vera Studio) | anything inside her own project | any other project |
-| @seedgo, @spawn | anything inside AIPass (the project whose registry is `AIPASS_REGISTRY.json`) | beyond AIPass, including projects nested in it |
-| everyone else | their own branch directory | another branch, a project-level file, another project |
+| every other seat, a project's manager row and @seedgo/@spawn included | their own branch directory | another branch, a project-level file, another project |
+
+Since DPLAN-0356 (`write_ownership` 2.0.0) the verified admin seat is the only cross-write exemption: a manager row (`owner: true`) and a directory name grant nothing.
 
 Reading is never refused by this rule. A file outside every project (a temp file) is nobody's and stays open. A session at a project root has no branch identity: it is the project's own seat and writes the project, fenced at its boundary.
 
 **Read from the registries, not from path shapes.** The caller's project is the nearest ancestor of the session cwd holding a `*_REGISTRY.json` (the marker @ai_mail's mail fence uses, GH #733). The cwd is where the walk starts because it is the only identity evidence a PreToolUse hook has, the same evidence the admin rail's leg 1 reads. What the walk finds is then read from the registry: a branch is a row's `path`, a manager is a row's `owner` flag (spawn writes it to the registry entry, not to a passport an agent can edit). The `src/<package>/<branch>` shape is only the fallback where a project has no branches table. A registry that proves it catalogues something else (a non-empty table with no `branches` key, like `flow_json/PLAN_REGISTRY.json`) marks no project; an unreadable or empty one still does.
 
-**Project-level files** (the repo root's own files: `.aipass/`, `.claude/`, `README.md`) belong to no branch row, so they are the manager's. @hooks' own `.aipass/hooks.json`, `.aipass/project_hooks.json` and `.claude/provider_manifest.json` go through @devpulse since this ruling.
+**Project-level files** (the repo root's own files: `.aipass/`, `.claude/`, `README.md`) belong to no branch row; a branch seat is refused and pointed at the manager, and only a session at the project root or the admin seat writes them. @hooks' own `.aipass/hooks.json`, `.aipass/project_hooks.json` and `.claude/provider_manifest.json` go through @devpulse since this ruling.
 
 ### The project boundary
 
@@ -42,7 +52,9 @@ Downward was trusted until the ruling, so every AIPass citizen could edit `proje
 
 ### The shell lane, and its residual
 
-The shell lane applies the same rules to what `bash_writes` can see. Inside one project it convicts on write grammar only (redirection, `tee`, `sed -i`, `cp`/`mv` destinations, `dd of=`). An interpreter's held paths (`python -c`, a heredoc, `awk`) cannot be told from reads, and reading another branch is the daily loop, so **an interpreter that writes another branch of its own project is not refused**. The project fence still reads held paths: an interpreter naming another project's file is refused whether it reads or writes.
+The shell lane applies the same rules to what `bash_writes` can see. Inside one project it convicts on write grammar only (redirection, `tee`, `sed -i`, `cp`/`mv` destinations, `dd of=`). An interpreter's held paths (`python -c`, a heredoc, `awk`) cannot be told from reads, and reading another branch is the daily loop, so **an interpreter that writes another branch of its own project is not refused**. The project fence still reads held paths: an interpreter naming another project's file is refused whether it reads or writes. The narrower `testwrite_gate` now asks `bash_writes` whether the interpreter's own text holds a write verb and stands down when it does not; this gate deliberately does not, and the marker it ignores is named in [bash_writes.md](bash_writes.md).
+
+**A source-read gate is open for the seconds an edit is half-applied.** The live gate imports this file per event, so while a symbol was being moved on 2026-09-18 five real events hit a `NameError` and failed OPEN (@devpulse's trigger digest: tripwire unwatched x4, one bash scan allowing). Move code in one Edit per symbol.
 
 ## The admin exemption — one seat reaches outwards
 
@@ -73,8 +85,7 @@ shares one OS user; the signature buys tamper-evidence, not attack-proofing). It
 reach — a session standing in devpulse's tree already writes that tree under the cross-branch fence,
 which keys on the same cwd.
 
-The exemption is narrow: it opens the **cross-project** fence only. Inside AIPass @devpulse writes every
-branch as the registry's manager, not as admin. Inbox writes, daemon confinement and the `.trinity` caps
+The exemption opens the cross-project fence and, inside a project, the cross-branch fence. Inbox writes, daemon confinement and the `.trinity` caps
 are unchanged for every seat including the admin.
 
 ## Outside AIPass — what a project `aipass init` creates gets

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: caller.py
 # Description: OpenRouter Caller Detection Handler
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2025-11-16
-# Modified: 2025-11-16
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -55,6 +55,14 @@ def get_caller_info() -> Optional[Dict[str, Any]]:
 
     Returns dict with: caller_name, caller_path, json_folder, category, detection_method
     Returns None if detection fails.
+
+    A failure answers the same None as no caller found, on purpose (api, fleet
+    green leg 5). Every caller does the right thing for a failure with that
+    None: client.get_response names the caller 'unknown' and sends the request,
+    and provision.ensure_caller_config answers {} (its own outer catch answers
+    {} as well). A raise, or a catch narrowed to a named list, would let an
+    error end client.get_response before its request is sent. What tells the
+    two apart is the error line logged here.
     """
     try:
         stack = inspect.stack()
@@ -92,19 +100,18 @@ def detect_caller_from_stack() -> Tuple[Optional[str], Optional[Path]]:
 
 
 def detect_caller_category(caller_path: Path) -> str:
-    """Categorize caller based on file path."""
-    try:
-        path_parts = caller_path.parts
+    """Categorize caller based on file path.
 
-        if "flow" in path_parts:
-            return "flow"
-        elif "prax" in path_parts:
-            return "prax"
-        else:
-            return "unknown"
+    No try: a Path cannot raise from its parts, so the catch guarded nothing
+    (api, fleet green leg 4).
+    """
+    path_parts = caller_path.parts
 
-    except Exception as e:
-        logger.error(f"Failed to detect category for {caller_path}: {e}")
+    if "flow" in path_parts:
+        return "flow"
+    elif "prax" in path_parts:
+        return "prax"
+    else:
         return "unknown"
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aipass.py
 # Description: AIPASS branch entry point — thin command router
-# Version: 0.5.0
+# Version: 0.5.1
 # Created: 2026-04-16
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -35,7 +35,7 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console, error, resolve_exit
 from aipass.prax import logger
 
 try:
@@ -102,13 +102,22 @@ def _pyproject_version(start: Path) -> str | None:
     return None
 
 
+def _installed_version() -> str:
+    """``importlib.metadata.version("aipass")``, unchanged.
+
+    A seam, and the reason is the test: it stands in here for an install with
+    no metadata instead of replacing importlib process-wide.
+    """
+    return importlib.metadata.version("aipass")
+
+
 def _resolve_version() -> str:
     """Live version — repo pyproject.toml first, installed metadata as fallback."""
     version = _pyproject_version(Path(__file__))
     if version:
         return version
     try:
-        return importlib.metadata.version("aipass")
+        return _installed_version()
     except importlib.metadata.PackageNotFoundError:
         logger.info("[AIPASS] No repo pyproject.toml and no package metadata, version unknown")
         return "unknown"
@@ -122,6 +131,15 @@ MODULES_DIR = Path(__file__).parent / "modules"
 
 
 _import_failures: dict[str, Exception] = {}
+
+
+def _import_module(name: str) -> Any:
+    """``importlib.import_module(name)``, unchanged.
+
+    A seam, and the reason is the test: every real module here has
+    handle_command, so the skip branch is reached by standing one in here.
+    """
+    return importlib.import_module(name)
 
 
 def discover_modules() -> List[Any]:
@@ -139,7 +157,7 @@ def discover_modules() -> List[Any]:
         module_name = f"aipass.aipass.apps.modules.{file_path.stem}"
 
         try:
-            module = importlib.import_module(module_name)
+            module = _import_module(module_name)
             if hasattr(module, "handle_command"):
                 modules.append(module)
         except Exception as e:
@@ -261,7 +279,12 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
 
 def main():
-    """Main entry point - routes commands or shows help."""
+    """Main entry point - routes commands or shows help.
+
+    Exit codes: 0 clean; 2 routed but a module reported through error();
+    1 not handled — unknown command, a module that crashed (named on
+    stderr by error()) or failed to load. No success path returns 1.
+    """
     modules = discover_modules()
     args = sys.argv[1:]
 
@@ -293,9 +316,12 @@ def main():
         console.print(f"Unknown command: {command}")
         return 1
 
+    # A module that reports through error() and returns True has failed:
+    # resolve_exit turns cli's command-failed flag into exit 2, so a shell
+    # reading `$?` sees the refusal (aipass's decision, fleet green leg 3).
     try:
         if route_command(command, remaining, modules):
-            return 0
+            return resolve_exit(True)
     except Exception as e:
         error(f"'{command}' crashed: {e}")
         logger.error(f"[AIPASS] '{command}' traceback", exc_info=True)
@@ -323,7 +349,7 @@ def main():
         console.print(f"[dim]No command '{command}' — answering as: aipass help {' '.join(question)}[/dim]")
         try:
             if route_command("help", question, modules):
-                return 0
+                return resolve_exit(True)
         except Exception as e:
             error(f"help crashed: {e}")
             logger.error("[AIPASS] catch-all help traceback", exc_info=True)

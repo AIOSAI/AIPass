@@ -1,25 +1,34 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/test_rollover.py
-# Date: 2026-03-24
-# Version: 1.1.2
-# Modified: 2026-09-15
+# Description: Tests for the rollover module's command routing and SUBCOMMANDS
+# Version: 1.2.0
+# Created: 2026-03-24
+# Modified: 2026-10-04
 # Category: memory/tests
 # =============================================
 
-"""Tests for the rollover orchestration module.
+"""Tests for apps/modules/rollover.py."""
 
-Covers: from aipass.memory.apps.modules.rollover import handle_command
+# Tests for the rollover orchestration module.
+#
+# Covers: from aipass.memory.apps.modules.rollover import handle_command
+#
+# Tests command routing, handler discovery, and the SUBCOMMANDS dict.
+# All tests use mocks or tmp_path — no live filesystem or infrastructure access.
 
-Tests command routing, handler discovery, and the SUBCOMMANDS dict.
-All tests use mocks or tmp_path — no live filesystem or infrastructure access.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — execute_rollover behind run_rollover, in tests/test_orchestrator_exec.py
+# seedgo: no-test-needed(covered_elsewhere) — the rollover_config verbs re-exported here, in tests/test_config_verbs.py
+# seedgo: no-test-needed(covered_elsewhere) — check_all_branches behind check_triggers, in tests/test_detector.py
 
 import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# The real module, for the tests that need no mock graph (the handler walk).
+from aipass.memory.apps.modules import rollover as rollover_module
 
 
 # ---------------------------------------------------------------------------
@@ -45,27 +54,13 @@ def _prepare_rollover_mocks(monkeypatch):
     real_rollover_config = importlib.import_module("aipass.memory.apps.modules.rollover_config")
     real_rollover_json = importlib.import_module("aipass.memory.apps.modules.rollover_json")
 
-    # rich
-    mock_panel = MagicMock()
-    mock_box = MagicMock()
-    rich_panel_mod = MagicMock()
-    rich_panel_mod.Panel = mock_panel
-    rich_box_mod = MagicMock()
-    rich_box_mod.box = mock_box
-    monkeypatch.setitem(sys.modules, "rich.panel", rich_panel_mod)
-    monkeypatch.setitem(sys.modules, "rich", MagicMock())
-
-    # aipass.cli console / error / warning
-    mock_console = MagicMock()
+    # aipass.cli is the REAL package (leg 11 of DPLAN-0354): its console only
+    # prints, and no test here reads the console. error() and warning() are
+    # replaced at the use site, on each module that bound them, because error()
+    # marks the process's command as failed; _import_rollover patches the
+    # re-imported rollover the same way.
     mock_error = MagicMock()
     mock_warning = MagicMock()
-    cli_modules_mod = MagicMock()
-    cli_modules_mod.console = mock_console
-    cli_modules_mod.error = mock_error
-    cli_modules_mod.warning = mock_warning
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules_mod)
 
     # aipass.memory handler sub-packages
     mock_detector = MagicMock()
@@ -149,15 +144,13 @@ def _prepare_rollover_mocks(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", mock_orchestrator)
     # Patched attribute by attribute rather than through the sys.modules
     # stand-in, because `_refuse` reads `error` from ITS OWN globals - without
-    # these three the mock error() the tests assert on is never called.
+    # these two the mock error() the tests assert on is never called.
     # monkeypatch restores each one.
-    monkeypatch.setattr(real_rollover_config, "console", mock_console)
     monkeypatch.setattr(real_rollover_config, "error", mock_error)
     monkeypatch.setattr(real_rollover_config, "detector", mock_detector)
-    # And the same two on rollover_json, which is where `_emit` reads `console`
-    # and `_refuse` reads `error` now — a patch on rollover_config no longer
-    # reaches either of them. No `detector` there: that module never took one.
-    monkeypatch.setattr(real_rollover_json, "console", mock_console)
+    # And `error` on rollover_json, which is where `_refuse` reads it now — a
+    # patch on rollover_config no longer reaches it. No `detector` there: that
+    # module never took one.
     monkeypatch.setattr(real_rollover_json, "error", mock_error)
 
     # intake (lazy import inside process_plans_command)
@@ -171,7 +164,6 @@ def _prepare_rollover_mocks(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.plans_processor", mock_plans_processor)
 
     return {
-        "console": mock_console,
         "error": mock_error,
         "warning": mock_warning,
         "detector": mock_detector,
@@ -188,8 +180,9 @@ _ROLLOVER_MODULE = "aipass.memory.apps.modules.rollover"
 def _import_rollover(monkeypatch):
     """Prepare mocks and import (or reimport) the rollover module.
 
-    The re-import binds rollover to the MagicMock cli, so its error() marks
-    nothing. Both evictions go through monkeypatch, which records what stood
+    The re-import binds rollover to the real cli, and its error() and warning()
+    are then replaced on the module, so its error() marks nothing. Both
+    evictions go through monkeypatch, which records what stood
     there - the real module, or nothing - and teardown puts exactly that back.
     A bare pop left the mock-bound module cached after teardown: the next
     in-process memory.main() on that xdist worker routed `rollover <bogus>`
@@ -212,6 +205,11 @@ def _import_rollover(monkeypatch):
     delattr(parent, "rollover")
 
     from aipass.memory.apps.modules import rollover
+
+    # The re-import bound the REAL cli; error() and warning() are replaced at
+    # the use site, so a test's refusal never marks the process's command failed.
+    monkeypatch.setattr(rollover, "error", mocks["error"])
+    monkeypatch.setattr(rollover, "warning", mocks["warning"])
 
     return rollover, mocks
 
@@ -274,7 +272,9 @@ class TestMockedCliPackageIsComplete:
             monkeypatch.setattr(cli, name, None, raising=False)
             delattr(cli, name)
         rollover, _mocks = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "check_triggers")
         assert rollover.handle_command("rollover", ["check"]) is True
+        assert calls == [((None,), {})], "the re-imported module did not route `check`"
 
 
 class TestMockedReimportIsUndoneAtTeardown:
@@ -352,21 +352,21 @@ class TestSubcommands:
 
     def test_subcommands_has_run(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
-        assert "run" in rollover._SUBCOMMANDS
+        assert "run" in rollover.SUBCOMMANDS
 
     def test_subcommands_has_status(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
-        assert "status" in rollover._SUBCOMMANDS
+        assert "status" in rollover.SUBCOMMANDS
 
     def test_subcommands_has_check(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
-        assert "check" in rollover._SUBCOMMANDS
+        assert "check" in rollover.SUBCOMMANDS
 
     def test_subcommands_has_report_lines(self, monkeypatch):
         """Renamed 2026-08-27 — `sync-lines` synced nothing after the health stamp went."""
         rollover, _ = _import_rollover(monkeypatch)
-        assert "report-lines" in rollover._SUBCOMMANDS
-        assert "sync-lines" not in rollover._SUBCOMMANDS
+        assert "report-lines" in rollover.SUBCOMMANDS
+        assert "sync-lines" not in rollover.SUBCOMMANDS
         assert rollover.RENAMED_VERBS["sync-lines"] == "report-lines"
 
     def test_subcommands_are_the_published_five_with_one_line_help(self, monkeypatch):
@@ -378,8 +378,8 @@ class TestSubcommands:
         non-empty single line because `--help` prints one row per entry.
         """
         rollover, _ = _import_rollover(monkeypatch)
-        assert set(rollover._SUBCOMMANDS) == {"run", "status", "check", "report-lines", "push"}
-        for key, value in rollover._SUBCOMMANDS.items():
+        assert set(rollover.SUBCOMMANDS) == {"run", "status", "check", "report-lines", "push"}
+        for key, value in rollover.SUBCOMMANDS.items():
             assert value.strip(), f"{key} has no description — --help would print a bare verb"
             assert "\n" not in value, f"{key}'s description spans lines and would break the help table"
 
@@ -389,6 +389,13 @@ class TestSubcommands:
 # ===========================================================================
 
 
+def _record(monkeypatch, module, name):
+    """Stand a recorder in for one of rollover's own verbs; the route is the claim, not the verb's work."""
+    calls = []
+    monkeypatch.setattr(module, name, lambda *a, **k: calls.append((a, k)))
+    return calls
+
+
 class TestHandleCommand:
     """Verify handle_command routes subcommands correctly."""
 
@@ -396,36 +403,52 @@ class TestHandleCommand:
 
     def test_rollover_run_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "run_rollover")
         assert rollover.handle_command("rollover", ["run"]) is True
+        assert calls == [((None,), {})]
 
     def test_rollover_status_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "show_status")
         assert rollover.handle_command("rollover", ["status"]) is True
+        assert calls == [((), {})]
 
     def test_rollover_check_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "check_triggers")
         assert rollover.handle_command("rollover", ["check"]) is True
+        assert calls == [((None,), {})]
 
     def test_rollover_sync_lines_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "report_line_counts")
         assert rollover.handle_command("rollover", ["sync-lines"]) is True
+        assert calls == [((), {})]
 
     def test_rollover_no_args_returns_true(self, monkeypatch):
         """No args triggers introspection, still returns True."""
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "print_introspection")
         assert rollover.handle_command("rollover", []) is True
+        assert calls == [((), {})]
 
     def test_rollover_help_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "print_help")
         assert rollover.handle_command("rollover", ["--help"]) is True
+        assert calls == [((), {})]
 
     def test_rollover_h_flag_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "print_help")
         assert rollover.handle_command("rollover", ["-h"]) is True
+        assert calls == [((), {})]
 
     def test_rollover_help_word_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "print_help")
         assert rollover.handle_command("rollover", ["help"]) is True
+        assert calls == [((), {})]
 
     def test_rollover_unknown_subcommand_returns_true(self, monkeypatch):
         """Unknown subcommand still returns True (handled with error message)."""
@@ -438,31 +461,45 @@ class TestHandleCommand:
 
     def test_toplevel_status_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "show_status")
         assert rollover.handle_command("status", []) is True
+        assert calls == [((), {})]
 
     def test_toplevel_check_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "check_triggers")
         assert rollover.handle_command("check", []) is True
+        assert calls == [((None,), {})]
 
     def test_toplevel_sync_lines_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "report_line_counts")
         assert rollover.handle_command("sync-lines", []) is True
+        assert calls == [((), {})]
 
     def test_toplevel_process_plans_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "process_plans_command")
         assert rollover.handle_command("process-plans", []) is True
+        assert calls == [((), {})]
 
     def test_toplevel_help_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "print_help")
         assert rollover.handle_command("--help", []) is True
+        assert calls == [((), {})]
 
     def test_toplevel_h_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "print_help")
         assert rollover.handle_command("-h", []) is True
+        assert calls == [((), {})]
 
     def test_toplevel_help_word_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
+        calls = _record(monkeypatch, rollover, "print_help")
         assert rollover.handle_command("help", []) is True
+        assert calls == [((), {})]
 
     # -- unknown command returns False --
 
@@ -549,26 +586,42 @@ class TestSubcommandHelpFlag:
 
 
 class TestDiscoverHandlers:
-    """Verify _discover_handlers scans handler directories correctly."""
+    """Verify the handler walk, read through its one caller: the introspection screen.
 
-    def test_returns_empty_dict_when_no_handlers_dir(self, monkeypatch, tmp_path):
+    Leg 11 of DPLAN-0354: these tests called the private walk; they now read the
+    map the public print_introspection() prints, which is where it is seen.
+    """
+
+    @staticmethod
+    def _connected(capsys) -> tuple[dict[str, list[str]], list[str]]:
+        """The "Connected Handlers" block of the screen: the map it shows, and its raw lines."""
+        rollover_module.print_introspection()
+        lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
+        block = lines[lines.index("Connected Handlers:") + 1 :]
+        block = block[: block.index("")]
+        shown = {}
+        for line in block:
+            if line == "No handlers found":
+                continue
+            directory, _, files = line.partition("  ")
+            shown[directory.removeprefix("handlers/").rstrip("/")] = files.strip().split(", ") if files.strip() else []
+        return shown, block
+
+    def test_returns_empty_dict_when_no_handlers_dir(self, monkeypatch, tmp_path, capsys):
         """Returns empty dict when handlers/ directory does not exist."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         # Point __file__ at a location with no handlers/ sibling
         fake_module = tmp_path / "modules" / "rollover.py"
         fake_module.parent.mkdir(parents=True)
         fake_module.write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result, block = self._connected(capsys)
 
         assert result == {}
+        assert block == ["No handlers found"]
 
-    def test_discovers_py_files_in_handler_dirs(self, monkeypatch, tmp_path):
+    def test_discovers_py_files_in_handler_dirs(self, monkeypatch, tmp_path, capsys):
         """Discovers .py files inside handler subdirectories."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         # Build fake handler structure
         # modules/rollover.py -> parent.parent = apps -> handlers is sibling
         modules_dir = tmp_path / "apps" / "modules"
@@ -590,8 +643,8 @@ class TestDiscoverHandlers:
         rollover_dir.mkdir()
         (rollover_dir / "orchestrator.py").write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result, _ = self._connected(capsys)
 
         assert "monitor" in result
         assert "detector.py" in result["monitor"]
@@ -602,10 +655,8 @@ class TestDiscoverHandlers:
         assert "rollover" in result
         assert "orchestrator.py" in result["rollover"]
 
-    def test_excludes_pycache_directories(self, monkeypatch, tmp_path):
+    def test_excludes_pycache_directories(self, monkeypatch, tmp_path, capsys):
         """Directories starting with __ are excluded."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
         fake_module = modules_dir / "rollover.py"
@@ -618,15 +669,13 @@ class TestDiscoverHandlers:
         pycache.mkdir()
         (pycache / "something.py").write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result, _ = self._connected(capsys)
 
         assert "__pycache__" not in result
 
-    def test_excludes_empty_handler_dirs(self, monkeypatch, tmp_path):
+    def test_excludes_empty_handler_dirs(self, monkeypatch, tmp_path, capsys):
         """Directories with no .py files (only __init__.py) are excluded."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
         fake_module = modules_dir / "rollover.py"
@@ -637,15 +686,13 @@ class TestDiscoverHandlers:
         empty_handler.mkdir(parents=True)
         (empty_handler / "__init__.py").write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result, _ = self._connected(capsys)
 
         assert "empty_handler" not in result
 
-    def test_returns_sorted_keys_and_values(self, monkeypatch, tmp_path):
+    def test_returns_sorted_keys_and_values(self, monkeypatch, tmp_path, capsys):
         """Handler dirs and their files are sorted alphabetically."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
         fake_module = modules_dir / "rollover.py"
@@ -661,8 +708,8 @@ class TestDiscoverHandlers:
             (d / "b_file.py").write_text("", encoding="utf-8")
             (d / "a_file.py").write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result, _ = self._connected(capsys)
 
         keys = list(result.keys())
         assert keys == sorted(keys), "Handler directory keys should be sorted"
@@ -670,10 +717,8 @@ class TestDiscoverHandlers:
         for dir_name, files in result.items():
             assert files == sorted(files), f"Files in {dir_name} should be sorted"
 
-    def test_ignores_non_py_files(self, monkeypatch, tmp_path):
+    def test_ignores_non_py_files(self, monkeypatch, tmp_path, capsys):
         """Non-.py files in handler directories are excluded."""
-        rollover, _ = _import_rollover(monkeypatch)
-
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
         fake_module = modules_dir / "rollover.py"
@@ -686,7 +731,7 @@ class TestDiscoverHandlers:
         (mixed_dir / "README.md").write_text("", encoding="utf-8")
         (mixed_dir / "config.json").write_text("", encoding="utf-8")
 
-        with patch.object(rollover, "__file__", str(fake_module)):
-            result = rollover._discover_handlers()
+        monkeypatch.setattr(rollover_module, "__file__", str(fake_module))
+        result, _ = self._connected(capsys)
 
         assert result["mixed"] == ["handler.py"]

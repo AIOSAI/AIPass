@@ -46,9 +46,9 @@ not hypothetical — the first fleet-wide run caught @devpulse and @memory savin
 engine does not wire, so a write followed by a failure goes unreported; and because the snapshot holds stats,
 not text, entries already over cap before the call are listed too ("holds", never "wrote").
 
-> **CONFIG WIRE — the tripwire is not live until two entries land in `.aipass/hooks.json`**, followed by
-> `aipass trust <path-to-this-repo>` (any byte change voids the trust hash):
-> `PreToolUse.trinity_tripwire_snapshot` → `aipass.hooks.apps.handlers.security.edit_gate.tripwire_snapshot`,
+> **CONFIG WIRE — the tripwire is wired in `.aipass/hooks.json`** (both entries are present, and both
+> are in the built-in gate set in `handlers/config/gates.py`, so they run even when no config can be
+> read): `PreToolUse.trinity_tripwire_snapshot` → `aipass.hooks.apps.handlers.security.edit_gate.tripwire_snapshot`,
 > matcher `Bash`; `PostToolUse.trinity_tripwire` → `aipass.hooks.apps.handlers.security.edit_gate.tripwire`,
 > matcher `Bash`. No provider wire: tool events already run every enabled handler. The refusal needs no wire;
 > it rides `pre_edit_gate`, which already matches Bash.

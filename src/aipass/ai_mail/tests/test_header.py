@@ -1,4 +1,15 @@
-"""Tests for email header handler -- get_dispatch_header, prepend_dispatch_header."""
+# =================== AIPass ====================
+# Name: test_header.py
+# Description: Tests for email header handler
+# Version: 1.0.1
+# Created: 2026-04-25
+# Modified: 2026-09-29
+# =============================================
+
+"""Tests for apps/handlers/email/header.py -- get_dispatch_header, prepend_dispatch_header."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — DISPATCH_HEADER and NO_MEMORY_SAVE_HEADER's exact wording
 
 import ast
 
@@ -8,6 +19,13 @@ from unittest.mock import MagicMock
 from pathlib import Path
 
 import aipass.ai_mail.apps.handlers.email.header as mod
+
+# The tree sweep's skips, written here rather than imported: seedgo's handlers
+# guard refuses a caller from another branch. dropbox and .archive are the
+# owner's ruling of 09-27 (a dropbox is a sandbox like .archive, nothing looks in);
+# __pycache__ holds no source. The sweep sees every other directory, tools, docs,
+# reports, logs and backups included: a product package of one of those names is walked.
+_SWEEP_SKIP_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 
 # --- Fixtures --------------------------------------------------------
@@ -169,8 +187,7 @@ def test_header_module_has_a_real_docstring():
 
     Goes red on the pre-fix file — the string was there, ``__doc__`` was None.
     """
-    assert mod.__doc__ is not None
-    assert "Email Header Handler" in mod.__doc__
+    assert "Email Header Handler" in (mod.__doc__ or "")
 
 
 def test_header_docstring_opens_the_module_body():
@@ -260,6 +277,37 @@ def test_the_sweep_convicts_an_fstring_opener():
     assert _discarded_module_strings(guilty) == [1]
 
 
+def _branch_sources(root):
+    """Every .py under root, never inside a dropbox, .archive or __pycache__.
+
+    Names are judged relative to root, never on the whole path: a checkout that
+    itself lives under a directory named dropbox is still walked.
+    """
+    for source in root.rglob("*.py"):
+        if not _SWEEP_SKIP_DIRS.intersection(source.relative_to(root).parts[:-1]):
+            yield source
+
+
+def test_the_tree_walk_never_enters_a_dropbox_or_an_archive(tmp_path):
+    """A file placed in a dropbox or .archive under the walked root is not visited.
+
+    apps/handlers/.archive holds retired .py files today, so the bare rglob read
+    them. The root stands inside a directory named dropbox, so a filter on the
+    whole path would drop kept.py too. The runner cannot serve a test module:
+    this pin stands on red first alone (the filter removed, both plants came back).
+    """
+    root = tmp_path / "dropbox" / "root"
+    (root / "live").mkdir(parents=True)
+    (root / "live" / "kept.py").write_text("", encoding="utf-8")
+    for skipped in ("dropbox", ".archive"):
+        (root / "live" / skipped).mkdir()
+        (root / "live" / skipped / "planted.py").write_text("", encoding="utf-8")
+
+    visited = [source.relative_to(root).as_posix() for source in _branch_sources(root)]
+
+    assert visited == ["live/kept.py"]
+
+
 def test_no_module_in_the_tree_documents_itself_into_the_void():
     """Tree-wide: the species dies everywhere in this branch, not just here.
 
@@ -269,7 +317,7 @@ def test_no_module_in_the_tree_documents_itself_into_the_void():
     """
     apps = Path(__file__).resolve().parents[1] / "apps"
     scanned, offenders = 0, []
-    for source in apps.rglob("*.py"):
+    for source in _branch_sources(apps):
         scanned += 1
         lines = _discarded_module_strings(source.read_text(encoding="utf-8"))
         if lines:
@@ -278,4 +326,4 @@ def test_no_module_in_the_tree_documents_itself_into_the_void():
     # Arming probe: a sweep over an empty file list passes for free. A wrong
     # root or a renamed apps/ would otherwise read as a clean tree forever.
     assert scanned > 30, f"sweep only visited {scanned} files — wrong root?"
-    assert not offenders, f"module strings Python discards: {offenders}"
+    assert offenders == [], f"module strings Python discards: {offenders}"

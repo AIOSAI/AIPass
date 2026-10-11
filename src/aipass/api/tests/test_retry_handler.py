@@ -3,28 +3,30 @@
 # Description: Tests for Google API retry handler with SSL error detection
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-10-05
 # =============================================
 
-"""Tests for apps/handlers/google/retry.py -- SSL retry logic.
+"""Tests for apps/handlers/google/retry.py, the SSL retry logic."""
 
-Tests:
-- is_ssl_error: SSLError, BrokenPipeError, ConnectionResetError, ValueError,
-  keyword-based detection
-- api_call_with_retry: first-try success, retry success, exhausted retries,
-  non-SSL immediate raise, rebuild_service_fn invocation
-"""
+# Tests:
+# - is_ssl_error: SSLError, BrokenPipeError, ConnectionResetError, ValueError,
+#   keyword-based detection
+# - api_call_with_retry: first-try success, retry success, exhausted retries,
+#   non-SSL immediate raise, rebuild_service_fn invocation
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that retry.py parses and imports
+# seedgo: no-test-needed(stdlib) — time.sleep's real delay; the sleep seam gets a recorder, no backoff is waited out
+# seedgo: no-test-needed(network) — a real Google call; api_call_with_retry is handed a stand-in request
 
 from __future__ import annotations
 
 import ssl
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from aipass.api.apps.handlers.google.retry import api_call_with_retry, is_ssl_error
-
-_RETRY_MOD = "aipass.api.apps.handlers.google.retry"
 
 
 # =============================================
@@ -76,60 +78,64 @@ class TestIsSSLError:
 class TestApiCallWithRetry:
     """Verifies retry logic for Google API calls."""
 
-    @patch(f"{_RETRY_MOD}.time.sleep")
-    def test_success_first_try(self, mock_sleep: MagicMock) -> None:
-        """Successful execute() on the first attempt returns the result."""
+    def test_success_first_try(self) -> None:
+        """Successful execute() on the first attempt returns the result, and nothing waits."""
         request = MagicMock()
         request.execute.return_value = {"files": []}
+        waits: list[float] = []
 
-        result = api_call_with_retry(request, max_retries=3)
+        result = api_call_with_retry(request, max_retries=3, sleep=waits.append)
 
         assert result == {"files": []}
         request.execute.assert_called_once()
-        mock_sleep.assert_not_called()
+        assert waits == []
 
-    @patch(f"{_RETRY_MOD}.time.sleep")
-    def test_success_after_retry(self, mock_sleep: MagicMock) -> None:
-        """SSL error on first attempt, success on second."""
+    def test_success_after_retry(self) -> None:
+        """SSL error on first attempt, success on second, after one wait of 1s."""
         request = MagicMock()
         request.execute.side_effect = [
             ssl.SSLError("transient"),
             {"files": ["a.txt"]},
         ]
+        waits: list[float] = []
 
-        result = api_call_with_retry(request, max_retries=3)
+        result = api_call_with_retry(request, max_retries=3, sleep=waits.append)
 
         assert result == {"files": ["a.txt"]}
         assert request.execute.call_count == 2
-        mock_sleep.assert_called_once()
+        assert waits == [1]
 
-    @patch(f"{_RETRY_MOD}.time.sleep")
-    def test_exhausted_retries_raises(self, mock_sleep: MagicMock) -> None:
-        """All retries exhausted re-raises the SSL error."""
+    def test_exhausted_retries_raises(self) -> None:
+        """All retries exhausted re-raises the SSL error, the waits doubling 1, 2, 4.
+
+        The waits are read off the sleep seam rather than a patch of time.sleep,
+        which replaced it for every reader in the process (api, fleet green leg 13).
+        """
         request = MagicMock()
         request.execute.side_effect = ssl.SSLError("persistent")
+        waits: list[float] = []
 
         with pytest.raises(ssl.SSLError, match="persistent"):
-            api_call_with_retry(request, max_retries=2)
+            api_call_with_retry(request, max_retries=3, sleep=waits.append)
 
-        # initial attempt + 2 retries = 3 calls
-        assert request.execute.call_count == 3
+        # initial attempt + 3 retries = 4 calls
+        assert request.execute.call_count == 4
+        assert waits == [1, 2, 4], "the backoff must double, not grow by one"
 
-    @patch(f"{_RETRY_MOD}.time.sleep")
-    def test_non_ssl_error_raises_immediately(self, mock_sleep: MagicMock) -> None:
-        """Non-SSL exception is raised without retry."""
+    def test_non_ssl_error_raises_immediately(self) -> None:
+        """Non-SSL exception is raised without retry, and nothing waits."""
         request = MagicMock()
         request.execute.side_effect = ValueError("bad arg")
+        waits: list[float] = []
 
         with pytest.raises(ValueError, match="bad arg"):
-            api_call_with_retry(request, max_retries=3)
+            api_call_with_retry(request, max_retries=3, sleep=waits.append)
 
         request.execute.assert_called_once()
-        mock_sleep.assert_not_called()
+        assert waits == []
 
-    @patch(f"{_RETRY_MOD}.time.sleep")
-    def test_rebuild_service_fn_called(self, mock_sleep: MagicMock) -> None:
-        """rebuild_service_fn is invoked after each SSL retry."""
+    def test_rebuild_service_fn_called(self) -> None:
+        """rebuild_service_fn is invoked after each SSL retry; the waits are not this test's subject."""
         request = MagicMock()
         request.execute.side_effect = [
             ssl.SSLError("first"),
@@ -138,7 +144,11 @@ class TestApiCallWithRetry:
         ]
         rebuild_fn = MagicMock()
 
-        result = api_call_with_retry(request, max_retries=3, rebuild_service_fn=rebuild_fn)
+        result = api_call_with_retry(request, max_retries=3, rebuild_service_fn=rebuild_fn, sleep=lambda _seconds: None)
 
         assert result == {"ok": True}
         assert rebuild_fn.call_count == 2
+        # Implied by the result (the third answer comes only from a third call); kept as the
+        # line that shows the unconsumed_side_effect row every queued answer is consumed,
+        # which the checker does not read from a return (api, fleet green leg 4).
+        assert request.execute.call_count == 3

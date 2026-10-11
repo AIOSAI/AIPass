@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Unified config loader for memory.config.json
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-06-13
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -374,8 +374,20 @@ def _find_repo_root() -> Path:
     return repo_root.find_repo_root(caller="config_loader")
 
 
+class RegistryUnreadable(ValueError):
+    """AIPASS_REGISTRY.json exists and cannot be read.
+
+    Raised rather than answered with ``{}``, which is what a registry with no
+    active branch gives (DPLAN-0354 leg 3).
+    """
+
+
 def materialize_per_branch() -> dict[str, Any]:
-    """Build per_branch from AIPASS_REGISTRY.json, seeded from rollover.defaults."""
+    """Build per_branch from AIPASS_REGISTRY.json, seeded from rollover.defaults.
+
+    Raises:
+        RegistryUnreadable: the registry exists and cannot be read.
+    """
     repo_root = _find_repo_root()
     registry_path = repo_root / "AIPASS_REGISTRY.json"
     from aipass.memory.apps.handlers import repo_root
@@ -388,9 +400,8 @@ def materialize_per_branch() -> dict[str, Any]:
 
     try:
         registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"[config_loader] Failed to load registry: {e}")
-        return {}
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+        raise RegistryUnreadable(f"Unreadable registry {registry_path}: {e}") from e
 
     cfg = load()
     defaults = cfg.get("rollover", {}).get("defaults", {})
@@ -418,7 +429,11 @@ def push_defaults_to_per_branch() -> dict[str, Any]:
     Returns:
         Dict with branch count and the new per_branch data.
     """
-    per_branch = materialize_per_branch()
+    try:
+        per_branch = materialize_per_branch()
+    except RegistryUnreadable as exc:
+        logger.error(f"[config_loader] Refusing push: {exc}")
+        return {"success": False, "error": str(exc)}
     if not per_branch:
         return {"success": False, "error": "No branches found in registry"}
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: m10.py
 # Description: the before/after proof that the real tree was never touched
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -49,7 +49,7 @@ def snapshot_tree(root: Path, hash_limit: int = HASH_SIZE_LIMIT) -> Dict[str, tu
     """
     fingerprints: Dict[str, tuple] = {}
 
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root, onerror=_unreadable):
         dirnames[:] = [d for d in dirnames if d not in ("__pycache__", ".git")]
         for name in filenames:
             full = os.path.join(dirpath, name)
@@ -58,6 +58,14 @@ def snapshot_tree(root: Path, hash_limit: int = HASH_SIZE_LIMIT) -> Dict[str, tu
                 fingerprints[full] = fingerprint
 
     return fingerprints
+
+
+def _unreadable(error: OSError) -> None:
+    """Raise a directory the walk could not list; every caller reports M10 unproven on OSError.
+
+    A skipped subtree would be missing from BOTH snapshots, so the proof would call it untouched unread.
+    """
+    raise error
 
 
 def _fingerprint(full: str, hash_limit: int) -> Optional[tuple]:

@@ -1,0 +1,14 @@
+# .claude/ is tracked: settings.json, hooks/, provider_manifest.json and the rest ship with a clone.
+# Only this directory's per-machine state is ignored, and the rules live here, beside the files.
+
+# Claude Code's per-user file (merged over settings.json): personal preferences and personal
+# paths live here, never in the tracked settings.json.
+settings.local.json
+
+# Hook harness runtime state
+hooks/__pycache__/
+hooks/.last_diagnostics_file
+hooks/probes/last_ping.jsonl
+
+# Claude Code worktrees
+worktrees/

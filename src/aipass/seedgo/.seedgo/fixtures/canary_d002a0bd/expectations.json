@@ -1,0 +1,207 @@
+{
+  "document_metadata": {
+    "name": "expectations.json",
+    "description": "fixture four - canary's round-4 blind build (the column aligner) at d002a0bd",
+    "version": "1.0.0",
+    "created": "2026-09-20",
+    "modified": "2026-09-20"
+  },
+  "subject_path": "src/aipass/canary",
+  "fixture": {
+    "subject": "@canary",
+    "commit": "d002a0bd",
+    "tracked_fidelity": "53 files, every one read at the commit itself with `drone @git show d002a0bd <path>`, one call per file, 2026-09-20. The live tree had already moved on - canary built a FIFTH time (kv, landed as a36f500a) before this fixture was cut - so the tree was RECONSTRUCTED from the commit rather than copied from disk: 4 files differed from the live tree and were taken from the commit (.aipass/aipass_local_prompt.md, README.md, apps/canary.py, docs/README.md), and 7 files that exist on disk today do not exist at d002a0bd and are excluded (apps/handlers/kv/, apps/modules/kv.py, docs/kv_module.md, and the kv suite).",
+    "what_is_new": "canary's fourth blind build: the column aligner (`drone @canary align FILE`, `--json`), 58 cases in the align suite, 267 across the branch, and the first round in which canary's own self-run mutation pass found a real gap and closed it (56 cases to 58).",
+    "layout_note": "Banked as src/aipass/canary so envcopy.detect_layout() returns a repo root and the COPY is importable as aipass.canary - the same reason as the three earlier fixtures. The lane takes the BRANCH path (.seedgo/fixtures/canary_d002a0bd/src/aipass/canary); handed the fixture root it refuses under law S1, correctly, because no suite sits there.",
+    "fifth_build_excluded": "The kv build is canary's round 5 and is not part of this fixture. It is named here rather than silently dropped: a reader comparing this tree to canary's today will find seven files missing, and should find the reason written down before they go looking.",
+    "one_campaign_per_copy": "a campaign mutates a copy, never this tree."
+  },
+  "opening_measurement": {
+    "baseline": "266 passed, 1 skipped, 0 failed, 0 errors at COLUMNS=200 in the scratch env - green on the first attempt, the second banked fixture whose suite runs and the first that needed no cure to get there.",
+    "hygiene": "score 100, published. Harness 12 of 17 checks pass, 5 not_applicable, 0 fail.",
+    "sibling_basis": "host_repo - the TARGET is frozen at d002a0bd; its dependencies are not, and the artifact says so rather than implying the whole env was frozen.",
+    "artifact": ".seedgo/audit_tests_canary_6eae052e.json, 2026-09-20"
+  },
+  "must_fire": [
+    {
+      "id": "R4-1-trail-statements-unobserved",
+      "source_row": "round 3 brief 1, 'the trail, isolated to named statements ... your own operator convicts these now, so this row is the regression pin'",
+      "file": "apps/handlers/table/aligner.py, apps/modules/align.py",
+      "group": "pytest.statement_deletion",
+      "species": "TRAIL-STATEMENT-UNOBSERVED",
+      "match_on": "mutant_outcome",
+      "expected": [
+        {
+          "file": "apps/handlers/table/aligner.py",
+          "line": 87,
+          "function": "_refuse",
+          "statement": "json_handler.log_operation(\"table_refused\", ...)",
+          "outcome": "survived"
+        },
+        {
+          "file": "apps/modules/align.py",
+          "line": 130,
+          "function": "_align",
+          "statement": "logger.warning(\"[align] refused %r - %s\", ...)",
+          "outcome": "survived"
+        },
+        {
+          "file": "apps/modules/align.py",
+          "line": 134,
+          "function": "_align",
+          "statement": "json_handler.log_operation(\"table_aligned\", ...)",
+          "outcome": "survived"
+        }
+      ],
+      "expected_count": 3,
+      "why": "Reproduced independently 2026-09-20 from the lane, not from a script: a diff-scoped statement_deletion campaign over commit d002a0bd deleted all three and the suite stayed green on every one. Each had a covering test watching - survived_no_covering_test is 0 for the whole campaign - so this is not 'no test ran', it is 'tests ran and none of them looked'. This row is the REGRESSION PIN: it exists to prove the operator keeps convicting, which is a different job from the rows that exist to catch what nothing catches.",
+      "built": "2026-09-20 round 3, measured on the live tree at d002a0bd with --diff-scope"
+    },
+    {
+      "id": "R4-2-width-residue-four-of-fifty-eight",
+      "source_row": "round 3 brief 5, 'the width residue, 4 of 58 - and the interesting part is why only four'",
+      "file": "the align suite",
+      "group": "pytest.width_coupling",
+      "species": "WIDTH-COUPLED-VERDICT",
+      "match_on": "diverged_nodeids",
+      "expected_count": 4,
+      "expected_cases": [
+        "test_a_file_that_is_not_there_is_refused_rather_than_read_as_empty[json]",
+        "test_a_file_that_is_not_there_is_refused_rather_than_read_as_empty[plain]",
+        "test_more_than_one_file_is_refused[json]",
+        "test_more_than_one_file_is_refused[plain]"
+      ],
+      "why": "Reproduced independently on this fixture 2026-09-20: 80 of 267 diverge across the branch, and exactly 4 of them are in the align suite - the two parametrised pairs that assert a FILESYSTEM PATH. The other three suites sit where they always did (top 31, span 25, note 20 - 76 of 209, the same number measured from a separate seat in round 2). The four survive because canary's flattening helper joins on whitespace, and the renderer breaks a long path INSIDE the token, with no space left to flatten. Phrase wrapping is repairable by flattening; token splitting is not, and this row pins the difference.",
+      "built": "2026-09-20 round 3, measured on this fixture"
+    },
+    {
+      "id": "R4-3-entry-point-help-unobserved",
+      "source_row": "round 3 brief 4, 'print_help is where the entry point advertises the new verb, so its Commands and Examples lines are unobserved by all 267 tests'",
+      "file": "apps/canary.py",
+      "group": "pytest.statement_deletion",
+      "species": "WHOLLY-UNOBSERVED-FUNCTION",
+      "match_on": "survivor_rollup.functions_wholly_unobserved",
+      "expected_count": 1,
+      "expected": [{"file": "apps/canary.py", "function": "print_help", "first_line": 162}],
+      "why": "MEASURED, and the measurement is NARROWER than the brief's claim - which is why it is written down rather than copied. The diff-scoped campaign probed only the 4 statements the align commit added to print_help, and all 4 survived: 4 of 4 executed, nothing killed. What is proven here is that the lines advertising the new verb are unobserved, not that the whole function is; a whole-tree pass is what would show the rest, and it has not run on this tree. Fourth sighting of the species across four builds, and the first time it is pinned to the statements one commit introduced.",
+      "built": "2026-09-20 round 3"
+    },
+    {
+      "id": "R4-4-display-surface-of-the-new-module",
+      "source_row": "round 3 brief 4, 'three pseudo-tested functions ... _module_summary, print_introspection, print_help'",
+      "file": "apps/modules/align.py",
+      "group": "pytest.statement_deletion",
+      "species": "DISPLAY-SURFACE-UNOBSERVED",
+      "match_on": "survivor_rollup.survivors_by_function",
+      "expected": [
+        {"file": "apps/modules/align.py", "function": "print_help", "statements": 29, "of_executed": 30},
+        {"file": "apps/modules/align.py", "function": "print_introspection", "statements": 9, "of_executed": 11}
+      ],
+      "why": "The new module ships its own help and introspection surface, and 38 of its 41 executed statements can be deleted with the suite green. NOT rolled up as wholly-unobserved, and the distinction is load-bearing: one statement in each function IS killed, so these are partially observed, and a rule that stood down inside 'display functions' would delete this finding rather than report it. Same reasoning that kept the arid-node rule narrow in round 2.",
+      "built": "2026-09-20 round 3"
+    },
+    {
+      "id": "R4-5-half-of-a-fresh-build-unobserved",
+      "source_row": "derived - not in the brief, measured while answering it",
+      "file": "commit d002a0bd, whole",
+      "group": "pytest.statement_deletion",
+      "species": "CAMPAIGN-LEVEL-RATE",
+      "match_on": "counts",
+      "expected": {
+        "statements_probeable": 92,
+        "statements_executed": 92,
+        "killed": 45,
+        "survived": 47,
+        "not_run": 0,
+        "survived_no_covering_test": 0
+      },
+      "why": "The headline of the scoped run, and it is NOT in the brief: 47 of the 92 statements this commit added survive deletion, all 47 with a covering test watching. A build that two independent mutation audits scored at 83% real specific protection has half of its own new statements unobserved - because the 83% was measured over the module's LOGIC, and most of the 47 are display and trail. Both numbers are true and they are about different things. Pinned so that a later round which moves this rate has to say why.",
+      "built": "2026-09-20 round 3"
+    }
+  ],
+  "must_not_fire": [
+    {
+      "id": "R4-the-58-cases-themselves",
+      "source_row": "round 3 brief, 'must_not_fire: all 58 real cases. Redundancy is not vacuity - 48 have a <=5-red discriminator, 9 die only with their family'",
+      "file": "the align suite",
+      "group_glob": "pytest.static_*",
+      "why_false": "Zero vacuous cases in four rounds running. 48 of the 58 have a discriminator of 5 reds or fewer and 9 die only with their family; a case that shares a kill-signature with its neighbour is REDUNDANT, not vacuous, and one refusal path killing a dozen cases at once is the CODE being well factored. Any static nomination against these 58 is a false positive.",
+      "scope": "every pytest.static_* group must be silent on the align suite - one scope row rather than 58 written out, so the key needs no edit when canary adds a parametrize case"
+    },
+    {
+      "id": "R4-redundancy-is-not-vacuity",
+      "file": "the whole suite directory",
+      "group_glob": "pytest.*",
+      "why_false": "No group may nominate a case for being killed by the same mutant as its neighbour. Carried forward from fixture three unchanged: it is a property of the instrument, not of a tree.",
+      "scope": "no group may report a row whose only evidence is a shared kill-signature"
+    },
+    {
+      "id": "R4-the-flattening-helper-is-not-a-finding-by-itself",
+      "file": "the align suite",
+      "group_glob": "pytest.*",
+      "why_false": "canary's helper flattens stderr whitespace before asserting. On its own that is a legitimate way to assert on prose a display layer may wrap, and 54 of 58 cases are genuinely width-stable because of it. It is only interesting WITH a claim that the output's shape is part of the contract - and no instrument in this release reads a claim. Nominating every whitespace-normalising assertion would fire on a correct suite.",
+      "scope": "no group may nominate a case solely for normalising whitespace before an assertion"
+    },
+    {
+      "id": "R4-the-nine-family-only-cases",
+      "file": "the align suite",
+      "group_glob": "pytest.static_no_oracle, pytest.static_tautology_assert, pytest.static_unentered_assert",
+      "why_false": "The 9 cases that die only with their family have real oracles; they share a killer, which is a statement about the code's factoring and not about the assertion's strength.",
+      "scope": "silent on all 58"
+    }
+  ],
+  "out_of_reach": [
+    {
+      "id": "R4-OOR-1-json-byte-contract",
+      "source_row": "round 3 brief 3, 'the JSON byte contract, third round running ... bank as out_of_reach with the reason unless targeted_mutation lands'",
+      "file": "apps/modules/align.py and the align suite",
+      "reach": "mechanism_not_built",
+      "mechanism": "pytest.targeted_mutation",
+      "why": "ensure_ascii=True, the custom separators, and markup/highlight/emoji on the JSON path all survive - INCLUDING the option the case's own docstring names - because the assertion round-trips the output through json.loads before comparing. Every one of those options changes bytes that json.loads discards, so no case that parses can see them. This is not a gap in the suite's intent; it is the oracle reading a level above the contract. statement_deletion cannot reach it either: these are ARGUMENTS, not statements, and deleting the whole call deletes the output. It needs targeted_mutation, which this release reports as not built. Third round running.",
+      "built": "not built"
+    },
+    {
+      "id": "R4-OOR-2-fixture-already-satisfies-the-claim",
+      "source_row": "round 3 brief 2, 'the fixture-already-satisfies-the-claim species, second instance'",
+      "file": "the align suite",
+      "reach": "static_reachable_not_built",
+      "why": "The JSON form's documented 'same row order' clause is unpinned: replacing the payload with a sorted copy is green, because all four JSON fixtures are already in sorted order. Round 3's [already_sorted] control was the first instance; this is the second - a different build, a different contract, two rounds apart, which is what takes it from a suspicion to a build. Still NOT in must_fire, for the same reason as last round: nothing in the static tier reads a parametrize id or a docstring claim against its own fixture data today. Declared, not built. Seedgo todo 127.",
+      "built": "not built"
+    },
+    {
+      "id": "R4-OOR-3-width-stable-because-weaker",
+      "source_row": "round 3 brief 4, the section devpulse most wanted an opinion on",
+      "file": "the align suite",
+      "reach": "none_for_this_axis",
+      "why": "A verdict-diff axis reads one observable: the per-nodeid verdict vector at two widths. 'Product cured', 'assertion weakened' and 'never coupled' all map to the same observation - no divergence - so the axis cannot separate them from a single run. That is identifiability, not an unfinished feature, and no amount of work inside the width axis changes it. What CAN see it is composition, and it is cheap: bank the per-nodeid divergence set, and a nodeid moving diverged -> stable becomes an EVENT that a diff of the same interval can rule on - only the suite changed means the assertion got weaker, the renderer changed means it may be a cure. The residue after that: a suite BORN flattened has no transition to see, and no verdict-reading instrument can tell a deliberately whitespace-insensitive contract from a silently weakened one, because that difference lives in the claim and not in the verdicts.",
+      "built": "not built - argued in the round 3 reply, no code"
+    }
+  ],
+  "instrument_findings": [
+    {
+      "id": "F4-1-diff-scope-saw-nothing-and-called-it-measured",
+      "what": "The first cut of --diff-scope, run against @canary from seedgo's seat, resolved 0 changed files and published 'measured - 0 statement deletions run, 0 survived'. A perfectly clean campaign that probed nothing.",
+      "root_cause": "`drone @git diff` is scoped BY CWD to the caller's own branch - 'Show git diff for your branch' - so a working-tree diff read from seedgo's home can never contain a canary path. The scope was correctly empty; the report of it was wrong.",
+      "cure": "Two doors, published. A ref goes through `drone @git show <ref>`, which prints the commit whole across every branch and is read as whoever asked; the working tree goes through `drone @git diff`, which sees the caller's branch only - and that limit is now written into SCOPE_LIMITS. An empty scope now RAISES instead of publishing, because an empty scope is not a clean run.",
+      "note": "Found by dogfooding, which is the only reason it was found: the feature works on the branch you are standing in, and every early exercise of it was run from there."
+    },
+    {
+      "id": "F4-2-the-hunk-header-cannot-be-trusted-for-line-scope",
+      "what": "The parser read the hunk header's +count. `drone @git show` refuses --unified=0 (git would read it as a ref), so every hunk arrives with three lines of context and the header count includes them - a one-line fix would have scoped seven lines and still called itself changed_lines.",
+      "cure": "The hunk BODY is walked instead: context and added lines advance the post-image counter, removed lines do not, and only added lines are recorded. Exact at any context width, and it made the pure-deletion limit fall out of the parse rather than be enforced on top of it."
+    },
+    {
+      "id": "F4-3-a-target-whose-suite-cannot-run-in-a-copy",
+      "what": "Seedgo's own scratch-env baseline is RED: 8 failures, 0 of them red in place. The lane then reported statement_deletion as not_applicable - coverage_map_unavailable, and 91 diff-scoped mutants came back not_run after 175 s of real work.",
+      "root_cause": "One suite file reads _REPO_ROOT/.claude/provider_manifest.json - a repo-root file OUTSIDE the branch tree, which the env does not copy and does not promise.",
+      "cure": "NOT CURED, and deliberately not papered over by special-casing one filename into envcopy. The env's contract and that file disagree, and which side gives is a ruling: either the env carries named repo-root config, or the case builds its own manifest. Reported to @devpulse in round 3; seedgo todo 128.",
+      "note": "It is also, on its own terms, exactly the species this lane hunts: a case coupled to the host tree passes everywhere it is ever run and fails the moment anything moves it."
+    }
+  ],
+  "release_check": {
+    "property": "every must_fire row nominated, every must_not_fire row silent, or the lane does not ship",
+    "pattern": "Semgrep rule tests - ruleid:/ok: annotations run as the rule's own regression",
+    "out_of_reach_is_a_finding": "a row here is not excused, it is reported. reach=none_for_this_axis means no instrument of that axis's class can see it and the argument is written down; mechanism_not_built names the mechanism that would.",
+    "how_to_run": "drone @seedgo audit-tests .seedgo/fixtures/canary_d002a0bd/src/aipass/canary [--width-coupling | --statement-deletion]. The BRANCH path, not the fixture root."
+  }
+}

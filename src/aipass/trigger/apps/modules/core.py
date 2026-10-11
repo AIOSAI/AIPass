@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Trigger event bus for AIPass system-wide event handling
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-02-03
-# Modified: 2026-08-12
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -54,21 +54,14 @@ def print_introspection():
 # both names keep working, the old one logs a deprecation, and the entry is
 # deleted in the release after.
 #
-# file_deleted -> profile_write_failed (FPLAN-0492 wave 5, ruled by @devpulse):
-#   the event fires when a profile write fails and json_handler cleans up its
-#   own temp file. The store is not deleted, so the old name described the
-#   opposite of what happened.
-#
-#   MEASURED 2026-09-07 and reported to @devpulse: three fire sites carry the
-#   old name and ONE of them is a genuine deletion —
-#   daemon/apps/modules/timer_install.py:157 fires it right after unlink()ing a
-#   systemd unit. Aliasing relabels that fire as a profile write failure, which
-#   is the same class of lie the rename exists to remove. Its owner needs a
-#   name that says "a file was deleted"; this table cannot tell the two apart,
-#   because it keys on the name, not the caller.
-DEPRECATED_EVENT_ALIASES = {
-    "file_deleted": "profile_write_failed",
-}
+# RETIRED 2026-09-28: file_deleted -> profile_write_failed (added 2026-09-07,
+#   FPLAN-0492 wave 5; lived through v2.8.7 to v2.8.11; retired under compass
+#   485 by @devpulse, DPLAN-0354 leg 3). Both profile fire sites in @aipass
+#   fire profile_write_failed by name, and the two fires left under the old
+#   name are real unlinks (aipass install.py, daemon timer_install.py), which
+#   the entry relabelled as a failed profile write. No handler was registered
+#   under either name. file_deleted now names a real deletion again.
+DEPRECATED_EVENT_ALIASES: dict[str, str] = {}
 
 
 class Trigger:

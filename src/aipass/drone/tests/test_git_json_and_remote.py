@@ -1,41 +1,47 @@
 # =================== AIPass ====================
 # Name: test_git_json_and_remote.py
-# Description: Machine output on the git read doors, and the remote read door
-# Version: 1.0.0
+# Description: The git read doors and their --json, remote, gh tiers, merge-main, the read twins and lock
+# Version: 1.0.6
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-10-04
 # =============================================
 
-"""FPLAN-0438 round 4a — the two door asks from @api's boundary assessment.
+"""Tests for apps/modules/git_module.py's --json on status/log/show and apps/handlers/git/remote_handler.py."""
 
-ASK 1: ``--json`` on status / log / show, so a consumer reads a document
-instead of scraping a rendered sentence.
-
-ASK 2: ``drone @git remote`` — a door that did not exist, which is why @api
-parsed .git/config as an INI file with its own worktree-following.
-
-Every prose assertion here is a REGRESSION PIN: the asks were explicitly
-additive, so the desktop and every current caller must keep reading exactly the
-bytes they read before.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — json.dumps' own encoding of the documents
 
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from aipass.drone.apps.handlers.json_flags import JSON_FLAG, strip_json_flag, wants_json
-from aipass.drone.apps.handlers.git import remote_handler
+from aipass.drone.apps.handlers.git import blame_handler, log_handler, remote_handler
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
-from aipass.drone.apps.modules.git_module import handle_command
+from aipass.drone.apps.modules.git_module import get_help, handle_command
+from aipass.drone.apps.plugins.devpulse_ops.auth import GH_SUBCOMMANDS, GIT_ACCESS_TIERS, gh_access_key
+
+# FPLAN-0438 round 4a, the two door asks from @api's boundary assessment.
+# ASK 1: --json on status / log / show, so a consumer reads a document instead
+# of scraping a rendered sentence.
+# ASK 2: drone @git remote, a door that did not exist, which is why @api parsed
+# .git/config as an INI file with its own worktree-following.
+# Every prose assertion here is a REGRESSION PIN: the asks were explicitly
+# additive, so the desktop and every current caller must keep reading exactly
+# the bytes they read before.
 
 _GIT_MOD = "aipass.drone.apps.modules.git_module"
 _AUTH = "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access"
 _STATUS_MOD = "aipass.drone.apps.handlers.git.status_handler"
 _REMOTE_MOD = "aipass.drone.apps.handlers.git.remote_handler"
+_EXPORT_MOD = "aipass.drone.apps.handlers.git.export_handler"
 
 
 # ===========================================================================
@@ -147,7 +153,7 @@ class TestProseUnchanged:
     def test_log_prose_untouched(self, _auth: MagicMock) -> None:
         with patch(
             f"{_GIT_MOD}.log_handler.get_git_log",
-            return_value={"entries": ["abc123 subject"], "count": 1, "message": "1 log entries"},
+            return_value={"success": True, "entries": ["abc123 subject"], "count": 1, "message": "1 log entries"},
         ):
             result = handle_command("log", ["1"])
 
@@ -235,7 +241,7 @@ class TestLogJson:
         entries = ["abc1234 fix(git): a subject with spaces", "def5678 feat: another"]
         with patch(
             f"{_GIT_MOD}.log_handler.get_git_log",
-            return_value={"entries": entries, "count": 2, "message": "2 log entries"},
+            return_value={"success": True, "entries": entries, "count": 2, "message": "2 log entries"},
         ):
             result = handle_command("log", ["2", JSON_FLAG])
 
@@ -253,7 +259,7 @@ class TestLogJson:
         """
         with patch(
             f"{_GIT_MOD}.log_handler.get_git_log",
-            return_value={"entries": [], "count": 0, "message": "0 log entries"},
+            return_value={"success": True, "entries": [], "count": 0, "message": "0 log entries"},
         ) as mock_log:
             handle_command("log", [JSON_FLAG, "5"])
 
@@ -263,7 +269,7 @@ class TestLogJson:
     def test_subjectless_commit_does_not_lose_its_sha(self, _auth: MagicMock) -> None:
         with patch(
             f"{_GIT_MOD}.log_handler.get_git_log",
-            return_value={"entries": ["abc1234"], "count": 1, "message": "1 log entries"},
+            return_value={"success": True, "entries": ["abc1234"], "count": 1, "message": "1 log entries"},
         ):
             doc = json.loads(handle_command("log", [JSON_FLAG])["stdout"])
 
@@ -313,10 +319,355 @@ class TestLogJson:
         for args, expected in ((["20"], 20), (["-n", "5"], 5), (["-3"], 3)):
             with patch(
                 f"{_GIT_MOD}.log_handler.get_git_log",
-                return_value={"entries": [], "count": 0, "message": "0 log entries"},
+                return_value={"success": True, "entries": [], "count": 0, "message": "0 log entries"},
             ) as mock_log:
                 handle_command("log", args)
             assert mock_log.call_args.kwargs["count"] == expected, args
+
+
+class TestLogPathFilter:
+    """log keeps only the commits touching the paths it is given (DPLAN-0356), no raw `git log -- path` needed."""
+
+    _OK = {"success": True, "entries": ["abc1234 touched it"], "count": 1, "message": "1 log entries"}
+
+    @patch(_AUTH, return_value="canary")
+    def test_a_path_from_the_caller_directory_reaches_git_absolute(self, _auth: MagicMock, tmp_path: Path) -> None:
+        """`log -n 3 apps` from a branch dir hands git that dir's apps, whatever cwd git runs in."""
+        caller = tmp_path / "repo" / "src" / "canary"
+        (caller / "apps").mkdir(parents=True)
+        with (
+            patch(f"{_GIT_MOD}.caller_cwd", return_value=caller),
+            patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=tmp_path / "repo"),
+            patch(f"{_GIT_MOD}.log_handler.get_git_log", return_value=dict(self._OK)) as mock_log,
+        ):
+            result = handle_command("log", ["-n", "3", "apps"])
+
+        assert result == {"stdout": "abc1234 touched it", "stderr": "", "exit_code": 0}
+        assert mock_log.call_args.kwargs == {"count": 3, "repo_root": None, "paths": [str(caller / "apps")]}
+
+    @patch(_AUTH, return_value="canary")
+    def test_a_path_is_read_against_the_repo_root_when_the_caller_dir_lacks_it(
+        self, _auth: MagicMock, tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "repo"
+        (repo / "src" / "aipass" / "canary").mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        with (
+            patch(f"{_GIT_MOD}.caller_cwd", return_value=elsewhere),
+            patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=repo),
+            patch(f"{_GIT_MOD}.log_handler.get_git_log", return_value=dict(self._OK)) as mock_log,
+        ):
+            handle_command("log", ["src/aipass/canary", "5"])
+
+        assert mock_log.call_args.kwargs["paths"] == [str(repo / "src" / "aipass" / "canary")]
+        assert mock_log.call_args.kwargs["count"] == 5
+
+    @patch(_AUTH, return_value="canary")
+    def test_a_gone_path_after_the_separator_is_still_a_filter(self, _auth: MagicMock, tmp_path: Path) -> None:
+        """The history of a deleted file: after `--` nothing has to exist, and it reads from the caller's dir."""
+        with (
+            patch(f"{_GIT_MOD}.caller_cwd", return_value=tmp_path),
+            patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=tmp_path),
+            patch(f"{_GIT_MOD}.log_handler.get_git_log", return_value=dict(self._OK)) as mock_log,
+        ):
+            result = handle_command("log", ["--", "old.py", "20"])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert mock_log.call_args.kwargs["paths"] == [str(tmp_path / "old.py"), str(tmp_path / "20")]
+        assert mock_log.call_args.kwargs["count"] == 10
+
+    @patch(_AUTH, return_value="canary")
+    def test_a_bare_token_that_is_no_path_is_refused_by_name(self, _auth: MagicMock, tmp_path: Path) -> None:
+        with (
+            patch(f"{_GIT_MOD}.caller_cwd", return_value=tmp_path),
+            patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=tmp_path),
+            patch(f"{_GIT_MOD}.log_handler.get_git_log") as mock_log,
+        ):
+            result = handle_command("log", ["5", "no_such_dir"])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"] == (
+            "Unknown argument for 'log': no_such_dir (not a count, not a range of commits, and no such path; "
+            "a path that no longer exists goes after --)"
+        )
+        mock_log.assert_not_called()
+
+    @patch(_AUTH, return_value="canary")
+    def test_a_git_failure_exits_1_with_its_reason(self, _auth: MagicMock) -> None:
+        """It once printed git's error on stdout with exit 0; a path outside the repo makes it likelier."""
+        failed = {"success": False, "entries": [], "count": 0, "message": "git log error: fatal: outside repository"}
+        with patch(f"{_GIT_MOD}.log_handler.get_git_log", return_value=failed):
+            result = handle_command("log", [])
+
+        assert result == {"stdout": "", "stderr": "git log error: fatal: outside repository", "exit_code": 1}
+
+    @patch(_AUTH, return_value="canary")
+    def test_a_git_failure_under_json_is_a_refusal_document(self, _auth: MagicMock) -> None:
+        failed = {"success": False, "entries": [], "count": 0, "message": "git log error: x"}
+        with patch(f"{_GIT_MOD}.log_handler.get_git_log", return_value=failed):
+            result = handle_command("log", [JSON_FLAG])
+
+        doc = json.loads(result["stdout"])
+        assert doc["ok"] is False
+        assert doc["message"] == "git log error: x"
+        assert result["exit_code"] == 1
+
+    def test_the_handler_puts_the_paths_after_the_separator(self, tmp_path: Path) -> None:
+        ran = MagicMock(returncode=0, stdout="abc1234 s\n", stderr="")
+        with patch("aipass.drone.apps.handlers.git.log_handler.subprocess.run", return_value=ran) as mock_run:
+            paths = [str(tmp_path / "a"), str(tmp_path / "b")]
+            result = log_handler.get_git_log(count=4, repo_root=tmp_path, paths=paths)
+
+        assert mock_run.call_args.args[0] == ["git", "log", "--oneline", "-4", "--", *paths]
+        assert result["success"] is True
+        assert result["entries"] == ["abc1234 s"]
+
+    def test_the_handler_without_paths_runs_the_plain_log(self, tmp_path: Path) -> None:
+        ran = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("aipass.drone.apps.handlers.git.log_handler.subprocess.run", return_value=ran) as mock_run:
+            result = log_handler.get_git_log(count=2, repo_root=tmp_path)
+
+        assert mock_run.call_args.args[0] == ["git", "log", "--oneline", "-2"]
+        assert result == {"success": True, "entries": [], "count": 0, "message": "0 log entries"}
+
+    def test_the_handler_says_git_failed(self, tmp_path: Path) -> None:
+        ran = MagicMock(returncode=128, stdout="", stderr="fatal: bad\n")
+        with patch("aipass.drone.apps.handlers.git.log_handler.subprocess.run", return_value=ran):
+            result = log_handler.get_git_log(count=2, repo_root=tmp_path)
+
+        assert result == {"success": False, "entries": [], "count": 0, "message": "git log error: fatal: bad"}
+
+    def test_resolve_prefers_the_caller_dir_then_the_root(self, tmp_path: Path) -> None:
+        cwd, root = tmp_path / "cwd", tmp_path / "root"
+        (cwd / "both").mkdir(parents=True)
+        (root / "both").mkdir(parents=True)
+        (root / "only_root").mkdir()
+
+        assert log_handler.resolve_log_path("both", root, cwd, True) == str(cwd / "both")
+        assert log_handler.resolve_log_path("only_root", root, cwd, True) == str(root / "only_root")
+        assert log_handler.resolve_log_path("neither", root, cwd, True) is None
+        assert log_handler.resolve_log_path("neither", root, cwd, False) == str(cwd / "neither")
+        assert log_handler.resolve_log_path("neither", root, None, False) == str(root / "neither")
+
+    def test_the_help_names_the_path_form_and_the_raw_twins(self) -> None:
+        """@hooks' refusal text points agents here, so the forms are pinned as written."""
+        verb = get_help("log")
+        page = get_help()
+        assert verb.startswith("git log [count] [path ...] [-- gone-path ...] — ")
+        assert "  Example: drone @git log 5 src/aipass/drone\n" in verb
+        assert "  git log -n 5 -- <path>   drone @git log 5 <path>  (deleted path: after --)\n" in page
+        assert "  git show <sha>:<path>    drone @git show <sha> <path>\n" in page
+
+    def test_resolve_keeps_an_absolute_path_and_checks_it_only_when_asked(self, tmp_path: Path) -> None:
+        gone = tmp_path / "gone"
+        assert log_handler.resolve_log_path(str(tmp_path), tmp_path, None, True) == str(tmp_path)
+        assert log_handler.resolve_log_path(str(gone), tmp_path, None, True) is None
+        assert log_handler.resolve_log_path(str(gone), tmp_path, None, False) == str(gone)
+
+
+class TestBlame:
+    """blame <file> [-L START,END]: the read twin of raw git blame (DPLAN-0356 leg 2), global tier."""
+
+    _BLAMED = {"success": True, "lines": ["abc1234 (x 2026-09-30 1) a", "abc1234 (x 2026-09-30 2) b"], "message": ""}
+
+    def test_blame_is_a_global_read(self) -> None:
+        assert "blame" in GIT_ACCESS_TIERS["global"]["commands"]
+        assert "blame" not in GIT_ACCESS_TIERS["owner"]["commands"]
+
+    @patch(_AUTH, return_value="canary")
+    def test_a_file_from_the_caller_directory_is_blamed_in_range(self, _auth: MagicMock, tmp_path: Path) -> None:
+        (tmp_path / "f.py").write_text("a\nb\n", encoding="utf-8")
+        with (
+            patch(f"{_GIT_MOD}.caller_cwd", return_value=tmp_path),
+            patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=tmp_path),
+            patch(f"{_GIT_MOD}.blame_handler.get_git_blame", return_value=dict(self._BLAMED)) as mock_blame,
+        ):
+            result = handle_command("blame", ["f.py", "-L", "1,2"])
+
+        assert result == {"stdout": "\n".join(self._BLAMED["lines"]), "stderr": "", "exit_code": 0}
+        mock_blame.assert_called_once_with(str(tmp_path / "f.py"), (1, 2), repo_root=tmp_path)
+
+    @patch(_AUTH, return_value="canary")
+    def test_a_missing_file_is_refused_by_name(self, _auth: MagicMock, tmp_path: Path) -> None:
+        with (
+            patch(f"{_GIT_MOD}.caller_cwd", return_value=tmp_path),
+            patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=tmp_path),
+            patch(f"{_GIT_MOD}.blame_handler.get_git_blame") as mock_blame,
+        ):
+            result = handle_command("blame", ["nope.py"])
+
+        assert result == {"stdout": "", "stderr": "No such file for 'blame': nope.py", "exit_code": 1}
+        mock_blame.assert_not_called()
+
+    @patch(_AUTH, return_value="canary")
+    def test_a_bad_range_and_a_stray_argument_refuse_before_git(self, _auth: MagicMock) -> None:
+        with patch(f"{_GIT_MOD}.blame_handler.get_git_blame") as mock_blame:
+            backwards = handle_command("blame", ["f.py", "-L", "5,2"])
+            no_value = handle_command("blame", ["f.py", "-L"])
+            stray = handle_command("blame", ["f.py", "extra"])
+            bare = handle_command("blame", [])
+
+        assert backwards["stderr"] == "Invalid line range for 'blame': '5,2' (use -L START,END, e.g. -L 10,40)"
+        assert no_value["stderr"] == "Invalid line range for 'blame': '' (use -L START,END, e.g. -L 10,40)"
+        assert stray["stderr"] == "Unknown argument for 'blame': extra\nUsage: drone @git blame <file> [-L START,END]"
+        assert bare["stderr"] == "Usage: drone @git blame <file> [-L START,END]"
+        assert {r["exit_code"] for r in (backwards, no_value, stray, bare)} == {1}
+        mock_blame.assert_not_called()
+
+    @patch(_AUTH, return_value="canary")
+    def test_a_git_failure_exits_1_with_its_reason(self, _auth: MagicMock, tmp_path: Path) -> None:
+        (tmp_path / "f.py").write_text("a\n", encoding="utf-8")
+        failed = {"success": False, "lines": [], "message": "git blame error: fatal: no such path"}
+        with (
+            patch(f"{_GIT_MOD}.caller_cwd", return_value=tmp_path),
+            patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=tmp_path),
+            patch(f"{_GIT_MOD}.blame_handler.get_git_blame", return_value=failed),
+        ):
+            result = handle_command("blame", ["f.py"])
+
+        assert result == {"stdout": "", "stderr": "git blame error: fatal: no such path", "exit_code": 1}
+
+    def test_the_handler_command_puts_the_range_before_the_separator(self, tmp_path: Path) -> None:
+        ran = MagicMock(returncode=0, stdout="l1\nl2\n", stderr="")
+        with patch("aipass.drone.apps.handlers.git.blame_handler.subprocess.run", return_value=ran) as mock_run:
+            target = str(tmp_path / "f.py")
+            ranged = blame_handler.get_git_blame(target, (3, 9), repo_root=tmp_path)
+            whole = blame_handler.get_git_blame(target, repo_root=tmp_path)
+
+        assert mock_run.call_args_list[0].args[0] == ["git", "blame", "--date=short", "-L", "3,9", "--", target]
+        assert mock_run.call_args_list[1].args[0] == ["git", "blame", "--date=short", "--", target]
+        assert ranged == {"success": True, "lines": ["l1", "l2"], "message": "2 line(s) blamed"}
+        assert whole["success"] is True
+
+    def test_the_handler_says_git_failed(self, tmp_path: Path) -> None:
+        ran = MagicMock(returncode=128, stdout="", stderr="fatal: no such path\n")
+        with patch("aipass.drone.apps.handlers.git.blame_handler.subprocess.run", return_value=ran):
+            result = blame_handler.get_git_blame(str(tmp_path / "f.py"), repo_root=tmp_path)
+
+        assert result == {"success": False, "lines": [], "message": "git blame error: fatal: no such path"}
+
+    def test_only_two_ordered_line_numbers_make_a_range(self) -> None:
+        assert blame_handler.parse_line_range("10,40") == (10, 40)
+        assert blame_handler.parse_line_range("7,7") == (7, 7)
+        for bad in ("0,4", "5,2", "10", "10,", "/re/,+3", ":func", "-1,3", ""):
+            assert blame_handler.parse_line_range(bad) is None, bad
+
+    def test_the_help_names_the_verb_and_its_raw_twin(self) -> None:
+        assert get_help("blame").startswith("git blame <file> [-L START,END] — ")
+        assert "  git blame -L 10,40 <f>   drone @git blame <f> -L 10,40\n" in get_help()
+
+
+class TestGhPassthroughTiers:
+    """issue, run and workflow: reads stay global, every write asks the owner tier, unknown is refused.
+
+    DPLAN-0356 leg 3. The gate is stubbed with a recorder of the key it is asked
+    for, so each test reads which tier a subcommand reaches; gh never runs.
+    """
+
+    @staticmethod
+    def _route(command: str, args: list[str]) -> tuple[dict, list[str], MagicMock]:
+        asked: list[str] = []
+
+        def gate(key: str) -> str:
+            asked.append(key)
+            return "canary"
+
+        with patch(_AUTH, side_effect=gate), patch(f"{_GIT_MOD}.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="ok\n", stderr="")
+            result = handle_command(command, args)
+        return result, asked, mock_run
+
+    @pytest.mark.parametrize(
+        ("command", "args"),
+        [
+            ("issue", ["list"]),
+            ("issue", ["view", "12", "--comments"]),
+            ("issue", ["status"]),
+            ("run", ["list"]),
+            ("run", ["view", "55", "--log-failed"]),
+            ("run", ["watch", "55"]),
+            ("workflow", ["list"]),
+            ("workflow", ["view", "ci.yml"]),
+        ],
+    )
+    def test_a_read_asks_the_global_key(self, command: str, args: list[str]) -> None:
+        result, asked, mock_run = self._route(command, args)
+        assert asked == [command]
+        assert result["exit_code"] == 0
+        mock_run.assert_called_once()
+
+    @pytest.mark.parametrize(
+        ("command", "args"),
+        [
+            ("issue", ["create", "--title", "x"]),
+            ("issue", ["close", "12"]),
+            ("issue", ["comment", "12", "--body", "x"]),
+            ("issue", ["edit", "12"]),
+            ("run", ["rerun", "55"]),
+            ("run", ["cancel", "55"]),
+            ("run", ["delete", "55"]),
+            ("workflow", ["run", "ci.yml"]),
+            ("workflow", ["enable", "ci.yml"]),
+            ("workflow", ["disable", "ci.yml"]),
+        ],
+    )
+    def test_a_write_asks_the_owner_key(self, command: str, args: list[str]) -> None:
+        _result, asked, _mock_run = self._route(command, args)
+        assert asked == [f"{command}-write"]
+
+    def test_an_unknown_subcommand_is_refused_before_the_gate_and_gh(self) -> None:
+        result, asked, mock_run = self._route("issue", ["frobnicate", "12"])
+        assert asked == []
+        mock_run.assert_not_called()
+        assert result["exit_code"] == 1
+        assert result["stderr"].startswith("Unknown subcommand for 'issue': 'frobnicate'. ")
+
+    def test_a_flag_in_the_subcommand_slot_is_refused(self) -> None:
+        """gh reads `issue -R x/y create` as a create; the slot must hold the subcommand itself."""
+        result, asked, mock_run = self._route("issue", ["-R", "x/y", "create"])
+        assert asked == []
+        mock_run.assert_not_called()
+        assert result["exit_code"] == 1
+
+    @pytest.mark.parametrize("command", ["issue", "run", "workflow"])
+    def test_the_key_for_each_shape(self, command: str) -> None:
+        table = GH_SUBCOMMANDS[command]
+        assert gh_access_key(command, []) == command
+        assert gh_access_key(command, [table["read"][0]]) == command
+        assert gh_access_key(command, [table["write"][-1]]) == f"{command}-write"
+        assert gh_access_key(command, ["frobnicate"]) is None
+
+    @pytest.mark.parametrize("command", ["issue", "run", "workflow"])
+    def test_the_write_key_is_owner_only(self, command: str) -> None:
+        assert f"{command}-write" in GIT_ACCESS_TIERS["owner"]["commands"]
+        assert f"{command}-write" not in GIT_ACCESS_TIERS["global"]["commands"]
+        assert command in GIT_ACCESS_TIERS["global"]["commands"]
+
+    @pytest.mark.parametrize("command", ["issue", "run", "workflow"])
+    def test_verb_help_names_every_read_and_every_owner_write(self, command: str) -> None:
+        table = GH_SUBCOMMANDS[command]
+        text = get_help(command)
+        reads_line = next(line for line in text.splitlines() if line.startswith("  Reads [global]: "))
+        owner_at = text.index("  Owner only: ")
+        for sub in table["read"]:
+            assert sub in reads_line
+        for sub in table["write"]:
+            assert sub in text[owner_at:]
+        assert "refused" in text
+        assert all(len(line) <= 80 for line in text.splitlines())
+
+    def test_the_page_lists_the_reads_as_global_and_the_writes_as_owner(self) -> None:
+        page = get_help()
+        global_part, owner_part = page.split("Owner (devpulse only):\n", 1)
+        owner_part = owner_part.split("\n\n", 1)[0]
+        for command, table in GH_SUBCOMMANDS.items():
+            assert f"  {command} {'|'.join(table['read'])}" in global_part
+            assert f"  {command} <write> " in owner_part
+        assert "  gh issue list|view|status  drone @git issue list|view|status\n" in page
+        gh_lines = [line for line in page.splitlines() if line.startswith(tuple(f"  {c} " for c in GH_SUBCOMMANDS))]
+        assert len(gh_lines) == 6
+        assert all(len(line) <= 80 for line in gh_lines)
 
 
 class TestShowJson:
@@ -564,8 +915,6 @@ class TestRemoteCommand:
         Unlisted commands raise 'Unknown git command' in the gate, so this pins
         the tier registration, not just the routing.
         """
-        from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS
-
         assert "remote" in GIT_ACCESS_TIERS["global"]["commands"]
         assert "remote" not in GIT_ACCESS_TIERS["owner"]["commands"]
 
@@ -577,3 +926,553 @@ class TestRemoteCommand:
 
         mock_remote.assert_not_called()
         assert result["exit_code"] == 0
+
+
+# ---------------------------------------------------------------------------
+# merge-main — origin/main into dev with a merge commit, against a temp repo
+# ---------------------------------------------------------------------------
+
+
+#: Why the unreadable-index pin skips: a mode-0 file binds no one on Windows or as root.
+_PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
+
+
+def _git(cwd: Path, *argv: str, check: bool = True) -> str:
+    """Run git in *cwd* for fixture setup and read-back."""
+    return subprocess.run(
+        ["git", *argv], cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", check=check
+    ).stdout.strip()
+
+
+@pytest.fixture()
+def diverged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    """A work repo on dev, one commit ahead of main, while origin/main took two files dev never saw.
+
+    Git runs with no host config, a fixed identity and a ceiling at tmp_path, so
+    no repository above the sandbox answers for it.
+    """
+    empty_config = tmp_path / "gitconfig"
+    empty_config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", os.pathsep.join(sorted({str(tmp_path), str(tmp_path.resolve())})))
+    for name in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        monkeypatch.setenv(name, "Merge Test")
+    for name in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(name, "merge@test.invalid")
+
+    origin = tmp_path / "origin.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    for name in ("a.txt", "b.txt"):
+        (work / name).write_text(f"{name} seed\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-q", "-m", "seed")
+    _git(work, "remote", "add", "origin", str(origin))
+    _git(work, "push", "-q", "origin", "main")
+
+    upstream = tmp_path / "upstream"
+    _git(tmp_path, "clone", "-q", str(origin), str(upstream))
+    (upstream / "a.txt").write_text("a.txt from main\n", encoding="utf-8")
+    (upstream / "m.txt").write_text("new on main\n", encoding="utf-8")
+    _git(upstream, "add", ".")
+    _git(upstream, "commit", "-q", "-m", "main moves on")
+    _git(upstream, "push", "-q", "origin", "main")
+
+    _git(work, "checkout", "-q", "-b", "dev")
+    (work / "d.txt").write_text("dev work\n", encoding="utf-8")
+    _git(work, "add", "d.txt")
+    _git(work, "commit", "-q", "-m", "dev work")
+    monkeypatch.chdir(work)
+    return {"work": work, "origin": origin, "upstream": upstream}
+
+
+class TestMergeMain:
+    """merge-main: main's commits into dev by merge, refused on any doubt, never pushed, forced or stashed."""
+
+    @staticmethod
+    def _run(work: Path, args: list[str] | None = None) -> dict:
+        with patch(_AUTH, return_value="devpulse"), patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=work):
+            return handle_command("merge-main", args or [])
+
+    def test_a_clean_merge_is_a_merge_commit_with_main_as_second_parent_and_is_not_pushed(
+        self, diverged: dict[str, Path]
+    ) -> None:
+        work = diverged["work"]
+        dev_before = _git(work, "rev-parse", "HEAD")
+        (work / "d.txt").write_text("uncommitted, unrelated\n", encoding="utf-8")
+
+        result = self._run(work)
+
+        assert result["exit_code"] == 0, result["stderr"]
+        main_sha = _git(work, "rev-parse", "origin/main")
+        assert _git(work, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:] == [dev_before, main_sha]
+        assert _git(work, "branch", "--show-current") == "dev"
+        assert (work / "a.txt").read_text(encoding="utf-8") == "a.txt from main\n"
+        assert (work / "d.txt").read_text(encoding="utf-8") == "uncommitted, unrelated\n"
+        assert _git(work, "ls-remote", "origin", "dev") == ""
+        assert _git(work, "stash", "list") == ""
+        assert "2 file(s)" in result["stdout"]
+        assert "Not pushed" in result["stdout"]
+
+    def test_a_dev_with_nothing_of_its_own_still_gets_a_merge_commit_not_a_fast_forward(
+        self, diverged: dict[str, Path]
+    ) -> None:
+        work = diverged["work"]
+        _git(work, "reset", "-q", "--hard", "main")
+        dev_before = _git(work, "rev-parse", "HEAD")
+
+        result = self._run(work)
+
+        assert result["exit_code"] == 0, result["stderr"]
+        parents = _git(work, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]
+        assert parents == [dev_before, _git(work, "rev-parse", "origin/main")]
+
+    @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason=_PERMISSIONS_REASON)
+    def test_a_git_read_that_fails_refuses_rather_than_reading_as_no_overlap(self, diverged: dict[str, Path]) -> None:
+        """An unreadable index is the command route to a failed listing; mode restored in finally."""
+        work = diverged["work"]
+        head = _git(work, "rev-parse", "HEAD")
+        # fetch's on-demand submodule check opens the index too; off, the first reader is the listing.
+        _git(work, "config", "fetch.recurseSubmodules", "false")
+        index = work / ".git" / "index"
+        index.chmod(0)
+        try:
+            result = self._run(work)
+        finally:
+            index.chmod(0o644)
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].startswith("git diff --cached --name-only -z failed: ")
+        assert result["stderr"].endswith(". Nothing was merged.")
+        assert _git(work, "rev-parse", "HEAD") == head
+
+    def test_off_dev_it_refuses_before_touching_anything(self, diverged: dict[str, Path]) -> None:
+        work = diverged["work"]
+        _git(work, "checkout", "-q", "main")
+        head = _git(work, "rev-parse", "HEAD")
+
+        result = self._run(work)
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].startswith("merge-main runs on dev only; HEAD is main.")
+        assert _git(work, "rev-parse", "HEAD") == head
+        assert _git(work, "rev-parse", "--verify", "--quiet", "origin/main", check=False) == head
+
+    def test_a_dirty_file_main_also_changes_is_refused_and_named(self, diverged: dict[str, Path]) -> None:
+        work = diverged["work"]
+        head = _git(work, "rev-parse", "HEAD")
+        (work / "a.txt").write_text("local edit\n", encoding="utf-8")
+        (work / "m.txt").write_text("untracked here, added on main\n", encoding="utf-8")
+
+        result = self._run(work)
+
+        assert result["exit_code"] == 1
+        assert "a.txt\n  m.txt" in result["stderr"]
+        assert "b.txt" not in result["stderr"]
+        assert _git(work, "rev-parse", "HEAD") == head
+        assert (work / "a.txt").read_text(encoding="utf-8") == "local edit\n"
+
+    def test_a_staged_change_is_refused_so_the_merge_commit_never_sweeps_it_in(self, diverged: dict[str, Path]) -> None:
+        work = diverged["work"]
+        head = _git(work, "rev-parse", "HEAD")
+        (work / "b.txt").write_text("staged\n", encoding="utf-8")
+        _git(work, "add", "b.txt")
+
+        result = self._run(work)
+
+        assert result["exit_code"] == 1
+        assert "Staged changes" in result["stderr"]
+        assert "b.txt" in result["stderr"]
+        assert _git(work, "rev-parse", "HEAD") == head
+        assert _git(work, "diff", "--cached", "--name-only") == "b.txt"
+
+    def test_a_conflict_is_aborted_named_and_leaves_the_tree_as_before(self, diverged: dict[str, Path]) -> None:
+        work = diverged["work"]
+        (work / "a.txt").write_text("dev's own a\n", encoding="utf-8")
+        _git(work, "commit", "-q", "-am", "dev edits a")
+        head = _git(work, "rev-parse", "HEAD")
+        (work / "d.txt").write_text("uncommitted, unrelated\n", encoding="utf-8")
+
+        result = self._run(work)
+
+        assert result["exit_code"] == 1
+        assert "Conflicted files:\n  a.txt" in result["stderr"]
+        assert "aborted" in result["stderr"]
+        assert _git(work, "rev-parse", "HEAD") == head
+        assert _git(work, "rev-parse", "--verify", "--quiet", "MERGE_HEAD", check=False) == ""
+        assert (work / "a.txt").read_text(encoding="utf-8") == "dev's own a\n"
+        assert (work / "d.txt").read_text(encoding="utf-8") == "uncommitted, unrelated\n"
+        assert _git(work, "status", "--porcelain") == "M d.txt"
+        assert _git(work, "stash", "list") == ""
+
+    def test_a_merge_already_in_progress_is_refused_and_left_alone(self, diverged: dict[str, Path]) -> None:
+        """An abort on conflict would throw away somebody else's half-done merge."""
+        work = diverged["work"]
+        (work / "a.txt").write_text("dev's own a\n", encoding="utf-8")
+        _git(work, "commit", "-q", "-am", "dev edits a")
+        _git(work, "fetch", "-q", "origin")
+        _git(work, "merge", "origin/main", check=False)
+        merge_head = _git(work, "rev-parse", "MERGE_HEAD")
+
+        result = self._run(work)
+
+        assert result["exit_code"] == 1
+        assert "already in progress" in result["stderr"]
+        assert _git(work, "rev-parse", "MERGE_HEAD") == merge_head
+
+    def test_a_second_run_finds_nothing_to_merge_and_adds_no_commit(self, diverged: dict[str, Path]) -> None:
+        work = diverged["work"]
+        self._run(work)
+        head = _git(work, "rev-parse", "HEAD")
+
+        result = self._run(work)
+
+        assert result["exit_code"] == 0
+        assert "nothing to merge" in result["stdout"]
+        assert _git(work, "rev-parse", "HEAD") == head
+
+    def test_an_argument_is_refused_before_git_runs(self, diverged: dict[str, Path]) -> None:
+        work = diverged["work"]
+        head = _git(work, "rev-parse", "HEAD")
+
+        result = self._run(work, ["--force"])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"] == "merge-main takes no arguments; got: --force"
+        assert _git(work, "rev-parse", "HEAD") == head
+        assert _git(work, "rev-parse", "--verify", "--quiet", "origin/main", check=False) != _git(
+            diverged["upstream"], "rev-parse", "HEAD"
+        )
+
+    def test_it_asks_the_owner_tier(self) -> None:
+        assert "merge-main" in GIT_ACCESS_TIERS["owner"]["commands"]
+        assert "merge-main" not in GIT_ACCESS_TIERS["global"]["commands"]
+        asked: list[str] = []
+        with (
+            patch(_AUTH, side_effect=lambda key: asked.append(key) or "devpulse"),
+            patch(f"{_GIT_MOD}.merge_main_handler.merge_main", return_value={"success": True, "message": "ok"}),
+        ):
+            handle_command("merge-main", [])
+        assert asked == ["merge-main"]
+
+    def test_help_names_the_verb_and_fix_points_at_it(self) -> None:
+        verb = get_help("merge-main")
+        assert verb.startswith("git merge-main — Merge origin/main into dev (no rewrite) [owner]\n")
+        for claim in ("--no-ff", "never pushes", "never forces", "never stashes", "dev-pr"):
+            assert claim in verb
+        assert "drone @git merge-main" in get_help("fix")
+        owner_part = get_help().split("Owner (devpulse only):\n", 1)[1].split("\n\n", 1)[0]
+        assert "  merge-main " in owner_part
+
+
+# ---------------------------------------------------------------------------
+# The four read twins devpulse uses (DPLAN-0356, git_gate 5.0.0): tracked,
+# diff paths and --stat, status --all ahead/behind with log ranges, export
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def seat(diverged: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    """The diverged repo with a canary branch seat in it, excluded from git, and the caller standing there."""
+    work = diverged["work"]
+    home = work / "canary"
+    (home / ".trinity").mkdir(parents=True)
+    passport = {"branch_info": {"branch_name": "canary"}}
+    (home / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    with (work / ".git" / "info" / "exclude").open("a", encoding="utf-8") as fh:
+        fh.write("canary/\n")
+    (work / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    _git(work, "add", ".gitignore")
+    _git(work, "commit", "-q", "-m", "ignore logs")
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+    monkeypatch.chdir(home)
+    return {**diverged, "home": home}
+
+
+def _twin(work: Path, verb: str, args: list[str]) -> dict:
+    with patch(_AUTH, return_value="canary"), patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=work):
+        return handle_command(verb, args)
+
+
+def _commits(work: Path, count: int) -> None:
+    for n in range(count):
+        (work / "d.txt").write_text(f"dev {n}\n", encoding="utf-8")
+        _git(work, "commit", "-q", "-am", f"dev {n}")
+
+
+class TestTracked:
+    """tracked <path ...>: each path named tracked, ignored, untracked, missing or outside."""
+
+    def test_each_path_gets_its_state_in_the_order_given(self, seat: dict[str, Path]) -> None:
+        work = seat["work"]
+        (work / "x.log").write_text("log\n", encoding="utf-8")
+        (work / "new.txt").write_text("new\n", encoding="utf-8")
+
+        result = _twin(work, "tracked", ["a.txt", "x.log", "new.txt", "gone.txt"])
+
+        assert result == {
+            "stdout": "tracked    a.txt\nignored    x.log\nuntracked  new.txt\nmissing    gone.txt",
+            "stderr": "",
+            "exit_code": 0,
+        }
+
+    def test_a_path_is_read_against_the_caller_directory_first(self, seat: dict[str, Path]) -> None:
+        (seat["home"] / "a.txt").write_text("canary's own\n", encoding="utf-8")
+
+        result = _twin(seat["work"], "tracked", ["a.txt"])
+
+        assert result["stdout"] == "ignored    canary/a.txt"
+
+    def test_a_path_outside_the_repo_is_named_outside(self, seat: dict[str, Path], tmp_path: Path) -> None:
+        stray = tmp_path / "stray.txt"
+        stray.write_text("x\n", encoding="utf-8")
+
+        result = _twin(seat["work"], "tracked", [str(stray)])
+
+        assert result["stdout"] == f"outside    {stray}"
+
+    def test_no_path_is_a_usage_refusal(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "tracked", [])
+
+        assert result == {"stdout": "", "stderr": "Usage: drone @git tracked <path ...>", "exit_code": 1}
+
+
+class TestDiffPathsAndStat:
+    """diff [--staged] [--stat] <path ...>: the diff of the named files, or its summary."""
+
+    def test_a_path_narrows_the_diff_to_that_file(self, seat: dict[str, Path]) -> None:
+        work = seat["work"]
+        (work / "a.txt").write_text("a edited\n", encoding="utf-8")
+        (work / "b.txt").write_text("b edited\n", encoding="utf-8")
+
+        for args in (["a.txt"], ["--", "a.txt"]):
+            result = _twin(work, "diff", args)
+
+            assert result["exit_code"] == 0, result["stderr"]
+            assert "+a edited" in result["stdout"], args
+            assert "b.txt" not in result["stdout"], args
+
+    def test_stat_prints_the_summary_not_the_patch(self, seat: dict[str, Path]) -> None:
+        work = seat["work"]
+        (work / "a.txt").write_text("a edited\n", encoding="utf-8")
+
+        result = _twin(work, "diff", ["--stat", "a.txt"])
+
+        assert result["stdout"].startswith(" a.txt | 2 +-")
+        assert "@@" not in result["stdout"]
+
+    def test_staged_reads_the_index_for_the_named_file(self, seat: dict[str, Path]) -> None:
+        work = seat["work"]
+        (work / "a.txt").write_text("a staged\n", encoding="utf-8")
+        _git(work, "add", "a.txt")
+        (work / "a.txt").write_text("a staged then edited\n", encoding="utf-8")
+
+        result = _twin(work, "diff", ["--staged", "a.txt"])
+
+        assert "+a staged" in result["stdout"]
+        assert "then edited" not in result["stdout"]
+
+    def test_an_unknown_flag_is_refused_by_name(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "diff", ["--cached", "a.txt"])
+
+        assert result == {"stdout": "", "stderr": "Unknown argument for 'diff': --cached", "exit_code": 1}
+
+    def test_a_path_in_neither_place_is_refused_unless_after_the_separator(self, seat: dict[str, Path]) -> None:
+        refused = _twin(seat["work"], "diff", ["nope.txt"])
+        allowed = _twin(seat["work"], "diff", ["--", "nope.txt"])
+
+        assert refused["exit_code"] == 1
+        assert refused["stderr"].startswith("Unknown argument for 'diff': nope.txt (no such path")
+        assert allowed["exit_code"] == 0
+
+
+class TestAheadBehindAndRanges:
+    """status --all says how far the branch is from origin; log reads a range, read-only."""
+
+    @staticmethod
+    def _diverge_from_origin_dev(seat: dict[str, Path], ahead: int) -> None:
+        work, upstream = seat["work"], seat["upstream"]
+        _git(work, "push", "-q", "origin", "dev")
+        _git(upstream, "fetch", "-q", "origin")
+        _git(upstream, "checkout", "-q", "-b", "dev", "origin/dev")
+        (upstream / "u.txt").write_text("upstream dev\n", encoding="utf-8")
+        _git(upstream, "add", "u.txt")
+        _git(upstream, "commit", "-q", "-m", "upstream on dev")
+        _git(upstream, "push", "-q", "origin", "dev")
+        _git(work, "fetch", "-q", "origin")
+        _commits(work, ahead)
+
+    def test_status_all_names_ahead_and_behind_of_origin(self, seat: dict[str, Path]) -> None:
+        self._diverge_from_origin_dev(seat, ahead=2)
+
+        result = _twin(seat["work"], "status", ["--all"])
+
+        assert result["stdout"].splitlines()[1:2] == ["dev: 2 ahead, 1 behind origin/dev (as of the last fetch)"]
+
+    def test_status_all_json_carries_the_counts(self, seat: dict[str, Path]) -> None:
+        self._diverge_from_origin_dev(seat, ahead=2)
+
+        doc = json.loads(_twin(seat["work"], "status", ["--all", JSON_FLAG])["stdout"])
+
+        assert (doc.get("upstream"), doc.get("ahead"), doc.get("behind")) == ("origin/dev", 2, 1)
+
+    def test_a_branch_origin_lacks_says_so(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "status", ["--all"])
+
+        assert result["stdout"].splitlines()[1:2] == ["dev: no origin/dev to compare with"]
+
+    def test_branch_scope_status_carries_no_count(self, seat: dict[str, Path]) -> None:
+        self._diverge_from_origin_dev(seat, ahead=1)
+
+        result = _twin(seat["work"], "status", [])
+
+        assert "ahead" not in result["stdout"]
+
+    def test_a_range_lists_every_commit_in_it_not_the_default_ten(self, seat: dict[str, Path]) -> None:
+        self._diverge_from_origin_dev(seat, ahead=11)
+
+        result = _twin(seat["work"], "log", ["origin/dev..HEAD"])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert [line.split(" ", 1)[1] for line in result["stdout"].splitlines()] == [
+            f"dev {n}" for n in range(10, -1, -1)
+        ]
+
+    def test_a_count_still_caps_a_range(self, seat: dict[str, Path]) -> None:
+        self._diverge_from_origin_dev(seat, ahead=4)
+
+        result = _twin(seat["work"], "log", ["2", "origin/dev..HEAD"])
+
+        assert len(result["stdout"].splitlines()) == 2
+
+    def test_a_range_side_that_is_no_commit_is_refused_by_name(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "log", ["origin/nope..HEAD"])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].startswith(
+            "Unknown argument for 'log': origin/nope..HEAD (not a count, not a range of commits, and no such path"
+        )
+
+
+class TestExport:
+    """export <ref> <dir>: the tracked tree at a ref, into an empty dir under the temp dir or your docs.local."""
+
+    def test_the_tracked_tree_is_written_and_nothing_untracked(self, seat: dict[str, Path], tmp_path: Path) -> None:
+        work = seat["work"]
+        (work / "sub").mkdir()
+        (work / "sub" / "c.txt").write_text("in a directory\n", encoding="utf-8")
+        _git(work, "add", "sub/c.txt")
+        _git(work, "commit", "-q", "-m", "a file in a directory")
+        (work / "new.txt").write_text("untracked\n", encoding="utf-8")
+        (work / "x.log").write_text("ignored\n", encoding="utf-8")
+        dest = tmp_path / "export_out"
+
+        result = _twin(work, "export", ["HEAD", str(dest)])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        written = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
+        assert written == sorted(_git(work, "ls-files").splitlines())
+        sha = _git(work, "rev-parse", "--short", "HEAD")
+        assert result["stdout"] == f"Exported HEAD ({sha}) to {dest}: {len(written)} file(s)"
+
+    def test_the_callers_docs_local_is_a_home_for_it(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "export", ["HEAD", "docs.local/tree"])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert (seat["home"] / "docs.local" / "tree" / "a.txt").is_file()
+
+    def test_a_destination_outside_both_homes_is_refused_and_not_made(
+        self, seat: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(f"{_EXPORT_MOD}.temp_roots", lambda: [tmp_path / "the_temp_dir"])
+        dest = tmp_path / "elsewhere"
+
+        result = _twin(seat["work"], "export", ["HEAD", str(dest)])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].startswith(f"export refused: {dest} is not under ")
+        assert not dest.exists()
+
+    def test_a_destination_that_holds_anything_is_refused(self, seat: dict[str, Path], tmp_path: Path) -> None:
+        dest = tmp_path / "full"
+        dest.mkdir()
+        (dest / "keep.txt").write_text("keep\n", encoding="utf-8")
+
+        result = _twin(seat["work"], "export", ["HEAD", str(dest)])
+
+        assert result == {"stdout": "", "stderr": f"export refused: {dest} is not empty", "exit_code": 1}
+        assert sorted(p.name for p in dest.iterdir()) == ["keep.txt"]
+
+    @pytest.mark.parametrize("ref", ["no-such-ref", "--output=x"])
+    def test_a_ref_that_is_no_commit_is_refused(self, seat: dict[str, Path], tmp_path: Path, ref: str) -> None:
+        dest = tmp_path / "out"
+
+        result = _twin(seat["work"], "export", [ref, str(dest)])
+
+        assert result == {"stdout": "", "stderr": f"export refused: {ref} is not a commit", "exit_code": 1}
+        assert not dest.exists()
+
+    def test_a_missing_argument_is_a_usage_refusal(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "export", ["HEAD"])
+
+        assert result == {"stdout": "", "stderr": "Usage: drone @git export <ref> <dir>", "exit_code": 1}
+
+
+class TestTwinTiersAndHelp:
+    def test_tracked_and_export_are_global_reads(self) -> None:
+        for verb in ("tracked", "export"):
+            assert verb in GIT_ACCESS_TIERS["global"]["commands"]
+            assert verb not in GIT_ACCESS_TIERS["owner"]["commands"]
+
+    def test_the_twins_table_names_all_four(self) -> None:
+        table = get_help().split("RAW GIT READS AND THEIR TWINS", 1)[1].split("\n\n", 1)[0]
+        for row in (
+            "  git ls-files / check-ignore <p>  drone @git tracked <p ...>\n",
+            "  git diff [--stat] -- <path>      drone @git diff [--staged] [--stat] <path ...>\n",
+            "  git rev-list --count a...b       drone @git status --all  (ahead/behind origin)\n",
+            "  git log origin/dev..HEAD         drone @git log origin/dev..HEAD\n",
+            "  git archive <ref> | tar -x       drone @git export <ref> <dir>\n",
+        ):
+            assert row in table
+
+    def test_each_new_verb_has_its_own_page(self) -> None:
+        assert get_help("tracked").startswith("git tracked <path ...> — ")
+        assert get_help("export").startswith("git export <ref> <dir> — ")
+
+
+# ---------------------------------------------------------------------------
+# lock: a holder whose liveness could not be checked (fleet green leg 6)
+# ---------------------------------------------------------------------------
+
+_LOCK_MOD = "aipass.drone.apps.handlers.git.lock_handler"
+
+
+class TestLockHolderUnchecked:
+    """`lock` names a holder it could not check as unchecked, never as active or orphaned."""
+
+    @staticmethod
+    def _lock(tmp_path: Path, side_effect: Exception | None) -> dict:
+        lock = {"branch": "@api", "started": "2026-10-04T00:00:00+00:00", "pid": os.getpid()}
+        (tmp_path / ".git_pr.lock").write_text(json.dumps(lock), encoding="utf-8")
+        with (
+            patch(_AUTH, return_value="canary"),
+            patch(f"{_LOCK_MOD}.find_repo_root", return_value=tmp_path),
+            patch(f"{_LOCK_MOD}._pid_alive", side_effect=side_effect, return_value=True),
+        ):
+            return json.loads(handle_command("lock", [])["stdout"])
+
+    def test_a_failed_liveness_check_reads_as_unchecked(self, tmp_path: Path) -> None:
+        """Red first: the Windows check failing answered True ("assuming alive"), so this read as active."""
+        doc = self._lock(tmp_path, OSError("OpenProcess failed"))
+
+        assert (doc["locked"], doc["orphaned"], doc["pid_checked"]) == (True, False, False)
+        assert doc["message"].startswith(f"Lock held by @api (PID {os.getpid()}, unchecked, ")
+
+    def test_a_live_holder_still_reads_as_active(self, tmp_path: Path) -> None:
+        doc = self._lock(tmp_path, None)
+
+        assert (doc["orphaned"], doc["pid_checked"]) == (False, True)
+        assert doc["message"].startswith(f"Lock held by @api (PID {os.getpid()}, stale, ")

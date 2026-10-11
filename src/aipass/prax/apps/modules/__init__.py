@@ -20,7 +20,7 @@ Available modules:
 # (apps/prax.py) talks to the modules layer, never to a handler directly. The
 # gate itself lives in apps/handlers/cli/arg_gate.py, where the modules import
 # it from.
-from aipass.prax.apps.handlers.cli.arg_gate import (  # noqa: E402
+from aipass.prax.apps.handlers.cli.arg_gate import (
     UnknownArgument,
     did_you_mean,
     refuse,

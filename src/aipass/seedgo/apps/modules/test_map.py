@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_map.py
 # Description: Custom Function Test Coverage Map Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -31,7 +31,7 @@ from aipass.prax import logger
 
 # CLI services (display/output formatting)
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error
+from aipass.cli.apps.modules import error, warning
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -156,6 +156,9 @@ def _display_coverage_map(result: dict) -> None:
     console.print()
     header(f"@{branch} CUSTOM FUNCTION COVERAGE")
     console.print()
+
+    for rel_path in result["unparsed"]:
+        warning(f"Not mapped, the file does not parse: {rel_path}")
 
     if total == 0:
         console.print("[dim]No custom public functions found in apps/modules/ or apps/handlers/[/dim]")

@@ -84,7 +84,7 @@ Caps are read, never copied. A second copy of a number is a second source of tru
  - `drone @memory push --confirm` is the fleet lane and is @devpulse's to run, not this seat's.
  - A hook gate refuses a shell write that names a memory file path, reads included, because an interpreter could write any path it holds. Read `.trinity` with the Read tool, `cat` or `jq`.
  - The PreCompact lane shells `drone @memory rollover check|run` from the repo root, and drone re-stamps `AIPASS_CALLER_CWD` — own-branch work there needs an explicit `--branch`.
- - `rollover.py` sits just under seedgo's 1,500-line module ceiling. Split it before adding to it.
+ - `rollover.py` is this branch's largest module. Before adding to it, check its size against seedgo's module ceiling (`drone @seedgo checklist`); split rather than cross it.
  - A new test file is refused by policy. Editing an existing one is fine; a genuinely new file needs @devpulse's ruling first.
 
 # Memory + tracking

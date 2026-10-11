@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: user.py
 # Description: User Info Handler
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2025-11-30
-# Modified: 2026-08-21
+# Modified: 2026-10-06
 # =============================================
 
 """
@@ -155,7 +155,13 @@ def get_user_by_email(email: str) -> Optional[Dict]:
         email: Email address (e.g., "@seedgo")
 
     Returns:
-        Dict containing user info, or None if not found
+        Dict containing user info, or None if not found; None also when no
+        registry file exists, which is the one answer the read can give.
+
+    Raises:
+        RegistryUnreadable: the registry exists and cannot be read. Read as None,
+            it answered like an unknown user (ai_mail, leg 17); no product
+            caller exists today, only the package re-export.
     """
     from .branch_detection import BRANCH_REGISTRY_PATH, _get_branches_list
 
@@ -184,9 +190,11 @@ def get_user_by_email(email: str) -> Optional[Dict]:
                     "timestamp_format": "%Y-%m-%d %H:%M:%S",
                 }
         return None
-    except Exception as e:
-        logger.warning("[identity] get_user_by_email(%s) failed: %s", email, e)
-        return None
+    except (OSError, ValueError) as e:
+        logger.error("[identity] get_user_by_email(%s) could not read %s: %s", email, registry_path, e)
+        from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+        raise RegistryUnreadable(f"{registry_path} could not be read: {e}") from e
 
 
 def get_all_users() -> Dict[str, Dict]:
@@ -194,7 +202,12 @@ def get_all_users() -> Dict[str, Dict]:
     Get all users from AIPASS_REGISTRY.json
 
     Returns:
-        Dict mapping branch emails to user info dicts
+        Dict mapping branch emails to user info dicts; {} when no registry exists.
+
+    Raises:
+        RegistryUnreadable: the registry exists and cannot be read. Read as {},
+            it answered like a registry naming nobody (ai_mail, leg 15); no
+            product caller exists today, only the package re-export.
     """
     from .branch_detection import BRANCH_REGISTRY_PATH, _get_branches_list
 
@@ -225,4 +238,6 @@ def get_all_users() -> Dict[str, Dict]:
         return users
     except Exception as e:
         logger.warning("[identity] get_all_users() failed: %s", e)
-        return {}
+        from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+        raise RegistryUnreadable(f"{registry_path} could not be read: {e}") from e

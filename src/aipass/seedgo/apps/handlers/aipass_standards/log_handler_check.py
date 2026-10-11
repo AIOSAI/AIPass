@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_handler_check.py
 # Description: Log Handler Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -28,6 +28,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: a test importing stdlib logging to assert on it is legitimate.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 
@@ -92,7 +94,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return {
             "passed": True,
             "checks": [
-                {"name": "Log handler check", "passed": True, "message": "No log handler setup found (skipped)"}
+                {
+                    "name": "Log handler check",
+                    "passed": True,
+                    "message": "No log handler setup found (skipped)",
+                    "declined": True,
+                }
             ],
             "score": 100,
             "standard": "LOG_HANDLER",
@@ -176,6 +183,7 @@ def check_no_raw_stream_handler(
             "name": "No raw StreamHandler with file logging",
             "passed": True,
             "message": "No file-based logging setup found (check not applicable)",
+            "declined": True,
         }
 
     violations = []

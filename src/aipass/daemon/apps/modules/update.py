@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update.py
 # Description: DAEMON Status Digest Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-01-29
-# Modified: 2026-01-29
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -198,7 +198,9 @@ def handle_command(command: str, args: list) -> bool:
     except Exception as e:
         logger.error(f"[DAEMON] Error generating update digest: {e}", exc_info=True)
         error(f"Error: {e}")
-        return True
+        # SystemExit, not a return: True is the success answer, and the router's
+        # `except Exception` would turn a False or a re-raise into "Unknown command".
+        raise SystemExit(1) from e
 
 
 # =============================================

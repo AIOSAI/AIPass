@@ -3,7 +3,7 @@
 # Description: Notification Preferences Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -74,7 +74,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # Action command that works without args — route before introspection gate
     if command == "preferences":
-        result = _handle_preferences(args)
+        result = _handle_preferences()
         if result:
             json_handler.log_operation("preferences_executed", {"command": "preferences", "success": True})
         return result
@@ -123,9 +123,9 @@ def _handle_level(result: dict, level: str) -> bool:
     return True
 
 
-def _handle_preferences(args: List[str]) -> bool:
+def _handle_preferences() -> bool:
     """Display all notification preferences for the caller."""
-    result = show_preferences(args)
+    result = show_preferences()
 
     if not result["success"]:
         error(result["error"])

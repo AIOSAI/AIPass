@@ -1,27 +1,27 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for cli's entry point routing, help and introspection
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-09-17
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for cli's CLI entry point.
+"""Tests for apps/cli.py — routing, help, introspection and the exit seam."""
 
-Covers the four things the entry point promises: no-args shows introspection,
---help shows help without executing anything, a subcommand's --help never runs
-that subcommand, and an unknown command fails loudly with a non-zero code.
-
-The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
-shell reads as success, so the refusal path is pinned by test rather than assumed.
-"""
-
-import sys
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — that route_command and print_help in apps/cli.py carry docstrings
 
 import pytest
 
 from aipass.cli.apps import cli as branch_entry
 from aipass.cli.apps.modules import display
+
+# Covers the four things the entry point promises: no-args shows introspection,
+# --help shows help without executing anything, a subcommand's --help never runs
+# that subcommand, and an unknown command fails loudly with a non-zero code.
+#
+# The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
+# shell reads as success, so the refusal path is pinned by test rather than assumed.
 
 
 class _StubModule:
@@ -63,7 +63,7 @@ def stub_module(monkeypatch):
 
 def _run(monkeypatch, argv):
     """Invoke main() with a synthetic argv."""
-    monkeypatch.setattr(sys, "argv", ["cli", *argv])
+    monkeypatch.setattr("sys.argv", ["cli", *argv])
     return branch_entry.main()
 
 
@@ -128,6 +128,21 @@ def test_print_help_publishes_escape_and_scopes_show(capsys):
     out = capsys.readouterr().out
     assert "from aipass.cli import escape" in out
     assert "Alias of display (not display show)" in out
+
+
+def test_discovery_hands_main_the_imported_modules_not_copies():
+    """A routed module's error() must trip the flag main() reads, or a refusal exits 0.
+
+    discover_modules() executed each file a second time as a fresh copy, so the
+    routed display kept its own failure flag apart from the one resolve_exit reads
+    (measured fleet green leg 3). Mutant: discovery back to spec_from_file_location.
+    """
+    discovered = {module.__name__.rsplit(".", 1)[-1]: module for module in branch_entry.discover_modules()}
+
+    discovered["display"].mark_command_failed()
+
+    assert display.command_failed() is True
+    assert branch_entry.resolve_exit(True) == 2
 
 
 # =============================================================================
@@ -286,7 +301,7 @@ def test_run_cli_maps_an_unhandled_crash_to_one(monkeypatch, mock_logger, capsys
 
 def test_run_cli_passes_a_clean_run_through(monkeypatch, stub_module):
     """No interrupt, no crash: run_cli() hands main()'s code straight back."""
-    monkeypatch.setattr(sys, "argv", ["cli", "probe"])
+    monkeypatch.setattr("sys.argv", ["cli", "probe"])
 
     assert branch_entry.run_cli() == 0
     assert stub_module.calls == [("probe", [])]

@@ -1,20 +1,24 @@
 # =================== AIPass ====================
 # Name: test_post_compact_regrounding.py
-# Version: 1.2.0
+# Version: 1.2.4
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-09-16
+# Modified: 2026-10-10
 # =============================================
 
-"""Tests for handlers/lifecycle/post_compact_regrounding.py.
+"""Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
 
-Replays the DPLAN-0276 incident: PreCompact can fire several times back-to-back
-with no intervening UserPromptSubmit, so cadence's normal turn-0 grounding path
-never runs. This PostToolUse backstop must inject grounding content directly via
-additionalContext the next time any tool runs, exactly once per compact, and
-stay silent otherwise.
-"""
+# Replays the DPLAN-0276 incident: PreCompact can fire several times back-to-back
+# with no intervening UserPromptSubmit, so cadence's normal turn-0 grounding path
+# never runs. This PostToolUse backstop must inject grounding content directly via
+# additionalContext the next time any tool runs, exactly once per compact, and
+# stay silent otherwise.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/lifecycle/post_compact_regrounding.py parses and imports
+# seedgo: no-test-needed(constant) — MANIFEST_REL's relative location of the scaffold manifest
+# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing cadence's guard directory
 
 import contextlib
 import json
@@ -22,10 +26,14 @@ import os
 import time
 from unittest.mock import patch
 
+from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
+from aipass.hooks.apps.handlers.lifecycle import release_notice as door
+from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import REGROUP_FIRE_BUDGET
+from aipass.hooks.apps.modules import cadence, release_notice
+
 
 class TestPostCompactRegrounding:
     def test_silent_when_nothing_pending(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         with patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=False):
             result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
@@ -33,7 +41,6 @@ class TestPostCompactRegrounding:
         assert result == {"stdout": "", "exit_code": 0}
 
     def test_injects_all_sections_when_pending(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         with (
             patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
@@ -62,7 +69,6 @@ class TestPostCompactRegrounding:
         same four empties are a degraded regroup and ship a banner — the twin
         below pins that side (DPLAN-0347, hooks row 1).
         """
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         monkeypatch.chdir(tmp_path)
         with (
@@ -79,8 +85,6 @@ class TestPostCompactRegrounding:
     def test_a_stamped_tree_with_nothing_loaded_ships_the_banner_not_silence(self, tmp_path, monkeypatch):
         """The quiet nothing this row exists to end: a post-compact session that
         got no grounding at all is the one that most needs to be told so."""
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
-        from aipass.hooks.apps.modules import release_notice
 
         (tmp_path / ".aipass").mkdir()
         monkeypatch.chdir(tmp_path)
@@ -102,7 +106,6 @@ class TestPostCompactRegrounding:
         spy.assert_not_called()
 
     def test_the_banner_opens_part_one_ahead_of_the_branch(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         (tmp_path / ".aipass").mkdir()
         monkeypatch.chdir(tmp_path)
@@ -120,7 +123,6 @@ class TestPostCompactRegrounding:
         assert context.index("[GROUNDING DEGRADED") < context.index("BRANCH") < context.index("KERNEL")
 
     def test_one_loader_failing_does_not_block_the_others(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         with (
             patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
@@ -137,7 +139,6 @@ class TestPostCompactRegrounding:
         assert "IDENTITY" in context
 
     def test_cadence_check_failure_is_silent(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         with patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", side_effect=RuntimeError("boom")):
             result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
@@ -148,13 +149,10 @@ class TestPostCompactRegrounding:
         """No mocking of cadence: several PreCompact resets fire back-to-back
         (the actual incident pattern), then the next tool call must reground
         exactly once and stay silent after that."""
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
-        from aipass.hooks.apps.modules import cadence
-
-        cadence._turn = None
-        cadence._config = None
 
         with (
+            patch.object(cadence, "_turn", None),
+            patch.object(cadence, "_config", None),
             patch("aipass.hooks.apps.modules.cadence._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "incident-session"}),
             patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value="KERNEL"),
@@ -254,7 +252,6 @@ class TestPostCompactRegrounding:
         autonomous work before the other two post-compact prompts. DEFAULTS is what
         ships: cadence_config.json is gitignored, an operator's override (the
         long-stretch case above proves the file is read)."""
-        from aipass.hooks.apps.modules import cadence
 
         assert 126_258 <= cadence.DEFAULTS["regroup_fresh_bytes"] < 308_557
 
@@ -268,16 +265,14 @@ _NOTIFICATION = "<task-notification>\n<task-id>b1hws2iup</task-id>\n<status>comp
 @contextlib.contextmanager
 def _seat(tmp_path, sizes=None, fresh_bytes=None):
     """One seat on real cadence and the real packer: its guard dir, session, transcript and sections."""
-    from aipass.hooks.apps.modules import cadence
-
     sizes = sizes or {"branch": 10, "identity": 10, "kernel": 10, "navmap": 10}
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("", encoding="utf-8")
     config = tmp_path / "cadence.json"
-    config.write_text(json.dumps({} if fresh_bytes is None else {"regroup_fresh_bytes": fresh_bytes}))
-    cadence._turn = None
-    cadence._config = None
+    config.write_text(json.dumps({} if fresh_bytes is None else {"regroup_fresh_bytes": fresh_bytes}), encoding="utf-8")
     with (
+        patch.object(cadence, "_turn", None),
+        patch.object(cadence, "_config", None),
         patch.object(cadence, "_GUARD_DIR", tmp_path),
         patch.object(cadence, "_CONFIG_PATH", config),
         patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": _SEAT}),
@@ -288,8 +283,6 @@ def _seat(tmp_path, sizes=None, fresh_bytes=None):
         patch(f"{_RN}.build_notice", return_value=""),
     ):
         yield cadence, transcript
-    cadence._turn = None
-    cadence._config = None
 
 
 def _grow(transcript, size):
@@ -299,8 +292,6 @@ def _grow(transcript, size):
 
 def _tool_calls(transcript, count):
     """*count* PostToolUse events, each after 1,000 bytes of work. Returns how many re-ground parts fired."""
-    from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
-
     fired = 0
     for _ in range(count):
         _grow(transcript, 1_000)
@@ -321,8 +312,8 @@ def _prompt(cadence, transcript, text="the owner types"):
 
 def _sibling(cadence, loader, transcript, text="the owner types"):
     """One loader's process for the prompt already in *transcript*: a fresh turn memo, the same token."""
-    cadence._turn = None
-    return cadence.should_fire(loader, {"prompt": text, "transcript_path": str(transcript)})
+    with patch.object(cadence, "_turn", None):
+        return cadence.should_fire(loader, {"prompt": text, "transcript_path": str(transcript)})
 
 
 class TestActiveStartupInstruction:
@@ -331,7 +322,6 @@ class TestActiveStartupInstruction:
     and a mid-task post-compact continuation never gets one."""
 
     def _ground(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         with (
             patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
@@ -387,7 +377,6 @@ class TestActiveStartupInstruction:
     def test_still_silent_when_not_pending(self, tmp_path):
         """The instruction rides the existing one-shot token — it must not turn the
         backstop into something that fires on every tool call."""
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         with patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=False):
             result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
@@ -411,7 +400,9 @@ MANAGER_PASSPORT = '{"identity": {"citizen_class": "manager"}}'
 SPECIALIST_PASSPORT = '{"identity": {"citizen_class": "specialist"}}'
 
 
-def _make_project(root, passport_json=MANAGER_PASSPORT, stamped=None, source_repo=False):
+def _make_project(
+    root, passport_json=MANAGER_PASSPORT, stamped=None, source_repo=False, stamped_at="2026-09-01T10:00:00"
+):
     """Build a project tree and return the branch cwd the hook would run in.
 
     root/
@@ -428,7 +419,7 @@ def _make_project(root, passport_json=MANAGER_PASSPORT, stamped=None, source_rep
         aipass_dir = root / ".aipass"
         aipass_dir.mkdir(exist_ok=True)
         (aipass_dir / "scaffold_manifest.json").write_text(
-            json.dumps({"aipass_version": stamped, "stamped_at": "2026-09-01T10:00:00", "files": {}}),
+            json.dumps({"aipass_version": stamped, "stamped_at": stamped_at, "files": {}}),
             encoding="utf-8",
         )
     if source_repo:
@@ -438,8 +429,6 @@ def _make_project(root, passport_json=MANAGER_PASSPORT, stamped=None, source_rep
 
 
 def _notice(cwd, installed="2.8.4"):
-    from aipass.hooks.apps.modules import release_notice
-
     with patch.object(release_notice, "_installed_version", return_value=installed):
         return release_notice.build_notice({"cwd": str(cwd)})
 
@@ -468,10 +457,27 @@ class TestReleaseNoticeModule:
         assert "T10:00:00" not in out
 
     def test_a_non_iso_stamp_is_passed_through_rather_than_guessed_at(self, tmp_path):
-        from aipass.hooks.apps.modules.release_notice import _stamp_date
+        """Read in the notice (fleet green leg 8), not _stamp_date by name. The loose
+        stamp holds a "T", so a guess that cut at it would print "()"."""
+        loose = _make_project(tmp_path / "loose", stamped="2.8.1", stamped_at="Tuesday last week")
+        iso = _make_project(tmp_path / "iso", stamped="2.8.1", stamped_at="2026-09-01T07:55:36.794203+00:00")
+        assert "(Tuesday last week)" in _notice(loose)
+        iso_notice = _notice(iso)
+        assert "(2026-09-01)" in iso_notice
+        assert "07:55" not in iso_notice
 
-        assert _stamp_date("sometime last week") == "sometime last week"
-        assert _stamp_date("2026-09-01T07:55:36.794203+00:00") == "2026-09-01"
+    def test_a_manager_passport_at_a_symlinked_home_is_not_read(self, tmp_path, monkeypatch):
+        """host_portability (PR #774): the resolved walk never met an unresolved home and read home's passport."""
+        real = tmp_path / "real_home"
+        (real / ".trinity").mkdir(parents=True)
+        (real / ".trinity" / "passport.json").write_text(MANAGER_PASSPORT, encoding="utf-8")
+        (real / "PROJ_REGISTRY.json").write_text("{}", encoding="utf-8")
+        (real / "work").mkdir()
+        (tmp_path / "home").symlink_to(real, target_is_directory=True)
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+        assert _notice(real / "work") == ""
 
     def test_current_scaffold_is_silent(self, tmp_path):
         assert _notice(_make_project(tmp_path / "proj", stamped="2.8.4")) == ""
@@ -543,54 +549,45 @@ class TestReleaseNoticeModule:
         assert snapshot() == before
 
 
-def _parsed_version(text: str) -> tuple[int, ...]:
-    """`_version_tuple` with its None branch asserted away, for the comparisons.
+def _speaks(tmp_path, stamped: str, installed: str) -> bool:
+    """Whether the notice speaks for a scaffold stamped `stamped` under `installed`.
 
-    `_is_behind` takes non-optional tuples while the parser answers
-    `tuple[int, ...] | None`, so handing one straight to the other type-errored
-    this file (10 findings) — and it hid a claim worth making: every spelling in
-    these units must PARSE, not merely compare. The unparseable spellings have
-    their own unit below.
+    The parse and the comparison are read through build_notice (fleet green
+    leg 8), not _version_tuple / _is_behind by name: a parsed stamp speaks only
+    when it is behind, an unparseable one always counts as behind.
     """
-    from aipass.hooks.apps.modules.release_notice import _version_tuple
-
-    parsed = _version_tuple(text)
-    assert parsed is not None, f"{text!r} did not parse"
-    return parsed
+    root = tmp_path / f"proj-{stamped or 'empty'}-{installed or 'empty'}"
+    return _notice(_make_project(root, stamped=stamped), installed=installed) != ""
 
 
 class TestReleaseNoticeVersionCompare:
-    def test_short_and_long_forms_of_the_same_version_are_equal(self):
+    def test_short_and_long_forms_of_the_same_version_are_equal(self, tmp_path):
         """Without zero-padding, (2, 8) < (2, 8, 0) and a scaffold stamped '2.8'
         would be reported behind '2.8.0' forever."""
-        from aipass.hooks.apps.modules.release_notice import _is_behind
 
-        assert _is_behind(_parsed_version("2.8"), _parsed_version("2.8.0")) is False
-        assert _is_behind(_parsed_version("2.8.0"), _parsed_version("2.8")) is False
+        assert _speaks(tmp_path, "2.8", "2.8.0") is False
+        assert _speaks(tmp_path, "2.8.0", "2.8") is False
 
-    def test_patch_and_minor_bumps_read_as_behind(self):
-        from aipass.hooks.apps.modules.release_notice import _is_behind
+    def test_patch_and_minor_bumps_read_as_behind(self, tmp_path):
 
-        assert _is_behind(_parsed_version("2.8.1"), _parsed_version("2.8.4")) is True
-        assert _is_behind(_parsed_version("2.8"), _parsed_version("2.9.0")) is True
-        assert _is_behind(_parsed_version("2.10.0"), _parsed_version("2.9.0")) is False
+        assert _speaks(tmp_path, "2.8.1", "2.8.4") is True
+        assert _speaks(tmp_path, "2.8", "2.9.0") is True
+        assert _speaks(tmp_path, "2.10.0", "2.9.0") is False
 
-    def test_a_prerelease_suffix_parses_to_its_numeric_core(self):
-        from aipass.hooks.apps.modules.release_notice import _version_tuple
+    def test_a_prerelease_suffix_parses_to_its_numeric_core(self, tmp_path):
+        """Parsed, 2.9.0rc1 is 2.9.0 and current; unparsed it would count as behind."""
 
-        assert _version_tuple("2.9.0rc1") == (2, 9, 0)
+        assert _speaks(tmp_path, "2.9.0rc1", "2.9.0") is False
 
-    def test_a_non_numeric_version_is_unparseable(self):
-        from aipass.hooks.apps.modules.release_notice import _version_tuple
+    def test_a_non_numeric_version_is_unparseable(self, tmp_path):
+        """An unparseable stamp counts as behind; an unparseable install stays quiet."""
 
-        assert _version_tuple("dev") is None
-        assert _version_tuple("") is None
+        assert _speaks(tmp_path, "dev", "2.9.0") is True
+        assert _speaks(tmp_path, "2.9.0", "") is False
 
 
 class TestReleaseNoticeSessionStartDoor:
     def _handle(self, cwd, source, installed="2.8.4"):
-        from aipass.hooks.apps.handlers.lifecycle import release_notice as door
-        from aipass.hooks.apps.modules import release_notice
 
         with patch.object(release_notice, "_installed_version", return_value=installed):
             return door.handle({"cwd": str(cwd), "source": source})
@@ -613,7 +610,6 @@ class TestReleaseNoticeSessionStartDoor:
         assert self._handle(_make_project(tmp_path / "proj"), "compact") == {"stdout": "", "exit_code": 0}
 
     def test_a_raising_module_never_escapes_into_session_start(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle import release_notice as door
 
         with patch.object(door, "load_content", side_effect=RuntimeError("boom")):
             assert door.handle({"cwd": str(tmp_path), "source": "startup"}) == {"stdout": "", "exit_code": 0}
@@ -621,7 +617,6 @@ class TestReleaseNoticeSessionStartDoor:
 
 class TestReleaseNoticeCompactDoor:
     def _reground(self, cwd, notice):
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         with (
             patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
@@ -651,8 +646,6 @@ class TestReleaseNoticeCompactDoor:
         """Guard order, not just output: a bare notice under a re-ground header
         would read as a regroup that reground nothing, and the two file reads
         would be spent on a block nobody sees."""
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
-        from aipass.hooks.apps.modules import release_notice
 
         monkeypatch.chdir(tmp_path)
         with (
@@ -695,17 +688,26 @@ def _section(tag, size):
     return "\n".join(lines)
 
 
+def _units(text: str) -> int:
+    """Length the way Claude Code measures it: UTF-16 code units, not code points.
+
+    The test's own measure (fleet green leg 8), not the handler's _cc_len: the
+    budget pins hold the handler to Claude Code's count, so they count it here.
+    """
+    return len(text.encode("utf-16-le")) // 2
+
+
 class TestRegroupBudget752:
-    def _sequence(self, tmp_path, sizes=None, notice_size=NOTICE_SIZE, events=12, resets=1):
+    def _sequence(self, tmp_path, sizes=None, notice_size=NOTICE_SIZE, events=12, resets=1, branch_text=None):
         """Real cadence (autouse-isolated state), real packer, sized sections.
-        Returns the additionalContext of every non-silent fire, in order."""
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
-        from aipass.hooks.apps.modules import cadence
+        Returns the additionalContext of every non-silent fire, in order.
+        *branch_text*, when given, is the branch section verbatim instead of a sized one."""
 
         sizes = sizes or TODAYS_SIZES
-        cadence._turn = None
+        branch = branch_text if branch_text is not None else _section("BRANCH", sizes["branch"])
         with (
-            patch(f"{_GC}.load_branch", return_value=_section("BRANCH", sizes["branch"])),
+            patch.object(cadence, "_turn", None),
+            patch(f"{_GC}.load_branch", return_value=branch),
             patch(f"{_GC}.load_identity", return_value=_section("IDENTITY", sizes["identity"])),
             patch(f"{_GC}.load_kernel", return_value=_section("KERNEL", sizes["kernel"])),
             patch(f"{_GC}.load_navmap", return_value=_section("NAVMAP", sizes["navmap"])),
@@ -721,22 +723,19 @@ class TestRegroupBudget752:
         return fired
 
     def test_the_budget_sits_below_the_measured_limit(self):
-        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         assert post_compact_regrounding.REGROUP_FIRE_BUDGET < 10_000
         # `__doc__` is `str | None`, and a module stripped of its docstring must
         # fail this claim rather than type-error the file on the `in`.
-        assert post_compact_regrounding.__doc__ is not None
-        assert "sgr = 1e4" in post_compact_regrounding.__doc__
+        assert "sgr = 1e4" in (post_compact_regrounding.__doc__ or "")
 
     def test_a_manager_seat_at_todays_sizes_never_exceeds_the_budget(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import REGROUP_FIRE_BUDGET, _cc_len
 
         fired = self._sequence(tmp_path)
         assert len(fired) > 1, "today's sizes cannot fit one fire - the split is the point"
-        assert sum(_cc_len(f) for f in fired) > 20_000, "the fixture must be at today's scale"
+        assert sum(_units(f) for f in fired) > 20_000, "the fixture must be at today's scale"
         for part, context in enumerate(fired, 1):
-            assert _cc_len(context) <= REGROUP_FIRE_BUDGET, f"part {part} is {_cc_len(context)} units"
+            assert _units(context) <= REGROUP_FIRE_BUDGET, f"part {part} is {_units(context)} units"
 
     def test_nothing_is_lost_across_the_parts(self, tmp_path):
         """VACUITY GUARD for the budget pin: a packer that met the cap by dropping
@@ -776,7 +775,6 @@ class TestRegroupBudget752:
         assert len(set(fired)) == len(fired)
 
     def test_each_fire_writes_one_sized_log_line(self, tmp_path):
-        from aipass.hooks.apps.modules import cadence
 
         with patch.object(cadence, "logger") as log:
             fired = self._sequence(tmp_path)
@@ -789,44 +787,35 @@ class TestRegroupBudget752:
         log.warning.assert_not_called()
 
     def test_a_section_larger_than_a_whole_part_is_split_between_lines(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import REGROUP_FIRE_BUDGET, _cc_len
 
         sizes = {"branch": 25_000, "identity": 10, "kernel": 10, "navmap": 10}
         fired = self._sequence(tmp_path, sizes=sizes, notice_size=0)
-        assert all(_cc_len(f) <= REGROUP_FIRE_BUDGET for f in fired)
+        assert all(_units(f) <= REGROUP_FIRE_BUDGET for f in fired)
         stream = "\n".join(fired)
         for line in _section("BRANCH", 25_000).split("\n"):
             assert stream.count(line) == 1
 
-    def test_a_single_line_longer_than_a_part_is_cut_not_dropped(self):
-        from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import (
-            REGROUP_FIRE_BUDGET,
-            _cc_len,
-            _pack,
-        )
+    # The two below go through handle() with the branch section verbatim (fleet
+    # green leg 8), not _pack by name.
+
+    def test_a_single_line_longer_than_a_part_is_cut_not_dropped(self, tmp_path):
+        """The line is lowercase letters only; every other run of them in a fire
+        (the tiny sections' x padding) is under 100, so the pieces rejoin to it."""
 
         line = "".join(chr(ord("a") + i % 26) for i in range(20_000))
-        parts = _pack([("branch", line)], "INSTRUCTION")
-        assert all(_cc_len(text) <= REGROUP_FIRE_BUDGET for text, _ in parts)
-        rejoined = "".join(
-            text.split("\n\n", 1)[1]
-            .replace("[… continued from the previous re-ground part]\n", "")
-            .replace("\n[… continued in the next re-ground part]", "")
-            for text, _ in parts
-        )
-        assert line in rejoined.replace("INSTRUCTION\n\n", "")
+        sizes = {"branch": 0, "identity": 10, "kernel": 10, "navmap": 10}
+        fired = self._sequence(tmp_path, sizes=sizes, notice_size=0, branch_text=line)
+        assert all(_units(f) <= REGROUP_FIRE_BUDGET for f in fired)
+        letters_only = "".join(ch if "a" <= ch <= "z" else " " for ch in "\n".join(fired))
+        assert "".join(run for run in letters_only.split() if len(run) >= 100) == line
 
-    def test_the_budget_counts_utf16_units_not_code_points(self):
+    def test_the_budget_counts_utf16_units_not_code_points(self, tmp_path):
         """Claude Code compares a JS string length. An emoji is one Python char and
         two JS units, so a packer counting len() would overshoot on emoji-heavy text."""
-        from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import (
-            REGROUP_FIRE_BUDGET,
-            _cc_len,
-            _pack,
-        )
 
         text = "\n".join("\U0001f600" * 60 for _ in range(100))  # 6,000 code points, 12,000 units
-        assert len(text) < REGROUP_FIRE_BUDGET < _cc_len(text)
-        parts = _pack([("branch", text)], "I")
-        assert len(parts) > 1
-        assert all(_cc_len(p) <= REGROUP_FIRE_BUDGET for p, _ in parts)
+        assert len(text) < REGROUP_FIRE_BUDGET < _units(text)
+        sizes = {"branch": 0, "identity": 10, "kernel": 10, "navmap": 10}
+        fired = self._sequence(tmp_path, sizes=sizes, notice_size=0, branch_text=text)
+        assert len(fired) > 1
+        assert all(_units(f) <= REGROUP_FIRE_BUDGET for f in fired)

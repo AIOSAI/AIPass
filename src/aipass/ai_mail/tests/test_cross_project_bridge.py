@@ -1,23 +1,25 @@
 # =================== AIPass ====================
 # Name: test_cross_project_bridge.py
 # Description: Tests for the verified-admin cross-project bridge + reply return path (FPLAN-0401 ph5/5b)
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-10-06
 # =============================================
 
-"""Tests for the cross-project bridge.
+"""Tests for apps/handlers/email/delivery.py and the cross-project bridge across wake.py and registry/read.py."""
 
-Two blockers stood between the devpulse seat and a citizen in projects/*:
-resolution only ever walked the CALLER's ancestor tree, and delivery actively
-refused mail across project roots. Both now have a verified-admin exemption —
-and only a verified-admin one. Everyone else must be byte-identical, so most of
-these tests assert that nothing happened.
+# Two blockers stood between the devpulse seat and a citizen in projects/*:
+# resolution only ever walked the CALLER's ancestor tree, and delivery actively
+# refused mail across project roots. Both now have a verified-admin exemption —
+# and only a verified-admin one. Everyone else must be byte-identical, so most of
+# these tests assert that nothing happened.
+#
+# The 5-leg verifier itself is devpulse's and is covered in test_admin_lane.py;
+# here it is the seam, patched to a verdict. Phase 5b adds the return path: a
+# reply is always deliverable to the mail it answers.
 
-The 5-leg verifier itself is devpulse's and is covered in test_admin_lane.py;
-here it is the seam, patched to a verdict. Phase 5b adds the return path: a
-reply is always deliverable to the mail it answers.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — _is_private_branch_email(), unrelated to the bridge: tests/test_delivery.py
 
 import json
 from pathlib import Path
@@ -28,11 +30,36 @@ import pytest
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.registry.read as reg
+import aipass.ai_mail.apps.modules.email_send as es
+from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
 from aipass.ai_mail.apps.handlers.users.verified_caller import is_verified_admin_caller
 
 _H_VERIFIED = "aipass.ai_mail.apps.handlers.users.verified_caller"
 _H_DELIVERY = "aipass.ai_mail.apps.handlers.email.delivery"
+
+
+def _deliver_across(recipient: Path, sender_email: str, email_data=None, to_branch: str = "@devpulse"):
+    """Deliver `to_branch`'s mail into `recipient` and answer (refused, message) (ai_mail, leg 14).
+
+    The cross-project boundary is reached through deliver_email_to_branch, not
+    called: only the registry lookup is stubbed, so `to_branch` names `recipient`.
+    The tmp inbox is written when the mail passes; contacts and the feed are the
+    conftest's tmp copies.
+    """
+    data = {
+        "subject": "S",
+        "message": "M",
+        "timestamp": "2026-10-04 00:00:00",
+        "from_name": sender_email,
+        **(email_data or {}),
+        "from": sender_email,
+    }
+    lookup = MagicMock(return_value=[{"email": to_branch, "path": str(recipient)}])
+    with patch(f"{_H_DELIVERY}.get_all_branches", lookup):
+        delivered, msg = deliver_email_to_branch(to_branch, data)
+    lookup.assert_called_with()
+    return not delivered, msg
 
 
 @pytest.fixture(autouse=True)
@@ -88,12 +115,16 @@ class TestProjectTreeBranches:
         """A repo with no projects/ tree yields nothing and does not raise."""
         assert get_project_tree_branches(tmp_path) == {}
 
-    def test_unreadable_registry_is_skipped_not_fatal(self, repo):
-        """One corrupt registry must not hide the healthy ones."""
+    def test_an_unreadable_registry_drops_the_sweep_and_names_it(self, repo):
+        """One corrupt registry stops the sweep, by name.
+
+        Until leg 12 it was skipped and the healthy ones answered; a citizen of
+        the skipped project then fell to the external tier, which could serve a
+        namesake. A dropped map refuses honestly (ai_mail, leg 12).
+        """
         (repo / "projects" / "baud" / "BAUD_REGISTRY.json").write_text("{not json", encoding="utf-8")
-        found = get_project_tree_branches(repo)
-        assert "@earmark" in found
-        assert "@baud" not in found
+        with pytest.raises(reg.RegistryUnreadable, match=r"^BAUD_REGISTRY\.json could not be read "):
+            get_project_tree_branches(repo)
 
     def test_does_not_reach_outside_the_projects_tree(self, repo):
         """Only projects/*/ — a registry elsewhere in the repo is not swept in."""
@@ -179,9 +210,7 @@ class TestCrossProjectBoundary:
     """delivery._check_cross_project_boundary: exempt the verified admin only."""
 
     def _boundary(self, recipient: Path, sender_email: str = "@devpulse"):
-        from aipass.ai_mail.apps.handlers.email.delivery import _check_cross_project_boundary
-
-        return _check_cross_project_boundary(recipient, sender_email)
+        return _deliver_across(recipient, sender_email, to_branch="@baud")
 
     def test_non_admin_cross_project_still_refused(self, repo, monkeypatch):
         """Exactly today's refusal, wording included."""
@@ -219,9 +248,7 @@ class TestReplyReturnPath:
     """
 
     def _boundary(self, recipient: Path, sender_email: str = "@baud", email_data=None, to_branch: str = "@devpulse"):
-        from aipass.ai_mail.apps.handlers.email.delivery import _check_cross_project_boundary
-
-        return _check_cross_project_boundary(recipient, sender_email, email_data=email_data, to_branch=to_branch)
+        return _deliver_across(recipient, sender_email, email_data=email_data, to_branch=to_branch)
 
     @pytest.fixture
     def baud(self, repo, monkeypatch):
@@ -349,13 +376,11 @@ class TestLaneDarkMeansNoWidening:
 
     def test_a_dark_lane_means_the_boundary_still_refuses(self, repo, monkeypatch):
         """The delivery half of the same reality."""
-        from aipass.ai_mail.apps.handlers.email.delivery import _check_cross_project_boundary
-
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(repo / "src" / "aipass" / "devpulse"))
 
         with _admin(False):
-            refused, msg = _check_cross_project_boundary(repo / "projects" / "baud", "@devpulse")
+            refused, msg = _deliver_across(repo / "projects" / "baud", "@devpulse", to_branch="@baud")
         assert refused is True
         assert "Cross-project mail refused" in msg
 
@@ -383,11 +408,12 @@ class TestIsVerifiedAdminCaller:
         with _admin(False):
             assert is_verified_admin_caller() is False
 
-    def test_a_raising_verifier_is_not_admin(self, monkeypatch):
-        """Fail closed on an unexpected error, never open."""
+    def test_a_raising_verifier_raises_rather_than_answering(self, monkeypatch):
+        """A verifier that faults is not a verdict: the fault reaches the caller, never False."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
-        with patch(f"{_H_VERIFIED}.verify_admin_caller", MagicMock(side_effect=RuntimeError("boom"))):
-            assert is_verified_admin_caller() is False
+        with patch(f"{_H_VERIFIED}.verify_admin_caller", MagicMock(side_effect=RuntimeError("grant unreadable"))):
+            with pytest.raises(RuntimeError, match="grant unreadable"):
+                is_verified_admin_caller()
 
     def test_result_is_not_cached_across_calls(self, monkeypatch):
         """A revoked grant must take effect immediately — caching would fail open."""
@@ -426,9 +452,7 @@ class TestReplyProofMailboxResolution:
     """
 
     def _boundary(self, recipient: Path, email_data, sender_email: str = "@baud", to_branch: str = "@devpulse"):
-        from aipass.ai_mail.apps.handlers.email.delivery import _check_cross_project_boundary
-
-        return _check_cross_project_boundary(recipient, sender_email, email_data=email_data, to_branch=to_branch)
+        return _deliver_across(recipient, sender_email, email_data=email_data, to_branch=to_branch)
 
     @pytest.fixture
     def deep_seat(self, repo, monkeypatch):
@@ -669,33 +693,32 @@ class TestBroadcastScope:
 
     def test_non_admin_broadcast_stays_fleet_only(self, monkeypatch):
         monkeypatch.setattr(reg, "get_resident_branches", lambda: {"@baud": "/x"})
-        import aipass.ai_mail.apps.modules.email_send as es
-
         monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@flow", "name": "FLOW"}])
-        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", lambda: False)
+        verifier = MagicMock(return_value=False)
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", verifier)
         assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@flow"]
+        verifier.assert_called_once_with()
 
     def test_verified_admin_broadcast_includes_residents(self, monkeypatch):
-        import aipass.ai_mail.apps.modules.email_send as es
-
         monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@flow", "name": "FLOW"}])
         monkeypatch.setattr(es, "get_resident_branches", lambda: {"@baud": "/p/baud"})
-        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", lambda: True)
+        verifier = MagicMock(return_value=True)
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", verifier)
         emails = [b["email"] for b in es.resolve_broadcast_targets()]
         assert emails == ["@flow", "@baud"], emails
+        verifier.assert_called_once_with()
 
     def test_a_resident_already_in_the_core_registry_is_not_duplicated(self, monkeypatch):
         """One inbox, one copy -- a duplicate would deliver the announcement twice."""
-        import aipass.ai_mail.apps.modules.email_send as es
-
         monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@baud", "name": "BAUD"}])
         monkeypatch.setattr(es, "get_resident_branches", lambda: {"@baud": "/p/baud"})
-        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", lambda: True)
+        verifier = MagicMock(return_value=True)
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", verifier)
         assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@baud"]
+        verifier.assert_called_once_with()
 
     def test_a_refusing_verifier_never_widens(self, monkeypatch):
         """A privilege path that raises is a refusal, never an opening."""
-        import aipass.ai_mail.apps.modules.email_send as es
 
         def boom():
             raise RuntimeError("grant unreadable")

@@ -3,7 +3,7 @@
 # Description: Branch name extraction and profile detection
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-10
+# Modified: 2026-09-28
 # =============================================
 
 """Branch name extraction and profile detection."""
@@ -32,7 +32,7 @@ def detect_profile(target_path):
       * ``{{PROFILE}}`` is still rendered by ``templates/citizen/artifacts/
         birth_certificate.json`` into ``metadata.template`` and the certificate
         description — 17 core branches carry "AIPass Workshop" there today.
-      * ``_spawn_agent`` passes the result to ``add_to_registry`` as the registry
+      * ``spawn_agent`` passes the result to ``add_to_registry`` as the registry
         entry's ``profile`` field.
 
     What it is NOT: a citizen class, a template directory, or anything the

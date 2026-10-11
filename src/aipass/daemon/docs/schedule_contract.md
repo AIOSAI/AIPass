@@ -23,7 +23,7 @@ own output appends to `~/.aipass/daemon-tick.log`.
 
 **Three tiers are swept (measured 2026-09-05: 28 citizens).** Core citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`) — 18 tonight. Resident citizens under `projects/<name>/` (listed in that project's own sealed `<NAME>_REGISTRY.json`) — 4 tonight: AIPASS_SITE, BAUD, EARMARK, FINCH. And **federated externals** — citizens in separate repos entirely, reached through their own registries — 6 tonight: VERA, RESEARCH, VERIFY and WRITER under `external/VERA-STUDIO`, plus `external/WREN` and `external/DEMO`. `drone @daemon rotation` prints the tier label; nothing routes on it. The sweep covers all three tiers; the nightly rounds serve only the first — see [docs/rounds.md](rounds.md).
 
-**Who counts as a citizen is no longer decided here (FPLAN-0460).** The core-registry read, the `projects/*` glob, the dot-filter and the two-key resident rule all used to live in `discovery.py` as a second copy of the fleet definition. They are now one call to `fleet.fleet_branches()` in @memory — a fleet definition with two implementations agrees only by coincidence. `discovery.py:159` consumes that list rather than mirroring it, which is why the federated-external tier above arrived here without a line changing in this branch.
+**Who counts as a citizen is decided by @memory, not here (FPLAN-0460).** The core-registry read, the `projects/*` glob, the dot-filter and the two-key resident rule are one call to `fleet.fleet_branches()` in @memory — a fleet definition with two implementations agrees only by coincidence. `discovery.py` consumes that list rather than mirroring it, so a new tier, like the federated externals above, reaches the daemon with no change in this branch.
 
 **What this branch still decides is an address.** @memory deliberately leaves that to each caller: their ruling is that a branch with no `email` is KEPT, because the path-based lanes (trinity push, rollover) still want it. Daemon cannot use it — a job's owner IS an email and the wake targets an email — so an addressless citizen is refused, and refused **loudly at error level**, because a citizen dropped without a line in the log is indistinguishable from one that was never discovered. A second row carrying an address already claimed is refused the same way: @memory deduplicates by resolved path, correct for its path-keyed lanes, but daemon is email-keyed and two rows sharing an address would double-fire the first citizen's schedule.
 
@@ -55,7 +55,7 @@ logged, the same way a missing `id` or `schedule` is.
 
 | Type | Fields | Due when |
 |------|--------|----------|
-| `interval` | `interval_minutes: N` | Elapsed >= N since last_run. With no `slot`, a job that has never run fires **immediately** — see below. |
+| `interval` | `interval_minutes: N` | Elapsed >= N since last_run. With no `slot`, a job that has never run fires **immediately** — see below. N must be a positive number (`30`, `0.5`): text, `null`, `true`, zero or a negative is refused at discovery and logged with the file and the job, so the job is never due. Absent, N reads as 60. |
 | `daily` | `time: "HH:MM"` | Within +/-15 min of target time, once per day. |
 | `hourly` | `time: "M"` (minute) | Within +/-15 min of target minute, once per hour. |
 | `once` | `due_date: "YYYY-MM-DD"` | Date <= today, then marks completed. |

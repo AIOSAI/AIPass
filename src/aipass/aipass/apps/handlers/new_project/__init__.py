@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-17
-# Modified: 2026-07-17
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -150,7 +150,7 @@ def _write_template(target: Path, name: str, template: str) -> list[str]:
 def _scaffold_aipass(target: Path, name: str) -> list[str]:
     """Write AIPass scaffold files (tiers, hooks, CLAUDE.md, settings, .venv)."""
     from aipass.aipass.shared.project_home import (
-        _claude_local_settings,
+        claude_local_settings,
         _claude_settings,
         _detect_aipass_home,
         _enroll_project,
@@ -213,7 +213,7 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
     if aipass_home and not is_throwaway_path(aipass_home):
         sm.write_text_lf(
             claude_dir / "settings.local.json",
-            _claude_local_settings(aipass_home, nested=is_projects_child(target)),
+            claude_local_settings(aipass_home, nested=is_projects_child(target)),
         )
         created.append(".claude/settings.local.json")
 

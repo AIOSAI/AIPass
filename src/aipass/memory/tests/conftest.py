@@ -1,8 +1,9 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/conftest.py
-# Date: 2026-03-24
-# Version: 1.1.0
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
+# Version: 1.3.0
+# Created: 2026-03-07
+# Modified: 2026-10-10
 # Category: memory/tests
 # =============================================
 
@@ -18,9 +19,8 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import json
 import pytest
-import shutil
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Generator
 from unittest.mock import MagicMock
 
@@ -30,17 +30,16 @@ from unittest.mock import MagicMock
 # fixture below must carry it, or any test that reimports the json package (the
 # _fresh_module pattern) would hit ImportError on a mocked prax (DPLAN-0325).
 # It is stdlib-only and resolves its directory per call, so holding it here is
-# safe and lets mock_infrastructure measure the true sandbox off the live service.
+# safe.
 from aipass.prax import json_handler as _prax_json_service
 
 # The write fence, captured once at collection so its logger is the real one and
 # no test's sys.modules stand-in can shadow it (see the fixture below).
 from aipass.memory.apps.handlers import write_fence as _write_fence
-
-# The branch shim's own file, so the service can resolve memory's json directory
-# the way the shim does, without importing (and caching) the memory json package
-# at collection.
-_SHIM_FILE = str(Path(__file__).resolve().parents[1] / "apps" / "handlers" / "json" / "json_handler.py")
+from aipass.memory.apps.handlers.monitor import registry_scope
+from aipass.memory.apps.handlers.templates import trinity_push
+from aipass.cli.apps.modules import display
+from aipass.memory.tests.support_config_verbs import _real_verbs
 
 # Nothing under .archive/ is a test: the old handler and the subsumed tests live
 # there as gitignored disposal (DPLAN-0325). Keep pytest from discovering them.
@@ -128,135 +127,6 @@ def _mock_infrastructure(monkeypatch):
 
 
 @pytest.fixture
-def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect the shim's json writes into a temp dir, and return that dir.
-
-    The DPLAN-0325 shim wiring test (test_json_handler.py) requests this to pin
-    that get_json_path lands in the branch's redirected sandbox. Deliberately
-    NOT autouse: the whole memory suite runs against the wholesale json_handler
-    mock in ``_mock_infrastructure`` above, and only the wiring test wants the
-    live service. The service recomputes its directory per call, so setting the
-    seam here - after import - still takes effect, and the sandbox is measured
-    off the real shim so it cannot drift from what the service does.
-
-    The service spells the sandbox <seam>/<branch>/<branch>_json, so the seam is
-    its own subdir of tmp_path rather than tmp_path itself, to avoid colliding
-    with a test that builds a directory of the branch's own name.
-
-    Returns:
-        The sandbox directory the handler now writes into.
-    """
-    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
-    handle = _prax_json_service.for_module(_SHIM_FILE)
-    sandbox = handle.get_json_path("probe", "config").parent
-    sandbox.mkdir(parents=True, exist_ok=True)
-    return sandbox
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after."""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides reusable sample data for general test assertions."""
-    return {
-        "created": "2026-01-01",
-        "last_updated": "2026-01-15",
-        "entries": [
-            {"id": 1, "name": "alpha", "status": "active"},
-            {"id": 2, "name": "beta", "status": "pending"},
-        ],
-        "metadata": {
-            "source": "test_fixture",
-            "version": "1.0.0",
-        },
-    }
-
-
-@pytest.fixture
-def sample_memory_data() -> dict:
-    """Provides sample memory file data (v2 schema)."""
-    return {
-        "document_metadata": {
-            "document_type": "session_history",
-            "document_name": "TEST.LOCAL",
-            "version": "2.0.0",
-            "schema_version": "2.0.0",
-            "created": "2026-01-01",
-            "last_updated": "2026-01-01",
-            "managed_by": "TEST",
-            "tags": ["test"],
-            "limits": {"max_sessions": 20, "max_key_learnings": 25},
-            "status": {"health": "healthy", "current_lines": 50},
-        },
-        "key_learnings": {"test_learning": "This is a test."},
-        "sessions": [{"session_number": 1, "date": "2026-01-01", "summary": "Test session", "status": "completed"}],
-    }
-
-
-@pytest.fixture
-def sample_registry_data() -> dict:
-    """Provides sample AIPASS_REGISTRY.json data."""
-    return {
-        "branches": [
-            {
-                "name": "TEST_BRANCH",
-                "path": "src/aipass/test_branch",
-                "module": "aipass.test_branch",
-                "email": "@test_branch",
-                "status": "active",
-            },
-            {
-                "name": "MEMORY",
-                "path": "src/aipass/memory",
-                "module": "aipass.memory",
-                "email": "@memory",
-                "status": "active",
-            },
-        ]
-    }
-
-
-@pytest.fixture
-def temp_branch(tmp_path, sample_memory_data):
-    """Create a minimal branch structure with .trinity/ files."""
-    branch_dir = tmp_path / "src" / "aipass" / "test_branch"
-    trinity = branch_dir / ".trinity"
-    trinity.mkdir(parents=True)
-    (trinity / "local.json").write_text(json.dumps(sample_memory_data, indent=2), encoding="utf-8")
-    (trinity / "passport.json").write_text(
-        json.dumps(
-            {
-                "branch_info": {"branch_name": "test_branch", "path": "src/aipass/test_branch"},
-                "identity": {"role": "test", "purpose": "testing"},
-                "citizenship": {"registered": True},
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    (trinity / "observations.json").write_text(
-        json.dumps({"document_metadata": {"document_type": "collaboration_patterns"}, "observations": []}, indent=2),
-        encoding="utf-8",
-    )
-    return branch_dir
-
-
-@pytest.fixture
-def temp_registry(tmp_path, sample_registry_data):
-    """Create a temporary AIPASS_REGISTRY.json."""
-    registry_path = tmp_path / "AIPASS_REGISTRY.json"
-    registry_path.write_text(json.dumps(sample_registry_data, indent=2), encoding="utf-8")
-    return registry_path
-
-
-@pytest.fixture
 def live_fleet():
     """The real installation's repo root, or SKIP if this machine has no fleet.
 
@@ -288,9 +158,6 @@ def live_fleet():
     Returns:
         The repo root holding the core registry.
     """
-    from aipass.memory.apps.handlers.monitor import registry_scope
-    from aipass.memory.apps.handlers.templates import trinity_push
-
     for root in (registry_scope.REPO_ROOT, trinity_push._REPO_ROOT):
         registry = root / registry_scope.CORE_REGISTRY
         if not registry.is_file():
@@ -379,8 +246,6 @@ def live_all_tiers(live_residents):
     Returns:
         The repo root carrying all three tiers.
     """
-    from aipass.memory.apps.handlers.monitor import registry_scope
-
     anchor = live_residents / registry_scope.DECLARED_ROOTS
     if not anchor.is_file():
         pytest.skip(
@@ -520,3 +385,24 @@ def case_insensitive_exists(monkeypatch):
 
     monkeypatch.setattr(Path, "exists", folded)
     return folded
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
+
+
+@pytest.fixture
+def verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Real config_loader + rollover module wired to a MINTED config and registry (see :func:`_real_verbs`)."""
+    return _real_verbs(tmp_path, monkeypatch)

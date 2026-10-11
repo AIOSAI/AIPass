@@ -8,10 +8,6 @@
   },
   "bypass": [
     {
-      "standard": "dead_code",
-      "reason": "All 15 handler files under apps/handlers/ are invoked dynamically by engine._run_handler (engine.py:60-66) via importlib.import_module + getattr on handler path strings from .aipass/hooks.json. They are never statically imported by design. Each handler verified wired in hooks.json AND fired in engine.jsonl (DPLAN-0191). Follow-up for @seedgo: teach dead_code checker about importlib dynamic dispatch patterns."
-    },
-    {
       "file": "apps/handlers/bridges/claude.py",
       "standard": "dead_code",
       "reason": "Bridge called externally by provider settings subprocess — no internal import. Verified wired in ~/.claude/settings.json hook entries."
@@ -40,6 +36,11 @@
       "file": "apps/handlers/bridges/claude.py",
       "standard": "imports",
       "reason": "Bridge imports engine module by design — sole purpose."
+    },
+    {
+      "file": "apps/handlers/bridges/mount.py",
+      "standard": "json_structure",
+      "reason": "Stdlib-only by necessity (DPLAN-0356 item 3): it runs BEFORE aipass.hooks.apps exists in the hook process, and importing json_handler would import the source tree it is mounting the promoted copy in place of."
     },
     {
       "file": "apps/handlers/bridges/codex.py",
@@ -212,11 +213,6 @@
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
-      "file": "apps/handlers/security/subagent_gate.py",
-      "standard": "open_encoding",
-      "reason": "NamedTemporaryFile creates binary wav for Piper TTS — encoding not applicable to binary audio."
-    },
-    {
       "file": "apps/handlers/security/registry_gate.py",
       "standard": "dead_code",
       "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.registry_gate.handle' — not statically imported by design. Wired in PreToolUse.registry_gate."
@@ -275,21 +271,6 @@
       "file": "apps/handlers/lifecycle/auto_fix.py",
       "standard": "json_structure",
       "reason": "Diagnostics handler uses stdlib json for hook protocol responses and state file — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/lifecycle/auto_watchdog.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.auto_watchdog.handle' — not statically imported by design. Verified wired in PostToolUse.auto_watchdog + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/lifecycle/auto_watchdog.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (PostToolUse.auto_watchdog)."
-    },
-    {
-      "file": "apps/handlers/lifecycle/auto_watchdog.py",
-      "standard": "json_structure",
-      "reason": "Uses stdlib json.dumps to produce additionalContext output — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/compact.py",
@@ -498,11 +479,6 @@
     },
     {
       "file": "apps/sound.py",
-      "standard": "open_encoding",
-      "reason": "NamedTemporaryFile creates binary WAV for Piper TTS — encoding not applicable to binary audio."
-    },
-    {
-      "file": "apps/sound.py",
       "standard": "cli_flags",
       "reason": "Shared utility module imported by handlers — not a CLI entry point. Has print_introspection() for drone discovery but no handle_command() or user-facing CLI."
     },
@@ -515,11 +491,6 @@
       "file": "tests/conftest.py",
       "standard": "json_handler",
       "reason": "Fixture file, not a module with JSON storage — it arms the AIPASS_TEST_LOG_DIR seam and imports the shim to measure the sandbox off it (DPLAN-0325), and does no JSON file ops of its own."
-    },
-    {
-      "file": "tests/conftest.py",
-      "standard": "exception_contracts",
-      "reason": "The handler contracts are pinned once for the fleet by seedgo's cross-branch contract (DPLAN-0325), never per branch in a fixture file."
     },
     {
       "file": "tests/test_engine.py",
@@ -545,11 +516,6 @@
       "file": "tests/test_engine.py",
       "standard": "json_handler",
       "reason": "Engine tests exercise JSONL diagnostic logging, which is the engine's own record — no branch JSON documents to route through the handler."
-    },
-    {
-      "file": "tests/test_engine.py",
-      "standard": "exception_contracts",
-      "reason": "The handler contracts are pinned once for the fleet by seedgo's cross-branch contract (DPLAN-0325), never per branch in an engine test."
     },
     {
       "file": "tests/test_tool_sound.py",
@@ -798,26 +764,6 @@
     },
     {
       "file": "tests/test_hooksound.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
-      "file": "tests/test_auto_watchdog.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_auto_watchdog.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_auto_watchdog.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_auto_watchdog.py",
       "standard": "meta",
       "reason": "Test files do not need Version/Modified metadata headers."
     },
@@ -1122,9 +1068,26 @@
       "reason": "Boot wrapper has no JSON file ops — delegates to cc_sessions module for session reads. No json_handler needed."
     },
     {
-      "file": "apps/handlers/lifecycle/session_boot.py",
+      "file": "tests/test_engine_contracts.py",
+      "standard": "through_the_command",
+      "lines": [30],
+      "reason": "Moved from tests/test_engine.py (split leg, 2026-10-08); the ruling of that file's through_the_command row, fleet green leg 9. _run_hook, ruling (c): dispatch() runs a command hook as a shell subprocess (a spawn); contract: exit code, stdout, stderr and elapsed_ms answered, TIMEOUT and OSError answered as exit -1, never raised. _log, ruling (b): the JSONL diagnostics writer, one JSON object appended per line, a failed write never raises."
+    },
+    {
+      "file": "tests/test_engine_safeguards.py",
+      "standard": "through_the_command",
+      "lines": [28, 463],
+      "reason": "Moved from tests/test_engine.py (split leg, 2026-10-08); the ruling of that file's through_the_command row, fleet green leg 9. _run_handler, ruling (c): on a timeout dispatch()'s far side speaks the timeout through the sound player (a spawn); contract: a handler outside aipass.* is refused before import, a hung handler answers TIMEOUT at its timeout, a raising one answers exit -1. _log, ruling (b): the JSONL diagnostics writer; line 463's hasattr pin (line 1614 before the split) is the json-handler shape the module keeps."
+    },
+    {
+      "file": "tests/support_cadence.py",
+      "standard": "state_leak",
+      "reason": "_reset_module_globals writes cadence's caches on the tests' behalf; the restore is conftest's _restore_cadence_globals, requested by every test of test_cadence.py and test_cadence_regroup.py through pytestmark. state_leak reads one file and cannot see a conftest fixture (its own Known limits). Split leg, 2026-10-08."
+    },
+    {
+      "file": "handlers/lifecycle/session_boot.py",
       "standard": "dead_code",
-      "reason": "Boot wrapper invoked via __main__ entry point from shell shim (tools/install_boot_shim.sh) — not engine-dispatched. boot() and main() called at process entry, not statically imported."
+      "reason": "The boot wrapper's launcher is the owner's shell, outside the repo by design: typing claude in a branch directory runs python -m aipass.hooks.apps.handlers.lifecycle.session_boot. Not engine-dispatched, imported by nothing. Path is apps-relative: dead_code matches the rule against handlers/..., never apps/handlers/... (2026-10-08)."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",
@@ -1227,11 +1190,6 @@
       "reason": "Delegates to context_window module for transcript/settings reads — no direct JSON file ops needing json_handler. Same pattern as session_start.py delegating to cadence."
     },
     {
-      "file": "apps/handlers/lifecycle/pre_compact_prep.py",
-      "standard": "handlers",
-      "reason": "Line 75: lazy cross-branch import of aipass.flow.apps.handlers.plan.get_open_plans — needed for the open-plan count in the AUTO-COMPACT SNAPSHOT. No module-layer equivalent exists to switch to: flow's own modules (close_plan.py) import this same handler directly rather than re-exporting it, and list_plans.py's module is a CLI display orchestrator, not a programmatic data source. Read-only cross-branch primitive read, same authorized pattern as ai_mail's dispatch_monitor.py broker-client import. Call is wrapped in try/except and degrades to None on any failure — never corrupts the snapshot."
-    },
-    {
       "file": "apps/handlers/prompt/compass_recall.py",
       "standard": "handlers",
       "reason": "Lines 49, 75, 84: lazy cross-branch imports of aipass.memory.apps.modules.governance and aipass.devpulse.apps.modules.compass. Surfacing other branches' rated decisions at prompt time IS this handler's job — not orchestration bleed but the designed integration point, same authorized cross-branch primitive pattern as ai_mail's dispatch_monitor.py. Whole handler wrapped in try/except and never blocks the prompt on failure."
@@ -1332,6 +1290,36 @@
       "reason": "Parses each handler's stdout and serialises the ONE hook-protocol document Claude Code reads, in memory, with stdlib json (FPLAN-0535). Opens no file and stores nothing, so json_handler has nothing to open and log_operation nothing to log. Same profile as post_compact_regrounding.py and the security gates' hook protocol responses."
     },
     {
+      "file": "apps/modules/shell_programs.py",
+      "standard": "json_structure",
+      "reason": "The default-deny program tables (DPLAN-0356 phase 4) and two pure functions over shell_reader's invocations. Reads and writes no JSON, logs no operation; same profile as shell_reader.py."
+    },
+    {
+      "file": "apps/modules/shell_programs.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: tables consumed by shell_reader, git_gate and edit_gate inside PreToolUse hooks. print_introspection() IS provided. Same profile as shell_reader.py."
+    },
+    {
+      "file": "apps/modules/shell_reader.py",
+      "standard": "json_structure",
+      "reason": "Pure shell-word reader (DPLAN-0356 phase 3): reads a Bash command, and the script files it names, as text and returns the programs it runs. Reads and writes no JSON, logs no operation; same profile as bash_writes.py."
+    },
+    {
+      "file": "apps/modules/shell_reader.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: the one shell-word reader consumed by handlers/security/rm_gate.py and git_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Same profile as bash_writes.py. print_introspection() IS provided."
+    },
+    {
+      "file": "apps/modules/protected_paths.py",
+      "standard": "json_structure",
+      "reason": "Answers whether one path is a gate-switching file (DPLAN-0356 item 1) by pattern and path arithmetic. Reads and writes no JSON, logs no operation; same profile as admin_seat.py."
+    },
+    {
+      "file": "apps/handlers/config/gates.py",
+      "standard": "json_structure",
+      "reason": "Constants and pure dict functions: which handlers are gates and how each fails (DPLAN-0356 item 2). Opens no file and stores nothing, so json_handler has nothing to open and log_operation nothing to log. Same profile as output_merge.py."
+    },
+    {
       "file": "apps/handlers/config/ledger_store.py",
       "standard": "json_structure",
       "reason": "The injection ledger IS an operations record: one JSONL line per engine dispatch, in the temp dir beside cadence's per-session state (DPLAN-0347 hooks row 3). It runs inside every dispatch, tool events included, so a log_operation per call would write a second ledger into hooks_json on every tool call. The read verb logs through json_handler in apps/modules/injection_ledger.py."
@@ -1345,6 +1333,293 @@
       "file": "apps/modules/write_ownership.py",
       "standard": "modules",
       "reason": "Not a drone command surface: the who-may-write-whose-files reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook. print_introspection states the rule; a CLI verdict would read the operator's cwd as a seat."
+    },
+    {
+      "file": "apps/handlers/security/edit_gate.py",
+      "standard": "logged_fallback",
+      "lines": [685, 747, 815, 1095, 1158],
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 685 _allowed_fields: the refusal's wording only, the refusal stands. 747: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 815: the todos advisory text, never a verdict. 1095 _seat_trinity and 1158 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through (the old 1049 and 1080) were cured fail-closed in leg 5. Re-pinned +3 after the 729ffaa9 probe refusal landed above them (2026-10-08)."
+    },
+    {
+      "file": "apps/handlers/security/subagent_gate.py",
+      "standard": "logged_fallback",
+      "lines": [73],
+      "reason": "Fleet green leg 5: _get_cwd_branch, a cwd outside src/<pkg>/<branch> has no branch to check. SubagentStop guards no write, and a block there traps the sub-agent in a stop loop (documented in the module)."
+    },
+    {
+      "file": "apps/handlers/security/presence_gate.py",
+      "standard": "logged_fallback",
+      "lines": [106, 127],
+      "reason": "Fleet green leg 5: 106 _format_session_age is display text only. 127 _session_start: None means 'cannot rank', which the docstring states and the caller treats as never younger, so no seat gains standing from an unreadable start."
+    },
+    {
+      "file": "apps/modules/bash_writes.py",
+      "standard": "logged_fallback",
+      "lines": [627],
+      "reason": "Fleet green leg 5: a word Path() cannot construct (a NUL byte) names no file the OS can write; NOT_CAUGHT says so, and the shell itself refuses such a path."
+    },
+    {
+      "file": "apps/modules/testgate_policy.py",
+      "standard": "logged_fallback",
+      "lines": [117, 126],
+      "reason": "Fleet green leg 5: find_policy_file's None is answered by load_policy with _missing(), a fail-closed Policy that refuses every new test file. Nothing is allowed on doubt."
+    },
+    {
+      "file": "apps/modules/engine_closure.py",
+      "standard": "logged_fallback",
+      "lines": [200],
+      "reason": "Fleet green leg 5, item 2: None is 'ruff could not run' and the success path never returns it (a list, [] when clean); the docstring names it. The edit is allowed and logged because two layers stand behind this one (the promoted copy, the fail-closed engine), and refusing every edit to 119 closure files on a missing linter would lock out the repair too."
+    },
+    {
+      "file": "apps/modules/diagnostics_state.py",
+      "standard": "logged_fallback",
+      "lines": [252, 255, 258, 261],
+      "reason": "Fleet green leg 5: revalidate's None is 'unknown' (pyright missing, timed out, unparseable, failed) and its docstring says it must never be read as clean; the success path returns a list. edit_gate keeps the recorded errors on None, so the fence stays as it was: fail-closed."
+    },
+    {
+      "file": "apps/modules/cc_sessions.py",
+      "standard": "logged_fallback",
+      "lines": [170, 203, 209, 212, 215, 238, 321],
+      "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). 203 and 212 answer 'alive' on doubt: the gate keeps refusing the newer seat. 209 is the real answer (ESRCH = dead). 215: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, both handled; any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block (ruling a, DPLAN-0310). 170 start ticks and 321 session_start: None is 'cannot rank', never younger. 238: display text."
+    },
+    {
+      "file": "apps/modules/cadence.py",
+      "standard": "logged_fallback",
+      "lines": [157, 332, 503, 508, 604, 804, 898, 958, 1051],
+      "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value (turn 0, 'never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
+    },
+    {
+      "file": "apps/modules/context_window.py",
+      "standard": "logged_fallback",
+      "lines": [57],
+      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write."
+    },
+    {
+      "file": "apps/modules/cc_transcripts.py",
+      "standard": "logged_fallback",
+      "lines": [209, 251],
+      "reason": "Fleet green leg 5: the recent-chats listing a session boot displays. An unlistable or unstattable transcript shows as no chat; guards no write."
+    },
+    {
+      "file": "apps/modules/alert_dismiss.py",
+      "standard": "logged_fallback",
+      "lines": [63, 78],
+      "reason": "Fleet green leg 5: the dismiss verb prints the failure in red to the operator who ran it and logs an error; False is the verb's 'not dismissed'. Not silent, guards no write."
+    },
+    {
+      "file": "apps/modules/release_notice.py",
+      "standard": "logged_fallback",
+      "lines": [59, 76, 98],
+      "reason": "Fleet green leg 5: the manager-only release notice (advisory). No root, no passport or an unreadable passport means no notice; guards no write. 76 gained its log line in leg 5 (it was silent)."
+    },
+    {
+      "file": "apps/modules/injection_ledger.py",
+      "standard": "logged_fallback",
+      "lines": [73],
+      "reason": "Fleet green leg 5: _automated is tri-state by its signature (bool | None); None records the ledger line without the flag, as its comment says."
+    },
+    {
+      "file": "apps/handlers/lifecycle/compact.py",
+      "standard": "logged_fallback",
+      "lines": [56],
+      "reason": "Fleet green leg 5: an injector's content (the last session); None injects nothing. Injectors are skipped on error by doctrine; guards no write."
+    },
+    {
+      "file": "apps/handlers/lifecycle/pre_compact_prep.py",
+      "standard": "logged_fallback",
+      "lines": [62, 132, 196, 229],
+      "reason": "Fleet green leg 5: 62 and 132 are counts for the compact snapshot, None renders as unknown, never zero. 196 and 229: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
+    },
+    {
+      "file": "apps/handlers/lifecycle/session_boot.py",
+      "standard": "logged_fallback",
+      "lines": [152, 221, 373, 984],
+      "reason": "Fleet green leg 5: boot display (tmux name, age, pinned CLI version) and the dispatch-lock read for the boot banner. Guards no write."
+    },
+    {
+      "file": "apps/handlers/config/output_merge.py",
+      "standard": "logged_fallback",
+      "lines": [58],
+      "reason": "Fleet green leg 5: _as_object's None is 'not a JSON object', and the merge keeps that stdout as text. A block is decided by the engine from exit code 2, before any merge."
+    },
+    {
+      "file": "apps/handlers/prompt/persistent_alert.py",
+      "standard": "logged_fallback",
+      "lines": [63],
+      "reason": "Fleet green leg 5: an injector; an unreadable alerts.json shows no alert this turn (logged). Injectors are skipped on error by doctrine; guards no write."
+    },
+    {
+      "file": "apps/handlers/notification/email.py",
+      "standard": "logged_fallback",
+      "lines": [77],
+      "reason": "Fleet green leg 5: the new-mail count for a notification; an unreadable inbox notifies nothing (logged). The inbox itself is read by drone @ai_mail inbox, not by this count."
+    },
+    {
+      "file": "apps/handlers/notification/telegram_response.py",
+      "standard": "logged_fallback",
+      "lines": [158, 339],
+      "reason": "Fleet green leg 5: an unreadable transcript relays nothing to Telegram, logged at ERROR. A notification, guards no write."
+    },
+    {
+      "file": "tests/test_json_durability.py",
+      "standard": "silent_catch",
+      "reason": "Fleet green leg 5, file-wide because silent_catch passes no line (the checklist says so). The three catches, lines 244, 249 and 258 today, are in a reader thread polling a file under concurrent os.replace. 249 and 258 are not silent: each appends to local_failures, which the test asserts empty. 244 is Windows share mode refusing the open while a replace is in flight; it is deliberately not counted as a read. A log call per poll would write thousands of lines from a hot loop."
+    },
+    {
+      "file": "apps/modules/protected_paths.py",
+      "standard": "modules",
+      "reason": "Fleet green leg 5: a module, not a handler. It is the business rule (which files switch the gates) and handlers/security/git_gate.py reaches it at call time; it is no drone verb because its answer depends on the asking seat's cwd and admin grant, which a CLI run would read as the operator's. Same profile and reason as write_ownership.py's modules row."
+    },
+    {
+      "file": "apps/modules/promote.py",
+      "standard": "introspection",
+      "reason": "Fleet green leg 5: the bare verb IS the action. `drone @hooks promote` with no arguments promotes, as @devpulse runs it; a no-args introspection gate would turn every promotion into a help screen. Introspection is on --help, and `promote status` reads the live name."
+    },
+    {
+      "file": "apps/modules/promote.py",
+      "standard": "modules",
+      "reason": "Fleet green leg 5: promote.py:188 writes the one-line pointer's scratch file (a name, not JSON) and os.replace makes it the pointer in one rename, so a hook process reads the old name or the new, never half. json_handler serves JSON documents; a pointer is not one."
+    },
+    {
+      "file": "apps/modules/engine_closure.py",
+      "standard": "modules",
+      "reason": "Fleet green leg 5: the 'direct file operation' is read_text of a Python source file for ast.parse (the closure is computed by reading, never importing). Source code is not a JSON document json_handler could serve. handle_command and print_introspection are present."
+    },
+    {
+      "file": "apps/modules/diagnostics_state.py",
+      "standard": "modules",
+      "reason": "Fleet green leg 5: of_the_tree reads the errored Python source to see whether an error's line holds a {{ placeholder. Source code is not JSON; the seat state itself is written atomically by save_seat (temp + os.replace). handle_command and print_introspection are present."
+    },
+    {
+      "file": "apps/modules/engine_closure.py",
+      "standard": "json_structure",
+      "reason": "Reads the root .aipass/hooks.json read-only with stdlib json to learn which handlers are wired, and ruff's JSON report. Writes nothing, logs no operation; same profile as write_ownership/admin_seat."
+    },
+    {
+      "file": "tests/test_tier0_kernel.py",
+      "standard": "through_the_command",
+      "lines": [28],
+      "reason": "Fleet green leg 8, ruling (b), hooks' decision: _find_project_dir's contract is that the per-user ~/.aipass is never read as a stamped tree. The handler's stdout cannot show the silent side: tmp_path may sit under a real home or a real stamped tree, and the walk keeps climbing past the fake home, so silence would be a property of the host. The loud side of the same test goes through handle()."
+    },
+    {
+      "file": "tests/test_codex_bridge.py",
+      "standard": "through_the_command",
+      "lines": [20],
+      "reason": "Fleet green leg 8, ruling (c), hooks' decision: the public door is main(), whose far side mounts the promoted .live copy over aipass.hooks.apps in sys.modules (mount.py) and runs the real engine over the live .aipass/hooks.json, writing engine.jsonl and cadence state. _normalize_stdin (Codex input -> tool_input) and _wrap_output (the hookSpecificOutput envelope, block -> deny) are pure, and reaching them by name is the safe door."
+    },
+    {
+      "file": "tests/test_edit_gate_bash.py",
+      "standard": "through_the_command",
+      "lines": [241],
+      "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is that a missing admin rail refuses (the lane goes dark, never open). Isolating that arm needs only the rail's import refused while every other call-time import of the gate runs, which is what edit_gate._import_module (its own import seam, leg 4) is for. A None entry in sys.modules was tried and did not isolate the arm: its 'return True' mutant survived twice. Through this seam, with the grant given, the mutant dies at _blocked."
+    },
+    {
+      "file": "tests/test_cc_transcripts.py",
+      "standard": "through_the_command",
+      "lines": [93, 117, 149],
+      "reason": "Fleet green leg 9, ruling (b), hooks' decision: the contract is the Claude Code CLI's own path-to-dirname rule and 31-hash, pinned against vectors measured with the CLI's own code on RAW strings (a Windows path, the empty string, a non-BMP character). project_dir_for resolves its argument first, so on POSIX a raw Windows path or '' never reaches the rule as written, and the resolved long path's hash suffix depends on the host's spelling (a drive letter on Windows), so no fixed CLI vector can name it. Everything a short path shows goes through project_dir_for."
+    },
+    {
+      "file": "tests/test_cc_sessions.py",
+      "standard": "through_the_command",
+      "lines": [120, 190, 200],
+      "reason": "Fleet green leg 9, ruling (b), hooks' decision: three guards no public door reaches. resolve_session_pid walks from os.getpid() and its parents, so a dead PID never reaches the ppid lookup (contract: a failed ps answers None); find_live_for_cwd checks liveness first, so a dead PID never reaches the /proc start read (contract: unreadable answers None, liveness only) nor a non-int pid the identity check (contract: cannot check, keep). The live halves of the same helpers are read through resolve_session_pid, find_live_for_cwd and the sessions listing."
+    },
+    {
+      "file": "tests/test_telegram_response_delivery.py",
+      "standard": "through_the_command",
+      "lines": [22],
+      "reason": "Fleet green leg 9, ruling (c), hooks' decision: the import of _advance_pending, _deliver_chunks, _prepend_branch_prefix, _send_with_retry and _write_delivery_log. Their one public door is handle(), whose far side sends to the Telegram Bot API (send_to_telegram/edit_telegram_message over urlopen), writes the delivery log and rewrites or unlinks the bot's pending file; telegram's send is a named far side. Contract: retry until ok, edit-then-send per chunk, the pending cursor advances to the transcript's line count, one JSONL record per delivery. _is_expired and _extract_user_text are read through find_pending_file and extract_mirror_turn. Moved from tests/test_telegram_response.py:26 (split leg, 2026-10-08)."
+    },
+    {
+      "file": "tests/test_telegram_response_mirror.py",
+      "standard": "through_the_command",
+      "lines": [23],
+      "reason": "Moved from tests/test_telegram_response.py:26 (split leg, 2026-10-08); the ruling of that row, fleet green leg 9, ruling (c): _advance_pending's one public door is handle(), whose far side sends to the Telegram Bot API. Contract here: a mirror mapping file is never unlinked, with or without a readable transcript."
+    },
+    {
+      "file": "tests/test_auto_fix.py",
+      "standard": "through_the_command",
+      "lines": [32, 423, 424, 430, 431],
+      "reason": "Fleet green leg 9, ruling (c), hooks' decision: _check_syntax, _check_ruff_lint, _check_ruff_format, _check_line_pattern, _check_patterns, _run_pyright_check, _run_ruff_lint_structured, _run_seedgo_checklist, _checklist_marker and _CHECKLIST_MARKER_FALLBACK. Their one public door is handle() on a .py edit, whose far side spawns py_compile, ruff (lint, format, structured), pyright and the seedgo checklist as subprocesses and writes the seat's diagnostics state; no seam may bind on a spawn. Contract: each check answers its own violation lines (SYNTAX/LINT/FORMAT/PATTERN/TYPE/SEEDGO), a check that cannot run answers nothing or NO ANSWER, the checklist marker is seedgo's FINDING_MARKER with a loud fallback. The json path and handle()'s refusal shape are read through handle()."
+    },
+    {
+      "file": "tests/test_engine.py",
+      "standard": "through_the_command",
+      "lines": [28],
+      "reason": "Fleet green leg 9, hooks' decision. _run_hook, ruling (c): dispatch() runs a command hook as a shell subprocess (a spawn); contract: exit code, stdout, stderr and elapsed_ms answered, TIMEOUT and OSError answered as exit -1, never raised. _run_handler, ruling (c): on a timeout dispatch()'s far side speaks the timeout through the sound player (a spawn); contract: a handler outside aipass.* is refused before import, a hung handler answers TIMEOUT at its timeout, a raising one answers exit -1. _log, ruling (b): the JSONL diagnostics writer, one JSON object appended per line, a failed write never raises; dispatch writes the same file, and line 1614's hasattr pin is the json-handler shape the module keeps. _matches is read through dispatch() (_fires), _cc_len through a test-own UTF-16 count."
+    },
+    {
+      "file": "tests/test_session_boot_lookups.py",
+      "standard": "stdlib_patch",
+      "lines": [199, 213, 283, 294, 307],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): real SIGTERM / real exec of tmux; no seam on exec or kill; on 10-05 leg 7 a def-time seam let the string-form patches miss and one run exec'd real tmux. Re-pointed from test_session_boot.py by the 2026-10-08 split; 199 and 213 (patch(f\"{_MOD}.os.execvp\"), judged again once the checker followed the support import) added in the re-pin leg."
+    },
+    {
+      "file": "tests/test_session_boot.py",
+      "standard": "stdlib_patch",
+      "lines": [38, 51, 76, 91, 123, 150, 164, 181, 195, 296, 310, 320, 331, 342, 355, 366, 378, 394, 437, 501, 521, 537, 597, 635, 727, 740, 753, 768, 786, 808, 831, 903, 921, 933, 947, 961, 974],
+      "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1516 and 1529): patch(f\"{_MOD}.os.execvp\"). The far side is a real exec: os.execvp replaces the test process with tmux (new-session / attach-session), claude or drone, so no run may reach it. Every public door of session_boot (boot(), main()) ends in that exec, so no door is safe; and no seam may stand on an exec, because on 10-05 (leg 7) a def-time seam let string-form patches miss and one run exec'd real tmux. The patch is the only guard, held at call time. Lines re-pinned after the 2026-10-08 split."
+    },
+    {
+      "file": "tests/test_session_boot_doors.py",
+      "standard": "stdlib_patch",
+      "lines": [119, 205, 299],
+      "reason": "Moved from test_session_boot.py by the 2026-10-08 split; that file's execvp row's ruling: fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8: patch(f\"{_MOD}.os.execvp\"). The far side is a real exec: os.execvp replaces the test process with tmux, claude or drone, so no run may reach it. Every public door of session_boot (boot(), main()) ends in that exec, so no door is safe; and no seam may stand on an exec, because on 10-05 (leg 7) a def-time seam let string-form patches miss and one run exec'd real tmux. The patch is the only guard, held at call time."
+    },
+    {
+      "file": "tests/test_session_boot.py",
+      "standard": "stdlib_patch",
+      "lines": [215, 234, 244],
+      "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1505): patch(f\"{_MOD}.os.kill\"). The far side is a real signal: _stop_session sends SIGTERM to the session's pid, a live claude process of this machine, so no run may reach it. Its only public door is boot()'s menu, which also ends in an exec, so no door is safe; and no seam may stand on a kill, by the same 10-05 incident. The patch is the only guard, held at call time. Lines re-pinned after the 2026-10-08 split."
+    },
+    {
+      "file": "tests/test_session_boot_lookups.py",
+      "standard": "stdlib_patch",
+      "lines": [381],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10): Path.home patched to raise (unresolvable home), not an exec; no portable in-process way to make the real Path.home raise. Re-pointed from test_session_boot.py by the 2026-10-08 split."
+    },
+    {
+      "file": "tests/test_cc_sessions.py",
+      "standard": "stdlib_patch",
+      "lines": [152, 156],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): os.kill, a real signal."
+    },
+    {
+      "file": "tests/test_cc_sessions.py",
+      "standard": "stdlib_patch",
+      "lines": [152, 185, 189],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10): sys.platform emulation; Windows pinned for real by CI's Windows lane."
+    },
+    {
+      "file": "tests/test_edit_gate_bash.py",
+      "standard": "stdlib_patch",
+      "lines": [992],
+      "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
+    },
+    {
+      "file": "tests/test_session_boot.py",
+      "standard": "through_the_command",
+      "lines": [205, 210, 216, 225, 236, 246, 523, 539, 550, 561, 624, 637, 652, 658, 663, 674, 685, 694, 705, 714, 729, 742, 755, 923, 976, 1075, 1096, 1099, 1102, 1105, 1118, 1130, 1138, 1147, 1156, 1163, 1168, 1173, 1176, 1182],
+      "reason": "Fleet green leg 9, ruling (c) without trial, devpulse's ruling for this file (the 10-05 incident): the module's only public doors are boot() and main(), and every path through them ends in os.execvp (claude, tmux new-session/attach-session, drone @prax monitor) or os.kill (SIGTERM on a stopped session), after spawning tmux, ps, the claude CLI and drone @daemon stop. No seam may bind on an exec, kill or spawn. The 24 names (_takeover_bg, _stop_session, _warn_on_version_drift, _name_flag, _is_descendant, _find_tmux_session_for_pid, _daemon_stop, _tmux_session_exists, _session_label, _resume_session, _is_session_file_present, _get_ppid, _tmux_kill_session, _make_session_name, _exec_in_tmux, _chat_age, _running_cli_version, _pinned_cli_version, _find_tmux, _start_fresh, _resolve_claude_binary, _find_manifest, _chat_line, _CHAT_LIMIT) are pinned at their own contracts with the exec and kill stood in. Lines re-pointed by the 2026-10-08 split; the lookups half is the row for test_session_boot_lookups.py."
+    },
+    {
+      "file": "tests/test_session_boot_lookups.py",
+      "standard": "through_the_command",
+      "lines": [42, 46, 63, 70, 76, 80, 90, 98, 102, 109, 114, 118, 124, 129, 132, 139, 146, 150, 155, 158, 161, 166, 170, 174, 178, 182, 189, 201, 215, 227, 231, 234, 244, 248, 254, 255, 265, 269, 276, 285, 296, 309, 388],
+      "reason": "Moved from test_session_boot.py by the 2026-10-08 split, same ruling: fleet green leg 9, ruling (c) without trial, devpulse's ruling for session_boot (the 10-05 incident). Its only public doors, boot() and main(), end in os.execvp or os.kill after spawning tmux, ps and the claude CLI, and no seam may bind on an exec, kill or spawn. The lookups (_resolve_claude_binary, _find_tmux, _tmux_session_exists, _find_tmux_session_for_pid, _get_ppid, _is_descendant, _make_session_name, _name_flag, _session_label, _exec_in_tmux, _is_session_file_present, _tmux_kill_session, _stop_session, _start_fresh) are pinned at their own contracts with the exec and kill stood in."
+    },
+    {
+      "file": "tests/test_temporal.py",
+      "standard": "through_the_command",
+      "lines": [21],
+      "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is the line's shape for a given instant and the hour buckets at their bounds (5/12/17/22). handle() reads the live clock, so the public door can only pin today's hour; fixing the instant means patching temporal.datetime (scored by stdlib_patch) or a now= parameter that would exist only for the test (HELD by the ruling). The pins on _format_line and _part_of_day stay; TestHandle pins the public door's live answer."
+    },
+    {
+      "file": "tests/test_subagent_gate.py",
+      "standard": "through_the_command",
+      "lines": [22],
+      "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is that a .claude/ path is skipped in the backslashed spelling handle() hands the checklist on Windows (compass 458). Through handle() the host chooses the separator, so on POSIX the public door can only ever hand the forward-slash spelling, which test_skip_claude_hooks_from_seedgo_checks pins through handle(). The one import kept is _run_seedgo_checklist, for test_skip_claude_hooks_in_the_windows_spelling alone."
     }
   ],
   "notes": {

@@ -2,10 +2,13 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Date: {{DATE}}
-# Version: 3.0.0
+# Version: 3.1.0
 # Category: {{BRANCH}}/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v3.1.0 (2026-10-10): temp_test_dir and sample_test_data retired - their one
+#     requester was the scaffold smoke test, and a fixture nothing requests is a
+#     seedgo unused_conftest_fixture row in every newborn (DPLAN-0354)
 #   - v3.0.0 ({{DATE}}): The json redirect is the AIPASS_TEST_LOG_DIR seam - the
 #     fleet service resolves its directory per call, so there is no singleton
 #     and no private attribute left to patch (DPLAN-0325)
@@ -25,34 +28,12 @@ AIPASS_TEST_LOG_DIR says otherwise. mock_infrastructure sets that variable per
 test, so every test lands in its own tmp_path without knowing it.
 """
 
-import shutil
-import tempfile
 from pathlib import Path
-from typing import Generator, List, Tuple
+from typing import List, Tuple
 
 import pytest
 
 from aipass.{{BRANCH}}.apps.handlers.json import json_handler
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after."""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data shaped like a valid 'data' JSON document."""
-    return {
-        "created": "{{DATE}}",
-        "last_updated": "{{DATE}}",
-        "test_key": "test_value",
-        "sample_data": "example",
-    }
 
 
 @pytest.fixture(autouse=True)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rotation.py
 # Description: Rounds roster, pointer state and prompt rendering
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-12
-# Modified: 2026-09-10
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -89,6 +89,11 @@ def in_framework_fleet(branch_path: Path, repo_root: Optional[Path] = None) -> b
     return Path(branch_path).resolve().is_relative_to(framework_root(repo_root).resolve())
 
 
+def roster_key(email: str) -> str:
+    """The roster's sort key: build_roster orders by it and next_target walks by it."""
+    return email.lower()
+
+
 def build_roster(include_managers: bool = DEFAULT_INCLUDE_MANAGERS, repo_root: Optional[Path] = None) -> List[dict]:
     """
     Return the ordered list of citizens eligible for a steward night.
@@ -116,13 +121,18 @@ def build_roster(include_managers: bool = DEFAULT_INCLUDE_MANAGERS, repo_root: O
         entry = dict(citizen)
         entry["citizen_class"] = citizen_class_for(citizen["path"])
 
+        # An unreadable passport may be a manager's: it sits this night out, knob or no knob.
+        if entry["citizen_class"] is None:
+            logger.warning("[rotation] %s excluded from roster (passport unreadable)", email)
+            continue
+
         if entry["citizen_class"] == MANAGER_CLASS and not include_managers:
             logger.info("[rotation] %s excluded from roster (manager, include_managers off)", email)
             continue
 
         roster.append(entry)
 
-    roster.sort(key=lambda c: c["email"].lower())
+    roster.sort(key=lambda c: roster_key(c["email"]))
     logger.info("[rotation] Roster built: %d citizen(s), include_managers=%s", len(roster), include_managers)
     return roster
 
@@ -131,8 +141,10 @@ def next_target(roster: List[dict], last_target: Optional[str]) -> Optional[dict
     """
     Return the roster entry whose turn it is, or None for an empty roster.
 
-    Walks one step past `last_target`, wrapping at the end. An unknown or
-    missing last_target starts the cycle at the top of the roster.
+    Walks one step past `last_target`, wrapping at the end. No last_target
+    starts the cycle at the top of the roster. A last_target off the roster
+    tonight (passport unreadable, class changed, branch gone) continues at the
+    first citizen that sorts after it by roster_key, wrapping to the first.
     """
     if not roster:
         logger.warning("[rotation] Empty roster — no steward target available")
@@ -142,11 +154,15 @@ def next_target(roster: List[dict], last_target: Optional[str]) -> Optional[dict
         return roster[0]
 
     emails = [c["email"] for c in roster]
-    if last_target not in emails:
-        logger.info("[rotation] Last target %s is no longer on the roster — restarting cycle", last_target)
-        return roster[0]
+    if last_target in emails:
+        return roster[(emails.index(last_target) + 1) % len(roster)]
 
-    return roster[(emails.index(last_target) + 1) % len(roster)]
+    missing = roster_key(last_target)
+    following = next((c for c in roster if roster_key(c["email"]) > missing), roster[0])
+    logger.info(
+        "[rotation] Last target %s is no longer on the roster — continuing at %s", last_target, following["email"]
+    )
+    return following
 
 
 def get_rotation_state(runstate: dict, key: str) -> dict:

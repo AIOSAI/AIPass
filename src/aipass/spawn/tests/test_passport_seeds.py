@@ -1,25 +1,16 @@
 # =================== META ====================
 # Name: test_passport_seeds.py
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-29
 # =============================================
 
-"""Passport seeds — the tracked identity that ships with the repo (TDPLAN-0017).
+"""Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
 
-Four properties carry the whole feature, and each is pinned on its own because
-each could be lost alone:
-
-* the export STRIPS EXACTLY the four machine-local facts — no more (an identity
-  silently thinned) and no less (a credential leaked into a tracked file);
-* the export is IDEMPOTENT — a second run writes nothing at all, which is what
-  makes a generated tracked file safe to regenerate in anger;
-* a mint from a seed produces a VALID 2.0 passport with FRESH local ids and a
-  stamp naming the exact seed file bytes it came from;
-* an INVALID seed refuses loudly and writes NOTHING — a citizen never lands on
-  disk holding a malformed identity.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in apps/handlers/ and apps/modules/ parses and imports
+# seedgo: no-test-needed(documentation) — that seed_ops' public functions carry docstrings
 
 import hashlib
 import json
@@ -45,52 +36,20 @@ from aipass.spawn.apps.handlers.seed_ops import (
     validate_passport,
     validate_seed,
 )
+from aipass.spawn.apps.modules.core import spawn_agent
+from aipass.spawn.tests.conftest import MACHINE_CITIZEN_ID, MACHINE_REGISTRY_ID, make_passport
 
-MACHINE_REGISTRY_ID = "11111111-1111-4111-8111-111111111111"
-MACHINE_CITIZEN_ID = "22222222-2222-4222-8222-222222222222"
-
-
-def make_passport(branch: str = "wanderer") -> dict:
-    """A live 2.0 passport, in canonical order — the shape the fleet carries."""
-    return {
-        "document_metadata": {
-            "document_type": "branch_identity",
-            "document_name": f"{branch}.PASSPORT",
-            "version": "2.0.0",
-            "schema_version": "2.0.0",
-            "created": "2026-03-05",
-            "last_updated": "2026-08-28",
-            "managed_by": branch,
-            "tags": ["identity", "passport", "branch_profile"],
-        },
-        "branch_info": {
-            "branch_name": branch,
-            "alias": "",
-            "path": f"src/aipass/{branch}",
-            "module": f"aipass.{branch}",
-            "email": f"@{branch}",
-            "created": "2026-03-05",
-            "git_branch": "dev",
-        },
-        "citizenship": {
-            "registered": True,
-            "residency": "core",
-            "registry_id": MACHINE_REGISTRY_ID,
-            "citizen_id": MACHINE_CITIZEN_ID,
-            "registry_path": ".aipass/registry.json",
-            "communications": True,
-            "memory": True,
-        },
-        "identity": {
-            "citizen_class": "specialist",
-            "role": "wanderer",
-            "purpose": "Walks the fleet — an identity worth shipping.",
-            "what_i_do": ["Walk", "Report"],
-            "what_i_dont_do": ["Guess"],
-            "traits": ["curious"],
-            "principles": ["Code is truth - fail honestly"],
-        },
-    }
+# Four properties carry the whole feature, and each is pinned on its own below because
+# each could be lost alone (TDPLAN-0017):
+#
+# * the export STRIPS EXACTLY the four machine-local facts — no more (an identity
+#   silently thinned) and no less (a credential leaked into a tracked file);
+# * the export is IDEMPOTENT — a second run writes nothing at all, which is what
+#   makes a generated tracked file safe to regenerate in anger;
+# * a mint from a seed produces a VALID 2.0 passport with FRESH local ids and a
+#   stamp naming the exact seed file bytes it came from;
+# * an INVALID seed refuses loudly and writes NOTHING — a citizen never lands on
+#   disk holding a malformed identity.
 
 
 def write_repo(root: Path, branches=("wanderer",), residents=()) -> Path:
@@ -209,6 +168,7 @@ class TestSeedValidation:
             and any(getattr(t, "id", "") == "MACHINE_LOCAL_CITIZENSHIP" for t in node.targets)
         )
 
+        assert isinstance(declared, ast.Tuple), "MACHINE_LOCAL_CITIZENSHIP is no longer declared as a tuple literal"
         assert len(declared.elts) == 4, f"seed_ops declares {len(declared.elts)} machine-local fields, not 4"
         assert len(MACHINE_LOCAL_CITIZENSHIP) == 4, MACHINE_LOCAL_CITIZENSHIP
         assert set(MACHINE_LOCAL_CITIZENSHIP) == {"registered", "registry_id", "citizen_id", STAMP_KEY}, (
@@ -422,12 +382,14 @@ class TestMintFromSeed:
         fleet that rejects the stamp it just minted — every seed birth refusing
         itself. Two pins, because the property can be lost two ways: the
         behaviour, and the extension of the allowlist that produces it.
+
+        Mutant: the stamp prepended to the citizenship key order instead of appended -> red.
         """
         seed, seed_file = seeded
         passport = mint_from_seed(seed, seed_file, branch_name="wanderer", registry_id="r", citizen_id="c")
 
         assert validate_passport(passport) == []
-        assert STAMP_KEY in seed_ops._key_order("citizenship")
+        assert list(passport["citizenship"])[-1] == STAMP_KEY, "the stamp is not appended to the citizenship order"
         assert STAMP_KEY not in KEY_ORDER["citizenship"], "the borrowed order is unextended — we extend it here"
 
     def test_refuses_a_seed_belonging_to_another_branch(self, seeded):
@@ -552,7 +514,7 @@ class TestExportSeeds:
 
         receipt = export_seeds(root, confirm=True)
         assert receipt["updated"] == 1
-        assert json.loads(seed_path_for(branch_dir(root)).read_text())["identity"]["role"] == "explorer"
+        assert json.loads(seed_path_for(branch_dir(root)).read_text(encoding="utf-8"))["identity"]["role"] == "explorer"
 
     def test_residents_are_counted_but_never_exported(self, tmp_path):
         root = write_repo(tmp_path, branches=("wanderer",), residents=("lodger",))
@@ -661,10 +623,12 @@ class TestMintFromSeedEndToEnd:
     """A clone's branch directory holds its soul; spawn gives it a passport."""
 
     def test_a_seeded_directory_is_born_from_its_seed(self, tmp_path):
-        from aipass.spawn.apps.modules.core import _spawn_agent
+        """A seed birth adopts, and adoption's template update looks the branch up by name
+        in the registry the birth was handed (the tmp_path registry)."""
 
         target = _seeded_branch(tmp_path)
-        result = _spawn_agent(str(target), registry_path=str(_registry(tmp_path)))
+        reg = _registry(tmp_path)
+        result = spawn_agent(str(target), registry_path=str(reg))
 
         assert result["success"] is True
         assert result["seeded"] is True
@@ -675,11 +639,10 @@ class TestMintFromSeedEndToEnd:
         assert passport["citizenship"][STAMP_KEY]["sha256"] == seed_fingerprint(seed_path_for(target))
 
     def test_the_born_citizen_carries_fresh_local_ids(self, tmp_path):
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         target = _seeded_branch(tmp_path)
         reg = _registry(tmp_path)
-        _spawn_agent(str(target), registry_path=str(reg))
+        spawn_agent(str(target), registry_path=str(reg))
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["citizenship"]["registry_id"] == "project-credential"
@@ -690,13 +653,12 @@ class TestMintFromSeedEndToEnd:
         assert entry["registry_id"] == passport["citizenship"]["citizen_id"]
 
     def test_an_invalid_seed_refuses_and_writes_nothing(self, tmp_path):
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         def leak(seed):
             seed["citizenship"]["citizen_id"] = "somebody-elses-id"
 
         target = _seeded_branch(tmp_path, mutate=leak)
-        result = _spawn_agent(str(target), registry_path=str(_registry(tmp_path)))
+        result = spawn_agent(str(target), registry_path=str(_registry(tmp_path)))
 
         assert result["success"] is False
         assert "SEED REFUSED" in result["error"]
@@ -705,36 +667,33 @@ class TestMintFromSeedEndToEnd:
 
     def test_a_seed_for_another_branch_refuses(self, tmp_path):
         """The seed lives in the branch it describes — a stray one is refused."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         target = tmp_path / "impostor"
         (target / seed_ops.SEED_DIR_NAME).mkdir(parents=True)
         seed_path_for(target).write_text(canonical_text(build_seed(make_passport("wanderer"))), encoding="utf-8")
 
-        result = _spawn_agent(str(target), registry_path=str(_registry(tmp_path)))
+        result = spawn_agent(str(target), registry_path=str(_registry(tmp_path)))
         assert result["success"] is False
         assert "belongs to branch 'wanderer'" in result["error"]
         assert not (target / ".trinity" / "passport.json").exists()
 
     def test_an_existing_directory_with_no_seed_still_refuses(self, tmp_path):
         """REGRESSION: the seed door opens only for a seed. Nothing else moved."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         target = tmp_path / "no_seed"
         target.mkdir()
         (target / "README.md").write_text("# just a dir\n", encoding="utf-8")
 
-        result = _spawn_agent(str(target), registry_path=str(_registry(tmp_path)))
+        result = spawn_agent(str(target), registry_path=str(_registry(tmp_path)))
         assert result["success"] is False
         assert "already exists" in result["error"]
 
     def test_a_template_mint_carries_no_stamp(self, tmp_path):
         """REGRESSION: a citizen born from the template came from no seed, and
         an empty stamp would be a claim about provenance that is not true."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         target = tmp_path / "newborn"
-        result = _spawn_agent(str(target), registry_path=str(_registry(tmp_path)))
+        result = spawn_agent(str(target), registry_path=str(_registry(tmp_path)))
 
         assert result["success"] is True
         assert result.get("seeded") is None

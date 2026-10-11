@@ -1,17 +1,15 @@
 # =================== META ====================
 # Name: test_scaffold.py
-# Description: Scaffold smoke test for template test infrastructure
-# Version: 1.2.0
+# Description: The handler guard's structural pin a citizen is born with
+# Version: 1.3.0
 # Created: 2026-07-04
-# Modified: 2026-08-31
+# Modified: 2026-10-10
 # =============================================
 
-"""Scaffold smoke test — proves pytest infrastructure works in this branch.
+"""Tests for apps/handlers/__init__.py, the guard pin a citizen is born with: no ``inspect.stack()``."""
 
-Also carries the one structural pin a citizen is BORN with: the handler
-access guard must never walk ``inspect.stack()``. See the test below for why
-that pin lives here rather than in a branch's own suite.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/__init__.py parses and imports
 
 import ast
 from pathlib import Path
@@ -19,48 +17,19 @@ from pathlib import Path
 import pytest
 
 
-def test_conftest_fixtures_available(request):
-    """Verify ``getfixturevalue`` finds the scaffold pair, in whichever world this branch is in.
-
-    Established branches replace the template conftest with their own suite
-    fixtures (spawn update never overwrites .py files). This test used to
-    ``pytest.skip`` on that world, which meant every branch that had grown its
-    own conftest ran the stamp as a silent pass — a scope that proves nothing
-    and says nothing about it.
-
-    Both worlds are asserted now. Present: the fixtures hand back the values
-    the template conftest declares. Absent: the replacement is TOTAL, because a
-    conftest offering one half of the pair is a half-edited scaffold, and that
-    is the failure this stamp is worth keeping for.
-    """
-    scaffold = {}
-    missing = []
-    for name in ("temp_test_dir", "sample_test_data"):
-        try:
-            scaffold[name] = request.getfixturevalue(name)
-        except pytest.FixtureLookupError:
-            missing.append(name)
-
-    if not missing:
-        assert scaffold["temp_test_dir"].exists(), "temp_test_dir yielded a path that is not on disk"
-        assert scaffold["sample_test_data"]["test_key"] == "test_value", (
-            "sample_test_data no longer carries the document the template conftest declares"
-        )
-        return
-
-    assert len(missing) == 2, (
-        f"half a scaffold: this branch's conftest still offers {sorted(scaffold)} "
-        f"but not {sorted(missing)} — replace the pair or keep the pair"
-    )
-    assert (Path(__file__).parent / "conftest.py").exists(), (
-        "the template conftest was removed and nothing replaced it — this suite has no fixtures at all"
-    )
+def _bound_names(node: ast.AST, module: str, name: str) -> set:
+    """The local names one import statement binds to ``module`` (Import) or ``module.name`` (ImportFrom)."""
+    if isinstance(node, ast.Import):
+        return {alias.asname or alias.name for alias in node.names if alias.name == module}
+    if isinstance(node, ast.ImportFrom) and node.module == module:
+        return {alias.asname or alias.name for alias in node.names if alias.name == name}
+    return set()
 
 
 def _inspect_stack_calls(source: str) -> list:
     """Line numbers of every ``inspect.stack()`` CALL in ``source``.
 
-    An AST matcher, not a string search: the guard's docstring names
+    An AST matcher, not a string search: a guard's docstring may name
     ``inspect.stack()`` while explaining what it replaced, and a spelling ban
     would convict the explanation.
     """
@@ -70,13 +39,9 @@ def _inspect_stack_calls(source: str) -> list:
     direct_names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "inspect":
-                    module_aliases.add(alias.asname or alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.module == "inspect":
-            for alias in node.names:
-                if alias.name == "stack":
-                    direct_names.add(alias.asname or alias.name)
+            module_aliases |= _bound_names(node, "inspect", "")
+        elif isinstance(node, ast.ImportFrom):
+            direct_names |= _bound_names(node, "inspect", "stack")
 
     found = []
     for node in ast.walk(tree):
@@ -109,15 +74,13 @@ def test_the_handler_guard_never_walks_inspect_stack():
     CI gate 2026-08-31; the cure is to walk frames with ``sys._getframe`` and
     read ``frame.f_code.co_filename``, which asks the filesystem nothing.
 
-    WHY IT IS STRUCTURAL. The regression has no behavioural instrument. The
-    guard's ``caller_file is None`` branch is unreachable from any import-shaped
-    test, because ``apps/__init__.py`` always supplies a real-file frame —
-    measured identically across nine branches, where restoring the walk left the
-    whole suite green. A call that must not exist is pinned by reading the
-    source; there is nothing else to watch.
+    WHY IT IS STRUCTURAL. The regression shows only on Windows with a dead cwd,
+    so this suite has no portable behavioural instrument for it (the fence's own
+    behaviour is pinned in test_handlers_fence.py). A call that must not exist
+    is pinned by reading the source.
 
-    Unlike the fixture smoke test above, this does NOT skip when a branch grows
-    its own suite: the guard is inherited code that a branch rarely edits, which
+    This needs no conftest fixture, so it holds when a branch grows its own
+    suite: the guard is inherited code that a branch rarely edits, which
     is exactly why nobody would notice it changing.
     """
     guard = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py"

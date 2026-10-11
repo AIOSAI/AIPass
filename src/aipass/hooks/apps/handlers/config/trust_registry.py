@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: trust_registry.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-07-15
-# Modified: 2026-07-15
+# Modified: 2026-10-08
 # =============================================
 
 """Trusted-project registry for hook config loading.
@@ -26,6 +26,17 @@ from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 REGISTRY_PATH = Path.home() / ".aipass" / "trusted_projects.json"
+REGISTRY_ENV = "AIPASS_TRUST_REGISTRY"
+
+
+def registry_path() -> Path:
+    """The registry file, resolved at each call: $AIPASS_TRUST_REGISTRY when set and non-empty, else REGISTRY_PATH.
+
+    The environment read is the public seam (DPLAN-0404 leg 12): aipass's test_trust redirects every
+    verb with one setenv instead of patching this module's global from another branch. Hooks' decision.
+    """
+    override = os.environ.get(REGISTRY_ENV, "")
+    return Path(override) if override else REGISTRY_PATH
 
 
 def _hash_file(path: Path) -> str:
@@ -36,22 +47,24 @@ def _hash_file(path: Path) -> str:
 
 def read_registry() -> dict:
     """Read the trusted-project registry. Returns empty registry if absent or corrupt."""
-    if not REGISTRY_PATH.exists():
+    path = registry_path()
+    if not path.exists():
         return {"version": 1, "projects": {}}
     try:
-        data = json_files.read_json_file(REGISTRY_PATH)
+        data = json_files.read_json_file(path)
         if not isinstance(data.get("projects"), dict):
             return {"version": 1, "projects": {}}
         return data
     except (json.JSONDecodeError, OSError) as exc:
-        logger.error("[HOOKS] bad trust registry %s: %s", REGISTRY_PATH, exc)
+        logger.error("[HOOKS] bad trust registry %s: %s", path, exc)
         return {"version": 1, "projects": {}}
 
 
 def _write_registry(registry: dict) -> None:
     """Write the registry to disk, creating parent dirs if needed."""
-    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    json_files.write_json_file(REGISTRY_PATH, registry)
+    path = registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    json_files.write_json_file(path, registry)
 
 
 def enroll(project_dir: str) -> bool:

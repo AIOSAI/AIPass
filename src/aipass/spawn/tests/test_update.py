@@ -1,21 +1,30 @@
 # =================== META ====================
 # Name: test_update.py
 # Description: Tests for spawn update orchestrator
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-03-07
-# Modified: 2026-09-15
+# Modified: 2026-10-06
 # =============================================
 
-"""Tests for the spawn update module.
+"""Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
 
-Tests update_branch(), update_all(), dry-run mode, .py skip behavior,
-JSON deep merge, first-time adoption, and self-skip logic.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that update_ops.py, update_ignore.py, and modules/update.py parse and import cleanly
+# seedgo: no-test-needed(documentation) — that the public functions in those modules carry docstrings
 
 import json
 from unittest.mock import patch
 
 import pytest
+
+from aipass.spawn.apps.handlers.update_ignore import UpdateIgnoreUnreadable, read_ignore
+from aipass.spawn.apps.handlers.update_ops import update_all, update_branch
+from aipass.spawn.apps.modules.update import handle_update
+
+# Context kept from the file's original docstring:
+#
+# Tests update_branch(), update_all(), dry-run mode, .py skip behavior,
+# JSON deep merge, first-time adoption, and self-skip logic.
 
 
 # ---------------------------------------------------------------------------
@@ -30,15 +39,16 @@ def template_dir(tmp_path):
     tpl.mkdir()
 
     # Template files
-    (tpl / "README.md").write_text("# {{BRANCHNAME}}\nTemplate readme\n")
+    (tpl / "README.md").write_text("# {{BRANCHNAME}}\nTemplate readme\n", encoding="utf-8")
     (tpl / "DASHBOARD.local.json").write_text(
-        json.dumps({"status": "active", "branch": "{{branchname}}", "version": "1.0"}, indent=2)
+        json.dumps({"status": "active", "branch": "{{branchname}}", "version": "1.0"}, indent=2),
+        encoding="utf-8",
     )
     (tpl / "apps").mkdir()
-    (tpl / "apps" / "__init__.py").write_text('"""{{branchname}} apps"""')
-    (tpl / "apps" / "branch.py").write_text('"""{{branchname}} entry point"""\ndef main(): pass\n')
+    (tpl / "apps" / "__init__.py").write_text('"""{{branchname}} apps"""', encoding="utf-8")
+    (tpl / "apps" / "branch.py").write_text('"""{{branchname}} entry point"""\ndef main(): pass\n', encoding="utf-8")
     (tpl / "tests").mkdir()
-    (tpl / "tests" / "__init__.py").write_text("")
+    (tpl / "tests" / "__init__.py").write_text("", encoding="utf-8")
     (tpl / ".archive").mkdir()
     (tpl / "docs").mkdir()
 
@@ -110,7 +120,7 @@ def template_dir(tmp_path):
         },
     }
 
-    (spawn_meta / ".template_registry.json").write_text(json.dumps(registry, indent=2) + "\n")
+    (spawn_meta / ".template_registry.json").write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
 
     return tpl
 
@@ -122,15 +132,18 @@ def branch_dir(tmp_path):
     branch.mkdir()
 
     # Existing files in branch
-    (branch / "README.md").write_text("# TEST_BRANCH\nCustom readme with user edits\n")
+    (branch / "README.md").write_text("# TEST_BRANCH\nCustom readme with user edits\n", encoding="utf-8")
     (branch / "DASHBOARD.local.json").write_text(
-        json.dumps({"status": "running", "branch": "test_branch", "custom_key": "preserved"}, indent=2)
+        json.dumps({"status": "running", "branch": "test_branch", "custom_key": "preserved"}, indent=2),
+        encoding="utf-8",
     )
     (branch / "apps").mkdir()
-    (branch / "apps" / "__init__.py").write_text('"""test_branch apps - modified"""')
-    (branch / "apps" / "branch.py").write_text('"""test_branch entry"""\ndef main():\n    print("hello")\n')
+    (branch / "apps" / "__init__.py").write_text('"""test_branch apps - modified"""', encoding="utf-8")
+    (branch / "apps" / "branch.py").write_text(
+        '"""test_branch entry"""\ndef main():\n    print("hello")\n', encoding="utf-8"
+    )
     (branch / "tests").mkdir()
-    (branch / "tests" / "__init__.py").write_text("")
+    (branch / "tests" / "__init__.py").write_text("", encoding="utf-8")
     (branch / ".archive").mkdir()
     (branch / "docs").mkdir()
     (branch / ".spawn").mkdir()
@@ -151,7 +164,8 @@ def branch_dir(tmp_path):
             },
             indent=2,
         )
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
 
     return branch
@@ -191,7 +205,7 @@ def mock_registry(tmp_path, branch_dir):
     }
 
     reg_path = repo_root / "AIPASS_REGISTRY.json"
-    reg_path.write_text(json.dumps(registry, indent=2) + "\n")
+    reg_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
 
     return reg_path
 
@@ -213,8 +227,6 @@ class TestUpdateBranch:
 
     def test_first_time_adoption_generates_meta(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Branch with no .branch_meta.json should get one generated."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         # Ensure no branch_meta exists
         meta_path = branch_dir / ".spawn" / ".branch_meta.json"
         assert not meta_path.exists()
@@ -232,11 +244,9 @@ class TestUpdateBranch:
 
     def test_dry_run_does_not_modify(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Dry run should report changes without modifying files."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         # Record original state
-        readme_before = (branch_dir / "README.md").read_text()
-        dashboard_before = (branch_dir / "DASHBOARD.local.json").read_text()
+        readme_before = (branch_dir / "README.md").read_text(encoding="utf-8")
+        dashboard_before = (branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -248,8 +258,8 @@ class TestUpdateBranch:
         assert result["dry_run"] is True
 
         # Files should be unchanged
-        assert (branch_dir / "README.md").read_text() == readme_before
-        assert (branch_dir / "DASHBOARD.local.json").read_text() == dashboard_before
+        assert (branch_dir / "README.md").read_text(encoding="utf-8") == readme_before
+        assert (branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8") == dashboard_before
 
         # No branch_meta created in dry-run on first adoption
         meta_path = branch_dir / ".spawn" / ".branch_meta.json"
@@ -257,8 +267,6 @@ class TestUpdateBranch:
 
     def test_py_files_never_overwritten(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Python files should be skipped even when template hash differs."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         # Create initial branch_meta with a matching .py file that has a different hash
         spawn_dir = branch_dir / ".spawn"
         spawn_dir.mkdir(exist_ok=True)
@@ -273,13 +281,11 @@ class TestUpdateBranch:
             result = update_branch("test_branch")
 
         # .py file should still have original content
-        assert (branch_dir / "apps" / "branch.py").read_text() == original_content
+        assert (branch_dir / "apps" / "branch.py").read_text(encoding="utf-8") == original_content
         assert result["success"] is True
 
     def test_json_deep_merge_preserves_existing(self, tmp_path, template_dir, branch_dir, mock_registry):
         """JSON merge should add new template keys while preserving existing values."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         # Set up branch_meta so DASHBOARD.local.json shows as needing update
         spawn_dir = branch_dir / ".spawn"
         spawn_dir.mkdir(exist_ok=True)
@@ -294,14 +300,15 @@ class TestUpdateBranch:
                     "new_field": "from_template",
                 },
                 indent=2,
-            )
+            ),
+            encoding="utf-8",
         )
 
         # Update template registry hash to differ from branch
         reg_path = template_dir / ".spawn" / ".template_registry.json"
-        reg = json.loads(reg_path.read_text())
+        reg = json.loads(reg_path.read_text(encoding="utf-8"))
         reg["files"]["f002"]["content_hash"] = "different_hash"
-        reg_path.write_text(json.dumps(reg, indent=2) + "\n")
+        reg_path.write_text(json.dumps(reg, indent=2) + "\n", encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -312,7 +319,7 @@ class TestUpdateBranch:
         assert result["success"] is True
 
         # Read merged dashboard
-        merged = json.loads((branch_dir / "DASHBOARD.local.json").read_text())
+        merged = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
 
         # Existing values preserved
         assert merged["custom_key"] == "preserved"
@@ -321,8 +328,6 @@ class TestUpdateBranch:
 
     def test_branch_not_found(self, tmp_path, template_dir, mock_registry):
         """Non-existent branch should return failure."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
@@ -334,21 +339,19 @@ class TestUpdateBranch:
 
     def test_additions_from_template(self, tmp_path, template_dir, branch_dir, mock_registry):
         """New template files not in branch should be added."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         # Add a new file to template that doesn't exist in branch
-        (template_dir / "docs" / "new_doc.md").write_text("# New doc for {{branchname}}")
+        (template_dir / "docs" / "new_doc.md").write_text("# New doc for {{branchname}}", encoding="utf-8")
 
         # Add it to template registry
         reg_path = template_dir / ".spawn" / ".template_registry.json"
-        reg = json.loads(reg_path.read_text())
+        reg = json.loads(reg_path.read_text(encoding="utf-8"))
         reg["files"]["f099"] = {
             "current_name": "new_doc.md",
             "path": "docs/new_doc.md",
             "content_hash": _hash_content("# New doc for {{branchname}}"),
             "has_branch_placeholder": True,
         }
-        reg_path.write_text(json.dumps(reg, indent=2) + "\n")
+        reg_path.write_text(json.dumps(reg, indent=2) + "\n", encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -362,16 +365,14 @@ class TestUpdateBranch:
         # The new file should exist with placeholders replaced
         new_file = branch_dir / "docs" / "new_doc.md"
         assert new_file.exists()
-        content = new_file.read_text()
+        content = new_file.read_text(encoding="utf-8")
         assert "{{branchname}}" not in content
         assert "test_branch" in content
 
     def test_extra_files_not_pruned(self, tmp_path, template_dir, branch_dir, mock_registry):
         """P1 engine never prunes — extra branch files are left untouched."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         extra_file = branch_dir / "old_config.json"
-        extra_file.write_text(json.dumps({"old": True}))
+        extra_file.write_text(json.dumps({"old": True}), encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -389,15 +390,13 @@ class TestNeverUpdateGuard:
 
     def test_trinity_local_json_never_touched(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Update must never modify .trinity/local.json even when template has it (create-only)."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         trinity_tpl = template_dir / ".trinity"
         trinity_tpl.mkdir(exist_ok=True)
-        (trinity_tpl / "local.json").write_text('{"sessions": []}')
+        (trinity_tpl / "local.json").write_text('{"sessions": []}', encoding="utf-8")
 
         trinity_branch = branch_dir / ".trinity"
-        (trinity_branch / "local.json").write_text('{"sessions": [{"id": 1}]}')
-        local_before = (trinity_branch / "local.json").read_text()
+        (trinity_branch / "local.json").write_text('{"sessions": [{"id": 1}]}', encoding="utf-8")
+        local_before = (trinity_branch / "local.json").read_text(encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -406,15 +405,13 @@ class TestNeverUpdateGuard:
             result = update_branch("test_branch")
 
         assert result["success"] is True
-        assert (trinity_branch / "local.json").read_text() == local_before
+        assert (trinity_branch / "local.json").read_text(encoding="utf-8") == local_before
 
     def test_passport_identity_content_never_touched_by_heal(self, tmp_path, template_dir, branch_dir, mock_registry):
         """passport.json heals allowlisted fields only — role/purpose/etc. stay create-only,
         even when the branch_dir fixture's passport is already allowlist-complete and the
         template disagrees on a non-allowlisted field (role) and on allowlisted ones (email,
         git_branch, traits) — existing always wins, template's differing values never land."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         trinity_tpl = template_dir / ".trinity"
         trinity_tpl.mkdir(exist_ok=True)
         (trinity_tpl / "passport.json").write_text(
@@ -424,11 +421,12 @@ class TestNeverUpdateGuard:
                     "identity": {"role": "template_role_should_not_apply", "traits": "should_not_apply"},
                 },
                 indent=2,
-            )
+            ),
+            encoding="utf-8",
         )
 
         trinity_branch = branch_dir / ".trinity"
-        passport_before = (trinity_branch / "passport.json").read_text()
+        passport_before = (trinity_branch / "passport.json").read_text(encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -437,14 +435,12 @@ class TestNeverUpdateGuard:
             result = update_branch("test_branch")
 
         assert result["success"] is True
-        assert (trinity_branch / "passport.json").read_text() == passport_before
+        assert (trinity_branch / "passport.json").read_text(encoding="utf-8") == passport_before
 
     def test_dashboard_never_touched(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Update must never modify DASHBOARD.local.json even when template differs."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         dashboard = branch_dir / "DASHBOARD.local.json"
-        dashboard_before = dashboard.read_text()
+        dashboard_before = dashboard.read_text(encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -453,7 +449,7 @@ class TestNeverUpdateGuard:
             result = update_branch("test_branch")
 
         assert result["success"] is True
-        assert dashboard.read_text() == dashboard_before
+        assert dashboard.read_text(encoding="utf-8") == dashboard_before
 
     def test_ai_mail_local_inbox_never_touched(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Update must never merge into .ai_mail.local/inbox.json — it is a branch's
@@ -463,15 +459,14 @@ class TestNeverUpdateGuard:
         live branch inbox doesn't have (a plausible real-world template schema
         change) so a plain deep-merge would detectably touch the file even though
         no message is ever lost — that touch itself is the thing being refused."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         mail_tpl = template_dir / ".ai_mail.local"
         mail_tpl.mkdir(exist_ok=True)
         (mail_tpl / "inbox.json").write_text(
             json.dumps(
                 {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": [], "schema_version": 2},
                 indent=2,
-            )
+            ),
+            encoding="utf-8",
         )
 
         mail_branch = branch_dir / ".ai_mail.local"
@@ -486,9 +481,10 @@ class TestNeverUpdateGuard:
                     "messages": [{"id": "m1", "from": "@someone", "subject": "hi"}],
                 },
                 indent=2,
-            )
+            ),
+            encoding="utf-8",
         )
-        inbox_before = inbox.read_text()
+        inbox_before = inbox.read_text(encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -497,7 +493,7 @@ class TestNeverUpdateGuard:
             result = update_branch("test_branch")
 
         assert result["success"] is True
-        assert inbox.read_text() == inbox_before
+        assert inbox.read_text(encoding="utf-8") == inbox_before
 
     def test_scaffold_test_never_re_added(self, tmp_path, template_dir, branch_dir, mock_registry):
         """tests/test_scaffold.py is create-only — a branch that deleted it never gets it back.
@@ -507,15 +503,13 @@ class TestNeverUpdateGuard:
         only ever skip, so re-adding it re-creates a permanently-inert test (@seedgo
         ruling, DPLAN-0291 wave 2).
         """
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         tests_tpl = template_dir / "tests"
         tests_tpl.mkdir(exist_ok=True)
-        (tests_tpl / "test_scaffold.py").write_text("def test_scaffold(): pass\n")
+        (tests_tpl / "test_scaffold.py").write_text("def test_scaffold(): pass\n", encoding="utf-8")
 
         branch_tests = branch_dir / "tests"
         branch_tests.mkdir(exist_ok=True)
-        (branch_tests / "test_real_suite.py").write_text("def test_real(): pass\n")
+        (branch_tests / "test_real_suite.py").write_text("def test_real(): pass\n", encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -530,8 +524,6 @@ class TestNeverUpdateGuard:
 
     def test_zero_renames_always(self, tmp_path, template_dir, branch_dir, mock_registry):
         """P1 engine never proposes renames."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
@@ -543,12 +535,10 @@ class TestNeverUpdateGuard:
 
     def test_backup_lands_in_spawn_recovery(self, tmp_path, template_dir, branch_dir, mock_registry):
         """JSON merge backups should land in .spawn/.recovery/, not branch root .recovery/."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         config_tpl = template_dir / "config.json"
-        config_tpl.write_text(json.dumps({"version": "2.0", "new_key": "added"}, indent=2))
+        config_tpl.write_text(json.dumps({"version": "2.0", "new_key": "added"}, indent=2), encoding="utf-8")
         config_branch = branch_dir / "config.json"
-        config_branch.write_text(json.dumps({"version": "1.0"}, indent=2))
+        config_branch.write_text(json.dumps({"version": "1.0"}, indent=2), encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -566,8 +556,6 @@ class TestNeverUpdateGuard:
 
     def test_create_update_invariant(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Fresh branch from template should show 0 changes on update."""
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
@@ -592,8 +580,6 @@ class TestMarkdownIsReportedAndNeverWritten:
     """
 
     def _update(self, template_dir, mock_registry, dry_run=True):
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
@@ -614,7 +600,7 @@ class TestMarkdownIsReportedAndNeverWritten:
         self, template_dir, branch_dir, mock_registry
     ):
         """Rendered, not raw: the comparison resolves placeholders first."""
-        (branch_dir / "README.md").write_text("# TEST_BRANCH\nTemplate readme\n")
+        (branch_dir / "README.md").write_text("# TEST_BRANCH\nTemplate readme\n", encoding="utf-8")
 
         result = self._update(template_dir, mock_registry)
 
@@ -677,8 +663,6 @@ class TestUpdateIgnoreIsTheOwnersDecision:
         (branch_dir / ".updateignore").write_text(text, encoding="utf-8")
 
     def _update(self, template_dir, mock_registry, dry_run=True):
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
@@ -805,8 +789,6 @@ class TestUpdateIgnoreIsTheOwnersDecision:
         the defect is invisible one layer down. The clause under test is "# comments,
         blank lines ignored", so the pin reads what the parser returned.
         """
-        from aipass.spawn.apps.handlers.update_ignore import read_ignore
-
         self._ignore(
             branch_dir,
             "# README.md is the owner's, or would be\n\n   \n  DASHBOARD.local.json  \n\t\n# trailing note\n",
@@ -881,18 +863,137 @@ class TestUpdateIgnoreIsTheOwnersDecision:
 
         assert path.read_text(encoding="utf-8") == before
 
-    def test_an_unreadable_ignore_file_protects_nothing_and_does_not_raise(
+    @staticmethod
+    def _tree(root):
+        return {p.relative_to(root): (p.read_bytes() if p.is_file() else None) for p in root.rglob("*")}
+
+    def test_an_unreadable_ignore_file_refuses_the_update_and_writes_nothing(
         self, tmp_path, template_dir, branch_dir, mock_registry
     ):
-        """Bad bytes must not take the whole update down with them."""
+        """A claim that cannot be read protects nothing, so the update refuses whole.
+
+        Before leg 6 the bad bytes read as an empty list and README.md, named in
+        the file, was handed in (devpulse's ruling on leg 5 of DPLAN-0354).
+        """
         (branch_dir / "README.md").unlink()
         (branch_dir / ".updateignore").write_bytes(b"\xff\xfe README.md")
+        before = self._tree(branch_dir)
+        registry_before = mock_registry.read_bytes()
 
-        result = self._update(template_dir, mock_registry)
+        with pytest.raises(UpdateIgnoreUnreadable, match=r"\.updateignore"):
+            self._update(template_dir, mock_registry, dry_run=False)
 
-        assert result["success"] is True
-        assert result["owner_protected"] == 0
-        assert "README.md" in [a["template_path"] for a in result["_additions_detail"]]
+        assert self._tree(branch_dir) == before
+        assert mock_registry.read_bytes() == registry_before
+
+    def test_update_all_goes_on_past_a_branch_whose_ignore_file_is_unreadable(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        """One refused branch is a failed row; the next branch is still updated."""
+        (branch_dir / ".updateignore").write_bytes(b"\xff\xfe README.md")
+        other = tmp_path / "other_branch"
+        (other / ".trinity").mkdir(parents=True)
+        (other / ".trinity" / "passport.json").write_bytes((branch_dir / ".trinity" / "passport.json").read_bytes())
+        reg = json.loads(mock_registry.read_text(encoding="utf-8"))
+        reg["branches"].append({"name": "OTHER_BRANCH", "path": "other_branch", "status": "active"})
+        mock_registry.write_text(json.dumps(reg, indent=2) + "\n", encoding="utf-8")
+        before = self._tree(branch_dir)
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            results = {r["branch"]: r for r in update_all(dry_run=False)}
+
+        assert results["test_branch"]["success"] is False
+        assert ".updateignore" in results["test_branch"]["errors"][0]
+        assert self._tree(branch_dir) == before
+        assert results["other_branch"]["success"] is True
+        assert (other / "README.md").is_file()
+
+
+class TestUpdateNeverJudgesASandbox:
+    """A living branch's dropbox and .archive are never read, compared or merged.
+
+    The rule is the owner of the project's, 09-27 20:42, in paraphrase: a
+    dropbox is ignored by all, a sandbox like .archive. devpulse ruled for
+    update (compass 491, 09-29 00:03): what the template ships there is still
+    handed in when absent, and nothing present there is judged. The skip reads
+    the parts below the branch root, so the whole world stands inside a
+    directory named dropbox (spawn's decision, DPLAN-0354 leg 5).
+    """
+
+    _TEMPLATE = {
+        "README.md": "# {{BRANCHNAME}}\nTemplate readme\n",
+        "dropbox/README.md": "# Dropbox\nHanded in here.\n",
+        ".archive/README.md": "# Archive\nRetired things.\n",
+        ".archive/notes.json": json.dumps({"kept": 1, "template_key": 2}),
+        "docs/.archive/old.md": "# Old\nShipped retired page.\n",
+    }
+
+    def _world(self, tmp_path):
+        """A template and a living branch under tmp_path/dropbox, with a registry."""
+        root = tmp_path / "dropbox"
+        tpl = root / "template"
+        for rel, text in self._TEMPLATE.items():
+            (tpl / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tpl / rel).write_text(text, encoding="utf-8")
+        branch = root / "test_branch"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".spawn").mkdir()
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"identity": {"citizen_class": "specialist", "role": "test", "traits": []}}), encoding="utf-8"
+        )
+        registry = root / "AIPASS_REGISTRY.json"
+        entry = {"name": "TEST_BRANCH", "path": "test_branch", "email": "@test_branch", "status": "active"}
+        registry.write_text(json.dumps({"metadata": {}, "branches": [entry]}), encoding="utf-8")
+        return tpl, branch, registry
+
+    def _update(self, tpl, registry):
+        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=tpl):
+            return update_branch("test_branch", dry_run=False, registry_path=registry)
+
+    def test_a_present_dropbox_or_archive_file_is_neither_reported_nor_merged(self, tmp_path):
+        """Ran red before the skip: both READMEs were reported as differs and notes.json merged."""
+        tpl, branch, registry = self._world(tmp_path)
+        planted = {
+            "README.md": "# TEST_BRANCH\nEdited by its owner\n",
+            "dropbox/README.md": "# Dropbox\nChanged by the branch\n",
+            ".archive/README.md": "# Archive\nChanged too\n",
+            ".archive/notes.json": json.dumps({"kept": 1}),
+            "docs/.archive/old.md": "# Old\nA nested archive, changed\n",
+        }
+        for rel, text in planted.items():
+            (branch / rel).parent.mkdir(parents=True, exist_ok=True)
+            (branch / rel).write_text(text, encoding="utf-8")
+
+        result = self._update(tpl, registry)
+
+        assert result["success"] is True, result
+        # The control: the live README beside them is still judged.
+        assert [(e["branch_path"], e["state"]) for e in result["_md_detail"]] == [("README.md", "differs")]
+        assert result["updates"] == 0
+        for rel, text in planted.items():
+            assert (branch / rel).read_text(encoding="utf-8") == text, rel
+
+    def test_an_absent_dropbox_is_created_with_its_shipped_readme(self, tmp_path):
+        """Handing a file in is what the place is for: directory absent, both land."""
+        tpl, branch, registry = self._world(tmp_path)
+
+        self._update(tpl, registry)
+
+        assert (branch / "dropbox" / "README.md").read_text(encoding="utf-8") == self._TEMPLATE["dropbox/README.md"]
+
+    def test_an_absent_shipped_file_in_a_present_archive_is_written(self, tmp_path):
+        """The directory is there, the shipped README is not: it is written, nothing else is touched."""
+        tpl, branch, registry = self._world(tmp_path)
+        (branch / ".archive").mkdir()
+        (branch / ".archive" / "notes.json").write_text(json.dumps({"kept": 1}), encoding="utf-8")
+
+        self._update(tpl, registry)
+
+        assert (branch / ".archive" / "README.md").read_text(encoding="utf-8") == self._TEMPLATE[".archive/README.md"]
+        assert json.loads((branch / ".archive" / "notes.json").read_text(encoding="utf-8")) == {"kept": 1}
 
 
 class TestUpdateAll:
@@ -900,8 +1001,6 @@ class TestUpdateAll:
 
     def test_update_all_skips_spawn(self, tmp_path, template_dir, branch_dir, mock_registry):
         """update_all should skip spawn itself."""
-        from aipass.spawn.apps.handlers.update_ops import update_all
-
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
@@ -916,17 +1015,15 @@ class TestUpdateAll:
 
     def test_update_all_processes_all_branches(self, tmp_path, template_dir, mock_registry):
         """update_all should process each registered branch."""
-        from aipass.spawn.apps.handlers.update_ops import update_all
-
         # Create a second branch
         branch2 = tmp_path / "other_branch"
         branch2.mkdir()
-        (branch2 / "README.md").write_text("# Other")
+        (branch2 / "README.md").write_text("# Other", encoding="utf-8")
         (branch2 / "apps").mkdir()
         (branch2 / "tests").mkdir()
 
         # Add it to registry
-        reg = json.loads(mock_registry.read_text())
+        reg = json.loads(mock_registry.read_text(encoding="utf-8"))
         rel_path = str(branch2.relative_to(tmp_path))
         reg["branches"].append(
             {
@@ -938,7 +1035,7 @@ class TestUpdateAll:
                 "status": "active",
             }
         )
-        mock_registry.write_text(json.dumps(reg, indent=2) + "\n")
+        mock_registry.write_text(json.dumps(reg, indent=2) + "\n", encoding="utf-8")
 
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
@@ -957,8 +1054,6 @@ class TestHandleUpdate:
 
     def test_no_args_shows_usage(self):
         """No args should show usage and return 1."""
-        from aipass.spawn.apps.modules.update import handle_update
-
         result = handle_update([])
         assert result == 1
 
@@ -968,8 +1063,6 @@ class TestHandleUpdate:
         error() writes plain text, so the dry-run mode marker built for console.print()
         surfaced as '[dim](dry-run)[/dim]' on every failed preview (DPLAN-0291 audit).
         """
-        from aipass.spawn.apps.modules.update import handle_update
-
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
@@ -985,8 +1078,6 @@ class TestHandleUpdate:
 
     def test_single_branch_arg(self, tmp_path, template_dir, branch_dir, mock_registry):
         """@branch arg should call update_branch."""
-        from aipass.spawn.apps.modules.update import handle_update
-
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
@@ -997,8 +1088,6 @@ class TestHandleUpdate:
 
     def test_dry_run_flag(self, tmp_path, template_dir, branch_dir, mock_registry):
         """--dry-run flag should be parsed and passed through."""
-        from aipass.spawn.apps.modules.update import handle_update
-
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
@@ -1012,15 +1101,11 @@ class TestHandleUpdate:
 
     def test_all_flag_requires_class(self, tmp_path, template_dir, branch_dir, mock_registry):
         """--all without a citizen class should be blocked."""
-        from aipass.spawn.apps.modules.update import handle_update
-
         result = handle_update(["--all"])
         assert result == 1
 
     def test_all_flag_with_class(self, tmp_path, template_dir, branch_dir, mock_registry):
         """--all with a citizen class should trigger update_all."""
-        from aipass.spawn.apps.modules.update import handle_update
-
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
@@ -1028,6 +1113,37 @@ class TestHandleUpdate:
             result = handle_update(["specialist", "--all"])
 
         assert result == 0
+
+
+def _one_file_world(tmp_path, rel, template_text, existing_text):
+    """A template holding ONE file at *rel*, and a branch holding its own copy.
+
+    The branch gets a minimal passport when *rel* is not the passport, because
+    update reads its class first. Answers the registry to hand to update_branch
+    and the branch copy (fleet green leg 7: these tests used to call the private
+    _merge_json and _heal_passport; they now go through the public update).
+    """
+    (tmp_path / "template" / rel).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "template" / rel).write_text(template_text, encoding="utf-8")
+    dest = tmp_path / "test_branch" / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(existing_text, encoding="utf-8")
+    passport = tmp_path / "test_branch" / ".trinity" / "passport.json"
+    if not passport.exists():
+        passport.parent.mkdir(parents=True, exist_ok=True)
+        passport.write_text(json.dumps({"identity": {"citizen_class": "specialist"}}), encoding="utf-8")
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text(json.dumps({"branches": [{"name": "TEST_BRANCH", "path": "test_branch"}]}), encoding="utf-8")
+    return registry, dest
+
+
+def _update_verdict(tmp_path, registry, rel):
+    """Run the public update once; answer what it did to *rel*: updated, unchanged or error."""
+    with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=tmp_path / "template"):
+        result = update_branch("test_branch", dry_run=False, registry_path=registry)
+    if result["errors"]:
+        return "error"
+    return "updated" if rel in [d["branch_path"] for d in result["_updates_detail"]] else "unchanged"
 
 
 class TestPassportHealIsNotAMigration:
@@ -1058,14 +1174,11 @@ class TestPassportHealIsNotAMigration:
     }
 
     def _heal(self, tmp_path, template_passport, existing_passport):
-        from aipass.spawn.apps.handlers.update_ops import _heal_passport
-
-        template_file = tmp_path / "template_passport.json"
-        template_file.write_text(json.dumps(template_passport, indent=2), encoding="utf-8")
-        dest = tmp_path / "branch" / ".trinity" / "passport.json"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(existing_passport, indent=2) + "\n", encoding="utf-8")
-        result = _heal_passport(template_file, dest, {}, dry_run=False, trace=False)
+        rel = ".trinity/passport.json"
+        registry, dest = _one_file_world(
+            tmp_path, rel, json.dumps(template_passport, indent=2), json.dumps(existing_passport, indent=2) + "\n"
+        )
+        result = _update_verdict(tmp_path, registry, rel)
         return result, json.loads(dest.read_text(encoding="utf-8"))
 
     def test_a_schema_1_passport_gains_no_2_0_fields_and_no_bump(self, tmp_path):
@@ -1085,19 +1198,67 @@ class TestPassportHealIsNotAMigration:
         assert "citizenship" not in healed
         assert healed == self.SCHEMA_1_PASSPORT
 
-    def test_every_allowlisted_field_exists_in_both_schemas(self, tmp_path):
-        """The structural reason the test above passes — pinned so it stays the reason."""
-        from aipass.spawn.apps.handlers.update_ops import _PASSPORT_HEAL_ALLOWLIST
+    # A template carrying the three healable fields AND 2.0-only ones, so a heal
+    # that reached past the allowlist would show as an added path.
+    TEMPLATE_2_0 = {
+        "document_metadata": {"schema_version": "2.0.0", "version": "2.0.0"},
+        "branch_info": {"email": "@template", "git_branch": "dev"},
+        "citizenship": {"residency": "resident", "citizen_id": ""},
+        "identity": {"traits": ["templated"], "principles": ["Code is truth - fail honestly"]},
+    }
 
-        assert len(_PASSPORT_HEAL_ALLOWLIST) == 3, (
-            f"the heal allowlist holds {_PASSPORT_HEAL_ALLOWLIST} - an emptied one makes this test vacuous "
-            "while the heal above still passes"
-        )
-        for section, key in _PASSPORT_HEAL_ALLOWLIST:
-            assert key in self.SCHEMA_1_PASSPORT.get(section, {}), (
-                f"{section}.{key} is on the heal allowlist but a schema-1.0.0 passport has no such field — "
-                "healing it there would be a migration, and a migration must complete or refuse"
-            )
+    def _without(self, missing):
+        """SCHEMA_1_PASSPORT with each (section, key) in *missing* removed."""
+        return {
+            section: {k: v for k, v in body.items() if (section, k) not in missing} if isinstance(body, dict) else body
+            for section, body in self.SCHEMA_1_PASSPORT.items()
+        }
+
+    @staticmethod
+    def _paths(document):
+        """Every (section, key) a document holds; a non-dict top-level value is (section,)."""
+        paths = set()
+        for section, body in document.items():
+            if isinstance(body, dict):
+                paths.update((section, key) for key in body)
+            else:
+                paths.add((section,))
+        return paths
+
+    @pytest.mark.parametrize("field", [("branch_info", "email"), ("branch_info", "git_branch"), ("identity", "traits")])
+    def test_a_missing_allowlisted_field_is_healed_and_nothing_else(self, tmp_path, field):
+        """Each field the heal allowlist names is one a schema-1.0.0 passport has, and heals alone.
+
+        Pinned through update_branch, the door every user walks (devpulse's ruling,
+        fleet green leg 10), in place of reading the allowlist tuple. A field
+        dropped from the allowlist leaves its passport unchanged and this case red.
+        """
+        existing = self._without({field})
+
+        result, healed = self._heal(tmp_path, self.TEMPLATE_2_0, existing)
+
+        assert result == "updated"
+        section, key = field
+        assert healed[section][key] == self.TEMPLATE_2_0[section][key]
+        assert healed["document_metadata"]["schema_version"] == "1.0.0"
+        assert self._paths(healed) - self._paths(existing) == {field}
+
+    def test_the_heal_adds_exactly_the_three_allowlisted_fields(self, tmp_path):
+        """The floor: with all three missing, the heal adds those three paths and no other.
+
+        The template also carries 2.0-only fields (citizenship, identity.principles).
+        An allowlist that grew to one of them adds a 2.0-only path here - a half
+        migration of every 1.0 passport; one that shrank or emptied adds fewer.
+        Either way the set comparison is red.
+        """
+        three = {("branch_info", "email"), ("branch_info", "git_branch"), ("identity", "traits")}
+        existing = self._without(three)
+
+        result, healed = self._heal(tmp_path, self.TEMPLATE_2_0, existing)
+
+        assert result == "updated"
+        assert self._paths(healed) - self._paths(existing) == three
+        assert healed["document_metadata"]["schema_version"] == "1.0.0"
 
     def test_a_passport_written_with_escapes_is_left_alone(self, tmp_path):
         """An untouched document must not be rewritten because it is SPELLED differently.
@@ -1109,25 +1270,20 @@ class TestPassportHealIsNotAMigration:
         difference, zero fields). Comparing documents instead of text answers the
         question that was actually being asked.
         """
-        from aipass.spawn.apps.handlers.update_ops import _heal_passport
-
-        template_file = tmp_path / "template_passport.json"
-        template_file.write_text(
-            json.dumps({"branch_info": {"email": "@t", "git_branch": "dev"}, "identity": {"traits": []}}, indent=2),
-            encoding="utf-8",
-        )
+        rel = ".trinity/passport.json"
+        template = {"branch_info": {"email": "@t", "git_branch": "dev"}, "identity": {"traits": []}}
         existing = {
             "document_metadata": {"schema_version": "2.0.0"},
             "branch_info": {"email": "@legacy", "git_branch": "main"},
-            "identity": {"traits": ["Radical specificity — exact numbers"]},
+            "identity": {"citizen_class": "specialist", "traits": ["Radical specificity — exact numbers"]},
         }
-        dest = tmp_path / "branch" / ".trinity" / "passport.json"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(existing, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+        registry, dest = _one_file_world(
+            tmp_path, rel, json.dumps(template, indent=2), json.dumps(existing, indent=2, ensure_ascii=True) + "\n"
+        )
         before = dest.read_bytes()
         assert b"\\u2014" in before, "fixture must carry an escaped character for this to mean anything"
 
-        result = _heal_passport(template_file, dest, {}, dry_run=False, trace=False)
+        result = _update_verdict(tmp_path, registry, rel)
 
         assert result == "unchanged"
         assert dest.read_bytes() == before
@@ -1153,15 +1309,11 @@ class TestTemplateOwnedListsGrow:
         "ignore_patterns": ["__pycache__", "*.pyc"],
     }
 
-    def _merge(self, tmp_path, resolved_path, template_data, existing_data, name="file.json"):
-        from aipass.spawn.apps.handlers.update_ops import _merge_json
-
-        template_file = tmp_path / f"template_{name}"
-        template_file.write_text(json.dumps(template_data, indent=2), encoding="utf-8")
-        dest = tmp_path / "branch" / name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(existing_data, indent=2) + "\n", encoding="utf-8")
-        result = _merge_json(template_file, dest, {}, False, False, tmp_path / ".recovery", resolved_path)
+    def _merge(self, tmp_path, resolved_path, template_data, existing_data):
+        registry, dest = _one_file_world(
+            tmp_path, resolved_path, json.dumps(template_data, indent=2), json.dumps(existing_data, indent=2) + "\n"
+        )
+        result = _update_verdict(tmp_path, registry, resolved_path)
         return result, json.loads(dest.read_text(encoding="utf-8"))
 
     def test_a_declared_list_receives_the_templates_additions(self, tmp_path):
@@ -1184,16 +1336,13 @@ class TestTemplateOwnedListsGrow:
         assert len(merged["ignore_files"]) == len(set(merged["ignore_files"])), "no duplicates"
 
     def test_a_second_pass_changes_nothing(self, tmp_path):
-        from aipass.spawn.apps.handlers.update_ops import _merge_json
+        rel = ".spawn/.registry_ignore.json"
+        registry, _dest = _one_file_world(
+            tmp_path, rel, json.dumps(self.TEMPLATE_IGNORE, indent=2), json.dumps(self.BRANCH_IGNORE, indent=2) + "\n"
+        )
 
-        template_file = tmp_path / "template.json"
-        template_file.write_text(json.dumps(self.TEMPLATE_IGNORE, indent=2), encoding="utf-8")
-        dest = tmp_path / "branch" / ".registry_ignore.json"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(self.BRANCH_IGNORE, indent=2) + "\n", encoding="utf-8")
-
-        first = _merge_json(template_file, dest, {}, False, False, tmp_path / ".rec", ".spawn/.registry_ignore.json")
-        second = _merge_json(template_file, dest, {}, False, False, tmp_path / ".rec", ".spawn/.registry_ignore.json")
+        first = _update_verdict(tmp_path, registry, rel)
+        second = _update_verdict(tmp_path, registry, rel)
 
         assert (first, second) == ("updated", "unchanged")
 
@@ -1204,7 +1353,7 @@ class TestTemplateOwnedListsGrow:
         template = {"permissions": {"deny": ["Bash(rm -rf*)", "Bash(commit-ish*)"], "allow": []}}
         existing = {"permissions": {"deny": ["Bash(rm -rf*)"], "allow": ["Bash(ls*)"]}}
 
-        result, merged = self._merge(tmp_path, ".claude/settings.local.json", template, existing, "settings.json")
+        result, merged = self._merge(tmp_path, ".claude/settings.local.json", template, existing)
 
         assert result == "unchanged"
         assert merged["permissions"]["deny"] == ["Bash(rm -rf*)"]

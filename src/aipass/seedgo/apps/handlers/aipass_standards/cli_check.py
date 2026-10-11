@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_check.py
 # Description: CLI Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -236,6 +236,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "CLI check",
                     "passed": True,
                     "message": "File outside module/handler/entry architecture (skipped)",
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -341,6 +342,7 @@ def check_handler_separation(content: str) -> Dict:
 
     # Find code section boundaries (skip docstrings and comments)
     in_docstring = False
+    docstring_marker: Optional[str] = None
     console_print_lines = []
     cli_import_lines = []
     print_lines = []
@@ -367,18 +369,34 @@ def check_handler_separation(content: str) -> Dict:
         if in_main_block:
             continue
 
-        # Track docstrings (handle single-line docstrings correctly)
+        # Track docstrings, REMEMBERING WHICH MARKER OPENED THE BLOCK.
+        #
+        # A single boolean toggled by either marker is wrong inside a block: a
+        # `'''` written as prose inside a `\"\"\"` docstring closed it, and every
+        # line after it was read as code. Measured 2026-09-19 on this pack's own
+        # `imports_check.py`, whose docstring quotes both markers while
+        # explaining them - one prose line flipped the flag and the line
+        # `Allowed: from aipass.cli import ...` two lines later was reported as
+        # a real CLI import in a handler. Only the marker that opened a block
+        # can close it; the other is content.
         triple_double = line.count('"""')
         triple_single = line.count("'''")
-        # Odd count means we're entering/exiting a docstring
-        # Even count (e.g., """text""") means complete docstring on one line - no state change
+        if in_docstring:
+            closer = triple_double if docstring_marker == '"""' else triple_single
+            if closer % 2 == 1:
+                in_docstring = False
+                docstring_marker = None
+            continue
         if triple_double % 2 == 1:
-            in_docstring = not in_docstring
+            in_docstring = True
+            docstring_marker = '"""'
             continue
         if triple_single % 2 == 1:
-            in_docstring = not in_docstring
+            in_docstring = True
+            docstring_marker = "'''"
             continue
-        # If even count (0, 2, 4...), docstring is complete on this line - don't toggle, but skip it
+        # Even count (e.g. \"\"\"text\"\"\") is a complete docstring on one line:
+        # no state change, but the line is still not code.
         if triple_double >= 2 or triple_single >= 2:
             continue
 
@@ -440,7 +458,7 @@ def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
     Exception: CLI branch itself uses internal imports
     """
     # Exception: CLI branch uses internal imports (it's the implementation)
-    if "/cli/apps/" in module_path:
+    if "/cli/apps/" in module_path.replace("\\", "/"):
         return {"name": "CLI service imports", "passed": True, "message": "CLI branch exempt (uses internal imports)"}
 
     # Check for CLI imports (canonical, sub-module, or shortcut via cli/__init__.py)
@@ -679,11 +697,11 @@ def check_duplicate_display_functions(content: str, module_path: str = "") -> Op
     Exception: CLI branch itself defines these functions.
     """
     # Exception: CLI branch defines these functions
-    if "/cli/apps/" in module_path:
+    if "/cli/apps/" in module_path.replace("\\", "/"):
         return None
 
     # Exception: Prax logger IS the logging system — it defines these legitimately
-    if "/prax/apps/modules/logger" in module_path:
+    if "/prax/apps/modules/logger" in module_path.replace("\\", "/"):
         return None
 
     # Display functions that CLI service provides

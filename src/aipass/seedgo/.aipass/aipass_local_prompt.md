@@ -18,8 +18,12 @@ seedgo diagnostics                               # Pyright type errors (runs via
 seedgo proof aipass                              # Proof certification
 seedgo test_map @branch                          # Custom function test coverage
 seedgo test-inventory <path>                     # Every test function in a tree, ranked
+seedgo tests retired / restore <name>            # The retire lane — a logged move, never a delete
+seedgo bypass prune @branch [--dry-run]          # Remove bypass rules that match nothing; live/blank never
+seedgo tests template-status / template bump     # Test template v1: receipts vs gold (--confirm writes)
 seedgo shadow-cycle run                          # The three weekly v5 passes
 seedgo permissions / inbox_audit                 # Settings sweep / mailbox hygiene
+seedgo home-paths scan [<root>]                  # developer_home over the tracked tree — the CI gate, red exits 1
 seedgo readme update @branch                     # README auto-update
 ```
 
@@ -47,7 +51,7 @@ apps/
     ├── aipass_proof/            # Proof certification
     ├── audit/                   # branch_audit, discovery, audit_display, artifact, incremental_cache
     ├── audit_tests/             # The execution lane: refusal vocabulary, runner, render
-    ├── bypass/                  # bypass_handler, ignore_handler, inert
+    ├── bypass/                  # bypass_handler, ignore_handler, inert, dead_rules
     ├── cli/                     # help_flags
     ├── config/                  # Package marker only — no handlers today
     ├── diagnostics/             # discovery (standalone disabled, runs via audit pipeline)
@@ -55,7 +59,8 @@ apps/
     ├── readme/                  # readme_update handlers
     ├── shadow_cycle/            # Weekly v5 cadence: score, cycle
     ├── test_inventory/          # collection, exclusions
-    └── test_map/                # function_scanner
+    ├── test_map/                # function_scanner
+    └── tests_lane/              # retire_ops (the .backup move), template_ops (gold + receipts)
 ```
 
 Two lanes, and a finding can exist in one and not the other: the **audit** walks `apps/**/*.py` only (`tests/` is not in its corpus), while the PostToolUse **checklist** hook checks `tests/`. A pack declares its own corpus in `pack.json`; the banner over its scores is that declaration, not the engine's file count.
@@ -72,6 +77,8 @@ When branch raises standards issue (email, dispatch, user relaying):
 
 Before changing checker/standard: prove catches real case AND doesn't catch false positives. Rule: break first, see violation, then fix.
 
+Before reporting a leg, run the touched tests as a clean checkout too: `PYTHONPATH=docs.local python -m pytest <files> -p clean_checkout_probe` hides the git-ignored AIPASS_REGISTRY.json from this process only. A seat green with the marker present is not CI green.
+
 When fixing own compliance: eat own dogfood. Seedgo can't pass own audit → nothing else matters.
 
 ## Access
@@ -87,3 +94,4 @@ Seedgo + devpulse have **system-wide file access**. "No cross-branch edits" rule
 - `standard ruff` answers "Unknown standard": the audit shows `ruff` (file `ruff_check.py` minus `_check`), the query surface takes `ruff_check` (its content/md names). Two names, one checker
 - The tree above is the ONLY copy — README is the face, not the map, and is off the startup read (DPLAN-0347)
 - Depth is `docs/` (indexed from README): standards pack, v5 pack, startup budget, audit engine, checklist+hooks, proof+coverage, tech debt
+- `templates/` is the fleet's GOLD test template (owner 2026-09-20, DPLAN-0354): `templates.json` versions it, `test_template_v1.md` is the page, `readme_update_model.py` is the model. Never collected by pytest. A branch's receipt is its `tests/.template_version.json`; a test's BODY is never distributed

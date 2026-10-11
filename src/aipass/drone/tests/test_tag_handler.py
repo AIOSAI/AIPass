@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_tag_handler.py
 # Description: Tests for the tag handler — release tagging with safety guards
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-02
-# Modified: 2026-07-02
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the tag handler — release tagging with safety guards."""
+"""Tests for apps/handlers/git/tag_handler.py, reached through apps/modules/git_module.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — subprocess.run, which every git call here reaches as a recorded stub
 
 from __future__ import annotations
 
@@ -145,11 +148,16 @@ class TestTagFormatValidation:
         result = handle_command("tag", ["vfoo.bar.baz"])
         assert result["exit_code"] == 1
 
-    def test_accepts_valid_format(self, devpulse_dir: Path) -> None:
-        """Valid vX.Y.Z format succeeds end-to-end."""
-        with patch(_TAG_PATCH, side_effect=_mock_run_success):
-            result = handle_command("tag", ["v2.6.1"])
+    def test_accepts_multi_digit_parts(self, devpulse_dir: Path) -> None:
+        """Mutant: _VERSION_RE `^v\\d\\.\\d\\.\\d$` — a v10.20.30 release is refused as a bad format."""
+        overrides = {
+            ("git", "show", "origin/main:pyproject.toml"): _make_mock(stdout='version = "10.20.30"\n'),
+            ("git", "show", "origin/main:src/aipass/__init__.py"): _make_mock(stdout='__version__ = "10.20.30"\n'),
+        }
+        with patch(_TAG_PATCH, side_effect=_mock_run_with_overrides(overrides)):
+            result = handle_command("tag", ["v10.20.30"])
         assert result["exit_code"] == 0
+        assert "v10.20.30" in result["stdout"]
 
 
 # ===========================================================================
@@ -192,11 +200,16 @@ class TestTagVersionGuard:
         assert result["exit_code"] == 1
         assert "pyproject" in result["stderr"].lower()
 
-    def test_both_match_passes(self, devpulse_dir: Path) -> None:
-        """Matching versions pass the guard."""
-        with patch(_TAG_PATCH, side_effect=_mock_run_success):
+    def test_both_match_passes_however_the_assignment_is_spaced(self, devpulse_dir: Path) -> None:
+        """Mutant: the version regexes demand `version = ` with single spaces — an unspaced manifest is refused."""
+        overrides = {
+            ("git", "show", "origin/main:pyproject.toml"): _make_mock(stdout='[project]\nversion="2.6.1"\n'),
+            ("git", "show", "origin/main:src/aipass/__init__.py"): _make_mock(stdout='__version__  =  "2.6.1"\n'),
+        }
+        with patch(_TAG_PATCH, side_effect=_mock_run_with_overrides(overrides)):
             result = handle_command("tag", ["v2.6.1"])
         assert result["exit_code"] == 0
+        assert "v2.6.1" in result["stdout"]
 
 
 # ===========================================================================

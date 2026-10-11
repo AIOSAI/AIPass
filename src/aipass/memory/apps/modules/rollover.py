@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover.py
 # Description: Rollover Orchestration Module
-# Version: 0.10.0
+# Version: 0.10.1
 # Created: 2025-11-16
-# Modified: 2026-09-18
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -521,7 +521,8 @@ def run_rollover(branch: str | None = None) -> bool:
 
             refresh_all_tabs(branches=rolled)
         except Exception as e:
-            logger.warning(f"[rollover] Tab refresh failed: {e}")
+            # The rollover landed, so the run stands; a failed refresh is a fault, not a degradation (leg 4).
+            logger.error(f"[rollover] Tab refresh failed: {e}")
 
         _normalize_rolled(rolled)
 

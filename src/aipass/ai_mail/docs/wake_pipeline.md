@@ -30,7 +30,7 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
      `is_manager(sender)` up front rather than guessing.
      Wake-back sessions carry an empty sender, so chains terminate at the
      original dispatcher, and `AIPASS_WAKE_DEPTH` caps the chain at
-     `MAX_WAKE_DEPTH = 3` regardless. `_wake_sender()` returns one of nine
+     `MAX_WAKE_DEPTH = 3` regardless. `wake_sender()` returns one of nine
      result tags into `dispatch_wake.log` — `success`, `mailed_manager`,
      `failed_manager_mail`, `blocked_occupied`, `blocked_locked`,
      `blocked_depth`, `skipped_sender`, `skipped_self`, `failed` — so "notified"

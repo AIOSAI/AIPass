@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: permission_flags_check.py
 # Description: Permission Flags Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -29,6 +29,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: a test that chmods 0o777 leaves the same hole.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 
@@ -116,7 +118,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return {
             "passed": True,
             "checks": [
-                {"name": "Permission flags check", "passed": True, "message": "No permission flags found (skipped)"}
+                {
+                    "name": "Permission flags check",
+                    "passed": True,
+                    "message": "No permission flags found (skipped)",
+                    "declined": True,
+                }
             ],
             "score": 100,
             "standard": "PERMISSION_FLAGS",

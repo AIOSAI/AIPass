@@ -81,7 +81,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/rooms?project=` | read | A filter over that same snapshot — never a room judgment of its own |
 | `GET /v1/projects` | read | @baud's project census — the switcher menu's rows, unchanged |
 | `GET /v1/roster` | read | Every working agent in **every** project. Takes no parameters — any is a 400, never a silent drop |
-| `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and eight sections (cpu, load, memory, swap, temp, fan, network, processes), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache — the first read after a server start shows cpu and network `warming`. An absent reading is a **200** with the skill's section, never a zero; **503** only when the skill refused (`psutil_missing`, `switched_off`: the code in `error.reason`, its detail as the message) or its door failed (`machine_door_failed`). Takes no parameters — any is a 400 |
+| `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and eight sections (cpu, load, memory, swap, temp, fan, network, processes), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache — the first read after a server start shows cpu and network `warming`. An absent reading is a **200** with the skill's section, never a zero; **503** only when the skill refused (`psutil_missing`, `switched_off`: the code in `error.reason`, its detail in this host's log) or its door failed (`machine_door_failed`). Takes no parameters — any is a 400 |
 | `GET /v1/lock` | read | @skills' `lock_state()`, **verbatim**: `ok`, `locked`, `method`, `session`, `reason`, `detail`. 1 s single-flight cache. Cannot tell (`ok: false`, `locked: null`, the skill's code and sentence) is a **200** — the phone draws it unknown, never unlocked; **503** `lock_door_failed` only when the door raised or broke its shape (a boolean `ok`, a `locked` key, the two agreeing). Takes no parameters — any is a 400. Locking stays `POST /v1/verbs/lock`, operate scope |
 | `GET /v1/memory-config?branch=` | read | @memory's limits. No branch = the fleet view; a branch = that one |
 | `POST /v1/memory-config/set` | operate | `{branch, type, count}` — one branch's override. 1–100 |
@@ -107,6 +107,12 @@ mechanism was never reached — seam missing, door unreachable — that is a sta
 code, not an `ok`. A wake refused by @ai_mail's blocklist is `200 {ok: false}`;
 a kill whose seam does not exist is 503.
 
+**An exception's words never reach the client.** They can carry a host path,
+another program's stderr or another branch's JSON, so a denial caused by a caught
+exception answers `{code, message, ref}`: the code's fixed sentence from
+`denials.py`, and a `ref` that names the host-log line holding the words and the
+traceback (CodeQL `py/stack-trace-exposure`, PR #774). Branch on `code`, read the log by `ref`.
+
 **The memory-config lane reads a document, not a screen.** It shipped scraping
 @memory's rendered text, because their config verbs had no machine surface — the
 most fragile handler in this branch, where a heading they reworded was a field it
@@ -131,9 +137,8 @@ tell. After a write that is the honest answer, and a `200` would be a guess abou
 the owner's configuration.
 
 **A refusal has one shape on this lane, wherever it was decided:** `400
-memory_config_refused`, their sentence in `message`, their remedy line in
-`suggestion` (present and `null` where there is none), their whole payload in
-`raw`. It shipped with two — an argument this server rejected before routing was
+memory_config_refused`, the code's fixed sentence and a `ref`; their sentence,
+remedy line and whole payload go to this host's log under that ref. It shipped with two — an argument this server rejected before routing was
 a 400, while a refusal @memory *spoke* came back `200 {ok: false}` — so a client
 had to check the status code **and** a flag to learn one fact. @baud found it
 reading the handler, devpulse confirmed it on the wire, and both now answer

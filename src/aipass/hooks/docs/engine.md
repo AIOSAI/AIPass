@@ -2,30 +2,55 @@
 
 # The engine
 
-**Branch** hooks · **Code** `apps/modules/engine.py`, `apps/handlers/config/output_merge.py`, `apps/handlers/module_root.py`
+**Branch** hooks · **Code** `apps/modules/engine.py`, `apps/modules/promote.py`, `apps/handlers/bridges/mount.py`, `apps/handlers/config/gates.py`, `apps/handlers/config/output_merge.py`, `apps/handlers/module_root.py`
 
-The dispatch path from a normalized event to a handler, how the stdouts become one document, and why every module in this branch must import in a process whose working directory is gone.
+The dispatch path from a normalized event to a handler, how a source edit becomes live code, why a broken gate refuses while a broken injector is skipped, how the stdouts become one document, and why every module in this branch must import in a process whose working directory is gone.
 
 ---
 
 ## How It Works
 
 1. Provider settings invoke the bridge one of two ways: `claude.py <Event>` (one fan-out entry, all enabled handlers — tool events) or `claude.py <Event>:<hook_name>` (one entry per handler — UserPromptSubmit, PreCompact, SessionStart). There is no bare `claude.py UserPromptSubmit` entry; it is 13 named ones.
-2. Bridge normalizes stdin, loads project config via `loader.find_project_config()`
-3. Bridge calls `engine.dispatch(event_type, stdin_data, config)`
+2. The bridge loads `handlers/bridges/mount.py` by path, which serves the promoted copy (below) as `aipass.hooks.apps`, then calls `engine.run_event(arg, stdin)`
+3. `run_event` resolves the config with `loader.resolve_config()` (see [project_config.md](project_config.md) — never "no hooks") and calls `engine.dispatch(event_type, stdin_data, config)`
 4. Engine runs matching hooks sequentially, logs each to JSONL
 5. First hook returning `{"decision": "block"}` with exit code 2 = bail (block the action)
-6. Exit code 2 without JSON = crash (log error, continue to next hook)
+6. A hook that fails to import, raises, times out, or exits 2 without JSON: a fail-closed gate is answered with a BLOCK (Gates Fail Closed, below); an injector is logged and skipped, and the next hook runs
 7. Hook stdouts returned to the platform as ONE document (`handlers/config/output_merge.py`). Claude Code parses a hook's stdout as a single document: two JSON objects on two lines are a non-blocking hook error and NEITHER is applied. So:
    - a single output passes through untouched, and plain-only outputs are newline-joined as before;
    - once any handler answers in JSON, the answer is one object: `additionalContext` joined in handler order by a blank line, `systemMessage` joined by a newline, other keys first-handler-wins (a conflict is logged);
    - the merged context stays within Claude Code's 10,000 UTF-16-unit display limit. The post-compact re-ground is placed first, and a context that would cross the limit is dropped with a WARNING naming it — never silently.
 
+## Promote — source edits are not live until promoted
+
+Every hook process runs the PROMOTED copy of `apps/`, never the tree being edited, so a half-edited source file cannot crash a live gate. `drone @hooks promote` (`apps/modules/promote.py`) makes a copy live:
+
+1. ruff `F821,F823,E9` (undefined names, syntax) over `apps/`
+2. every source file compiles (`compileall`)
+3. the branch's full suite passes, run against the source
+4. `apps/` is copied to `<branch>/.live-<stamp>/`
+5. the real bridge is smoke-tested against the copy: a raw `rm` must be refused and a Read allowed
+6. `<branch>/.live-current` is rewritten atomically to name the copy
+
+Any failed check refuses and leaves the live copy untouched. The newest 3 copies are kept. `drone @hooks promote status` shows which copy every hook process is running. The bridges (`claude.py`, `codex.py`) run from the source tree and hold nothing but argv, stdin, the mount and the `run_event` call; with no `.live-current` (a fresh clone) the source tree serves.
+
+The workflow: edit -> test -> `drone @hooks promote`.
+
+## Gates Fail Closed
+
+`apps/handlers/config/gates.py` says, in code and never in config, which hooks are gates and how each fails:
+
+- `FAIL_CLOSED`: `edit_gate.handle`, `git_gate.handle`, `rm_gate.handle`, `testwrite_gate.handle`, `registry_gate.handle`, `edit_gate.tripwire_snapshot`, `edit_gate.tripwire`. When one fails to import, raises, times out, or exits 2 without a decision, the engine (`_gate_failure`, `_refuse_broken_gate`) answers with a BLOCK carrying the `BROKEN_GATE` text and logs `GATE BROKEN` at ERROR, the line @trigger escalates.
+- `FAIL_OPEN`, each with its reason: `presence_gate` (a broken one would refuse every prompt, including the one that fixes it) and `subagent_gate` (a block at SubagentStop would trap the sub-agent in a loop).
+- Everything else is an injector (prompt, lifecycle, notification handlers): a crash is logged and skipped, and one broken injector never blocks the rest.
+
+Each fail-closed gate also refuses the call it guards when it crashes internally (its own `GATE_CRASHED` text). One layer up, the bridge refuses a PreToolUse call when the engine cannot load at all (block JSON and exit 2; Codex: a deny envelope); every other event exits 0 with the reason on stderr.
+
 ## Dynamic Dispatch
 
 Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including seedgo's dead_code checker) cannot see that they are used — the last unshielded run scored `dead_code` at 40% and reported 29 of 49 files unreferenced, which is this indirection and not rot. That measurement is historic and not re-verified here: `apps/` now carries 59 live non-`__init__` files (61 on disk, two parked as `(disabled)`), and re-running unshielded needs a bypass-rule change this branch does not make for a doc pass. Shielded, `dead_code` audits 100%.
 
-Every handler is verified wired in `hooks.json` (32 entries, 31 distinct names — `auto_process` is the one name wired twice, on UserPromptSubmit and PreCompact). **30 of the 32 are `enabled: true`** as of 2026-09-07: `feedback_pulse` is off by choice in this repo, and `auto_watchdog` was flipped off when it was retired (FPLAN-0495 item 3). Editing `.aipass/hooks.json` breaks its enrolled hash, which disables EVERY hook for the project until a human re-enrolls with `aipass trust <repo-root>` — that checkpoint is deliberate, it does not auto-heal, and it is outstanding right now. Firing evidence is a *narrow* window — `logs/engine.jsonl` rotates at `JSONL_MAX_BYTES = 500_000` keeping one `.1` backup (prax `jsonl_writer.py`), so it holds minutes to tens of minutes of live traffic and absence from it is **not** evidence of a dead wire. Measured 2026-09-05 over a 4.3-minute window: **27 of the 31 names appear**. The four absentees are the three PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and `cadence_reset` — PreCompact did not fire in the window and SessionStart fired before it opened. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
+Every handler is verified wired in `hooks.json` (32 entries, 31 distinct names — `auto_process` is the one name wired twice, on UserPromptSubmit and PreCompact). **30 of the 32 are `enabled: true`** as of 2026-09-07: `feedback_pulse` is off by choice in this repo, and `auto_watchdog` was flipped off when it was retired (FPLAN-0495 item 3). The AIPass root `.aipass/hooks.json` is read with no trust check (since DPLAN-0356), so editing it changes what fires and never turns the hooks off; it is a protected file, written by the admin seat alone. Firing evidence is a *narrow* window — `logs/engine.jsonl` rotates at `JSONL_MAX_BYTES = 500_000` keeping one `.1` backup (prax `jsonl_writer.py`), so it holds minutes to tens of minutes of live traffic and absence from it is **not** evidence of a dead wire. Measured 2026-09-05 over a 4.3-minute window: **27 of the 31 names appear**. The four absentees are the three PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and `cadence_reset` — PreCompact did not fire in the window and SessionStart fired before it opened. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
 
 ## Importing Without a Working Directory
 

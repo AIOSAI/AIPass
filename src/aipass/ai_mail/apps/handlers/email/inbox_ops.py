@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_ops.py
 # Description: Inbox Operations Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -130,9 +130,9 @@ def load_inbox(inbox_file: Path) -> Dict:
             migrated = True
 
         try:
-            from aipass.ai_mail.apps.handlers.email.inbox_cleanup import _sweep_closed
+            from aipass.ai_mail.apps.handlers.email.inbox_cleanup import sweep_closed
 
-            swept = _sweep_closed(inbox_data, inbox_file.parent)
+            swept = sweep_closed(inbox_data, inbox_file.parent)
             if swept > 0:
                 migrated = True
         except Exception as e:

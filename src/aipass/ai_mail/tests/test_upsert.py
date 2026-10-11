@@ -1,22 +1,24 @@
 # =================== AIPass ====================
 # Name: test_upsert.py
 # Description: Tests for upsert_key delivery (repeat-signal collapsing)
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-08-10
-# Modified: 2026-08-10
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for upsert_key delivery.
+"""Tests for apps/handlers/email/delivery.py's upsert_key handling."""
 
-A repeating signal must occupy ONE inbox slot with a climbing counter, never
-a stack of identical messages. The rules under test:
+# A repeating signal must occupy ONE inbox slot with a climbing counter, never
+# a stack of identical messages. The rules under test:
+#
+# - match (same sender + same key + not closed) rewrites in place
+# - no match creates a normal new message at updates: 1
+# - a closed predecessor does NOT match — closing re-arms the signature
+# - an in-place update never wakes and never flips read status back to new
+# - upsert_key=None is byte-for-byte today's behavior
 
-- match (same sender + same key + not closed) rewrites in place
-- no match creates a normal new message at updates: 1
-- a closed predecessor does NOT match — closing re-arms the signature
-- an in-place update never wakes and never flips read status back to new
-- upsert_key=None is byte-for-byte today's behavior
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — _auto_register_contact()'s broad except Exception around contact registration
 
 import json
 import pytest
@@ -26,12 +28,7 @@ from unittest.mock import patch
 
 import aipass.ai_mail.apps.handlers.email.delivery as delivery_mod
 import aipass.ai_mail.apps.handlers.email.format as format_mod
-from aipass.ai_mail.apps.handlers.email.delivery import (
-    _apply_upsert_update,
-    _coerce_updates,
-    _find_upsert_target,
-    deliver_email_to_branch,
-)
+from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 from aipass.ai_mail.apps.handlers.email.send import send_to_single
 from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args
 
@@ -128,99 +125,124 @@ def _deliver(branches, email_data, **kwargs):
         return deliver_email_to_branch("@target", email_data, **kwargs)
 
 
-# ---- _coerce_updates() ---------------------------------------
+def _upsert_onto(tmp_path, seeded: list, **email) -> list:
+    """Deliver an upsert_key="disk" send onto an inbox holding `seeded`; the messages as they land.
+
+    The match, the rewrite and the counter are reached through the delivery,
+    not called (ai_mail, leg 14).
+    """
+    branches = _setup_branch(tmp_path)
+    inbox_file = Path(branches[0]["path"]) / ".ai_mail.local" / "inbox.json"
+    seeded_inbox = {"mailbox": "inbox", "total_messages": len(seeded), "unread_count": 0, "messages": seeded}
+    inbox_file.write_text(json.dumps(seeded_inbox), encoding="utf-8")
+    success, msg = _deliver(branches, _make_email_data(**email), upsert_key="disk")
+    assert success is True, msg
+    return _read_inbox(branches)["messages"]
 
 
-def test_coerce_updates_reads_int():
-    """A normal stored counter reads back unchanged."""
-    assert _coerce_updates(4) == 4
+def _counter_after(tmp_path, stored) -> object:
+    """The counter a matched message carries after one more send, from `stored`."""
+    seeded = [{"id": "aa", "from": "@trigger", "upsert_key": "disk", "status": "new", "updates": stored}]
+    return _upsert_onto(tmp_path, seeded)[0]["updates"]
 
 
-def test_coerce_updates_floors_at_one():
+# ---- the stored counter, read on a match -----------------------
+
+
+def test_coerce_updates_reads_int(tmp_path, repo_root, noop_inbox_lock):
+    """A normal stored counter reads back unchanged, then climbs by one."""
+    assert _counter_after(tmp_path, 4) == 5
+
+
+@pytest.mark.parametrize("stored", [0, -3])
+def test_coerce_updates_floors_at_one(tmp_path, repo_root, noop_inbox_lock, stored):
     """Zero or negative counters floor to 1 — a message exists, so it fired at least once."""
-    assert _coerce_updates(0) == 1
-    assert _coerce_updates(-3) == 1
+    assert _counter_after(tmp_path, stored) == 2
 
 
-def test_coerce_updates_survives_garbage():
+@pytest.mark.parametrize("stored", [None, "lots", {}])
+def test_coerce_updates_survives_garbage(tmp_path, repo_root, noop_inbox_lock, stored):
     """A hand-edited or missing counter must not crash a delivery."""
-    assert _coerce_updates(None) == 1
-    assert _coerce_updates("lots") == 1
-    assert _coerce_updates({}) == 1
+    assert _counter_after(tmp_path, stored) == 2
 
 
-def test_coerce_updates_accepts_numeric_string():
+def test_coerce_updates_accepts_numeric_string(tmp_path, repo_root, noop_inbox_lock):
     """A counter that round-tripped through a string still counts."""
-    assert _coerce_updates("7") == 7
+    assert _counter_after(tmp_path, "7") == 8
 
 
 # ---- _find_upsert_target() -----------------------------------
 
 
-def test_find_upsert_target_matches_sender_and_key():
-    """Match requires same key AND same sender AND not closed."""
-    messages = [{"id": "aa", "from": "@trigger", "upsert_key": "disk", "status": "new"}]
-    match = _find_upsert_target(messages, "@trigger", "disk")
-    assert match is not None
-    assert match["id"] == "aa"
+def test_find_upsert_target_matches_sender_and_key(tmp_path, repo_root, noop_inbox_lock):
+    """Match requires same key AND same sender AND not closed: the send lands in place."""
+    seeded = [{"id": "aa", "from": "@trigger", "upsert_key": "disk", "status": "new"}]
+    messages = _upsert_onto(tmp_path, seeded)
+    assert [m["id"] for m in messages] == ["aa"]
+    assert messages[0]["updates"] == 2
 
 
-def test_find_upsert_target_ignores_other_sender():
-    """Same key from a different sender is a different signal."""
-    messages = [{"id": "aa", "from": "@other", "upsert_key": "disk", "status": "new"}]
-    assert _find_upsert_target(messages, "@trigger", "disk") is None
+@pytest.mark.parametrize(
+    "seeded",
+    [
+        pytest.param({"id": "aa", "from": "@other", "upsert_key": "disk", "status": "new"}, id="other-sender"),
+        pytest.param({"id": "aa", "from": "@trigger", "upsert_key": "cpu", "status": "new"}, id="other-key"),
+        pytest.param({"id": "aa", "from": "@trigger", "status": "new"}, id="keyless"),
+    ],
+)
+def test_find_upsert_target_ignores_a_different_signal(tmp_path, repo_root, noop_inbox_lock, seeded):
+    """Same key from another sender, another key, or no key at all: a new message, the old one untouched."""
+    messages = _upsert_onto(tmp_path, [dict(seeded)])
+    assert len(messages) == 2
+    assert messages[0]["id"] != "aa"
+    assert messages[0]["updates"] == 1
+    assert messages[1] == seeded
 
 
-def test_find_upsert_target_ignores_other_key():
-    """Different signature, different message."""
-    messages = [{"id": "aa", "from": "@trigger", "upsert_key": "cpu", "status": "new"}]
-    assert _find_upsert_target(messages, "@trigger", "disk") is None
-
-
-def test_find_upsert_target_ignores_closed():
+def test_find_upsert_target_ignores_closed(tmp_path, repo_root, noop_inbox_lock):
     """A closed message is spent — it must not absorb the next send."""
-    messages = [{"id": "aa", "from": "@trigger", "upsert_key": "disk", "status": "closed"}]
-    assert _find_upsert_target(messages, "@trigger", "disk") is None
+    seeded = [{"id": "aa", "from": "@trigger", "upsert_key": "disk", "status": "closed"}]
+    messages = _upsert_onto(tmp_path, seeded)
+    assert messages[0]["id"] != "aa"
+    assert messages[0]["updates"] == 1
 
 
-def test_find_upsert_target_ignores_keyless_messages():
-    """Ordinary mail carries no key and can never be matched into."""
-    messages = [{"id": "aa", "from": "@trigger", "status": "new"}]
-    assert _find_upsert_target(messages, "@trigger", "disk") is None
-
-
-def test_find_upsert_target_returns_newest_open_match():
+def test_find_upsert_target_returns_newest_open_match(tmp_path, repo_root, noop_inbox_lock):
     """Messages are newest-first, so the first hit is the most recent one."""
-    messages = [
+    seeded = [
         {"id": "new", "from": "@trigger", "upsert_key": "disk", "status": "opened"},
         {"id": "old", "from": "@trigger", "upsert_key": "disk", "status": "new"},
     ]
-    match = _find_upsert_target(messages, "@trigger", "disk")
-    assert match is not None
-    assert match["id"] == "new"
+    messages = _upsert_onto(tmp_path, [dict(m) for m in seeded])
+    assert [m["id"] for m in messages] == ["new", "old"]
+    assert messages[0]["updates"] == 2
+    assert messages[1] == seeded[1]
 
 
 # ---- _apply_upsert_update() ----------------------------------
 
 
-def test_apply_upsert_update_preserves_identity_and_status():
+def test_apply_upsert_update_preserves_identity_and_status(tmp_path, repo_root, noop_inbox_lock):
     """The rewrite keeps id, original timestamp and read status."""
-    existing = {
+    seeded = {
         "id": "abc12345",
+        "from": "@trigger",
+        "upsert_key": "disk",
         "timestamp": "2026-08-10T10:00:00Z",
         "subject": "old",
         "message": "old body",
         "status": "opened",
         "updates": 1,
     }
-    _apply_upsert_update(existing, _make_email_data(subject="new", message="new body"))
+    sent_at = "2026-08-10T12:00:00Z"
+    [existing] = _upsert_onto(tmp_path, [seeded], subject="new", message="new body", timestamp=sent_at)
 
     assert existing["id"] == "abc12345"
     assert existing["status"] == "opened"
-    assert existing["timestamp"] == "2026-08-10T10:00:00Z"
+    assert existing["timestamp"] == seeded["timestamp"]
     assert existing["subject"] == "new"
     assert existing["message"] == "new body"
-    assert existing["last_updated"] == "2026-08-10T12:00:00Z"
+    assert existing["last_updated"] == sent_at
     assert existing["updates"] == 2
 
 
@@ -578,8 +600,8 @@ def test_parse_send_args_defaults_upsert_key_to_none():
     assert parse_send_args(["@target", "Subject", "Body"])["upsert_key"] is None
 
 
-def test_send_to_single_forwards_upsert_key():
-    """The mid-layer hands the key to delivery on email_data."""
+def test_send_to_single_forwards_upsert_key(recorded_bus):
+    """The mid-layer hands the key to delivery on email_data; the bus event stays keyless."""
     captured = {}
 
     def _fake_deliver(to_branch, email_data, on_delivered=None):
@@ -608,10 +630,11 @@ def test_send_to_single_forwards_upsert_key():
     assert ok is True
     assert err is None
     assert captured["upsert_key"] == "warn:disk"
+    assert recorded_bus.fires == [("email_sent", {"to": "@target", "subject": "Subject", "auto_execute": False})]
 
 
-def test_send_to_single_without_key_sends_nothing_extra():
-    """Default None leaves the payload exactly as it is today."""
+def test_send_to_single_without_key_sends_nothing_extra(recorded_bus):
+    """Default None leaves the payload, and the email_sent fire, exactly as they are today."""
     captured = {}
 
     def _fake_deliver(to_branch, email_data, on_delivered=None):
@@ -636,3 +659,4 @@ def test_send_to_single_without_key_sends_nothing_extra():
     )
 
     assert "upsert_key" not in captured
+    assert recorded_bus.fires == [("email_sent", {"to": "@target", "subject": "Subject", "auto_execute": False})]

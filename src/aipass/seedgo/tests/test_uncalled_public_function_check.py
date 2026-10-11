@@ -1,0 +1,344 @@
+# =================== META ====================
+# Name: test_uncalled_public_function_check.py
+# Description: uncalled_public_function_check — crack class O, a subject's untested export
+# Version: 1.2.0
+# Created: 2026-09-22
+# Modified: 2026-10-10
+# =============================================
+
+"""Tests for apps/handlers/aipass_standards/uncalled_public_function_check.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
+# seedgo: no-test-needed(shared) — applies_to_file's production/tests split; tests/test_applicability.py
+# seedgo: no-test-needed(constant) — the prose of CURE; the function, line and shape are asserted
+
+from pathlib import Path
+
+import pytest
+
+from aipass.seedgo.apps.handlers.aipass_standards import uncalled_public_function_check
+
+#: A subject module with one public export and one private helper.
+SUBJECT = "def discover():\n    return []\ndef _hidden():\n    return 1\n"
+
+#: The parse warning's text on every Python we support. Its CATEGORY is not:
+#: DeprecationWarning before 3.12, SyntaxWarning after (PR #774, CI 3.10 and 3.11).
+INVALID_ESCAPE = "invalid escape sequence"
+
+#: The docstring line that makes a test file declare what it tests — template item 6.
+DECLARES = '"""Tests for apps/modules/thing.py."""\n'
+
+
+def _branch(tmp_path, subject=SUBJECT, tests=DECLARES, extra=None):
+    """A branch root with a subject module under apps/ and a tests/ tree."""
+    modules = tmp_path / "apps" / "modules"
+    modules.mkdir(parents=True, exist_ok=True)
+    (modules / "thing.py").write_text(subject, encoding="utf-8")
+    if extra:
+        for name, source in extra.items():
+            (modules / name).write_text(source, encoding="utf-8")
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir(exist_ok=True)
+    (tests_dir / "test_thing.py").write_text(tests, encoding="utf-8")
+    return tmp_path
+
+
+def _names(tmp_path, tests, subject=SUBJECT, extra=None):
+    """Just the convicted function names."""
+    findings, _acquitted = uncalled_public_function_check.scan(_branch(tmp_path, subject, tests, extra))
+    return [name for _path, _line, name, _shape in findings]
+
+
+def _shapes(tmp_path, tests, subject=SUBJECT):
+    """Just the shapes, in line order — O1 or O2."""
+    findings, _acquitted = uncalled_public_function_check.scan(_branch(tmp_path, subject, tests))
+    return [shape for _path, _line, _name, shape in findings]
+
+
+class TestThePlantedSpecimens:
+    """One specimen per shape, both taken from @backup."""
+
+    def test_o1_a_function_named_only_as_a_patch_target(self, tmp_path):
+        """apps/backup.py:125 discover_modules — four sites replace it, none runs it."""
+        tests = (
+            DECLARES + "def test_it():\n    with patch.object(entry, 'discover', return_value=[]):\n        main()\n"
+        )
+        assert _names(tmp_path, tests) == ["discover"]
+        assert _shapes(tmp_path, tests) == [uncalled_public_function_check.REPLACED]
+
+    def test_o2_a_function_no_test_names_at_all(self, tmp_path):
+        """result.py:50 new_result — defined once, referenced nowhere."""
+        assert _names(tmp_path, DECLARES) == ["discover"]
+        assert _shapes(tmp_path, DECLARES) == [uncalled_public_function_check.UNREACHED]
+
+    def test_the_finding_names_the_function_and_its_line(self, tmp_path):
+        """A finding that does not say where to look is a chore, not a cure."""
+        findings, _acquitted = uncalled_public_function_check.scan(_branch(tmp_path))
+        path, line, name, _shape = findings[0]
+        assert (path.name, line, name) == ("thing.py", 1, "discover")
+
+
+class TestWhatCountsAsCalled:
+    """Named in a Call, or an attribute access that is then called."""
+
+    def test_a_direct_call_acquits(self, tmp_path):
+        """The plain case."""
+        assert _names(tmp_path, DECLARES + "def test_it():\n    discover()\n") == []
+
+    def test_an_attribute_call_acquits(self, tmp_path):
+        """test_caller_path.py:86 calls share_mod.run_share(file_arg) for real."""
+        assert _names(tmp_path, DECLARES + "def test_it():\n    thing_mod.discover()\n") == []
+
+    def test_reaching_it_through_the_product_acquits(self, tmp_path):
+        """route_command and every print_introspection are acquitted this way."""
+        subject = "def run():\n    return discover()\ndef discover():\n    return []\n"
+        assert _names(tmp_path, DECLARES + "def test_it():\n    run()\n", subject=subject) == []
+
+    def test_the_reachability_guard_is_transitive(self, tmp_path):
+        """A fixed point, not one hop: main() -> route_command() -> print_introspection()."""
+        subject = (
+            "def run():\n    return middle()\ndef middle():\n    return discover()\ndef discover():\n    return []\n"
+        )
+        assert _names(tmp_path, DECLARES + "def test_it():\n    run()\n", subject=subject) == []
+
+    def test_a_patched_function_also_named_elsewhere_is_reported_not_scored(self, tmp_path):
+        """Named ONLY as a patch target is the rule; named twice is not that."""
+        tests = DECLARES + "def test_it():\n    patch.object(entry, 'discover')\n    assert discover.__doc__\n"
+        assert _names(tmp_path, tests) == []
+
+
+class TestReplacedInOneTestRunInAnother:
+    """O1 is "never run": a test that runs it unpatched acquits it (seedgo, fleet green leg 10)."""
+
+    SUBJECT = "def run():\n    return discover()\ndef discover():\n    return []\n"
+    FIXTURE = "@pytest.fixture\ndef stub(monkeypatch):\n    monkeypatch.setattr(entry, 'discover', list)\n"
+
+    def test_a_test_with_no_stub_runs_the_real_function(self, tmp_path):
+        """cli's print_introspection test runs discover_modules; stub_module replaces it elsewhere.
+
+        Red first: the patch in one test convicted it as O1 for the whole suite.
+        """
+        tests = DECLARES + self.FIXTURE + "def test_stubbed(stub):\n    run()\ndef test_real():\n    run()\n"
+        assert _names(tmp_path, tests, subject=self.SUBJECT) == []
+
+    def test_a_call_through_an_import_alias_runs_it(self, tmp_path):
+        """devpulse's seat_email calls guard.owner_address as _owner_address."""
+        seat = "from apps.modules.thing import discover as _discover\ndef seat():\n    return _discover()\n"
+        tests = DECLARES + "def test_patched():\n    patch.object(guard, 'discover')\ndef test_seat():\n    seat()\n"
+        assert _names(tmp_path, tests, extra={"seat.py": seat}) == []
+
+    @pytest.mark.parametrize(
+        "replacer",
+        [
+            "def test_stubbed(stub):\n    run()\n",
+            "@patch('apps.modules.thing.discover')\ndef test_stubbed(fake):\n    run()\n",
+            "@patch('apps.modules.thing.discover')\nclass TestIt:\n    def test_stubbed(self, fake):\n        run()\n",
+            "@pytest.fixture(autouse=True)\ndef always(monkeypatch):\n"
+            "    monkeypatch.setattr(entry, 'discover', list)\ndef test_plain():\n    run()\n",
+        ],
+    )
+    def test_every_test_that_reaches_it_replaces_it_is_still_o1(self, tmp_path, replacer):
+        """The control: a fixture, a decorator, a class decorator and an autouse fixture each replace it."""
+        tests = DECLARES + self.FIXTURE + replacer
+        assert _shapes(tmp_path, tests, subject=self.SUBJECT) == [uncalled_public_function_check.REPLACED]
+
+
+class TestTheSubjectLine:
+    """No subject, no verdict — 492 of the fleet's 561 test files say nothing."""
+
+    def test_a_file_with_no_subject_path_judges_nothing(self, tmp_path):
+        """The rule cannot judge a file that never says what it tests."""
+        assert _names(tmp_path, '"""Tests for the thing."""\n') == []
+
+    def test_a_docstring_naming_two_modules_declares_both(self, tmp_path):
+        """findall, not search: taking the first mis-attributes the second."""
+        declares = '"""Tests for apps/modules/thing.py and apps/modules/other.py."""\n'
+        extra = {"other.py": "def orphan():\n    return 1\n"}
+        assert sorted(_names(tmp_path, declares, extra=extra)) == ["discover", "orphan"]
+
+    def test_a_subject_path_that_does_not_exist_is_skipped(self, tmp_path):
+        """A stale docstring path is file_top's finding, not a function verdict."""
+        assert _names(tmp_path, '"""Tests for apps/modules/gone.py."""\n') == []
+
+    def test_a_private_function_is_never_judged(self, tmp_path):
+        """The subject of the rule is the module's exported surface."""
+        assert "_hidden" not in _names(tmp_path, DECLARES)
+
+
+class TestArchivedCodeIsNotProduct:
+    """The product graph skips SOURCE_SKIP_DIRS: trigger's .archive fed it (seedgo, leg 148dd7c5)."""
+
+    ARCHIVED_CALLER = "def run():\n    return discover()\n"
+
+    def _archive(self, branch, source):
+        archive = branch / "apps" / "modules" / ".archive"
+        archive.mkdir()
+        (archive / "old.py").write_text(source, encoding="utf-8")
+
+    def test_an_archived_caller_no_longer_acquits_a_live_function(self, tmp_path):
+        branch = _branch(tmp_path, tests=DECLARES + "def test_it():\n    run()\n")
+        self._archive(branch, self.ARCHIVED_CALLER)
+        findings, _acquitted = uncalled_public_function_check.scan(branch)
+        assert [name for _path, _line, name, _shape in findings] == ["discover"]
+
+    def test_an_archived_file_that_warns_on_parse_prints_nothing(self, tmp_path, recwarn):
+        branch = _branch(tmp_path, tests=DECLARES + "def test_it():\n    discover()\n")
+        self._archive(branch, 'PATTERN = "\\d"\n')
+        uncalled_public_function_check.scan(branch)
+        assert [w for w in recwarn if INVALID_ESCAPE in str(w.message)] == []
+
+    def test_a_live_file_that_warns_on_parse_names_its_file(self, tmp_path, recwarn):
+        branch = _branch(
+            tmp_path, tests=DECLARES + "def test_it():\n    discover()\n", extra={"loud.py": 'P = "\\d"\n'}
+        )
+        uncalled_public_function_check.scan(branch)
+        warned = {Path(w.filename).name for w in recwarn if INVALID_ESCAPE in str(w.message)}
+        assert warned == {"loud.py"}
+
+
+class TestCalledByPytestProtocol:
+    """A plugin's hooks are called by pytest, never by name (seedgo, leg 1cd2e911)."""
+
+    def test_a_plugin_hook_no_test_names_is_acquitted_as_protocol(self, tmp_path):
+        """payload/audit_hygiene_plugin.py pytest_configure was convicted O2.
+
+        Mutant: PYTEST_HOOKS emptied -- red, pytest_configure convicted again.
+        """
+        subject = "def pytest_configure(config):\n    return None\n"
+        message = uncalled_public_function_check.check_branch(str(_branch(tmp_path, subject=subject)))["checks"][0][
+            "message"
+        ]
+        assert f"1 {uncalled_public_function_check.PROTOCOL}" in message
+
+    def test_a_helper_only_a_hook_calls_is_live(self, tmp_path):
+        """The plugin's emit is called from its hooks and from nowhere else.
+
+        Mutant: the hooks no longer seed reachability -- red, emit convicted O2.
+        """
+        subject = "def pytest_configure(config):\n    emit()\ndef emit():\n    return 1\n"
+        assert _names(tmp_path, DECLARES, subject=subject) == []
+
+    def test_a_hook_name_in_a_file_that_is_no_plugin_is_still_judged(self, tmp_path):
+        """No pytest_configure or pytest_sessionstart: pytest never loads it, so nothing calls it.
+
+        Mutant: the plugin-file test dropped -- red, the function acquitted.
+        """
+        subject = "def pytest_runtest_setup(item):\n    return None\n"
+        assert _names(tmp_path, DECLARES, subject=subject) == ["pytest_runtest_setup"]
+
+
+class TestTheEntryPoint:
+    """check_branch's own paths, which scan never sees."""
+
+    def test_a_convicted_branch_scores_zero(self, tmp_path):
+        """No partial credit: the lane is pass/fail per branch."""
+        assert uncalled_public_function_check.check_branch(str(_branch(tmp_path)))["score"] == 0
+
+    def test_a_branch_with_no_tests_scores_100(self, tmp_path):
+        """Nothing declares a subject, so nothing may be charged."""
+        (tmp_path / "apps").mkdir()
+        assert uncalled_public_function_check.check_branch(str(tmp_path))["score"] == 100
+
+    def test_the_acquitted_count_rides_in_the_passing_message(self, tmp_path):
+        """The rule's biggest judgement is reported, not hidden."""
+        subject = "def run():\n    return discover()\ndef discover():\n    return []\n"
+        branch = _branch(tmp_path, subject=subject, tests=DECLARES + "def test_it():\n    run()\n")
+        message = uncalled_public_function_check.check_branch(str(branch))["checks"][0]["message"]
+        assert "1 are reached only through the product" in message
+
+    def test_the_message_names_the_shape_and_the_cure(self, tmp_path):
+        """A finding that does not say what to do is a chore, not a cure."""
+        message = uncalled_public_function_check.check_branch(str(_branch(tmp_path)))["checks"][0]["message"]
+        assert uncalled_public_function_check.UNREACHED in message
+        assert uncalled_public_function_check.CURE in message
+
+    def test_an_unparseable_subject_yields_nothing(self, tmp_path):
+        """ruff already convicts the syntax error; a second verdict misdirects."""
+        assert (
+            uncalled_public_function_check.check_branch(str(_branch(tmp_path, subject="def discover(:\n")))["score"]
+            == 100
+        )
+
+
+class TestEveryHitRidesOnOneCheck:
+    """checklist._format_failure prints the FIRST failed check and hides the rest."""
+
+    def test_two_functions_arrive_on_a_single_check(self, tmp_path):
+        """Two checks would show one function and '(+1 more)'."""
+        subject = "def discover():\n    return []\ndef collect():\n    return []\n"
+        checks = uncalled_public_function_check.check_branch(str(_branch(tmp_path, subject=subject)))["checks"]
+        assert len(checks) == 1
+        assert checks[0]["message"].count(uncalled_public_function_check.CURE) == 2
+
+
+class TestItDeclaresItsScope:
+    """The two constants both lanes consult before they run it."""
+
+    def test_it_applies_to_tests_only(self):
+        """The question is whether a TEST calls the function."""
+        assert uncalled_public_function_check.APPLIES_TO == "tests"
+
+    def test_it_reports_per_branch(self):
+        """Declared subjects against the whole tests/ tree."""
+        assert uncalled_public_function_check.AUDIT_SCOPE == "branch_level"
+
+
+class TestTheBypass:
+    """Every checker in the pack answers to .seedgo/bypass.json."""
+
+    @pytest.mark.parametrize("rules", [[{"standard": "uncalled_public_function"}]])
+    def test_a_bypassed_branch_passes(self, tmp_path, rules):
+        """A deliberate exception is not a violation."""
+        assert (
+            uncalled_public_function_check.check_branch(
+                str(_branch(tmp_path)), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules]
+            )["score"]
+            == 100
+        )
+
+
+class TestARetiredTestCallsNothing:
+    """tests/.archive is git-ignored: CI never sees it (devpulse d13d7c68 item A, PR #774 round two).
+
+    memory's apps/handlers/json/memory_files.py:471 validate_memory_file_structure
+    read 100 on memory's seat and 98 on the clean checkout: its one naming test was
+    tests/.archive/deleted_2026-09-03_json_handler.py. The same cure as
+    unused_conftest_fixture 1.1.0 - live test files only.
+    """
+
+    CALLS = "def test_old():\n    assert discover() == []\n"
+
+    def _retire(self, branch, directory, source):
+        retired = branch / "tests" / directory
+        retired.mkdir(parents=True, exist_ok=True)
+        (retired / "test_retired.py").write_text(source, encoding="utf-8")
+
+    @pytest.mark.parametrize("directory", [".archive", "backups"])
+    def test_a_function_named_only_by_a_retired_test_is_convicted(self, tmp_path, directory):
+        """The archived call is the only one; a skipped dir under tests/ is not a test."""
+        branch = _branch(tmp_path)
+        self._retire(branch, directory, self.CALLS)
+        findings, _acquitted = uncalled_public_function_check.scan(branch)
+        assert [(name, shape) for _path, _line, name, shape in findings] == [
+            ("discover", uncalled_public_function_check.UNREACHED)
+        ]
+
+    def test_the_same_call_in_a_live_test_acquits(self, tmp_path):
+        """The control: memory's cure, the naming test moved into the live tree."""
+        branch = _branch(tmp_path)
+        (branch / "tests" / "test_live.py").write_text(self.CALLS, encoding="utf-8")
+        findings, _acquitted = uncalled_public_function_check.scan(branch)
+        assert findings == []
+
+    def test_a_retired_unpatched_run_does_not_rescue_a_replaced_function(self, tmp_path):
+        """O1 stays O1: the run_unpatched pass reads live test files only, too."""
+        branch = _branch(
+            tmp_path, tests=DECLARES + "@patch('apps.modules.thing.discover')\ndef test_it(fake):\n    run()\n"
+        )
+        self._retire(branch, ".archive", self.CALLS.replace("assert discover() == []", "run()"))
+        (branch / "apps" / "modules" / "entry.py").write_text("def run():\n    return discover()\n", encoding="utf-8")
+        findings, _acquitted = uncalled_public_function_check.scan(branch)
+        assert [(name, shape) for _path, _line, name, shape in findings] == [
+            ("discover", uncalled_public_function_check.REPLACED)
+        ]

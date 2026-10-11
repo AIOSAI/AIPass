@@ -1,15 +1,31 @@
-"""Tests for runaway_log_detected event handler."""
+# =================== AIPass ====================
+# Name: test_runaway_handler.py
+# Description: Tests for the runaway_log_detected event handler
+# Version: 1.0.1
+# Created: 2026-08-09
+# Modified: 2026-10-08
+# =============================================
 
+"""Tests for apps/handlers/events/runaway_handler.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the detection in apps/handlers/log_watcher.py; the log watcher tests cover it
 import json
-import sys
+import tempfile
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.ai_mail.apps.modules import door_wake as ai_mail_wake
 from aipass.trigger.apps import config as trigger_config
 from aipass.trigger.apps.handlers.events import runaway_handler as mod
+
+# The handler only keys cooldowns and names alerts by this path; it never opens it.
+RUNAWAY_LOG = str(Path(tempfile.gettempdir()) / "test.log")
 
 
 # ---------------------------------------------------------------------------
@@ -27,7 +43,7 @@ _trail = MagicMock()
 @pytest.fixture(autouse=True)
 def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: ignore[misc]
     """Reset module state and redirect file paths to tmp_path."""
-    mod._file_cooldowns.clear()
+    monkeypatch.setattr(mod, "_file_cooldowns", {})
     mod._send_email = None
 
     monkeypatch.setattr(mod, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
@@ -36,18 +52,10 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: igno
     _trail.reset_mock()
     monkeypatch.setattr(trigger_config, "_append_jsonl", _trail)
 
-    # Mock wake_branch import chain so the in-function import succeeds
-    mock_wake_mod = MagicMock()
-    mock_wake_mod.wake_branch = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.handlers", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.handlers.dispatch", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.handlers.dispatch.wake", mock_wake_mod)
+    # The handler imports wake_branch from ai_mail's door at call time: replace it there
+    monkeypatch.setattr(ai_mail_wake, "wake_branch", MagicMock())
 
     yield
-
-    mod._file_cooldowns.clear()
 
 
 def _setup_happy_path() -> MagicMock:
@@ -87,11 +95,15 @@ class TestPerFileCooldown:
     """Second call for the same file within 30min cooldown is suppressed."""
 
     def test_second_call_within_cooldown_suppressed(self) -> None:
-        """Second call for the same file is suppressed (no time mock needed)."""
+        """Second call for the same file is suppressed; another file still dispatches.
+
+        The cooldown is keyed per file. Mutant run: keying the cooldown on one
+        shared key suppresses the other file and reddens the last assert.
+        """
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -101,13 +113,24 @@ class TestPerFileCooldown:
 
         # Second call — same file, should be suppressed
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=120,
             severity="critical",
         )
         assert send.call_count == 1
+
+        # A different file is not on this file's cooldown
+        mod.handle_runaway_log_detected(
+            file_path=str(Path(tempfile.gettempdir()) / "other.log"),
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+        subjects = [c.kwargs["subject"] for c in send.call_args_list]
+        assert [subject.split()[1] for subject in subjects] == ["test.log", "other.log"]
 
 
 # ---------------------------------------------------------------------------
@@ -118,14 +141,17 @@ class TestPerFileCooldown:
 class TestCooldownExpired:
     """Call after cooldown window expires dispatches again."""
 
-    @patch("aipass.trigger.apps.handlers.events.runaway_handler.time")
-    def test_dispatches_again_after_cooldown_expires(self, mock_time: MagicMock) -> None:
-        """Dispatch succeeds again once the 1800s cooldown has elapsed."""
+    def test_dispatches_again_after_cooldown_expires(self) -> None:
+        """Dispatch succeeds again once the 1800s cooldown has elapsed.
+
+        The clock stub stands at the handler's own time binding, so the
+        process clock is never patched.
+        Mutant run: a cooldown ten times as long reddens this.
+        """
         send = _setup_happy_path()
 
-        mock_time.time.return_value = 1_000_000.0
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -133,15 +159,16 @@ class TestCooldownExpired:
         )
         assert send.call_count == 1
 
-        # Advance past 1800s cooldown
-        mock_time.time.return_value = 1_000_000.0 + 1801
-        mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
-            branch="flow",
-            rate_lines_per_min=5000,
-            sustained_duration_sec=120,
-            severity="critical",
-        )
+        # The handler's clock reads past the 1800s cooldown
+        later = time.time() + mod.COOLDOWN_SECONDS + 1
+        with patch.object(mod, "time", MagicMock(time=MagicMock(return_value=later))):
+            mod.handle_runaway_log_detected(
+                file_path=RUNAWAY_LOG,
+                branch="flow",
+                rate_lines_per_min=5000,
+                sustained_duration_sec=120,
+                severity="critical",
+            )
         assert send.call_count == 2
 
 
@@ -173,7 +200,7 @@ class TestBranchMuted:
         _write_config(tmp_path, {"muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -189,7 +216,7 @@ class TestBranchMuted:
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=500,
             sustained_duration_sec=60,
@@ -197,20 +224,23 @@ class TestBranchMuted:
         send.assert_not_called()
 
     def test_expired_volume_mute_delivers(self, tmp_path: Path) -> None:
-        """An expired volume mute entry does not suppress."""
+        """An expired volume mute entry does not suppress.
+
+        Mutant run: every runaway addressed to @prax reddens this.
+        """
         send = _setup_happy_path()
 
         expired = (datetime.now() - timedelta(hours=1)).isoformat()
         _write_config(tmp_path, {"volume_muted_branches": [{"name": "flow", "expires_at": expired}]})
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
             severity="critical",
         )
-        send.assert_called_once()
+        assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@flow"]
 
     def test_critical_bypasses_volume_mute(self, tmp_path: Path) -> None:
         """CRITICAL runaways deliver even through an active volume mute."""
@@ -219,7 +249,7 @@ class TestBranchMuted:
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -229,19 +259,22 @@ class TestBranchMuted:
         assert send.call_args.kwargs["to_branch"] == "@flow"
 
     def test_critical_bypass_is_case_insensitive(self, tmp_path: Path) -> None:
-        """Severity matching tolerates 'CRITICAL' as well as 'critical'."""
+        """Severity matching tolerates 'CRITICAL' as well as 'critical'.
+
+        Mutant run: every runaway addressed to @prax reddens this.
+        """
         send = _setup_happy_path()
 
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
             severity="CRITICAL",
         )
-        send.assert_called_once()
+        assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@flow"]
 
     def test_warning_still_respects_volume_mute(self, tmp_path: Path) -> None:
         """Non-critical runaways still honour an explicit volume mute.
@@ -255,7 +288,7 @@ class TestBranchMuted:
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=500,
             sustained_duration_sec=60,
@@ -263,6 +296,31 @@ class TestBranchMuted:
         )
         send.assert_not_called()
         assert not (tmp_path / "alerts.json").exists()
+
+    def test_unreadable_mute_file_fails_open_and_says_so(self, tmp_path: Path) -> None:
+        """An unreadable medic_state.json is not a mute, and the trail says it was unread.
+
+        Before, a corrupt file read as "not muted" with only a sidecar warning, so
+        the decision trail could not tell an unread mute from a branch nobody muted.
+        Failing open is kept: a runaway must reach someone. One event is one
+        trail line: the observe_only line is not written beside it (2026-09-28,
+        red first on the code that wrote both).
+        Mutant 2026-09-28: the observe-only write keyed to 'observe_only' alone reddens this.
+        """
+        (tmp_path / "medic_state.json").write_text("{not json", encoding="utf-8")
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=150,
+            sustained_duration_sec=720,
+            severity="warning",
+        )
+
+        entries = _decision_entries("mute_unreadable")
+        assert [(e["outcome"], e["branch"]) for e in entries] == [("observed", "flow")]
+        assert _decision_entries("observe_only") == []
+        assert len(_read_alerts(tmp_path)) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +336,7 @@ class TestUnknownBranch:
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="UNKNOWN",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -301,7 +359,7 @@ class TestNoneBranch:
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch=None,
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -327,7 +385,7 @@ class TestNoEmailCallback:
         """Logs a WARNING to the sidecar trail when no callback set."""
         # _send_email stays None (no set_send_email_callback call)
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -352,7 +410,7 @@ class TestSuccessfulDispatch:
     def test_full_dispatch(self, tmp_path: Path) -> None:
         """Email sent with correct kwargs, alert file exists, cooldown recorded."""
         send = _setup_happy_path()
-        file_path = "/var/log/test.log"
+        file_path = RUNAWAY_LOG
 
         mod.handle_runaway_log_detected(
             file_path=file_path,
@@ -372,17 +430,16 @@ class TestSuccessfulDispatch:
         assert "[RUNAWAY]" in kwargs["subject"]
         assert "CRITICAL" in kwargs["subject"]
 
-        # wake_branch called (via mocked import)
-        from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
-
-        wake_branch.assert_called_once_with("@flow", fresh=False, sender="@trigger")  # type: ignore[union-attr]
+        # wake_branch called (replaced at its home by the autouse fixture)
+        _wake_mock().assert_called_once_with("@flow", fresh=False, sender="@trigger")
 
         # Alert file written
         alerts_file = tmp_path / "alerts.json"
         assert alerts_file.exists()
 
-        # Cooldown recorded
-        assert file_path in mod._file_cooldowns
+        # Cooldown recorded: the next detection of the file is gated (leg 7: read
+        # through the handler, not _file_cooldowns; mutant: the booking removed)
+        assert _gated_by_cooldown(file_path), "no cooldown was booked"
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +455,7 @@ class TestAlertFileSchema:
         _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=500,
             sustained_duration_sec=60,
@@ -425,7 +482,7 @@ class TestAlertFileSchema:
         _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=500,
             sustained_duration_sec=60,
@@ -445,7 +502,7 @@ class TestAlertFileSchema:
         _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=500,
             sustained_duration_sec=60,
@@ -484,7 +541,7 @@ class TestAlertAppends:
 
         _setup_happy_path()
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=500,
             sustained_duration_sec=60,
@@ -508,7 +565,7 @@ class TestEmailSendFails:
         """Failed email send means no alert file and no cooldown entry."""
         send = MagicMock(return_value=False)
         mod.set_send_email_callback(send)
-        file_path = "/var/log/test.log"
+        file_path = RUNAWAY_LOG
 
         mod.handle_runaway_log_detected(
             file_path=file_path,
@@ -521,7 +578,8 @@ class TestEmailSendFails:
         send.assert_called_once()
         alerts_file = tmp_path / "alerts.json"
         assert not alerts_file.exists()
-        assert file_path not in mod._file_cooldowns
+        # Leg 7: read through the handler, not _file_cooldowns (mutant: booked before the send)
+        assert not _gated_by_cooldown(file_path), "a failed dispatch booked a cooldown"
 
 
 # ---------------------------------------------------------------------------
@@ -535,13 +593,32 @@ def _decision_entries(reason: str) -> list:
     return [c[0][1] for c in calls if isinstance(c[0][1], dict) and c[0][1].get("reason") == reason]
 
 
+def _gated_by_cooldown(file_path: str) -> bool:
+    """Detect the same file again at once; True when the handler's own trail says its cooldown gated it.
+
+    The public answer for the per-file cooldown (leg 7): _file_cooldowns itself
+    is module state. The cooldown is checked before any send, so a gated probe
+    sends nothing; an ungated one runs the CRITICAL path into the test's stubs.
+    """
+    before = len(_decision_entries("cooldown"))
+    mod.handle_runaway_log_detected(
+        file_path=file_path, branch="flow", rate_lines_per_min=5000, sustained_duration_sec=60, severity="critical"
+    )
+    return len(_decision_entries("cooldown")) == before + 1
+
+
+def _trail_lines() -> list:
+    """Collect every line written to the decision trail, in order."""
+    return [c[0][1] for c in _trail.call_args_list if c[0][0] == mod.DECISION_LOG]
+
+
 class TestSuppressionLog:
     """Cooldown and mute suppressions write to the decision log."""
 
     def test_cooldown_writes_suppression_log(self) -> None:
         """Cooldown suppression writes reason='cooldown' to the decision log."""
         _setup_happy_path()
-        file_path = "/var/log/test.log"
+        file_path = RUNAWAY_LOG
 
         # First call dispatches normally
         mod.handle_runaway_log_detected(
@@ -573,7 +650,7 @@ class TestSuppressionLog:
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=500,
             sustained_duration_sec=60,
@@ -590,7 +667,7 @@ class TestSuppressionLog:
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -603,13 +680,99 @@ class TestSuppressionLog:
         assert entries[0]["branch"] == "flow"
         assert not _decision_entries("volume_muted")
 
+    def test_critical_bypass_that_fails_to_send_is_not_delivered(self, tmp_path: Path) -> None:
+        """Delivered is written after the send returns, never before it.
+
+        The handler used to write the bypass_critical 'delivered' line before the
+        mail was attempted, so a refused send left a trail saying delivered.
+        Red first on that code (2026-09-28).
+        Mutant 2026-09-28: the delivered write moved back above the send reddens this.
+        """
+        send = MagicMock(return_value=False)
+        mod.set_send_email_callback(send)
+        _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        send.assert_called_once()
+        assert _decision_entries("bypass_critical") == []
+
+    def test_critical_over_an_unreadable_mute_is_delivered_once(self, tmp_path: Path) -> None:
+        """A sent critical over a mute nobody could read leaves one line: delivered, mute_unreadable.
+
+        Green on the tree from its first run; its proof is the mutant.
+        Mutant 2026-09-29: delivered written for bypass_critical alone reddens this.
+        """
+        send = _setup_happy_path()
+        (tmp_path / "medic_state.json").write_text("{not json", encoding="utf-8")
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        send.assert_called_once()
+        assert [(e["outcome"], e["reason"]) for e in _trail_lines()] == [("delivered", "mute_unreadable")]
+
+    def test_an_unmuted_critical_that_was_sent_is_delivered(self) -> None:
+        """The trail records what happened to every event, the ones the gate passed included.
+
+        Red first on 2026-09-29: an unmuted critical wrote no line at all.
+        """
+        _setup_happy_path()
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        assert [(e["outcome"], e["reason"]) for e in _trail_lines()] == [("delivered", "critical")]
+
+    def test_a_critical_whose_send_was_refused_is_failed(self) -> None:
+        """A send that answers False is one line, failed, send_refused. Red first on 2026-09-29."""
+        mod.set_send_email_callback(MagicMock(return_value=False))
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        assert [(e["outcome"], e["reason"]) for e in _trail_lines()] == [("failed", "send_refused")]
+
+    def test_a_critical_with_no_mail_callback_is_failed(self) -> None:
+        """No callback to send with is one line, failed, no_callback. Red first on 2026-09-29."""
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        assert [(e["outcome"], e["reason"]) for e in _trail_lines()] == [("failed", "no_callback")]
+
     def test_content_mute_writes_no_decision_entry(self, tmp_path: Path) -> None:
         """A content mute is not a runaway gate — it leaves no decision entry."""
         _setup_happy_path()
         _write_config(tmp_path, {"muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=500,
             sustained_duration_sec=60,
@@ -628,18 +791,47 @@ class TestSetSendEmailCallback:
     """Tests for set_send_email_callback."""
 
     def test_sets_callback_correctly(self) -> None:
-        """Stores the callback as module-level _send_email."""
-        callback = MagicMock()
+        """The callback set is the one a CRITICAL dispatch sends through.
+
+        Read through the handler since leg 7 (it compared _send_email by
+        identity). Mutant run (leg 7): the setter storing nothing reddens this.
+        """
+        callback = MagicMock(return_value=True)
         mod.set_send_email_callback(callback)
-        assert mod._send_email is callback
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        callback.assert_called_once()
+        assert callback.call_args.kwargs["to_branch"] == "@flow"
 
     def test_overwrites_previous_callback(self) -> None:
-        """Second call replaces the first callback."""
-        first = MagicMock()
-        second = MagicMock()
+        """Second call replaces the first callback: only the second one sends.
+
+        Read through the handler since leg 7 (it compared _send_email by
+        identity). Mutant run (leg 7): the setter keeping the first callback reddens this.
+        """
+        first = MagicMock(return_value=True)
+        second = MagicMock(return_value=True)
         mod.set_send_email_callback(first)
         mod.set_send_email_callback(second)
-        assert mod._send_email is second
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        second.assert_called_once()
+        assert second.call_args.kwargs["to_branch"] == "@flow"
+        first.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -649,9 +841,7 @@ class TestSetSendEmailCallback:
 
 def _wake_mock() -> MagicMock:
     """Return the mocked wake_branch installed by the autouse fixture."""
-    from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
-
-    return wake_branch  # type: ignore[return-value]
+    return cast(MagicMock, ai_mail_wake.wake_branch)
 
 
 def _read_alerts(tmp_path: Path) -> list:
@@ -674,7 +864,7 @@ class TestObserveOnlyWarning:
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=150,
             sustained_duration_sec=720,
@@ -689,7 +879,7 @@ class TestObserveOnlyWarning:
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=150,
             sustained_duration_sec=720,
@@ -707,7 +897,7 @@ class TestObserveOnlyWarning:
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/chatty.log",
+            file_path=str(tmp_path / "chatty.log"),
             branch="flow",
             rate_lines_per_min=150,
             sustained_duration_sec=720,
@@ -720,7 +910,7 @@ class TestObserveOnlyWarning:
         assert alert["severity"] == "warning"
         assert alert["source"] == "prax"
         assert "chatty.log" in alert["title"]
-        assert "/var/log/chatty.log" in alert["body"]
+        assert str(tmp_path / "chatty.log") in alert["body"]
         assert "150 lines/min" in alert["body"]
         assert "720s" in alert["body"]
         assert "flow" in alert["body"]
@@ -733,7 +923,7 @@ class TestObserveOnlyWarning:
         _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=150,
             sustained_duration_sec=720,
@@ -744,14 +934,14 @@ class TestObserveOnlyWarning:
         assert len(entries) == 1
         assert entries[0]["outcome"] == "observed"
         assert entries[0]["branch"] == "flow"
-        assert entries[0]["file"] == "/var/log/test.log"
+        assert entries[0]["file"] == RUNAWAY_LOG
         # Not a suppression (we recorded it) and not a delivery (nobody was told)
         assert entries[0]["outcome"] not in {"suppressed", "delivered"}
 
     def test_warning_records_file_cooldown(self, tmp_path: Path) -> None:
         """Observe-only still books the cooldown — the record must not flood itself."""
         _setup_happy_path()
-        file_path = "/var/log/test.log"
+        file_path = RUNAWAY_LOG
 
         mod.handle_runaway_log_detected(
             file_path=file_path,
@@ -760,7 +950,6 @@ class TestObserveOnlyWarning:
             sustained_duration_sec=720,
             severity="warning",
         )
-        assert file_path in mod._file_cooldowns
         assert len(_read_alerts(tmp_path)) == 1
 
         # Second detection interval for the same file is gated by the cooldown
@@ -782,7 +971,7 @@ class TestObserveOnlyWarning:
         record was written; a WARNING no longer sends, so it must not care.
         """
         # _send_email stays None (no set_send_email_callback call)
-        file_path = "/var/log/test.log"
+        file_path = RUNAWAY_LOG
 
         mod.handle_runaway_log_detected(
             file_path=file_path,
@@ -794,7 +983,8 @@ class TestObserveOnlyWarning:
 
         assert len(_read_alerts(tmp_path)) == 1
         assert len(_decision_entries("observe_only")) == 1
-        assert file_path in mod._file_cooldowns
+        # Leg 7: read through the handler, not _file_cooldowns
+        assert _gated_by_cooldown(file_path), "no cooldown was booked"
         _wake_mock().assert_not_called()
 
 
@@ -814,7 +1004,7 @@ class TestCriticalUnchanged:
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -825,7 +1015,8 @@ class TestCriticalUnchanged:
         assert send.call_args.kwargs["to_branch"] == "@flow"
         _wake_mock().assert_called_once_with("@flow", fresh=False, sender="@trigger")
         assert len(_read_alerts(tmp_path)) == 1
-        assert "/var/log/test.log" in mod._file_cooldowns
+        # Leg 7: read through the handler, not _file_cooldowns
+        assert _gated_by_cooldown(RUNAWAY_LOG), "no cooldown was booked"
 
     def test_critical_bypasses_volume_mute_and_still_wakes(self, tmp_path: Path) -> None:
         """NO-OVERREACH: a volume mute still does not stop a CRITICAL wake."""
@@ -833,7 +1024,7 @@ class TestCriticalUnchanged:
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="flow",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -848,7 +1039,7 @@ class TestCriticalUnchanged:
         """NO-OVERREACH: sent=False still logs, returns, and records no dispatch."""
         send = MagicMock(return_value=False)
         mod.set_send_email_callback(send)
-        file_path = "/var/log/test.log"
+        file_path = RUNAWAY_LOG
 
         mod.handle_runaway_log_detected(
             file_path=file_path,
@@ -861,8 +1052,9 @@ class TestCriticalUnchanged:
         send.assert_called_once()
         _wake_mock().assert_not_called()
         assert not _read_alerts(tmp_path)
-        assert file_path not in mod._file_cooldowns
         assert not _decision_entries("observe_only")
+        # Leg 7: read through the handler, not _file_cooldowns (mutant: booked before the send)
+        assert not _gated_by_cooldown(file_path), "a failed dispatch booked a cooldown"
 
         calls = _trail.call_args_list
         warnings = [c[0][1] for c in calls if isinstance(c[0][1], dict) and c[0][1].get("level") == "WARNING"]
@@ -873,7 +1065,7 @@ class TestCriticalUnchanged:
         send = _setup_happy_path()
 
         mod.handle_runaway_log_detected(
-            file_path="/var/log/test.log",
+            file_path=RUNAWAY_LOG,
             branch="UNKNOWN",
             rate_lines_per_min=5000,
             sustained_duration_sec=60,
@@ -902,7 +1094,7 @@ class TestOperationLogNaming:
 
         with patch.object(mod.json_handler, "log_operation") as log_op:
             mod.handle_runaway_log_detected(
-                file_path="/var/log/test.log",
+                file_path=RUNAWAY_LOG,
                 branch="flow",
                 rate_lines_per_min=150,
                 sustained_duration_sec=720,
@@ -919,7 +1111,7 @@ class TestOperationLogNaming:
 
         with patch.object(mod.json_handler, "log_operation") as log_op:
             mod.handle_runaway_log_detected(
-                file_path="/var/log/test.log",
+                file_path=RUNAWAY_LOG,
                 branch="flow",
                 rate_lines_per_min=5000,
                 sustained_duration_sec=60,
@@ -936,14 +1128,14 @@ class TestOperationLogNaming:
 
         with patch.object(mod.json_handler, "log_operation") as log_op:
             mod.handle_runaway_log_detected(
-                file_path="/var/log/warn.log",
+                file_path=str(Path(tempfile.gettempdir()) / "warn.log"),
                 branch="flow",
                 rate_lines_per_min=150,
                 sustained_duration_sec=720,
                 severity="warning",
             )
             mod.handle_runaway_log_detected(
-                file_path="/var/log/crit.log",
+                file_path=str(Path(tempfile.gettempdir()) / "crit.log"),
                 branch="flow",
                 rate_lines_per_min=5000,
                 sustained_duration_sec=60,
@@ -959,12 +1151,17 @@ class TestVolumeMuteMigration:
     """Volume mutes are read through the legacy-path migration."""
 
     def test_volume_mute_survives_migration(self, tmp_path: Path) -> None:
-        """A volume mute written under the old filename still silences the alert."""
+        """A volume mute written under the old filename still silences the alert.
+
+        Mutant run: skipping the legacy-file migration in the mute read reddens this.
+        """
         mod.LEGACY_MEDIC_STATE_FILE.write_text(
             json.dumps({"config": {"volume_muted_branches": [{"name": "hooks", "expires_at": None}]}}),
             encoding="utf-8",
         )
 
-        assert mod._is_branch_volume_muted("hooks") is True
+        mod.handle_runaway_log_detected(file_path=RUNAWAY_LOG, branch="hooks", severity="warning")
+
+        assert [e["outcome"] for e in _decision_entries("volume_muted")] == ["suppressed"]
         assert mod.MEDIC_STATE_FILE.exists()
         assert not mod.LEGACY_MEDIC_STATE_FILE.exists()

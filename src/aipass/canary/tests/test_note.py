@@ -1,22 +1,16 @@
 # =================== AIPass ====================
 # Name: test_note.py
 # Description: Tests for the note store - add, list, and refusing a store that will not parse
-# Version: 1.1.0
+# Version: 1.4.0
 # Created: 2026-09-12
-# Modified: 2026-09-19
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for `drone @canary note`.
+"""Tests for apps/modules/note.py and the notes store it drives."""
 
-Driven through the entry point's main() with real module discovery, so the
-exit codes asserted here are the ones drone hands back to a caller.
-
-The load-bearing tests are the corrupt-store ones: a store that will not parse
-must be refused by file name with a non-zero exit, and its bytes AND mtime must
-be exactly what they were. Losing stored notes to one bad read is the failure
-the contract exists to prevent, so "did not crash" is not the assertion.
-"""
-
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(log_structure) — that a refusal also lands in the prax log
+# seedgo: no-test-needed(json_structure) — that each add and each list lands in the json trail
 import json
 import sys
 from datetime import datetime
@@ -25,6 +19,15 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.notes import store
+
+# Driven through the entry point's main() with real module discovery, so the
+# exit codes asserted here are the ones drone hands back to a caller.
+#
+# The load-bearing tests are the corrupt-store ones: a store that will not
+# parse must be refused by file name with a non-zero exit, and its bytes AND
+# mtime must be exactly what they were. Losing stored notes to one bad read is
+# the failure the contract exists to prevent, so "did not crash" is not the
+# assertion.
 
 VALID_LINE = b'{"text": "kept", "timestamp": "2026-09-12T15:00:00-07:00"}\n'
 
@@ -204,6 +207,36 @@ def test_a_store_path_that_is_not_a_file_is_refused_nonzero(monkeypatch, capsys,
     assert store_path.is_dir()
 
 
+def _refusing_disk(*args):
+    """Stand-in for the store's own disk call: the disk refuses, with this canary's own error."""
+    raise OSError("stand-in: the disk refused")
+
+
+def test_add_on_a_disk_that_refuses_the_write_exits_two_and_names_the_store(monkeypatch, capsys, store_path):
+    """The OSError branch of add, distinct from the parse refusal; proven by its mutants."""
+    monkeypatch.setattr(store, "append_note", _refusing_disk)
+
+    result = _run(monkeypatch, ["note", "add", "must not land"])
+
+    out, err = capsys.readouterr()
+    assert result == 2
+    assert out == ""
+    assert _squash(f"note add failed: cannot use store {store_path}: stand-in: the disk refused") in _squash(err)
+    assert not store_path.parent.exists()
+
+
+def test_list_on_a_disk_that_refuses_the_read_exits_two_and_names_the_store(monkeypatch, capsys, store_path):
+    """The OSError branch of list, distinct from the parse refusal; proven by its mutants."""
+    monkeypatch.setattr(store, "read_notes", _refusing_disk)
+
+    result = _run(monkeypatch, ["note", "list", "--json"])
+
+    out, err = capsys.readouterr()
+    assert result == 2
+    assert out == ""
+    assert _squash(f"note list failed: cannot read store {store_path}: stand-in: the disk refused") in _squash(err)
+
+
 # =============================================================================
 # ARGUMENT REFUSALS AND HELP
 # =============================================================================
@@ -240,4 +273,46 @@ def test_help_never_writes_a_note(monkeypatch, capsys, store_path, argv):
     assert _run(monkeypatch, argv) == 0
 
     assert "Usage:" in capsys.readouterr().out
+    assert not store_path.exists()
+
+
+# =============================================================================
+# LIST --JSON
+# =============================================================================
+
+
+@pytest.mark.parametrize("argv", [["list", "--json"], ["--json", "list"]], ids=["flag_after", "flag_before"])
+def test_list_json_prints_the_stored_records_as_one_array(monkeypatch, capsys, store_path, argv):
+    """--json prints exactly the records on disk, in order, as one JSON array and nothing else."""
+    assert _run(monkeypatch, ["note", "add", "first [bold]x[/bold]"]) == 0
+    assert _run(monkeypatch, ["note", "add", "second"]) == 0
+    capsys.readouterr()
+
+    assert _run(monkeypatch, ["note", *argv]) == 0
+
+    out = capsys.readouterr().out
+    assert json.loads(out) == store.read_notes(store_path)
+    assert out.count("\n") == 1
+
+
+def test_list_json_on_a_missing_store_is_an_empty_array(monkeypatch, capsys, store_path):
+    """No store is [], not the plain form's 'No notes yet' line - and no file is created."""
+    assert _run(monkeypatch, ["note", "list", "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == []
+    assert not store_path.parent.exists()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["add", "text", "--json"], ["--json", "add", "text"], ["--json"]],
+    ids=["add_flag_after", "add_flag_before", "flag_alone"],
+)
+def test_json_off_list_is_refused_and_stores_nothing(monkeypatch, capsys, store_path, argv):
+    """--json belongs to list: on add it is refused, never swallowed or stored as text."""
+    assert _run(monkeypatch, ["note", *argv]) == 2
+
+    captured = capsys.readouterr()
+    assert "only for list" in captured.err
+    assert captured.out == ""
     assert not store_path.exists()

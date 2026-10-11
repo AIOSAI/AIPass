@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plans_processor.py
 # Description: Plan Archival Vectorization Handler
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-03-12
-# Modified: 2026-03-12
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -33,6 +33,7 @@ from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.repo_root import module_file
+from aipass.memory.apps.handlers.storage.chroma_subprocess import embedder_reason
 
 # Subprocess scripts
 _HANDLERS_DIR = module_file(__file__).parent.parent
@@ -194,18 +195,29 @@ def _chunk_plan_text(text: str, filename: str) -> List[Dict[str, str]]:
 # =============================================================================
 
 
+class ManifestUnreadable(ValueError):
+    """The processed-plans manifest exists and cannot be read."""
+
+
 def _load_manifest() -> Dict[str, Any]:
     """Load processed files manifest.
 
     Values are either the content-keyed row this module writes now, or the bare
     ISO string written before 2026-08-30 -- see :func:`_recorded`.
+
+    Raises:
+        ManifestUnreadable: the manifest exists and is not a readable object.
+            It used to load as {}, so every plan was embedded again and the
+            broken file written over (DPLAN-0354 leg 4).
     """
     if _PROCESSED_MANIFEST.exists():
         try:
-            return json.loads(_PROCESSED_MANIFEST.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning(f"[plans_processor] Failed to load processed manifest: {e}")
-            return {}
+            data = json.loads(_PROCESSED_MANIFEST.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            raise ManifestUnreadable(f"Unreadable processed manifest {_PROCESSED_MANIFEST}: {e}") from e
+        if not isinstance(data, dict):
+            raise ManifestUnreadable(f"Unreadable processed manifest {_PROCESSED_MANIFEST}: root is not an object")
+        return data
     return {}
 
 
@@ -290,7 +302,10 @@ def _embed_texts(texts: List[str], timeout: int = 120) -> dict:
             timeout=timeout,
         )
         if result.returncode != 0:
-            return {"success": False, "error": result.stderr or "Embedding failed"}
+            return {
+                "success": False,
+                "error": f"Embedding failed (exit {result.returncode}): {embedder_reason(result)}",
+            }
         return json.loads(result.stdout)
     except Exception as e:
         logger.warning(f"[plans_processor] Embedding subprocess failed: {e}")
@@ -360,7 +375,11 @@ def process_plans() -> Dict[str, Any]:
     if not files:
         return {"success": True, "files_processed": 0, "total_chunks": 0}
 
-    manifest = _load_manifest()
+    try:
+        manifest = _load_manifest()
+    except ManifestUnreadable as e:
+        logger.error(f"[plans_processor] {e} — no plan processed, the manifest is left as it is")
+        return {"success": False, "error": str(e)}
 
     # Read each file ONCE here: the same text decides staleness and, for a file
     # that turns out to be current, backfills the hash its legacy row never had.

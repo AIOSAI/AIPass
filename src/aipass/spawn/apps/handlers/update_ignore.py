@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ignore.py
 # Description: .updateignore parser — the branch owner's decision about what update skips
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-09
-# Modified: 2026-09-09
+# Modified: 2026-10-02
 # =============================================
 
 """Owner-protected files: the ``.updateignore`` contract at a BRANCH root.
@@ -42,6 +42,16 @@ from aipass.prax import logger
 IGNORE_NAME: str = ".updateignore"
 
 
+class UpdateIgnoreUnreadable(Exception):
+    """A branch's ``.updateignore`` is there but cannot be read.
+
+    Not the same answer as no file: an owner who wrote one has claimed files, and
+    an update that reads the claim as empty would write over them. The update of
+    that branch refuses before any write (devpulse's ruling on leg 5 of
+    DPLAN-0354, the same cure as aipass's door).
+    """
+
+
 def read_ignore(branch_dir) -> list:
     """Patterns from *branch_dir*'s ``.updateignore``, or [] when it is absent.
 
@@ -50,25 +60,29 @@ def read_ignore(branch_dir) -> list:
     v1 — an ignore file whose meaning depends on line order is a support burden,
     and nobody has asked for it.
 
-    An UNREADABLE file protects nothing and says so in the log rather than
-    raising: a branch whose ignore file has bad bytes still gets its update, and
-    an owner who cannot see the log still sees every protected path missing from
-    the preview's skipped list.
+    An UNREADABLE file raises: it protects nothing, so an update that went on
+    would write over what the owner claimed (devpulse's ruling on leg 5 of
+    DPLAN-0354; before it, bad bytes read as an empty list).
 
     Args:
         branch_dir: The branch root — the directory holding ``.trinity/``.
 
     Returns:
-        Pattern strings in file order. Empty when the file is absent or unreadable.
+        Pattern strings in file order. Empty when the file is absent.
+
+    Raises:
+        UpdateIgnoreUnreadable: the file is there but cannot be read or decoded.
+            Caller: update_ops.update_branch, before any write; update_all
+            records the branch as failed and goes on to the next.
     """
     path = Path(branch_dir) / IGNORE_NAME
+    if not path.exists():
+        return []
     try:
         raw = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return []
     except (OSError, UnicodeDecodeError) as exc:
-        logger.info("[update] %s unreadable, protecting nothing: %s", path, exc)
-        return []
+        logger.warning("[update] %s is there but cannot be read: %s", path, exc)
+        raise UpdateIgnoreUnreadable(f"{path} is there but cannot be read ({exc}); fix or remove it") from exc
 
     patterns = []
     for line in raw.splitlines():

@@ -6,7 +6,7 @@ Breadcrumbs only — details in README, `--help`, `.trinity/`, `DASHBOARD.local.
 # Watchdog — one-shot wire, armed in the background
 
 Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_background: true`:
-`drone @devpulse watchdog baseline --once` — it sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no timer and survives /compact (DPLAN-0348). A `killed … low on memory` notification is the harness reaping it — report it, don't re-arm unprompted.
+`drone @devpulse watchdog baseline --once`, bare: no pipe, no `| tail`, no redirect — a pipe records the wrapper as foreground and the statusline paints a ticking wire red ELSEWHERE (twice now). It sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no timer and survives /compact (DPLAN-0348). A `killed … low on memory` notification is the harness reaping it — report it, don't re-arm unprompted.
 
 **Never the Monitor tool for this.** Claude Code 2.1.271 removed `persistent` and kills every Monitor at 30m, waking this seat to say so — 33 empty wakes in one 15-hour absence. The continuous `baseline` (no `--once`) refuses background Bash by design; don't fight it. After a compact, check TaskList for a live wire before arming a second. Statusline: `watchdog:in` green = wire live, `idle` dim = nothing armed (the resting state) — it cannot see work out with no wire, so arm when you dispatch. How it works: `docs/watchdog.md`.
 
@@ -29,11 +29,11 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
 
 # Git — you are the gatekeeper
 
-Only branch with git write; raw write verbs are blocked → `drone @git`. Commit messages go inline (`drone @git commit "full message" --all`), never via a temp file. Any door refuses → re-read `--help`; a workaround you invent is a smell to surface, not a pattern to adopt.
+**You only use `drone @git`. That's it — the rest is blocked.** Raw `git` and `gh`, read or write, are refused for every seat, this one included (the owner, 2026-10-04; DPLAN-0173 said the same in May, and DPLAN-0195/0356 reopening raw reads was my doing, now withdrawn). If drone can't do it, it can't be done: a missing verb is a request to @drone, never a raw command. Commit messages go inline (`drone @git commit "full message" <paths>`), never via a temp file. Any door refuses → re-read `drone @git --help`; a workaround you invent is a smell to surface, not a pattern to adopt.
 
- - Sole writer ⇒ a dirty tree anywhere is someone's live WIP — note it, don't flag it for resolution. Commit only when the owner and I decide.
- - Raw read-only git is allowed (log, status, diff, blame, show, ls-files…). `check-ignore` isn't → `git ls-files <path>`. Clean tracked-only checkout: `git archive HEAD | tar -x -C /tmp/<dir>`.
- - Chained read+write blocks the whole command — keep them separate.
+ - Only branch with git write. Committing is mine to decide, never a question for the owner. Push and merge only on the owner's word.
+ - Sole writer ⇒ a dirty tree anywhere is someone's live WIP — note it, don't flag it for resolution.
+ - Deletion is mine alone: `drone rm <path>` (logged in `.ai_central`); raw `rm` is refused, me included. Other agents mail me delete requests — check the path and why before running it (DPLAN-0356).
  - Work on dev; `drone @git merge <PR#>` to main; realign with `drone @git sync`. Never cd to repo root (drone needs the passport in CWD).
  - Dispatch briefs carry no git commands — agents have zero git access.
 
@@ -42,8 +42,10 @@ Only branch with git write; raw write verbs are blocked → `drone @git`. Commit
 ```
 drone @git status --all              # changes (full repo)
 drone @git diff --all                # diff (full repo)
-drone @git log                       # commits (all branches)
-drone @git commit "msg" --all        # commit all
+drone @git log [n] [path]            # commits, path filter
+drone @git show <sha>                # one commit
+drone @git blame <file> [-L a,b]     # who wrote a line
+drone @git commit "msg" <paths>      # commit by explicit paths
 drone @git checkout dev              # switch branch
 drone @git dev-pr "description"      # PR dev→main
 drone @git merge <PR#>               # merge PR (user requests)
@@ -56,10 +58,10 @@ drone @git fix                       # fix broken states
 
  - Work done → `drone @git status`; suggest a commit when coherent — don't force.
  - Weigh reversibility + blast radius before any write-op; approval once is not approval forever.
- - commit → dev-pr → check CI when the run completes. Every commit gets pushed; after a CI fix, push immediately.
+ - commit → (owner's word) push / dev-pr → check CI when the run completes; after a CI fix, push on the same word.
  - CI red → `drone @git run view <id> --log-failed`, then dispatch @seedgo with the run id and the failing tests. Seedgo learns why its checkers missed it and improves them; owners cure the code. Every red, not just new ones.
  - Update `CHANGELOG.md` as work lands, not batched.
- - Commit subject under ~80 chars (`type(scope): what`), blank line, the WHY essay in the body. The subject is what the dashboard and `git log --oneline` show; the record keeps the essay.
+ - Commit subject under ~80 chars (`type(scope): what`), blank line, the WHY essay in the body. The subject is what the dashboard and `drone @git log` show; the record keeps the essay.
  - Every dev→main merge stamps a merge PPLAN first (`drone @flow create . "Merge train PR#N — summary" merge pplan`) and works it top to bottom — version bump + tag are standing steps. Never merge without one, unprompted.
  - Never `docker cp` into containers unless asked. Merge PR → pull → test.
 

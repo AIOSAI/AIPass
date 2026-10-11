@@ -1,9 +1,16 @@
-# META
-# module: devpulse.feedback
-# description: Tests for feedback storage layer
-# END META
+# =================== AIPass ====================
+# Name: test_feedback_storage.py
+# Description: Tests for feedback storage — load, save, generate_id, directory creation
+# Version: 1.0.0
+# Created: 2026-04-14
+# Modified: 2026-09-27
+# =============================================
 
-"""Tests for feedback storage — load, save, generate_id, directory creation."""
+"""Tests for apps/handlers/feedback/storage.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that storage.py parses and imports
+# seedgo: no-test-needed(stdlib) — secrets.token_hex's randomness behind generate_id()
 
 import json
 from unittest.mock import patch

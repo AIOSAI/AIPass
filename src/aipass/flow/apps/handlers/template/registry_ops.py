@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_ops.py
 # Description: Template registry CRUD operations
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-18
-# Modified: 2026-03-18
+# Modified: 2026-10-04
 # =============================================
 
 """Template Registry CRUD Operations.
@@ -299,13 +299,18 @@ def save_registry(data: Dict[str, Any]) -> bool:
         data: Registry dict to persist.
 
     Returns:
-        True if saved successfully, False on error.
+        True if saved successfully, False when the write failed (OSError).
+
+    Raises:
+        ValueError: ``data`` is not a dict with a ``types`` key. Every
+            caller passes a registry it loaded, so this is a caller's bug. It
+            used to answer False, the same as a failed write, so the caller
+            could not tell the two apart (flow's decision, leg 5).
     """
     path = _registry_path()
 
     if not isinstance(data, dict) or "types" not in data:
-        logger.error("[%s] Cannot save invalid registry structure", MODULE_NAME)
-        return False
+        raise ValueError(f"[{MODULE_NAME}] Cannot save invalid registry structure: {type(data).__name__}")
 
     # Refresh metadata
     data.setdefault("metadata", {})

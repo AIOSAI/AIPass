@@ -41,7 +41,6 @@ if sys.platform == "win32":
 
 from typing import Any, Dict, Tuple, List
 
-# ruff: noqa: E402
 # INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 

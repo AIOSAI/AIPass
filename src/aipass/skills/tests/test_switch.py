@@ -1,8 +1,9 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_switch.py - Skill off-switch tests
-# Date: 2026-08-18
+# =================== AIPass ====================
+# Name: test_switch.py
+# Description: Skill off-switch tests
 # Version: 1.1.0
+# Created: 2026-08-18
+# Modified: 2026-09-27
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -15,17 +16,11 @@
 #   - systemctl is ALWAYS faked - a test must never touch this machine's units
 # =============================================
 
-"""Tests for the per-skill off-switch (DPLAN-0306).
+"""Tests for apps/handlers/switch_handler.py and the doors that read it (runner, telegram notifier)."""
 
-The switch has one job: OFF means the skill is disconnected. These tests pin
-the four properties that make that claim true rather than hopeful:
-
-  1. The toggle persists across a process restart (state is on disk, not in RAM).
-  2. OFF stops every declared process AND blocks respawn AND gates the runner.
-  3. ON restores.
-  4. An unreadable state document fails CLOSED - it never reads as "all on",
-     because reading it as "all on" resurrects the processes the operator killed.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/switch_handler.py parses and carries no unused import
+# seedgo: no-test-needed(stdlib) — json's rejection of a malformed document; only the refusal built on it is pinned
 
 import json
 import os
@@ -36,8 +31,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.skills.apps.handlers import discovery_handler as dh
 from aipass.skills.apps.handlers import switch_handler as sh
 from aipass.skills.apps.handlers.json import json_handler as jh
+from aipass.skills.apps.modules import runner
+from aipass.skills.lib.telegram.apps.handlers import notifier
 
 
 # =============================================
@@ -156,6 +154,7 @@ class TestStatePersistence:
             [sys.executable, "-c", probe],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             env={
                 **os.environ,
@@ -234,6 +233,7 @@ class TestStatePersistence:
 # =============================================
 
 
+# Fails CLOSED: reading an unreadable document as "all on" resurrects the processes the operator killed.
 class TestUnreadableStateFailsClosed:
     """An unreadable toggle must never read as 'everything is on'."""
 
@@ -413,8 +413,6 @@ class TestRunnerGate:
     """The second door: AIPass must not start a skill it has switched off."""
 
     def test_run_skill_refuses_a_switched_off_skill(self, state_dir):
-        from aipass.skills.apps.modules import runner
-
         sh.set_enabled("telegram", False, reason="retired 08-18")
 
         # run_handler/run_markdown are stubbed so that a REGRESSION of the gate
@@ -437,8 +435,6 @@ class TestRunnerGate:
     def test_the_gate_runs_before_the_handler_is_even_loaded(self, state_dir):
         # Stopping systemd units is not enough: `run telegram start base` spawns
         # a bot IN-PROCESS. The gate has to bite before the handler is imported.
-        from aipass.skills.apps.modules import runner
-
         sh.set_enabled("telegram", False)
         with patch.object(runner, "load_skill") as loader:
             result = runner.run_skill("telegram", action="start")
@@ -451,8 +447,6 @@ class TestRunnerGate:
         loader.assert_not_called()
 
     def test_an_unreadable_state_document_refuses_to_run_anything(self, state_dir):
-        from aipass.skills.apps.modules import runner
-
         (state_dir / "switch_state.json").write_text("{corrupt", encoding="utf-8")
         result = runner.run_skill("github", action="anything")
 
@@ -460,8 +454,6 @@ class TestRunnerGate:
         assert "switch_state.json" in result["error"]
 
     def test_an_on_skill_passes_through_the_gate(self, state_dir):
-        from aipass.skills.apps.modules import runner
-
         sh.set_enabled("telegram", True)
         with patch.object(runner, "load_skill") as loader:
             loader.return_value = {
@@ -505,8 +497,6 @@ class TestDeclaredUnits:
         # in discovery_handler, which silently answered "" for a block list.
         # An environment-dependent pin proves nothing; this one names the
         # environment and asserts both halves of it.
-        from aipass.skills.apps.handlers import discovery_handler as dh
-
         with patch.object(dh, "yaml", None):
             without_yaml = sh.declared_units("telegram")
 
@@ -517,9 +507,7 @@ class TestDeclaredUnits:
         # The other half of the same lesson: if this skill's SKILL.md ever stops
         # shipping, the pin above must fail LOUDLY here rather than quietly
         # asserting against a file only this machine has.
-        from aipass.skills.apps.handlers.discovery_handler import get_search_paths
-
-        builtin = [path for path, source in get_search_paths() if source == "builtin"][0]
+        builtin = [path for path, source in dh.get_search_paths() if source == "builtin"][0]
         assert (builtin / "telegram" / "SKILL.md").exists(), (
             "telegram's SKILL.md is missing from the built-in lib — the declaration "
             "test above would be asserting against nothing"
@@ -583,8 +571,6 @@ class TestTheNotifierDoor:
     BOT = {"bot_token": "123:not-a-token", "chat_id": "42"}
 
     def _send(self):
-        from aipass.skills.lib.telegram.apps.handlers import notifier
-
         response = MagicMock()
         response.__enter__.return_value.read.return_value = b'{"ok": true}'
         with (

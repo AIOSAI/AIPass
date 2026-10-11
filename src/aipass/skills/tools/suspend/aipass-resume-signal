@@ -12,7 +12,9 @@
 # reads it (see base_bot.py _check_resume_signal) and drives the actual
 # grace-window / re-arm decision there.
 
-SIGNAL_FILE="/home/patrick/.aipass/telegram_bots/resume_signal.json"
+# The signal lives under the running user's home; a system hook may run with HOME unset,
+# so fall back to the passwd entry of the invoking user.
+SIGNAL_FILE="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}/.aipass/telegram_bots/resume_signal.json"
 
 case "$1" in
   post)

@@ -2,7 +2,7 @@
   "metadata": {
     "version": "2.1.0",
     "created": "2026-03-07T22:43:25.317608",
-    "updated": "2026-08-31",
+    "updated": "2026-10-08",
     "description": "Standards bypass configuration for @trigger — rebuilt from ground truth (FPLAN-0382 wave 1), re-measured after FPLAN-0384 scoping",
     "true_up": "Every rule below was re-derived by running the seedgo checkers over this branch with bypass_rules=[] and matching one rule to one surviving violation. 84 rules became 25: the rest were dead (file deleted, violation fixed, or target never audited). Re-derive the same way before editing — do not hand-adjust line numbers.",
     "liveness_2026_08_09": "Leave-one-out re-measurement after FPLAN-0384 landed: 24 of 25 rules provably suppress a real violation (audit lane 24 hits with rules=[], 0 with the full set). The dead one — error_handling on events/error_detected.py — was removed. NOTE for whoever measures next: audit-lane unused_function records carry no line/name field (function names live inside the `issues` strings), so attributing a functions-scoped rule by record fields reports a false DEAD. A/B the rule instead.",
@@ -62,18 +62,6 @@
       "standard": "handlers",
       "pattern": "module_name auto-detection + bus import",
       "reason": "Two findings, one rule (the checker gives neither a line). module_name is supplied by the watcher's own parse of the log line, not inspect.stack() — the calling frame is watchdog's thread, which knows nothing about which branch wrote the line. L353 imports the trigger bus because a watchdog callback's whole job is to bridge the filesystem to the event bus."
-    },
-    {
-      "file": "apps/handlers/events/runaway_handler.py",
-      "standard": "handlers",
-      "pattern": "cross-branch wake_branch import",
-      "reason": "L344: inline `from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch` after email delivery. ai_mail exposes no modules/ entry point for wake — dispatch.wake IS the public surface. Cross-branch, so seedgo's same-branch handler-import allowance does not cover it. FILE-WIDE: handlers_check passes no line."
-    },
-    {
-      "file": "apps/handlers/events/error_detected.py",
-      "standard": "handlers",
-      "pattern": "cross-branch wake_branch import",
-      "reason": "L598: the same inline wake_branch import as runaway_handler.py, for the same reason — the medic dispatch has to wake the branch it just mailed. FILE-WIDE: handlers_check passes no line."
     },
     {
       "file": "apps/handlers/events/warning_logged.py",
@@ -168,14 +156,110 @@
       "anchor": "python -m aipass.trigger.apps.log_watcher_service"
     },
     {
-      "file": "apps/handlers/events/runaway_handler.py",
-      "standard": "encapsulation",
-      "lines": [
-        336
-      ],
-      "pattern": "from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch",
-      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). ai_mail publishes no modules/ entry point for waking a branch, so dispatch.wake is the only door. Line number drifts if anything above L344 changes — re-derive rather than nudge it. | LINE RE-DERIVED 2026-08-31: was [344], now [336]. The round-4 dead-cwd sweep deleted a _find_repo_root copy from this file and every line below it moved up; the waiver kept pointing at the old number and silently stopped suppressing.",
-      "anchor": "from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch"
+      "file": "tests/test_error_registry.py",
+      "standard": "through_the_command",
+      "lines": [1101],
+      "pattern": "er._load_circuit_breaker_state() read directly",
+      "reason": "No product door (@devpulse ruling, fleet green leg 10). The loader's only caller is module import (error_registry.py, _circuit_breaker = _load_circuit_breaker_state()), so the one public route to it is a re-import, and a re-import binds the live trigger_json/trigger_cb_state.json.",
+      "anchor": "er._load_circuit_breaker_state()"
+    },
+    {
+      "file": "tests/test_error_registry.py",
+      "standard": "through_the_command",
+      "lines": [1459],
+      "pattern": "er._fingerprint_dispatch_count read directly",
+      "reason": "Truly internal (trigger's reading, fleet green leg 10). The test pins that get_dispatch_count never creates an entry for an unknown fingerprint. No public answer can see the difference between an entry of 0 and no entry: get_dispatch_count answers 0 for both (correctly; it counts true, pinned at 2 after two dispatches), should_dispatch treats both as never dispatched, and the saved per_fingerprint keys come from _fingerprint_dispatch_times. What it guards is memory growth alone.",
+      "anchor": "er._fingerprint_dispatch_count"
+    },
+    {
+      "file": "tests/test_error_detected.py",
+      "standard": "import_site",
+      "lines": [535, 536],
+      "pattern": "sys.modules entries set and dropped to re-import error_detected",
+      "reason": "An import-time fallback no setattr can re-fail (@devpulse ruling, fleet green leg 10). The stubs exist only in error_detected's `except ImportError` arm around its error_registry import, so the one way to reach them is an import that fails; monkeypatch restores both entries at teardown.",
+      "anchor": "sys.modules, \"aipass.trigger.apps.handlers."
+    },
+    {
+      "file": "tests/test_error_detected.py",
+      "standard": "import_site",
+      "lines": [537],
+      "pattern": "the fresh import of error_detected inside the fixture",
+      "reason": "The other half of the same fixture (fleet green leg 10 ruling): the import must run while error_registry is unimportable, so it cannot move to the top of the file.",
+      "anchor": "import aipass.trigger.apps.handlers.events.error_detected as fresh"
+    },
+    {
+      "file": "apps/config.py",
+      "standard": "logged_fallback",
+      "lines": [119],
+      "pattern": "append_trail returns False when the trail write fails",
+      "reason": "False means not written in both arms, and success is True, so no caller can mistake the failure for an answer (fleet green leg 5, kept leg 10). Each caller reads False as not written: TrailLogger.dropped counts it, and error_detected, runaway_handler and startup check it. You cannot log a failure to log.",
+      "anchor": "return False"
+    },
+    {
+      "file": "apps/modules/errors.py",
+      "standard": "logged_fallback",
+      "lines": [298],
+      "pattern": "_cmd_detail returns True after an unreadable registry",
+      "reason": "True there means routed, not succeeded (fleet green leg 5, kept leg 10). The failure goes out through cli error() and its failure flag, which trigger.main reads.",
+      "anchor": "return True"
+    },
+    {
+      "file": "apps/handlers/error_registry.py",
+      "standard": "logged_fallback",
+      "lines": [840],
+      "pattern": "update_status returns False on an exception",
+      "reason": "The success path returns _save_registry's answer, so False is always a failure: invalid status, not found, save failed or an exception (fleet green leg 4, kept leg 10). Its callers in errors.py (suppress, unsuppress, resolve) print the failure on False and do nothing else, and the warning names the exception.",
+      "anchor": "return False"
+    },
+    {
+      "file": "apps/handlers/error_registry.py",
+      "standard": "logged_fallback",
+      "lines": [996],
+      "pattern": "update_source_fix_status returns False on an exception",
+      "reason": "Fleet green leg 5, kept leg 10. Its caller, errors suppress, ignores the answer and runs after the suppression write and after the source-fix send. A raise would crash after the mail went, and a distinct value would need that caller changed.",
+      "anchor": "return False"
+    },
+    {
+      "file": "apps/handlers/escalation.py",
+      "standard": "logged_fallback",
+      "lines": [780, 895],
+      "pattern": "digest and aged-notice send raised -> send_failed",
+      "reason": "send_failed comes only from failure arms (fleet green leg 5, kept leg 10): no callback wired, the send raised, the send refused. A success returns another outcome and stamps the cooldown. A raise would reach the record path's state write and drop the occurrence; send_failed leaves no cooldown, so the next occurrence retries.",
+      "anchor": "return \"send_failed\""
+    },
+    {
+      "file": "apps/handlers/escalation.py",
+      "standard": "logged_fallback",
+      "lines": [968],
+      "pattern": "_rollup_is_due sends anyway on an unreadable stamp",
+      "reason": "An unreadable stamp must not mute the manager forever (fleet green leg 5, kept leg 10). True is the decision to send, taken on purpose, and the warning names the stamp.",
+      "anchor": "return True"
+    },
+    {
+      "file": "apps/handlers/events/error_detected.py",
+      "standard": "logged_fallback",
+      "lines": [313],
+      "pattern": "_read_log_context returns empty text on a read failure",
+      "reason": "Fleet green leg 5, kept leg 10. Its caller runs right before the dispatch mail. A raise would drop a dispatch over an unreadable context, while empty text drops only the context section.",
+      "anchor": "return \"\""
+    },
+    {
+      "file": "apps/config.py",
+      "standard": "cli_flags",
+      "pattern": "config.py read as an entry point",
+      "reason": "config.py is not an entry point (fleet green leg 10 ruling). It holds constants and shared helpers imported by every trigger module; the entry point is apps/trigger.py. FILE-WIDE: the rule judges the file as a whole."
+    },
+    {
+      "file": "apps/config.py",
+      "standard": "cli_ux",
+      "pattern": "config.py read as an entry point",
+      "reason": "config.py is not an entry point (fleet green leg 10 ruling). It holds constants and shared helpers imported by every trigger module; the entry point is apps/trigger.py. FILE-WIDE: the rule judges the file as a whole."
+    },
+    {
+      "file": "apps/log_watcher_service.py",
+      "standard": "introspection",
+      "pattern": "--help check in main() with no no-args check before it",
+      "reason": "A systemd daemon must start on no arguments (fleet green leg 11 ruling): the unit runs the module bare, so no-args IS the start and must never print introspection instead. The --help guard (leg 10) is the only argument branch; a daemon with no subcommands has nothing else to gate. FILE-WIDE, not line-scoped: introspection_check calls is_bypassed() only at its top gate with no line, so a rule carrying lines is inert there (bypass/utils._scope_matches) - measured leg 11: line-scoped 85, file-wide 100."
     }
   ],
   "notes": {

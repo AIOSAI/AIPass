@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: triplet_content.py
 # Description: Queryable content for the triplet proof
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -53,13 +53,12 @@ def get_triplet_proof() -> str:
         "",
         f"[dim]{sep}[/dim]",
         "[bold cyan]HOW TO FIX:[/bold cyan]",
-        "  [yellow]1.[/yellow] Create the missing [dim]*_content.py[/dim] with a [dim]get_{name}_standards()[/dim] function",
+        "  [yellow]1.[/yellow] Create the missing [dim]*_content.py[/dim] with a "
+        "[dim]get_{name}_standards()[/dim] function",
         "  [yellow]2.[/yellow] Create the missing [dim]*.md[/dim] with full documentation",
         "  [yellow]3.[/yellow] Follow existing triplets as examples:",
         "     [green]\u2713[/green] [dim]architecture_check.py + architecture_content.py + architecture.md[/dim]",
         "",
-        # TODO: Expand with actual scan logic details, threshold counts,
-        # and per-pack statistics once the scanner is implemented.
         "",
         f"[dim]{sep}[/dim]",
         "[bold cyan]RELATED:[/bold cyan]",

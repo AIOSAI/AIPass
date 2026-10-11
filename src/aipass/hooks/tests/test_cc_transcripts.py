@@ -1,20 +1,24 @@
 # =================== AIPass ====================
 # Name: test_cc_transcripts.py
-# Version: 1.0.0
+# Version: 1.0.3
 # Description: Tests for the CC transcript reader
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-10-05
 # =============================================
 
-"""Tests for apps/modules/cc_transcripts.py.
+"""Tests for apps/modules/cc_transcripts.py."""
 
-The picker used to enumerate processes and call them chats. On 2026-08-18 that
-cost a conversation: Ctrl+C removes the dead chat's session file, so the chat
-the owner wanted was the one thing a PID list could not show, while three bg
-leftovers were offered as if they were his.
-"""
+# The picker used to enumerate processes and call them chats. On 2026-08-18 that
+# cost a conversation: Ctrl+C removes the dead chat's session file, so the chat
+# the owner wanted was the one thing a PID list could not show, while three bg
+# leftovers were offered as if they were his.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that modules/cc_transcripts.py parses and imports
+# seedgo: no-test-needed(documentation) — print_introspection(), the module's help screen
+# seedgo: no-test-needed(constant) — PROJECTS_ROOT's default location; every test repoints it at a temporary directory
 
 import json
 import os
@@ -24,6 +28,11 @@ from pathlib import Path
 import pytest
 
 from aipass.hooks.apps.modules import cc_transcripts
+
+
+def _dashed(text: str) -> str:
+    """The CLI's dpo() for a path of BMP characters: every non-alphanumeric becomes a dash."""
+    return re.sub(r"[^A-Za-z0-9]", "-", text)
 
 
 def write_transcript(root: Path, cwd: Path, session_id: str, title: str, messages: int, age: float = 0) -> Path:
@@ -68,12 +77,14 @@ class TestManglingRule:
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            ("/home/patrick/Projects/AIPass/src/aipass/hooks", "-home-patrick-Projects-AIPass-src-aipass-hooks"),
+            # Measured 2026-10-04 by Claude Code 2.1.289's own cP(), copied verbatim from its bundle into
+            # node; the same code gave the old oracle for the old path, so the measure is the CLI's.
+            ("/srv/aipass/src/aipass/hooks", "-srv-aipass-src-aipass-hooks"),
             # A Windows path: the colon and both backslashes are just
             # non-alphanumerics. There is NO drive-letter special case.
-            ("C:\\Users\\p\\ai_mail", "C--Users-p-ai-mail"),
+            ("C:\\Work\\aipass\\ai_mail", "C--Work-aipass-ai-mail"),
             ("", ""),
-            ("/tmp/é–ø/x", "-tmp-----x"),
+            ("/srv/é–ø/x", "-srv-----x"),  # measured 10-04 22:15 with the same cP(); /tmp gave the old oracle
             # Non-BMP: JS sees a SURROGATE PAIR and writes TWO dashes.
             ("/a/\U0001d518nicode/b", "-a---nicode-b"),
         ],
@@ -81,17 +92,21 @@ class TestManglingRule:
     def test_matches_the_cli(self, raw: str, expected: str):
         assert cc_transcripts._mangle(raw) == expected
 
-    def test_underscore_becomes_dash(self):
+    def test_underscore_becomes_dash(self, tmp_path):
         """ai_mail is the branch that proves it — a naive '/'->'-' misses it."""
-        assert "_" not in cc_transcripts._mangle("/x/ai_mail")
+        name = cc_transcripts.project_dir_for(tmp_path / "x" / "ai_mail").name
+        assert "_" not in name
+        assert name.endswith("-x-ai-mail")
 
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            ("/home/patrick/Projects/AIPass/src/aipass/hooks", "tmdi4s"),
-            ("C:\\Users\\p\\ai_mail", "htazyh"),
+            # Measured 2026-10-04 by 2.1.289's own Le()/Hee() in node (it gives tmdi4s, the old oracle, for the
+            # old developer path): a neutral path, so no person's home ships in a public test.
+            ("/srv/aipass/src/aipass/hooks", "nn2k9g"),
+            ("C:\\Work\\aipass\\ai_mail", "vlvg33"),
             ("", "0"),
-            ("/tmp/é–ø/x", "cac2i8"),
+            ("/srv/é–ø/x", "yc66z4"),  # measured 10-04 22:15 with the same Le(); /tmp gave the old cac2i8
             ("/a/\U0001d518nicode/b", "u24wth"),
             ("/x/" + "deep/" * 60 + "branch", "z99g94"),
         ],
@@ -109,7 +124,7 @@ class TestProjectDirFor:
         target = tmp_path / "Projects" / "AIPass" / "ai_mail"
         target.mkdir(parents=True)
         got = cc_transcripts.project_dir_for(target)
-        assert got.name == cc_transcripts._mangle(str(target.resolve()))
+        assert got.name == _dashed(str(target.resolve()))
         assert got.parent == tmp_path
 
     def test_every_character_maps_one_to_one(self, monkeypatch, tmp_path):
@@ -129,15 +144,15 @@ class TestProjectDirFor:
         monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", tmp_path)
         raw = "/x/" + "deep/" * 60 + "branch"
         name = cc_transcripts.project_dir_for(raw).name
-        assert len(name) > cc_transcripts._NAME_LIMIT
-        assert name.endswith("-" + cc_transcripts._cc_path_hash(str(Path(raw).resolve())))
-        assert name[: cc_transcripts._NAME_LIMIT] == cc_transcripts._mangle(str(Path(raw).resolve()))[:200]
+        resolved = str(Path(raw).resolve())
+        assert len(_dashed(resolved)) > 200  # the CLI's limit, read from its bundle (see TestManglingRule)
+        assert name == _dashed(resolved)[:200] + "-" + cc_transcripts._cc_path_hash(resolved)
 
     def test_short_path_is_not_hashed(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", tmp_path)
         target = tmp_path / "short"
         target.mkdir()
-        assert cc_transcripts.project_dir_for(target).name == cc_transcripts._mangle(str(target.resolve()))
+        assert cc_transcripts.project_dir_for(target).name == _dashed(str(target.resolve()))
 
 
 class TestRecentChats:
@@ -230,7 +245,9 @@ class TestChatFor:
         write_transcript(root, cwd, "ancient", "Ancient", 5, age=999999)
         for i in range(6):
             write_transcript(root, cwd, f"s{i}", f"Chat {i}", 2, age=i)
-        assert cc_transcripts.chat_for(cwd, "ancient")["title"] == "Ancient"
+        chat = cc_transcripts.chat_for(cwd, "ancient")
+        assert chat is not None
+        assert chat["title"] == "Ancient"
         assert "ancient" not in {c["session_id"] for c in cc_transcripts.recent_chats(cwd, limit=5)}
 
     def test_missing_transcript_is_none(self, root, tmp_path):

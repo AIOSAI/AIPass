@@ -58,7 +58,9 @@ sections. One number, one method, produced live.
 | `test_json_durability.py` | Torn-write durability — atomic writes across every JSON and text path |
 | `test_birth_receipt.py` | The birth receipt lane, the seed-vs-gold drift pins, the newborn budget contract, and that retirement carries the memories |
 | `test_passport_seeds.py` | Passport seeds — the tracked identity that ships with the repository |
-| `test_template_import_guard.py` | What a newborn's handler guard must survive on its first import |
+| `test_template_import_guard.py` | The template's fence before any mint: foreign and outside seats refused by name, kin and the modules door allowed, a dead cwd survived |
+| `test_template_import_guard_hosts.py` | The worlds those pins run in: the realpath denial arms on every interpreter, the harness survives hosts this box is not; `support_template_import_guard.py` holds the worlds both files read (never collected) |
+| `test_handlers_fence.py` | Spawn's own handlers fence, a fresh interpreter per case; `support_fence.py` is its probe (never collected) |
 | `test_conftest_fixtures.py` | Pins that this branch's own mocking fixtures reach the code they claim to mock |
 | `conftest.py` | Fixtures: mock templates, registry protection |
 

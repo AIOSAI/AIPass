@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli.py
 # Description: Entry point for drone @cli — seedgo-compliant module discovery and routing
-# Version: 2.3.0
+# Version: 2.3.1
 # Created: 2026-03-08
-# Modified: 2026-09-17
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -24,7 +24,7 @@ ARCHITECTURE:
 """
 
 import sys
-import importlib.util
+import importlib
 from pathlib import Path
 from typing import List, Any
 
@@ -39,7 +39,7 @@ from rich import box
 # CLI modules (showcasing our own services!)
 from aipass.cli.apps.modules.display import console, header, error, reset_command_state, resolve_exit
 
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 CLI_ROOT = Path(__file__).parent
 MODULES_DIR = CLI_ROOT / "modules"
 
@@ -69,11 +69,10 @@ def discover_modules() -> List[Any]:
             continue
 
         try:
-            spec = importlib.util.spec_from_file_location(file_path.stem, file_path)
-            if spec is None or spec.loader is None:
-                continue
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+            # Imported by dotted name, never executed again from the file: a second
+            # copy of display.py kept its own failure flag, so error() inside a routed
+            # module never reached the flag resolve_exit reads (fleet green leg 3).
+            module = importlib.import_module(f"aipass.cli.apps.modules.{file_path.stem}")
             if hasattr(module, "handle_command"):
                 modules.append(module)
         except Exception as e:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dashboard_writer.py
 # Description: Dashboard Write-Through Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -79,16 +79,17 @@ def _find_branch_path(branch_name: str) -> Optional[str]:
 
     Returns:
         Path string to the branch directory, or None if not found
+
+    Raises:
+        OSError, json.JSONDecodeError: the registry exists but cannot be read.
+        Both callers log it and raise it on, so an unreadable registry is
+        never reported as "branch path not found".
     """
     if not os.path.exists(BRANCH_REGISTRY_PATH):
         return None
 
-    try:
-        with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
-            registry = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        logger.warning("[dashboard_writer] Failed to read branch registry")
-        return None
+    with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
+        registry = json.load(f)
 
     for branch in registry.get("branches", []):
         if branch.get("name") == branch_name:
@@ -102,14 +103,19 @@ def write_commons_activity(branch_name: str, activity: Dict[str, Any]) -> bool:
     Write the commons_activity section to a branch's DASHBOARD.local.json.
 
     Uses the devpulse write_section() API for atomic, consistent dashboard writes.
-    Failures are logged but never raised.
 
     Args:
         branch_name: The branch name whose dashboard to update (e.g., "SEED")
         activity: The commons_activity dict to write
 
     Returns:
-        True if written successfully, False otherwise
+        True if written; False when the branch is not registered, write_section
+        is unavailable, or write_section answered False.
+
+    Raises:
+        Whatever the registry read or write_section raises, logged first, so a
+        broken write is never the False of "not found" (commons' decision,
+        DPLAN-0354 leg 5).
     """
     try:
         branch_path = _find_branch_path(branch_name)
@@ -132,7 +138,7 @@ def write_commons_activity(branch_name: str, activity: Dict[str, Any]) -> bool:
 
     except Exception as e:
         logger.error(f"[commons] Dashboard write failed for {branch_name}: {e}")
-        return False
+        raise
 
 
 def update_commons_dashboard(branch_name: str) -> bool:
@@ -149,7 +155,13 @@ def update_commons_dashboard(branch_name: str) -> bool:
         branch_name: The branch name to update (e.g., "SEED")
 
     Returns:
-        True if dashboard was updated, False otherwise
+        True if updated; False when the branch is not registered, write_section
+        is unavailable, or write_section answered False.
+
+    Raises:
+        Whatever the registry read, the database or write_section raises, logged
+        first. dashboard_pipeline.update_dashboards_for_event catches it per
+        branch and goes on (commons' decision, DPLAN-0354 leg 5).
     """
     try:
         branch_path = _find_branch_path(branch_name)
@@ -198,7 +210,7 @@ def update_commons_dashboard(branch_name: str) -> bool:
 
     except Exception as e:
         logger.error(f"[commons] update_commons_dashboard failed for {branch_name}: {e}")
-        return False
+        raise
 
 
 def _read_last_checked(branch_path: str) -> str:

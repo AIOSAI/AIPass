@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: windows_compat_check.py
 # Description: Windows Compatibility Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.6.0
 # Created: 2026-05-10
-# Modified: 2026-09-18
+# Modified: 2026-10-10
 # =============================================
 
 """Windows Compatibility Standards Checker Handler."""
@@ -20,9 +20,16 @@ from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# APPLIES_TO: Windows CI runs the suite; a Unix-only API in a test fails it.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 _POSIX_ONLY_MODULES = frozenset({"fcntl", "pwd", "grp", "termios", "resource"})
+
+# Deferred-import arm: a module one platform lacks, imported at call time.
+_PLATFORM_ONLY_MODULES = _POSIX_ONLY_MODULES | frozenset({"msvcrt", "winreg"})
+
+_IMPORT_CATCHING_TYPES = frozenset({"ImportError", "ModuleNotFoundError", "Exception", "BaseException"})
 
 _POSIX_ONLY_OS_ATTRS = frozenset({"WNOHANG"})
 
@@ -121,6 +128,195 @@ def _find_posix_import_violations(tree: ast.Module, guarded: set[int]) -> list[t
             if node.module.split(".")[0] in _POSIX_ONLY_MODULES and node.lineno not in guarded:
                 violations.append((node.lineno, f"from {node.module} import ..."))
     return violations
+
+
+def _platform_only_names(node: ast.Import | ast.ImportFrom) -> list[str]:
+    """The platform-only module names an import statement binds."""
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names if alias.name.split(".")[0] in _PLATFORM_ONLY_MODULES]
+    if node.module and node.module.split(".")[0] in _PLATFORM_ONLY_MODULES:
+        return [node.module]
+    return []
+
+
+def _try_body_catches_import(node: ast.Try, child: ast.AST) -> bool:
+    """True when ``child`` sits in the try body and a handler catches ImportError."""
+    if not any(child is stmt or child in ast.walk(stmt) for stmt in node.body):
+        return False
+    for handler in node.handlers:
+        if handler.type is None:
+            return True
+        types = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+        if any(isinstance(t, ast.Name) and t.id in _IMPORT_CATCHING_TYPES for t in types):
+            return True
+    return False
+
+
+def _deferred_import_sites(
+    node: ast.AST, stack: list[ast.AST]
+) -> list[tuple[ast.Import | ast.ImportFrom, ast.FunctionDef | ast.AsyncFunctionDef]]:
+    """Imports of platform-only modules inside a function, outside any ImportError catch."""
+    sites: list[tuple[ast.Import | ast.ImportFrom, ast.FunctionDef | ast.AsyncFunctionDef]] = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.Import, ast.ImportFrom)) and _platform_only_names(child):
+            funcs = [s for s in stack if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef))]
+            caught = any(isinstance(s, ast.Try) and _try_body_catches_import(s, child) for s in stack)
+            if funcs and not caught:
+                sites.append((child, funcs[-1]))
+        sites.extend(_deferred_import_sites(child, stack + [child]))
+    return sites
+
+
+def _find_deferred_platform_imports(tree: ast.Module, reported: set[int]) -> list[tuple[int, str]]:
+    """Flag a platform-only module imported at call time (devpulse a831fe55).
+
+    A deferred import is decided when the function runs, after a test may have
+    pretended sys.platform: registry's _FileLock imported fcntl under
+    ``sys.platform != 'win32'`` and a darwin-pretending test made the Windows
+    runner import it. A module-level import (gated or try/except) is decided
+    once at import, before any test runs, so it is not read here. Lines the
+    unguarded-import arm already reports are skipped: one row per line.
+    """
+    violations: list[tuple[int, str]] = []
+    for node, func in _deferred_import_sites(tree, []):
+        if node.lineno in reported:
+            continue
+        name = _platform_only_names(node)[0]
+        stmt = f"import {name}" if isinstance(node, ast.Import) else f"from {name} import ..."
+        cure = "bind it once at module level, try/except ImportError -> None"
+        violations.append((node.lineno, f"{stmt} inside {func.name}() -- {cure}"))
+    return violations
+
+
+_STREAM_PROBES = frozenset({"isatty", "get_terminal_size"})
+_SYS_STREAMS = frozenset({"stdout", "stderr", "__stdout__", "__stderr__"})
+
+
+def _executed_nodes(node: ast.AST):
+    """Every node of one expression or simple statement, minus lambda/def bodies."""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield current
+        stack.extend(ast.iter_child_nodes(current))
+
+
+def _compound_parts(stmt: ast.stmt) -> tuple[list[ast.AST], list[ast.stmt]] | None:
+    """(head expressions, nested statements) a compound statement runs, or None for a simple one."""
+    if isinstance(stmt, ast.ClassDef):
+        return [], stmt.body
+    if isinstance(stmt, ast.Try):
+        return [], stmt.body + stmt.orelse + stmt.finalbody
+    if isinstance(stmt, (ast.If, ast.While)):
+        return [stmt.test], stmt.body + stmt.orelse
+    if isinstance(stmt, ast.With):
+        return [item.context_expr for item in stmt.items], stmt.body
+    if isinstance(stmt, ast.For):
+        return [stmt.iter], stmt.body + stmt.orelse
+    return None
+
+
+def _import_time_nodes(body: list[ast.stmt]):
+    """Nodes a module runs when imported: no function body, main guard or except fallback."""
+    for stmt in body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) or _is_main_guard(stmt):
+            continue
+        parts = _compound_parts(stmt)
+        if parts is None:
+            yield from _executed_nodes(stmt)
+            continue
+        heads, nested = parts
+        for head in heads:
+            yield from _executed_nodes(head)
+        yield from _import_time_nodes(nested)
+
+
+def _console_constructors(tree: ast.Module) -> set[str]:
+    """Names that build a rich Console: aliases of it, and same-file subclasses that keep its __init__ answer.
+
+    A subclass that defines ``_color_system`` decides colour itself (cli display's
+    _LiveConsole re-detects it per print) and is not a constructor here.
+    """
+    names = {"Console"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "rich.console":
+            names.update(alias.asname or alias.name for alias in node.names if alias.name == "Console")
+    classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
+    grew = True
+    while grew:
+        grew = False
+        for cls in classes:
+            if cls.name in names or any(
+                isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name == "_color_system"
+                for stmt in cls.body
+            ):
+                continue
+            bases = {b.id if isinstance(b, ast.Name) else getattr(b, "attr", "") for b in cls.bases}
+            if bases & names:
+                names.add(cls.name)
+                grew = True
+    return names
+
+
+def _is_sys_stream(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr in _SYS_STREAMS
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "sys"
+    )
+
+
+def _console_decides_colour(call: ast.Call) -> bool:
+    """True when the call's own arguments settle colour without reading the host stream."""
+    keywords = {kw.arg: kw.value for kw in call.keywords}
+    if None in keywords:
+        return True  # **kwargs: the decision is not in this file
+    colour = keywords.get("color_system")
+    forced = keywords.get("force_terminal")
+    target = keywords.get("file")
+    if isinstance(colour, ast.Constant) and colour.value is None:
+        return True
+    if isinstance(forced, ast.Constant) and isinstance(forced.value, bool):
+        return True
+    return target is not None and not _is_sys_stream(target)
+
+
+def _call_name(call: ast.Call) -> str:
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id
+    return func.attr if isinstance(func, ast.Attribute) else ""
+
+
+def _find_import_time_stream_reads(tree: ast.Module) -> list[tuple[int, str]]:
+    """Flag a colour or size answer fixed when the module is imported (cli b6655280).
+
+    Rich runs _detect_color_system() in Console.__init__ and keeps the answer, so
+    a console built at import -- force_terminal set from isatty() or left unset --
+    answers for the stream as it was then. A conftest imported cli's display while
+    pytest's capture was suspended; on a Windows xdist worker that stream is NUL,
+    isatty() says True, and every later capture carried escape codes (PR #774).
+    Read: module-level code (class bodies, if/try/with blocks), never a function
+    body, an ``if __name__ == "__main__"`` block or an except handler (a fallback
+    for an absent cross-branch import does not run where the fleet is installed).
+    Acquitted: file= other than sys.stdout/sys.stderr, force_terminal=True/False,
+    color_system=None, or a subclass that defines _color_system (per-print).
+    """
+    constructors = _console_constructors(tree)
+    rows: dict[int, str] = {}
+    for node in _import_time_nodes(tree.body):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _call_name(node)
+        if name in constructors and not _console_decides_colour(node):
+            cure = "decide per print (cli display._LiveConsole) or pass file=/force_terminal= explicitly"
+            rows[node.lineno] = f"module-level {name}() fixes its colour at import -- {cure}"
+        elif name in _STREAM_PROBES and node.lineno not in rows:
+            rows[node.lineno] = f"{name}() read at import -- read it when you print"
+    return sorted(rows.items())
 
 
 def _find_posix_constant_violations(tree: ast.Module, guarded: set[int]) -> list[tuple[int, str]]:
@@ -414,6 +610,85 @@ def _scan_test_body(
             violations.append((lineno, desc))
             seen_lines.add(lineno)
 
+    for lineno, desc in _find_backslashed_tmp_writes(func_node):
+        if lineno not in guarded and lineno not in seen_lines:
+            violations.append((lineno, desc))
+            seen_lines.add(lineno)
+
+
+# A tmp_path name holding a backslash (PR #774, CI round three): one file on
+# POSIX, a tree whose parents do not exist on Windows, so the write raises
+# there before the code under test runs. Only a literal segment of a path
+# rooted at the tmp_path / tmpdir fixture, and only when the test writes it: a
+# name only read or handed on is the same missing file on both hosts.
+_TMP_ROOTS = frozenset({"tmp_path", "tmpdir"})
+_PATH_WRITE_METHODS = frozenset({"write_text", "write_bytes", "touch", "mkdir"})
+
+
+def _backslashed_literal(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str) and "\\" in node.value:
+        return node.value
+    return None
+
+
+def _backslashed_tmp_name(node: ast.expr) -> str | None:
+    """The backslashed literal segment of a tmp_path-rooted path expression, else None."""
+    found = None
+    while True:
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            found = _backslashed_literal(node.right) or found
+            node = node.left
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "joinpath":
+            for arg in node.args:
+                found = _backslashed_literal(arg) or found
+            node = node.func.value
+        else:
+            break
+    return found if isinstance(node, ast.Name) and node.id in _TMP_ROOTS else None
+
+
+def _opens_for_writing(call: ast.Call, mode_index: int) -> bool:
+    modes = [kw.value for kw in call.keywords if kw.arg == "mode"]
+    if len(call.args) > mode_index:
+        modes.append(call.args[mode_index])
+    return any(isinstance(m, ast.Constant) and isinstance(m.value, str) and set(m.value) & set("wax+") for m in modes)
+
+
+def _written_path(call: ast.Call) -> ast.expr | None:
+    """The path a call writes or creates on disk, else None."""
+    func = call.func
+    if isinstance(func, ast.Attribute) and func.attr in _PATH_WRITE_METHODS:
+        return func.value
+    if isinstance(func, ast.Attribute) and func.attr == "open" and _opens_for_writing(call, 0):
+        return func.value
+    if isinstance(func, ast.Name) and func.id == "open" and call.args and _opens_for_writing(call, 1):
+        return call.args[0]
+    return None
+
+
+def _find_backslashed_tmp_writes(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[int, str]]:
+    """Writes to a tmp_path name holding a backslash, in place or through a name bound once."""
+    bindings: dict[str, list[str | None]] = {}
+    for node in ast.walk(func_node):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            bindings.setdefault(node.targets[0].id, []).append(_backslashed_tmp_name(node.value))
+    # A name bound more than once is not guessed at: which binding reaches the write needs flow.
+    named = {name: values[0] for name, values in bindings.items() if len(values) == 1 and values[0]}
+
+    rows: list[tuple[int, str]] = []
+    for node in ast.walk(func_node):
+        if not isinstance(node, ast.Call):
+            continue
+        target = _written_path(node)
+        if target is None:
+            continue
+        literal = named.get(target.id) if isinstance(target, ast.Name) else _backslashed_tmp_name(target)
+        if literal:
+            rows.append(
+                (node.lineno, f"tmp_path name {literal!r} holds a backslash -- one file on POSIX, a tree on Windows")
+            )
+    return rows
+
 
 def _collect_unguarded_tests(
     parent: ast.Module | ast.ClassDef,
@@ -474,6 +749,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "Windows compat",
                     "passed": True,
                     "message": "File skipped (non-target)",
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -532,7 +808,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     platform_only = _platform_guarded_lines(tree)
 
     all_violations: list[tuple[int, str]] = []
-    all_violations.extend(_find_posix_import_violations(tree, guarded))
+    posix_imports = _find_posix_import_violations(tree, guarded)
+    all_violations.extend(posix_imports)
+    all_violations.extend(_find_deferred_platform_imports(tree, {ln for ln, _ in posix_imports}))
     all_violations.extend(_find_posix_constant_violations(tree, guarded))
     all_violations.extend(_find_posix_call_violations(tree, guarded))
     all_violations.extend(_find_os_kill_violations(tree, guarded))
@@ -545,6 +823,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     if _is_test_file(path):
         all_violations.extend(_find_test_platform_violations(tree, guarded))
+    elif path.name != "conftest.py":
+        all_violations.extend(_find_import_time_stream_reads(tree))
 
     non_bypassed = [
         (ln, desc) for ln, desc in all_violations if not is_bypassed(module_path, "windows_compat", ln, bypass_rules)

@@ -1,15 +1,19 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: tests/conftest.py
-# Date: 2025-11-08
-# Version: 1.3.0
+# Description: Shared pytest fixtures for trigger tests
+# Created: 2025-11-08
+# Modified: 2026-10-10
+# Version: 1.5.1
 # Category: trigger/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.5.1 (2026-10-10): Spawn-template temp_test_dir and sample_test_data removed; no live test requested them
+#   - v1.5.0 (2026-10-08): Escalation lane fixtures moved from test_escalation.py; log_watcher_infrastructure
+#     moved from test_log_watcher.py (its _mock_infrastructure); both at the oversize_test_file splits
+#   - v1.4.0 (2026-09-27): Template C1/C2 fixtures - pinned console width, command state reset
 #   - v1.3.0 (2026-09-12): Autouse catch-up state isolation (DPLAN-0339 step 2c)
 #   - v1.2.0 (2026-08-08): Autouse resync of parent-package attrs after sys.modules surgery (CI xdist red)
-#   - v1.1.0 (2026-08-08): Suite-wide escalation lane isolation
-#   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
 #
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
@@ -25,12 +29,14 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
+import json
 import pytest
-import shutil
 import sys
 import types
 from pathlib import Path
-from typing import Generator
+from types import SimpleNamespace
+from typing import Any, Dict, Generator, List
+from unittest.mock import MagicMock
 
 # Imported here, while the REAL aipass.trigger.apps.config is still in place,
 # so the whole suite shares ONE escalation module. Handlers reach the lane with
@@ -42,6 +48,12 @@ from aipass.trigger.apps.handlers import escalation as _escalation
 from aipass.trigger.apps.handlers.json import config_loader as _config_loader
 from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers.json import json_handler
+from aipass.trigger.apps.handlers.events import startup as _startup
+from aipass.trigger.apps.handlers import error_registry, escalation, medic_state
+from aipass.trigger.apps.handlers.events import error_detected
+import aipass.trigger.apps.handlers.json.config_loader as config_loader
+import aipass.trigger.apps.handlers.log_watcher as lw
+from aipass.cli.apps.modules import display
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
 # handler's tests, the lane's template routing suite) that must not be collected
@@ -97,18 +109,16 @@ def isolate_catchup_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     value, so a test run eats the recovery window the live watcher service
     exists to cover (DPLAN-0339 step 2, row 12).
 
-    Resolved through sys.modules rather than a top-level import so the fixture
-    patches whichever copy of the module is currently registered — several
-    tests in this suite delete it and re-import it under a mocked config.
+    Bound by a top-level import since 2026-09-28 (fleet green leg 3): no test
+    in this suite deletes and re-imports the startup module any more, so the
+    one copy imported here is the one every handler reaches.
 
     NOT a full cure: a suite running from ANOTHER branch's directory never
     loads this conftest, so @ai_mail's own reproduction still writes the live
     file. That needs a read-time seam on TRIGGER_JSON_DIR itself, which is a
     change to a shared constant and carries its own plan.
     """
-    import aipass.trigger.apps.handlers.events.startup  # noqa: F401 - registers in sys.modules
-
-    mod = sys.modules["aipass.trigger.apps.handlers.events.startup"]
+    mod = _startup
     sandbox = tmp_path / "_catchup_sandbox"
     sandbox.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(mod, "CATCHUP_STATE_FILE", sandbox / "error_catchup.json")
@@ -155,22 +165,37 @@ def _resync_module_attrs() -> Generator[None, None, None]:
                 delattr(pkg, attr)
 
 
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
 
 
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data
+@pytest.fixture(autouse=True)
+def header_off_the_live_bus(monkeypatch: pytest.MonkeyPatch) -> list:
+    """cli's header fires cli_header_displayed on the trigger it loaded once.
 
-    Customize this fixture for your module's needs
+    display keeps that trigger in _TRIGGER behind _TRIGGER_LOADED, so any test
+    printing through the real header would fire on the live bus. Its handler
+    was retired in leg 4 (2026-09-29), yet this stays: the first fire of a
+    process runs the real setup_handlers, which wires the live mail adapter
+    into three handler modules. Set here for every test, to a recorder: the
+    api cure of 2026-09-27, chosen by this branch in leg 3.
     """
-    return {"test_key": "test_value", "sample_data": "example"}
+    fired: list = []
+    recorder = types.SimpleNamespace(fire=lambda event, **data: fired.append((event, data)))
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return fired
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -202,3 +227,156 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+# ---------------------------------------------------------------------------
+# The escalation lane, shared by test_escalation.py and test_escalation_digest.py
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cfg() -> Dict[str, Any]:
+    """Operator settings the lane runs on — tests mutate this dict, never a live file."""
+    return {
+        "enabled": True,
+        "digest_recipient": "@digest-inbox",
+        "warning_threshold": 3,
+        "error_threshold": 3,
+        "window_minutes": 60,
+        "cooldown_minutes": 60,
+        "warning_age_hours": 24,
+        "rollup_hours": 24,
+        "sample_lines": 3,
+        "max_signatures": 500,
+        "escalate_suppressed": False,
+        "watch_branch_log_warnings": True,
+        "ignore_branches": [],
+    }
+
+
+@pytest.fixture
+def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
+    """The escalation handler, wired to a tmp state file and the cfg fixture.
+
+    The real file lock and real atomic writes run here on purpose: a mocked
+    lock has already hidden a self-deadlock in this branch once.
+    """
+    monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
+    monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
+    monkeypatch.setattr(escalation, "get_config", lambda: cfg)
+    monkeypatch.setattr(escalation, "_send_email", None)
+    # The aged lane opens a registry row. Left real, that wrote into the LIVE
+    # trigger_json/error_registry.json on every run: by 2026-09-24 two test
+    # messages sat there at count 151 and 51. Tests that care patch over this.
+    monkeypatch.setattr(escalation, "_registry_report", lambda **kwargs: {})
+    escalation._config_cache = (0.0, None)
+    # Reset on the way OUT too: a test that points BRANCH_REGISTRY_FILE at a tmp
+    # registry leaves the compiled pattern behind, and monkeypatch restores the
+    # path but not the cache — the next test would sign against a stale citizen
+    # list that no longer matches any file on disk.
+    escalation._branch_names_cache = (0.0, None)
+    yield escalation
+    escalation._config_cache = (0.0, None)
+    escalation._branch_names_cache = (0.0, None)
+
+
+@pytest.fixture
+def outbox(monkeypatch: pytest.MonkeyPatch, lane) -> List[Dict[str, Any]]:
+    """Capture digest emails instead of sending them."""
+    box: List[Dict[str, Any]] = []
+
+    def _send(**kwargs: Any) -> bool:
+        box.append(kwargs)
+        return True
+
+    monkeypatch.setattr(lane, "_send_email", _send)
+    return box
+
+
+@pytest.fixture
+def medic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
+    """Registry + medic state describing an error medic is still handling itself.
+
+    The lane reaches each of these through a lazy import that resolves out of
+    sys.modules at call time, so the module objects imported at the top of
+    this file are the ones patched here and the ones the lane reads.
+    """
+
+    # Answers that depend on what the lane asks: a test suppresses a fingerprint
+    # by adding it to `suppressed`, and turns medic off through `switches`.
+    suppressed: set = set()
+    switches = {"medic_enabled": True}
+    monkeypatch.setattr(error_registry, "is_suppressed", lambda fingerprint: fingerprint in suppressed)
+    monkeypatch.setattr(error_registry, "get_dispatch_count", lambda fingerprint: 0)
+    monkeypatch.setattr(medic_state, "is_enabled", lambda: switches["medic_enabled"])
+    monkeypatch.setattr(medic_state, "get_muted_branches", lambda: [])
+    # The real registry lookup, reading a tmp_path registry file.
+    branch_registry = tmp_path / "AIPASS_REGISTRY.json"
+    branches = [{"email": "@flow"}, {"email": "@memory"}]
+    branch_registry.write_text(json.dumps({"branches": branches}), encoding="utf-8")
+    monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", branch_registry)
+
+    return SimpleNamespace(
+        branch_registry=branch_registry,
+        registry=error_registry,
+        state=medic_state,
+        dispatcher=error_detected,
+        suppressed=suppressed,
+        switches=switches,
+    )
+
+
+# ---------------------------------------------------------------------------
+# The branch log watcher, shared by test_log_watcher.py, test_log_watcher_rotation.py
+# and test_log_watcher_state.py. Not autouse: it was autouse inside the one file it
+# lived in, and each of those three files keeps that by naming it in pytestmark, so
+# no other test file starts running it.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def log_watcher_infrastructure(monkeypatch, tmp_path):
+    """Replace every door the watcher opens onto live state, on the real module.
+
+    The module is imported once, at the top. Each outward function and every
+    path constant it writes is set here and put back by monkeypatch; the
+    module-level state a fresh import used to reset is reset here too.
+    """
+    monkeypatch.setattr(lw, "logger", MagicMock())
+
+    # log_operation appends to the LIVE trigger logs/.
+    mock_json_handler = MagicMock()
+    mock_json_handler.log_operation = MagicMock(return_value=True)
+    monkeypatch.setattr(lw, "json_handler", mock_json_handler)
+
+    # Built under tmp_path so every trigger_data.json flush the product makes
+    # lands in this test's own directory, never the live watcher positions.
+    fake_trigger_root = tmp_path / "fake_trigger_root"
+    fake_trigger_root.mkdir()
+    monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", fake_trigger_root / "trigger_data.json")
+    monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "fake_aipass_pkg")
+    monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
+
+    # -- error registry: the import-time binding and the lazy fallback import
+    # both answer from this recorder, never the LIVE registry.
+    registry_answer = MagicMock(return_value={"is_new": True, "count": 1, "id": "abc123"})
+    monkeypatch.setattr(lw, "registry_report", registry_answer)
+    monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", True)
+    monkeypatch.setattr(error_registry, "report", registry_answer)
+
+    # -- the operator switch for WARNING capture: read lazily per line.
+    monkeypatch.setattr(config_loader, "section", MagicMock(return_value={}))
+
+    # -- watchdog: no real observer is ever armed over a directory.
+    monkeypatch.setattr(lw, "WatchdogObserver", MagicMock())
+
+    # -- module state a fresh import used to start from.
+    monkeypatch.setattr(lw, "_branch_log_observer", None)
+    monkeypatch.setattr(lw, "_active_watcher", None)
+    monkeypatch.setattr(lw, "_seen_error_hashes", set())
+    monkeypatch.setattr(lw, "_fallback_error_counts", {})
+    monkeypatch.setattr(lw, "_data_dirty", False)
+    monkeypatch.setattr(lw, "_last_flush_time", 0.0)
+    monkeypatch.setattr(lw, "_branch_names_cache", (0.0, ()))
+    monkeypatch.setattr(lw, "_fire_event", None)
+    monkeypatch.setattr(lw, "_warning_capture_cache", (0.0, True))

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delete_ops.py
 # Description: Delete handler — implementation logic for branch deletion
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-10
+# Modified: 2026-09-27
 # =============================================
 
 """Delete handler implementation for branch lifecycle management.
@@ -146,6 +146,15 @@ def delete_branch(
     if branch_dir is None or not branch_dir.is_dir():
         msg = f"Branch directory does not exist: {branch_dir}"
         logger.warning(f"[delete] {msg}")
+        return _error_result(branch_name, msg)
+
+    # Protection is by NAME; this is the check by LOCATION. A row that resolves
+    # outside the project, or to the project root itself, is refused before the
+    # archive and the rmtree ever see it.
+    root = project_root.resolve()
+    if branch_dir == root or not branch_dir.is_relative_to(root):
+        msg = f"Branch directory {branch_dir} is outside the project {root} - refusing to archive or remove it"
+        logger.error(f"[delete] {msg}")
         return _error_result(branch_name, msg)
 
     # 2. Confirmation prompt

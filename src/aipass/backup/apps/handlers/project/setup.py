@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Project setup handler — scaffold .backup/ directory in target
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-16
-# Modified: 2026-09-03
+# Modified: 2026-09-22
 # =============================================
 
 """Project setup handler.
@@ -90,8 +90,11 @@ def create_backup_dir(project_path: str) -> Path | None:
 
     ignore_path = builder.build_ignore_path(project_path)
     if not ignore_path.exists():
-        with open(ignore_path, "w", encoding="utf-8") as f:
-            f.write(_build_backupignore())
+        # Build the content BEFORE opening the destination: opening first
+        # truncated it, so a missing template left a zero-byte .backupignore
+        # that the exists() guard above then never reseeded.
+        content = _build_backupignore()
+        ignore_path.write_text(content, encoding="utf-8")
 
     trail.log_operation("setup_complete", {"project_path": project_path})
     return backup_dir

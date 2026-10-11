@@ -3,80 +3,51 @@
 # Description: Tests for trigger.py CLI entry point — line coverage
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the trigger.py CLI entry point (discover, route, main)."""
+"""Tests for the apps/trigger.py CLI entry point (discover, route, main)."""
 
-import sys
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — each command's own behaviour under apps/modules/; each has its own test file
+
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+from aipass.cli.apps.modules import error, mark_command_failed
+from aipass.trigger.apps import trigger as trigger_entry
 
 
 # ---------------------------------------------------------------------------
 # Infrastructure mocks — isolate from real prax / cli
 # ---------------------------------------------------------------------------
 
-_mock_console = MagicMock()
-_mock_header = MagicMock()
-_mock_error = MagicMock()
 _mock_logger = MagicMock()
 
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace heavy infrastructure imports with lightweight mocks."""
-    # Reset call counts between tests
-    _mock_console.reset_mock()
-    _mock_header.reset_mock()
-    _mock_error.reset_mock()
-    _mock_logger.reset_mock()
+    """Patch the entry point's prax logger on the real module.
 
-    # ---- prax logger ----
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.system_logger = _mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
+    The entry point logs failures at ERROR, and a real prax ERROR line is what
+    the live branch watcher escalates, so the logger is the edge patched here.
+    """
+    # Reset call counts between tests
+    _mock_logger.reset_mock()
+    monkeypatch.setattr(trigger_entry, "logger", _mock_logger)
 
     # ---- cli ----
-    # The exit seam is REAL here, not mocked. main() now returns
-    # resolve_exit(True) instead of a literal 0, and a MagicMock seam would
-    # make every exit-code assertion below compare against a mock that equals
-    # nothing — green or red for reasons unrelated to the exit code. These
-    # three are pure functions over one process-level flag, so wiring the real
-    # ones costs nothing and is the only way an exit code means anything.
-    from aipass.cli.apps.modules import mark_command_failed, reset_command_state, resolve_exit
-
-    mock_cli = MagicMock()
-    mock_cli.console = _mock_console
-    mock_cli.header = _mock_header
-    # error() marks the command failed in the real cli; a bare mock would not,
-    # and the refusal arm of the seam would be untestable from here.
-    _mock_error.side_effect = lambda *a, **k: mark_command_failed()
-    mock_cli.error = _mock_error
-    mock_cli.reset_command_state = reset_command_state
-    mock_cli.resolve_exit = resolve_exit
-    # Real too, and it matters: a test that reaches for this through the mocked
-    # module and got an auto-MagicMock would set no flag at all, and the reset
-    # it means to exercise would pass with the reset deleted (measured).
-    mock_cli.mark_command_failed = mark_command_failed
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", mock_cli)
-
-    # ---- force re-import so the module picks up our mocks ----
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.trigger", raising=False)
+    # cli is REAL here (2026-09-27): console output is read with capsys and a
+    # refusal from error() on stderr. The exit seam was already real; a mocked
+    # console only let the tests read call args instead of what a user sees.
 
 
 def _import_trigger():
-    """Import trigger.py fresh (after infrastructure mocks are in place)."""
-    import aipass.trigger.apps.trigger as mod
-
-    return mod
+    """Return the real trigger.py entry module the fixture patched."""
+    return trigger_entry
 
 
 # ===================================================================
@@ -236,7 +207,7 @@ class TestRouteCommand:
 class TestPrintIntrospection:
     """Cover print_introspection() paths."""
 
-    def test_prints_module_info_with_doc(self) -> None:
+    def test_prints_module_info_with_doc(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Module with __doc__ gets its first line as description."""
         trigger = _import_trigger()
         mock_mod = MagicMock()
@@ -245,11 +216,10 @@ class TestPrintIntrospection:
 
         trigger.print_introspection([mock_mod])
         # Verify console.print was called with the module name
-        calls = [str(c) for c in _mock_console.print.call_args_list]
-        joined = " ".join(calls)
+        joined = capsys.readouterr().out
         assert "fire" in joined
 
-    def test_prints_module_info_without_doc(self) -> None:
+    def test_prints_module_info_without_doc(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Module with __doc__=None shows 'No description'."""
         trigger = _import_trigger()
         mock_mod = MagicMock()
@@ -257,16 +227,14 @@ class TestPrintIntrospection:
         mock_mod.__doc__ = None
 
         trigger.print_introspection([mock_mod])
-        calls = [str(c) for c in _mock_console.print.call_args_list]
-        joined = " ".join(calls)
+        joined = capsys.readouterr().out
         assert "No description" in joined
 
-    def test_prints_no_modules_message(self) -> None:
+    def test_prints_no_modules_message(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Empty module list shows 'No modules discovered'."""
         trigger = _import_trigger()
         trigger.print_introspection([])
-        calls = [str(c) for c in _mock_console.print.call_args_list]
-        joined = " ".join(calls)
+        joined = capsys.readouterr().out
         assert "No modules discovered" in joined
 
 
@@ -278,7 +246,7 @@ class TestPrintIntrospection:
 class TestPrintHelp:
     """Cover print_help() paths."""
 
-    def test_prints_help_with_modules_and_doc(self) -> None:
+    def test_prints_help_with_modules_and_doc(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Help output includes module name and docstring first line."""
         trigger = _import_trigger()
         mock_mod = MagicMock()
@@ -286,12 +254,11 @@ class TestPrintHelp:
         mock_mod.__doc__ = "Show status information\nDetails"
 
         trigger.print_help([mock_mod])
-        _mock_header.assert_called()
-        calls = [str(c) for c in _mock_console.print.call_args_list]
-        joined = " ".join(calls)
+        joined = capsys.readouterr().out
         assert "status" in joined
+        assert "TRIGGER - Branch Management System" in joined
 
-    def test_prints_help_with_modules_no_doc(self) -> None:
+    def test_prints_help_with_modules_no_doc(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Help output shows 'No description' when module lacks docstring."""
         trigger = _import_trigger()
         mock_mod = MagicMock()
@@ -299,16 +266,14 @@ class TestPrintHelp:
         mock_mod.__doc__ = None
 
         trigger.print_help([mock_mod])
-        calls = [str(c) for c in _mock_console.print.call_args_list]
-        joined = " ".join(calls)
+        joined = capsys.readouterr().out
         assert "No description" in joined
 
-    def test_prints_help_no_modules(self) -> None:
+    def test_prints_help_no_modules(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Help output shows 'No modules discovered' for empty list."""
         trigger = _import_trigger()
         trigger.print_help([])
-        calls = [str(c) for c in _mock_console.print.call_args_list]
-        joined = " ".join(calls)
+        joined = capsys.readouterr().out
         assert "No modules discovered" in joined
 
 
@@ -320,80 +285,76 @@ class TestPrintHelp:
 class TestMain:
     """Cover main() paths."""
 
-    def test_no_args_shows_introspection(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_args_shows_introspection(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """No CLI args triggers print_introspection and returns 0."""
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger"])
         monkeypatch.setattr(trigger, "discover_modules", lambda: [])
 
-        result = trigger.main()
+        result = trigger.main([])
         assert result == 0
         # print_introspection prints "No modules discovered"
-        calls = [str(c) for c in _mock_console.print.call_args_list]
-        joined = " ".join(calls)
+        joined = capsys.readouterr().out
         assert "No modules discovered" in joined
 
-    def test_version_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_version_flag(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """The --version flag prints version string and returns 0."""
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "--version"])
         monkeypatch.setattr(trigger, "discover_modules", lambda: [])
 
-        result = trigger.main()
+        result = trigger.main(["--version"])
         assert result == 0
-        _mock_console.print.assert_any_call(f"TRIGGER v{trigger.__version__}")
+        assert f"TRIGGER v{trigger.__version__}" in capsys.readouterr().out
 
-    def test_version_short_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_version_short_flag(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """The -V short flag prints version string and returns 0."""
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "-V"])
         monkeypatch.setattr(trigger, "discover_modules", lambda: [])
 
-        result = trigger.main()
+        result = trigger.main(["-V"])
         assert result == 0
-        _mock_console.print.assert_any_call(f"TRIGGER v{trigger.__version__}")
+        assert f"TRIGGER v{trigger.__version__}" in capsys.readouterr().out
 
-    def test_help_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_help_flag(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """The --help flag calls print_help and returns 0."""
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "--help"])
         monkeypatch.setattr(trigger, "discover_modules", lambda: [])
 
-        result = trigger.main()
+        result = trigger.main(["--help"])
         assert result == 0
-        _mock_header.assert_called()
+        assert "TRIGGER - Branch Management System" in capsys.readouterr().out
 
     def test_help_short_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The -h short flag calls print_help and returns 0."""
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "-h"])
         monkeypatch.setattr(trigger, "discover_modules", lambda: [])
 
-        result = trigger.main()
+        result = trigger.main(["-h"])
         assert result == 0
 
     def test_help_word(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The bare 'help' command calls print_help and returns 0."""
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "help"])
         monkeypatch.setattr(trigger, "discover_modules", lambda: [])
 
-        result = trigger.main()
+        result = trigger.main(["help"])
         assert result == 0
 
     def test_valid_command_routes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Known command is routed to the matching module and returns 0."""
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "fire", "startup"])
         mock_mod = MagicMock()
         mock_mod.handle_command.return_value = True
         monkeypatch.setattr(trigger, "discover_modules", lambda: [mock_mod])
 
-        result = trigger.main()
+        result = trigger.main(["fire", "startup"])
         assert result == 0
         mock_mod.handle_command.assert_called_once_with("fire", ["startup"])
 
-    def test_a_module_that_refuses_through_error_exits_non_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_module_that_refuses_through_error_exits_non_zero(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """Handled is not succeeded — a routed refusal must reach the shell.
 
         Every module of mine that declined through error() still exited 0,
@@ -404,11 +365,8 @@ class TestMain:
         command gate cannot catch this; resolve_exit is what separates the two.
         """
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "start"])
 
         def _refuse(command, args):
-            from aipass.cli.apps.modules import error
-
             error("Not started — withdrawn by ruling, not failed")
             return True
 
@@ -416,10 +374,10 @@ class TestMain:
         mock_mod.handle_command.side_effect = _refuse
         monkeypatch.setattr(trigger, "discover_modules", lambda: [mock_mod])
 
-        result = trigger.main()
+        result = trigger.main(["start"])
 
         assert result == 2, "a handled command that refused must not report success"
-        _mock_error.assert_called_once()
+        assert capsys.readouterr().err.count("❌") == 1
 
     def test_a_previous_refusal_does_not_colour_the_next_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The failure flag is process-level, so main() resets it at the door.
@@ -428,53 +386,54 @@ class TestMain:
         long-lived process — anything importing and calling main() twice — one
         refusal would otherwise make every later command exit 2 forever.
         """
-        from aipass.cli.apps.modules import mark_command_failed
-
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "fire", "startup"])
         mock_mod = MagicMock()
         mock_mod.handle_command.return_value = True
         monkeypatch.setattr(trigger, "discover_modules", lambda: [mock_mod])
 
         mark_command_failed()
 
-        assert trigger.main() == 0
+        assert trigger.main(["fire", "startup"]) == 0
 
     def test_valid_command_no_extra_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Command with no trailing args passes empty list."""
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "fire"])
         mock_mod = MagicMock()
         mock_mod.handle_command.return_value = True
         monkeypatch.setattr(trigger, "discover_modules", lambda: [mock_mod])
 
-        result = trigger.main()
+        result = trigger.main(["fire"])
         assert result == 0
         mock_mod.handle_command.assert_called_once_with("fire", [])
 
-    def test_unknown_command_returns_1(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Unrecognised command calls error() and returns 1."""
+    def test_unknown_command_returns_1(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Unrecognised command reports one error on stderr and returns 1.
+
+        Mutant run: dropping the error() call on the unknown-command arm reddens this.
+        """
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "bogus"])
         mock_mod = MagicMock()
         mock_mod.handle_command.return_value = False
         monkeypatch.setattr(trigger, "discover_modules", lambda: [mock_mod])
 
-        result = trigger.main()
+        result = trigger.main(["bogus"])
         assert result == 1
-        _mock_error.assert_called_once()
+        assert capsys.readouterr().err.count("❌") == 1
 
-    def test_unknown_command_error_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_unknown_command_error_message(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """Error call includes the unknown command name and suggestion."""
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "xyzzy"])
         monkeypatch.setattr(trigger, "discover_modules", lambda: [])
 
-        result = trigger.main()
+        result = trigger.main(["xyzzy"])
         assert result == 1
-        args, kwargs = _mock_error.call_args
-        assert "xyzzy" in args[0]
-        assert "suggestion" in kwargs
+        err = capsys.readouterr().err
+        assert "Unknown command: xyzzy" in err
+        assert "→ Try:" in err
 
 
 class TestVersionString:
@@ -488,9 +447,7 @@ class TestVersionString:
         among them — shipped without the string moving. Nothing enforced the
         pairing, so it drifted silently and `--version` misreported the branch.
         """
-        import re
-
-        from aipass.trigger.apps.trigger import __version__
+        __version__ = trigger_entry.__version__
 
         readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
         match = re.search(r"^\*\*Version:\*\*\s*(\S+)", readme, re.MULTILINE)
@@ -503,7 +460,9 @@ class TestVersionString:
 class TestUnknownCommandMessage:
     """An unroutable invocation must name the words that failed."""
 
-    def test_unknown_subcommand_names_full_invocation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_unknown_subcommand_names_full_invocation(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """`medic nonsense` reports both words, not just `medic`.
 
         Found live in APLAN-0008: `drone @trigger medic nonsense` printed
@@ -511,16 +470,15 @@ class TestUnknownCommandMessage:
         not — so the message accused the one word that was valid.
         """
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", "medic", "nonsense"])
         monkeypatch.setattr(trigger, "discover_modules", lambda: [])
 
-        assert trigger.main() == 1
-        printed = [str(c) for c in _mock_error.call_args_list]
-        assert any("medic nonsense" in p for p in printed), printed
+        assert trigger.main(["medic", "nonsense"]) == 1
+        err = capsys.readouterr().err
+        assert "medic nonsense" in err, err
 
     @pytest.mark.parametrize("module_name", ["errors", "escalation"])
     def test_real_module_refuses_unknown_subcommand_through_the_gate(
-        self, monkeypatch: pytest.MonkeyPatch, module_name: str
+        self, monkeypatch: pytest.MonkeyPatch, module_name: str, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """A real module's unknown subcommand exits 1, not 0.
 
@@ -531,8 +489,7 @@ class TestUnknownCommandMessage:
         discovered for real here: mocking them away would prove nothing.
         """
         trigger = _import_trigger()
-        monkeypatch.setattr(sys, "argv", ["trigger", module_name, "not_a_subcommand_xyz"])
 
-        assert trigger.main() == 1
-        printed = [str(c) for c in _mock_error.call_args_list]
-        assert any(f"{module_name} not_a_subcommand_xyz" in p for p in printed), printed
+        assert trigger.main([module_name, "not_a_subcommand_xyz"]) == 1
+        err = capsys.readouterr().err
+        assert f"{module_name} not_a_subcommand_xyz" in err, err

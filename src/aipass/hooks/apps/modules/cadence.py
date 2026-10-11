@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.7.0
+# Version: 2.9.2
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-09-16
+# Modified: 2026-10-10
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -15,6 +15,7 @@ Uses fcntl.flock + mtime debounce + per-turn token to ensure the counter
 advances exactly once per real user turn.
 """
 
+import hashlib
 import json
 import os
 import tempfile
@@ -24,6 +25,7 @@ from pathlib import Path
 from aipass.cli.apps.modules import err_console
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.hooks.apps.modules.grounding_content import find_branch_root
 
 try:
     import fcntl
@@ -60,6 +62,10 @@ DEFAULTS = {
         "email": {"period": 5},
         "alert": {"period": 5},
     },
+    # Per-branch loader overrides (DPLAN-0355): {"<branch>": {"loaders": {"<loader>": {...}}}},
+    # each merged over the global entry for that loader only. A branch not named
+    # here runs the global entries. "beat": false fires a loader at turn 0 only.
+    "branches": {},
 }
 
 MAIL_LOADER = "email"
@@ -206,10 +212,33 @@ def _mtime_age(fd) -> float:
         return _DEBOUNCE_S + 1
 
 
-def _should_increment(stored_turn: int, stored_token: int, token: int, fd) -> bool:
-    """Decide whether to increment the counter. Extracted for nesting depth."""
+def _prompt_key(hook_data: dict, token: int) -> str | None:
+    """One prompt's identity, shared by every sibling process of it; None when the payload has none.
+
+    sha1 of the transcript size and the prompt text (DPLAN-0355 follow-up). The
+    size alone was the guard until 09-30, and a headless first prompt runs before
+    the transcript exists: every sibling read 0, 0 switched the guard off, and a
+    sibling past the 2s debounce counted a second turn (canary 7f1a35f6). The
+    text tells that prompt apart; the size tells a repeated text apart.
+    """
+    prompt = hook_data.get("prompt")
+    if not isinstance(prompt, str) and not hook_data.get("transcript_path"):
+        return None
+    text = prompt if isinstance(prompt, str) else ""
+    return hashlib.sha1(f"{token}\0{text}".encode("utf-8")).hexdigest()[:16]
+
+
+def _should_increment(stored_turn: int, stored_token: int, token: int, fd, key=None, stored_key=None) -> bool:
+    """Decide whether to increment the counter: once per prompt key, else by the old window.
+
+    A key on both sides decides alone, however far apart the siblings run. With
+    no key (a payload with neither prompt nor transcript_path, or a state file
+    written before keys) the 2s debounce and the nonzero-token guard decide.
+    """
     if stored_turn < 0:
         return True
+    if key is not None and stored_key is not None:
+        return key != stored_key
     if _mtime_age(fd) < _DEBOUNCE_S:
         return False
     if token == stored_token and token != 0:
@@ -232,7 +261,7 @@ def _read_turn_uncounted(path: Path) -> int:
         return -1
     fd = None
     try:
-        fd = open(path, encoding="utf-8")  # noqa: SIM115
+        fd = open(path, encoding="utf-8")
         _lock(fd)
         content = fd.read()
         _close_fd(fd)
@@ -267,10 +296,11 @@ def _load_and_increment(hook_data: dict) -> int:
         return _turn
 
     token = _get_turn_token(hook_data)
+    key = _prompt_key(hook_data, token)
     fd = None
 
     try:
-        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")
         _lock(fd)
         fd.seek(0)
         content = fd.read()
@@ -279,11 +309,11 @@ def _load_and_increment(hook_data: dict) -> int:
         stored_turn = data.get("turn", -1)
         stored_token = data.get("token", -1)
 
-        if _should_increment(stored_turn, stored_token, token, fd):
+        if _should_increment(stored_turn, stored_token, token, fd, key, data.get("key")):
             new_turn = max(stored_turn + 1, 0)
             fd.seek(0)
             fd.truncate()
-            fd.write(json.dumps({"turn": new_turn, "token": token}))
+            fd.write(json.dumps({"turn": new_turn, "token": token, "key": key}))
             fd.flush()
         else:
             new_turn = stored_turn
@@ -331,8 +361,56 @@ def _degraded_fire(loader_name: str) -> bool:
     return fires
 
 
+def _prompt_branch(hook_data: dict) -> str:
+    """The branch a prompt came from: its cwd's branch root, by name. "none" when there is none.
+
+    The payload's cwd only, never this process's. No branch is not a failure (the
+    repo root and an external project have none), so it is logged and the global
+    loader entries serve it.
+    """
+    cwd = hook_data.get("cwd")
+    root = find_branch_root(cwd) if isinstance(cwd, str) and cwd else None
+    if root is None:
+        logger.info("[HOOKS] cadence: cwd %r is under no branch, the global loader config applies", cwd)
+        return "none"
+    return root.name
+
+
+def _branch_loader_override(config: dict, branch: str, loader_name: str) -> dict:
+    """The branch's override for one loader (DPLAN-0355), {} when it has none.
+
+    A malformed override fails loud (ERROR) and serves {}, the global entry: the
+    file is operator-owned and is never rewritten here.
+    """
+    override = config.get("branches")
+    for key in (branch, "loaders", loader_name):
+        if not isinstance(override, dict):
+            break
+        override = override.get(key, {})
+    if not isinstance(override, dict):
+        problem = "branches, branches.<branch>, .loaders and .loaders.<loader> must each be an object"
+    elif "beat" in override and not isinstance(override["beat"], bool):
+        problem = f"beat must be true or false, got {override['beat']!r}"
+    elif any(type(override.get(key, 0)) is not int for key in ("period", "offset")):
+        problem = "period and offset must be whole numbers"
+    else:
+        return override
+    logger.error(
+        "[HOOKS] cadence: malformed override for branch=%s loader=%s in %s (%s); the global entry serves",
+        branch,
+        loader_name,
+        _CONFIG_PATH,
+        problem,
+    )
+    return {}
+
+
 def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
-    """Check if a loader should fire this turn. Always True on turn 0 or if cadence disabled."""
+    """Check if a loader should fire this turn. Always True on turn 0 or if cadence disabled.
+
+    The prompt's branch may override a loader's entry (`branches` in the config,
+    DPLAN-0355); `"beat": false` then fires it at turn 0 and never on the period.
+    """
     config = _load_config()
 
     if not config.get("enabled", True):
@@ -340,11 +418,16 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
 
     global_period = config.get("period", 5)
 
-    loader_config = config.get("loaders", {}).get(loader_name, {})
+    branch = _prompt_branch(hook_data or {})
+    loader_config = _deep_merge(
+        dict(config.get("loaders", {}).get(loader_name, {})),
+        _branch_loader_override(config, branch, loader_name),
+    )
     period = loader_config.get("period", global_period)
     offset = loader_config.get("offset", 0)
+    beat = loader_config.get("beat", True) is not False
 
-    if period <= 0:
+    if beat and period <= 0:
         return True
 
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
@@ -356,7 +439,9 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
     # an alert's arrival never asks cadence (persistent_alert); should_fire("alert")
     # only decides a repeat, and a turn that does not count is not its beat.
     if is_automated(hook_data):
-        logger.info("[HOOKS] cadence skipped loader=%s automated turn session=%s", loader_name, session_short)
+        logger.info(
+            "[HOOKS] cadence skipped loader=%s automated turn session=%s branch=%s", loader_name, session_short, branch
+        )
         return False
 
     turn = _load_and_increment(hook_data or {})
@@ -365,23 +450,27 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
 
     if turn == 0 and loader_name in GROUNDING_LOADERS and _grounded_by_regroup(hook_data or {}, config):
         logger.info(
-            "[HOOKS] cadence suppressed loader=%s turn=0: the post-compact re-ground already delivered it session=%s",
+            "[HOOKS] cadence suppressed loader=%s turn=0: the post-compact re-ground already delivered it "
+            "session=%s branch=%s",
             loader_name,
             session_short,
+            branch,
         )
         return False
 
-    fired = turn == 0 or (turn % period) == offset
+    fired = turn == 0 or (beat and (turn % period) == offset)
 
     action = "fired" if fired else "skipped"
     logger.info(
-        "[HOOKS] cadence %s loader=%s turn=%d period=%d offset=%d session=%s",
+        "[HOOKS] cadence %s loader=%s turn=%d period=%d offset=%d beat=%s session=%s branch=%s",
         action,
         loader_name,
         turn,
         period,
         offset,
+        "on" if beat else "off",
         session_short,
+        branch,
     )
 
     return fired
@@ -610,7 +699,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
 
     fd = None
     try:
-        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")
         _lock(fd)
         fd.seek(0)
         content = fd.read()
@@ -627,13 +716,13 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
 
         debounced = elapsed is not None and elapsed < _REGROUP_DEBOUNCE_S
         if debounced:
-            token = data.get("regroup_token")
+            regroup_stamp = data.get("regroup_token")
             armed_at = prior_armed_at
         else:
-            token = f"{int(now * 1000)}-{pid}"
+            regroup_stamp = f"{int(now * 1000)}-{pid}"
             armed_at = now
 
-        state = {"turn": -1, "token": -1, "regroup_token": token, "regroup_armed_at": armed_at}
+        state = {"turn": -1, "token": -1, "regroup_token": regroup_stamp, "regroup_armed_at": armed_at}
         if debounced:
             # A duplicate reset on the SAME compact boundary must not cancel the
             # re-ground parts still queued for it (issue #752); a new compaction
@@ -664,7 +753,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
                 "session=%s prev_turn=%d",
                 caller,
                 pid,
-                token,
+                regroup_stamp,
                 session_short,
                 old_turn,
             )
@@ -734,22 +823,22 @@ def stamp_regroup_complete(hook_data: dict | None = None) -> None:
     """
     session_id = (hook_data or {}).get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     window = window_opened_at(hook_data)
-    token = _get_turn_token(hook_data or {})
-    if not session_id or window is None or token <= 0:
+    transcript_mark = _get_turn_token(hook_data or {})
+    if not session_id or window is None or transcript_mark <= 0:
         logger.info(
             "[HOOKS] cadence: regroup completion NOT stamped (session=%s window=%s token=%d), fire-all stays",
             session_id[:8] or "none",
             window,
-            token,
+            transcript_mark,
         )
         return
     try:
-        stamp = {"window": window, "token": token, "used_token": None}
+        stamp = {"window": window, "token": transcript_mark, "used_token": None}
         _regroup_done_path(session_id).write_text(json.dumps(stamp), encoding="utf-8")
     except OSError as exc:
         logger.info("[HOOKS] cadence: regroup completion stamp write FAILED session=%s: %s", session_id[:8], exc)
         return
-    logger.info("[HOOKS] cadence: regroup complete, stamped token=%d session=%s", token, session_id[:8])
+    logger.info("[HOOKS] cadence: regroup complete, stamped token=%d session=%s", transcript_mark, session_id[:8])
 
 
 def _stands_in(stamp: dict, window: float | None, token: int, distance: int) -> bool:
@@ -788,7 +877,7 @@ def _grounded_by_regroup(hook_data: dict, config: dict) -> bool:
     token = _get_turn_token(hook_data)
     fd = None
     try:
-        fd = open(path, "r+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "r+", encoding="utf-8")
         _lock(fd)
         content = fd.read()
         stamp = json.loads(content) if content.strip() else {}
@@ -835,13 +924,13 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
 
     fd = None
     try:
-        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")
         _lock(fd)
         fd.seek(0)
         content = fd.read()
         data = json.loads(content) if content.strip() else {}
-        token = data.get("regroup_token")
-        pending = bool(token)
+        regroup_stamp = data.get("regroup_token")
+        pending = bool(regroup_stamp)
 
         if pending:
             data["regroup_token"] = None
@@ -857,7 +946,7 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
             logger.info(
                 "[HOOKS] cadence: regroup_pending consumed (mid-turn backstop) pid=%d token=%s session=%s",
                 pid,
-                token,
+                regroup_stamp,
                 session_short,
             )
         return pending
@@ -901,7 +990,7 @@ def queue_regroup_parts(total: int, hook_data: dict | None = None) -> None:
         return
     fd = None
     try:
-        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")
         _lock(fd)
         fd.seek(0)
         content = fd.read()
@@ -934,7 +1023,7 @@ def pop_regroup_part(hook_data: dict | None = None) -> tuple[int, int] | None:
         return None
     fd = None
     try:
-        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")
         _lock(fd)
         fd.seek(0)
         content = fd.read()
@@ -1004,7 +1093,10 @@ def print_introspection() -> None:
             # fire, not a modulo slot, so it can announce the turn mail arrives.
             CONSOLE.print(f"  Loader '{name}': period={lp} (elapsed-turns loop, announces on arrival)")
         else:
-            CONSOLE.print(f"  Loader '{name}': period={lp} offset={lcfg.get('offset', 0)}")
+            beat = "off" if lcfg.get("beat", True) is False else "on"
+            CONSOLE.print(f"  Loader '{name}': period={lp} offset={lcfg.get('offset', 0)} beat={beat}")
+    branches = config.get("branches")
+    CONSOLE.print(f"  Branch overrides: {json.dumps(branches) if branches else 'none (every branch runs the above)'}")
     path = _state_path()
     if path and path.exists():
         try:

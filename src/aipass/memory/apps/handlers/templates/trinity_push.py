@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
 # Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2026-08-27
-# Modified: 2026-09-15
+# Modified: 2026-10-04
 # =============================================
 
 """Trinity Push Handler
@@ -519,11 +519,15 @@ def resolve_scope(branch: str | None = None) -> dict:
     # external tier build never writes outside this repo and the push does not
     # get to be the exception, so the scope stops at the repo edge here — at the
     # one consumer that acts on the list, not in the reader that serves them all.
-    branches = [
-        item
-        for item in registry_scope.fleet_branches(_REPO_ROOT, name_from="path")
-        if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL
-    ]
+    # Strict, because this lane matches by NAME and then writes: with the core
+    # registry unreadable, a resident sharing a core citizen's name was the only
+    # match for it (leg 10 of DPLAN-0354). The refusal names the file.
+    try:
+        fleet = registry_scope.fleet_branches(_REPO_ROOT, name_from="path", strict=True)
+    except registry_scope.RegistryUnreadable as exc:
+        logger.error(f"[trinity_push] REFUSED: {exc}")
+        return {"branches": [], "error": f"REFUSED: {exc}"}
+    branches = [item for item in fleet if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL]
 
     if branch is None:
         return {"branches": branches, "error": None}
@@ -1292,7 +1296,9 @@ def push(branch: str | None = None, dry_run: bool = True, store_client=None, bac
             out["branches"].append(_dry_entry(plan))
             out["errors"].extend(plan["errors"])
             continue
-        applied = apply_plan(plan, store_client, _destinations(item["name"]))
+        destinations, local_store = _destinations(item["name"])
+        applied = apply_plan(plan, store_client, destinations)
+        applied["local_store"] = local_store
         applied["strays"] = plan["strays"]
         out["branches"].append(applied)
         out["errors"].extend(applied["errors"])
@@ -1317,21 +1323,26 @@ def push(branch: str | None = None, dry_run: bool = True, store_client=None, bac
     return out
 
 
-def _destinations(branch_name: str) -> list:
+def _destinations(branch_name: str) -> tuple[list, str | None]:
     """The two stores a pruned entry must reach: the branch's own, and global.
 
     A branch with no local ``.chroma`` gets the global store only — reported,
     not invented. Creating a store for a branch that has never had one is a
     side effect the push has no mandate for.
+
+    Returns:
+        ``(destinations, reason)``: reason is None when the local store is in
+        the list, else why it is not (the lookup's reason, which the report
+        renders: an unreadable registry is not a branch without a store).
     """
-    from aipass.memory.apps.handlers.rollover.orchestrator import get_branch_local_chroma_path
+    from aipass.memory.apps.handlers.rollover.orchestrator import local_store_lookup
 
     destinations: list = []
-    local_path = get_branch_local_chroma_path(branch_name)
+    local_path, reason = local_store_lookup(branch_name)
     if local_path:
         destinations.append(("local", local_path))
     destinations.append(("global", None))
-    return destinations
+    return destinations, reason
 
 
 def todo_summary(plan: dict) -> dict:

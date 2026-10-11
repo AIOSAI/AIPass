@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection_check.py
 # Description: Introspection Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-07
 # =============================================
 
 """
@@ -27,6 +27,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Run on ALL .py files so modules (apps/modules/*.py) are checked, not just entry points
+# APPLIES_TO: the no-args gate is a module behaviour.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 
@@ -80,7 +82,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if path.name == "__init__.py":
         return {
             "passed": True,
-            "checks": [{"name": "Introspection check", "passed": True, "message": "__init__.py skipped"}],
+            "checks": [
+                {"name": "Introspection check", "passed": True, "message": "__init__.py skipped", "declined": True}
+            ],
             "score": 100,
             "standard": "INTROSPECTION",
         }
@@ -102,7 +106,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not content.strip():
         return {
             "passed": True,
-            "checks": [{"name": "Introspection check", "passed": True, "message": "Empty file skipped"}],
+            "checks": [
+                {"name": "Introspection check", "passed": True, "message": "Empty file skipped", "declined": True}
+            ],
             "score": 100,
             "standard": "INTROSPECTION",
         }
@@ -121,7 +127,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     # Determine file type from path
     is_entry_point = _is_entry_point(module_path, path)
-    is_module = "/modules/" in module_path and path.parent.name == "modules"
+    # A door (apps/modules/door_<subject>.py, DPLAN-0404) is a re-export with
+    # no CLI: the modules standard reads its shape, there is nothing to introspect
+    is_module = "/modules/" in module_path and path.parent.name == "modules" and not path.name.startswith("door_")
 
     # If neither entry point nor module, skip
     if not is_entry_point and not is_module:
@@ -132,6 +140,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "Introspection check",
                     "passed": True,
                     "message": "Not an entry point or module file (not applicable)",
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -162,7 +171,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     # Check 2: Execution order (entry points only)
     if is_entry_point:
-        order_check = check_execution_order(tree, content, path.name)
+        order_check = check_execution_order(tree, path.name)
         if order_check:
             checks.append(order_check)
 
@@ -438,10 +447,11 @@ def _build_helpers_map(tree: ast.Module) -> dict:
     return result
 
 
-def check_execution_order(tree: ast.Module, content: str, filename: str) -> Optional[Dict]:
+def check_execution_order(tree: ast.Module, filename: str) -> Optional[Dict]:
     """
     In the main() function (or if __name__ block), verify that no-args check
-    comes BEFORE --help check.
+    comes BEFORE --help check. It reads the tree alone; the `content` it also
+    took was never read and was dropped (seedgo, fleet green leg 8).
 
     The standard execution order is:
     1. No args → print introspection info
@@ -463,6 +473,7 @@ def check_execution_order(tree: ast.Module, content: str, filename: str) -> Opti
             "name": "Execution order",
             "passed": True,
             "message": f"No main() or __name__ block found in {filename} (skipped)",
+            "declined": True,
         }
 
     # Walk the body of main to find conditionals
@@ -521,6 +532,7 @@ def check_execution_order(tree: ast.Module, content: str, filename: str) -> Opti
         "name": "Execution order",
         "passed": True,
         "message": f"No args/help conditionals detected in main() of {filename} (skipped)",
+        "declined": True,
     }
 
 
@@ -568,6 +580,7 @@ def check_module_handle_command_gate(tree: ast.Module, filename: str) -> Optiona
             "name": "handle_command no-args gate",
             "passed": True,
             "message": f"No handle_command() found in {filename} (skipped)",
+            "declined": True,
         }
 
     # Walk handle_command body to find a no-args conditional that calls introspection

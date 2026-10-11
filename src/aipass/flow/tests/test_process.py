@@ -3,32 +3,74 @@
 # Description: Tests for mbank/process.py — additional coverage
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-18
+# Modified: 2026-10-05
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""
 
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that mbank/process.py parses and imports
+
 import json
 import os
+import shutil
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import aipass.flow.apps.handlers.mbank.process as proc
+from aipass.flow.apps.handlers.mbank.process import (
+    archive_plan,
+    cleanup_temp_files,
+    get_closed_plans,
+    is_template_content,
+    load_flow_registry,
+    process_closed_plans,
+    save_flow_registry,
+    verify_and_heal_orphaned_plans,
+)
+
 _PROC = "aipass.flow.apps.handlers.mbank.process"
 
-# Captured before any test patches os.open: the stand-in below delegates here.
-_REAL_OS_OPEN = os.open
+
+def _move_answer(source: Path, destination: Path) -> OSError | None:
+    """Move ``source`` with the test's own hands and keep what the platform answers.
+
+    Returns:
+        The OSError the move raised, or None when the move succeeded.
+    """
+    try:
+        shutil.move(str(source), str(destination))
+    except OSError as exc:
+        return exc
+    return None
+
+
+def _mkdir_answer(path: Path) -> OSError | None:
+    """Make ``path`` a directory the way the heal does and keep the platform's answer.
+
+    Returns:
+        The OSError the mkdir raised, or None when the directory was made.
+    """
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return exc
+    return None
 
 
 def _deny_exclusive_creates(lock_path: Path, denials: int | None):
-    """An os.open stand-in that answers the way Windows does mid-release.
+    """A stand-in for process's _create_exclusive seam that answers the way
+    Windows does mid-release.
 
     Windows answers an exclusive create against a lock another writer is still
     removing (delete-pending) with PermissionError, not FileExistsError; Linux
-    cannot show that, so it is manufactured. The first ``denials`` exclusive
-    creates of ``lock_path`` are denied (None = never clears); everything else
-    reaches the real os.open.
+    cannot show that, so it is manufactured, handed in through the product's
+    own seam so os.open stays whole for every other reader. The first
+    ``denials`` creates of ``lock_path`` are denied (None = never clears);
+    after that the real exclusive create is made on disk.
 
     Returns:
         (side_effect, attempts, raised): attempts counts every exclusive create
@@ -37,16 +79,16 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     attempts: list[int] = []
     raised: list[PermissionError] = []
 
-    def fake_open(path, flags, *args, **kwargs):
-        if flags & os.O_EXCL and str(path) == str(lock_path):
+    def fake_create(path):
+        if str(path) == str(lock_path):
             attempts.append(len(attempts) + 1)
             if denials is None or len(attempts) <= denials:
                 denial = PermissionError(13, "Access is denied")
                 raised.append(denial)
                 raise denial
-        return _REAL_OS_OPEN(path, flags, *args, **kwargs)
+        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
-    return fake_open, attempts, raised
+    return fake_create, attempts, raised
 
 
 # ===================================================================
@@ -59,7 +101,6 @@ class TestIsTemplateContent:
 
     def test_default_template_detected(self):
         """Content with 3+ default bracket placeholders is a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "# Plan\n"
@@ -71,7 +112,6 @@ class TestIsTemplateContent:
 
     def test_master_template_detected(self):
         """Content with 3+ master bracket placeholders is a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "# Master Plan\n[What this phase accomplishes]\n[What the agent will build]\n[Files/outputs expected]\n"
@@ -80,7 +120,6 @@ class TestIsTemplateContent:
 
     def test_proposal_template_detected(self):
         """Content with 3+ proposal bracket placeholders is a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "# Proposal\n"
@@ -93,7 +132,6 @@ class TestIsTemplateContent:
 
     def test_real_content_not_template(self):
         """Content without bracket placeholders is not a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "# Implement OAuth flow\n"
@@ -106,7 +144,6 @@ class TestIsTemplateContent:
 
     def test_user_checked_execution_log_overrides(self):
         """Checked execution log items signal real work, even with placeholders."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -118,7 +155,6 @@ class TestIsTemplateContent:
 
     def test_user_checked_agent_completed_overrides(self):
         """Checked 'Agent completed' item signals real work."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -130,7 +166,6 @@ class TestIsTemplateContent:
 
     def test_user_checked_seedgo_overrides(self):
         """Checked 'Seedgo checklist' item signals real work."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -142,7 +177,6 @@ class TestIsTemplateContent:
 
     def test_user_checked_all_goals_overrides(self):
         """Checked 'All goals achieved' item signals real work."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -154,7 +188,6 @@ class TestIsTemplateContent:
 
     def test_notes_section_with_real_content_overrides(self):
         """Real content in Notes section means the plan has been worked on."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -167,7 +200,6 @@ class TestIsTemplateContent:
 
     def test_notes_section_with_only_placeholder_still_template(self):
         """Notes section containing only the template placeholder does not override."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -180,7 +212,6 @@ class TestIsTemplateContent:
 
     def test_execution_log_with_many_lines_overrides(self):
         """More than 8 lines in Execution Log section signals real work."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         exec_lines = "\n".join(f"- Step {i}: did something" for i in range(10))
         content = (
@@ -194,7 +225,6 @@ class TestIsTemplateContent:
 
     def test_two_placeholders_not_enough(self):
         """Fewer than 3 bracket placeholders is not a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -205,13 +235,11 @@ class TestIsTemplateContent:
 
     def test_empty_content_not_template(self):
         """Empty content is not a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         assert is_template_content("") is False
 
     def test_mixed_placeholder_types_below_threshold(self):
         """Placeholders from different template types don't combine to reach threshold."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -237,8 +265,6 @@ class TestArchivePlan:
         processed_dir = tmp_path / "processed"
 
         with patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir):
-            from aipass.flow.apps.handlers.mbank.process import archive_plan
-
             result = archive_plan(plan_file)
 
         assert result is True
@@ -254,8 +280,6 @@ class TestArchivePlan:
         (processed_dir / "FPLAN-0200.md").write_text("already there", encoding="utf-8")
 
         with patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir):
-            from aipass.flow.apps.handlers.mbank.process import archive_plan
-
             result = archive_plan(plan_file)
 
         assert result is True
@@ -271,51 +295,66 @@ class TestArchivePlan:
         processed_dir = tmp_path / "deep" / "nested" / "processed"
 
         with patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir):
-            from aipass.flow.apps.handlers.mbank.process import archive_plan
-
             result = archive_plan(plan_file)
 
         assert result is True
         assert processed_dir.exists()
         assert (processed_dir / "FPLAN-0300.md").exists()
 
-    def test_archive_returns_false_on_move_failure(self, tmp_path):
-        """Return False when shutil.move raises an exception."""
+    def test_archive_returns_false_on_move_failure(self, tmp_path, mock_logger):
+        """Return False when the move itself raises.
+
+        The failure is a real one on disk: the plan file was never written, so
+        the move has no source. The test makes the same move on a missing twin
+        first and asserts only that the platform refused it.
+        Mutant: the except's `return False` -> `return True` reddens this.
+        """
         plan_file = tmp_path / "FPLAN-0400.md"
-        plan_file.write_text("content", encoding="utf-8")
         processed_dir = tmp_path / "processed"
+        answer = _move_answer(tmp_path / "twin-FPLAN-0400.md", tmp_path / "twin-dest.md")
+        assert isinstance(answer, OSError), "premise: this platform moved a file that does not exist"
 
-        with (
-            patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir),
-            patch("aipass.flow.apps.handlers.mbank.process.shutil.move", side_effect=OSError("disk full")),
-        ):
-            from aipass.flow.apps.handlers.mbank.process import archive_plan
-
+        with patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir):
             result = archive_plan(plan_file)
 
         assert result is False
+        assert list(processed_dir.iterdir()) == []
+        assert mock_logger.error.call_args.args[1] == plan_file
 
     def test_archive_returns_false_when_dest_not_verified(self, tmp_path):
-        """Return False when destination file does not exist after move."""
+        """Return False when destination file does not exist after move.
+
+        The real shutil moves the file on disk; the product's own constant is
+        the seam, a processed dir whose every child answers "not there", so
+        the verification is the only thing between the move and a True (leg 10).
+        """
         plan_file = tmp_path / "FPLAN-0500.md"
         plan_file.write_text("content", encoding="utf-8")
         processed_dir = tmp_path / "processed"
 
-        def fake_move(src: str, _: str) -> None:
-            """Simulate a move that deletes source but never creates destination."""
-            import os
+        class _Unverified:
+            """A destination the move reaches but the check cannot see."""
 
-            os.remove(src)
+            def __init__(self, real: Path) -> None:
+                self.real = real
 
-        with (
-            patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir),
-            patch("aipass.flow.apps.handlers.mbank.process.shutil.move", side_effect=fake_move),
-        ):
-            from aipass.flow.apps.handlers.mbank.process import archive_plan
+            def __str__(self) -> str:
+                return str(self.real)
 
+            def exists(self) -> bool:
+                return False
+
+        unverifiable_dir = MagicMock()
+        unverifiable_dir.mkdir.side_effect = lambda **kw: processed_dir.mkdir(**kw)
+        unverifiable_dir.__truediv__.side_effect = lambda name: _Unverified(processed_dir / name)
+
+        with patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", unverifiable_dir):
             result = archive_plan(plan_file)
 
         assert result is False
+        # The move did happen on disk; only the verification refused to call it done.
+        assert (processed_dir / "FPLAN-0500.md").read_text(encoding="utf-8") == "content"
+        assert not plan_file.exists()
 
 
 # ===================================================================
@@ -332,8 +371,6 @@ class TestLoadFlowRegistryAdditional:
         (tmp_path / "custom_reg.json").write_text(json.dumps(data), encoding="utf-8")
 
         with patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path):
-            from aipass.flow.apps.handlers.mbank.process import load_flow_registry
-
             result = load_flow_registry(registry_file="custom_reg.json")
 
         assert result["next_number"] == 2
@@ -356,8 +393,6 @@ class TestSaveFlowRegistryAdditional:
             patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
         ):
-            from aipass.flow.apps.handlers.mbank.process import save_flow_registry
-
             save_flow_registry(data)
 
         saved = json.loads(reg_file.read_text(encoding="utf-8"))
@@ -371,7 +406,6 @@ class TestSaveFlowRegistryAdditional:
         It used to give up on the first denial, so the plan was archived but
         the registry never learned it was processed.
         """
-        from aipass.flow.apps.handlers.mbank.process import save_flow_registry
 
         reg_file = tmp_path / "fplan_registry.json"
         lock = reg_file.with_suffix(".lock")
@@ -380,12 +414,20 @@ class TestSaveFlowRegistryAdditional:
 
         with (
             patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
-            patch(f"{_PROC}.os.open", side_effect=fake_open),
-            patch(f"{_PROC}.time.sleep"),
+            patch(f"{_PROC}._create_exclusive", side_effect=fake_open),
+            patch(f"{_PROC}._sleep") as sleep,
         ):
-            save_flow_registry(data, registry_file=reg_file.name)
+            # A save that refuses is the failure this test is about, so it is
+            # said as one: a lock that gave up on the denial fails here by
+            # name, not by its own error escaping the test.
+            try:
+                save_flow_registry(data, registry_file=reg_file.name)
+            except Exception as exc:  # save_flow_registry raises bare Exception
+                raise AssertionError(f"the save did not land: {exc}") from exc
 
         assert len(attempts) == 2
+        sleep.assert_called_once()
+        assert sleep.call_args.args[0] > 0
         saved = json.loads(reg_file.read_text(encoding="utf-8"))
         assert saved["plans"]["1"]["processed"] is True
         assert not lock.exists()
@@ -395,37 +437,74 @@ class TestSaveFlowRegistryAdditional:
         denial in the message after exactly the budget; the helper's own raise
         is a PermissionError chained to the last denial.
         """
-        import aipass.flow.apps.handlers.mbank.process as proc
 
         reg_file = tmp_path / "fplan_registry.json"
         before = {"next_number": 2, "plans": {"1": {"status": "closed"}}}
         reg_file.write_text(json.dumps(before), encoding="utf-8")
         lock = reg_file.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
+        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
         with (
             patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
-            patch(f"{_PROC}.os.open", side_effect=fake_open),
-            patch(f"{_PROC}.time.sleep"),
+            patch(f"{_PROC}._create_exclusive", side_effect=fake_open),
+            patch(f"{_PROC}._sleep") as sleep,
             pytest.raises(Exception) as excinfo,
         ):
             proc.save_flow_registry({"next_number": 2, "plans": {}}, registry_file=reg_file.name)
 
-        assert len(attempts) == proc._LOCK_RETRIES
+        # The count the message states is the count of creates made, read off
+        # the attempts rather than the private budget constant.
+        budget = len(attempts)
+        assert budget > 1
         assert str(lock) in str(excinfo.value)
-        assert f"{proc._LOCK_RETRIES} attempts" in str(excinfo.value)
+        assert f"{budget} attempts" in str(excinfo.value)
         assert json.loads(reg_file.read_text(encoding="utf-8")) == before
+        # What each wait was given: positive, doubling, summed into the message.
+        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
+        # `(2**attempt)` growth each redden this.
+        delays = [c.args[0] for c in sleep.call_args_list]
+        assert len(delays) == len(attempts)
+        assert delays[0] > 0
+        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
+        assert f"({sum(delays):.2f}s waited)" in str(excinfo.value)
 
-        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
+        # The helper's own raise rides out of save_flow_registry as the context
+        # of its wrapper, chained to the last denial (reached through the
+        # public saver since leg 10, not by calling the lock helper).
+        helper_exc = excinfo.value.__context__
+        assert isinstance(helper_exc, PermissionError)
+        assert helper_exc.__cause__ is raised[-1]
+
+    def test_lock_create_error_is_reported_as_itself(self, tmp_path, mock_logger, platform_create_answer):
+        """A lock create that fails with neither contention nor denial names its own cause.
+
+        The registry name fits the filesystem; its .lock sibling is 257 bytes, so
+        the exclusive create fails on disk. _acquire_lock used to answer False,
+        and save_flow_registry reported "Could not acquire lock" - the contention
+        message - for it. It now propagates. Which error a 257-byte name raises
+        is the platform's choice, so the test asks the platform first.
+        Mutant: `lock_path, exc)` + `raise` -> `return False` reddens this.
+        """
+        name = "a" * 252 + ".js"
+        answer = platform_create_answer((tmp_path / name).with_suffix(".lock"))
+        assert isinstance(answer, OSError) and not isinstance(answer, (FileExistsError, PermissionError)), (
+            f"{sys.platform} answered {answer!r} to a 257-byte lock name: the premise of this test is gone"
+        )
+
         with (
-            patch(f"{_PROC}.os.open", side_effect=fake_open),
-            patch(f"{_PROC}.time.sleep"),
-            pytest.raises(PermissionError) as helper_exc,
+            patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
+            pytest.raises(Exception) as excinfo,
         ):
-            proc._acquire_lock(lock)
+            proc.save_flow_registry({"next_number": 1, "plans": {}}, registry_file=name)
 
-        assert helper_exc.value.__cause__ is raised[-1]
-        assert len(attempts) == proc._LOCK_RETRIES
+        assert "Could not acquire lock" not in str(excinfo.value)
+        assert "retries" not in str(excinfo.value)
+        assert not (tmp_path / name).exists()
+        logged = [arg for c in mock_logger.warning.call_args_list for arg in c.args if isinstance(arg, OSError)]
+        assert len(logged) == 1
+        assert type(logged[0]) is type(answer)
+        assert logged[0].errno == answer.errno
+        assert excinfo.value.__context__ is logged[0]
 
 
 # ===================================================================
@@ -452,8 +531,6 @@ class TestGetClosedPlansAdditional:
                 side_effect=[Exception("corrupt"), {"plans": {}}],
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import get_closed_plans
-
             result = get_closed_plans()
 
         # Should not raise, returns empty because the good registry has no closed plans
@@ -487,8 +564,6 @@ class TestGetClosedPlansAdditional:
                 return_value=registry,
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import get_closed_plans
-
             result = get_closed_plans()
 
         assert len(result) == 1
@@ -505,12 +580,13 @@ class TestCleanupTempFilesAdditional:
 
     def test_scan_error_returns_error_key(self, tmp_path):
         """When scanning the directory raises, return scan_error key."""
-        with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", tmp_path):
-            # Make .exists() return True but .glob() raise
-            with patch.object(Path, "glob", side_effect=PermissionError("no access")):
-                from aipass.flow.apps.handlers.mbank.process import cleanup_temp_files
-
-                result = cleanup_temp_files()
+        # The product's own constant is the seam: a memory dir that exists but
+        # cannot be listed. pathlib itself stays whole (leg 10).
+        unlistable = MagicMock(spec=Path)
+        unlistable.exists.return_value = True
+        unlistable.glob.side_effect = PermissionError("no access")
+        with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", unlistable):
+            result = cleanup_temp_files()
 
         assert "scan_error" in result
         assert result["files_found"] == 0
@@ -525,10 +601,22 @@ class TestVerifyAndHealOrphanedPlansAdditional:
     """Additional edge cases for verify_and_heal_orphaned_plans."""
 
     def test_handles_rename_exception(self, tmp_path):
-        """When rename raises, report failed_to_heal."""
+        """When the heal's move raises, report failed_to_heal.
+
+        The failure is a real one on disk: the processed path is a file, so
+        the directory the heal makes before its rename cannot be made. The test
+        asks the platform the same question on a twin first.
+        Mutants: the except's `failed_to_heal += 1` -> `+= 0`, and its
+        `"status": "heal_failed"` -> `"healed"`, each redden this.
+        """
         plan_file = tmp_path / "FPLAN-0030.md"
         plan_file.write_text("orphan", encoding="utf-8")
         processed_dir = tmp_path / "processed"
+        processed_dir.write_text("a file where the directory goes", encoding="utf-8")
+        twin = tmp_path / "twin-processed"
+        twin.write_text("", encoding="utf-8")
+        answer = _mkdir_answer(twin)
+        assert isinstance(answer, OSError), "premise: this platform made a directory over a file"
 
         registry = {
             "plans": {
@@ -546,15 +634,13 @@ class TestVerifyAndHealOrphanedPlansAdditional:
                 "aipass.flow.apps.handlers.mbank.process._get_all_registry_files",
                 return_value=["fplan_registry.json"],
             ),
-            patch.object(Path, "rename", side_effect=OSError("cross-device")),
         ):
-            from aipass.flow.apps.handlers.mbank.process import verify_and_heal_orphaned_plans
-
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 1
         assert result["failed_to_heal"] == 1
         assert result["orphans"][0]["status"] == "heal_failed"
+        assert plan_file.read_text(encoding="utf-8") == "orphan"
 
     def test_skips_registries_that_fail_to_load(self):
         """When a registry fails to load during healing, skip it."""
@@ -568,8 +654,6 @@ class TestVerifyAndHealOrphanedPlansAdditional:
                 side_effect=Exception("corrupt file"),
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import verify_and_heal_orphaned_plans
-
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 0
@@ -603,8 +687,6 @@ class TestVerifyAndHealOrphanedPlansAdditional:
                 return_value=["fplan_registry.json", "dplan_registry.json"],
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import verify_and_heal_orphaned_plans
-
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 2
@@ -653,8 +735,6 @@ class TestProcessClosedPlansAdditional:
                 tmp_path / "fplan_registry.json",
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             result = process_closed_plans()
 
         assert result["success"] is True
@@ -695,8 +775,6 @@ class TestProcessClosedPlansAdditional:
             ),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", tmp_path / "fplan_registry.json"),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             process_closed_plans()
 
         # Registry save was called with cleanup_completed=False
@@ -706,7 +784,10 @@ class TestProcessClosedPlansAdditional:
         assert "processed" not in registry["plans"]["70"]
 
     def test_logs_json_operation_after_processing(self, tmp_path, mock_json_handler):
-        """json_handler.log_operation is called after processing plans."""
+        """json_handler.log_operation is called after processing plans.
+
+        Mutant: save_flow_registry(registry, registry_file=reg_file) -> save_flow_registry(registry) reddens this.
+        """
         plan_file = tmp_path / "FPLAN-0080.md"
         plan_file.write_text("content", encoding="utf-8")
 
@@ -730,17 +811,18 @@ class TestProcessClosedPlansAdditional:
             patch("aipass.flow.apps.handlers.mbank.process.get_closed_plans", return_value=closed_plans),
             patch("aipass.flow.apps.handlers.mbank.process.archive_plan", return_value=True),
             patch("aipass.flow.apps.handlers.mbank.process.load_flow_registry", return_value=registry),
-            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry"),
+            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry") as mock_save,
             patch(
                 "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
                 return_value={"files_found": 0, "files_deleted": 0, "failed_deletes": 0, "details": []},
             ),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", tmp_path / "fplan_registry.json"),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             process_closed_plans()
 
+        # The processed flag is written back to the plan's OWN registry, once.
+        mock_save.assert_called_once_with(registry, registry_file="fplan_registry.json")
+        assert registry["plans"]["80"]["processed"] is True
         mock_json_handler.assert_called_once_with(
             "closed_plans_processed",
             {
@@ -752,7 +834,10 @@ class TestProcessClosedPlansAdditional:
         )
 
     def test_multiple_plans_mixed_results(self, tmp_path):
-        """Process two plans: one succeeds, one fails."""
+        """Process two plans: one succeeds, one fails.
+
+        Mutant: `if archive_success:` (processed flag) -> `if True:` reddens this.
+        """
         plan_ok = tmp_path / "FPLAN-0090.md"
         plan_ok.write_text("ok", encoding="utf-8")
         plan_bad = tmp_path / "FPLAN-0091.md"
@@ -787,15 +872,13 @@ class TestProcessClosedPlansAdditional:
             patch("aipass.flow.apps.handlers.mbank.process.get_closed_plans", return_value=closed_plans),
             patch("aipass.flow.apps.handlers.mbank.process.archive_plan", side_effect=archive_results),
             patch("aipass.flow.apps.handlers.mbank.process.load_flow_registry", return_value=registry),
-            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry"),
+            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry") as mock_save,
             patch(
                 "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
                 return_value={"files_found": 0, "files_deleted": 0, "failed_deletes": 0, "details": []},
             ),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", tmp_path / "fplan_registry.json"),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             result = process_closed_plans()
 
         assert result["success"] is True
@@ -804,3 +887,7 @@ class TestProcessClosedPlansAdditional:
         statuses = [r["status"] for r in result["results"]]
         assert "archived" in statuses
         assert "archive_failed" in statuses
+        # Both rows are written back (the failure records cleanup_completed=False); only the success is processed.
+        assert mock_save.call_count == 2
+        assert registry["plans"]["90"].get("processed") is True
+        assert "processed" not in registry["plans"]["91"]

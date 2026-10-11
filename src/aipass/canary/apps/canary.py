@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: canary.py
 # Description: Entry point CLI for drone @canary — permanent test citizen
-# Version: 2.2.0
+# Version: 2.7.0
 # Created: 2026-08-20
-# Modified: 2026-09-15
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -37,10 +37,10 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit  # noqa: E402
-from aipass.prax import logger  # noqa: E402
+from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
+from aipass.prax import logger
 
-__version__ = "2.2.0"
+__version__ = "2.7.0"
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -49,28 +49,14 @@ __version__ = "2.2.0"
 MODULES_DIR = Path(__file__).parent / "modules"
 
 
-def _module_import_path(stem: str) -> str:
-    """Return the correct import path for a module, handling both layouts.
-
-    Args:
-        stem: Module filename without the .py suffix.
-
-    Returns:
-        The installed-package path when importable, else the local fallback.
-    """
-    try:
-        importlib.import_module(f"aipass.canary.apps.modules.{stem}")
-        return f"aipass.canary.apps.modules.{stem}"
-    except ImportError as e:
-        # Not silent: the fallback path is a real branch in behaviour, so the
-        # reason it was taken has to be readable afterwards. A canary that
-        # swallows this is the exact failure species it exists to catch.
-        logger.info("[CANARY] Package import failed for %s (%s) — using local layout", stem, e)
-        return f"apps.modules.{stem}"
-
-
 def discover_modules() -> List[Any]:
     """Auto-discover modules in modules/ directory.
+
+    Every module is imported by its package path only. The local-layout
+    fallback (apps.modules.<stem>) was removed in canary's fleet green leg 1:
+    this file imports aipass.* above, so the package is always importable, and
+    a module that failed under its package name failed again under the local
+    one and was logged by the wrong name.
 
     Returns:
         List of imported modules exposing handle_command().
@@ -84,7 +70,7 @@ def discover_modules() -> List[Any]:
         if file_path.name.startswith("_"):
             continue
 
-        module_name = _module_import_path(file_path.stem)
+        module_name = f"aipass.canary.apps.modules.{file_path.stem}"
 
         try:
             module = importlib.import_module(module_name)
@@ -153,8 +139,16 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]Commands:[/yellow]")
-    console.print("  [cyan]note add TEXT[/cyan]   Append one note to the branch-local store")
-    console.print("  [cyan]note list[/cyan]       Print notes in order, with index and timestamp")
+    console.print("  [cyan]note add TEXT[/cyan]      Append one note to the branch-local store")
+    console.print("  [cyan]note list[/cyan]          Print notes in order, with index and timestamp")
+    console.print("  [cyan]span TEXT[/cyan]          Print a written duration as a total in seconds")
+    console.print('  [cyan]span --json TEXT[/cyan]   The same total as {"seconds": N}, nothing on stdout')
+    console.print("  [cyan]top N FILE[/cyan]         Print the N highest counts in a name/count file")
+    console.print("  [cyan]top --json N FILE[/cyan]  The same rows as one JSON array, nothing else on stdout")
+    console.print("  [cyan]align FILE[/cyan]         Print a text table with every column lined up")
+    console.print("  [cyan]align --json FILE[/cyan]  The same rows as one JSON array of arrays, nothing else")
+    console.print("  [cyan]kv FILE <verb>[/cyan]     Keep key/value pairs in a file: set, get, delete, list")
+    console.print("  [cyan]kv --json FILE list[/cyan]  Every pair as one JSON object, nothing else on stdout")
     console.print("  [dim]modules are added per test, then removed — 'drone @canary' lists what is present[/dim]")
     console.print()
 
@@ -174,6 +168,15 @@ def print_help() -> None:
     console.print("  $ drone @canary")
     console.print('  $ drone @canary note add "check the tick-5 interrupt"')
     console.print("  $ drone @canary note list")
+    console.print("  $ drone @canary span '2d 4h'")
+    console.print("  $ drone @canary span --json 1h30m")
+    console.print("  $ drone @canary top 3 scores.txt")
+    console.print("  $ drone @canary top --json 3 scores.txt")
+    console.print("  $ drone @canary align table.txt")
+    console.print("  $ drone @canary align --json table.txt")
+    console.print("  $ drone @canary kv store.txt set colour red")
+    console.print("  $ drone @canary kv store.txt get colour")
+    console.print("  $ drone @canary kv --json store.txt list")
     console.print("  $ drone @canary --version")
     console.print()
 

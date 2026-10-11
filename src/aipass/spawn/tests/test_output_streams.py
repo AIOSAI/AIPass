@@ -1,22 +1,19 @@
-"""Stream-routing tests for spawn's user-facing output.
+# =================== AIPass ====================
+# Name: test_output_streams.py
+# Description: Stream-routing tests for spawn's user-facing output
+# Version: 1.0.1
+# Created: 2026-08-13
+# Modified: 2026-09-27
+# =============================================
 
-Two defects found by the DPLAN-0291 live audit, both caused by the same habit —
-building one logical block out of ``warning()``/``error()`` (stderr) and
-``console.print()`` (stdout):
+"""Tests for apps/spawn.py's and apps/modules/*.py's --help and report stream routing (stdout vs stderr)."""
 
-1. Every ``--help`` screen sent its ``Usage:`` line to stderr with a warning
-   glyph while the body went to stdout. ``drone @spawn update --help > f``
-   dropped the usage line; ``--help | grep`` missed it. @drone, @flow and
-   @ai_mail all emit nothing on stderr for --help — spawn was the outlier.
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every handler module this file imports parses and imports
+# seedgo: no-test-needed(documentation) — docstrings on print_help and the handler --help paths
 
-2. The sync-registry report printed the "Stale"/"Unregistered" headers on
-   stderr and their member names on stdout, so on stdout the stale branch
-   names appeared directly under "Healthy (N)" — the report read a stale
-   branch as healthy.
-
-Requested help is not a warning, and a report section must not be split
-across two streams.
-"""
+import json
+from unittest.mock import patch
 
 import pytest
 
@@ -26,6 +23,24 @@ from aipass.spawn.apps.modules.regenerate_registry import handle_regenerate_regi
 from aipass.spawn.apps.modules.repair import handle_repair
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 from aipass.spawn.apps.modules.update import handle_update
+from aipass.spawn.apps.spawn import print_help
+
+# Two defects found by the DPLAN-0291 live audit, both caused by the same habit —
+# building one logical block out of ``warning()``/``error()`` (stderr) and
+# ``console.print()`` (stdout):
+#
+# 1. Every ``--help`` screen sent its ``Usage:`` line to stderr with a warning
+#    glyph while the body went to stdout. ``drone @spawn update --help > f``
+#    dropped the usage line; ``--help | grep`` missed it. @drone, @flow and
+#    @ai_mail all emit nothing on stderr for --help — spawn was the outlier.
+#
+# 2. The sync-registry report printed the "Stale"/"Unregistered" headers on
+#    stderr and their member names on stdout, so on stdout the stale branch
+#    names appeared directly under "Healthy (N)" — the report read a stale
+#    branch as healthy.
+#
+# Requested help is not a warning, and a report section must not be split
+# across two streams.
 
 HELP_HANDLERS = [
     ("update", handle_update),
@@ -64,7 +79,6 @@ class TestHelpGoesToStdout:
 
     def test_entry_point_help_is_stdout_only(self, capsys):
         """The global help's OPTIONS block was the loudest case — 8 warning() calls."""
-        from aipass.spawn.apps.spawn import print_help
 
         print_help()
 
@@ -77,17 +91,28 @@ class TestHelpGoesToStdout:
 class TestReportSectionsStayWhole:
     """A report section's header and its items belong on the same stream."""
 
-    def test_stale_names_never_land_under_healthy_on_stdout(self, capsys):
-        from aipass.spawn.apps.modules.sync_registry import _print_summary
+    def test_stale_names_never_land_under_healthy_on_stdout(self, tmp_path, capsys):
+        """Driven through `sync-registry` against a tmp_path project: alpha is whole,
+        ghost is registered with no directory, stranger has a passport but no entry.
 
-        _print_summary(
-            {
-                "healthy": ["alpha"],
-                "stale": ["ghost"],
-                "unregistered": ["stranger"],
-                "fixed": False,
-            }
+        Mutant: stale names printed to stdout instead of stderr -> red.
+        """
+        for name in ("alpha", "stranger"):
+            (tmp_path / name / ".trinity").mkdir(parents=True)
+            (tmp_path / name / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": "1.0.0", "last_updated": "2026-01-01", "id": "proj-id"},
+                    "branches": [{"name": "ALPHA", "path": "alpha"}, {"name": "GHOST", "path": "ghost"}],
+                }
+            ),
+            encoding="utf-8",
         )
+
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=registry):
+            handle_sync_registry([])
 
         captured = capsys.readouterr()
         assert "alpha" in captured.out

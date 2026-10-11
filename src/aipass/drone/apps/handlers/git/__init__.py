@@ -3,10 +3,14 @@
 from . import lock_handler as lock_handler  # explicit re-export for type checkers
 from . import status_handler as status_handler
 from . import show_handler as show_handler
+from . import blame_handler as blame_handler
 from . import sync_handler as sync_handler
+from . import merge_main_handler as merge_main_handler
 from . import pr_handler as pr_handler
 from . import diff_handler as diff_handler
 from . import log_handler as log_handler
+from . import tracked_handler as tracked_handler
+from . import export_handler as export_handler
 from . import commit_handler as commit_handler
 from . import checkout_handler as checkout_handler
 from . import dev_pr_handler as dev_pr_handler
@@ -16,3 +20,4 @@ from . import close_pr_handler as close_pr_handler
 from . import tag_handler as tag_handler
 from . import repo_context as repo_context
 from . import remote_handler as remote_handler
+from . import help_pages as help_pages

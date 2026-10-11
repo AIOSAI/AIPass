@@ -1,24 +1,26 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_symbolic_parked.py
-# Date: 2026-08-14
-# Version: 1.0.0
-# Category: memory/tests
+# =================== AIPass ====================
+# Name: test_symbolic_parked.py
+# Description: Pins the park of the symbolic fragments tier (the owner's ruling, 2026-08-14)
+# Version: 1.0.2
+# Created: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for parking the symbolic fragments tier (the owner's ruling, 2026-08-14).
+"""Tests for apps/modules/symbolic.py and the parked handlers/symbolic package."""
 
-The Agent Memory Atlas review of AIPass memory (revision 0d27e5ef) flagged the
-AUDN deduplicator: an LLM returns a Delete verdict and nothing records what was
-removed or why — an unauditable deletion. The tier was never wired into any live
-lane, and Compass became the curated-truth piece, so the owner ruled: park it,
-revivable, and say where the active piece is.
+# Tests for parking the symbolic fragments tier (the owner's ruling, 2026-08-14).
+#
+# The Agent Memory Atlas review of AIPass memory (revision 0d27e5ef) flagged the
+# AUDN deduplicator: an LLM returns a Delete verdict and nothing records what was
+# removed or why — an unauditable deletion. The tier was never wired into any live
+# lane, and Compass became the curated-truth piece, so the owner ruled: park it,
+# revivable, and say where the active piece is.
+#
+# A park is only honest if it is loud. These tests pin the two halves:
+#   - every disabled surface names the ruling, its date, and Compass
+#   - nothing that runs today lost anything (the live lane never touched it)
 
-A park is only honest if it is loud. These tests pin the two halves:
-  - every disabled surface names the ruling, its date, and Compass
-  - nothing that runs today lost anything (the live lane never touched it)
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import importlib
 import subprocess
@@ -28,6 +30,7 @@ from pathlib import Path
 import pytest
 
 from aipass.memory.apps.modules import symbolic
+from aipass.memory.apps.modules.governance import new_state, should_surface
 
 # The park's TRACKED home. It lived under .archive/ until 2026-08-18, when
 # The owner ruled .archive/ always-ignored and named it his disposal zone -- at
@@ -133,7 +136,7 @@ class TestLiveLaneUntouched:
             encoding="utf-8"
         )
         live = [ln for ln in source.splitlines() if ln.strip().startswith("from . import symbolic")]
-        assert not live, f"live lane still imports the parked tier: {live}"
+        assert live == [], f"live lane still imports the parked tier: {live}"
 
     def test_the_live_entry_points_still_import(self):
         for dotted in (
@@ -144,12 +147,10 @@ class TestLiveLaneUntouched:
             "aipass.memory.apps.modules.search",
             "aipass.memory.apps.modules.governance",
         ):
-            assert importlib.import_module(dotted) is not None
+            assert importlib.import_module(dotted).__name__ == dotted
 
     def test_governance_is_not_parked(self):
         """Governance is a SEPARATE tier and is live on the prompt lane (@hooks compass_recall)."""
-        from aipass.memory.apps.modules.governance import should_surface, new_state
-
         surfaced, reason, state = should_surface("item-1", 0.9, new_state())
         assert surfaced is True, reason
 
@@ -246,6 +247,8 @@ class TestParkIsNeverCollected:
             [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", str(_PARK.parent)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=180,
         )
         combined = result.stdout + result.stderr
@@ -256,4 +259,4 @@ class TestParkIsNeverCollected:
     def test_a_parked_test_file_would_otherwise_have_matched(self):
         """Guard the guard: if no parked file looks like a test, the pin is vacuous."""
         tempting = [p.name for p in _PARK.parent.rglob("test_*.py")]
-        assert tempting, "no parked file matches test_*.py — this pin no longer pins anything"
+        assert len(tempting) >= 1, "no parked file matches test_*.py — this pin no longer pins anything"

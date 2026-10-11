@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mirror.py
 # Description: Mirror cleanup handler — removes snapshot files whose source no longer exists
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-06-12
+# Modified: 2026-09-27
 # =============================================
 
 """Mirror cleanup handler — removes snapshot files whose source no longer exists."""
@@ -92,7 +92,6 @@ def _remove_empty_dirs(
 def cleanup_deleted_files(
     backup_path: Path,
     source_dir: Path,
-    should_ignore,
     result: BackupResult,
     dry_run: bool = False,
 ) -> None:
@@ -101,7 +100,6 @@ def cleanup_deleted_files(
     Args:
         backup_path: Snapshot destination directory.
         source_dir: Original project root.
-        should_ignore: Callable(Path) -> bool for ignore check.
         result: BackupResult to track deletions.
         dry_run: If True, only count what would be deleted.
     """

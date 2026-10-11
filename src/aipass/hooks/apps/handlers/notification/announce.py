@@ -18,7 +18,7 @@ SOUNDS_DIR = AIPASS_HOME / ".claude" / "sounds"
 SOUND_FILE = SOUNDS_DIR / "mixkit-clear-announce-tones-2861.wav"
 
 
-def handle(hook_data: dict) -> dict:  # noqa: ARG001
+def handle(hook_data: dict) -> dict:
     """Play notification tone and speak hook name for identification.
 
     Args:

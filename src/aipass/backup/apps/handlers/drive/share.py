@@ -41,6 +41,46 @@ def _get_authenticated_email(client: DriveClient) -> str | None:
     return None
 
 
+def _revoke_public_access(client: DriveClient, file_id: str) -> bool:
+    """Delete every ``anyone`` permission standing on *file_id*.
+
+    ``upload_for_share`` reuses a file it finds by name, so a restricted share
+    can land on a file an earlier ``--public`` run opened to the web.  Creating
+    the user permission does not close that door; only deleting the ``anyone``
+    permission does.
+
+    Returns ``True`` when the file is known to carry no ``anyone`` permission.
+    ``False`` when Drive could not be asked, or a delete failed — the caller
+    must refuse rather than report a file as restricted on a guess.
+    """
+    try:
+        request = client.drive_service.permissions().list(  # type: ignore[union-attr]
+            fileId=file_id,
+            fields="permissions(id,type)",
+        )
+        result = client._api_call(request)
+        if result is None:
+            client.last_error = f"Could not list permissions on {file_id}"
+            return False
+
+        for permission in result.get("permissions", []):
+            if permission.get("type") != "anyone":
+                continue
+            delete_request = client.drive_service.permissions().delete(  # type: ignore[union-attr]
+                fileId=file_id,
+                permissionId=permission.get("id"),
+            )
+            if client._api_call(delete_request) is None:
+                client.last_error = f"Could not revoke public access on {file_id}"
+                return False
+            logger.info(f"Revoked public permission {permission.get('id')} on {file_id}")
+        return True
+    except Exception as exc:
+        client.last_error = str(exc)
+        logger.warning(f"Failed to revoke public access on {file_id}: {exc}")
+        return False
+
+
 def upload_for_share(
     client: DriveClient,
     local_file: Path,
@@ -85,8 +125,10 @@ def set_share_permission(
     """Set a read permission on *file_id*.
 
     *public* ``False`` (default): restricted to the authenticated user
-    (``type=user``, ``role=reader``).  ``True``: anyone with the link
-    (``type=anyone``, ``role=reader``).
+    (``type=user``, ``role=reader``), and any ``anyone`` permission an earlier
+    public share left on the file is revoked first — otherwise "restricted" is
+    a word printed over a file the web can still read.
+    ``True``: anyone with the link (``type=anyone``, ``role=reader``).
 
     Returns the permission ID, or ``None`` on failure.
     """
@@ -96,6 +138,8 @@ def set_share_permission(
         email = _get_authenticated_email(client)
         if not email:
             client.last_error = "Could not determine authenticated email"
+            return None
+        if not _revoke_public_access(client, file_id):
             return None
         body = {"type": "user", "role": "reader", "emailAddress": email}
 

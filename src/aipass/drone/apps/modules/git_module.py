@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.4.1
+# Version: 1.5.1
 # Created: 2026-03-17
-# Modified: 2026-09-15
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 from aipass.prax import logger
@@ -26,9 +27,13 @@ from aipass.drone.apps.handlers.git import (
     lock_handler,
     status_handler,
     sync_handler,
+    merge_main_handler,
     diff_handler,
     log_handler,
+    tracked_handler,
+    export_handler,
     show_handler,
+    blame_handler,
     commit_handler,
     checkout_handler,
     dev_pr_handler,
@@ -38,8 +43,9 @@ from aipass.drone.apps.handlers.git import (
     tag_handler,
     remote_handler,
     repo_door,
+    help_pages,
 )
-from aipass.drone.apps.handlers.help_flags import wants_help
+from aipass.drone.apps.handlers.help_flags import help_topic, wants_help
 from aipass.drone.apps.handlers.router_handler import caller_cwd
 from aipass.drone.apps.handlers.json_flags import strip_json_flag, wants_json
 
@@ -54,6 +60,9 @@ _COMMANDS = (
     "diff",
     "log",
     "show",
+    "blame",
+    "tracked",
+    "export",
     "remote",
     "lock",
     "branches",
@@ -63,6 +72,7 @@ _COMMANDS = (
     "commit",
     "checkout",
     "sync",
+    "merge-main",
     "unlock",
     "dev-pr",
     "delete-branch",
@@ -74,6 +84,9 @@ _COMMANDS = (
     "prune-temp",
     "tag",
     "tag-list",
+    "issue-write",
+    "run-write",
+    "workflow-write",
 )
 
 _GH_PASSTHROUGH_COMMANDS = ("issue", "run", "workflow")
@@ -110,6 +123,9 @@ _RUN_VIEW_VALUE_FLAGS = ("-R", "--repo", "-j", "--job", "-a", "--attempt", "-q",
 _JOB_ROW_JQ = '"\\(.id)\\t\\(.conclusion)\\t\\(.name)"'
 _GH_TIMEOUT = 60
 
+# The flags diff takes; any other flag before `--` is refused by name
+_DIFF_FLAGS = ("--staged", "--all", "--stat")
+
 # Count flags whose value lives in the following arg — skipped, not warned about
 _LOG_COUNT_FLAGS = ("-n", "--count", "--max-count")
 
@@ -124,6 +140,9 @@ def _detect_branch_dir() -> tuple[str, Path] | None:
     Returns None when the process has no CWD — this detects the branch from
     LOCATION, and there is nothing to detect from. Identity assigned at spawn
     is a different question, answered elsewhere and unaffected.
+
+    Raises ValueError when a passport is found but cannot be read: a corrupt
+    passport is a failure to report, never "not inside a branch".
     """
     cwd = caller_cwd()
     if cwd is None:
@@ -142,7 +161,7 @@ def _detect_branch_dir() -> tuple[str, Path] | None:
                     return name, current
             except Exception as exc:
                 logger.warning("Failed to read passport at %s: %s", passport, exc)
-                return None
+                raise ValueError(f"Unreadable passport at {passport}: {exc}") from exc
         parent = current.parent
         if parent == current:
             break
@@ -170,7 +189,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             return {"stdout": "", "stderr": "", "exit_code": 0}
         args = []
     if wants_help(command, args):
-        print_help()
+        print_help(help_topic(command, args))
         return {"stdout": "", "stderr": "", "exit_code": 0}
 
     if command is None:
@@ -190,9 +209,21 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     cmd: str = command
     if cmd == "tag" and (not args or args[0] == "--list"):
         cmd = "tag-list"
-    try:
-        from aipass.drone.apps.plugins.devpulse_ops.auth import verify_git_access
+    from aipass.drone.apps.plugins.devpulse_ops.auth import GH_SUBCOMMANDS, gh_access_key, verify_git_access
 
+    if command in _GH_PASSTHROUGH_COMMANDS:
+        # Reads stay global, writes ask the owner tier, and an unknown subcommand
+        # is refused here, before the gate and before gh (DPLAN-0356 leg 3).
+        gh_key = gh_access_key(command, args)
+        if gh_key is None:
+            table = GH_SUBCOMMANDS[command]
+            message = (
+                f"Unknown subcommand for '{command}': '{args[0]}'. "
+                f"Reads: {', '.join(table['read'])}. Owner only: {', '.join(table['write'])}."
+            )
+            return {"stdout": "", "stderr": message, "exit_code": 1}
+        cmd = gh_key
+    try:
         caller = verify_git_access(cmd)
     except PermissionError as exc:
         # WARNING, not ERROR: auth.py already logged this same denial with the
@@ -213,6 +244,12 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         return _handle_log(args)
     if command == "show":
         return _handle_show(args)
+    if command == "blame":
+        return _handle_blame(args)
+    if command == "tracked":
+        return _handle_tracked(args)
+    if command == "export":
+        return _handle_export(args)
     if command == "remote":
         return _handle_remote(args)
     if command == "lock":
@@ -231,6 +268,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         return _handle_checkout(args)
     if command == "sync":
         return _handle_sync(args)
+    if command == "merge-main":
+        return _handle_merge_main(args)
     if command == "unlock":
         return _handle_unlock(args)
     if command == "merge":
@@ -559,6 +598,18 @@ def _handle_close_pr(args: list[str]) -> dict:
     return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
 
+def _terminal_answer(prompt: str) -> str | None:
+    """The typed answer to *prompt* on a real terminal, or None when stdin is not one.
+
+    Its body is the two calls the merge gate made inline. It has a name of its
+    own for the tests: they hand the gate a terminal through this name instead of
+    replacing sys.stdin for the whole process (drone's decision, DPLAN-0354 leg 5).
+    """
+    if not sys.stdin.isatty():
+        return None
+    return input(prompt)
+
+
 def _confirm_merge(pr_number: str, caller: str, confirmed: bool) -> dict | None:
     """Joint-decision gate: merges must never happen accidentally (DPLAN-0256).
 
@@ -570,8 +621,8 @@ def _confirm_merge(pr_number: str, caller: str, confirmed: bool) -> dict | None:
         json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "--confirm"})
         return None
 
-    if sys.stdin.isatty():
-        answer = input(f"Merge PR #{pr_number}? Merges are a joint decision. [y/N] ")
+    answer = _terminal_answer(f"Merge PR #{pr_number}? Merges are a joint decision. [y/N] ")
+    if answer is not None:
         if answer.strip().lower() in ("y", "yes"):
             json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "tty-yes"})
             return None
@@ -700,6 +751,7 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
     as_json = wants_json(args)
     args = strip_json_flag(args)
     show_all = "--all" in args or repo_root is not None
+    counts: dict | None = None
 
     if repo_root is not None:
         branch_name = repo_root.name
@@ -707,9 +759,12 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
         if result.get("ok", True):
             result["message"] = f"{result['total']} file(s) changed in {repo_root}"
     else:
-        detected = _detect_branch_dir()
-        if detected is None:
+        try:
+            detected = _detect_branch_dir()
             message = "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/"
+        except ValueError as exc:
+            detected, message = None, str(exc)
+        if detected is None:
             if as_json:
                 # This refusal fires BEFORE the branch is known, which is how a
                 # machine caller ends up parsing a bare sentence. Every exit from a
@@ -727,6 +782,11 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
             if result.get("ok", True):
                 # only reword the success message — an error message must survive verbatim
                 result["message"] = f"{result['total']} file(s) changed in repo"
+                # The twin of `git rev-list --count` both ways: how far this branch
+                # is from its origin twin, as of the last fetch (DPLAN-0356).
+                counts = status_handler.get_ahead_behind(standing_root)
+                if not counts["ok"]:
+                    result = {**result, "ok": False, "message": counts["message"]}
         else:
             result = status_handler.get_branch_status(branch_dir)
 
@@ -734,16 +794,16 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
         # The scope footer and the header sentence are prose. A machine caller
         # asked for facts, so it gets the scope as a field instead of a line it
         # would have to recognise and strip.
-        return _json_document(
-            {
-                "branch": branch_name,
-                "scope": "repo" if show_all else "branch",
-                "files": result["files"],
-                "total": result["total"],
-                "message": result["message"],
-            },
-            ok=result.get("ok", True),
-        )
+        document = {
+            "branch": branch_name,
+            "scope": "repo" if show_all else "branch",
+            "files": result["files"],
+            "total": result["total"],
+            "message": result["message"],
+        }
+        if counts is not None:
+            document.update(upstream=counts["upstream"], ahead=counts["ahead"], behind=counts["behind"])
+        return _json_document(document, ok=result.get("ok", True))
 
     if not result.get("ok", True):
         # a failed git status must FAIL the command — exit 0 here false-greened
@@ -751,6 +811,8 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
         return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
     lines = [result["message"]]
+    if counts is not None:
+        lines.append(counts["message"])
     for f in result["files"]:
         # STRIPPED FOR THE SCREEN ONLY. The handler now reports porcelain's two
         # columns verbatim; this rendering has always shown one right-aligned
@@ -768,28 +830,71 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
     }
 
 
-def _handle_diff(args: list[str], repo_root: Path | None = None) -> dict:
-    """Handle the diff subcommand (global tier). --staged, --all supported.
+def _resolve_diff_paths(
+    path_tokens: list[tuple[str, bool]], root: Path, cwd: Path | None
+) -> tuple[list[str], str | None]:
+    """The diff's paths made absolute, or the first token that names no path (then the paths are partial)."""
+    paths: list[str] = []
+    for token, must_exist in path_tokens:
+        resolved = log_handler.resolve_log_path(token, root, cwd, must_exist)
+        if resolved is None:
+            return paths, token
+        paths.append(resolved)
+    return paths, None
 
-    *repo_root* is set only by the external-repo door: the whole named repo.
+
+def _handle_diff(args: list[str], repo_root: Path | None = None) -> dict:
+    """Handle the diff subcommand (global tier): `diff [--staged] [--stat] [--all] [path ...]`.
+
+    Paths narrow the diff to those files and are read against the caller's
+    directory, then the repo root, as log reads them; one that no longer
+    exists goes after `--`. --stat prints git's summary in place of the patch.
+    Any other flag fails by name. *repo_root* is set only by the external-repo
+    door: the whole named repo, paths read against it alone.
     """
-    staged = "--staged" in args
+    flags: set[str] = set()
+    path_tokens: list[tuple[str, bool]] = []
+    after_separator = False
+    for arg in args:
+        if after_separator or arg == "--":
+            path_tokens += [(arg, False)] if after_separator else []
+            after_separator = True
+            continue
+        if arg in _DIFF_FLAGS:
+            flags.add(arg)
+            continue
+        if arg.startswith("-"):
+            return {"stdout": "", "stderr": f"Unknown argument for 'diff': {arg}", "exit_code": 1}
+        path_tokens.append((arg, True))
+    staged = "--staged" in flags
+    stat = "--stat" in flags
     scope_note = ""
-    if repo_root is not None:
-        result = diff_handler.get_branch_diff(repo_root, staged=staged, repo_root=repo_root)
+    if path_tokens:
+        root = repo_root if repo_root is not None else lock_handler.find_repo_root()
+        cwd = None if repo_root is not None else caller_cwd()
+        paths, unknown = _resolve_diff_paths(path_tokens, root, cwd)
+        if unknown is not None:
+            message = (
+                f"Unknown argument for 'diff': {unknown} (no such path; a path that no longer exists goes after --)"
+            )
+            logger.warning("git diff refused unknown argument '%s'", unknown)
+            return {"stdout": "", "stderr": message, "exit_code": 1}
+        result = diff_handler.get_branch_diff(root, staged=staged, repo_root=root, paths=paths, stat=stat)
+    elif repo_root is not None:
+        result = diff_handler.get_branch_diff(repo_root, staged=staged, repo_root=repo_root, stat=stat)
     else:
-        detected = _detect_branch_dir()
+        try:
+            detected = _detect_branch_dir()
+            message = "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/"
+        except ValueError as exc:
+            detected, message = None, str(exc)
         if detected is None:
-            return {
-                "stdout": "",
-                "stderr": "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/",
-                "exit_code": 1,
-            }
+            return {"stdout": "", "stderr": message, "exit_code": 1}
 
         branch_name, branch_dir = detected
-        show_all = "--all" in args
+        show_all = "--all" in flags
         target_dir = lock_handler.find_repo_root() if show_all else branch_dir
-        result = diff_handler.get_branch_diff(target_dir, staged=staged)
+        result = diff_handler.get_branch_diff(target_dir, staged=staged, stat=stat)
         if not show_all:
             scope_note = f"\n(showing {branch_name} scope — use --all for full repo)"
 
@@ -820,42 +925,81 @@ def _split_log_entry(entry: str) -> dict:
 def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
     """Handle the log subcommand (global tier).
 
-    Accepts the git idioms: `log 20`, `log -n 20`, and `log -20`. *repo_root* is
-    set only by the external-repo door.
+    Accepts the git idioms: `log 20`, `log -n 20`, and `log -20`, and paths that
+    keep only the commits touching them: `log src/aipass/drone`, or after `--`
+    for a path that no longer exists (`log -n 5 -- old/file.py`). A path is read
+    against the caller's directory, then the repo root. One range of commits,
+    `log origin/dev..HEAD`, lists every commit in it unless a count caps it;
+    each side must name a commit. *repo_root* is set only by the external-repo
+    door, where paths are read against that repo alone.
     """
     as_json = wants_json(args)
     # Stripped BEFORE the count scan below: left in, `--json` reaches int(),
     # fails, and logs a bogus "Invalid log count argument" on every call.
     args = strip_json_flag(args)
-    count = 10
+    count: int | None = None
+    path_tokens: list[tuple[str, bool]] = []
+    after_separator = False
     for arg in args:
+        if after_separator:
+            path_tokens.append((arg, False))
+            continue
+        if arg == "--":
+            after_separator = True
+            continue
         if arg in _LOG_COUNT_FLAGS:
             continue
         # git shorthand: -20 means 20 commits
         candidate = arg[1:] if arg.startswith("-") and arg[1:].isdigit() else arg
-        try:
+        if count is None and candidate.isdigit():
             count = int(candidate)
-            break
-        except ValueError:
-            # The owner's standing ruling: an unknown argument FAILS by name. This
-            # used to log a WARNING and carry on with the default 10, so
-            # `log not_a_real_count` printed output byte-identical to `log` with
-            # an empty stderr and exit 0 — the code knew the token was bad and
-            # proceeded as if a default had been meant. A caller reading $? was
-            # told the count it asked for had been honoured.
-            message = f"Unknown argument for 'log': {arg}"
-            logger.warning("git log refused unknown argument '%s'", arg)
-            if as_json:
-                return _json_document({"commits": [], "count": 0, "message": message}, ok=False)
-            return {"stdout": "", "stderr": message, "exit_code": 1}
+            continue
+        path_tokens.append((arg, True))
 
-    if count < 1:
+    root = repo_root if repo_root is not None else lock_handler.find_repo_root()
+    rev_range: str | None = None
+    for argument, must_exist in path_tokens:
+        if must_exist and ".." in argument and log_handler.is_commit_range(argument, root):
+            rev_range = argument
+            path_tokens.remove((argument, must_exist))
+            break
+
+    if count is None and rev_range is None:
+        count = 10
+    if count is not None and count < 1:
         message = f"Invalid log count {count}: must be 1 or greater"
         if as_json:
             return _json_document({"commits": [], "count": 0, "message": message}, ok=False)
         return {"stdout": "", "stderr": message, "exit_code": 1}
 
-    result = log_handler.get_git_log(count=count, repo_root=repo_root)
+    paths: list[str] = []
+    if path_tokens:
+        cwd = None if repo_root is not None else caller_cwd()
+        for argument, must_exist in path_tokens:
+            resolved = log_handler.resolve_log_path(argument, root, cwd, must_exist)
+            if resolved is None:
+                # The owner's standing ruling: an unknown argument FAILS by name.
+                # It once logged a WARNING and carried on with the default 10, so
+                # `log not_a_real_count` printed what plain `log` prints, exit 0.
+                message = (
+                    f"Unknown argument for 'log': {argument} (not a count, not a range of commits, and no such path; "
+                    "a path that no longer exists goes after --)"
+                )
+                logger.warning("git log refused unknown argument '%s'", argument)
+                if as_json:
+                    return _json_document({"commits": [], "count": 0, "message": message}, ok=False)
+                return {"stdout": "", "stderr": message, "exit_code": 1}
+            paths.append(resolved)
+
+    if rev_range is None:
+        result = log_handler.get_git_log(count=count, repo_root=repo_root, paths=paths or None)
+    else:
+        result = log_handler.get_git_log(count=count, repo_root=root, paths=paths or None, rev_range=rev_range)
+
+    if not result["success"]:
+        if as_json:
+            return _json_document({"commits": [], "count": 0, "message": result["message"]}, ok=False)
+        return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
     if as_json:
         return _json_document(
@@ -911,6 +1055,91 @@ def _handle_show(args: list[str]) -> dict:
     if result["success"]:
         return {"stdout": result["content"], "stderr": "", "exit_code": 0}
     return {"stdout": "", "stderr": result["message"], "exit_code": 1}
+
+
+def _handle_blame(args: list[str]) -> dict:
+    """Handle the blame subcommand (global tier): `blame <file> [-L START,END]`.
+
+    The file is read against the caller's directory, then the repo root, the
+    same way log reads its paths. Repo-wide, like show (see blame_handler).
+    """
+    usage = "Usage: drone @git blame <file> [-L START,END]"
+    file_token: str | None = None
+    line_range: tuple[int, int] | None = None
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "-L":
+            spec = args[index + 1] if index + 1 < len(args) else ""
+            line_range = blame_handler.parse_line_range(spec)
+            if line_range is None:
+                message = f"Invalid line range for 'blame': '{spec}' (use -L START,END, e.g. -L 10,40)"
+                return {"stdout": "", "stderr": message, "exit_code": 1}
+            index += 2
+            continue
+        if file_token is None and not arg.startswith("-"):
+            file_token = arg
+            index += 1
+            continue
+        return {"stdout": "", "stderr": f"Unknown argument for 'blame': {arg}\n{usage}", "exit_code": 1}
+
+    if file_token is None:
+        return {"stdout": "", "stderr": usage, "exit_code": 1}
+
+    root = lock_handler.find_repo_root()
+    resolved = log_handler.resolve_log_path(file_token, root, caller_cwd(), True)
+    if resolved is None:
+        return {"stdout": "", "stderr": f"No such file for 'blame': {file_token}", "exit_code": 1}
+
+    result = blame_handler.get_git_blame(resolved, line_range, repo_root=root)
+    if not result["success"]:
+        return {"stdout": "", "stderr": result["message"], "exit_code": 1}
+    return {"stdout": "\n".join(result["lines"]), "stderr": "", "exit_code": 0}
+
+
+def _handle_tracked(args: list[str]) -> dict:
+    """Handle the tracked subcommand (global tier): `tracked <path ...>`, one row per path.
+
+    The twin of `git ls-files` plus `git check-ignore`. Each path is read
+    against the caller's directory, then the repo root, as log reads them.
+    """
+    if not args:
+        return {"stdout": "", "stderr": "Usage: drone @git tracked <path ...>", "exit_code": 1}
+    flag = next((arg for arg in args if arg.startswith("-")), None)
+    if flag is not None:
+        return {"stdout": "", "stderr": f"Unknown argument for 'tracked': {flag}", "exit_code": 1}
+    result = tracked_handler.classify(lock_handler.find_repo_root(), caller_cwd(), args)
+    if not result["ok"]:
+        return {"stdout": "", "stderr": result["message"], "exit_code": 1}
+    rows = [f"{state:<10} {path}" for state, path in result["rows"]]
+    return {"stdout": "\n".join(rows), "stderr": "", "exit_code": 0}
+
+
+def _handle_export(args: list[str]) -> dict:
+    """Handle the export subcommand (global tier): `export <ref> <dir>`, the tracked tree at ref into dir.
+
+    The twin of `git archive | tar -x`. A relative dir is read against the
+    caller's directory; export_handler decides whether it may be written.
+    """
+    if len(args) != 2:
+        return {"stdout": "", "stderr": "Usage: drone @git export <ref> <dir>", "exit_code": 1}
+    ref, dir_token = args
+    dest = Path(dir_token)
+    cwd = caller_cwd()
+    if not dest.is_absolute():
+        if cwd is None:
+            message = f"export refused: {dir_token} is relative and there is no cwd to read it against"
+            return {"stdout": "", "stderr": message, "exit_code": 1}
+        dest = cwd / dest
+    try:
+        detected = _detect_branch_dir()
+    except ValueError as exc:
+        return {"stdout": "", "stderr": str(exc), "exit_code": 1}
+    docs_local = detected[1] / "docs.local" if detected is not None else None
+    result = export_handler.export_tree(lock_handler.find_repo_root(), ref, dest, docs_local)
+    if not result["success"]:
+        return {"stdout": "", "stderr": result["message"], "exit_code": 1}
+    return {"stdout": result["message"], "stderr": "", "exit_code": 0}
 
 
 def _handle_remote(args: list[str]) -> dict:
@@ -1013,6 +1242,16 @@ def _handle_sync(args: list[str]) -> dict:
     }
 
 
+def _handle_merge_main(args: list[str]) -> dict:
+    """Handle the merge-main subcommand (owner tier): origin/main into dev by merge commit."""
+    if args:
+        return {"stdout": "", "stderr": f"merge-main takes no arguments; got: {' '.join(args)}", "exit_code": 1}
+    result = merge_main_handler.merge_main(lock_handler.find_repo_root())
+    if result["success"]:
+        return {"stdout": result["message"], "stderr": "", "exit_code": 0}
+    return {"stdout": "", "stderr": result["message"], "exit_code": 1}
+
+
 def _handle_lock() -> dict:
     """Handle the lock subcommand (global tier)."""
     result = lock_handler.check_lock_status()
@@ -1055,189 +1294,26 @@ def get_help(command: str | None = None) -> str:
     Returns:
         Help text string.
     """
-    if command == "issue":
-        return (
-            "git issue [args] — Passthrough to gh issue CLI [global]\n  Examples: list, create, view <#>, close <#>\n"
-        )
-    if command == "run":
-        return "git run [args] — Passthrough to gh run CLI [global]\n  Examples: list, view <id>, watch <id>\n"
-    if command == "workflow":
-        return (
-            "git workflow [args] — Passthrough to gh workflow CLI [global]\n  Examples: list, view <name>, run <name>\n"
-        )
-    if command == "pr":
-        return (
-            "git pr <description> — Push current branch and create PR to main [owner]\n"
-            "  On main: creates temp branch from slug. Otherwise: pushes branch directly. No -u flag.\n"
-        )
-    if command == "status":
-        return "git status [--all] — Show git status filtered to your branch (--all for repo-wide) [global]\n"
-    if command == "diff":
-        return (
-            "git diff [--staged] [--all] — Show git diff filtered to your branch [global]\n"
-            "  Options:\n"
-            "    --staged   Show staged changes only.\n"
-            "    --all      Show all repo changes (not just your branch).\n"
-        )
-    if command == "log":
-        return "git log [count] — Show recent git log entries (default: 10) [global]\n"
-    if command == "lock":
-        return "git lock — Check current lock status [global]\n  Shows lock holder, age, stale/orphan detection.\n"
-    if command == "branches":
-        return "git branches — List all remote branches [global]\n"
-    if command == "dev-pr":
-        return (
-            "git dev-pr <description> — Push dev branch and create PR to main [owner]\n"
-            "  Description becomes the PR title.\n"
-        )
-    if command == "delete-branch":
-        return (
-            "git delete-branch <name> — Delete a remote branch [owner]\n  Protected: main and dev cannot be deleted.\n"
-        )
-    if command == "close-pr":
-        return "git close-pr <number> — Close a GitHub pull request by number [owner]\n"
-    if command == "commit":
-        return (
-            "git commit <message> [--all | file1 file2 ...] — Commit changes [owner]\n"
-            "  Options:\n"
-            "    --all          Stage all repo changes (git add -A) before committing.\n"
-            "    file1 file2    Stage only these files before committing.\n"
-            "  With no flag or files, commits whatever is already staged.\n"
-            f"  The subject (line 1) is refused over {commit_handler.SUBJECT_CAP} chars: keep it under\n"
-            "  about 80 in type(scope): what form, blank line, then the why in the body.\n"
-        )
-    if command == "checkout":
-        return "git checkout <main|dev> — Switch branches (main or dev only) [owner]\n"
-    if command == "sync":
-        return (
-            "git sync [--autostash] [--main-ref] — Sync with origin/main [owner]\n"
-            "  On dev: fast-forward to origin/main (stays on dev, no checkout).\n"
-            "  On main: pull latest. From other branch: checkout main first.\n"
-            "  Refuses if dev has diverged — no silent rewrite.\n"
-            "  Options:\n"
-            "    --autostash   Stash local changes before sync and restore after.\n"
-            "    --main-ref    Update local main ref without checkout (from any branch).\n"
-        )
-    if command == "unlock":
-        return "git unlock --force — Force-release the PR lock [owner]\n"
-    if command == "merge":
-        return (
-            "git merge <PR#> [--confirm] — Merge a PR and sync local main [owner]\n"
-            "  Runs gh pr merge --merge --delete-branch, then git pull --rebase.\n"
-            "  Joint-decision gate: terminal sessions get a y/N prompt; headless\n"
-            "  callers must pass --confirm or the merge is refused.\n"
-        )
-    if command == "smart-sync":
-        return "git smart-sync — Fetch origin and rebase if behind [owner]\n"
-    if command == "fix":
-        return (
-            "git fix [--dry-run] — Detect and fix broken git states [owner]\n"
-            "\n"
-            "Detected states and actions:\n"
-            "  Stuck rebase   → git rebase --abort\n"
-            "  Detached HEAD  → git checkout main\n"
-            "  Diverged       → git fetch + git merge origin/main\n"
-            "  Dirty index    → git reset HEAD\n"
-            "\n"
-            "Options:\n"
-            "  --dry-run   Report without executing fixes.\n"
-        )
-    if command == "push":
-        return (
-            "git push --repo <path> — Push an external repo's checked-out branch to its origin [admin seat]\n"
-            "  Same branch name on origin, never forced; git's own refusal comes back untouched.\n"
-            "  Only through the external-repo door — AIPass pushes through dev-pr.\n"
-        )
-    if command == "tag":
-        return (
-            "git tag <vX.Y.Z> — Create and push an annotated release tag [owner]\n"
-            "git tag --list    — List all tags (newest first) [global]\n"
-            "\n"
-            "In AIPass:\n"
-            "  Tags origin/main. Version guard — refuses unless pyproject.toml and\n"
-            "  __init__.py on origin/main both match the tag version.\n"
-            "\n"
-            "In an external project (projects/*, any other repo):\n"
-            "  Tags that repo's current HEAD and pushes to its own origin. No version\n"
-            "  guard — your manifests and release cadence are yours. Any name git\n"
-            "  accepts as a tag works, not just vX.Y.Z.\n"
-            "\n"
-            "Both:\n"
-            "  Exists guard    Refuses if tag already exists locally or on remote.\n"
-        )
+    if command in _GH_PASSTHROUGH_COMMANDS:
+        return _gh_verb_help(command)
+    return help_pages.page(command)
 
-    return (
-        "git — Tier-based git workflow (dev branch model)\n"
-        "Global (all branches):\n"
-        "  status                 Show git status for your branch\n"
-        "  diff [--staged]        Show git diff for your branch\n"
-        "  log [count]            Show recent git log (default: 10)\n"
-        "  show <ref> [path]      Show a commit, or a file's contents at it\n"
-        "  remote                 List remotes and their urls (credentials redacted)\n"
-        "  lock                   Check lock status\n"
-        "  branches               List remote branches\n"
-        "  tag --list             List all tags (newest first)\n"
-        "  issue [args]           Passthrough to gh issue\n"
-        "  run [args]             Passthrough to gh run\n"
-        "  workflow [args]        Passthrough to gh workflow\n"
-        "Owner (devpulse only):\n"
-        "  commit <msg> [--all | files]  Commit changes (selective or --all)\n"
-        "  checkout <main|dev>    Switch branches\n"
-        "  pr <desc>              Push current branch and create PR to main\n"
-        "  dev-pr <desc>          Push dev and create PR to main\n"
-        "  delete-branch <name>   Delete a remote branch\n"
-        "  prune-temp             Delete merged citizen/* temp branches\n"
-        "  close-pr <number>      Close a PR\n"
-        "  merge <PR#> [--confirm]  Merge a PR (gated: y/N prompt or --confirm)\n"
-        "  sync [--autostash]     Sync with origin/main (FF on dev)\n"
-        "  smart-sync             Fetch + rebase if behind\n"
-        "  unlock --force         Force-release the PR lock\n"
-        "  tag <vX.Y.Z>           Create and push release tag\n"
-        "  fix [--dry-run]        Fix broken git states\n"
-        "  push --repo <path>     Push an external repo's branch (the door below only)\n"
-        "\n" + _repo_door_help() + "\n"
-        "--json — THE MACHINE SURFACE:\n"
-        "  status, log, show and remote take --json in ANY slot; it is stripped\n"
-        "  before positional parsing, so `log --json 20` parses like `log 20`.\n"
-        "  One JSON document on stdout, every one carrying an `ok` verdict — a\n"
-        "  refusal is a document too, so a caller can parse why it failed.\n"
-        "  A help flag OUTRANKS it: `status --help --json` prints this page.\n"
-        "  status --json reports git's TWO porcelain columns ('M ' staged vs\n"
-        "  ' M' unstaged) which the rendered view collapses to one letter.\n"
+
+def _gh_verb_help(command: str) -> str:
+    """Per-verb help for a gh passthrough: its reads and owner-only writes, from the gate's own table."""
+    from aipass.drone.apps.plugins.devpulse_ops.auth import GH_SUBCOMMANDS
+
+    table = GH_SUBCOMMANDS[command]
+    writes = textwrap.fill(
+        ", ".join(table["write"]), width=78, initial_indent="  Owner only: ", subsequent_indent=" " * 14
     )
-
-
-def _repo_door_help() -> str:
-    """The external-repo door's block of the help page, refusals rendered from the door's own constants."""
-    placeholders = {"caller": "<caller>", "path": "<path>", "verb": "<verb>", "toplevel": "<toplevel>"}
-    refusals = (
-        repo_door.REFUSE_NOT_ADMIN,
-        repo_door.REFUSE_LANE_DARK.replace("{reason}", "<reason>"),
-        repo_door.REFUSE_VERB,
-        repo_door.REFUSE_NO_VALUE,
-        repo_door.REFUSE_TWICE,
-        repo_door.REFUSE_MISSING,
-        repo_door.REFUSE_NOT_DIR,
-        repo_door.REFUSE_NOT_REPO,
-        repo_door.REFUSE_NOT_TOP,
-        repo_door.REFUSE_AIPASS,
-    )
-    lines = "".join(f"    {text.format(**placeholders)}\n" for text in refusals)
+    log_line = "  view <id> --log | --log-failed reads a run's log (job API fallback)\n" if command == "run" else ""
     return (
-        "External-repo door — admin seat only (DPLAN-0344):\n"
-        "  status | diff [--staged] | log [count] | commit <msg> [--all | files] | push | tag <name>  --repo <path>\n"
-        "  Runs the verb in another git repo (projects/baud, a clone outside the tree).\n"
-        "  <path> is absolute, or relative to the AIPass root (not your cwd), and must be\n"
-        "  that repo's top level. --repo=<path> works too, in any slot.\n"
-        "  Checked on EVERY use against @ai_mail's verified-caller rail — the 5-leg admin\n"
-        "  grant, never cached. Project managers keep their own CWD-bound owner tier;\n"
-        "  --repo is not theirs. No AIPass PR lock is taken (git's index.lock serialises).\n"
-        "  commit never pushes, as at home: push is its own verb. commit --all runs the\n"
-        "  same lint and test gate there it runs anywhere; file paths are repo-relative.\n"
-        "  issue, run and workflow are not door verbs: their --repo OWNER/NAME is gh's own.\n"
-        "  Every use, refusals included, is one line in .ai_central/git_repo_door.jsonl:\n"
-        "  caller, cwd, verb, args, repo, HEAD before and after, exit code.\n"
-        "  Refusals, exactly as printed:\n" + lines
+        f"git {command} <subcommand> [args] — gh {command}, gated per subcommand\n"
+        f"  Reads [global]: {', '.join(table['read'])}\n"
+        f"{writes}\n"
+        f"{log_line}"
+        "  A subcommand in neither list is refused, never passed to gh.\n"
     )
 
 
@@ -1248,15 +1324,19 @@ def get_introspective() -> str:
         "Connected Handlers:\n"
         "  handlers/git/\n"
         "    - lock_handler.py, status_handler.py, diff_handler.py, log_handler.py, show_handler.py\n"
+        "    - tracked_handler.py, export_handler.py\n"
         "    - remote_handler.py, commit_handler.py, checkout_handler.py, sync_handler.py\n"
+        "    - merge_main_handler.py\n"
         "    - dev_pr_handler.py, branches_handler.py, delete_branch_handler.py, close_pr_handler.py\n"
         "    - repo_door.py (--repo <path>, admin seat only)\n"
         "  plugins/devpulse_ops/\n"
         "    - auth.py, merge_plugin.py, sync_plugin.py, fix_plugin.py\n"
         "  gh passthrough: issue, run, workflow\n"
         "Machine surface: --json on status, log, show, remote\n"
-        "Tiers: global (status,diff,log,show,remote,lock,branches,tag --list,issue,run,workflow)"
-        " | owner (pr,commit,checkout,dev-pr,delete-branch,prune-temp,close-pr,sync,unlock,merge,smart-sync,fix,tag)\n"
+        "Tiers: global (status,diff,log,show,blame,tracked,export,remote,lock,branches,tag --list,"
+        "issue,run,workflow)"
+        " | owner (pr,commit,checkout,dev-pr,delete-branch,prune-temp,close-pr,sync,merge-main,"
+        "unlock,merge,smart-sync,fix,tag)\n"
     )
 
 
@@ -1305,6 +1385,7 @@ def print_introspection() -> None:
         " [cyan]show_handler.py[/cyan], [cyan]remote_handler.py[/cyan]"
     )
     c.print("    - [cyan]commit_handler.py[/cyan], [cyan]checkout_handler.py[/cyan], [cyan]sync_handler.py[/cyan]")
+    c.print("    - [cyan]merge_main_handler.py[/cyan], [cyan]tracked_handler.py[/cyan], [cyan]export_handler.py[/cyan]")
     c.print(
         "    - [cyan]dev_pr_handler.py[/cyan], [cyan]branches_handler.py[/cyan],"
         " [cyan]delete_branch_handler.py[/cyan], [cyan]close_pr_handler.py[/cyan],"
@@ -1331,8 +1412,12 @@ def print_introspection() -> None:
     c.print()
 
 
-def print_help() -> None:
+def print_help(command: str | None = None) -> None:
     """Print help (seedgo compliance).
+
+    Args:
+        command: The verb to explain. None prints the top-level page; an
+            unknown verb falls through to it inside ``get_help``.
 
     ``markup=False``: this page is documentation, not styled output, and its
     argument placeholders are literal. Rendered as markup, Rich read ``[count]``
@@ -1341,4 +1426,4 @@ def print_help() -> None:
     standard scoring 100, because the literal is returned by ``get_help()``
     rather than written at the print site.
     """
-    _get_console().print(get_help(), markup=False)
+    _get_console().print(get_help(command), markup=False)

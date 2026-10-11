@@ -50,8 +50,10 @@ from aipass.memory.apps.handlers.cli.help_flags import wants_help
 # Handler import (same package family — json handlers)
 from aipass.memory.apps.handlers.json.lint_handler import PASSPORT_FILE, run_lint, run_lint_fields
 
-# Cross-handler access for branch discovery (module layer bridges handlers)
-from aipass.memory.apps.handlers.monitor.detector import _read_registry
+# Cross-handler access for branch discovery (module layer bridges handlers).
+# read_scope, not _read_registry: lint reads and never writes, so its scope is
+# the declared fleet including externals. The write scope stops at the repo edge.
+from aipass.memory.apps.handlers.monitor.detector import read_scope
 
 # The mode word, named once: the router matches it and the help prints it.
 FIELDS_MODE = "fields"
@@ -172,7 +174,7 @@ def _resolve_branches(branch_filter: str | None) -> list[dict[str, Any]] | None:
         path has already reported itself through ``error()``.
     """
     try:
-        branches = _read_registry()
+        branches = read_scope()
     except Exception as exc:
         logger.warning(f"[lint] Failed to read registry: {exc}")
         error(f"Failed to read registry: {exc}")

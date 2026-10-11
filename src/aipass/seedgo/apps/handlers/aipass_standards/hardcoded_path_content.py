@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: hardcoded_path_content.py
 # Description: Hardcoded Absolute Path Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-18
-# Modified: 2026-06-18
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -61,8 +61,12 @@ def get_hardcoded_path_standards() -> str:
         "  [green]Good -- use pathlib for home:[/green]",
         "  [dim]home = Path.home()[/dim]",
         "",
-        "  [green]Good -- test fixtures with generic paths:[/green]",
-        '  [dim]path = "/home/user/Projects/AIPass/..."  # generic, no real username[/dim]',
+        "  [green]Good -- a home path as the INPUT under test:[/green]",
+        "  [dim]path = tmp_path / 'home' / 'user' / 'Projects'   # built, not written[/dim]",
+        "  A written generic home (user as the name) is convicted like any other",
+        "  (seedgo, fleet green leg 10: this page once called it good). When the text IS",
+        "  the input -- a sanitizer that strips a home -- a line-level bypass with",
+        "  the reason is the door.",
         "",
         "[yellow]SCOPE:[/yellow]",
         "  AUDIT_SCOPE = [bold]all_files[/bold]",

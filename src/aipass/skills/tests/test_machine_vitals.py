@@ -1,30 +1,18 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_machine_vitals.py - The machine_vitals() contract
-# Date: 2026-09-12
-# Version: 1.1.0
+# =================== AIPass ====================
+# Name: test_machine_vitals.py
+# Description: The machine_vitals() contract
+# Version: 1.2.0
+# Created: 2026-09-12
+# Modified: 2026-10-10
 # Category: skills/tests
 # =============================================
 
-"""The machine_vitals() contract on the system_status skill (FPLAN-0561 row 1).
+"""Tests for lib/system_status/handler.py's machine_vitals() contract (FPLAN-0561 row 1)."""
 
-The host API relays this dict verbatim and BAUD's phone draws it, so what is
-pinned here is the shape a consumer reads: the section set, the closed reason
-codes and their sentences, per-section absence, the whole-function refusal, the
-baseline the skill owns, the sensor allowlist, the read-only sysfs range read,
-a manufactured macOS, the no_range branch, and the per-core cpu read
-(FPLAN-0586).
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the skill's handler module parses and imports
 
-Nothing here asks the live machine for a reading. psutil is a stand-in with
-numbers this host does not have, the clock is one the test moves, and the sysfs
-tree is built in tmp_path - so the suite is green on a host with no sensor chips
-at all, and a case can only pass if the handler asked the stand-in.
-"""
-
-import builtins
-import io
 import os
-import sys
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -52,6 +40,8 @@ _Swap = namedtuple("sswap", ["total", "used", "free", "percent", "sin", "sout"])
 _Temp = namedtuple("shwtemp", ["label", "current", "high", "critical"])
 _Fan = namedtuple("sfan", ["label", "current"])
 
+# The host API relays this dict verbatim and BAUD's phone draws it, so what is
+# pinned here is the shape a consumer reads.
 # The contract, written out rather than read back from the handler - a pin that
 # mirrors the module's own table can never disagree with it.
 BASE_KEYS = ["available", "reason", "sentence", "detail"]
@@ -313,6 +303,10 @@ def fresh_process(monkeypatch):
     monkeypatch.setattr(status, "_BASELINES", {})
 
 
+# Nothing here asks the live machine for a reading. psutil is a stand-in with
+# numbers this host does not have, the clock is one the test moves, and the
+# sysfs tree is built in tmp_path - so the suite is green on a host with no
+# sensor chips at all, and a case can only pass if the handler asked the stand-in.
 @pytest.fixture()
 def clock(monkeypatch):
     fake = _Clock()
@@ -325,7 +319,7 @@ def sysfs(tmp_path, monkeypatch):
     """A Linux host whose hwmon tree is the MacBook's, built in tmp_path."""
     root = _build_hwmon(tmp_path / "hwmon")
     monkeypatch.setattr(status, "HWMON_ROOT", root)
-    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(status, "_host_platform", lambda: "linux")
     return root
 
 
@@ -337,50 +331,39 @@ def machine(monkeypatch, clock, sysfs):
 
 
 @pytest.fixture()
-def guarded_sysfs(sysfs, monkeypatch):
+def guarded_sysfs(sysfs, audit_guard):
     """Record every open under the sysfs tree; a fan control file or a write mode raises.
 
-    builtins.open, io.open and os.open are all covered - pathlib reaches files
-    through io.open, and on Python 3.10 through os.open as well.
+    The interpreter's "open" audit event covers builtins.open, io.open, os.open
+    and pathlib alike (pathlib reaches files through io.open, and on Python
+    3.10 through os.open as well), so no route escapes and no name is replaced.
+    The event carries the mode for open() and None for os.open(), whose flags
+    are recorded instead.
     """
-    real_open = builtins.open
-    real_os_open = os.open
     root = os.fspath(sysfs)
     opened = []
     write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 
-    def _relative(file):
-        if isinstance(file, (str, os.PathLike)) and os.fspath(file).startswith(root):
-            return Path(os.fspath(file)).relative_to(sysfs).as_posix()
-        return None
+    def _guard(event, args):
+        if event != "open" or not isinstance(args[0], (str, os.PathLike)):
+            return
+        path, mode, flags = args
+        if not os.fspath(path).startswith(root):
+            return
+        relative = Path(os.fspath(path)).relative_to(sysfs).as_posix()
+        opened.append((relative, mode if mode is not None else flags))
+        if Path(relative).name in FAN_CONTROL_FILES:
+            raise PermissionError(13, "a fan control file was opened", os.fspath(path))
+        if flags & write_flags:
+            raise PermissionError(13, "sysfs was opened for writing", os.fspath(path))
 
-    def _open(file, mode="r", *args, **kwargs):
-        relative = _relative(file)
-        if relative is not None:
-            opened.append((relative, mode))
-            if Path(relative).name in FAN_CONTROL_FILES:
-                raise PermissionError(13, "a fan control file was opened", os.fspath(file))
-            if set(mode) & set("wax+"):
-                raise PermissionError(13, "sysfs was opened for writing", os.fspath(file))
-        return real_open(file, mode, *args, **kwargs)
-
-    def _os_open(path, flags, *args, **kwargs):
-        relative = _relative(path)
-        if relative is not None:
-            opened.append((relative, flags))
-            if Path(relative).name in FAN_CONTROL_FILES or flags & write_flags:
-                raise PermissionError(13, "sysfs was opened for writing", os.fspath(path))
-        return real_os_open(path, flags, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "open", _open)
-    monkeypatch.setattr(io, "open", _open)
-    monkeypatch.setattr(os, "open", _os_open)
+    audit_guard(_guard)
     return opened
 
 
 def _manufacture(monkeypatch, clock, tmp_path, platform):
     """A host with no sensor functions at all, naming itself as platform."""
-    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(status, "_host_platform", lambda: platform)
     monkeypatch.setattr(status, "HWMON_ROOT", tmp_path / "no_sysfs_here")
     stand_in = _Machine(clock)
     monkeypatch.setattr(status, "psutil", stand_in)
@@ -456,7 +439,9 @@ class TestAbsenceIsPerSection:
         result = status.machine_vitals()
 
         assert result["ok"] is True
-        assert result[section] == _expected(section, "read_failed", detail=f"OSError: {call} went away")
+        assert result[section] == _expected(
+            section, "read_failed", detail=f"The {section} reading failed (OSError); the error is in the host log."
+        )
         assert [name for name in status.SECTIONS if result[name]["reason"] == "read_failed"] == [section]
         assert result["swap"] == _expected(
             "swap", total_bytes=4 * GIB, used_bytes=1 * GIB, free_bytes=3 * GIB, percent=25.0
@@ -520,10 +505,37 @@ class TestTheWholeFunctionRefusal:
         assert list(result) == ["ok", "reason", "detail"]
         assert result["ok"] is False
         assert result["reason"] == "switched_off"
-        assert complaint in result["detail"]
-        assert switch_handler.STATE_FILENAME in result["detail"]
+        assert result["detail"] == (
+            f"The switch state {switch_handler.STATE_FILENAME} could not be read (SwitchStateUnreadable), "
+            f"so this skill counts as switched OFF; the error is in the host log."
+        )
         assert untouchable.touched == []
         assert state_path.read_text(encoding="utf-8") == document
+
+    @pytest.mark.parametrize(
+        ("document", "complaint"),
+        [
+            ("{not json", "not valid JSON"),
+            ('{"skills": []}', "no 'skills' map"),
+        ],
+    )
+    def test_the_exception_words_go_to_the_host_log_never_to_the_handset(self, monkeypatch, document, complaint):
+        """detail rides verbatim to the handset (CodeQL py/stack-trace-exposure, 2026-10-10):
+        the switch handler's own complaint is logged with its traceback, not published."""
+        logged = []
+        monkeypatch.setattr(status.logger, "error", lambda msg, *a, **k: logged.append((msg, a, k)))
+        monkeypatch.setattr(status, "psutil", _UntouchableMachine())
+        state_path = switch_handler.get_state_path()
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(document, encoding="utf-8")
+
+        result = status.machine_vitals()
+
+        assert complaint not in result["detail"]
+        assert len(logged) == 1
+        _msg, args, kwargs = logged[0]
+        assert complaint in str(args[0])
+        assert kwargs == {"exc_info": True}
 
 
 class TestTheSkillOwnsItsBaseline:
@@ -651,7 +663,7 @@ class TestTheFanRangeReadIsReadOnly:
         assert status.machine_vitals()["fan"]["fans"] == [RIGHT_SIDE_AT_ITS_FLOOR]
 
     def test_off_linux_the_range_is_never_read(self, machine, guarded_sysfs, monkeypatch):
-        monkeypatch.setattr(sys, "platform", "freebsd14")
+        monkeypatch.setattr(status, "_host_platform", lambda: "freebsd14")
         fan = status.machine_vitals()["fan"]
         assert fan["reason"] == "no_range"
         assert fan["current"] == 1290
@@ -823,7 +835,7 @@ class TestTheCores:
         cpu = _two_reads(clock)["cpu"]
         assert cpu == _expected(
             "cpu",
-            detail=f"cpu_freq: {type(error).__name__}: {error}",
+            detail=f"cpu_freq read failed ({type(error).__name__}); the error is in the host log.",
             percent=50.0,
             window_s=2.0,
             cores=CORES_OVER_0_TO_2,

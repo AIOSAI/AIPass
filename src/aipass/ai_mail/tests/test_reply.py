@@ -1,4 +1,15 @@
-"""Tests for email reply handler -- get_email_by_id and send_reply."""
+# =================== AIPass ====================
+# Name: test_reply.py
+# Description: Tests for email reply handler
+# Version: 1.0.2
+# Created: 2026-04-25
+# Modified: 2026-10-04
+# =============================================
+
+"""Tests for apps/handlers/email/reply.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
 
 import json
 import pytest
@@ -6,7 +17,6 @@ from unittest.mock import patch
 
 
 from aipass.ai_mail.apps.handlers.email.reply import (
-    _validate_reply_path,
     get_email_by_id,
     send_reply,
 )
@@ -70,13 +80,17 @@ def test_get_email_by_id_missing_file(tmp_path):
 
 
 def test_get_email_by_id_corrupt_json(tmp_path):
-    """Returns None when inbox file contains invalid JSON."""
+    """An inbox that cannot be parsed raises; it is not "message not found".
+
+    Before leg 10 this answered None, the same answer as an id that is not in a
+    readable inbox, so reply told the user "Message not found" about a broken
+    inbox. handle_reply turns the raise into its error line (ai_mail, leg 10).
+    """
     inbox_file = tmp_path / "inbox.json"
     inbox_file.write_text("{broken json!!!", encoding="utf-8")
 
-    result = get_email_by_id(inbox_file, "abc123")
-
-    assert result is None
+    with pytest.raises(json.JSONDecodeError):
+        get_email_by_id(inbox_file, "abc123")
 
 
 def test_get_email_by_id_empty_messages(tmp_path):
@@ -340,13 +354,34 @@ def _make_external_project(root, project="myproj", branch="vera"):
 # GAP 2 -- validator accepts external registries
 
 
+def _reply_to_external(tmp_path, reply_path):
+    """send_reply from a tmp branch to an external @vera whose message carried `reply_path`.
+
+    The reply_path validator is reached through send_reply, not called (ai_mail, leg 14).
+    """
+    branch_a = tmp_path / "branch_a"
+    branch_a.mkdir(exist_ok=True)
+    original = _make_original_email(sender="@vera")
+    original["reply_path"] = str(reply_path)
+    with (
+        patch(_PATCH_BRANCH_DETECTION, return_value={"email": "@branch_a", "name": "BRANCH_A"}),
+        patch(_PATCH_ALL_BRANCHES, return_value=[]),  # @vera is external -- registry miss is correct
+        patch(_PATCH_CLOSE_ARCHIVE, return_value=(True, "closed")),
+        patch(_PATCH_NOTIFY),
+    ):
+        success, msg, _rid = send_reply(branch_a, original, "Reply outbound")
+    return success, msg
+
+
 def test_validate_reply_path_accepts_external_registry(tmp_path):
-    """An ancestor holding only MYPROJ_REGISTRY.json must be accepted."""
+    """An ancestor holding only MYPROJ_REGISTRY.json must be accepted: the reply lands."""
     _branch, inbox_file = _make_external_project(tmp_path)
 
-    valid, reason = _validate_reply_path(str(inbox_file))
+    success, msg = _reply_to_external(tmp_path, inbox_file)
 
-    assert valid is True, reason
+    assert success is True, msg
+    delivered = json.loads(inbox_file.read_text(encoding="utf-8"))["messages"]
+    assert [m["message"] for m in delivered] == ["Reply outbound"]
 
 
 def test_validate_reply_path_still_rejects_wrong_shape(tmp_path):
@@ -355,10 +390,11 @@ def test_validate_reply_path_still_rejects_wrong_shape(tmp_path):
     impostor = inbox_file.parent / "notes.json"
     impostor.write_text("{}", encoding="utf-8")
 
-    valid, reason = _validate_reply_path(str(impostor))
+    success, msg = _reply_to_external(tmp_path, impostor)
 
-    assert valid is False
-    assert "inbox.json" in reason
+    assert success is False
+    assert msg.startswith("Invalid reply_path: Path does not end with .ai_mail.local/inbox.json")
+    assert impostor.read_text(encoding="utf-8") == "{}"
 
 
 def test_validate_reply_path_rejects_tree_with_no_registry(tmp_path):
@@ -367,10 +403,11 @@ def test_validate_reply_path_rejects_tree_with_no_registry(tmp_path):
     stray.mkdir(parents=True)
     (stray / "inbox.json").write_text("{}", encoding="utf-8")
 
-    valid, reason = _validate_reply_path(str(stray / "inbox.json"))
+    success, msg = _reply_to_external(tmp_path, stray / "inbox.json")
 
-    assert valid is False
-    assert "REGISTRY" in reason
+    assert success is False
+    assert msg.startswith("Invalid reply_path: No *_REGISTRY.json found in ancestors of")
+    assert (stray / "inbox.json").read_text(encoding="utf-8") == "{}"
 
 
 # GAP 1 -- outgoing replies carry a return address
@@ -435,7 +472,7 @@ def test_cross_project_reply_round_trip(tmp_path):
 
     assert success is True, msg
 
-    delivered = json.loads(ext_inbox.read_text())["messages"][0]
+    delivered = json.loads(ext_inbox.read_text(encoding="utf-8"))["messages"][0]
     assert delivered["from"] == "@branch_a"
     assert delivered["message"] == "Reply outbound"
     # The return address A stamped on the way out.
@@ -452,7 +489,7 @@ def test_cross_project_reply_round_trip(tmp_path):
 
     assert success2 is True, msg2
 
-    landed = json.loads(a_inbox.read_text())["messages"][0]
+    landed = json.loads(a_inbox.read_text(encoding="utf-8"))["messages"][0]
     assert landed["from"] == "@vera"
     assert landed["message"] == "Reply back inbound"
     # And the conversation can continue past this round too.

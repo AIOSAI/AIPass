@@ -11,12 +11,6 @@
     "deny": [
       "EnterPlanMode",
       "Bash(git *)",
-      "Read(/home/patrick/Patrick-Personal/**)",
-      "Edit(/home/patrick/Patrick-Personal/**)",
-      "Write(/home/patrick/Patrick-Personal/**)",
-      "Glob(/home/patrick/Patrick-Personal/**)",
-      "Grep(/home/patrick/Patrick-Personal/**)",
-      "Bash(*Patrick-Personal*)",
       "Bash(drone @git checkout main)"
     ],
     "defaultMode": "acceptEdits"

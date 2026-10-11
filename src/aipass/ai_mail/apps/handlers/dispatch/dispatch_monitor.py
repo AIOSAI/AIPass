@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.5.0
+# Version: 2.8.1
 # Created: 2026-03-02
-# Modified: 2026-09-12
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -57,13 +57,18 @@ HARD_TIMEOUT = 7200  # 2 hours
 POLL_INTERVAL = 5
 
 
-def _is_sandbox_enabled() -> bool:
-    """Check if dispatch sandbox is enabled via AIPASS_SANDBOX_ENABLED env var."""
+def is_sandbox_enabled() -> bool:
+    """Check if dispatch sandbox is enabled via AIPASS_SANDBOX_ENABLED env var.
+
+    A door: main() reads it once per dispatch; the env var is the deployment's switch.
+    """
     return os.environ.get("AIPASS_SANDBOX_ENABLED", "").lower() in ("1", "true", "yes")
 
 
-def _wrap_for_sandbox(cmd: list, branch_path: Path) -> list:
+def wrap_for_sandbox(cmd: list, branch_path: Path) -> list:
     """Wrap a claude command in the srt kernel sandbox.
+
+    A door: main() calls it when the sandbox flag is on; @hooks owns the building blocks it calls.
 
     Uses @hooks sandbox building blocks to resolve the bwrap command,
     then returns a shell invocation list compatible with Popen.
@@ -87,7 +92,7 @@ def _connect_broker(repo_root: Path, branch_name: str) -> socket.socket:
 
     Raises on ANY failure — caller must not silently skip the broker.
     """
-    from aipass.drone.apps.handlers.broker.client import create_identified_connection
+    from aipass.drone.apps.modules.door_broker import create_identified_connection
 
     socket_path = repo_root / ".ai_central" / "drone_broker.sock"
     secret_path = repo_root / ".ai_central" / "broker_secret"
@@ -101,12 +106,14 @@ MAX_WAKE_DEPTH = 3
 # the agent's, and would leak the choice into any dispatch the agent makes.
 NO_WAKE_BACK_FLAG = "--no-wake-back"
 # The dispatch_wake.log tag main() records in place of a wake result when the
-# caller declined the wake-back — _wake_sender is then never called.
+# caller declined the wake-back — wake_sender is then never called.
 WAKE_RESULT_DECLINED = "declined"
 
 
-def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str) -> str:
+def wake_sender(sender: str, branch_email: str, exit_code: int) -> str:
     """Wake the dispatcher back after target completion.
+
+    A door: main() calls it, and its tags are read in dispatch_wake.log and by managers.
 
     Builder-class citizens get woken back, subject to the same availability
     checks as a normal wake (interactive session, active lock, depth cap).
@@ -162,7 +169,7 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
             # The wake is correctly refused; the NOTIFICATION is not optional. Until
             # this, the branch returned here having neither woken nor mailed, and
             # said "mail delivered" while delivering nothing.
-            if _mail_wake_back(sender, branch_email, exit_code, lock_file):
+            if _mail_wake_back(sender, branch_email, exit_code):
                 return "mailed_manager"
             return "failed_manager_mail"
 
@@ -186,7 +193,32 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
         return "failed"
 
 
-def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: str) -> bool:
+_AI_MAIL_DIR = Path(__file__).resolve().parents[3]  # ai_mail/
+
+
+def _send_from_ai_mail(recipient: str, subject: str, body: str) -> subprocess.CompletedProcess:
+    """Send one of the monitor's notices through drone, as @ai_mail.
+
+    The bounce and the wake-back are the mail system's own notices. They ran in
+    the woken branch's home under the monitor's inherited AIPASS_BRANCH_NAME, so
+    drone saw two claims, the name and the passport underfoot, and logged an
+    identity conflict on every one (665 since 2026-08-18, reported by @drone on
+    2026-10-04). Both claims now name ai_mail: its home as cwd and its name in
+    the env, whoever started the monitor (ai_mail's decision, 2026-10-04).
+    """
+    env = dict(os.environ)
+    env["AIPASS_BRANCH_NAME"] = "ai_mail"
+    return subprocess.run(
+        ["drone", "@ai_mail", "send", recipient, subject, body],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(_AI_MAIL_DIR),
+        env=env,
+    )
+
+
+def _mail_wake_back(sender: str, branch_email: str, exit_code: int) -> bool:
     """Deliver the wake-back as MAIL when the sender cannot be woken.
 
     Managers are blocklisted from wakes and that is correct — two claudes on one
@@ -198,9 +230,8 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: s
     had finished only if the agent happened to volunteer an email.
 
     Same transport as _send_bounce, for the same reason: `drone` resolves routing,
-    and cwd is the target branch — which is a real branch, so the identity fence
-    passes. Sending in-process would need a sender identity this process does not
-    have.
+    and _send_from_ai_mail sends it as @ai_mail. Sending in-process would need a
+    sender identity this process does not have.
 
     Returns:
         bool: True when the mail was accepted for delivery.
@@ -214,13 +245,7 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: s
         f"off the next phase if there is one."
     )
     try:
-        result = subprocess.run(
-            ["drone", "@ai_mail", "send", sender, subject, body],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(Path(lock_file).parent.parent),
-        )
+        result = _send_from_ai_mail(sender, subject, body)
         if result.returncode != 0:
             logger.warning(
                 "[monitor] Wake-back mail to manager %s FAILED (exit %d): %s",
@@ -236,10 +261,12 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: s
         return False
 
 
-def _log_wake_result(branch_email: str, sender: str, exit_code: int, result: str, lock_file: str):
+def log_wake_result(branch_email: str, sender: str, exit_code: int, result: str, lock_file: str):
     """Append a wake-back result line to dispatch_wake.log under target's logs/.
 
-    ``result`` is one of _wake_sender's tags, or "declined" when the caller
+    A door: main() calls it, and its line is read in dispatch_wake.log by managers and the register.
+
+    ``result`` is one of wake_sender's tags, or "declined" when the caller
     passed --no-wake-back.
     """
     lock_path = Path(lock_file).resolve()
@@ -284,14 +311,7 @@ def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, st
 
     # Send via drone (resolves paths, handles routing)
     try:
-        result = subprocess.run(
-            ["drone", "@ai_mail", "send", sender, subject, body],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(Path(lock_file).parent.parent),
-        )
-        return result.returncode == 0
+        return _send_from_ai_mail(sender, subject, body).returncode == 0
     except (subprocess.SubprocessError, OSError) as e:
         logger.warning("[monitor] Bounce email send failed for %s: %s", branch_email, e)
         # Fallback: write bounce to a file if email fails
@@ -395,8 +415,10 @@ def _make_fresh_cmd(claude_cmd: list) -> list:
     return fresh
 
 
-def _cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple[list, str]:
+def cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple[list, str]:
     """Build the command for one attempt of the 3-strike loop. Returns (cmd, mode).
+
+    A door: main() calls it per attempt; it keeps the --resume/--session-id shapes wake.py builds.
 
     Attempts 1 and 2 used to re-run the identical command. Harmless for -c,
     fatal for --session-id: the CLI refuses an id that already exists
@@ -419,7 +441,21 @@ def _cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple
         # asking for it again. No transcript = nothing was consumed, and the
         # command stands as built.
         stripped = _make_fresh_cmd(claude_cmd) if session_id else []
-        if session_id and stripped and _transcript_exists(branch_path, session_id):
+        spent: Optional[bool] = False
+        if session_id and stripped:
+            try:
+                spent = _transcript_exists(branch_path, session_id)
+            except OSError as e:
+                # Unknown is neither spent nor free: resuming an id attempt 1
+                # never claimed fails, and so does re-sending one it did. A new
+                # id is right either way (ai_mail, leg 10).
+                logger.warning(
+                    "[monitor] Attempt 2: cannot tell whether session %s exists (%s) — minting a new id", session_id, e
+                )
+                spent = None
+        if spent is None:
+            return _fresh_cmd_with_new_id(claude_cmd, branch_path)
+        if spent:
             logger.info("[monitor] Attempt 2: session %s already exists — retrying as --resume", session_id)
             # Rebuilt in wake.py's shape — `--resume <id>` straight after the
             # binary — rather than swapped where --session-id sat. A swap in
@@ -436,30 +472,44 @@ def _cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple
     if not has_resume and session_id is None:
         return list(claude_cmd), "fresh"
 
+    return _fresh_cmd_with_new_id(claude_cmd, branch_path)
+
+
+def _fresh_cmd_with_new_id(claude_cmd: list, branch_path: Path) -> Tuple[list, str]:
+    """Strip the session binding, mint a new id, and point the branch at it.
+
+    Strike 3's route, and attempt 2's when it cannot tell whether attempt 1
+    claimed its id (ai_mail, leg 10). A pointer write that fails is logged and
+    never costs the attempt.
+    """
     fresh_cmd = _make_fresh_cmd(claude_cmd)
     new_id = session_pointer.mint_session_id()
     fresh_cmd += [SESSION_ID_FLAG, new_id]
     if not session_pointer.write_pointer(branch_path, new_id, "monitor-retry-fresh"):
-        logger.warning("[monitor] Strike-3 pointer write failed for %s — running fresh anyway", new_id)
+        logger.warning("[monitor] Retry pointer write failed for %s — running fresh anyway", new_id)
     return fresh_cmd, "fresh"
 
 
-def _transcript_exists(branch_path: Path, session_id: str) -> bool:
-    """True when a transcript file exists for this session in this branch."""
+def _transcript_exists(branch_path: Path, session_id: str) -> Optional[bool]:
+    """Whether a transcript file exists for this session in this branch.
+
+    Returns:
+        True or False when the transcript can be looked for; None when this
+        machine cannot name its home, so no transcript can be located and the
+        id's state is unknown. cmd_for_attempt mints a new id on None
+        (ai_mail, leg 11; before it, no home answered False and the id was re-sent).
+
+    Raises:
+        OSError: the transcript could not be stat'd. False would say the id is
+            free to re-send when it may already be taken; cmd_for_attempt
+            mints a new id on this instead (ai_mail, leg 10).
+    """
     transcript = session_pointer.transcript_file(branch_path, session_id)
     if transcript is None:
-        # No home means no transcript can be located — and "unknown beats wrong"
-        # applies with more force here than to a stat failure: this gates whether
-        # a session id is safe to re-send.
-        return False
+        logger.warning("[monitor] No home to locate session %s's transcript — its state is unknown", session_id)
+        return None
 
-    try:
-        return transcript.is_file()
-    except OSError as e:
-        # Unknown beats wrong here: a stat failure must not make us re-send an
-        # id that may already be taken.
-        logger.warning("[monitor] Cannot stat transcript for session %s: %s", session_id, e)
-        return False
+    return transcript.is_file()
 
 
 def _aimed_at_a_session(claude_cmd: list) -> bool:
@@ -472,8 +522,10 @@ def _aimed_at_a_session(claude_cmd: list) -> bool:
     return _session_id_in(claude_cmd) is not None or any(flag in claude_cmd for flag in RESUME_FLAGS)
 
 
-def _reconcile_pointer(branch_path: Path, stdout_log: str, claude_cmd: list) -> None:
+def reconcile_pointer(branch_path: Path, stdout_log: str, claude_cmd: list) -> None:
     """Record the session the CLI actually used, when it differs from the pointer.
+
+    A door: main() calls it after a clean run; wake.py reads the pointer it writes.
 
     Only runs when we AIMED at a session (--session-id or --resume). On the bare
     -c fallback the landing spot was picked by file mtime, and writing that down
@@ -612,26 +664,6 @@ def _cleanup_own_lock(lock_file: str) -> None:
         logger.info("[monitor] Failed to clean up lock file %s", lock_file)
 
 
-def _get_jsonl_projects_dir(cwd: str) -> Optional[Path]:
-    """Get Claude's JSONL projects directory for a branch CWD.
-
-    Claude encodes the cwd by replacing path separators and ':' with '-'.
-    Windows path ``C:\\repo\\AIPass`` becomes ``C--repo-AIPass``.
-
-    The encoding itself lives in session_pointer.transcript_dir. It used to be
-    duplicated here byte-for-byte; the day Claude changes how it encodes a cwd
-    there must be one line to fix, not two that drift apart silently.
-
-    None when the machine cannot name its home directory (@hooks, 2026-08-23).
-    THIS CALL SITE IS THE SHARPER ONE: it runs AFTER the agent has been spawned,
-    so the bare Path.home() it used to inherit would have killed the monitor
-    with a live agent still running — the dispatch orphaned, no report written,
-    the lock left held. Losing the startup poll costs a slower start; raising
-    here costs the whole dispatch.
-    """
-    return session_pointer.transcript_dir(cwd)
-
-
 def _snapshot_jsonl_sizes(projects_dir: Path) -> dict:
     """Snapshot current sizes of all JSONL files in the projects directory."""
     sizes = {}
@@ -685,11 +717,13 @@ def _kill_process(process: subprocess.Popen, branch_email: str):
             logger.warning("[monitor] %s SIGKILL didn't work", branch_email)
 
 
-def _run_with_startup_check(
+def run_with_startup_check(
     claude_cmd: list, stdout_log: str, stderr_fh, cwd: str, spawn_env: dict, branch_email: str, pass_fds: tuple = ()
 ) -> tuple:
     """
     Run claude with startup timeout check.
+
+    A door: main() runs every attempt through it, and the tests drive main() with it as the seam.
 
     Returns:
         (exit_code, startup_failed: bool)
@@ -724,11 +758,14 @@ def _run_with_startup_check(
     # Phase 1: Startup check — poll JSONL session files for activity.
     # stdout is buffered by --output-format json, so we can't use it.
     # Claude writes to ~/.claude/projects/{encoded-cwd}/*.jsonl continuously.
-    projects_dir = _get_jsonl_projects_dir(cwd)
+    # The cwd encoding has one home, session_pointer.transcript_dir (2026-10-10).
+    projects_dir = session_pointer.transcript_dir(cwd)
     if projects_dir is None:
-        # No home means no transcripts to watch. The startup probe is an
-        # OPTIMISATION — it notices the agent is alive sooner — so its absence
-        # degrades the wait, never the dispatch. _claude_home already warned.
+        # No home means no transcripts to watch (@hooks, 2026-08-23). This runs
+        # AFTER the spawn, so raising here would orphan a live agent with the lock
+        # held. The startup probe is an OPTIMISATION — it notices the agent is
+        # alive sooner — so its absence degrades the wait, never the dispatch.
+        # _claude_home already warned.
         logger.warning("[monitor] no home directory — skipping the JSONL startup probe for %s", cwd)
     initial_sizes = _snapshot_jsonl_sizes(projects_dir) if projects_dir else {}
     deadline = time.time() + STARTUP_TIMEOUT
@@ -768,6 +805,16 @@ def _run_with_startup_check(
     finally:
         if stdout_fh is not None:
             stdout_fh.close()
+
+
+def prepend_to_path(path_value: str, entry: str, sep: str = os.pathsep) -> str:
+    """Return PATH with entry first, joined by the host's separator.
+
+    sep is handed in so a test can give the other host's separator (";" on
+    Windows, ":" on POSIX); callers keep the default. A literal ":" here once
+    broke a spawn PATH on Windows, where ":" follows every drive letter.
+    """
+    return sep.join([entry, path_value]) if path_value else entry
 
 
 def main():
@@ -837,12 +884,12 @@ def main():
     _repo_root = find_repo_root()
     venv_bin = str(_repo_root / ".venv" / "bin")
     if venv_bin not in spawn_env.get("PATH", ""):
-        spawn_env["PATH"] = venv_bin + ":" + spawn_env.get("PATH", "")
+        spawn_env["PATH"] = prepend_to_path(spawn_env.get("PATH", ""), venv_bin)
     # Guarantee ~/.local/bin is on PATH for pip-installed tools (e.g. claude)
     # Background processes (trigger, prax watchdog) may have restricted PATH.
     local_bin = str(Path.home() / ".local" / "bin")
     if local_bin not in spawn_env.get("PATH", ""):
-        spawn_env["PATH"] = local_bin + ":" + spawn_env.get("PATH", "")
+        spawn_env["PATH"] = prepend_to_path(spawn_env.get("PATH", ""), local_bin)
     for key in list(spawn_env.keys()):
         if key.startswith("CLAUDE") or key == "AIPASS_BOT_ID":
             spawn_env.pop(key)
@@ -886,7 +933,7 @@ def main():
     start_time = time.time()
 
     # ─── Sandbox Gate ─────────────────────────────────────
-    sandbox_enabled = _is_sandbox_enabled()
+    sandbox_enabled = is_sandbox_enabled()
     if sandbox_enabled:
         logger.info("[monitor] Sandbox ENABLED for %s", branch_email)
 
@@ -904,7 +951,7 @@ def main():
     cmd = list(claude_cmd)
 
     for attempt in range(1, 4):
-        cmd, mode = _cmd_for_attempt(claude_cmd, attempt, branch_path)
+        cmd, mode = cmd_for_attempt(claude_cmd, attempt, branch_path)
         if attempt == 3 and mode == "fresh" and cmd != claude_cmd:
             logger.info("[monitor] %s attempt %d/3: switching to --fresh", branch_email, attempt)
 
@@ -915,7 +962,7 @@ def main():
         attempt_pass_fds: tuple = ()
         if sandbox_enabled:
             try:
-                run_cmd = _wrap_for_sandbox(cmd, branch_path)
+                run_cmd = wrap_for_sandbox(cmd, branch_path)
             except Exception as e:
                 logger.error(
                     "[monitor] Sandbox init FAILED for %s: %s — ABORTING (will NOT launch unsandboxed)",
@@ -950,7 +997,7 @@ def main():
             stderr_fh.flush()
             attempt_stderr_offset = stderr_fh.tell()
 
-        exit_code, startup_failed = _run_with_startup_check(
+        exit_code, startup_failed = run_with_startup_check(
             run_cmd,
             stdout_log,
             stderr_fh if stderr_fh is not None else subprocess.DEVNULL,
@@ -1025,7 +1072,7 @@ def main():
     # `cmd` is the LAST attempt's command, not the original — strike 3 remints,
     # so the original would misreport which session this run actually aimed at.
     if exit_code == 0:
-        _reconcile_pointer(branch_path, stdout_log, cmd)
+        reconcile_pointer(branch_path, stdout_log, cmd)
 
     # Check for max-turns hit (Claude exits 0 but output contains stop_reason)
     max_turns_hit = False
@@ -1108,19 +1155,19 @@ def main():
     # ordering below is the whole of FPLAN-0452 P0's second fix and it is not
     # arbitrary — see the block comment on the report write.
     if wake_back:
-        wake_result = _wake_sender(sender, branch_email, exit_code, lock_file)
+        wake_result = wake_sender(sender, branch_email, exit_code)
     else:
         # The caller declined (wake_branch(wake_back=False), e.g. @daemon's
         # scheduled nudges): a nudge owes no reply, and waking the sender back
         # only burned a session reading an empty inbox. No wake and no manager
-        # mail — _wake_sender owns both. Bounce mail above still used sender.
+        # mail — wake_sender owns both. Bounce mail above still used sender.
         logger.info(
             "[monitor] Wake-back declined by caller: %s finished, sender %s not woken or mailed",
             branch_email,
             sender,
         )
         wake_result = WAKE_RESULT_DECLINED
-    _log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
+    log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
 
     # ─── The completion report, written BEFORE the lock is released ────────
     # Under the old design the report was a garnish, so losing it was a

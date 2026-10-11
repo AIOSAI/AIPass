@@ -1,33 +1,36 @@
 # =================== AIPass ====================
 # Name: test_live_contacts_hygiene.py
 # Description: Guard that test/probe fixtures never leak into the live contacts.json
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-29
 # =============================================
 
-"""Guard against tmp/fixture inbox paths leaking into the live address book.
+"""Tests for apps/handlers/paths.py's find_repo_root(), guarding the live contacts.json it locates."""
 
-@devpulse flagged (2026-08-16, e00936b6) that the live .ai_mail.local/contacts.json
-carried 6 rows pointing at /tmp paths — 2 from an unisolated pytest run
-(deliver_email_to_branch() auto-registers every recipient, and CONTACTS_FILE had
-no conftest redirect the way FEED_PATH does) and 4 older ones from disposable
-scratchpad sub-agent probes. branch_detection._get_contact_info() then resolved
-one of those rows as "verified" identity, serving a dead mailbox in place of a
-real one.
+# @devpulse flagged (2026-08-16, e00936b6) that the live .ai_mail.local/contacts.json
+# carried 6 rows pointing at /tmp paths — 2 from an unisolated pytest run
+# (deliver_email_to_branch() auto-registers every recipient, and CONTACTS_FILE had
+# no conftest redirect the way FEED_PATH does) and 4 older ones from disposable
+# scratchpad sub-agent probes. branch_detection._get_contact_info() then resolved
+# one of those rows as "verified" identity, serving a dead mailbox in place of a
+# real one.
+#
+# Two fixes landed alongside this guard: an autouse conftest fixture that
+# redirects CONTACTS_FILE for every test (tests/conftest.py), and a staleness
+# check in _get_contact_info() that refuses to vouch for a contact whose branch
+# root no longer exists on disk. This test is the live-state tripwire for the
+# first — companion to test_live_mailbox_hygiene.py's inbox guard.
 
-Two fixes landed alongside this guard: an autouse conftest fixture that
-redirects CONTACTS_FILE for every test (tests/conftest.py), and a staleness
-check in _get_contact_info() that refuses to vouch for a contact whose branch
-root no longer exists on disk. This test is the live-state tripwire for the
-first — companion to test_live_mailbox_hygiene.py's inbox guard.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
 
 import json
 import tempfile
 
 import pytest
 
+import aipass.ai_mail.tests.test_live_contacts_hygiene as guard_mod
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 _TMPDIR = tempfile.gettempdir()
@@ -66,7 +69,7 @@ class TestNoTmpPathsInLiveContacts:
             if isinstance(info, dict) and str(info.get("inbox", "")).startswith(_TMPDIR)
         ]
 
-        assert not strays, "tmp-path rows found in live contacts.json:\n  " + "\n  ".join(strays)
+        assert strays == [], "tmp-path rows found in live contacts.json:\n  " + "\n  ".join(strays)
 
     def test_the_guard_can_actually_see_the_contacts(self):
         """A guard reading an empty/missing file would pass forever, blind."""
@@ -78,8 +81,6 @@ class TestNoTmpPathsInLiveContacts:
 
     def test_the_guard_fires_on_a_planted_stray(self, tmp_path, monkeypatch):
         """Mutation check: green above must mean clean, not blind."""
-        import aipass.ai_mail.tests.test_live_contacts_hygiene as guard_mod
-
         fake_repo = tmp_path / "repo"
         contacts_dir = fake_repo / "src" / "aipass" / "ai_mail" / ".ai_mail.local"
         contacts_dir.mkdir(parents=True)

@@ -1,6 +1,6 @@
 # Unused Function Standards
 **Status:** Draft v1
-**Date:** 2026-03-22
+**Date:** 2026-10-03
 
 ---
 
@@ -26,20 +26,25 @@ Gathers all `.py` files in the branch, skipping irrelevant directories:
 
 `__pycache__`, `.archive`, `logs`, `tests`, `json_templates`, `tools`, `.trinity`, `.aipass`, `.ai_mail.local`, `.venv`, `venv`, `node_modules`, `.git`, `site-packages`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache`, `.spawn`, `backups`, `reports`, `docs`, `.sorting_unprocessed`
 
+A `SOURCE_SKIP_DIRS` name that is an importable package (an identifier directory holding `__init__.py`) is source and is read: commons keeps live code in `apps/handlers/artifacts/` (since 2026-10-08). `tests` and `json_templates` are skipped whatever they hold.
+
 ### Phase 2: Build Corpus
 
 Reads all collected files and strips non-code content to prevent false positives:
-- **Triple-quoted strings** (docstrings, multiline literals) -- removed
+- **String literals** (docstrings, multiline and single-line literals) -- removed
+- **f-strings** (2026-10-03, seedgo fleet green leg 9) -- the literal text is removed like any string; the names inside a replacement field (`f"{helper()}"`) are code and count as references. One verdict on every interpreter: 3.12+ tokenizes an f-string into parts and 3.10/3.11 as one string, and both are read as the whole literal
 - **Comment lines** (`# ...`) -- removed
 - **`if __name__ == "__main__":` blocks** -- removed (demo invocations, not real references)
 
 ### Phase 3: Extract Functions
 
-AST-parses each file to find `def` and `async def` definitions. The following are **excluded from analysis** and will never be flagged:
+AST-parses each file to find `def` and `async def` definitions. A file Python cannot parse (caught mid-save) judges nothing and is named in the result's `unparsed` list, never counted as a file with no functions (2026-10-03, seedgo fleet green leg 12; its names still count as callers through the raw-text fallback). The following are **excluded from analysis** and will never be flagged:
 
 - **Dunder methods:** `__init__`, `__str__`, `__repr__`, `__enter__`, `__exit__`, etc.
 - **Framework conventions:** `main()` and `handle_command()`
 - **Decorated functions:** Any function with a decorator (`@property`, `@staticmethod`, `@track_operation`, etc.)
+- **Overrides of an imported base** (2026-10-03, seedgo fleet green leg 10) -- a method whose class inherits from an imported class that defines the same name in its own body (`class Watcher(FileSystemEventHandler): def on_created(...)`). The base calls it by name, so it is used. The base's source is located with `importlib.util.find_spec` on the top-level package only and read with `ast`, never imported or run. One level only: a name the base inherits from its own base, a base the imports do not name, and a base Python ships as compiled code stay convicted. A name a registry or another branch calls is NOT this rule (see the next row and What this check actually measures)
+- **A dotted-path string** (2026-10-03, seedgo fleet green leg 11) -- a string literal that is a whole import path and nothing else (`"aipass.x.lib.helper"`, `f"{_SECURITY}.edit_gate.tripwire"`) keeps its last segment as a reference: a registry names a handler so and a loader calls it by that name (hooks `config/gates.py`). Prose that mentions a path (`"see lib.helper"`), a path with a tail (`"lib.helper.txt"`, `"...helper()"`) and a bare suffix (`".helper"`) are not one. A name only ANOTHER branch calls stays convicted: the scan is per-branch and cannot see it; that line takes a bypass in its own branch with the caller as the reason (hooks `trust_registry.enroll`, called from `shared/project_home.py`)
 
 ### Phase 4: Reference Counting
 

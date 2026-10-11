@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cleanup.py
 # Description: Usage data retention and cleanup
-# Version: 0.1.0
+# Version: 0.1.2
 # Created: 2025-11-16
-# Modified: 2025-11-16
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -32,27 +32,39 @@ DEFAULT_RETENTION_DAYS = 30
 
 
 def _read_json(file_path: Path) -> Optional[Dict]:
-    """Read JSON file with error handling."""
-    try:
-        if not file_path.exists():
-            return None
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to read JSON from {file_path}: {e}")
+    """Read a JSON file; None only when it is absent.
+
+    A read or parse error raises: None means 'no store', so a failure may not
+    wear it and have cleanup report nothing to clean (api, fleet green leg 3).
+    """
+    if not file_path.exists():
         return None
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _write_json(file_path: Path, data: Dict) -> bool:
-    """Write JSON file with error handling."""
+    """Write a JSON file, creating its parent; True once written.
+
+    A failed write raises, so no caller counts a cleanup that never landed (api, fleet green leg 3).
+
+    The text is built first and written to a sibling file in the same directory,
+    which then replaces the store in one step, so a failed dump or write never
+    leaves a cut store; the sibling is removed on any failure (api, fleet green
+    leg 4). On Windows the replace fails with PermissionError while another
+    process holds the store open (Python's own open never shares delete access):
+    the store then stays whole, the sibling is removed and the error is raised.
+    """
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(data, indent=2, ensure_ascii=False)
+    sibling = file_path.with_name(file_path.name + ".tmp")
     try:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        logger.error(f"Failed to write JSON to {file_path}: {e}")
-        return False
+        sibling.write_text(text, encoding="utf-8")
+        sibling.replace(file_path)
+    except BaseException:
+        sibling.unlink(missing_ok=True)
+        raise
+    return True
 
 
 def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTION_DAYS) -> int:
@@ -64,7 +76,10 @@ def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTI
         retention_days: Number of days to retain data (default: 30)
 
     Returns:
-        int: Number of generation entries cleaned up
+        int: Number of generation entries cleaned up; 0 only when there was nothing to clean
+
+    Raises:
+        ValueError or OSError when the store cannot be read, parsed or written (api, fleet green leg 3).
     """
     try:
         cutoff_date = datetime.now() - timedelta(days=retention_days)
@@ -90,17 +105,22 @@ def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTI
             data["timestamp"] = datetime.now().isoformat()
 
         _write_json(data_file_path, data)
-        logger.info(f"Cleaned up {len(old_generations)} generation entries")
-        logger.info(f"Cleaned up {len(old_generations)} generation entries older than {retention_days} days")
-        json_handler.log_operation(
-            "usage_cleanup", {"generations_removed": len(old_generations), "retention_days": retention_days}
-        )
-
-        return len(old_generations)
 
     except Exception as e:
         logger.error(f"Cleanup failed: {e}")
-        return 0
+        raise
+
+    # The store is cleaned on disk from here on: a failing audit line is logged and
+    # never reported as a failed cleanup (api, fleet green leg 4).
+    logger.info(f"Cleaned up {len(old_generations)} generation entries older than {retention_days} days")
+    try:
+        json_handler.log_operation(
+            "usage_cleanup", {"generations_removed": len(old_generations), "retention_days": retention_days}
+        )
+    except Exception as e:
+        logger.warning(f"Cleanup landed but its audit line failed: {e}")
+
+    return len(old_generations)
 
 
 def _identify_old_generations(generation_tracking: Dict, cutoff_date: datetime) -> List[str]:

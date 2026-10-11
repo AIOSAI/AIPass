@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-14
-# Modified: 2026-09-14
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -49,7 +49,7 @@ from typing import List, Optional
 
 from aipass.cli.apps.modules import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
-from aipass.prax import logger  # noqa: F401
+from aipass.prax import logger
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.modules import host_config_cli
@@ -455,8 +455,10 @@ def _stamp(value: object) -> str:
     except ValueError as e:
         # Shown raw rather than swallowed: the only way a stored stamp fails to
         # parse is a hand-edited store or a shape change nobody migrated, and
-        # the operator reading this listing is exactly who should see it.
-        logger.warning("[host_api] unreadable timestamp %r in the token store: %s", text, e)
+        # the operator reading this listing is exactly who should see it. The
+        # listing shows it; the log line names the condition only, because the
+        # value and ValueError's text are read out of the credential store.
+        logger.warning("[host_api] unreadable timestamp in the token store (%s)", type(e).__name__)
         return text
 
 

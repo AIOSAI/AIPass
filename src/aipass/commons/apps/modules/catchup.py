@@ -3,7 +3,7 @@
 # Description: Catchup Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -63,7 +63,11 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "catchup":
         return False
 
-    return _handle_catchup(args)
+    if "--help" in args or "-h" in args:
+        print_introspection()
+        return True
+
+    return _handle_catchup()
 
 
 # =============================================================================
@@ -71,9 +75,9 @@ def handle_command(command: str, args: List[str]) -> bool:
 # =============================================================================
 
 
-def _handle_catchup(args: List[str]) -> bool:
+def _handle_catchup() -> bool:
     """Run catchup and display results."""
-    result = run_catchup(args)
+    result = run_catchup()
 
     if not result["success"]:
         error(result["error"])

@@ -32,8 +32,12 @@ Deliberately generous:
 - any `assert_*` method — the `unittest` and `mock` spellings
 - a call to a checking helper: a name starting `assert`, `check`, `verify`, or
   `expect`
+- a call to a function of the same test module (by its name) or a method of the
+  unit's own class (through `self`) whose own body holds any of the above. One
+  level only: the helper's body is read, not what it calls in turn (fleet green
+  leg 20; `self._reason(...)` with the asserts in `_reason`)
 
-That last one matters. A unit calling `_assert_document_is_lawful(...)` has an
+The last two matter. A unit calling `_assert_document_is_lawful(...)` has an
 oracle one hop away. Flagging it would teach projects to inline their helpers to
 please the checker — which is precisely the behaviour v4 produced, and precisely
 what this pack exists to stop.

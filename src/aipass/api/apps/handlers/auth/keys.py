@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: keys.py
 # Description: API Key Management Handler
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2025-11-16
-# Modified: 2025-11-16
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -21,9 +21,6 @@ Functions:
 # Standard library
 from pathlib import Path
 from typing import Optional, Dict, Any
-
-# Logging
-from aipass.prax import logger
 
 # JSON handler
 from aipass.api.apps.handlers.json import json_handler
@@ -43,6 +40,15 @@ VALIDATION_RULES = {
 }
 
 
+class KeyUnavailable(Exception):
+    """The secrets file exists but could not be read.
+
+    Named only by the error's strerror or its type, and raised from None, so
+    no byte of the file travels in a message or a traceback (api, fleet green
+    leg 11). None stays the answer for a file or a key that is not there.
+    """
+
+
 # ==============================================
 # KEY RETRIEVAL
 # ==============================================
@@ -60,22 +66,22 @@ def get_api_key(provider: str = "openrouter") -> Optional[str]:
     Returns:
         str: Validated API key or None if not found/invalid
 
+    Raises:
+        KeyUnavailable: the secrets file exists but could not be read; None
+        used to answer for that too, which read the same as "no key set"
+        (api, fleet green leg 11).
+
     Example:
         >>> key = get_api_key('openrouter')
         >>> if key:
         ...     print(f"Got key: {key[:20]}...")
     """
-    try:
-        key = _read_key_from_secrets(provider)
-        if key and validate_key(key, provider):
-            json_handler.log_operation("key_retrieved", {"provider": provider, "source": "secrets"})
-            return key
+    key = _read_key_from_secrets(provider)
+    if key and validate_key(key, provider):
+        json_handler.log_operation("key_retrieved", {"provider": provider, "source": "secrets"})
+        return key
 
-        return None
-
-    except Exception as e:
-        logger.error(f"Failed to get API key for provider '{provider}': {e}")
-        return None
+    return None
 
 
 def _read_key_from_secrets(provider: str) -> Optional[str]:
@@ -87,6 +93,10 @@ def _read_key_from_secrets(provider: str) -> Optional[str]:
 
     Returns:
         str: API key value or None if not found
+
+    Raises:
+        KeyUnavailable: the file exists but could not be read
+        (api, fleet green leg 11).
     """
     secrets_path = Path.home() / ".secrets" / "aipass" / ".env"
     if not secrets_path.exists():
@@ -105,8 +115,8 @@ def _read_key_from_secrets(provider: str) -> Optional[str]:
                         return value.strip()
         return None
     except Exception as e:
-        logger.warning(f"Error reading secrets file: {e}")
-        return None
+        reason = getattr(e, "strerror", None) or type(e).__name__
+        raise KeyUnavailable(f"The secrets file could not be read ({reason})") from None
 
 
 # ==============================================
@@ -199,6 +209,9 @@ def diagnose_key(provider: str = "openrouter") -> str:
 
     Returns:
         str: Human-readable explanation of the key issue
+
+    Raises:
+        KeyUnavailable: the secrets file could not be read (api, fleet green leg 11).
 
     Example:
         >>> if not get_api_key('openrouter'):

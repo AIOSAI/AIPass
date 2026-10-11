@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: welcome_ops.py
 # Description: Welcome Operations Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -13,6 +13,7 @@ Implementation logic for the welcome command: scanning for unwelcomed
 branches and creating welcome posts. Returns dicts for module display layer.
 """
 
+import sqlite3
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -92,14 +93,32 @@ def _welcome_scan(conn) -> dict:
         conn: Database connection
 
     Returns:
-        Dict with success and welcomed list
+        Dict with success, welcomed list and failed list. A scan where any branch failed answers
+        success False with an error naming the failed and the welcomed branches: commons' decision,
+        DPLAN-0354 leg 3 (compass 304: a failure is loud where the caller is). The command then refuses
+        (exit 2) instead of printing a clean "welcomed" list over a branch that was never welcomed;
+        the welcomed list stays in the answer, so the partial work is still reported.
     """
-    welcomed = welcome_new_branches(conn)
+    failed: List[str] = []
+    welcomed = welcome_new_branches(conn, failed)
+
+    if failed:
+        names = ", ".join(f"@{name}" for name in failed)
+        done = ", ".join(f"@{name}" for name in welcomed) or "none"
+        return {
+            "success": False,
+            "action": "scan",
+            "partial": True,
+            "welcomed": welcomed,
+            "failed": failed,
+            "error": f"Welcome scan partial: database error welcoming {names} (see log). Welcomed: {done}.",
+        }
 
     return {
         "success": True,
         "action": "scan",
         "welcomed": welcomed,
+        "failed": failed,
     }
 
 
@@ -122,7 +141,11 @@ def _welcome_specific(conn, branch_name: str) -> dict:
     if has_been_welcomed(conn, branch_name):
         return {"success": True, "action": "specific", "already_welcomed": True, "branch": branch_name}
 
-    post_id = create_welcome_post(conn, branch_name)
+    try:
+        post_id = create_welcome_post(conn, branch_name)
+    except sqlite3.Error as e:
+        logger.error(f"[welcome_ops] Welcome post for @{branch_name} failed: {e}")
+        return {"success": False, "error": f"Failed to create welcome post for @{branch_name}: database error: {e}"}
 
     if post_id:
         return {

@@ -3,17 +3,19 @@
 # Description: Tests for registry driver auto-discovery
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for registry.py — driver auto-discovery for integrations."""
+"""Tests for apps/modules/registry.py, driver auto-discovery for integrations."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — bridge's list_contracts() and call routing, tests/test_integrations.py
+# seedgo: no-test-needed(stdlib) — importlib.util.spec_from_file_location's own loading of a file as a module
 
 import sys
-from unittest.mock import patch
 
-import pytest
-
-from aipass.api.apps.modules.registry import load_drivers, _import_driver
+from aipass.api.apps.modules.bridge import clear, resolve
+from aipass.api.apps.modules.registry import handle_command, load_drivers, print_introspection
 
 
 class TestLoadDrivers:
@@ -35,7 +37,7 @@ class TestLoadDrivers:
         integrations = tmp_path / "integrations"
         project = integrations / "myproject"
         project.mkdir(parents=True)
-        (project / "other.py").write_text("x = 1")
+        (project / "other.py").write_text("x = 1", encoding="utf-8")
         assert load_drivers(integrations) == 0
 
     def test_loads_valid_driver(self, tmp_path):
@@ -47,10 +49,9 @@ class TestLoadDrivers:
         driver.write_text(
             "def register():\n"
             "    from aipass.api.apps.modules.bridge import register as r\n"
-            "    r('test_load', lambda *a: 'ok')\n"
+            "    r('test_load', lambda *a: 'ok')\n",
+            encoding="utf-8",
         )
-
-        from aipass.api.apps.modules.bridge import clear, resolve
 
         clear()
         loaded = load_drivers(integrations)
@@ -63,14 +64,14 @@ class TestLoadDrivers:
         integrations = tmp_path / "integrations"
         project = integrations / "broken"
         project.mkdir(parents=True)
-        (project / "driver.py").write_text("raise ImportError('boom')")
+        (project / "driver.py").write_text("raise ImportError('boom')", encoding="utf-8")
         assert load_drivers(integrations) == 0
 
     def test_skips_non_directories(self, tmp_path):
         """Regular files in integrations dir are skipped."""
         integrations = tmp_path / "integrations"
         integrations.mkdir()
-        (integrations / "notadir.py").write_text("x = 1")
+        (integrations / "notadir.py").write_text("x = 1", encoding="utf-8")
         assert load_drivers(integrations) == 0
 
     def test_multiple_drivers(self, tmp_path):
@@ -82,10 +83,9 @@ class TestLoadDrivers:
             (d / "driver.py").write_text(
                 f"def register():\n"
                 f"    from aipass.api.apps.modules.bridge import register as r\n"
-                f"    r('{name}_contract', lambda *a: '{name}')\n"
+                f"    r('{name}_contract', lambda *a: '{name}')\n",
+                encoding="utf-8",
             )
-
-        from aipass.api.apps.modules.bridge import clear
 
         clear()
         loaded = load_drivers(integrations)
@@ -94,7 +94,7 @@ class TestLoadDrivers:
 
 
 class TestImportDriver:
-    """Tests for _import_driver() — single driver import and registration."""
+    """Single driver import and registration, reached through load_drivers()."""
 
     def test_import_valid_driver(self, tmp_path):
         """
@@ -105,14 +105,15 @@ class TestImportDriver:
         hook is the entire point of a driver: without it the module is loaded
         and registers nothing, which looks identical from the outside.
         """
-        project = tmp_path / "proj"
-        project.mkdir()
+        project = tmp_path / "integrations" / "proj"
+        project.mkdir(parents=True)
         driver = project / "driver.py"
         driver.write_text(
-            "LOADED = True\nREGISTERED = False\ndef register():\n    global REGISTERED\n    REGISTERED = True\n"
+            "LOADED = True\nREGISTERED = False\ndef register():\n    global REGISTERED\n    REGISTERED = True\n",
+            encoding="utf-8",
         )
 
-        _import_driver(driver, "proj")
+        assert load_drivers(tmp_path / "integrations") == 1
 
         # The namespaced key is the contract: two projects named driver.py
         # must not overwrite each other in sys.modules.
@@ -128,22 +129,26 @@ class TestImportDriver:
         hook does not abort the import partway: a driver may register at
         module level instead, so its top-level code has to have run.
         """
-        project = tmp_path / "proj2"
-        project.mkdir()
+        project = tmp_path / "integrations" / "proj2"
+        project.mkdir(parents=True)
         driver = project / "driver.py"
-        driver.write_text("LOADED = True\n")
+        driver.write_text("LOADED = True\n", encoding="utf-8")
 
-        _import_driver(driver, "proj2")
+        assert load_drivers(tmp_path / "integrations") == 1
 
         assert sys.modules["_aipass_integration_proj2"].LOADED is True, (
             "a driver with no register() hook was not executed"
         )
 
-    def test_invalid_spec_raises(self, tmp_path):
-        """Nonexistent driver path raises ImportError or FileNotFoundError."""
-        fake_path = tmp_path / "nonexistent.py"
-        with pytest.raises((ImportError, FileNotFoundError)):
-            _import_driver(fake_path, "fake")
+    def test_unloadable_driver_is_skipped_not_counted(self, tmp_path, monkeypatch):
+        """A driver.py that cannot be loaded (here a directory) is skipped and not counted."""
+        (tmp_path / "integrations" / "fake" / "driver.py").mkdir(parents=True)
+        # The failed load leaves its half-built module in sys.modules; the name is
+        # entered through monkeypatch so teardown removes it (api, fleet green leg 3).
+        monkeypatch.setitem(sys.modules, "_aipass_integration_fake", None)
+
+        assert load_drivers(tmp_path / "integrations") == 0
+        assert sys.modules["_aipass_integration_fake"] is not None, "the load was attempted, not skipped by name"
 
 
 class TestRegistryHandleCommand:
@@ -151,14 +156,10 @@ class TestRegistryHandleCommand:
 
     def test_returns_false_for_unknown(self):
         """Unknown command returns False."""
-        from aipass.api.apps.modules.registry import handle_command
-
         assert handle_command("anything", ["stuff"]) is False
 
     def test_help_stays_silent(self, capsys):
         """A --help probe for another module's command prints nothing here."""
-        from aipass.api.apps.modules.registry import handle_command
-
         assert handle_command("validate", ["--help"]) is False
         assert capsys.readouterr().out == ""
 
@@ -168,8 +169,6 @@ class TestRegistryHandleCommand:
         Registry is discovered before google_client, so anything printed here
         leaks into the output of the commands that module owns.
         """
-        from aipass.api.apps.modules.registry import handle_command
-
         assert handle_command("validate", []) is False
         assert capsys.readouterr().out == ""
 
@@ -177,9 +176,7 @@ class TestRegistryHandleCommand:
 class TestPrintIntrospection:
     """Tests for print_introspection() — registry status display."""
 
-    @patch("aipass.api.apps.modules.registry.console")
-    @patch("aipass.api.apps.modules.registry.header")
-    def test_introspection_reports_where_it_looks_for_drivers(self, _mock_header, mock_console):
+    def test_introspection_reports_where_it_looks_for_drivers(self, capsys):
         """
         The self-map names the directory it scans and whether it has loaded.
 
@@ -188,11 +185,9 @@ class TestPrintIntrospection:
         for are WHERE it looks and WHETHER it has run — an introspection that
         stopped printing either still "rendered without raising".
         """
-        from aipass.api.apps.modules.registry import print_introspection
-
         print_introspection()
 
-        printed = " ".join(str(call) for call in mock_console.print.call_args_list)
+        printed = capsys.readouterr().out
 
         assert "integrations" in printed, "the self-map no longer says where it scans for drivers"
         assert "Loaded:" in printed, "the self-map no longer says whether discovery has run"

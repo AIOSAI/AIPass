@@ -8,9 +8,8 @@ Directory layout, per-file responsibilities, and the module status table for the
 
 ## Layout
 
-The directory tree itself now lives only in the branch prompt. What follows are the per-file and
-per-directory notes that used to sit inline in that tree, kept here so none of that information is
-lost.
+The directory tree lives only in the branch prompt. What follows are the per-file and
+per-directory notes that the tree points at.
 
 ### daemon/ (branch root)
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: heal_registry.py
 # Description: Registry Doctrine Self-Heal Handler
-# Version: 1.1.0
+# Version: 1.5.0
 # Created: 2026-07-29
-# Modified: 2026-08-16
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -37,6 +37,9 @@ never again require a manual JSON edit:
    JSON is the wrong fix — it does not stick while code still writes the
    stale value. The healer handles the class instead, and a row it cannot
    attribute on evidence is quarantined for a human rather than guessed.
+6. Not a plan — an open row whose present file monitor_ops.is_plan_file
+   calls False (a report renamed and registered before leg 7). Closed in
+   the registry only, closed_reason "not_a_plan"; the file is never touched.
 
 Guarantees:
 - On-disk .md files are NEVER renamed, moved or deleted here. Only
@@ -58,6 +61,7 @@ Usage:
 
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
 
@@ -68,7 +72,7 @@ from aipass.flow.apps.handlers.plan.auto_cleanup import auto_close_orphaned_plan
 from aipass.flow.apps.handlers.plan.close_helpers import _self_heal_unregistered_plan
 from aipass.flow.apps.handlers.plan.registry_routing import _load_template_registry
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
-from aipass.flow.apps.handlers.registry.monitor_ops import IGNORE_FOLDERS, PLAN_PATTERN
+from aipass.flow.apps.handlers.registry.monitor_ops import IGNORE_FOLDERS, PLAN_PATTERN, is_plan_file
 from aipass.flow.apps.handlers.registry.save_registry import save_registry
 from aipass.flow.apps.handlers.repo_root import exists_exactly, find_repo_root
 
@@ -80,6 +84,71 @@ MODULE_NAME = "heal_registry"
 
 # Matches the plan-type prefix at the start of a plan filename.
 FILENAME_PREFIX_PATTERN = re.compile(r"^([A-Z]+PLAN)-")
+
+
+# =============================================
+# CASE 5 — OPEN ROW WHOSE FILE IS NOT A PLAN
+# =============================================
+
+
+def _heal_not_a_plan_rows(
+    prefix: str,
+    registry_file: str,
+    load_registry_fn: Callable[..., Dict[str, Any]],
+    save_registry_fn: Callable[..., bool],
+) -> List[Dict[str, Any]]:
+    """Close, registry only, open rows whose present file is not a plan.
+
+    Until leg 7 of fleet green the scan renamed reports named like plans and
+    heal registered them, so open rows point at reports (FPLAN 0564 to 0583
+    on 2026-10-04). Such a row cannot be retired by close, which archives the
+    file (devpulse's ruling of leg 8, flow's design). The file is never touched.
+    Only a False from monitor_ops.is_plan_file closes a row: an unreadable
+    file (None) and an absent file are left to the other sweeps.
+
+    Args:
+        prefix: Plan-type prefix (e.g. "FPLAN")
+        registry_file: Registry filename for this type
+        load_registry_fn: Registry loader (injected)
+        save_registry_fn: Registry saver (injected)
+
+    Returns:
+        List of heal-action dicts, one per row closed with closed_reason "not_a_plan".
+
+    Raises:
+        Whatever the loader raises, as _heal_missing_file_plans does.
+    """
+    registry = load_registry_fn(registry_file=registry_file)
+    registry.setdefault("plans", {})
+
+    actions: List[Dict[str, Any]] = []
+    for number, entry in sorted(registry["plans"].items()):
+        file_path = entry.get("file_path", "") or ""
+        if entry.get("status") != "open" or not file_path or not Path(file_path).is_file():
+            continue
+        if is_plan_file(Path(file_path)) is not False:
+            continue
+        entry["status"] = "closed"
+        entry["closed"] = datetime.now(timezone.utc).isoformat()
+        entry["closed_reason"] = "not_a_plan"
+        actions.append(
+            {
+                "action": "closed_not_a_plan",
+                "prefix": prefix,
+                "registry_file": registry_file,
+                "number": number,
+                "file": file_path,
+            }
+        )
+        logger.warning(f"[{MODULE_NAME}] Closed {prefix}-{number}, registry only: its file is not a plan: {file_path}")
+
+    # save_registry answers False rather than raising. Each sweep runs in its
+    # own try in heal_registry_doctrine_impl, so this raise is logged as that
+    # sweep's failure instead of reporting rows never written (flow's
+    # decision, leg 10). The same holds at every save in this file.
+    if actions and not save_registry_fn(registry, registry_file=registry_file):
+        raise OSError(f"could not save {registry_file}: no row was closed")
+    return actions
 
 
 # =============================================
@@ -97,6 +166,8 @@ def _build_plan_file_index(ecosystem_root: Path) -> Dict[Tuple[str, str], Path]:
     Walk skeleton mirrors ``monitor_ops.scan_plan_files_impl`` (same
     IGNORE_FOLDERS pruning, same permission-error tolerance). Directory and
     file lists are sorted so the index is deterministic run to run.
+    Only a file monitor_ops.is_plan_file() calls a plan is indexed: a report
+    named after a plan was registered as one until leg 7 of fleet green.
 
     Args:
         ecosystem_root: Root directory to scan from
@@ -124,6 +195,8 @@ def _build_plan_file_index(ecosystem_root: Path) -> Dict[Tuple[str, str], Path]:
                 continue
             key = (match.group(1), match.group(2))
             file_path = Path(root) / filename
+            if not is_plan_file(file_path):
+                continue
             if key in index:
                 logger.warning(f"[{MODULE_NAME}] On-disk duplicate for {key[0]}-{key[1]}: {file_path} (keeping first)")
                 continue
@@ -158,13 +231,16 @@ def _heal_missing_file_plans(
         save_registry_fn: Registry saver (injected)
 
     Returns:
-        List of heal-action dicts performed for this type.
+        List of heal-action dicts performed for this type; [] means nothing
+        needed healing.
+
+    Raises:
+        Whatever the loader raises. An unreadable registry is a failed sweep,
+        not an empty one: flow's leg 3 decision lets it reach the one caller
+        (heal_registry_doctrine_impl), which logs it as an error for this type
+        and goes on with the others.
     """
-    try:
-        registry = load_registry_fn(registry_file=registry_file)
-    except Exception as e:
-        logger.warning(f"[{MODULE_NAME}] Could not load '{registry_file}' — skipping {prefix} orphan sweep: {e}")
-        return []
+    registry = load_registry_fn(registry_file=registry_file)
 
     registry.setdefault("plans", {})
     open_before = {num for num, entry in registry["plans"].items() if entry.get("status") == "open"}
@@ -173,7 +249,8 @@ def _heal_missing_file_plans(
     if closed_count == 0:
         return []
 
-    save_registry_fn(registry, registry_file=registry_file)
+    if not save_registry_fn(registry, registry_file=registry_file):
+        raise OSError(f"could not save {registry_file}: no missing-file row was closed")
 
     actions: List[Dict[str, Any]] = []
     for number in sorted(open_before):
@@ -422,7 +499,8 @@ def _heal_wrong_prefix_rows(
                 action = "removed_orphaned_wrong_prefix_row"
 
             del host_registry["plans"][number]
-            save_registry_fn(host_registry, registry_file=host_registry_file)
+            if not save_registry_fn(host_registry, registry_file=host_registry_file):
+                raise OSError(f"could not save {host_registry_file}: row '{number}' is still there")
 
             actions.append(
                 {
@@ -685,8 +763,8 @@ def _heal_orphan_locations(
             )
             logger.info(f"[{MODULE_NAME}] {plan_id}: location re-attributed {raw_location} -> {seat}")
 
-        if dirty:
-            save_registry_fn(registry, registry_file)
+        if dirty and not save_registry_fn(registry, registry_file):
+            raise OSError(f"could not save {registry_file}: no location was re-attributed")
 
     if quarantined:
         logger.warning(
@@ -784,6 +862,10 @@ def heal_registry_doctrine_impl(
             actions.extend(_heal_missing_file_plans(prefix, registry_file, load_registry_fn, save_registry_fn))
         except Exception as e:
             logger.error(f"[{MODULE_NAME}] Missing-file sweep failed for type {prefix}: {e}")
+        try:
+            actions.extend(_heal_not_a_plan_rows(prefix, registry_file, load_registry_fn, save_registry_fn))
+        except Exception as e:
+            logger.error(f"[{MODULE_NAME}] Not-a-plan sweep failed for type {prefix}: {e}")
         try:
             actions.extend(
                 _heal_type_registry(prefix, registry_file, plan_file_index, load_registry_fn, save_registry_fn)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push_report.py
 # Description: Renders and persists the trinity push report — the artifact the dry-run exists to produce
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-27
-# Modified: 2026-09-15
+# Modified: 2026-10-02
 # =============================================
 
 """Trinity Push Report
@@ -101,6 +101,9 @@ def _branch_block(entry: dict, dry_run: bool) -> List[str]:
         )
         lines.extend(_todo_lines(entry, dry_run))
         lines.extend(f"     ! {message}" for message in entry.get("errors", []))
+        # Why the pruned entries reached the global store only (leg 6 of DPLAN-0354).
+        if entry.get("local_store"):
+            lines.append(f"   local store: none ({entry['local_store']}) — global store only")
 
     strays = entry.get("strays", [])
     if strays:

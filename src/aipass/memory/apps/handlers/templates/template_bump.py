@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_bump.py
 # Description: The gold-template bump site — announces the bump and heals the fleet through the push's gates
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-27
-# Modified: 2026-08-27
+# Modified: 2026-09-28
 # =============================================
 
 """Template Bump
@@ -216,7 +216,12 @@ def receipt_status() -> dict[str, Any]:
 
     rows = []
     for item in registry_scope.fleet_branches():
-        data = receipt.read_receipt(Path(item["path"]) / ".trinity")
+        try:
+            data = receipt.read_receipt(Path(item["path"]) / ".trinity")
+        except receipt.ReceiptUnreadable as exc:
+            # Listed as carrying nothing readable, as before; the error line names the file.
+            logger.error(f"[template_bump] {exc}")
+            data = None
         carries = data.get("template_versions") if isinstance(data, dict) else None
         rows.append(
             {

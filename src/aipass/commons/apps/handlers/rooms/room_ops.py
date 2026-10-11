@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: room_ops.py
 # Description: Room management operations
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -18,7 +18,7 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
-from aipass.commons.apps.modules.commons_identity import get_caller_branch
+from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 from aipass.commons.apps.handlers.json import json_handler
 
 
@@ -54,7 +54,10 @@ def create_room(args: List[str]) -> dict:
         return {"success": False, "error": "Room name cannot be empty"}
 
     # Get caller identity
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,
@@ -106,15 +109,11 @@ def create_room(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def list_rooms(args: List[str]) -> dict:
+def list_rooms() -> dict:
     """
     List all visible rooms in The Commons with member and post counts.
 
     Hidden rooms are excluded from the listing.
-
-    Args:
-        args: List of string arguments (currently unused, reserved for
-              future filtering options).
 
     Returns:
         Dict with success status and list of room dicts including
@@ -167,7 +166,10 @@ def join_room(args: List[str]) -> dict:
         return {"success": False, "error": "Room name cannot be empty"}
 
     # Get caller identity
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,
@@ -238,7 +240,10 @@ def leave_room(args: List[str]) -> dict:
         return {"success": False, "error": "Room name cannot be empty"}
 
     # Get caller identity
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,

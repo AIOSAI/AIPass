@@ -1,16 +1,22 @@
 # =================== AIPass ====================
 # Name: test_doctor_fix.py
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
-# Version: 1.0.0
+# Version: 1.2.1
 # Created: 2026-05-15
-# Modified: 2026-05-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for doctor_fix — remediation generation, text/JSON formatting, severity classification."""
+"""Tests for apps/modules/_doctor_fix.py."""
+# Remediation generation, text/JSON formatting, severity classification.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that _doctor_fix.py and the modules it imports parse and import
 
 import json
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from aipass.aipass.apps.modules._doctor_fix import (
     RemediationItem,
@@ -18,6 +24,7 @@ from aipass.aipass.apps.modules._doctor_fix import (
     format_json_report,
     format_text_report,
     generate_remediation,
+    handle_command,
     print_json_report,
     print_remediation_report,
 )
@@ -376,25 +383,21 @@ class TestPrintFunctions:
 class TestDoctorFixHandleCommand:
     def test_wrong_command(self) -> None:
         """Non-doctor_fix commands are not handled."""
-        from aipass.aipass.apps.modules._doctor_fix import handle_command
-
         assert handle_command("doctor", []) is False
         assert handle_command("help", []) is False
 
-    def test_no_args_shows_usage(self) -> None:
-        """No args shows usage message (not introspection banner)."""
-        from aipass.aipass.apps.modules._doctor_fix import handle_command
+    def test_no_args_shows_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """No args shows the usage message, not the introspection banner.
 
-        with patch("aipass.aipass.apps.modules._doctor_fix.console") as mock_console:
-            result = handle_command("doctor_fix", [])
+        Mutant: no-args usage line not printed -> red.
+        """
+        result = handle_command("doctor_fix", [])
         assert result is True
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
-        assert "aipass doctor --fix" in printed
+        out, _err = capsys.readouterr()
+        assert "aipass doctor --fix" in out
 
     def test_info_flag(self) -> None:
         """--info triggers print_introspection."""
-        from aipass.aipass.apps.modules._doctor_fix import handle_command
-
         with patch("aipass.aipass.apps.modules._doctor_fix.print_introspection") as mock:
             result = handle_command("doctor_fix", ["--info"])
         assert result is True

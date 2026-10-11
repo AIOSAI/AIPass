@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.1.0
+# Version: 1.1.6
 # Created: 2026-04-16
-# Modified: 2026-09-15
+# Modified: 2026-09-29
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -16,8 +16,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, NamedTuple
-
+from typing import Dict, List, NamedTuple, Optional
+from rich.markup import escape
 from aipass.cli.apps.modules import console, error as cli_error, success
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
@@ -25,20 +25,10 @@ from aipass.prax import logger
 from aipass.aipass.shared.registry_discovery import find_registry as _discover_registry
 from aipass.aipass.shared.project_home import _detect_aipass_home, find_fenceless_projects
 
-from aipass.aipass.apps.handlers.cross_os import (
-    CrossOsGapError,
-    PreflightResult,
-    RunRecordError,
-    check_hookstatus,
-    check_routing,
-    check_versions,
-    gaps_for_platform,
-    generate_run_record,
-)
-from aipass.aipass.apps.handlers.cross_os import run_e2e as run_e2e_preflight
-from aipass.aipass.apps.handlers.cross_os.preflight import E2E_UNRUNNABLE_PREFIX
+from aipass.aipass.apps.handlers.cross_os import RunRecordError, generate_run_record
+from aipass.aipass.apps.handlers.cross_os.doctor_rows import check_cross_os, record_path_arg
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.handlers.provider_wire import _platform_bridge_command
+from aipass.aipass.apps.handlers.provider_wire import platform_bridge_command
 from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_broker_alive,
     check_bwrap_functional,
@@ -51,6 +41,7 @@ from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
 )
 from aipass.aipass.apps.handlers.admin_lane import check_admin_lane
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
+    PackagesUnknown,
     check_placement,
     check_pyproject,
     check_registry_consistency,
@@ -164,7 +155,7 @@ def _check_system() -> List[CheckResult]:
 
 
 def _configured_aipass_home() -> str:
-    """``env.AIPASS_HOME`` from ~/.claude/settings.json, or "" when absent."""
+    """``env.AIPASS_HOME`` from ~/.claude/settings.json; "" when absent or unreadable (global settings row FAILs)."""
     settings_path = Path.home() / ".claude" / "settings.json"
     if not settings_path.exists():
         return ""
@@ -188,7 +179,7 @@ def _check_global_aipass_home() -> List[CheckResult]:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         logger.info("[doctor] global settings.json unreadable: %s", exc)
-        return results
+        return [CheckResult("global settings", GLYPH_FAIL, "~/.claude/settings.json unreadable", "Repair its JSON")]
     home_val = data.get("env", {}).get("AIPASS_HOME", "")
     if not home_val:
         return results
@@ -235,7 +226,9 @@ def _check_home_agreement(active: str, configured: str) -> List[CheckResult]:
         configured: ``env.AIPASS_HOME`` from ``~/.claude/settings.json``.
 
     Returns:
-        One CheckResult when the trees disagree, otherwise an empty list.
+        One CheckResult when the trees disagree, one WARN row when the pair
+        cannot be compared (resolve raised), otherwise an empty list. Silence
+        there would read as agreement.
     """
     if not active or not configured:
         return []
@@ -243,9 +236,16 @@ def _check_home_agreement(active: str, configured: str) -> List[CheckResult]:
         # resolve() collapses trailing slashes and symlinks — the same tree
         # reached two ways is one tree, not a split.
         same = Path(active).resolve() == Path(configured).resolve()
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:  # RuntimeError: a symlink loop, Python 3.12 and older
         logger.warning("[doctor] could not resolve AIPASS_HOME pair: %s", exc)
-        return []
+        return [
+            CheckResult(
+                "AIPASS_HOME pair",
+                GLYPH_WARN,
+                f"cannot be compared — resolve failed: {exc}",
+                f"Check both paths exist and hold no symlink loop: {active}, {configured}",
+            )
+        ]
     if same:
         return []
 
@@ -332,8 +332,8 @@ def _fix_owner_seating() -> List[CheckResult]:
     return [CheckResult("owner fix", GLYPH_FAIL, detail, "")]
 
 
-def _check_identity() -> List[CheckResult]:
-    """Run Identity group checks."""
+def check_identity() -> List[CheckResult]:
+    """Run Identity group checks. Public for tests/test_doctor.py; product caller: _compute_doctor_groups."""
     results: List[CheckResult] = []
 
     # Project root + registry — single lookup
@@ -438,8 +438,29 @@ def _find_manifest() -> Path | None:
     return None
 
 
-def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> List[CheckResult]:
-    """Check provider settings against manifest. Returns hook/env/permission results."""
+def check_provider_manifest(
+    interactive: bool = False,
+    fix: bool = False,
+    settings_path: Optional[Path] = None,
+    os_name: Optional[str] = None,
+) -> List[CheckResult]:
+    """Check provider settings against manifest. Returns hook/env/permission results.
+
+    Public because a second module reads it: init_flow's report gathers the
+    manifest gaps through it without a full doctor run. Doctor's own callers:
+    the gated group, the Configuration group, and handle_command's --fix path.
+
+    Args:
+        interactive: Offer the wire prompt when hooks are missing.
+        fix: Apply the fix path.
+        settings_path: The provider settings file, ``~/.claude/settings.json``
+            when None. os_name: handed to platform_bridge_command, ``os.name``
+            when None. Both are seams for the tests — a tmp settings file and a
+            forced platform without replacing Path.home or os process-wide;
+            every product caller passes neither.
+    """
+    if settings_path is None:
+        settings_path = Path.home() / ".claude" / "settings.json"
     results: List[CheckResult] = []
 
     manifest_path = _find_manifest()
@@ -465,7 +486,7 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
 
     # --- Hook commands wired in provider settings ---
     manifest_hooks = claude_section.get("hooks", [])
-    provider_settings_path = Path.home() / ".claude" / "settings.json"
+    provider_settings_path = settings_path
     provider_hooks: dict = {}
     if provider_settings_path.exists():
         try:
@@ -476,7 +497,7 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
     missing_hooks = []
     for hook in manifest_hooks:
         # Same OS transform provider_wire applies at write time, so verify agrees with write (DPLAN-0234).
-        command = _platform_bridge_command(hook.get("command", ""))
+        command = platform_bridge_command(hook.get("command", ""), os_name)
         event = hook.get("event", "")
         if not command or not event:
             continue
@@ -510,7 +531,7 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
     missing_env: List[str] = []
     manifest_env = claude_section.get("env", {})
     if manifest_env:
-        provider_settings_path = Path.home() / ".claude" / "settings.json"
+        provider_settings_path = settings_path
         provider_env: dict = {}
         if provider_settings_path.exists():
             try:
@@ -538,7 +559,7 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
     manifest_deny = manifest_perms.get("deny", [])
     manifest_ask = manifest_perms.get("ask", [])
     if manifest_deny or manifest_ask:
-        provider_settings_path = Path.home() / ".claude" / "settings.json"
+        provider_settings_path = settings_path
         provider_perms: dict = {}
         if provider_settings_path.exists():
             try:
@@ -569,7 +590,7 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
             )
 
     # --- Settings scalars the manifest names (DPLAN-0347) ---
-    settings_rows, missing_settings = check_settings_scalars(manifest)
+    settings_rows, missing_settings = check_settings_scalars(manifest, settings_path)
     results.extend(CheckResult(*row) for row in settings_rows)
 
     # --- Interactive auto-wire prompt / --fix auto-accept ---
@@ -587,8 +608,8 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
                 manifest_path, missing_hooks, missing_env, missing_deny, missing_ask, missing_settings
             )
 
-        if wired:
-            return _check_provider_manifest(interactive=False, fix=False)
+        if wired:  # the re-read after a wire reads the same file, on the same platform
+            return check_provider_manifest(interactive=False, fix=False, settings_path=settings_path, os_name=os_name)
 
     return results
 
@@ -597,7 +618,7 @@ _MAX_NAMED_EXTRAS = 3
 
 
 def _registry_citizen_names() -> set[str]:
-    """Lowercased names of every citizen the root registry lists. Empty on failure."""
+    """Lowercased names of every citizen the root registry lists. Empty on failure: the registry row FAILs it."""
     reg_path = _find_registry()
     if reg_path is None:
         return set()
@@ -712,14 +733,15 @@ def _check_services(verbose: bool = False) -> List[CheckResult]:
             timeout=90,
             cwd=cwd,
         )
-        output = proc.stdout + proc.stderr
+        lines = [ln.replace("[", r"\[") for ln in (proc.stdout + proc.stderr).splitlines()]  # markup-escaped
         if proc.returncode == 0:
-            # Count collected lines
-            collected = [ln for ln in output.splitlines() if "<" in ln or "::" in ln]
+            collected = [ln for ln in lines if "<" in ln or "::" in ln]
             detail = f"{len(collected)} tests collected" if collected else "ok"
             results.append(CheckResult("pytest collect", GLYPH_PASS, detail, ""))
-        else:
-            results.append(CheckResult("pytest collect", GLYPH_WARN, "collection issues", "Run pytest to diagnose"))
+        else:  # --verbose: pytest's ERROR lines (else its last line) under the row
+            errs = [ln for ln in lines if ln.startswith("ERROR")] or lines[-1:]
+            detail = "collection issues" + "".join(f"\n      {ln}" for ln in errs[:_MAX_NAMED_EXTRAS] if verbose)
+            results.append(CheckResult("pytest collect", GLYPH_WARN, detail, "Run pytest to diagnose"))
     except FileNotFoundError as exc:
         logger.warning("[doctor] pytest not found: %s", exc)
         results.append(CheckResult("pytest collect", GLYPH_WARN, "pytest not found", "pip install pytest"))
@@ -735,7 +757,7 @@ def _check_services(verbose: bool = False) -> List[CheckResult]:
         )
 
     # hooks + env + permissions — manifest-driven provider check
-    manifest_checks = _check_provider_manifest()
+    manifest_checks = check_provider_manifest()
     results.extend(manifest_checks)
 
     # wire_verify guard — catch empty/orphaned/duplicate provider hook entries
@@ -796,8 +818,18 @@ def _check_structure() -> List[CheckResult]:
     agents = scan_agents(project_root)
     results.append(CheckResult("agents found", GLYPH_PASS, f"{len(agents)} agents", ""))
 
-    # Placement
-    placement_issues = check_placement(agents, project_root)
+    # Placement — a root whose package names are unknown is one WARN row, never a placement issue
+    unknown_packages: List[PackagesUnknown] = []
+    placement_issues = check_placement(agents, project_root, unknown_packages)
+    for unread in unknown_packages:
+        results.append(
+            CheckResult(
+                "package names",
+                GLYPH_WARN,
+                f"unknown at {unread.root} — {unread.reason}",
+                "Placement is not measured against packages there; install tomli or fix pyproject.toml",
+            )
+        )
     if placement_issues:
         for issue in placement_issues:
             glyph = GLYPH_WARN if issue.severity == "warn" else GLYPH_FAIL
@@ -973,106 +1005,7 @@ def _check_sandbox() -> List[CheckResult]:
     return results
 
 
-# --- Cross-OS pre-flight group ---
-
-
-def _cross_os_gap_rows() -> List[CheckResult]:
-    """OS-gap cross-reference rows (slice 1): tracked gaps for this platform.
-
-    Machine pre-flight — surfaces OS-specific gaps from tests/CROSS_OS_TESTING.md
-    for this box. Never claims the checklist's human green. WARN per gap, a single
-    PASS when none apply, a single WARN when the registry can't be read (never
-    silent).
-    """
-    platform_name = sys.platform
-    try:
-        gaps = gaps_for_platform(platform_name)
-    except CrossOsGapError as exc:
-        logger.warning("[doctor] cross-OS gap registry unavailable: %s", exc)
-        return [
-            CheckResult(
-                "cross-os registry (pre-flight)",
-                GLYPH_WARN,
-                f"pre-flight: gap registry unavailable — {exc}",
-                "Ensure tests/CROSS_OS_TESTING.md has a 'Known cross-OS gap registry' table",
-            )
-        ]
-
-    if not gaps:
-        return [
-            CheckResult(
-                "cross-os (pre-flight)",
-                GLYPH_PASS,
-                f"pre-flight: no tracked cross-OS gaps for {platform_name}",
-                "",
-            )
-        ]
-
-    return [
-        CheckResult(
-            f"cross-os gap #{gap.number} (pre-flight)",
-            GLYPH_WARN,
-            f"pre-flight: {gap.symptom}",
-            f"tracked gap [{gap.status}] — owner {gap.owner}; human Layer-3 pass still required",
-        )
-        for gap in gaps
-    ]
-
-
-def _preflight_row(label: str, result: PreflightResult, remediation: str) -> CheckResult:
-    """Map a non-mutating PreflightResult to a labelled pre-flight CheckResult.
-
-    ok -> PASS, else FAIL. The detail is always prefixed 'pre-flight:' so a row
-    can never be mistaken for the checklist's human acceptance green.
-    """
-    glyph = GLYPH_PASS if result.ok else GLYPH_FAIL
-    return CheckResult(f"{label} (pre-flight)", glyph, f"pre-flight: {result.detail}", "" if result.ok else remediation)
-
-
-def _e2e_row(result: PreflightResult) -> CheckResult:
-    """Map the heavy e2e PreflightResult to a CheckResult (PASS/FAIL/WARN).
-
-    ok -> PASS. Un-runnable infra cases (dir missing, no pytest, timeout) -> WARN.
-    Real test failures -> FAIL.
-    """
-    if result.ok:
-        glyph, remediation = GLYPH_PASS, ""
-    elif result.detail.startswith(E2E_UNRUNNABLE_PREFIX):
-        glyph = GLYPH_WARN
-        remediation = "Ensure a project .venv with pytest (or system pytest) and tests/e2e are present"
-    else:
-        glyph, remediation = GLYPH_FAIL, "Run 'pytest tests/e2e -q' from the repo root to inspect the failures"
-    return CheckResult("e2e suite (pre-flight)", glyph, f"pre-flight: {result.detail}", remediation)
-
-
-def _check_cross_os(run_e2e: bool = False) -> List[CheckResult]:
-    """Cross-OS pre-flight group (Layer-3-lite): gap cross-reference + machine routes.
-
-    Combines the slice-1 OS-gap rows with the non-mutating routing / --version /
-    hookstatus probes (Phase 4 / 1.3 / 6.3). None of these wake a citizen. When
-    ``run_e2e`` is set, also runs the heavy Phase-2 e2e suite. Every row is
-    labelled pre-flight and still needs the human Layer-3 pass.
-    """
-    results = _cross_os_gap_rows()
-
-    results.append(
-        _preflight_row(
-            "routing", check_routing(), "Ensure aipass is installed (setup.sh) so 'drone systems' and routes resolve"
-        )
-    )
-    results.append(
-        _preflight_row(
-            "versions", check_versions(), "Ensure 'drone' and 'aipass' are on PATH (clone the repo, run setup.sh)"
-        )
-    )
-    results.append(
-        _preflight_row("hookstatus", check_hookstatus(), "Check @hooks routing: 'drone @hooks status' should exit 0")
-    )
-
-    if run_e2e:
-        results.append(_e2e_row(run_e2e_preflight()))
-
-    return results
+# --- Cross-OS pre-flight group: rows built in handlers/cross_os/doctor_rows.py, printed here ---
 
 
 def run_cross_os(run_e2e: bool = False) -> int:
@@ -1088,14 +1021,14 @@ def run_cross_os(run_e2e: bool = False) -> int:
         console.print("[dim]--e2e: running the heavy Phase-2 e2e wiring suite (builds a wheel + fresh venv)…[/dim]")
     console.print()
 
-    checks = _check_cross_os(run_e2e=run_e2e)
+    checks = check_cross_os(run_e2e=run_e2e)
     pass_count = 0
     warn_count = 0
     error_count = 0
 
     console.print("  [bold]Cross-OS[/bold]")
-    for check in checks:
-        line = format_check(check.label, check.glyph, check.detail, check.remediation)
+    for check in checks:  # rows carry registry and probe text, never markup: escaped so brackets print as written
+        line = format_check(escape(check.label), check.glyph, escape(check.detail), escape(check.remediation))
         console.print(line)
         if check.glyph == GLYPH_PASS:
             pass_count += 1
@@ -1115,22 +1048,6 @@ def run_cross_os(run_e2e: bool = False) -> int:
 
     logger.info("[doctor] cross-os run — pass=%d warn=%d error=%d", pass_count, warn_count, error_count)
     return error_count
-
-
-def _record_path_arg(args: list[str]) -> str | None:
-    """Extract the optional PATH value following ``--record`` (None if absent).
-
-    ``--record`` may stand alone (default path) or be followed by a path; a
-    following token that starts with ``-`` is another flag, not the path.
-    """
-    if "--record" not in args:
-        return None
-    idx = args.index("--record")
-    if idx + 1 < len(args):
-        candidate = args[idx + 1]
-        if not candidate.startswith("-"):
-            return candidate
-    return None
 
 
 def run_cross_os_record(path: str | None = None, run_e2e: bool = False) -> int:
@@ -1227,7 +1144,10 @@ def _check_scaffold() -> List[CheckResult]:
 
     preview = f"Run 'aipass init update {root} --dry-run' to see the plan"
     results: List[CheckResult] = []
-    ignored = sm.read_ignore(root)
+    try:
+        ignored = sm.read_ignore(root)
+    except sm.UpdateIgnoreUnreadable as exc:  # no claims known, so no drift is guessed: one row, the update refuses
+        return [CheckResult(".updateignore", GLYPH_WARN, "is there but cannot be read — update refuses", str(exc))]
 
     installed = sm.installed_version()
     manifest = sm.read_manifest(root)
@@ -1295,7 +1215,7 @@ def _compute_doctor_groups(
     """Run all six check groups (optionally auto-fixing). Returns them by group name."""
     group_specs = [
         ("System", _check_system),
-        ("Identity", _check_identity),
+        ("Identity", check_identity),
         ("Services", lambda: _check_services(verbose=verbose)),
         ("Community", _check_community),
         ("Structure", _check_structure),
@@ -1310,7 +1230,7 @@ def _compute_doctor_groups(
             progress.remove_task(task_id)
 
     if interactive or fix:
-        manifest_results = _check_provider_manifest(interactive=interactive, fix=fix)
+        manifest_results = check_provider_manifest(interactive=interactive, fix=fix)
         if manifest_results:
             groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)
 
@@ -1464,7 +1384,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     if "--cross-os" in args:
         e2e = "--e2e" in args
         if "--record" in args:
-            record_path = _record_path_arg(args)
+            record_path = record_path_arg(args)
             rc = run_cross_os_record(record_path, run_e2e=e2e)
             json_handler.log_operation("doctor_cross_os_record", {"path": record_path, "e2e": e2e, "rc": rc})
             if rc != 0:

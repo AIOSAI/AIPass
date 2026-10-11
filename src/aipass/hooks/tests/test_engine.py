@@ -1,81 +1,88 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 1.2.0
-# Description: Tests for hook engine dispatch logic
+# Version: 2.1.0
+# Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-16
+# Modified: 2026-10-08
 # =============================================
 
-"""Tests for hook engine dispatch logic."""
+"""Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
+
+# Matching, the hook runner, dispatch, the log and its volume, block severity,
+# the completion count, config lookup, the entry point and run_event. Contracts
+# and resilience are test_engine_contracts.py; trust, timeouts, the ledger and
+# the fail-closed gates are test_engine_safeguards.py.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — subprocess.run's process spawn and timeout mechanics; the tests stub it at the edge
 
 import json
 import subprocess
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.hooks.apps.hooks import handle_command, main, print_introspection
 from aipass.hooks.apps.modules.engine import (
     dispatch,
-    _matches,
+    run_event,
     _run_hook,
     _log,
 )
 from aipass.hooks.apps.handlers.config.loader import find_project_config
 from aipass.hooks.apps.handlers.config.trust_registry import enroll
+from aipass.hooks.tests.support_engine import _GATE, _one
+
+pytestmark = pytest.mark.usefixtures("_no_real_trust_banners")
 
 
-@pytest.fixture(autouse=True)
-def _no_real_trust_banners():
-    """dispatch() now runs both trust banners unconditionally on UserPromptSubmit.
-
-    Neutralize by default so the many dispatch()-calling tests in this file
-    never do a real CWD-to-home walk against the actual ~/.aipass registry.
-    Tests that want to exercise the banners override with their own nested
-    patch, which takes precedence inside its `with` block.
-    """
-    with (
-        patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
-        patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
-    ):
-        yield
+def _fires(matcher: str, value: str) -> bool:
+    """Whether dispatch() runs a handler hook with this matcher on an event whose tool_name is value."""
+    module = MagicMock()
+    module.handle.return_value = {"exit_code": 0, "stdout": ""}
+    hook = {"enabled": True, "handler": "aipass.hooks.apps.handlers.probe.handle", "matcher": matcher}
+    config = {"hooks_enabled": True, "Probe": {"probe": hook}}
+    with patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=module):
+        dispatch("Probe", json.dumps({"tool_name": value}) if value else "{}", config)
+    return module.handle.called
 
 
 class TestMatches:
-    """Tests for _matches() matcher logic."""
+    """Matcher logic, read as whether dispatch() runs the hook."""
 
-    def test_empty_matcher_always_matches(self):
-        assert _matches("", "Edit") is True
+    def test_empty_matcher_always_matches(self, mock_logger):
+        assert _fires("", "Edit") is True
 
-    def test_empty_matcher_matches_empty_value(self):
-        assert _matches("", "") is True
+    def test_empty_matcher_matches_empty_value(self, mock_logger):
+        assert _fires("", "") is True
 
-    def test_single_match(self):
-        assert _matches("Edit", "Edit") is True
+    def test_single_match(self, mock_logger):
+        assert _fires("Edit", "Edit") is True
 
-    def test_single_no_match(self):
-        assert _matches("Edit", "Bash") is False
+    def test_single_no_match(self, mock_logger):
+        assert _fires("Edit", "Bash") is False
 
-    def test_pipe_delimited_match_first(self):
-        assert _matches("Edit|Write|MultiEdit", "Edit") is True
+    def test_pipe_delimited_match_first(self, mock_logger):
+        assert _fires("Edit|Write|MultiEdit", "Edit") is True
 
-    def test_pipe_delimited_match_middle(self):
-        assert _matches("Edit|Write|MultiEdit", "Write") is True
+    def test_pipe_delimited_match_middle(self, mock_logger):
+        assert _fires("Edit|Write|MultiEdit", "Write") is True
 
-    def test_pipe_delimited_match_last(self):
-        assert _matches("Edit|Write|MultiEdit", "MultiEdit") is True
+    def test_pipe_delimited_match_last(self, mock_logger):
+        assert _fires("Edit|Write|MultiEdit", "MultiEdit") is True
 
-    def test_pipe_delimited_no_match(self):
-        assert _matches("Edit|Write|MultiEdit", "Bash") is False
+    def test_pipe_delimited_no_match(self, mock_logger):
+        assert _fires("Edit|Write|MultiEdit", "Bash") is False
 
-    def test_partial_name_does_not_match(self):
-        assert _matches("Edit", "MultiEdit") is False
+    def test_partial_name_does_not_match(self, mock_logger):
+        assert _fires("Edit", "MultiEdit") is False
+        assert _fires("MultiEdit", "Edit") is False
 
-    def test_manual_auto_compact(self):
-        assert _matches("manual|auto", "manual") is True
-        assert _matches("manual|auto", "auto") is True
+    def test_manual_auto_compact(self, mock_logger):
+        assert _fires("manual|auto", "manual") is True
+        assert _fires("manual|auto", "auto") is True
 
 
 class TestRunHook:
@@ -100,9 +107,9 @@ class TestRunHook:
         assert result["exit_code"] == -1
         assert result["stderr"] == "TIMEOUT"
 
-    def test_hook_os_error(self, mock_subprocess, mock_logger):
+    def test_hook_os_error(self, mock_subprocess, mock_logger, tmp_path):
         mock_subprocess.side_effect = OSError("No such file")
-        result = _run_hook("/nonexistent", "")
+        result = _run_hook(str(tmp_path / "nonexistent"), "")
         assert result["exit_code"] == -1
         assert "No such file" in result["stderr"]
 
@@ -123,15 +130,13 @@ class TestDispatch:
 
     def test_hooks_disabled_returns_empty(self, mock_logger):
         config = {"hooks_enabled": False}
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            result = dispatch("UserPromptSubmit", "{}", config)
+        result = dispatch("UserPromptSubmit", "{}", config)
         assert result[0] == ""
         assert result[1] == 0
 
     def test_no_hooks_for_event_returns_empty(self, mock_logger):
         config = {"hooks_enabled": True}
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            result = dispatch("UnknownEvent", "{}", config)
+        result = dispatch("UnknownEvent", "{}", config)
         assert result[0] == ""
         assert result[1] == 0
 
@@ -146,9 +151,8 @@ class TestDispatch:
                 }
             },
         }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
         mock_run.assert_not_called()
         assert result[0] == ""
         assert result[1] == 0
@@ -164,10 +168,9 @@ class TestDispatch:
                 }
             },
         }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                mock_run.return_value = {"exit_code": 0, "stdout": "matched", "stderr": "", "elapsed_ms": 10}
-                dispatch("PreToolUse", '{"tool_name":"Bash"}', config)
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            mock_run.return_value = {"exit_code": 0, "stdout": "matched", "stderr": "", "elapsed_ms": 10}
+            dispatch("PreToolUse", '{"tool_name":"Bash"}', config)
         mock_run.assert_not_called()
 
     def test_matching_hook_fires(self, mock_logger):
@@ -181,10 +184,9 @@ class TestDispatch:
                 }
             },
         }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                mock_run.return_value = {"exit_code": 0, "stdout": "edit_output", "stderr": "", "elapsed_ms": 10}
-                result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            mock_run.return_value = {"exit_code": 0, "stdout": "edit_output", "stderr": "", "elapsed_ms": 10}
+            result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
         mock_run.assert_called_once()
         assert "edit_output" in result[0]
         assert result[1] == 0
@@ -197,13 +199,13 @@ class TestDispatch:
                 "hook_b": {"enabled": True, "command": "echo B", "matcher": ""},
             },
         }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                mock_run.side_effect = [
-                    {"exit_code": 0, "stdout": "output_A", "stderr": "", "elapsed_ms": 10},
-                    {"exit_code": 0, "stdout": "output_B", "stderr": "", "elapsed_ms": 10},
-                ]
-                result = dispatch("UserPromptSubmit", '{"user_prompt":"test"}', config)
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            mock_run.side_effect = [
+                {"exit_code": 0, "stdout": "output_A", "stderr": "", "elapsed_ms": 10},
+                {"exit_code": 0, "stdout": "output_B", "stderr": "", "elapsed_ms": 10},
+            ]
+            result = dispatch("UserPromptSubmit", '{"user_prompt":"test"}', config)
+        assert mock_run.call_count == 2
         assert "output_A" in result[0]
         assert "output_B" in result[0]
         assert result[1] == 0
@@ -217,10 +219,9 @@ class TestDispatch:
             },
         }
         block_json = json.dumps({"decision": "block", "reason": "test block"})
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                mock_run.return_value = {"exit_code": 2, "stdout": block_json, "stderr": "", "elapsed_ms": 10}
-                result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            mock_run.return_value = {"exit_code": 2, "stdout": block_json, "stderr": "", "elapsed_ms": 10}
+            result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
         assert mock_run.call_count == 1
         parsed = json.loads(result[0])
         assert parsed["decision"] == "block"
@@ -234,13 +235,12 @@ class TestDispatch:
                 "next_hook": {"enabled": True, "command": "echo survived", "matcher": ""},
             },
         }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                mock_run.side_effect = [
-                    {"exit_code": 2, "stdout": "", "stderr": "file not found", "elapsed_ms": 10},
-                    {"exit_code": 0, "stdout": "survived", "stderr": "", "elapsed_ms": 10},
-                ]
-                result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            mock_run.side_effect = [
+                {"exit_code": 2, "stdout": "", "stderr": "file not found", "elapsed_ms": 10},
+                {"exit_code": 0, "stdout": "survived", "stderr": "", "elapsed_ms": 10},
+            ]
+            result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
         assert mock_run.call_count == 2
         assert "survived" in result[0]
         assert result[1] == 0
@@ -257,10 +257,9 @@ class TestDispatch:
                 }
             },
         }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                mock_run.return_value = {"exit_code": 0, "stdout": "", "stderr": "", "elapsed_ms": 50}
-                dispatch("PreCompact", '{"type":"manual"}', config)
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            mock_run.return_value = {"exit_code": 0, "stdout": "", "stderr": "", "elapsed_ms": 50}
+            dispatch("PreCompact", '{"type":"manual"}', config)
         mock_run.assert_called_once_with("slow_cmd", '{"type":"manual"}', timeout_s=120)
 
     def test_empty_command_skipped(self, mock_logger):
@@ -270,9 +269,8 @@ class TestDispatch:
                 "no_command": {"enabled": True, "command": "", "matcher": ""},
             },
         }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                dispatch("Stop", "{}", config)
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            dispatch("Stop", "{}", config)
         mock_run.assert_not_called()
 
     def test_malformed_stdin_does_not_crash(self, mock_logger):
@@ -282,10 +280,9 @@ class TestDispatch:
                 "hook": {"enabled": True, "command": "echo ok", "matcher": ""},
             },
         }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
-                result = dispatch("UserPromptSubmit", "not json at all{{{", config)
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
+            result = dispatch("UserPromptSubmit", "not json at all{{{", config)
         assert "ok" in result[0]
         assert result[1] == 0
 
@@ -293,7 +290,6 @@ class TestDispatch:
         """A hash-mismatch banner must reach the user even though presence_gate's own hook_def is empty."""
         config = {"hooks_enabled": True, "UserPromptSubmit": {"presence_gate": {}}}
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch(
                 "aipass.hooks.apps.handlers.config.loader.trust_break_banner",
                 return_value="# TRUST BREAK — ALL AIPASS HOOKS DISABLED",
@@ -307,7 +303,6 @@ class TestDispatch:
     def test_no_trust_break_falls_through_to_normal_dispatch(self, mock_logger):
         config = {"hooks_enabled": True, "UserPromptSubmit": {"presence_gate": {}}}
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
         ):
             result = dispatch("UserPromptSubmit", "{}", config)
@@ -317,7 +312,6 @@ class TestDispatch:
         """A never-enrolled nudge must reach the user and skip normal hook dispatch."""
         config = {"hooks_enabled": True, "UserPromptSubmit": {"presence_gate": {}}}
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
             patch(
                 "aipass.hooks.apps.handlers.config.loader.never_enrolled_banner",
@@ -332,7 +326,6 @@ class TestDispatch:
     def test_no_never_enrolled_nudge_falls_through_to_normal_dispatch(self, mock_logger):
         config = {"hooks_enabled": True, "UserPromptSubmit": {"presence_gate": {}}}
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
             patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
         ):
@@ -343,7 +336,6 @@ class TestDispatch:
         """Both can't fire for the same project in practice, but trust_break must win if they did."""
         config = {"hooks_enabled": True, "UserPromptSubmit": {"presence_gate": {}}}
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch(
                 "aipass.hooks.apps.handlers.config.loader.trust_break_banner",
                 return_value="# TRUST BREAK — ALL AIPASS HOOKS DISABLED",
@@ -362,7 +354,6 @@ class TestDispatch:
             "UserPromptSubmit": {"other_hook": {"enabled": True, "command": "echo hi", "matcher": ""}},
         }
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner") as mock_banner,
             patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
             patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
@@ -370,12 +361,11 @@ class TestDispatch:
             mock_banner.return_value = None
             mock_run.return_value = {"exit_code": 0, "stdout": "hi", "stderr": "", "elapsed_ms": 5}
             dispatch("UserPromptSubmit", "{}", config)
-        mock_banner.assert_called_once()
+        mock_banner.assert_called_once_with()  # the banner reads its own state: no argument filters it
 
     def test_trust_break_check_skipped_for_non_prompt_events(self, mock_logger):
         config = {"hooks_enabled": True, "PreToolUse": {"presence_gate": {}}}
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner") as mock_banner,
         ):
             dispatch("PreToolUse", "{}", config)
@@ -422,10 +412,12 @@ class TestLogVolume:
         monkeypatch.delenv("AIPASS_HOOKS_VERBOSE_LOG", raising=False)
         mock_log = self._dispatch(mock_logger)
 
-        actions = [c.args[0].get("action") for c in mock_log.call_args_list]
-        assert "skipped_disabled" in actions
-        assert "complete" in actions
-        assert any("hook" in c.args[0] and "exit_code" in c.args[0] for c in mock_log.call_args_list)
+        entries = [c.args[0] for c in mock_log.call_args_list]
+        skipped = [(e["event"], e["hook"]) for e in entries if e.get("action") == "skipped_disabled"]
+        assert skipped == [("PreToolUse", "off_hook")]
+        assert [e["event"] for e in entries if e.get("action") == "complete"] == ["PreToolUse"]
+        ran = [(e["event"], e["hook"], e["exit_code"]) for e in entries if "exit_code" in e]
+        assert ran == [("PreToolUse", "rm_gate", 0)]
 
     def test_verbose_env_restores_the_lines(self, mock_logger, monkeypatch):
         """AIPASS_HOOKS_VERBOSE_LOG=1 is the DEBUG-level stand-in."""
@@ -456,7 +448,6 @@ class TestLogVolume:
             "PreToolUse": {"gate": {"enabled": True, "command": "block", "matcher": ""}},
         }
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
         ):
             mock_run.return_value = {
@@ -483,7 +474,6 @@ class TestBlockSeverity:
 
     def _dispatch(self, stdout: str):
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
         ):
             mock_run.return_value = {"exit_code": 2, "stdout": stdout, "stderr": "", "elapsed_ms": 1}
@@ -550,7 +540,6 @@ class TestCompletionCount:
     def test_silent_hooks_are_counted_as_run(self, mock_logger):
         """Two gates run and pass quietly — the log must say 2, not 0."""
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
         ):
             mock_run.return_value = {"exit_code": 0, "stdout": "", "stderr": "", "elapsed_ms": 1}
@@ -568,6 +557,9 @@ class TestCompletionCount:
             dispatch("PreToolUse", '{"tool_name":"Bash"}', self.SILENT)
 
         complete = [c.args[0] for c in mock_log.call_args_list if c.args[0].get("action") == "complete"][0]
+        assert complete["event"] == "PreToolUse"
+        ran = [(e["event"], e["hook"]) for e in (c.args[0] for c in mock_log.call_args_list) if "exit_code" in e]
+        assert ran == [("PreToolUse", "rm_gate"), ("PreToolUse", "git_gate")]
         assert complete["hooks_run"] == 2
         assert complete["hooks_with_output"] == 0
 
@@ -584,7 +576,6 @@ class TestCompletionCount:
             },
         }
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
         ):
             mock_run.side_effect = [
@@ -593,6 +584,7 @@ class TestCompletionCount:
             ]
             dispatch("PreToolUse", '{"tool_name":"Bash"}', config)
 
+        assert mock_run.call_count == 2
         per_hook = [c for c in mock_logger.info.call_args_list if c.args and "agent=%s" in c.args[0]]
         assert len(per_hook) == 2
         assert self._complete_line(mock_logger)[2] == len(per_hook)
@@ -601,7 +593,6 @@ class TestCompletionCount:
         """A timeout gets its own loud line and no per-hook line, so it must not
         inflate the completion count."""
         with (
-            patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
         ):
             mock_run.side_effect = [
@@ -610,6 +601,7 @@ class TestCompletionCount:
             ]
             dispatch("PreToolUse", '{"tool_name":"Bash"}', self.SILENT)
 
+        assert mock_run.call_count == 2
         assert self._complete_line(mock_logger)[2] == 1
 
 
@@ -622,16 +614,21 @@ class TestFindProjectConfig:
             enroll(str(temp_test_dir))
         with (
             patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
-            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=temp_test_dir),
+            patch(
+                "aipass.hooks.apps.handlers.config.loader._search_bounds",
+                return_value=(temp_test_dir, temp_test_dir.parent),
+            ),
         ):
             config = find_project_config()
         assert config is not None
         assert config["hooks_enabled"] is True
 
     def test_returns_none_when_no_config(self, temp_test_dir, mock_logger):
-        with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir):
-            with patch("aipass.hooks.apps.modules.engine.Path.home", return_value=temp_test_dir.parent):
-                config = find_project_config()
+        with patch(
+            "aipass.hooks.apps.handlers.config.loader._search_bounds",
+            return_value=(temp_test_dir, temp_test_dir.parent),
+        ):
+            config = find_project_config()
         assert config is None
 
     def test_expands_aipass_home(self, temp_test_dir, mock_logger):
@@ -641,18 +638,20 @@ class TestFindProjectConfig:
             "hooks_enabled": True,
             "Stop": {"sound": {"enabled": True, "command": "python3 $AIPASS_HOME/hook.py", "matcher": ""}},
         }
-        (config_dir / "hooks.json").write_text(json.dumps(config))
+        (config_dir / "hooks.json").write_text(json.dumps(config), encoding="utf-8")
         reg_path = temp_test_dir / "registry.json"
         with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
             enroll(str(temp_test_dir))
         with (
             patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
-            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=temp_test_dir),
-            patch("aipass.hooks.apps.handlers.config.loader.AIPASS_HOME", "/test/path"),
+            patch(
+                "aipass.hooks.apps.handlers.config.loader._search_bounds",
+                return_value=(temp_test_dir, temp_test_dir.parent),
+            ),
+            patch.dict("os.environ", {"AIPASS_HOME": "/test/path"}),
         ):
             result = find_project_config()
-        assert result is not None
-        assert "/test/path/hook.py" in result["Stop"]["sound"]["command"]
+        assert (result or {}).get("Stop", {}).get("sound", {}).get("command") == "python3 /test/path/hook.py"
 
 
 class TestLog:
@@ -662,7 +661,7 @@ class TestLog:
         log_file = temp_test_dir / "test.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"event": "Test", "action": "test_write"})
-        lines = log_file.read_text().strip().split("\n")
+        lines = log_file.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 1
         entry = json.loads(lines[0])
         assert entry["event"] == "Test"
@@ -679,7 +678,7 @@ class TestLog:
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"event": "A"})
             _log({"event": "B"})
-        lines = log_file.read_text().strip().split("\n")
+        lines = log_file.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 2
 
 
@@ -687,40 +686,28 @@ class TestHooksEntryPoint:
     """Tests for hooks.py CLI routing."""
 
     def test_help_returns_zero(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks", "--help"]):
             assert main() == 0
 
     def test_version_returns_zero(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks", "--version"]):
             assert main() == 0
 
     def test_no_args_shows_help(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks"]):
             assert main() == 0
 
     def test_unknown_command_returns_one(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks", "nonexistent_command"]):
             assert main() == 1
 
     def test_print_introspection_prints_output(self, capsys):
-        from aipass.hooks.apps.hooks import print_introspection
-
         print_introspection()
         captured = capsys.readouterr()
         assert "HOOKS" in captured.out
         assert "Discovered Modules" in captured.out
 
     def test_handle_command_returns_bool(self):
-        from aipass.hooks.apps.hooks import handle_command
-
         result = handle_command("nonexistent", [])
         assert result is False
 
@@ -736,8 +723,6 @@ class TestHooksEntryPoint:
         the exit-0 defect FPLAN-0507 had just cured. Patch the name hookstatus
         actually calls, and pin the cured outcome.
         """
-        from aipass.hooks.apps.hooks import handle_command
-
         with (
             patch("aipass.hooks.apps.modules.hookstatus.find_project_config", return_value=None),
             pytest.raises(SystemExit) as exit_info,
@@ -745,1164 +730,46 @@ class TestHooksEntryPoint:
             handle_command("status", [])
         assert exit_info.value.code == 1
 
-    def test_log_command_returns_true(self):
-        from aipass.hooks.apps.hooks import handle_command
-
-        result = handle_command("log", [])
+    def test_log_command_prints_the_log_tail_to_stderr(self, tmp_path, capsys):
+        """Green from its first run; its proof is a mutant on the printed line."""
+        log_file = tmp_path / "engine.jsonl"
+        log_file.write_text('{"event": "first"}\n{"event": "second"}\n', encoding="utf-8")
+        with patch("aipass.hooks.apps.handlers.config.diagnostics.LOG_FILE", log_file):
+            result = handle_command("log", [])
+        out, err = capsys.readouterr()
         assert result is True
+        assert '{"event": "first"}' in err
+        assert '{"event": "second"}' in err
+        assert "No engine log found" not in err
 
     def test_short_help_flag(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks", "-h"]):
             assert main() == 0
 
     def test_help_word(self):
-        from aipass.hooks.apps.hooks import main
-
         with patch("sys.argv", ["hooks", "help"]):
             assert main() == 0
 
 
-class TestErrorResilience:
-    """Tests for error handling edge cases."""
+class TestRunEvent:
+    """The bridges' logic, served from the promoted copy (DPLAN-0356 item 3)."""
 
-    def test_missing_hooks_json_file(self, temp_test_dir, mock_logger):
-        with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir):
-            with patch("aipass.hooks.apps.modules.engine.Path.home", return_value=temp_test_dir.parent):
-                config = find_project_config()
-        assert config is None
-
-    # Both enrol the project first: unenrolled, find_project_config returns None
-    # at the trust check and never reads the file, so these passed without ever
-    # reaching the parse they are named for. The enrolment lands in conftest's
-    # sandbox registry (isolated_trust_registry).
-    def test_corrupt_hooks_json(self, temp_test_dir, mock_logger):
-        config_dir = temp_test_dir / ".aipass"
-        config_dir.mkdir()
-        (config_dir / "hooks.json").write_text("{invalid json!!!")
-        enroll(str(temp_test_dir))
+    def test_it_dispatches_the_resolved_config_never_an_empty_one(self, mock_logger):
         with (
-            patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir),
-            patch("aipass.hooks.apps.handlers.config.loader.logger") as loader_logger,
+            patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=_one(_GATE)) as resolved,
+            patch("aipass.hooks.apps.modules.engine.dispatch", return_value=("", 0)) as sent,
         ):
-            config = find_project_config()
-        assert config is None
-        assert "bad config" in loader_logger.error.call_args[0][0]
+            run_event("PreToolUse", "{}")
+        resolved.assert_called_once()
+        assert sent.call_args[0][2]["PreToolUse"]["the_hook"]["handler"] == _GATE
 
-    def test_empty_hooks_json(self, temp_test_dir, mock_logger):
-        config_dir = temp_test_dir / ".aipass"
-        config_dir.mkdir()
-        (config_dir / "hooks.json").write_text("")
-        enroll(str(temp_test_dir))
+    def test_a_named_hook_is_cut_out_of_the_config(self, mock_logger):
         with (
-            patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir),
-            patch("aipass.hooks.apps.handlers.config.loader.logger") as loader_logger,
+            patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=_one(_GATE)),
+            patch("aipass.hooks.apps.modules.engine.dispatch", return_value=("", 0)) as sent,
         ):
-            config = find_project_config()
-        assert config is None
-        assert "bad config" in loader_logger.error.call_args[0][0]
-
-    def test_a_registry_bootstrap_lands_in_the_sandbox(self, temp_test_dir, tmp_path, monkeypatch, mock_logger):
-        """seedgo's runtime probe, 2026-09-14: this class created ~/.aipass/trusted_projects.json.
-
-        find_project_config bootstraps the registry when it is absent, and
-        REGISTRY_PATH is bound to Path.home() at import. The sandbox is checked
-        BEFORE the call, so a run without the guard fails without touching the
-        live file.
-        """
-        from aipass.hooks.apps.handlers.config import trust_registry
-
-        registry = trust_registry.REGISTRY_PATH
-        assert registry != Path.home() / ".aipass" / "trusted_projects.json"
-        assert not registry.exists()
-        install = tmp_path / "install"
-        (install / ".aipass").mkdir(parents=True)
-        (install / ".aipass" / "hooks.json").write_text("{}")
-        monkeypatch.setenv("AIPASS_HOME", str(install))
-        (temp_test_dir / ".aipass").mkdir()
-        (temp_test_dir / ".aipass" / "hooks.json").write_text("{invalid json!!!")
-
-        with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir):
-            find_project_config()
-
-        assert list(json.loads(registry.read_text(encoding="utf-8"))["projects"]) == [str(install.resolve())]
-
-    def test_log_write_failure_does_not_crash(self, tmp_path, mock_logger):
-        """A failed log write is reported and swallowed, never raised.
-
-        Had no oracle: the call sat alone and anything that did not raise was a
-        pass - including a version that dropped the OSError silently. Crash
-        isolation is the point of this handler, but a hook whose diagnostics
-        die quietly is the one failure nobody would ever see.
-
-        A bare-Mock LOG_FILE leaks a real MagicMock/LOG_FILE/ dir into the CWD
-        via append_jsonl's Path(...).parent.mkdir - use a real tmp path.
-        """
-        log_file = tmp_path / "engine.jsonl"
-        # The report goes through diagnostics' own logger, not engine's - the
-        # mock_logger fixture patches engine.logger and would be blind here,
-        # which is exactly the "assert on the wrong seam" trap.
-        with (
-            patch("builtins.open", side_effect=OSError("disk full")),
-            patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file),
-            patch("aipass.hooks.apps.handlers.config.diagnostics.logger") as diag_logger,
-        ):
-            _log({"event": "Test"})
-
-        assert not log_file.exists()
-        assert diag_logger.error.call_count == 1
-        assert "log write failed" in diag_logger.error.call_args[0][0]
-
-    def test_no_mock_named_directory_survives_in_the_branch_root(self):
-        """A Mock handed to a filesystem call names a directory after its repr.
-
-        The cure for the known instance is in the test above (a real tmp path
-        instead of a bare Mock LOG_FILE, because append_jsonl calls
-        Path(...).parent.mkdir). This is the detector, and it is deliberately a
-        property of the TREE rather than of one call site: the next leak will
-        come from a different test, and the only thing every version of this
-        mistake has in common is the directory it leaves behind.
-
-        Found by @seedgo, 2026-09-16: MagicMock/LOG_FILE/ had sat in this branch
-        root since 2026-07-10 with nothing pointing at it.
-        """
-        root = Path(__file__).resolve().parent.parent
-        leaked = sorted(p.name for p in root.iterdir() if "mock" in p.name.lower())
-        assert leaked == [], f"a mock repr reached a filesystem call: {leaked}"
-
-
-class TestDataStructureContracts:
-    """Tests for config and log data structures."""
-
-    def test_config_has_hooks_enabled_key(self, sample_hooks_config):
-        assert "hooks_enabled" in sample_hooks_config
-
-    # test_config_event_values_are_dicts archived 2026-09-08 (FPLAN-0513) to
-    # tests/.archive/archived_2026-09-08_engine_fixture_contracts.py - it
-    # asserted a property of the conftest literal, never touching the engine.
-
-    def test_log_entry_has_required_fields(self, temp_test_dir, mock_logger):
-        log_file = temp_test_dir / "test.jsonl"
-        with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"ts": 123.0, "event": "Test", "action": "check"})
-        entry = json.loads(log_file.read_text().strip())
-        assert "ts" in entry
-        assert "event" in entry
-
-
-class TestExceptionContracts:
-    """Tests for expected exceptions and error paths."""
-
-    def test_dispatch_with_none_config_event_returns_empty(self, mock_logger):
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            result = dispatch("Stop", "{}", {"hooks_enabled": True})
-        assert result == ("", 0)
-
-    def test_run_hook_timeout_returns_negative_exit(self, mock_subprocess, mock_logger):
-        mock_subprocess.side_effect = subprocess.TimeoutExpired("cmd", 30)
-        result = _run_hook("cmd", "")
-        assert result["exit_code"] == -1
-
-    def test_run_hook_os_error_returns_negative_exit(self, mock_subprocess, mock_logger):
-        mock_subprocess.side_effect = OSError("not found")
-        result = _run_hook("cmd", "")
-        assert result["exit_code"] == -1
-
-
-class TestInfrastructureMocking:
-    """Tests verifying mock infrastructure works correctly."""
-
-    def test_mock_logger_fixture(self, mock_logger):
-        assert mock_logger is not None
-
-    def test_mock_subprocess_fixture(self, mock_subprocess):
-        assert mock_subprocess is not None
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        _run_hook("test", "")
-        mock_subprocess.assert_called_once()
-
-    def test_hooks_config_file_fixture(self, hooks_config_file):
-        assert hooks_config_file.exists()
-        config = json.loads(hooks_config_file.read_text())
-        assert config["hooks_enabled"] is True
-
-
-class TestInitProvisioning:
-    """Tests for initialization and directory setup."""
-
-    def test_log_auto_creates_directory(self, temp_test_dir, mock_logger):
-        log_file = temp_test_dir / "new_dir" / "engine.jsonl"
-        with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"event": "init_test"})
-        assert log_file.parent.exists()
-
-    def test_config_walks_up_from_subdirectory(self, temp_test_dir, mock_logger):
-        config_dir = temp_test_dir / ".aipass"
-        config_dir.mkdir()
-        (config_dir / "hooks.json").write_text('{"hooks_enabled": true}')
-        sub_dir = temp_test_dir / "deep" / "nested" / "path"
-        sub_dir.mkdir(parents=True)
-        reg_path = temp_test_dir / "registry.json"
-        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
-            enroll(str(temp_test_dir))
-        with (
-            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
-            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=sub_dir),
-        ):
-            config = find_project_config()
-        assert config is not None
-        assert config["hooks_enabled"] is True
-
-    def test_log_no_overwrite_on_append(self, temp_test_dir, mock_logger):
-        log_file = temp_test_dir / "test.jsonl"
-        log_file.write_text('{"existing": true}\n')
-        with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"event": "new"})
-        lines = log_file.read_text().strip().split("\n")
-        assert len(lines) == 2
-        assert json.loads(lines[0])["existing"] is True
-
-    def test_dispatch_returns_tuple(self, mock_logger):
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            result = dispatch("Stop", "{}", {"hooks_enabled": True})
-        assert isinstance(result, tuple)
-        assert isinstance(result[0], str)
-        assert isinstance(result[1], int)
-        assert result == ("", 0)
-
-
-class TestConftest:
-    """Tests verifying conftest fixtures and mock infrastructure."""
-
-    def test_sample_hooks_config_has_events(self, sample_hooks_config):
-        assert "UserPromptSubmit" in sample_hooks_config
-        assert "PreToolUse" in sample_hooks_config
-
-    def test_sample_data_structure(self, sample_hooks_config):
-        hook = sample_hooks_config["UserPromptSubmit"]["test_hook"]
-        assert "enabled" in hook
-        assert "command" in hook
-        assert "matcher" in hook
-
-    # test_hooks_config_file_is_valid_json archived 2026-09-08 (FPLAN-0513) to
-    # tests/.archive/archived_2026-09-08_engine_fixture_contracts.py - the
-    # fixture writes the file with json.dumps, so the round trip was a tautology.
-
-    def test_temp_test_dir_exists(self, temp_test_dir):
-        assert temp_test_dir.exists()
-        assert temp_test_dir.is_dir()
-
-    def test_autouse_mock_subprocess(self, mock_subprocess):
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="x", stderr="")
-        result = _run_hook("test_cmd", "input")
-        assert result["stdout"] == "x"
-
-    def test_reimport_after_mock(self, mock_logger):
-        from aipass.hooks.apps.modules import engine
-
-        assert hasattr(engine, "dispatch")
-
-
-class TestCliRouting:
-    """Additional CLI routing tests for print_help and output capture."""
-
-    def test_print_help_writes_output(self, capsys):
-        from aipass.hooks.apps.hooks import print_help
-
-        print_help()
-        captured = capsys.readouterr()
-        assert "HOOKS" in captured.out
-        assert "drone @hooks" in captured.out
-
-    def test_print_help_surfaces_subcommands(self, capsys):
-        from aipass.hooks.apps.hooks import print_help
-
-        print_help()
-        captured = capsys.readouterr()
-        assert "hooksound on" in captured.out
-        assert "hooksound off" in captured.out
-        assert "status" in captured.out
-        assert "log" in captured.out
-
-    def test_print_help_has_examples_section(self, capsys):
-        from aipass.hooks.apps.hooks import print_help
-
-        print_help()
-        captured = capsys.readouterr()
-        assert "EXAMPLES" in captured.out
-        assert "drone @hooks status" in captured.out
-        assert "drone @hooks hooksound off" in captured.out
-
-    def test_print_help_has_usage_section(self, capsys):
-        from aipass.hooks.apps.hooks import print_help
-
-        print_help()
-        captured = capsys.readouterr()
-        assert "USAGE" in captured.out
-        assert "drone @hooks <command>" in captured.out
-
-    def test_help_commands_auto_discovered(self, capsys):
-        from aipass.hooks.apps.hooks import print_help
-        from aipass.hooks.apps.modules.hooksound import HELP_COMMANDS as hs_cmds
-        from aipass.hooks.apps.modules.hookstatus import HELP_COMMANDS as hst_cmds
-        from aipass.hooks.apps.modules.engine import HELP_COMMANDS as eng_cmds
-
-        print_help()
-        captured = capsys.readouterr()
-        # The floor, per module and not in total. Auto-discovery is the claim,
-        # so a module that stopped declaring HELP_COMMANDS has to red here - and
-        # a total-only floor would let hooksound go empty while engine's rows
-        # kept the count up. A floor and not the exact counts (3/1/1 today):
-        # adding a help command must not red a test about discovery.
-        assert min(len(hs_cmds), len(hst_cmds), len(eng_cmds)) >= 1
-        commands = hs_cmds + hst_cmds + eng_cmds
-        for cmd, _ in commands:
-            assert cmd in captured.out
-
-    def test_output_capture_status(self, capsys):
-        from aipass.hooks.apps.hooks import handle_command
-
-        with (
-            patch("aipass.hooks.apps.modules.hookstatus.find_project_config", return_value=None),
-            patch(
-                "aipass.hooks.apps.modules.hookstatus.config_unavailable_reason",
-                return_value="No .aipass/hooks.json found — run from an AIPass project directory.",
-            ),
-        ):
-            with pytest.raises(SystemExit) as exit_info:
-                handle_command("status", [])
-
-        # Exit 1, not 0: rewritten 2026-09-07 (canary refusal sweep). Showing
-        # nothing and reporting success is the defect, not the message.
-        assert exit_info.value.code == 1
-        captured = capsys.readouterr()
-        assert "No .aipass/hooks.json" in captured.err
-
-    def test_version_output(self, capsys):
-        """Read from the header, never hardcoded.
-
-        This asserted a literal "1.1.0" while the file header said 1.2.0 — the
-        second of two tests pinning the stale value they existed to catch
-        (todo 16, fixed 2026-09-07). Its twin lives in test_cli_routing.py and
-        covers both flags; this one keeps the claim on the engine-routed path.
-        """
-        import re
-
-        from aipass.hooks.apps import hooks as entry
-
-        header = re.search(
-            r"^# Version:\s*(\S+)",
-            Path(entry.__file__).read_text(encoding="utf-8"),
-            re.MULTILINE,
-        )
-        assert header is not None, "apps/hooks.py has no '# Version:' header line"
-
-        with patch("sys.argv", ["hooks", "--version"]):
-            entry.main()
-        captured = capsys.readouterr()
-        assert header.group(1) in captured.out
-
-
-class TestConfigDataContracts:
-    """Additional data structure contract tests."""
-
-    # test_config_keys_are_strings archived 2026-09-08 (FPLAN-0513) to
-    # tests/.archive/archived_2026-09-08_engine_fixture_contracts.py - same
-    # species: it asserted a property of the conftest literal.
-
-    def test_hook_def_has_command_key(self, sample_hooks_config):
-        hook = sample_hooks_config["UserPromptSubmit"]["test_hook"]
-        assert "command" in hook
-        assert isinstance(hook["command"], str)
-
-    def test_data_keys_in_log_entry(self, temp_test_dir, mock_logger):
-        log_file = temp_test_dir / "test.jsonl"
-        with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"ts": 1.0, "event": "Test", "hook": "test_hook", "exit_code": 0})
-        entry = json.loads(log_file.read_text().strip())
-        assert "ts" in entry
-        assert "event" in entry
-        assert "hook" in entry
-        assert "exit_code" in entry
-
-
-class TestPathContracts:
-    """Tests for path-returning functions."""
-
-    def test_paths_return_path(self):
-        """BRANCH_ROOT resolves to this branch, not to whatever the cwd was.
-
-        The isinstance pair this replaces could not fail: both names are built
-        from Path literals at import, so they are Paths whether or not they
-        point anywhere. That mattered here more than most - BRANCH_ROOT is
-        resolved at import time, and the known gotcha in this branch is exactly
-        an import-time resolve that reads the cwd (ntpath.realpath on Windows).
-        A type check is blind to a BRANCH_ROOT pointing at the caller's
-        directory; a landmark under it is not.
-        """
-        from aipass.hooks.apps.modules.engine import BRANCH_ROOT
-        from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE
-
-        assert BRANCH_ROOT.name == "hooks"
-        assert (BRANCH_ROOT / "apps" / "modules" / "engine.py").is_file()
-        assert LOG_FILE == BRANCH_ROOT / "logs" / "engine.jsonl"
-
-
-class TestErrorResilienceExtended:
-    """Additional error resilience tests."""
-
-    def test_dispatch_with_empty_stdin(self, mock_logger):
-        config = {
+            run_event("PreToolUse:the_hook", "{}")
+        assert sent.call_args[0][2] == {
             "hooks_enabled": True,
-            "Stop": {"hook": {"enabled": True, "command": "echo ok", "matcher": ""}},
+            "PreToolUse": {"the_hook": _one(_GATE)["PreToolUse"]["the_hook"]},
         }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
-                result = dispatch("Stop", "", config)
-        assert "ok" in result[0]
-        assert result[1] == 0
-
-    def test_config_with_nonexistent_dir(self, temp_test_dir, mock_logger):
-        nonexistent = temp_test_dir / "does_not_exist"
-        with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=nonexistent):
-            with patch("aipass.hooks.apps.modules.engine.Path.home", return_value=temp_test_dir):
-                config = find_project_config()
-        assert config is None
-
-    def test_missing_file_in_log_path(self, temp_test_dir, mock_logger):
-        missing = temp_test_dir / "missing" / "nonexistent.jsonl"
-        with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=missing):
-            _log({"event": "test_missing"})
-        assert missing.exists()
-
-    def test_empty_file_config(self, temp_test_dir, mock_logger):
-        config_dir = temp_test_dir / ".aipass"
-        config_dir.mkdir()
-        empty_file = config_dir / "hooks.json"
-        empty_file.write_text("")
-        with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir):
-            config = find_project_config()
-        assert config is None
-
-
-class TestMockInfrastructure:
-    """Tests verifying sys.modules mocking and reimport patterns."""
-
-    def test_sys_modules_mock(self):
-        import sys
-
-        assert "aipass.hooks.apps.modules.engine" in sys.modules
-
-    def test_reimport_after_mock(self, mock_logger):
-        import importlib
-        from aipass.hooks.apps.modules import engine
-
-        importlib.reload(engine)
-        assert hasattr(engine, "dispatch")
-        assert hasattr(engine, "_matches")
-        assert hasattr(engine, "_run_hook")
-
-
-class TestLayerATrustEnforcement:
-    """DPLAN-0244 Layer A: engine refuses command-type from project config, enforces handler namespace."""
-
-    def test_command_type_refused_from_project_config(self, mock_logger):
-        config = {
-            "hooks_enabled": True,
-            "_source": "project",
-            "PreToolUse": {
-                "evil_cmd": {
-                    "enabled": True,
-                    "command": "echo PWNED",
-                    "matcher": "",
-                }
-            },
-        }
-        with patch("aipass.hooks.apps.modules.engine._log") as mock_log:
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
-        mock_run.assert_not_called()
-        assert result == ("", 0)
-        log_calls = [c[0][0] for c in mock_log.call_args_list]
-        assert any(e.get("action") == "refused_command_type" for e in log_calls if isinstance(e, dict))
-
-    def test_handler_namespace_enforced(self, mock_logger):
-        from aipass.hooks.apps.modules.engine import _run_handler
-
-        result = _run_handler("evil.payload.handle", {})
-        assert result["exit_code"] == -1
-        assert "namespace refused" in result["stderr"]
-
-    def test_handler_aipass_namespace_allowed(self, mock_logger):
-        from aipass.hooks.apps.modules.engine import _run_handler
-
-        mock_handler = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
-        mock_module = MagicMock()
-        mock_module.handle = mock_handler
-        with patch("importlib.import_module", return_value=mock_module):
-            result = _run_handler("aipass.hooks.apps.handlers.notification.stop_sound.handle", {})
-        assert result["exit_code"] == 0
-
-    def test_command_type_allowed_from_default_config(self, mock_logger):
-        config = {
-            "hooks_enabled": True,
-            "_source": "default",
-            "Stop": {
-                "cmd_hook": {
-                    "enabled": True,
-                    "command": "echo allowed",
-                    "matcher": "",
-                }
-            },
-        }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                mock_run.return_value = {
-                    "exit_code": 0,
-                    "stdout": "allowed",
-                    "stderr": "",
-                    "elapsed_ms": 5,
-                }
-                result = dispatch("Stop", "{}", config)
-        mock_run.assert_called_once()
-        assert "allowed" in result[0]
-
-    def test_mixed_config_partial_refusal(self, mock_logger):
-        config = {
-            "hooks_enabled": True,
-            "_source": "project",
-            "UserPromptSubmit": {
-                "good_handler": {
-                    "enabled": True,
-                    "handler": "aipass.hooks.apps.handlers.notification.stop_sound.handle",
-                    "matcher": "",
-                },
-                "evil_cmd": {
-                    "enabled": True,
-                    "command": "echo PWNED",
-                    "matcher": "",
-                },
-            },
-        }
-        mock_handler_func = MagicMock(return_value={"exit_code": 0, "stdout": "handler_ok"})
-        mock_module = MagicMock()
-        mock_module.handle = mock_handler_func
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("importlib.import_module", return_value=mock_module):
-                with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                    result = dispatch("UserPromptSubmit", "{}", config)
-        mock_run.assert_not_called()
-        assert "handler_ok" in result[0]
-        assert result[1] == 0
-
-    def test_source_overwrite_not_merge(self, temp_test_dir, mock_logger):
-        config_dir = temp_test_dir / ".aipass"
-        config_dir.mkdir()
-        hostile_config = {
-            "hooks_enabled": True,
-            "_source": "provider",
-            "SessionStart": {
-                "evil": {
-                    "enabled": True,
-                    "command": "echo PWNED",
-                    "matcher": "",
-                }
-            },
-        }
-        (config_dir / "hooks.json").write_text(json.dumps(hostile_config))
-        reg_path = temp_test_dir / "registry.json"
-        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
-            enroll(str(temp_test_dir))
-        with (
-            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
-            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=temp_test_dir),
-        ):
-            loaded = find_project_config()
-        assert loaded is not None
-        assert loaded["_source"] == "project"
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                result = dispatch("SessionStart", "{}", loaded)
-        mock_run.assert_not_called()
-        assert result == ("", 0)
-
-    def test_command_without_source_defaults_allowed(self, mock_logger):
-        config = {
-            "hooks_enabled": True,
-            "Stop": {
-                "cmd_hook": {
-                    "enabled": True,
-                    "command": "echo ok",
-                    "matcher": "",
-                }
-            },
-        }
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
-                mock_run.return_value = {
-                    "exit_code": 0,
-                    "stdout": "ok",
-                    "stderr": "",
-                    "elapsed_ms": 5,
-                }
-                result = dispatch("Stop", "{}", config)
-        mock_run.assert_called_once()
-        assert "ok" in result[0]
-
-
-class TestRunHandlerTimeout:
-    """DPLAN-0256 backlog #1: handler-type hooks had no engine-side timeout — a hung
-    handler could stall the whole event. _run_handler now runs the handler on a
-    daemon thread and joins with a timeout instead of calling it inline."""
-
-    def test_handler_completes_within_timeout(self, mock_logger):
-        from aipass.hooks.apps.modules.engine import _run_handler
-
-        mock_handler = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
-        mock_module = MagicMock()
-        mock_module.handle = mock_handler
-        with patch("importlib.import_module", return_value=mock_module):
-            result = _run_handler("aipass.hooks.apps.handlers.notification.stop_sound.handle", {}, timeout_s=1)
-        assert result["exit_code"] == 0
-        assert result["stdout"] == "ok"
-
-    def test_handler_exceeding_timeout_returns_timeout_marker(self, mock_logger):
-        import time as time_module
-
-        from aipass.hooks.apps.modules.engine import _run_handler
-
-        def _slow_handler(_data):
-            time_module.sleep(1.3)
-            return {"exit_code": 0, "stdout": "too late"}
-
-        mock_module = MagicMock()
-        mock_module.handle = _slow_handler
-        with patch("importlib.import_module", return_value=mock_module):
-            result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
-        assert result["exit_code"] == -1
-        assert result["stderr"] == "TIMEOUT"
-
-    def test_handler_timeout_does_not_block_caller(self, mock_logger):
-        """Regression: the caller must return promptly even if the handler thread never finishes."""
-        import time as time_module
-
-        from aipass.hooks.apps.modules.engine import _run_handler
-
-        def _hangs_much_longer_than_timeout(_data):
-            time_module.sleep(3)
-            return {"exit_code": 0, "stdout": "should never see this"}
-
-        mock_module = MagicMock()
-        mock_module.handle = _hangs_much_longer_than_timeout
-        with patch("importlib.import_module", return_value=mock_module):
-            start = time_module.monotonic()
-            result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
-            elapsed = time_module.monotonic() - start
-        assert elapsed < 2.0
-        assert result["stderr"] == "TIMEOUT"
-
-    def test_default_handler_timeout_is_30(self):
-        import inspect
-
-        from aipass.hooks.apps.modules.engine import _run_handler
-
-        sig = inspect.signature(_run_handler)
-        assert sig.parameters["timeout_s"].default == 30
-
-    def test_handler_exception_still_surfaces_as_error_not_timeout(self, mock_logger):
-        from aipass.hooks.apps.modules.engine import _run_handler
-
-        def _boom(_data):
-            raise RuntimeError("handler blew up")
-
-        mock_module = MagicMock()
-        mock_module.handle = _boom
-        with patch("importlib.import_module", return_value=mock_module):
-            result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
-        assert result["exit_code"] == -1
-        assert "handler blew up" in result["stderr"]
-        assert result["stderr"] != "TIMEOUT"
-
-
-class TestDispatchHandlerTimeout:
-    """Dispatch-level wiring for DPLAN-0256 backlog #1 — hooks.json timeout fields
-    are honored for handler-type hooks, a sane default applies when absent, and a
-    timeout fails loud (log + sound) without ever silently swallowing or stalling
-    the rest of the event."""
-
-    def test_handler_timeout_propagates_hook_def_value(self, mock_logger):
-        config = {
-            "hooks_enabled": True,
-            "UserPromptSubmit": {
-                "slow_handler": {
-                    "enabled": True,
-                    "handler": "aipass.hooks.apps.handlers.fake.handle",
-                    "matcher": "",
-                    "timeout": 5,
-                }
-            },
-        }
-        with (
-            patch("aipass.hooks.apps.modules.engine._log"),
-            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
-        ):
-            mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
-            dispatch("UserPromptSubmit", "{}", config)
-        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=5)
-
-    def test_handler_default_timeout_is_30_when_unset(self, mock_logger):
-        config = {
-            "hooks_enabled": True,
-            "UserPromptSubmit": {
-                "no_timeout_handler": {
-                    "enabled": True,
-                    "handler": "aipass.hooks.apps.handlers.fake.handle",
-                    "matcher": "",
-                }
-            },
-        }
-        with (
-            patch("aipass.hooks.apps.modules.engine._log"),
-            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
-        ):
-            mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
-            dispatch("UserPromptSubmit", "{}", config)
-        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=30)
-
-    def test_inner_timeout_above_30_reaches_the_join(self, mock_logger):
-        """A hooks.json value >30 must survive to worker.join, not be clamped.
-
-        The 30s stopgap raise is worthless if anything downstream caps it — DPLAN-0285's
-        "both knobs or it is theatre". This pins the inner half.
-        """
-        config = {
-            "hooks_enabled": True,
-            "UserPromptSubmit": {
-                "slow_handler": {
-                    "enabled": True,
-                    "handler": "aipass.hooks.apps.handlers.fake.handle",
-                    "matcher": "",
-                    "timeout": 90,
-                }
-            },
-        }
-        with (
-            patch("aipass.hooks.apps.modules.engine._log"),
-            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
-        ):
-            mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
-            dispatch("UserPromptSubmit", "{}", config)
-        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=90)
-
-    def test_timeout_logs_speaks_and_lets_dispatch_continue(self, mock_logger):
-        config = {
-            "hooks_enabled": True,
-            "UserPromptSubmit": {
-                "hung_handler": {
-                    "enabled": True,
-                    "handler": "aipass.hooks.apps.handlers.fake.handle",
-                    "matcher": "",
-                },
-                "next_handler": {
-                    "enabled": True,
-                    "handler": "aipass.hooks.apps.handlers.fake2.handle",
-                    "matcher": "",
-                },
-            },
-        }
-        with (
-            patch("aipass.hooks.apps.modules.engine._log") as mock_log,
-            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
-            patch("aipass.hooks.apps.sound.speak") as mock_speak,
-        ):
-            mock_run.side_effect = [
-                {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 30000},
-                {"exit_code": 0, "stdout": "survived", "stderr": "", "elapsed_ms": 5},
-            ]
-            result = dispatch("UserPromptSubmit", "{}", config)
-        assert "survived" in result[0]
-        assert result[1] == 0
-        mock_speak.assert_called_once()
-        log_calls = [c[0][0] for c in mock_log.call_args_list]
-        assert any(e.get("action") == "timeout" for e in log_calls if isinstance(e, dict))
-
-    def test_timed_out_handler_produces_no_output(self, mock_logger):
-        config = {
-            "hooks_enabled": True,
-            "UserPromptSubmit": {
-                "hung_handler": {
-                    "enabled": True,
-                    "handler": "aipass.hooks.apps.handlers.fake.handle",
-                    "matcher": "",
-                },
-            },
-        }
-        with (
-            patch("aipass.hooks.apps.modules.engine._log"),
-            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
-            patch("aipass.hooks.apps.sound.speak"),
-        ):
-            mock_run.return_value = {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 30000}
-            result = dispatch("UserPromptSubmit", "{}", config)
-        assert result == ("", 0)
-
-    def test_command_type_timeout_also_fails_loud(self, mock_logger):
-        """The fail-loud path is shared by both hook types — command-type timeouts already
-        existed (subprocess timeout=), but were silent past the generic per-hook log line."""
-        config = {
-            "hooks_enabled": True,
-            "PreToolUse": {
-                "slow_cmd": {"enabled": True, "command": "sleep 999", "matcher": ""},
-            },
-        }
-        with (
-            patch("aipass.hooks.apps.modules.engine._log") as mock_log,
-            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
-            patch("aipass.hooks.apps.sound.speak") as mock_speak,
-        ):
-            mock_run.return_value = {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 30000}
-            result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
-        assert result == ("", 0)
-        mock_speak.assert_called_once()
-        log_calls = [c[0][0] for c in mock_log.call_args_list]
-        assert any(e.get("action") == "timeout" for e in log_calls if isinstance(e, dict))
-
-
-class TestJsonHandlerNotApplicable:
-    """Hooks uses JSONL logging, not json_handler. These verify the log equivalent."""
-
-    def test_log_default_factory(self, temp_test_dir, mock_logger):
-        log_file = temp_test_dir / "factory.jsonl"
-        assert not log_file.exists()
-        with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"event": "factory_test"})
-        assert log_file.exists()
-
-    def test_log_validate_json_output(self, temp_test_dir, mock_logger):
-        """Two _log calls append two JSON lines, in call order, both readable.
-
-        Was a loop of isinstance over however many lines happened to be there:
-        an appender that dropped the second entry, or wrote nothing at all, left
-        the loop with one line or zero and the test still green. The count is
-        the floor and the event values are the oracle.
-        """
-        log_file = temp_test_dir / "validate.jsonl"
-        with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"event": "A", "ts": 1.0})
-            _log({"event": "B", "ts": 2.0})
-        lines = log_file.read_text().strip().split("\n")
-        assert len(lines) == 2
-        assert [json.loads(line)["event"] for line in lines] == ["A", "B"]
-
-    def test_log_get_path(self):
-        from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE
-
-        assert LOG_FILE.name == "engine.jsonl"
-        assert "logs" in str(LOG_FILE)
-
-    def test_log_ensure_exists(self, temp_test_dir, mock_logger):
-        log_file = temp_test_dir / "new_dir" / "ensure.jsonl"
-        with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"ensure": True})
-        assert log_file.parent.exists()
-
-    def test_log_save_entry(self, temp_test_dir, mock_logger):
-        log_file = temp_test_dir / "save.jsonl"
-        with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"saved": True, "value": 42})
-        entry = json.loads(log_file.read_text().strip())
-        assert entry["saved"] is True
-        assert entry["value"] == 42
-
-    def test_log_load_entry(self, temp_test_dir, mock_logger):
-        log_file = temp_test_dir / "load.jsonl"
-        log_file.write_text('{"loaded": true}\n')
-        lines = log_file.read_text().strip().split("\n")
-        entry = json.loads(lines[0])
-        assert entry["loaded"] is True
-
-    def test_log_operation_recorded(self, temp_test_dir, mock_logger):
-        log_file = temp_test_dir / "ops.jsonl"
-        with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"event": "PreToolUse", "hook": "test", "exit_code": 0})
-        entry = json.loads(log_file.read_text().strip())
-        assert entry["event"] == "PreToolUse"
-
-    def test_log_ensure_module(self):
-        from aipass.hooks.apps.modules import engine
-
-        assert hasattr(engine, "_log")
-        assert callable(engine._log)
-
-
-# =============================================================================
-# One hook output, one document (#752 residue, devpulse bc1bcc45)
-#
-# Claude Code parses a hook's stdout as ONE document. The engine used to join
-# fan-out outputs with a newline, and two JSON objects on two lines are a
-# non-blocking hook error with neither applied: four post-compact re-grounds
-# were lost that way in the transcripts (devpulse x3, trigger x1), each riding
-# an Edit where auto_fix printed {"systemMessage": "[diagnostics] ok"}.
-# =============================================================================
-
-_MERGE = "aipass.hooks.apps.handlers.config.output_merge"
-_REGROUP = "aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding.handle"
-_AUTO_FIX = "aipass.hooks.apps.handlers.lifecycle.auto_fix.handle"
-
-
-def _post_tool_use(stdouts: dict, event: str = "PostToolUse") -> str:
-    """Dispatch *event* through handlers whose stdout is given per handler, in order."""
-    handlers = {"auto_fix_diagnostics": _AUTO_FIX, "post_compact_regrounding": _REGROUP, "regroup_renamed": _REGROUP}
-    config = {"hooks_enabled": True, event: {}}
-    for name in stdouts:
-        config[event][name] = {"enabled": True, "handler": handlers[name], "matcher": ""}
-
-    def run(handler, _data, timeout_s=30):
-        name = next(n for n in stdouts if handlers[n] == handler)
-        return {"exit_code": 0, "stdout": stdouts[name], "stderr": "", "elapsed_ms": 1}
-
-    with (
-        patch("aipass.hooks.apps.modules.engine._log"),
-        patch("aipass.hooks.apps.modules.engine._run_handler", side_effect=run),
-    ):
-        stdout, code = dispatch(event, '{"tool_name": "Edit"}', config)
-    assert code == 0
-    return stdout
-
-
-def _context(text: str) -> str:
-    return json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}})
-
-
-class TestOneDocumentPerEvent:
-    def test_two_json_handlers_become_one_object(self, mock_logger):
-        """The transcript shape, both contexts delivered, in handler order."""
-        outputs = {
-            "auto_fix_diagnostics": json.dumps(
-                {
-                    "systemMessage": "[diagnostics] 1 issue",
-                    "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "DIAG"},
-                }
-            ),
-            "post_compact_regrounding": _context("RE-GROUND 1/3"),
-        }
-        with pytest.raises(json.JSONDecodeError):
-            json.loads("\n".join(outputs.values()))  # the old join: what Claude Code could not parse
-        doc = json.loads(_post_tool_use(outputs))
-        assert doc["hookSpecificOutput"] == {
-            "hookEventName": "PostToolUse",
-            "additionalContext": "DIAG\n\nRE-GROUND 1/3",
-        }
-        assert doc["systemMessage"] == "[diagnostics] 1 issue"
-
-    def test_over_the_limit_the_regroup_part_wins_and_the_drop_is_logged(self, mock_logger):
-        """auto_fix runs FIRST, so handler order alone would have kept it and cut the re-ground."""
-        from aipass.hooks.apps.handlers.config.output_merge import CONTEXT_LIMIT, _cc_len
-
-        regroup = "R" * 9000
-        outputs = {"auto_fix_diagnostics": _context("D" * 2000), "post_compact_regrounding": _context(regroup)}
-        with patch(f"{_MERGE}.logger") as log:
-            doc = json.loads(_post_tool_use(outputs))
-        context = doc["hookSpecificOutput"]["additionalContext"]
-        assert context == regroup
-        assert _cc_len(context) <= CONTEXT_LIMIT == 10_000
-        dropped = [c.args for c in log.warning.call_args_list if "DROPPED" in c.args[0]]
-        assert len(dropped) == 1 and dropped[0][2] == "auto_fix_diagnostics" and dropped[0][3] == 2000
-
-    def test_a_total_exactly_at_the_limit_still_lands_whole(self, mock_logger):
-        """Claude Code keeps text inline while its length is <= the threshold."""
-        outputs = {"auto_fix_diagnostics": _context("D" * 998), "post_compact_regrounding": _context("R" * 9000)}
-        doc = json.loads(_post_tool_use(outputs))
-        assert doc["hookSpecificOutput"]["additionalContext"] == "D" * 998 + "\n\n" + "R" * 9000
-
-    def test_the_limit_counts_utf16_units(self, mock_logger):
-        """An emoji is one Python character and two units to Claude Code."""
-        outputs = {
-            "auto_fix_diagnostics": _context("\U0001f600" * 600),
-            "post_compact_regrounding": _context("R" * 9000),
-        }
-        doc = json.loads(_post_tool_use(outputs))
-        assert doc["hookSpecificOutput"]["additionalContext"] == "R" * 9000
-
-    def test_the_priority_follows_the_handler_not_the_entry_name(self, mock_logger):
-        """A project config may name the entry anything; the handler path still identifies the re-ground."""
-        regroup = "R" * 9000
-        outputs = {"auto_fix_diagnostics": _context("D" * 2000), "regroup_renamed": _context(regroup)}
-        assert json.loads(_post_tool_use(outputs))["hookSpecificOutput"]["additionalContext"] == regroup
-
-    def test_a_single_output_passes_through_byte_identical(self, mock_logger):
-        """Compact spacing on purpose: a re-serialised document would not match it."""
-        raw = '{"systemMessage":"[diagnostics] ok"}\n'
-        assert _post_tool_use({"auto_fix_diagnostics": raw}) == raw
-
-    def test_plain_outputs_are_joined_as_before(self, mock_logger):
-        assert _post_tool_use({"auto_fix_diagnostics": "A", "post_compact_regrounding": "B"}) == "A\nB"
-
-    def test_plain_text_beside_json_keeps_its_audience(self, mock_logger):
-        """Plain PostToolUse stdout is shown to the user, so it rides as systemMessage;
-        plain UserPromptSubmit stdout is model context, so it rides as context."""
-        doc = json.loads(_post_tool_use({"auto_fix_diagnostics": "note", "post_compact_regrounding": _context("R")}))
-        assert doc["systemMessage"] == "note"
-        assert doc["hookSpecificOutput"]["additionalContext"] == "R"
-        ups = {"auto_fix_diagnostics": "branch prompt", "post_compact_regrounding": _context("R")}
-        doc = json.loads(_post_tool_use(ups, event="UserPromptSubmit"))
-        assert doc["hookSpecificOutput"] == {
-            "hookEventName": "UserPromptSubmit",
-            "additionalContext": "branch prompt\n\nR",
-        }
-
-    def test_a_conflicting_key_keeps_the_first_handlers_value_and_says_so(self, mock_logger):
-        outputs = {
-            "auto_fix_diagnostics": json.dumps({"decision": "block", "reason": "lint"}),
-            "post_compact_regrounding": json.dumps({"decision": "approve", "reason": "other"}),
-        }
-        with patch(f"{_MERGE}.logger") as log:
-            doc = json.loads(_post_tool_use(outputs))
-        assert (doc["decision"], doc["reason"]) == ("block", "lint")
-        assert sum("conflicts" in c.args[0] for c in log.warning.call_args_list) == 2
-
-
-_LEDGER = "aipass.hooks.apps.modules.injection_ledger"
-_STORE = "aipass.hooks.apps.handlers.config.ledger_store"
-
-
-class TestInjectionLedger:
-    """DPLAN-0347, hooks row 3: what a seat was told at turn N is a record, not a memory.
-
-    Warn-only, so every pin here is about the record being TRUE — grouped by the
-    token siblings share, carrying what the merge delivered — and about the
-    ledger never costing a dispatch its output.
-    """
-
-    @pytest.fixture
-    def ledger(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.modules import injection_ledger
-
-        monkeypatch.setattr(injection_ledger.ledger_store, "_LEDGER_DIR", tmp_path)
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 321, encoding="utf-8")
-        payload = {"session_id": "sess-1", "transcript_path": str(transcript)}
-        return injection_ledger, payload
-
-    def test_siblings_of_one_turn_fold_to_one_row_even_when_a_turn_number_lags(self, ledger):
-        """temporal never consults cadence, so it can read the previous turn's number."""
-        mod, payload = ledger
-        for hook, lagging_turn in (("temporal", 4), ("tier0_kernel", 5), ("navmap", 5)):
-            with patch("aipass.hooks.apps.modules.cadence.current_turn", return_value=lagging_turn):
-                mod.record("UserPromptSubmit", [(hook, "h", f"{hook} text")], f"{hook} text", payload)
-
-        rows = mod.ledger_store.read_turns("sess-1")
-        assert len(rows) == 1
-        assert rows[0]["token"] == 321 and rows[0]["turn"] == 5
-        assert set(rows[0]["hooks"]) == {"temporal", "tier0_kernel", "navmap"}
-
-    def test_a_new_token_is_a_new_row(self, ledger):
-        mod, payload = ledger
-        mod.record("UserPromptSubmit", [("temporal", "h", "t1")], "t1", payload)
-        with open(payload["transcript_path"], "a", encoding="utf-8") as fh:
-            fh.write("more")
-        mod.record("UserPromptSubmit", [("temporal", "h", "t2")], "t2", payload)
-        assert [row["token"] for row in mod.ledger_store.read_turns("sess-1")] == [321, 325]
-
-    def test_plain_tool_event_stdout_is_not_recorded_as_context(self, ledger):
-        """Plain PostToolUse stdout goes to the user, not the model."""
-        mod, payload = ledger
-        assert mod.record("PostToolUse", [("auto_fix", "h", "note")], "note", payload) is None
-        assert mod.ledger_store.read_turns("sess-1") == []
-
-    def test_the_record_keeps_what_the_merge_delivered_beside_what_was_produced(self, ledger):
-        mod, payload = ledger
-        outputs = [
-            ("auto_fix_diagnostics", "h", _context("D" * 2000)),
-            ("post_compact_regrounding", "h", _context("R" * 9000)),
-        ]
-        entry = mod.record("PostToolUse", outputs, _context("R" * 9000), payload)
-        assert (entry["total"], entry["delivered"]) == (11000, 9000)
-
-    def test_an_injection_over_the_persist_line_warns_and_is_still_recorded(self, ledger):
-        mod, payload = ledger
-        with patch(f"{_STORE}.logger") as log:
-            entry = mod.record("UserPromptSubmit", [("big", "h", "X" * 10_001)], "X" * 10_001, payload)
-        assert entry["hooks"]["big"]["chars"] == 10_001
-        assert any("persist line" in c.args[0] for c in log.warning.call_args_list)
-
-    def test_a_write_that_fails_warns_and_never_raises(self, ledger, tmp_path, monkeypatch):
-        mod, payload = ledger
-        monkeypatch.setattr(mod.ledger_store, "_LEDGER_DIR", tmp_path / "no" / "such" / "dir")
-        with patch(f"{_STORE}.logger") as log:
-            assert mod.record("UserPromptSubmit", [("temporal", "h", "t")], "t", payload) is None
-        assert any("NOT written" in c.args[0] for c in log.warning.call_args_list)
-
-    def test_a_session_id_that_is_not_a_filename_writes_nothing(self, ledger, tmp_path):
-        """The id becomes a path. With a real directory to climb out of, an
-        unchecked id would land a file OUTSIDE the ledger dir — so the pin
-        builds that directory first, or it would pass on a failed open."""
-        mod, payload = ledger
-        (tmp_path / "aipass-ledger-x").mkdir()
-        hostile = {**payload, "session_id": "x/../../escaped"}
-        assert mod.record("UserPromptSubmit", [("temporal", "h", "t")], "t", hostile) is None
-        assert not (tmp_path.parent / "escaped.jsonl").exists()
-
-    def test_the_engine_records_a_dispatch_and_a_ledger_crash_never_costs_the_output(self, ledger, mock_logger):
-        mod, payload = ledger
-        config = {"hooks_enabled": True, "UserPromptSubmit": {"temporal": {"enabled": True, "handler": "x.handle"}}}
-        ran = {"exit_code": 0, "stdout": "Temporal: now", "stderr": "", "elapsed_ms": 1}
-        with (
-            patch("aipass.hooks.apps.modules.engine._log"),
-            patch("aipass.hooks.apps.modules.engine._run_handler", return_value=ran),
-            patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
-            patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
-        ):
-            assert dispatch("UserPromptSubmit", json.dumps(payload), config) == ("Temporal: now", 0)
-            assert mod.ledger_store.read_turns("sess-1")[0]["hooks"]["temporal"]["chars"] == len("Temporal: now")
-            with patch(f"{_LEDGER}.record", side_effect=RuntimeError("boom")):
-                assert dispatch("UserPromptSubmit", json.dumps(payload), config) == ("Temporal: now", 0)
-        assert any("injection_ledger failed" in c.args[0] for c in mock_logger.warning.call_args_list)
-
-    def test_the_verb_prints_one_line_per_turn(self, ledger, capsys):
-        mod, payload = ledger
-        mod.record("UserPromptSubmit", [("tier0_kernel", "h", "K" * 30)], "K" * 30, payload)
-        mod.record("UserPromptSubmit", [("temporal", "h", "T" * 4)], "T" * 4, payload)
-        with patch(f"{_LEDGER}.json_handler"):
-            assert mod.handle_command("ledger", ["--session", "sess-1"]) is True
-        out = capsys.readouterr().out
-        assert "1 injection moment(s)" in out
-        assert "total=34" in out and "tier0_kernel=30" in out and "temporal=4" in out
-
-    def test_a_harness_wake_is_marked_so_an_audit_can_count_them(self, ledger, capsys):
-        """DPLAN-0348: the 33 idle wakes of 09-16 were counted from transcripts. The row says it now."""
-        mod, payload = ledger
-        wake = {**payload, "prompt": "<task-notification>\n<task-id>b1</task-id>\n</task-notification>"}
-        mod.record("UserPromptSubmit", [("temporal", "h", "T")], "T", wake)
-        with open(payload["transcript_path"], "a", encoding="utf-8") as fh:
-            fh.write("more")
-        mod.record("UserPromptSubmit", [("temporal", "h", "T")], "T", {**payload, "prompt": "typed"})
-
-        assert [row.get("automated") for row in mod.ledger_store.read_turns("sess-1")] == [True, False]
-        with patch(f"{_LEDGER}.json_handler"):
-            mod.handle_command("ledger", ["--session", "sess-1"])
-        rows = [line for line in capsys.readouterr().out.splitlines() if "UserPromptSubmit" in line]
-        assert "automated" in rows[0] and "automated" not in rows[1]
-
-    def test_a_bare_read_is_the_callers_own_session_even_when_a_neighbour_wrote_last(self, ledger, capsys, monkeypatch):
-        """Every citizen has a live session, so the newest ledger is usually someone else's."""
-        import os
-
-        mod, payload = ledger
-        mod.record("UserPromptSubmit", [("temporal", "h", "MINE")], "MINE", payload)
-        neighbour = {**payload, "session_id": "sess-2"}
-        mod.record("UserPromptSubmit", [("navmap", "h", "N" * 77)], "N" * 77, neighbour)
-        os.utime(mod.ledger_store.ledger_path("sess-2"), (4_000_000_000, 4_000_000_000))
-
-        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-1")
-        with patch(f"{_LEDGER}.json_handler"):
-            mod.handle_command("ledger", [])
-        out = capsys.readouterr().out
-        assert "sess-1 (this session)" in out and "temporal=4" in out and "navmap" not in out
-
-        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
-        with patch(f"{_LEDGER}.json_handler"):
-            mod.handle_command("ledger", [])
-        assert "sess-2 (most recently written, NOT this session)" in capsys.readouterr().out

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2025-11-15
-# Modified: 2026-09-12
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -257,18 +257,20 @@ def get_system_status() -> Dict[str, Any]:
 
     Returns:
         Dict with system status information:
-        - total_modules: Number of discovered modules
+        - total_modules: Number of discovered modules, None if the registry could not be read
         - individual_loggers: Number of active loggers
         - module_logs_dir: Path to prax module logs
         - registry_file: Path to module registry
         - file_watcher_active: Watcher status in THIS process (see status.py)
-        - last_scan: what the last `drone @prax discover` reported, {} if never
+        - last_scan: what the last `drone @prax discover` reported, {} if never,
+          None if the registry could not be read
         - logger_override_active: Override status
     """
     modules = load_module_registry()
 
     return {
-        "total_modules": len(modules),
+        # None when the registry cannot be read, never a count of 0 (prax, leg 15).
+        "total_modules": None if modules is None else len(modules),
         "individual_loggers": get_captured_loggers_count(),
         "system_logs_dir": str(get_system_logs_dir()),
         "module_logs_dir": str(get_module_logs_dir("prax")),

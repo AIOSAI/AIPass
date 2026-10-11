@@ -65,6 +65,11 @@ def test_parse_returns_the_offsets():
 Getting that backwards is the failure mode that would sink the rule: it would
 flag the *right* answer and teach projects to delete their type assertions.
 
+Company need not be an `assert` statement. A `with pytest.raises(...)` block
+(with or without `as`) and a mock's `assert_*` call (`assert_not_called`,
+`assert_called_once_with` and kin) are oracles too, so an isinstance on a
+raised error's `__cause__` beside either is not flagged (fleet green leg 20).
+
 ## OR-ESCAPE — the assertion with an exit
 
 ```python

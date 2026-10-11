@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ruff_check_content.py
 # Description: Ruff Check Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -26,7 +26,7 @@ def get_ruff_check_standards() -> str:
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  Ruff is the primary linter for AIPass code. Zero violations is the bar.",
         "  Code that passes seedgo can still have 338 ruff violations — this standard",
-        "  closes that gap. Advisory initially: surfaces violations, never blocks.",
+        "  closes that gap. It gates: the row counts in the branch's Overall.",
         "",
         "[bold cyan]WHAT IT CHECKS:[/bold cyan]",
         "  Runs [dim]ruff check <branch>/apps/ --output-format=json[/dim] and scores",
@@ -52,10 +52,10 @@ def get_ruff_check_standards() -> str:
         "  Runs once per branch — ruff walks [dim]apps/[/dim] tree itself.",
         "  Respects the branch's own [dim]pyproject.toml[/dim] or [dim]ruff.toml[/dim] if present.",
         "",
-        "[bold cyan]ADVISORY MODE:[/bold cyan]",
-        "  This standard is currently ADVISORY — it surfaces violation counts",
-        "  and affects branch scores but never blocks an audit.",
-        "  Promotion to REQUIRED once all branches are consistently clean.",
+        "[bold cyan]GATING (since 2026-09-25, owner ruling 00:33):[/bold cyan]",
+        "  Advisory from 2026-04-16 until CI ruff went green fleet-wide. Now the",
+        "  row counts in Overall and fails on any lint OR format finding.",
+        "  Ruff not installed is a skip; a timeout is a 0.",
         "",
         "[bold cyan]VIOLATIONS:[/bold cyan]",
         "  Violation message format:",

@@ -1,6 +1,6 @@
 # TODO/FIXME Standards
 **Status:** Draft v1
-**Date:** 2026-03-22
+**Date:** 2026-10-03
 
 ---
 
@@ -27,11 +27,14 @@ The checker scans each Python file for comment lines containing these tags (case
 | `HACK` | Workaround that should be replaced |
 | `XXX` | Dangerous or problematic code |
 
-**Pattern:** Matches `# TODO: text`, `# FIXME(user): text`, inline `x = 1  # HACK ...`, etc. The regex requires the `#` comment marker, so these tags inside actual code strings are not flagged.
+**Pattern:** Matches `# TODO: text`, `# FIXME(user): text`, inline `x = 1  # HACK ...`, etc.
+
+**Only a real comment counts** (2026-10-03, seedgo fleet green leg 13). Comments are read from Python's tokenizer (its `COMMENT` tokens), so a `# TODO` inside any string or docstring is text and never flagged: `text = "# TODO: a specimen"` passes, and so does a `# FIXME` line inside an assigned triple-quoted string. Before this, a line scan read both as comments. A real comment after a string on the same line (`text = "# fine"  # TODO: real`) is still flagged.
+
+**A file Python cannot tokenize** (an unclosed string, a bad dedent) fails by name with the check `File tokenizable`: its comments are unknown, so it never reads as clean.
 
 **Skipped:**
 - `__init__.py` files
-- Content inside docstrings (triple-quoted strings are tracked and skipped)
 
 ---
 

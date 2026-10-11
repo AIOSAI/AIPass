@@ -1,22 +1,33 @@
-"""Tests for ruff_check.check_branch — the 33rd seedgo standard."""
-
 # =================== META ====================
 # Name: test_checkers_batch5.py
-# Description: Unit tests for ruff_check checker handler (batch 5)
-# Version: 1.0.0
+# Description: Unit tests for ruff_check and clear_text_secret_logging checker handlers (batch 5)
+# Version: 1.6.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-10-11
 # =============================================
 
+"""Tests for apps/handlers/aipass_standards/ruff_check.py and clear_text_secret_logging_check.py."""
+
+# ruff_check is the 33rd seedgo standard. Its per-file lane, check_module, has no
+# test in this file.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — ruff's own lint and format verdicts; subprocess.run is sealed, its output built here
+# seedgo: no-test-needed(stdlib) — shutil.which's PATH search; the tests only choose what PATH holds
+# seedgo: no-test-needed(shared) — is_bypassed's own matching rules for clear_text_secret_logging; tests/test_bypass.py
+
 import json
+import os
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from aipass.seedgo.apps.handlers.aipass_standards.ruff_check import (
-    check_branch,
-    _score_from_count,
-    _is_ruff_bypassed,
-)
+import pytest
+
+from aipass.seedgo.apps.handlers.aipass_standards import clear_text_secret_logging_check as secret_logging
+from aipass.seedgo.apps.handlers.aipass_standards.ruff_check import check_branch
+
+_RUN = "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run"
 
 
 # =============================================
@@ -68,77 +79,107 @@ def _make_violation(filename: str, code: str = "F401", row: int = 1) -> dict:
     }
 
 
+def _put_ruff_on_path(tmp_path: Path, monkeypatch) -> None:
+    """PATH holds only a stand-in ruff; subprocess.run is sealed, so it never runs."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # Windows finds ruff.exe through PATHEXT and ignores the bit; POSIX needs the bit.
+    for name in ("ruff", "ruff.exe"):
+        stub = bin_dir / name
+        stub.write_text("", encoding="utf-8")
+        if sys.platform != "win32":
+            os.chmod(stub, 0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+
+def _branch_result(tmp_path: Path, monkeypatch, violations: list, ruff_bypass: list | None = None) -> dict:
+    """check_branch on a fresh branch whose ruff reports these lint hits and no format hits."""
+    branch = _make_branch(tmp_path)
+    if ruff_bypass is not None:
+        bypass_file = branch / ".seedgo" / "ruff_bypass.json"
+        bypass_file.parent.mkdir(parents=True, exist_ok=True)
+        bypass_file.write_text(json.dumps(ruff_bypass), encoding="utf-8")
+    _put_ruff_on_path(tmp_path, monkeypatch)
+    lint = _ruff_proc(violations, returncode=1 if violations else 0)
+    with patch(_RUN, side_effect=[lint, _fmt_proc()]):
+        return check_branch(str(branch))
+
+
+def _hits(tmp_path: Path, count: int) -> list:
+    return [_make_violation(str(tmp_path / "apps" / "modules" / "x.py"), "F401", i) for i in range(count)]
+
+
 # =============================================
-# 1. Score helper
+# 1. Score bands, through check_branch
 # =============================================
 
 
 class TestScoreFromCount:
-    def test_zero_violations(self) -> None:
-        """Zero violations maps to score 100."""
-        assert _score_from_count(0) == 100
+    def test_zero_violations(self, tmp_path: Path, monkeypatch) -> None:
+        """Zero violations maps to score 100. Mutant: the clean score returns 99 in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        assert _branch_result(tmp_path, monkeypatch, [])["score"] == 100
 
-    def test_one_violation(self) -> None:
-        """One violation falls in the 1–5 band, score 95."""
-        assert _score_from_count(1) == 95
+    def test_one_violation(self, tmp_path: Path, monkeypatch) -> None:
+        """One violation falls in the 1–5 band, score 95. Mutant: the band starts at 2 in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        assert _branch_result(tmp_path, monkeypatch, _hits(tmp_path, 1))["score"] == 95
 
-    def test_five_violations(self) -> None:
-        """Five violations is the upper bound of the 1–5 band, score 95."""
-        assert _score_from_count(5) == 95
+    def test_five_violations(self, tmp_path: Path, monkeypatch) -> None:
+        """Five violations is the upper bound of the 1–5 band, score 95. Mutant: count < 5 in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        assert _branch_result(tmp_path, monkeypatch, _hits(tmp_path, 5))["score"] == 95
 
-    def test_six_violations(self) -> None:
-        """Six violations enters the 6–20 band, score 85."""
-        assert _score_from_count(6) == 85
+    def test_six_violations(self, tmp_path: Path, monkeypatch) -> None:
+        """Six violations enters the 6–20 band, score 85. Mutant: the 95 band reaches 6 in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        assert _branch_result(tmp_path, monkeypatch, _hits(tmp_path, 6))["score"] == 85
 
-    def test_fifty_one_violations(self) -> None:
-        """51 violations enters the 51–100 band, score 50."""
-        assert _score_from_count(51) == 50
+    def test_fifty_one_violations(self, tmp_path: Path, monkeypatch) -> None:
+        """51 violations enters the 51–100 band, score 50. Mutant: the 70 band reaches 51 in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        assert _branch_result(tmp_path, monkeypatch, _hits(tmp_path, 51))["score"] == 50
 
-    def test_over_hundred(self) -> None:
-        """101+ violations hits the floor band, score 25."""
-        assert _score_from_count(101) == 25
+    def test_over_hundred(self, tmp_path: Path, monkeypatch) -> None:
+        """101+ violations hits the floor band, score 25. Mutant: the 50 band reaches 101 in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        assert _branch_result(tmp_path, monkeypatch, _hits(tmp_path, 101))["score"] == 25
 
 
 # =============================================
-# 2. Ruff bypass helper
+# 2. Ruff bypass (.seedgo/ruff_bypass.json)
 # =============================================
 
 
 class TestIsRuffBypassed:
-    def test_no_bypass_rules(self) -> None:
-        """Empty bypass list never matches any violation."""
-        v = _make_violation("/apps/module.py", "F401", 10)
-        assert not _is_ruff_bypassed(v, [])
+    def test_no_bypass_rules(self, tmp_path: Path, monkeypatch) -> None:
+        """Empty bypass list never matches any violation. Mutant: an empty list matches all in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        v = _make_violation(str(tmp_path / "apps" / "module.py"), "F401", 10)
+        assert _branch_result(tmp_path, monkeypatch, [v], ruff_bypass=[])["score"] == 95
 
-    def test_file_and_code_match(self) -> None:
-        """Rule matching file and code bypasses the violation."""
-        v = _make_violation("/apps/module.py", "F401", 10)
+    def test_file_and_code_match(self, tmp_path: Path, monkeypatch) -> None:
+        """Rule matching file and code bypasses the violation. Mutant: file must match whole in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        v = _make_violation(str(tmp_path / "apps" / "module.py"), "F401", 10)
         bypass = [{"file": "module.py", "code": "F401"}]
-        assert _is_ruff_bypassed(v, bypass)
+        assert _branch_result(tmp_path, monkeypatch, [v], ruff_bypass=bypass)["score"] == 100
 
-    def test_code_mismatch(self) -> None:
-        """Rule with different code does not bypass the violation."""
-        v = _make_violation("/apps/module.py", "F401", 10)
+    def test_code_mismatch(self, tmp_path: Path, monkeypatch) -> None:
+        """Rule with different code does not bypass the violation. Mutant: the code is ignored in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        v = _make_violation(str(tmp_path / "apps" / "module.py"), "F401", 10)
         bypass = [{"file": "module.py", "code": "E501"}]
-        assert not _is_ruff_bypassed(v, bypass)
+        assert _branch_result(tmp_path, monkeypatch, [v], ruff_bypass=bypass)["score"] == 95
 
-    def test_line_match(self) -> None:
-        """Rule with matching line number bypasses the violation."""
-        v = _make_violation("/apps/module.py", "F401", 42)
+    def test_line_match(self, tmp_path: Path, monkeypatch) -> None:
+        """Rule with matching line number bypasses the violation. Mutant: a line rule never matches in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        v = _make_violation(str(tmp_path / "apps" / "module.py"), "F401", 42)
         bypass = [{"file": "module.py", "code": "F401", "line": 42}]
-        assert _is_ruff_bypassed(v, bypass)
+        assert _branch_result(tmp_path, monkeypatch, [v], ruff_bypass=bypass)["score"] == 100
 
-    def test_line_mismatch(self) -> None:
-        """Rule targeting a different line does not bypass the violation."""
-        v = _make_violation("/apps/module.py", "F401", 10)
+    def test_line_mismatch(self, tmp_path: Path, monkeypatch) -> None:
+        """Rule targeting a different line does not bypass the violation. Mutant: the line is ignored in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        v = _make_violation(str(tmp_path / "apps" / "module.py"), "F401", 10)
         bypass = [{"file": "module.py", "code": "F401", "line": 99}]
-        assert not _is_ruff_bypassed(v, bypass)
+        assert _branch_result(tmp_path, monkeypatch, [v], ruff_bypass=bypass)["score"] == 95
 
-    def test_file_only_matches_any_code(self) -> None:
-        """File-only rule bypasses all violations in that file regardless of code."""
-        v = _make_violation("/apps/module.py", "E501", 1)
+    def test_file_only_matches_any_code(self, tmp_path: Path, monkeypatch) -> None:
+        """File-only rule bypasses all codes in that file. Mutant: a missing code matches none in apps/handlers/aipass_standards/ruff_check.py — killed."""
+        v = _make_violation(str(tmp_path / "apps" / "module.py"), "E501", 1)
         bypass = [{"file": "module.py"}]
-        assert _is_ruff_bypassed(v, bypass)
+        assert _branch_result(tmp_path, monkeypatch, [v], ruff_bypass=bypass)["score"] == 100
 
 
 # =============================================
@@ -148,43 +189,42 @@ class TestIsRuffBypassed:
 
 @patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.json_handler")
 class TestCheckBranch:
-    def test_clean_branch_scores_100(self, mock_json, tmp_path: Path) -> None:
+    def test_clean_branch_scores_100(self, mock_json, tmp_path: Path, monkeypatch) -> None:
         """Branch with zero ruff violations scores 100."""
         branch = _make_branch(tmp_path)
         clean_proc = _ruff_proc([], returncode=0)
         fmt_clean = _fmt_proc()
-        with patch(
-            "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which",
-            return_value="/usr/bin/ruff",
-        ):
-            with patch(
-                "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run",
-                side_effect=[clean_proc, fmt_clean],
-            ):
-                result = check_branch(str(branch))
+        _put_ruff_on_path(tmp_path, monkeypatch)
+        with patch(_RUN, side_effect=[clean_proc, fmt_clean]):
+            result = check_branch(str(branch))
         assert result["score"] == 100
         assert result["passed"] is True
         assert result["standard"] == "RUFF_CHECK"
-        assert result["advisory"] is True
+        assert "advisory" not in result
 
-    def test_violations_caught_and_scored(self, mock_json, tmp_path: Path) -> None:
+    def test_violations_caught_and_scored(self, mock_json, tmp_path: Path, monkeypatch) -> None:
         """Branch with violations reports count and drops score."""
         branch = _make_branch(tmp_path)
         violations = [_make_violation(str(branch / "apps" / "modules" / "x.py"), "F401", i) for i in range(10)]
         proc = _ruff_proc(violations, returncode=1)
         fmt_clean = _fmt_proc()
-        with patch(
-            "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which",
-            return_value="/usr/bin/ruff",
-        ):
-            with patch(
-                "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run",
-                side_effect=[proc, fmt_clean],
-            ):
-                result = check_branch(str(branch))
+        _put_ruff_on_path(tmp_path, monkeypatch)
+        with patch(_RUN, side_effect=[proc, fmt_clean]):
+            result = check_branch(str(branch))
         assert result["score"] == 85  # 10 violations → 6–20 band
-        assert result["passed"] is True  # advisory: always True
+        assert result["passed"] is False  # the row gates since 2026-09-25
         assert "10 violation" in result["checks"][0]["message"]
+
+    def test_an_unformatted_file_alone_fails_the_row(self, mock_json, tmp_path: Path, monkeypatch) -> None:
+        """The row covers format too: one unformatted file, zero lint hits, still gates."""
+        branch = _make_branch(tmp_path)
+        fmt_dirty = _fmt_proc([f"Would reformat: {branch / 'apps' / 'x.py'}"])
+        _put_ruff_on_path(tmp_path, monkeypatch)
+        with patch(_RUN, side_effect=[_ruff_proc([], returncode=0), fmt_dirty]):
+            result = check_branch(str(branch))
+        assert result["score"] == 98
+        assert result["passed"] is False
+        assert "1 file(s) need formatting — x.py" in result["checks"][1]["message"]
 
     def test_standard_bypass_respected(self, mock_json, tmp_path: Path) -> None:
         """Standard-level bypass via bypass_rules returns score 100."""
@@ -194,17 +234,18 @@ class TestCheckBranch:
         assert result["score"] == 100
         assert result["passed"] is True
 
-    def test_ruff_not_installed_skips(self, mock_json, tmp_path: Path) -> None:
+    def test_ruff_not_installed_skips(self, mock_json, tmp_path: Path, monkeypatch) -> None:
         """Missing ruff binary returns score 100 with skipped status."""
         branch = _make_branch(tmp_path)
-        with patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which", return_value=None):
-            result = check_branch(str(branch))
+        (tmp_path / "empty").mkdir()
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+        result = check_branch(str(branch))
         assert result["score"] == 100
         assert result["passed"] is True
         assert result.get("status") == "skipped"
         assert "not installed" in result["checks"][0]["message"]
 
-    def test_ruff_bypass_json_filters_violations(self, mock_json, tmp_path: Path) -> None:
+    def test_ruff_bypass_json_filters_violations(self, mock_json, tmp_path: Path, monkeypatch) -> None:
         """Violations listed in .seedgo/ruff_bypass.json are filtered out."""
         branch = _make_branch(tmp_path)
         v_path = str(branch / "apps" / "modules" / "thing.py")
@@ -217,33 +258,668 @@ class TestCheckBranch:
         # Bypass the F401
         bypass_file = branch / ".seedgo" / "ruff_bypass.json"
         bypass_file.parent.mkdir(parents=True, exist_ok=True)
-        bypass_file.write_text(json.dumps([{"file": "thing.py", "code": "F401"}]))
-        with patch(
-            "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which",
-            return_value="/usr/bin/ruff",
-        ):
-            with patch(
-                "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run",
-                side_effect=[proc, fmt_clean],
-            ):
-                result = check_branch(str(branch))
+        bypass_file.write_text(json.dumps([{"file": "thing.py", "code": "F401"}]), encoding="utf-8")
+        _put_ruff_on_path(tmp_path, monkeypatch)
+        with patch(_RUN, side_effect=[proc, fmt_clean]):
+            result = check_branch(str(branch))
         # Only 1 active violation (E501), score should be 95
         assert result["score"] == 95
         assert "1 violation" in result["checks"][0]["message"]
 
-    def test_timeout_returns_score_zero(self, mock_json, tmp_path: Path) -> None:
+    def test_timeout_returns_score_zero(self, mock_json, tmp_path: Path, monkeypatch) -> None:
         """Subprocess timeout returns score 0 and passed False."""
         import subprocess as sp
 
         branch = _make_branch(tmp_path)
-        with patch(
-            "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which", return_value="/usr/bin/ruff"
-        ):
-            with patch(
-                "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run",
-                side_effect=sp.TimeoutExpired(cmd="ruff", timeout=60),
-            ):
-                result = check_branch(str(branch))
+        _put_ruff_on_path(tmp_path, monkeypatch)
+        with patch(_RUN, side_effect=sp.TimeoutExpired(cmd="ruff", timeout=60)):
+            result = check_branch(str(branch))
         assert result["score"] == 0
         assert result["passed"] is False
         assert "timed out" in result["checks"][0]["message"]
+
+
+# =============================================
+# 4. clear_text_secret_logging (dispatch 82800a7a, CodeQL on PR #774)
+# =============================================
+
+#: @api apps/handlers/host/tokens.py as on disk 2026-10-10, cut to the three
+#: warning calls CodeQL py/clear-text-logging-sensitive-data traced into prax's
+#: SystemLogger.warning (logger.py:135). Both sources read secrets_store.SECRETS_BASE
+#: (store_path :182, lock_path :267); on disk the calls are :324, :438 and :370.
+TOKENS_SPECIMEN = """from aipass.prax import logger
+from aipass.api.apps.handlers.auth import secrets as secrets_store
+
+
+def store_path():
+    return secrets_store.SECRETS_BASE / "host_api" / "tokens.json"
+
+
+def lock_path():
+    return secrets_store.SECRETS_BASE / "host_api" / "tokens.lock"
+
+
+def save_tokens(content):
+    target = store_path()
+    temporary = target.parent / ".tokens.tmp"
+    try:
+        temporary.write_bytes(content)
+    except OSError as cleanup_error:
+        logger.warning("could not remove the temp store at %s: %s", temporary, cleanup_error)
+
+
+def _drop_lock(path):
+    try:
+        path.unlink()
+    except OSError as e:
+        logger.warning("could not remove the token store lock at %s: %s", path, e)
+
+
+def take_lock():
+    path = lock_path()
+    if path.exists():
+        logger.warning("breaking a stale token store lock at %s", path)
+        _drop_lock(path)
+"""
+
+#: The temp-store call (:324 on disk), the _drop_lock call (:438) and the stale-lock call (:370).
+TOKENS_ROWS = [19, 26, 32]
+
+#: @api apps/handlers/auth/secrets.py as on disk 2026-10-10, cut to the module-level
+#: SECRETS_BASE binding (:29) and the three warnings it reaches (:62, :187, :216 on disk).
+AUTH_SECRETS_SPECIMEN = """from pathlib import Path
+from aipass.prax import logger
+
+SECRETS_BASE = Path.home() / ".secrets" / "aipass"
+
+
+def get_secret(provider, slug):
+    provider_dir = SECRETS_BASE / provider
+    if not provider_dir.exists():
+        logger.warning(f"Provider directory not found: {provider_dir}")
+        return None
+    json_path = provider_dir / f"{slug}.json"
+    raw_path = provider_dir / slug
+    return _read_json(json_path) or _read_raw(raw_path)
+
+
+def _read_json(path):
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.warning(f"Error reading secret file {path}: {e}")
+
+
+def _read_raw(path):
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.warning(f"Error reading secret file {path}: {e}")
+"""
+
+#: @drone apps/drone.py as on disk 2026-10-10, cut: _resolve_mail_token hands back its
+#: parameter `token`, and the result is logged as `command` (:621 on disk).
+RESOLVED_TOKEN_SPECIMEN = """from aipass.prax import logger
+
+
+def _resolve_mail_token(token):
+    return token
+
+
+def route(cmd_args, exc):
+    command = _resolve_mail_token(cmd_args[0])
+    logger.warning("Command routing failed for %s: %s", command, exc)
+"""
+
+#: @hooks apps/handlers/security/git_gate.py:373 as on disk 2026-10-10, cut to the call.
+GIT_GATE_SPECIMEN = """from aipass.prax import logger
+
+
+def refuse(credentials):
+    if credentials:
+        logger.warning("[HOOKS] git_gate: credential read refused: %s", credentials[0])
+"""
+
+
+def _secret_rows(source: str) -> list:
+    """The convicted line numbers of one source text."""
+    return [line for line, _what in secret_logging.scan(source)]
+
+
+class TestASecretDerivedPathOnALogLineIsConvicted:
+    def test_the_three_codeql_flows_in_api_tokens_are_convicted(self) -> None:
+        assert _secret_rows(TOKENS_SPECIMEN) == TOKENS_ROWS
+
+    def test_the_row_names_the_source_the_value_came_from(self) -> None:
+        whats = [what for _line, what in secret_logging.scan(TOKENS_SPECIMEN)]
+        assert whats == [
+            "temporary (built from secrets_store.SECRETS_BASE)",
+            "path (built from secrets_store.SECRETS_BASE)",
+            "path (built from secrets_store.SECRETS_BASE)",
+        ]
+
+    def test_the_cured_store_root_name_acquits_every_flow(self) -> None:
+        assert _secret_rows(TOKENS_SPECIMEN.replace("SECRETS_BASE", "STORE_ROOT")) == []
+
+    def test_a_module_level_secrets_base_reaches_all_three_api_auth_warnings(self) -> None:
+        assert _secret_rows(AUTH_SECRETS_SPECIMEN) == [10, 21, 28]
+
+
+class TestArmTwoStartsOnlyFromAModuleBindingOrAnAttribute:
+    def test_a_returned_token_parameter_logged_under_a_neutral_name_is_acquitted(self) -> None:
+        assert _secret_rows(RESOLVED_TOKEN_SPECIMEN) == []
+
+    def test_a_loop_token_built_into_a_neutral_name_is_acquitted(self) -> None:
+        source = (
+            "from pathlib import Path\nfrom aipass.prax import logger\n\n\n"
+            "def tracked(tokens):\n    for token in tokens:\n        path = Path(token)\n"
+            "        logger.info('outside: %s', path)\n"
+        )
+        assert _secret_rows(source) == []
+
+    def test_the_parameter_itself_on_the_log_line_is_still_arm_one(self) -> None:
+        source = RESOLVED_TOKEN_SPECIMEN + "\n\ndef refuse(token):\n    logger.warning('refused %s', token)\n"
+        assert _secret_rows(source) == [14]
+
+
+class TestASecretNamedValueOnALogLineIsConvicted:
+    def test_an_element_of_a_credentials_list_is_convicted(self) -> None:
+        assert _secret_rows(GIT_GATE_SPECIMEN) == [6]
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            'logger.info(f"sending {api_key}")',
+            'logger.error("bad %s" % self.password)',
+            'logger.debug("using {}".format(get_bearer()))',
+            'logger.critical("value: " + str(client_secret))',
+            "logger.exception(token.strip())",
+        ],
+    )
+    def test_every_spelling_of_the_message_is_read(self, call: str) -> None:
+        assert _secret_rows(f"from aipass.prax import logger\n{call}\n") == [2]
+
+    def test_an_aliased_prax_logger_is_read(self) -> None:
+        assert _secret_rows("from aipass.prax import logger as log\nlog.warning('%s', token)\n") == [2]
+
+
+class TestAnIdentifierOrARedactionIsAcquitted:
+    @pytest.mark.parametrize(
+        "argument",
+        ["token_id", "n_tokens", "secret_path", "len(token)", "token[-4:]", "mask(password)", "redact_secret(api_key)"],
+    )
+    def test_the_dispatch_exemptions_are_acquitted(self, argument: str) -> None:
+        assert _secret_rows(f"from aipass.prax import logger\nlogger.warning('%s', {argument})\n") == []
+
+    def test_a_first_ten_characters_slice_still_shows_the_secret(self) -> None:
+        assert _secret_rows("from aipass.prax import logger\nlogger.warning('%s', token[:10])\n") == [2]
+
+    def test_a_print_or_a_constant_word_is_not_a_log_of_a_value(self) -> None:
+        source = "from aipass.prax import logger\nprint(token)\nlogger.warning('token refused')\n"
+        assert _secret_rows(source) == []
+
+
+class TestTheSecretLoggingVerdict:
+    def test_a_convicted_file_scores_0_and_names_every_line(self, tmp_path: Path) -> None:
+        path = tmp_path / "apps" / "tokens.py"
+        _write_file(path, TOKENS_SPECIMEN)
+        result = secret_logging.check_module(str(path))
+        lines = result["checks"][0]["message"].splitlines()
+        assert (result["score"], result["passed"]) == (0, False)
+        assert [line.split(" ")[0] for line in lines] == ["tokens.py:19", "tokens.py:26", "tokens.py:32"]
+
+    def test_a_bypass_for_one_line_clears_that_line_only(self, tmp_path: Path) -> None:
+        path = tmp_path / "apps" / "tokens.py"
+        _write_file(path, TOKENS_SPECIMEN)
+        rules = [{"file": str(path), "standard": "clear_text_secret_logging", "lines": [19, 26]}]
+        message = secret_logging.check_module(str(path), bypass_rules=rules)["checks"][0]["message"]
+        assert message.splitlines()[0].startswith("tokens.py:32 ") and len(message.splitlines()) == 1
+
+    def test_a_clean_file_scores_100(self, tmp_path: Path) -> None:
+        path = tmp_path / "apps" / "clean.py"
+        _write_file(path, "from aipass.prax import logger\nlogger.info('%s', token_id)\n")
+        assert secret_logging.check_module(str(path))["score"] == 100
+
+    def test_the_standard_is_declared_production_only(self) -> None:
+        assert (secret_logging.APPLIES_TO, secret_logging.AUDIT_SCOPE) == ("production", "all_files")
+
+
+# =============================================
+# 5. clear_text_secret_logging arm 2 widened (dispatch 39bfe173, CodeQL round nine)
+# =============================================
+
+#: @skills lib/telegram/apps/handlers/config.py BEFORE its cure (2026-10-10), cut:
+#: load_bot_config's secret = _get_secret(bot_id) (:365) handed to non_secret_keys
+#: (:147), whose sorted generator over the document comes back as strays, logged at :376.
+TELEGRAM_CONFIG_SPECIMEN = """from aipass.prax import logger
+from aipass.api.apps.modules.secrets import get_secret as _api_get_secret
+
+SECRET_FIELDS = ("bot_token", "api_id", "api_hash")
+
+
+def _get_secret(bot_id):
+    return _api_get_secret("telegram", bot_id, as_json=True)
+
+
+def non_secret_keys(document):
+    if not isinstance(document, dict):
+        return []
+    return sorted(key for key in document if key not in SECRET_FIELDS)
+
+
+def load_bot_config(bot_id):
+    secret = _get_secret(bot_id)
+    strays = non_secret_keys(secret)
+    if strays:
+        logger.warning(
+            "Legacy secret document telegram/%s carries %d non-secret key(s) %s",
+            bot_id,
+            len(strays),
+            strays,
+        )
+    return dict(secret)
+"""
+
+#: The cure @skills shipped: the count stays on the line, the key names leave it.
+TELEGRAM_CONFIG_CURED = TELEGRAM_CONFIG_SPECIMEN.replace(" non-secret key(s) %s", " non-secret key(s)").replace(
+    "            len(strays),\n            strays,\n", "            len(strays),\n"
+)
+
+#: A secret document laundered through a neutrally named same-file helper.
+LAUNDERED_SPECIMEN = """from aipass.prax import logger
+from aipass.api.apps.modules.secrets import get_secret
+
+
+def describe(document):
+    names = [key for key in document]
+    return ", ".join(sorted(names))
+
+
+def report(provider):
+    doc = get_secret(provider, "bot")
+    summary = describe(doc)
+    logger.info("document keys: %s", summary)
+    logger.info("provider keys: %s", describe(provider))
+"""
+
+
+def _one_call_rows(call: str) -> list:
+    """The rows of a file that assigns one call's result to a neutral name and logs it."""
+    return _secret_rows(f"from aipass.prax import logger\n\nvalue = {call}\nlogger.info('%s', value)\n")
+
+
+class TestASecretNamedCallsResultSeedsArmTwo:
+    def test_the_telegram_config_strays_line_is_convicted(self, tmp_path: Path) -> None:
+        path = tmp_path / "apps" / "config.py"
+        _write_file(path, TELEGRAM_CONFIG_SPECIMEN)
+        message = secret_logging.check_module(str(path))["checks"][0]["message"]
+        assert message.startswith("config.py:21 logs strays (built from ") and len(message.splitlines()) == 1
+
+    def test_the_cured_count_only_line_is_acquitted(self) -> None:
+        assert _secret_rows(TELEGRAM_CONFIG_CURED) == []
+
+    @pytest.mark.parametrize(
+        "call",
+        ["get_secret(a, b)", "secrets_store.get_secret(a, b)", "load_trusted_keys()", "read_confidential()"],
+    )
+    def test_a_secret_named_call_assigned_to_a_neutral_name_is_convicted(self, call: str) -> None:
+        assert _one_call_rows(call) == [4]
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            "secrets.token_hex(16)",
+            "issue_token(seat)",
+            "secret_path(slug)",
+            "hash_secret(raw)",
+            "get_user_secret(seat)",
+            "load_untrusted()",
+            "set_secret(a, b, c)",
+            "delete_secret(a, b)",
+        ],
+    )
+    def test_a_token_word_identifier_excluded_or_setter_call_seeds_nothing(self, call: str) -> None:
+        assert _one_call_rows(call) == []
+
+
+class TestASameFileHelperCarriesItsArgumentsTaint:
+    def test_a_secret_laundered_through_a_same_file_helper_is_convicted(self) -> None:
+        assert secret_logging.scan(LAUNDERED_SPECIMEN) == [(13, "summary (built from get_secret(provider, 'bot'))")]
+
+    def test_a_clean_argument_through_the_same_helper_is_acquitted(self) -> None:
+        assert 14 not in _secret_rows(LAUNDERED_SPECIMEN)
+
+    def test_a_helper_that_drops_its_argument_returns_clean(self) -> None:
+        source = LAUNDERED_SPECIMEN.replace('return ", ".join(sorted(names))', "return str(len(names))")
+        assert _secret_rows(source) == []
+
+    def test_a_non_prefix_never_acquits_the_value_through_it(self) -> None:
+        source = LAUNDERED_SPECIMEN.replace("describe", "non_secret_keys")
+        assert 13 in _secret_rows(source)
+
+    def test_a_local_built_in_one_function_is_not_another_functions_name(self) -> None:
+        source = (
+            "from aipass.prax import logger\n\n\ndef fetch(slug):\n    value = get_secret(slug)\n    return None\n\n\n"
+            "def show(value):\n    logger.info('%s', value)\n"
+        )
+        assert _secret_rows(source) == []
+
+
+#: @prax apps/modules/monitor.py as on disk 2026-10-10, cut: argparse's positional
+#: `tokens` (branch names) through _standalone_run_args' list() reaches a log line as `args`.
+PARSER_TOKENS_SPECIMEN = """from aipass.prax import logger
+
+
+def _standalone_run_args(tokens):
+    tokens = list(tokens)
+    return ["run", *tokens]
+
+
+def _run_monitor(args):
+    logger.info(f"Starting unified monitoring (args: {args})")
+
+
+def main(args):
+    _run_monitor(_standalone_run_args(args.tokens))
+"""
+
+
+class TestATokenNamedBindingOrAttributeSeedsNothing:
+    def test_argparse_tokens_carried_into_a_neutral_name_are_acquitted(self) -> None:
+        assert _secret_rows(PARSER_TOKENS_SPECIMEN) == []
+
+    def test_a_secrets_named_attribute_through_the_same_path_is_convicted(self) -> None:
+        assert _secret_rows(PARSER_TOKENS_SPECIMEN.replace("args.tokens", "args.secrets")) == [10]
+
+
+# =============================================
+# 6. clear_text_secret_logging follows reads and adds on a built value (dispatch fad65d17, CodeQL round ten)
+# =============================================
+
+#: @api apps/handlers/host/tokens.py BEFORE its round-ten cure (HEAD 6c3aa9aa), cut:
+#: load_tokens' get_secret (:158), .get("tokens") (:167) and comprehension (:172);
+#: touch_token's loop and its _is_due(record.get("last_used")) hop; the warnings :631 and :655.
+TOKENS_R10_SPECIMEN = """from datetime import datetime
+from aipass.prax import logger
+from aipass.api.apps.handlers.auth import secrets as secrets_store
+
+
+def load_tokens():
+    stored = secrets_store.get_secret("host_api", "tokens", as_json=True)
+    if not isinstance(stored, dict):
+        return []
+    records = stored.get("tokens")
+    if not isinstance(records, list):
+        return []
+    return [record for record in records if isinstance(record, dict)]
+
+
+def touch_token(token_id):
+    try:
+        records = load_tokens()
+        for record in records:
+            if record.get("id") != token_id:
+                continue
+            if not _is_due(record.get("last_used")):
+                return
+    except OSError as e:
+        logger.warning("[host_api] could not record last_used for %s: %s", token_id, e)
+
+
+def _is_due(last_used):
+    if not last_used:
+        return True
+    try:
+        age = (datetime.now() - datetime.fromisoformat(str(last_used))).total_seconds()
+    except ValueError as e:
+        logger.warning("[host_api] unreadable last_used %r, treating as due: %s", last_used, e)
+        return True
+    return age >= 60
+"""
+
+#: The cure @api shipped: the stamp and ValueError's text leave the line, the id leaves :631.
+TOKENS_R10_CURED = TOKENS_R10_SPECIMEN.replace(
+    '"[host_api] unreadable last_used %r, treating as due: %s", last_used, e',
+    '"[host_api] unreadable last_used stamp, treating as due (%s)", type(e).__name__',
+).replace('last_used for %s: %s", token_id, e', 'last_used for the presented token: %s", e')
+
+#: A secret document's keys appended one by one to a neutrally named list that is logged.
+APPENDED_KEYS_SPECIMEN = """from aipass.prax import logger
+from aipass.api.apps.modules.secrets import get_secret
+
+
+def report(provider):
+    document = get_secret(provider, "bot")
+    seen = []
+    for key in document:
+        seen.append(key)
+    logger.info("document keys: %s", seen)
+"""
+
+
+def _built_rows(body: str) -> tuple:
+    """(convicted lines, the log line) of a function that builds ``value`` from a secret document by ``body``."""
+    lines = body.split("\n")
+    source = (
+        "from aipass.prax import logger\nfrom aipass.api.apps.modules.secrets import get_secret\n\n\n"
+        "def report(provider):\n    document = get_secret(provider, 'bot')\n"
+        + "".join(f"    {line}\n" for line in lines)
+        + "    logger.info('value: %s', value)\n"
+    )
+    return _secret_rows(source), 7 + len(lines)
+
+
+class TestAReadOfABuiltValueCarriesItOn:
+    def test_the_pre_cure_tokens_last_used_warning_is_convicted(self) -> None:
+        assert secret_logging.scan(TOKENS_R10_SPECIMEN) == [
+            (34, "last_used (built from secrets_store.get_secret('host_api', 'tokens', as_json=True))")
+        ]
+
+    def test_the_cured_tokens_lines_are_acquitted(self) -> None:
+        assert _secret_rows(TOKENS_R10_CURED) == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "value = document.get('k')",
+            "value = document.pop('k')",
+            "value = document.setdefault('k', None)",
+            "value = list(document.items())",
+            "value = sorted(document.keys())",
+            "value = [v for v in document.values()]",
+            "for key, value in document.items():\n    pass",
+            "value, _rest = document.get('pair')",
+            "value = document['k'].get('inner')",
+        ],
+    )
+    def test_every_dict_read_of_a_built_value_is_convicted(self, body: str) -> None:
+        rows, log_line = _built_rows(body)
+        assert rows == [log_line]
+
+    @pytest.mark.parametrize(
+        "body",
+        ["value = document['k']", "value = document[0]", "value = document[:10]", "first, value = document"],
+    )
+    def test_a_subscript_a_wide_slice_or_an_unpacking_stays_convicted(self, body: str) -> None:
+        rows, log_line = _built_rows(body)
+        assert rows == [log_line]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "value = document.get('k')[-4:]",
+            "value = len(document.get('k'))",
+            "value = type(document.get('k')).__name__",
+            "value = mask(document.pop('k'))",
+            "value = config.get('k')",
+        ],
+    )
+    def test_a_redaction_a_type_name_or_a_clean_receiver_is_acquitted(self, body: str) -> None:
+        rows, _log_line = _built_rows(body)
+        assert rows == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "value = str(document.get('k'))",
+            "value = repr(document.get('k'))",
+            "value = f\"{document.get('k')!r}\"",
+            "value = '%r' % document.get('k')",
+        ],
+    )
+    def test_str_repr_and_r_formatting_of_a_read_stay_convicted(self, body: str) -> None:
+        rows, log_line = _built_rows(body)
+        assert rows == [log_line]
+
+
+class TestAnAddOfABuiltValueBindsTheCollection:
+    def test_a_secret_documents_keys_appended_to_a_logged_list_are_convicted(self) -> None:
+        assert secret_logging.scan(APPENDED_KEYS_SPECIMEN) == [(10, "seen (built from get_secret(provider, 'bot'))")]
+
+    def test_the_cured_count_only_line_is_acquitted(self) -> None:
+        source = APPENDED_KEYS_SPECIMEN.replace('"document keys: %s", seen', '"document keys: %d", len(seen)')
+        assert _secret_rows(source) == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "value = []\nvalue.extend(document)",
+            "value = set()\nvalue.add(document.get('k'))",
+            "value = []\nvalue.insert(0, document['k'])",
+            "value = {'k': document.get('k')}",
+            "value = dict(k=document.get('k'))",
+        ],
+    )
+    def test_extend_add_insert_and_a_dict_holding_a_built_value_are_convicted(self, body: str) -> None:
+        rows, log_line = _built_rows(body)
+        assert rows == [log_line]
+
+    @pytest.mark.parametrize(
+        "body",
+        ["value = []\nvalue.append(provider)", "value = []\nvalue.insert(len(document), 'x')"],
+    )
+    def test_a_clean_value_or_a_built_index_leaves_the_collection_clean(self, body: str) -> None:
+        rows, _log_line = _built_rows(body)
+        assert rows == []
+
+
+# =============================================
+# 7. clear_text_secret_logging secret-reader-parameter arm (dispatch 4bb9a4c9, CodeQL round eleven)
+# =============================================
+
+#: @api apps/handlers/auth/secrets.py BEFORE its round-eleven cure (HEAD 6c3aa9aa), cut:
+#: get_secret's provider-only warning (:64), its "Secret not found" f-string (:83, the
+#: caller line CodeQL drew), list_secrets (:87) and the exception-only lines (:191, :220).
+AUTH_SECRETS_R11_SPECIMEN = """import json
+from pathlib import Path
+from aipass.prax import logger
+
+SECRETS_BASE = Path.home() / ".secrets" / "aipass"
+
+
+def get_secret(provider, slug, as_json=False):
+    provider_dir = SECRETS_BASE / provider
+    if not provider_dir.exists():
+        logger.warning(f"Provider directory not found under the secrets base: {provider}")
+        return None
+    json_path = provider_dir / f"{slug}.json"
+    if json_path.exists():
+        return _read_json_secret(json_path, as_json)
+    raw_path = provider_dir / slug
+    if raw_path.exists():
+        return _read_raw_secret(raw_path)
+    logger.warning(f"Secret not found: {provider}/{slug}")
+    return None
+
+
+def list_secrets(provider):
+    provider_dir = SECRETS_BASE / provider
+    if not provider_dir.exists():
+        return []
+    return sorted(entry.name.removesuffix(".json") for entry in provider_dir.iterdir())
+
+
+def _read_json_secret(path, as_json):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Error reading a JSON secret file: {e}")
+        return None
+    return data
+
+
+def _read_raw_secret(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError as e:
+        logger.warning(f"Error reading a raw secret file: {e}")
+        return None
+"""
+
+#: The cure @api shipped (83f812c9): the slug leaves the line, the provider stays as a %s argument.
+AUTH_SECRETS_R11_CURED = AUTH_SECRETS_R11_SPECIMEN.replace(
+    'f"Secret not found: {provider}/{slug}"',
+    '"Secret not found under provider %s: no JSON or raw document for the requested slug", provider',
+)
+
+
+def _reader_rows(reader: str, message: str, lister: str = "list_secrets") -> list:
+    """The convicted lines of a file defining ``lister(provider)`` and ``reader(provider, slug)`` that logs ``message``."""
+    return _secret_rows(
+        f"from aipass.prax import logger\n\n\ndef {lister}(provider):\n    return []\n\n\n"
+        f"def {reader}(provider, slug):\n    logger.warning({message})\n"
+    )
+
+
+class TestASecretReadersDocumentNameInTheMessageIsConvicted:
+    def test_the_pre_cure_not_found_line_is_convicted_and_only_it(self) -> None:
+        assert secret_logging.scan(AUTH_SECRETS_R11_SPECIMEN) == [
+            (19, "slug (a document name the secret reader get_secret() is handed)")
+        ]
+
+    def test_the_cured_line_carrying_provider_as_an_argument_is_acquitted(self) -> None:
+        assert _secret_rows(AUTH_SECRETS_R11_CURED) == []
+
+    def test_the_slug_as_a_percent_s_argument_is_not_this_arms_row(self) -> None:
+        assert _reader_rows("get_secret", '"Secret not found: %s/%s", provider, slug') == []
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            'f"missing {slug}"',
+            '"missing %s" % slug',
+            '"missing {}".format(slug)',
+            '"missing " + slug',
+            "str(slug).strip()",
+        ],
+    )
+    def test_every_message_shape_holding_the_document_name_is_convicted(self, message: str) -> None:
+        assert _reader_rows("get_secret", message) == [9]
+
+    @pytest.mark.parametrize("message", ['f"missing {provider}"', 'f"missing {len(slug)}"', 'f"missing {slug[-4:]}"'])
+    def test_the_listers_own_parameter_or_a_redaction_is_acquitted(self, message: str) -> None:
+        assert _reader_rows("get_secret", message) == []
+
+    @pytest.mark.parametrize("reader", ["read_secret", "load_secret", "fetch_secret", "_get_secret", "load_trusted"])
+    def test_every_secret_reader_name_is_convicted(self, reader: str) -> None:
+        assert _reader_rows(reader, 'f"missing {slug}"') == [9]
+
+    @pytest.mark.parametrize(
+        "reader",
+        ["set_secret", "write_secret", "delete_secret", "describe_secret", "get_user_secret", "get_secret_path"],
+    )
+    def test_a_setter_a_verbless_an_excluded_or_an_identifier_def_is_acquitted(self, reader: str) -> None:
+        assert _reader_rows(reader, 'f"missing {slug}"') == []
+
+    def test_a_file_without_a_secret_lister_is_acquitted(self) -> None:
+        assert _reader_rows("get_secret", 'f"missing {slug}"', lister="list_providers") == []
+
+    def test_a_rebound_document_parameter_is_acquitted(self) -> None:
+        source = AUTH_SECRETS_R11_SPECIMEN.replace(
+            "    provider_dir = SECRETS_BASE / provider\n    if not provider_dir.exists():\n        logger",
+            '    slug = "bot"\n    provider_dir = SECRETS_BASE / provider\n    if not provider_dir.exists():\n        logger',
+            1,
+        )
+        assert _secret_rows(source) == []

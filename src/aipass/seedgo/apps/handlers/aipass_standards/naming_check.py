@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: naming_check.py
 # Description: Naming Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -13,6 +13,7 @@ Validates module compliance with AIPass naming standards.
 Checks file naming, function naming, variable naming, constant naming.
 """
 
+import ast
 import re
 from pathlib import Path
 from typing import Dict, Optional
@@ -21,6 +22,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: snake_case and column-0 constants are the house style everywhere.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 # A bare dotted name and nothing else — `_h.save_json`, `mod.InvalidDocument`.
@@ -208,6 +211,26 @@ def check_file_naming(module_path: str, path: Path) -> Dict:
         }
 
 
+#: unittest's hooks, spelled by the framework: a TestCase that renames them never runs them.
+_UNITTEST_HOOKS = frozenset(
+    {"setUp", "tearDown", "setUpClass", "tearDownClass", "setUpModule", "tearDownModule", "asyncSetUp", "asyncTearDown"}
+)
+
+
+def _protocol_name(func_name: str) -> bool:
+    """Whether an inherited protocol, not the author, chose this name (seedgo, fleet green leg 9).
+
+    ``ast.NodeVisitor`` dispatches on ``visit_`` plus the node's class name, so
+    ``visit_Call`` is the only spelling that is ever called (spawn's
+    test_json_durability); only a real ``ast`` node class counts after the
+    prefix. unittest's hooks are a fixed list.
+    """
+    if func_name in _UNITTEST_HOOKS:
+        return True
+    node = getattr(ast, func_name[len("visit_") :], None) if func_name.startswith("visit_") else None
+    return isinstance(node, type) and issubclass(node, ast.AST)
+
+
 def check_function_naming(content: str) -> Optional[Dict]:
     """
     Check function naming conventions
@@ -228,6 +251,8 @@ def check_function_naming(content: str) -> Optional[Dict]:
     for func_name in functions:
         # Skip dunder methods
         if func_name.startswith("__") and func_name.endswith("__"):
+            continue
+        if _protocol_name(func_name):
             continue
 
         # Check for snake_case

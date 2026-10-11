@@ -1,13 +1,30 @@
-"""Unit tests for CLI display module -- Rich-formatted terminal output."""
+# =================== AIPass ====================
+# Name: test_display.py
+# Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
+# Version: 1.2.0
+# Created: 2026-03-24
+# Modified: 2026-10-10
+# =============================================
 
+"""Tests for apps/modules/display.py — the render surface every branch imports."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — that display.header and the other public functions carry docstrings
+# seedgo: no-test-needed(rich_markup) — that display.print_help's own literals keep their brackets
+
+import contextlib
 import importlib
+import io
 import sys
 from unittest.mock import patch, MagicMock
 
 import pytest
+from rich.markup import escape as rich_escape
 
+import aipass.cli
 from aipass.cli.apps import modules
 from aipass.cli.apps.modules import display, templates
+from aipass.trigger.apps.modules import core as trigger_core
 
 from .conftest import make_capture_console
 
@@ -123,9 +140,13 @@ class TestHandleCommandRouting:
         mock_run_demo.assert_not_called()
         assert result is True
 
-    def test_display_unknown_subcommand_returns_false(self):
+    def test_display_unknown_subcommand_refusal_names_the_token(self, capsys):
+        """`display unknown_sub` is refused by name, and the refusal trips the exit flag."""
         result = display.handle_command("display", ["unknown_sub"])
-        assert result is False
+        out, err = capsys.readouterr()
+        assert "Unknown display subcommand: unknown_sub" in err
+        assert display.command_failed() is True
+        assert result is True
 
 
 # =============================================================================
@@ -326,8 +347,7 @@ class TestRunDemo:
             display.run_demo()
         mock_log.assert_called_once_with("display_demo")
 
-    @patch("aipass.cli.apps.handlers.json.json_handler.log_operation")
-    def test_run_demo_renders_expected_content(self, mock_log):
+    def test_run_demo_renders_expected_content(self):
         cons, get_output = _make_capture_console()
         err_cons, get_err_output = _make_capture_console()
         with (
@@ -523,32 +543,34 @@ class TestPrintHelpOutput:
 class TestHeaderTriggerLoading:
     """Verify header() lazy-loads trigger module."""
 
-    def test_header_loads_trigger_on_first_call(self):
-        cons, _get_output = _make_capture_console()
-        original_loaded = display._TRIGGER_LOADED
-        original_trigger = display._TRIGGER
-        try:
-            display._TRIGGER_LOADED = False
-            display._TRIGGER = None
-            with patch.object(display, "CONSOLE", cons):
-                display.header("Test")
-            assert display._TRIGGER_LOADED is True
-        finally:
-            display._TRIGGER_LOADED = original_loaded
-            display._TRIGGER = original_trigger
+    def test_header_loads_trigger_on_first_call(self, monkeypatch):
+        """The first header() loads trigger and fires its event with the title.
 
-    def test_header_handles_import_error_for_trigger(self):
+        Mutant: header() marks trigger loaded but never binds it — killed.
+        """
+        fired = []
+        monkeypatch.setattr(display, "_TRIGGER_LOADED", False)
+        monkeypatch.setattr(display, "_TRIGGER", None)
+        monkeypatch.setattr(trigger_core.trigger, "fire", lambda event, **kw: fired.append((event, kw)))
         cons, _get_output = _make_capture_console()
-        display._TRIGGER_LOADED = False
-        display._TRIGGER = None
+        with patch.object(display, "CONSOLE", cons):
+            display.header("Test")
+        assert fired == [("cli_header_displayed", {"title": "Test"})]
+
+    def test_header_handles_import_error_for_trigger(self, monkeypatch):
+        """With trigger unimportable, header() still renders and does not raise.
+
+        Mutant: drop the except ImportError around the lazy import — killed.
+        """
+        monkeypatch.setattr(display, "_TRIGGER_LOADED", False)
+        monkeypatch.setattr(display, "_TRIGGER", None)
+        cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
             patch.dict("sys.modules", {"aipass.trigger.apps.modules.core": None}),
         ):
-            display._TRIGGER_LOADED = False
             display.header("Trigger Fail Test")
-        assert display._TRIGGER_LOADED is True
-        assert display._TRIGGER is None
+        assert "Trigger Fail Test" in get_output()
 
 
 class TestInfrastructureMocking:
@@ -659,9 +681,6 @@ class TestEscapeExport:
     PLACEHOLDER = "log [count]"
 
     def test_escape_is_published_on_both_surfaces(self):
-        import aipass.cli
-        from rich.markup import escape as rich_escape
-
         assert "escape" in modules.__all__
         assert modules.escape is rich_escape
         assert aipass.cli.escape is rich_escape
@@ -706,3 +725,49 @@ class TestEscapeExport:
     def test_text_functions_must_not_be_escaped(self, fn):
         assert "log [count]" in _render(fn, self.PLACEHOLDER)
         assert "\\[count]" in _render(fn, modules.escape(self.PLACEHOLDER))
+
+
+# =============================================================================
+# COLOUR IS DECIDED PER PRINT
+# =============================================================================
+
+
+class _TerminalStream(io.StringIO):
+    """A stream that answers isatty() True, as a terminal does."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+class TestColourFollowsTheLiveStream:
+    """Both consoles decide colour at each print, against the stream as it is then.
+
+    CI on PR #774, 2026-10-10: the consoles were built once, at import, with the
+    stream's isatty() as it was then. A conftest imported while pytest's capture
+    was suspended read an xdist worker's NUL, which Windows calls a terminal, and
+    every later capture in the run carried escape codes. Rich fixes its colour
+    system in __init__ too, so leaving force_terminal unset alone does not cure it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _a_colour_terminal(self, monkeypatch):
+        """TERM=dumb or an unset TERM would make a terminal answer plain."""
+        monkeypatch.setenv("TERM", "xterm-256color")
+
+    def test_console_colours_a_terminal_then_prints_plain_into_capture(self, capsys):
+        terminal = _TerminalStream()
+        with contextlib.redirect_stdout(terminal):
+            display.console.print("[bold]live[/bold]")
+        display.console.print("[bold]live[/bold]")
+        out, _err = capsys.readouterr()
+        assert "\x1b[" in terminal.getvalue()
+        assert out == "live\n"
+
+    def test_err_console_colours_a_terminal_then_prints_plain_into_capture(self, capsys):
+        terminal = _TerminalStream()
+        with contextlib.redirect_stderr(terminal):
+            display.err_console.print("[bold]live[/bold]")
+        display.err_console.print("[bold]live[/bold]")
+        _out, err = capsys.readouterr()
+        assert "\x1b[" in terminal.getvalue()
+        assert err == "live\n"

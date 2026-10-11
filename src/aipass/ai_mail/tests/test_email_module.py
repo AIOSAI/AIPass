@@ -1,27 +1,28 @@
 # =================== AIPass ====================
 # Name: test_email_module.py
-# Description: Tests for email.py and email_send.py orchestrator functions
-# Version: 1.0.0
+# Description: Tests for email.py's mailbox handlers - inbox, view, close, reply, sent
+# Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-10-08
 # =============================================
 
-"""Tests for email.py and email_send.py orchestrator functions.
+"""Tests for apps/modules/email.py's mailbox handlers: inbox, view, close, reply, sent."""
 
-Covers: handle_inbox, handle_view, handle_close, handle_reply,
-handle_sent, handle_contacts, handle_register (email.py),
-and handle_send (email_send.py).
+# Covers: handle_inbox, handle_view, handle_close, handle_reply,
+# handle_sent (email.py).
+#
+# All handler dependencies are mocked -- these tests verify orchestration
+# logic, not business logic.
 
-All handler dependencies are mocked -- these tests verify orchestration
-logic, not business logic.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that print_help, caller_refusal and resolve_broadcast_targets parse and import
+# seedgo: no-test-needed(shared) — handle_send() and handle_command(): tests/test_email_module_send.py
+# seedgo: no-test-needed(shared) — handle_contacts() and handle_register(): tests/test_email_module_contacts.py
 
-import io
 import json
-import sys
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 # Bind the REAL module objects once, at collection time, before any test can
 # replace them in sys.modules. Other test modules in the suite install
@@ -30,40 +31,16 @@ from unittest.mock import MagicMock, patch
 # string-path patch or in-test `from ... import x` would otherwise resolve to
 # a mock on an xdist worker that ran the polluter first.
 from aipass.ai_mail.apps.modules import email as email_mod
-from aipass.ai_mail.apps.modules import email_send as email_send_mod
+from aipass.ai_mail.apps.modules.email import (
+    handle_close,
+    handle_inbox,
+    handle_reply,
+    handle_sent,
+    handle_view,
+)
+from aipass.ai_mail.tests.support_email_module import _StdoutLines
 
-
-# ---------------------------------------------------------------------------
-# Autouse fixture: pin the real modules into sys.modules for the test duration
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _pin_real_modules(monkeypatch):
-    """Guarantee string-path patches resolve to the real modules, not stubs.
-
-    monkeypatch.setitem restores the previous sys.modules value exactly on
-    teardown, so this never leaks in either direction.
-    """
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email", email_mod)
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", email_send_mod)
-
-
-# ---------------------------------------------------------------------------
-# Autouse fixture: suppress json_handler.log_operation across both modules
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _silence_json_handler():
-    """Prevent log_operation from writing real JSON files during tests."""
-    with (
-        patch.object(email_mod, "json_handler") as mock_email_jh,
-        patch.object(email_send_mod, "json_handler") as mock_send_jh,
-    ):
-        mock_email_jh.log_operation.return_value = True
-        mock_send_jh.log_operation.return_value = True
-        yield
+pytestmark = pytest.mark.usefixtures("email_modules_pinned", "email_json_silenced")
 
 
 # ---------------------------------------------------------------------------
@@ -89,11 +66,11 @@ def _write_inbox(tmp_path: Path, messages: list | None = None) -> Path:
 class TestHandleInbox:
     """Tests for email.handle_inbox orchestrator."""
 
-    def test_inbox_empty_messages(self, tmp_path, monkeypatch):
+    def test_inbox_empty_messages(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """Empty inbox prints 'is empty' message."""
         _write_inbox(tmp_path, messages=[])
 
-        printed: list[str] = []
+        printed = _StdoutLines(capsys)
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.resolve_inbox_target",
             lambda first_arg, repo_root, get_branch_fn, get_user_fn: (
@@ -110,17 +87,12 @@ class TestHandleInbox:
             "aipass.ai_mail.apps.modules.email.load_inbox",
             lambda f: {"messages": []},
         )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_inbox
 
         result = handle_inbox([])
         assert result is True
         assert any("empty" in p.lower() for p in printed)
 
-    def test_inbox_with_messages(self, tmp_path, monkeypatch):
+    def test_inbox_with_messages(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """Inbox with messages formats and displays them."""
         messages = [
             {"id": "m1", "status": "new", "subject": "Hello"},
@@ -148,12 +120,7 @@ class TestHandleInbox:
             "aipass.ai_mail.apps.modules.email.format_email_list_item",
             lambda i, msg, show_unread=True: f"[{i}] {msg['subject']}",
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_inbox
+        printed = _StdoutLines(capsys)
 
         result = handle_inbox([])
         assert result is True
@@ -179,8 +146,6 @@ class TestHandleInbox:
             lambda msg: errors.append(msg),
         )
 
-        from aipass.ai_mail.apps.modules.email import handle_inbox
-
         result = handle_inbox(["@fake"])
         assert result is True
         assert any("Unknown branch: @fake" in e for e in errors)
@@ -202,13 +167,11 @@ class TestHandleView:
             lambda msg: errors.append(msg),
         )
 
-        from aipass.ai_mail.apps.modules.email import handle_view
-
         result = handle_view([])
         assert result is True
         assert any("Usage" in e for e in errors)
 
-    def test_view_marks_opened_and_prints(self, tmp_path, monkeypatch):
+    def test_view_marks_opened_and_prints(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """View with valid ID marks as opened and prints header + message."""
         email_data = {
             "id": "abc123",
@@ -229,12 +192,7 @@ class TestHandleView:
             "aipass.ai_mail.apps.modules.email.format_email_header",
             lambda ed: "FROM: @sender | SUBJECT: Test Subject",
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_view
+        printed = _StdoutLines(capsys)
 
         result = handle_view(["abc123"])
         assert result is True
@@ -256,8 +214,6 @@ class TestHandleView:
             "aipass.ai_mail.apps.modules.email.error",
             lambda msg: errors.append(msg),
         )
-
-        from aipass.ai_mail.apps.modules.email import handle_view
 
         result = handle_view(["missing_id"])
         assert result is True
@@ -306,11 +262,6 @@ class TestHandleView:
             "aipass.ai_mail.apps.modules.email.format_email_header",
             lambda ed: "HEADER",
         )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_view
 
         result = handle_view(["latest"])
         assert result is True
@@ -333,13 +284,11 @@ class TestHandleClose:
             lambda msg: errors.append(msg),
         )
 
-        from aipass.ai_mail.apps.modules.email import handle_close
-
         result = handle_close([])
         assert result is True
         assert any("Usage" in e for e in errors)
 
-    def test_close_single_id(self, tmp_path, monkeypatch):
+    def test_close_single_id(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """Close a single message ID via batch_close."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
@@ -349,19 +298,17 @@ class TestHandleClose:
             "aipass.ai_mail.apps.modules.email.batch_close",
             lambda bp, ids, fn: ([("msg1", True, "Closed msg1")], 1, 0),
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", lambda msg: None)
-
-        from aipass.ai_mail.apps.modules.email import handle_close
+        printed = _StdoutLines(capsys)
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", error_mock)
 
         result = handle_close(["msg1"])
         assert result is True
         assert any("Closed" in p for p in printed)
+        # error() raises cli's process-wide failure flag; a success path never calls it (ai_mail, leg 6)
+        error_mock.assert_not_called()
 
-    def test_close_all(self, tmp_path, monkeypatch):
+    def test_close_all(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """Close 'all' delegates to mark_all_read_and_archive."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
@@ -371,12 +318,7 @@ class TestHandleClose:
             "aipass.ai_mail.apps.modules.email.mark_all_read_and_archive",
             lambda bp: (True, "Archived 5 messages", 5),
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_close
+        printed = _StdoutLines(capsys)
 
         result = handle_close(["all"])
         assert result is True
@@ -397,11 +339,6 @@ class TestHandleClose:
             "aipass.ai_mail.apps.modules.email.error",
             lambda msg: errors.append(msg),
         )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_close
 
         result = handle_close(["all"])
         assert result is True
@@ -426,16 +363,13 @@ class TestHandleClose:
             "aipass.ai_mail.apps.modules.email.batch_close_post_ops",
             lambda bp, central_fn, purge_fn: post_ops_called.append(True),
         )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", lambda msg: None)
-
-        from aipass.ai_mail.apps.modules.email import handle_close
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", error_mock)
 
         result = handle_close(["m1", "m2"])
         assert result is True
         assert len(post_ops_called) == 1
+        error_mock.assert_not_called()
 
 
 # ===========================================================================
@@ -454,8 +388,6 @@ class TestHandleReply:
             lambda msg: errors.append(msg),
         )
 
-        from aipass.ai_mail.apps.modules.email import handle_reply
-
         result = handle_reply(["only_id"])
         assert result is True
         assert any("Usage" in e for e in errors)
@@ -466,10 +398,9 @@ class TestHandleReply:
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
             lambda: tmp_path,
         )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.get_email_by_id",
-            lambda inbox_file, msg_id: None,
-        )
+        # A stub that sets the world (no such message); asserted so it is also a check of the lookup (ai_mail, leg 6)
+        lookup = MagicMock(return_value=None)
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.get_email_by_id", lookup)
         errors: list[str] = []
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.error",
@@ -477,13 +408,13 @@ class TestHandleReply:
         )
         _write_inbox(tmp_path)
 
-        from aipass.ai_mail.apps.modules.email import handle_reply
-
         result = handle_reply(["missing_id", "my reply"])
         assert result is True
         assert any("not found" in e.lower() for e in errors)
+        lookup.assert_called_once()
+        assert lookup.call_args.args[1] == "missing_id"
 
-    def test_reply_success(self, tmp_path, monkeypatch):
+    def test_reply_success(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """Successful reply prints success message."""
         original = {"id": "msg1", "from": "@sender", "subject": "Re: test"}
         monkeypatch.setattr(
@@ -498,13 +429,8 @@ class TestHandleReply:
             "aipass.ai_mail.apps.modules.email.send_reply",
             lambda bp, orig, msg: (True, "Reply sent to @sender", "reply_001"),
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
+        printed = _StdoutLines(capsys)
         _write_inbox(tmp_path)
-
-        from aipass.ai_mail.apps.modules.email import handle_reply
 
         result = handle_reply(["msg1", "Thanks!"])
         assert result is True
@@ -531,8 +457,6 @@ class TestHandleReply:
             lambda msg: errors.append(msg),
         )
         _write_inbox(tmp_path)
-
-        from aipass.ai_mail.apps.modules.email import handle_reply
 
         result = handle_reply(["msg1", "reply text"])
         assert result is True
@@ -568,13 +492,12 @@ class TestHandleReply:
         )
         _write_inbox(tmp_path)
 
-        from aipass.ai_mail.apps.modules.email import handle_reply
-
-        result = handle_reply(["msg1", "--body-file", "/tmp/reply.txt"])
+        body_file_arg = str(tmp_path / "reply.txt")
+        result = handle_reply(["msg1", "--body-file", body_file_arg])
         assert result is True
         assert any("--body-file" in w for w in warnings)
         # The literal-text behavior is unchanged — only the silence is fixed.
-        assert sent_message["body"] == "--body-file /tmp/reply.txt"
+        assert sent_message["body"] == f"--body-file {body_file_arg}"
 
     def test_reply_ordinary_message_no_warning(self, tmp_path, monkeypatch):
         """A normal reply with no '--' tokens triggers no warning."""
@@ -598,8 +521,6 @@ class TestHandleReply:
         )
         _write_inbox(tmp_path)
 
-        from aipass.ai_mail.apps.modules.email import handle_reply
-
         result = handle_reply(["msg1", "Thanks, all good."])
         assert result is True
         assert warnings == []
@@ -613,24 +534,19 @@ class TestHandleReply:
 class TestHandleSent:
     """Tests for email.handle_sent orchestrator."""
 
-    def test_sent_no_folder(self, tmp_path, monkeypatch):
+    def test_sent_no_folder(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """No sent folder prints 'No sent messages'."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
             lambda: tmp_path,
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_sent
+        printed = _StdoutLines(capsys)
 
         result = handle_sent([])
         assert result is True
         assert any("No sent" in p for p in printed)
 
-    def test_sent_with_files(self, tmp_path, monkeypatch):
+    def test_sent_with_files(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """Sent folder with files loads and displays them."""
         sent_folder = tmp_path / ".ai_mail.local" / "sent"
         sent_folder.mkdir(parents=True)
@@ -649,19 +565,14 @@ class TestHandleSent:
             "aipass.ai_mail.apps.modules.email.format_email_list_item",
             lambda i, data, show_unread=True: f"[{i}] {data['subject']}",
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_sent
+        printed = _StdoutLines(capsys)
 
         result = handle_sent([])
         assert result is True
         assert any("Sent Messages" in p for p in printed)
         assert any("[1]" in p for p in printed)
 
-    def test_sent_empty_folder(self, tmp_path, monkeypatch):
+    def test_sent_empty_folder(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """Sent folder exists but has no JSON files."""
         sent_folder = tmp_path / ".ai_mail.local" / "sent"
         sent_folder.mkdir(parents=True)
@@ -670,506 +581,11 @@ class TestHandleSent:
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
             lambda: tmp_path,
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_sent
+        printed = _StdoutLines(capsys)
 
         result = handle_sent([])
         assert result is True
         assert any("No sent" in p for p in printed)
-
-
-# ===========================================================================
-# handle_contacts
-# ===========================================================================
-
-
-class TestHandleContacts:
-    """Tests for email.handle_contacts orchestrator."""
-
-    def test_contacts_displays_branches(self, monkeypatch):
-        """Contacts lists all registered branches."""
-        branches = [
-            {"email": "@alpha", "name": "ALPHA", "path": "/src/alpha"},
-            {"email": "@beta", "name": "BETA", "path": "/src/beta"},
-        ]
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.get_all_branches",
-            lambda: branches,
-        )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_contacts
-
-        result = handle_contacts([])
-        assert result is True
-        assert any("2 branches" in p for p in printed)
-        # Branches should appear sorted by email
-        alpha_lines = [p for p in printed if "@alpha" in p]
-        assert len(alpha_lines) > 0
-
-    def test_contacts_empty(self, monkeypatch):
-        """No contacts found prints error."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.get_all_branches",
-            lambda: [],
-        )
-        errors: list[str] = []
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.error",
-            lambda msg: errors.append(msg),
-        )
-
-        from aipass.ai_mail.apps.modules.email import handle_contacts
-
-        result = handle_contacts([])
-        assert result is True
-        assert any("No contacts" in e for e in errors)
-
-    def test_contacts_exception_handled(self, monkeypatch):
-        """Exception in get_all_branches is caught and error is shown."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.get_all_branches",
-            lambda: (_ for _ in ()).throw(RuntimeError("Registry unavailable")),
-        )
-        errors: list[str] = []
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.error",
-            lambda msg: errors.append(msg),
-        )
-
-        from aipass.ai_mail.apps.modules.email import handle_contacts
-
-        result = handle_contacts([])
-        assert result is True
-        assert any("Registry unavailable" in e for e in errors)
-
-
-# ===========================================================================
-# handle_register
-# ===========================================================================
-
-
-class TestHandleRegister:
-    """Tests for email.handle_register orchestrator."""
-
-    def test_register_too_few_args(self, monkeypatch):
-        """Register with < 2 args prints usage error."""
-        errors: list[str] = []
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.error",
-            lambda msg: errors.append(msg),
-        )
-
-        from aipass.ai_mail.apps.modules.email import handle_register
-
-        result = handle_register(["@branch"])
-        assert result is True
-        assert any("Usage" in e for e in errors)
-
-    def test_register_success(self, monkeypatch):
-        """Successful registration prints green confirmation."""
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        # register_contact is imported locally inside handle_register,
-        # so patch at the handler source module
-        with patch(
-            "aipass.ai_mail.apps.handlers.email.contacts.register_contact",
-            return_value=True,
-        ):
-            from aipass.ai_mail.apps.modules.email import handle_register
-
-            result = handle_register(["@devpulse", "/path/to/inbox"])
-        assert result is True
-        assert any("Registered" in p and "devpulse" in p for p in printed)
-
-    def test_register_failure(self, monkeypatch):
-        """Failed registration prints error."""
-        errors: list[str] = []
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.error",
-            lambda msg: errors.append(msg),
-        )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        with patch(
-            "aipass.ai_mail.apps.handlers.email.contacts.register_contact",
-            return_value=False,
-        ):
-            from aipass.ai_mail.apps.modules.email import handle_register
-
-            result = handle_register(["@badstuff", "/path/to/inbox"])
-        assert result is True
-        assert any("Failed" in e for e in errors)
-
-    def test_register_with_project_arg(self, monkeypatch):
-        """Third arg is passed as project name."""
-        registered_args: list[tuple] = []
-
-        def _mock_register(name, project, path):
-            """Capture register_contact arguments for assertion."""
-            registered_args.append((name, project, path))
-            return True
-
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        with patch(
-            "aipass.ai_mail.apps.handlers.email.contacts.register_contact",
-            side_effect=_mock_register,
-        ):
-            from aipass.ai_mail.apps.modules.email import handle_register
-
-            result = handle_register(["@vera", "/path/to/inbox", "VeraStudio"])
-        assert result is True
-        assert registered_args[0] == ("vera", "VeraStudio", "/path/to/inbox")
-
-
-# ===========================================================================
-# handle_send (from email_send.py)
-# ===========================================================================
-
-
-class TestHandleSend:
-    """Tests for email_send.handle_send orchestrator."""
-
-    def test_send_direct_single_recipient(self, monkeypatch):
-        """Direct send to a single recipient calls send_to_single."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.parse_send_args",
-            lambda args: {
-                "mode": "direct",
-                "recipients": ["@target"],
-                "subject": "Hello",
-                "message": "World",
-                "auto_execute": False,
-                "reply_to": None,
-                "no_memory_save": False,
-                "from_branch": None,
-            },
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_dispatch_target",
-            lambda branch, auto, fn: None,
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
-            lambda fb, rr, amd, gbe, gcu: {
-                "email_address": "@ai_mail",
-                "display_name": "AI_MAIL",
-                "mailbox_path": "/tmp/mailbox",
-            },
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.send_to_single",
-            lambda *a, **kw: (True, None),
-        )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
-
-        from aipass.ai_mail.apps.modules.email_send import handle_send
-
-        result = handle_send(["@target", "Hello", "World"])
-        assert result is True
-        assert any("sent" in p.lower() and "@target" in p for p in printed)
-
-    def test_send_error_mode(self, monkeypatch):
-        """A parse error prints usage and stays handled (exit 2, not 1)."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.parse_send_args",
-            lambda args: {
-                "mode": "error",
-                "error": "Usage: send @recipient [subject] [message]",
-            },
-        )
-        errors: list[str] = []
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.error",
-            lambda msg: errors.append(msg),
-        )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email_send import handle_send
-
-        result = handle_send(["bad", "args"])
-        assert result is True
-        assert any("Usage" in e for e in errors)
-
-    def test_send_delivery_failure(self, monkeypatch):
-        """When send_to_single returns failure, error is printed."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.parse_send_args",
-            lambda args: {
-                "mode": "direct",
-                "recipients": ["@target"],
-                "subject": "Sub",
-                "message": "Msg",
-                "auto_execute": False,
-                "reply_to": None,
-                "no_memory_save": False,
-                "from_branch": None,
-            },
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_dispatch_target",
-            lambda branch, auto, fn: None,
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
-            lambda fb, rr, amd, gbe, gcu: {
-                "email_address": "@ai_mail",
-                "display_name": "AI_MAIL",
-                "mailbox_path": "/tmp/mailbox",
-            },
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.send_to_single",
-            lambda *a, **kw: (False, "Branch not found"),
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.dispatch_send_error",
-            lambda *a, **kw: None,
-        )
-        errors: list[str] = []
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.error",
-            lambda msg: errors.append(msg),
-        )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email_send import handle_send
-
-        result = handle_send(["@target", "Sub", "Msg"])
-        assert result is True
-        assert any("Branch not found" in e for e in errors)
-
-    def test_send_interactive_mode(self, monkeypatch):
-        """A cancelled interactive send is still a handled command."""
-        # pytest's stdin is not a terminal, so without this the no-TTY guard
-        # answers first and this test would pass while never reaching the
-        # cancel path it is named for.
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.parse_send_args",
-            lambda args: {"mode": "interactive"},
-        )
-        # _send_interactive calls get_all_branches and collect_interactive_input
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.get_all_branches",
-            lambda: [{"name": "A", "email": "@a"}],
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.collect_interactive_input",
-            lambda branches: None,  # User cancelled
-        )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email_send import handle_send
-
-        result = handle_send([])
-        assert result is True
-        assert any("Cancelled" in p for p in printed)
-
-    def test_send_dispatch_fires_trigger(self, monkeypatch):
-        """With auto_execute, dispatch trigger is fired after successful send."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.parse_send_args",
-            lambda args: {
-                "mode": "direct",
-                "recipients": ["@target"],
-                "subject": "Dispatch Task",
-                "message": "Do the thing",
-                "auto_execute": True,
-                "reply_to": None,
-                "no_memory_save": False,
-                "from_branch": None,
-            },
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_dispatch_target",
-            lambda branch, auto, fn: "@target",
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
-            lambda fb, rr, amd, gbe, gcu: {
-                "email_address": "@ai_mail",
-                "display_name": "AI_MAIL",
-                "mailbox_path": "/tmp/mailbox",
-            },
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.prepend_dispatch_header",
-            lambda msg, no_memory_save=False: f"[DISPATCH] {msg}",
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.send_to_single",
-            lambda *a, **kw: (True, None),
-        )
-
-        trigger_calls: list[tuple] = []
-        mock_trigger = MagicMock()
-        mock_trigger.fire = lambda event, **kw: trigger_calls.append((event, kw))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.trigger", mock_trigger)
-
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
-
-        from aipass.ai_mail.apps.modules.email_send import handle_send
-
-        result = handle_send(["@target", "Dispatch Task", "Do the thing", "--dispatch"])
-        assert result is True
-        assert len(trigger_calls) == 1
-        assert trigger_calls[0][0] == "email_dispatched"
-        assert trigger_calls[0][1]["to"] == "@target"
-
-    def test_send_group_multiple_recipients(self, monkeypatch):
-        """Group send to multiple recipients calls _send_direct for each."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.parse_send_args",
-            lambda args: {
-                "mode": "direct",
-                "recipients": ["@alpha", "@beta"],
-                "subject": "Group msg",
-                "message": "Hi all",
-                "auto_execute": False,
-                "reply_to": None,
-                "no_memory_save": False,
-                "from_branch": None,
-            },
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_dispatch_target",
-            lambda branch, auto, fn: None,
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
-            lambda fb, rr, amd, gbe, gcu: {
-                "email_address": "@ai_mail",
-                "display_name": "AI_MAIL",
-                "mailbox_path": "/tmp/mailbox",
-            },
-        )
-
-        sent_to: list[str] = []
-
-        def mock_send_single(*args, **kwargs):
-            """Track which branches receive send_to_single calls."""
-            sent_to.append(args[0])
-            return (True, None)
-
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.send_to_single",
-            mock_send_single,
-        )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
-
-        from aipass.ai_mail.apps.modules.email_send import handle_send
-
-        result = handle_send(["@alpha", "@beta", "Group msg", "Hi all"])
-        assert result is True
-        # Both recipients should have been sent to
-        assert "@alpha" in sent_to
-        assert "@beta" in sent_to
-        assert any("Group send complete" in p for p in printed)
-
-
-# ===========================================================================
-# handle_command dispatch table
-# ===========================================================================
-
-
-class TestHandleCommand:
-    """Tests for the top-level handle_command router."""
-
-    def test_unknown_command_returns_false(self):
-        """Unknown command returns False."""
-        from aipass.ai_mail.apps.modules.email import handle_command
-
-        result = handle_command("nonexistent", [])
-        assert result is False
-
-    def test_help_flag_prints_help(self, monkeypatch):
-        """--help prints help text and returns True."""
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_command
-
-        result = handle_command("--help", [])
-        assert result is True
-        assert any("Email Module" in p for p in printed)
-
-    def test_command_with_help_arg(self, monkeypatch):
-        """Any valid command with 'help' as first arg prints help."""
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_command
-
-        result = handle_command("inbox", ["help"])
-        assert result is True
-        assert any("Email Module" in p for p in printed)
-
-
-# ###########################################################################
-# NEW COVERAGE TESTS — appended for untested paths in email.py & email_send.py
-# ###########################################################################
-
-
-# ===========================================================================
-# _resolve_branch_path — identity propagates, never substitutes
-# ===========================================================================
-
-
-class TestResolveBranchPath:
-    """Tests for _resolve_branch_path identity behaviour."""
-
-    def test_runtime_error_propagates_no_substitution(self, monkeypatch):
-        """POLICY CHANGE 2026-08-21: an unresolvable caller no longer collapses to
-        _AI_MAIL_DIR. That substitution pointed view/close/reply at @ai_mail's own
-        mailbox, so a caller standing outside any branch read and archived another
-        citizen's mail with no signal (the owner's ruling via @devpulse, 096c9a42)."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.get_current_user",
-            lambda: (_ for _ in ()).throw(RuntimeError("no branch")),
-        )
-
-        from aipass.ai_mail.apps.modules.email import _resolve_branch_path
-
-        with pytest.raises(RuntimeError, match="no branch"):
-            _resolve_branch_path()
 
 
 # ===========================================================================
@@ -1180,7 +596,7 @@ class TestResolveBranchPath:
 class TestHandleInboxExtended:
     """Extended tests for handle_inbox edge cases."""
 
-    def test_inbox_nonexistent_file(self, tmp_path, monkeypatch):
+    def test_inbox_nonexistent_file(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """When inbox_file does not exist, prints 'empty' (line 156-158)."""
         non_existent = tmp_path / ".ai_mail.local" / "inbox.json"
 
@@ -1196,18 +612,13 @@ class TestHandleInboxExtended:
                 },
             ),
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_inbox
+        printed = _StdoutLines(capsys)
 
         result = handle_inbox([])
         assert result is True
         assert any("empty" in p.lower() for p in printed)
 
-    def test_inbox_with_target_branch_label(self, tmp_path, monkeypatch):
+    def test_inbox_with_target_branch_label(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """When resolve returns target_branch, label shows 'for @target (NAME)'."""
         messages = [{"id": "m1", "status": "new", "subject": "Hello"}]
         _write_inbox(tmp_path, messages=messages)
@@ -1232,12 +643,7 @@ class TestHandleInboxExtended:
             "aipass.ai_mail.apps.modules.email.format_email_list_item",
             lambda i, msg, show_unread=True: f"[{i}] {msg['subject']}",
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_inbox
+        printed = _StdoutLines(capsys)
 
         result = handle_inbox(["@alpha"])
         assert result is True
@@ -1251,11 +657,6 @@ class TestHandleInboxExtended:
                 BrokenPipeError("pipe closed")
             ),
         )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_inbox
 
         result = handle_inbox([])
         assert result is True
@@ -1271,11 +672,6 @@ class TestHandleInboxExtended:
             "aipass.ai_mail.apps.modules.email.error",
             lambda msg: errors.append(msg),
         )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_inbox
 
         result = handle_inbox([])
         assert result is True
@@ -1301,8 +697,6 @@ class TestHandleViewExtended:
             lambda bp, mid: (_ for _ in ()).throw(BrokenPipeError("pipe")),
         )
 
-        from aipass.ai_mail.apps.modules.email import handle_view
-
         result = handle_view(["some_id"])
         assert result is True
 
@@ -1321,8 +715,6 @@ class TestHandleViewExtended:
             "aipass.ai_mail.apps.modules.email.error",
             lambda msg: errors.append(msg),
         )
-
-        from aipass.ai_mail.apps.modules.email import handle_view
 
         result = handle_view(["some_id"])
         assert result is True
@@ -1344,8 +736,6 @@ class TestHandleViewExtended:
             lambda msg: errors.append(msg),
         )
 
-        from aipass.ai_mail.apps.modules.email import handle_view
-
         result = handle_view(["latest"])
         assert result is True
         assert any("empty" in e.lower() for e in errors)
@@ -1366,8 +756,6 @@ class TestHandleViewExtended:
             lambda msg: errors.append(msg),
         )
 
-        from aipass.ai_mail.apps.modules.email import handle_view
-
         result = handle_view(["latest"])
         assert result is True
         assert any("latest" in e.lower() or "could not" in e.lower() for e in errors)
@@ -1381,7 +769,7 @@ class TestHandleViewExtended:
 class TestHandleCloseExtended:
     """Extended tests for handle_close edge cases."""
 
-    def test_close_batch_mixed_success_failure(self, tmp_path, monkeypatch):
+    def test_close_batch_mixed_success_failure(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """Batch close with mixed results prints both success and error."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
@@ -1396,26 +784,22 @@ class TestHandleCloseExtended:
             "aipass.ai_mail.apps.modules.email.batch_close",
             lambda bp, ids, fn: (results, 2, 1),
         )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.batch_close_post_ops",
-            lambda bp, central_fn, purge_fn: None,
-        )
-        printed: list[str] = []
+        # post_ops writes the live central file and runs purge, so it stays patched and is asserted (ai_mail, leg 6)
+        post_ops = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.batch_close_post_ops", post_ops)
+        printed = _StdoutLines(capsys)
         errors: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.error",
             lambda msg: errors.append(msg),
         )
 
-        from aipass.ai_mail.apps.modules.email import handle_close
-
         result = handle_close(["m1", "m2", "m3"])
         assert result is True
         assert any("Closed m1" in p for p in printed)
         assert any("Not found: m2" in e for e in errors)
+        post_ops.assert_called_once()
+        assert post_ops.call_args.args[0] == tmp_path
         assert any("Closed m3" in p for p in printed)
         assert any("Closed 2" in p and "failed 1" in p for p in printed)
 
@@ -1430,8 +814,6 @@ class TestHandleCloseExtended:
             "aipass.ai_mail.apps.modules.email.error",
             lambda msg: errors.append(msg),
         )
-
-        from aipass.ai_mail.apps.modules.email import handle_close
 
         result = handle_close(["m1"])
         assert result is True
@@ -1452,17 +834,13 @@ class TestHandleCloseExtended:
             "aipass.ai_mail.apps.modules.email.batch_close_post_ops",
             lambda bp, central_fn, purge_fn: post_ops_called.append(True),
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", lambda msg: None)
-
-        from aipass.ai_mail.apps.modules.email import handle_close
+        error_mock = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", error_mock)
 
         result = handle_close(["m1"])
         assert result is True
         assert len(post_ops_called) == 0
+        error_mock.assert_not_called()
 
 
 # ===========================================================================
@@ -1484,8 +862,6 @@ class TestHandleReplyExtended:
             "aipass.ai_mail.apps.modules.email.error",
             lambda msg: errors.append(msg),
         )
-
-        from aipass.ai_mail.apps.modules.email import handle_reply
 
         result = handle_reply(["msg1", "my reply"])
         assert result is True
@@ -1512,366 +888,9 @@ class TestHandleSentExtended:
             lambda msg: errors.append(msg),
         )
 
-        from aipass.ai_mail.apps.modules.email import handle_sent
-
         result = handle_sent([])
         assert result is True
         assert any("path error" in e for e in errors)
-
-
-# ===========================================================================
-# print_introspection (email.py lines 361-402)
-# ===========================================================================
-
-
-class TestPrintIntrospection:
-    """Tests for email.print_introspection."""
-
-    def test_print_introspection_outputs_module_info(self, monkeypatch):
-        """print_introspection outputs module info including handler list."""
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg="", **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import print_introspection
-
-        print_introspection()
-        combined = "\n".join(printed)
-        assert "email Module" in combined
-        assert "Connected Handlers" in combined
-        assert "send.py" in combined
-        assert "inbox_ops.py" in combined
-        assert "json_handler.py" in combined
-
-
-# ===========================================================================
-# email_send.py: _delivery_callback
-# ===========================================================================
-
-
-class TestDeliveryCallback:
-    """Tests for email_send._delivery_callback."""
-
-    def test_delivery_callback_calls_on_email_delivered(self, monkeypatch):
-        """_delivery_callback delegates to on_email_delivered with only update_central_fn."""
-        delivered_args: list[dict] = []
-
-        def mock_on_delivered(update_central_fn=None):
-            """Capture on_email_delivered arguments."""
-            delivered_args.append({"update_central_fn": update_central_fn})
-
-        monkeypatch.setattr(email_send_mod, "on_email_delivered", mock_on_delivered)
-
-        email_send_mod._delivery_callback("/some/path", 3, 2, 5)
-        assert len(delivered_args) == 1
-
-
-# ===========================================================================
-# email_send.py: _get_branch_info_fn
-# ===========================================================================
-
-
-class TestGetBranchInfoFn:
-    """Tests for email_send._get_branch_info_fn."""
-
-    def test_get_branch_info_fn_success(self):
-        """Returns function on success."""
-        from aipass.ai_mail.apps.modules.email_send import _get_branch_info_fn
-
-        result = _get_branch_info_fn()
-        # MEASURED 2026-09-08: the import succeeds here and a real function comes
-        # back, so ``result is None`` never held — the ``or`` let the failure
-        # this unit is named for pass as success.
-        assert callable(result)
-        assert result.__name__ == "get_branch_info_from_registry"
-
-    def test_get_branch_info_fn_import_error(self, monkeypatch):
-        """Returns None on ImportError."""
-        import builtins
-
-        original_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            """Raise ImportError for branch_detection module."""
-            if "branch_detection" in name:
-                raise ImportError("no module")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", mock_import)
-
-        from aipass.ai_mail.apps.modules.email_send import _get_branch_info_fn
-
-        result = _get_branch_info_fn()
-        assert result is None
-
-
-# ===========================================================================
-# email_send.py: _send_direct BrokenPipeError & generic exception
-# ===========================================================================
-
-
-class TestSendDirectExtended:
-    """Extended tests for email_send._send_direct edge cases."""
-
-    def test_send_direct_broken_pipe(self, monkeypatch):
-        """BrokenPipeError is caught and returns True (line 187-189)."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
-            lambda fb, rr, amd, gbe, gcu: (_ for _ in ()).throw(BrokenPipeError("stdout closed")),
-        )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
-
-        from aipass.ai_mail.apps.modules.email_send import _send_direct
-
-        result = _send_direct("@target", "Sub", "Msg")
-        assert result is True
-
-    def test_send_direct_generic_exception(self, monkeypatch):
-        """Generic exception calls dispatch_send_error and returns False."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
-            lambda fb, rr, amd, gbe, gcu: (_ for _ in ()).throw(RuntimeError("send boom")),
-        )
-        dispatched_errors: list[tuple] = []
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.dispatch_send_error",
-            lambda to, subj, err_msg, deliver_fn: dispatched_errors.append((to, subj, err_msg)),
-        )
-        errors: list[str] = []
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.error",
-            lambda msg: errors.append(msg),
-        )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email_send import _send_direct
-
-        result = _send_direct("@target", "Sub", "Msg")
-        assert result is False
-        assert any("send boom" in e for e in errors)
-        assert len(dispatched_errors) == 1
-        assert dispatched_errors[0][0] == "@target"
-
-    def test_send_direct_broadcast_target(self, monkeypatch):
-        """When to_branch is '@all', delegates to _send_broadcast."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
-            lambda fb, rr, amd, gbe, gcu: {
-                "email_address": "@ai_mail",
-                "display_name": "AI_MAIL",
-                "mailbox_path": "/tmp/mailbox",
-            },
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.get_all_branches",
-            lambda: [{"name": "A", "email": "@a"}],
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.send_to_broadcast",
-            lambda *a, **kw: (True, 1, 1, [("A", True, None)]),
-        )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
-
-        from aipass.ai_mail.apps.modules.email_send import _send_direct
-
-        result = _send_direct("@all", "Hello", "World")
-        assert result is True
-        assert any("Broadcast" in p or "OK" in p for p in printed)
-
-
-# ===========================================================================
-# email_send.py: _fire_dispatch_trigger exception (line 201-202)
-# ===========================================================================
-
-
-class TestFireDispatchTrigger:
-    """Tests for email_send._fire_dispatch_trigger exception handling."""
-
-    def test_fire_dispatch_trigger_exception_logged(self, monkeypatch):
-        """Exception in trigger.fire is logged but does not propagate."""
-        mock_trigger = MagicMock()
-        mock_trigger.fire.side_effect = RuntimeError("trigger broken")
-        monkeypatch.setattr(email_send_mod, "trigger", mock_trigger)
-
-        email_send_mod._fire_dispatch_trigger("@target", "Test Subject")
-        mock_trigger.fire.assert_called_once_with("email_dispatched", to="@target", subject="Test Subject")
-
-
-# ===========================================================================
-# email_send.py: _send_broadcast happy path & failure path
-# ===========================================================================
-
-
-class TestSendBroadcast:
-    """Tests for email_send._send_broadcast."""
-
-    def test_send_broadcast_happy_path(self, monkeypatch):
-        """Broadcast sends to all branches and reports success."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.get_all_branches",
-            lambda: [
-                {"name": "A", "email": "@a"},
-                {"name": "B", "email": "@b"},
-            ],
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.send_to_broadcast",
-            lambda *a, **kw: (True, 2, 2, [("A", True, None), ("B", True, None)]),
-        )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
-
-        from aipass.ai_mail.apps.modules.email_send import _send_broadcast
-
-        user_info = {
-            "email_address": "@ai_mail",
-            "display_name": "AI_MAIL",
-            "mailbox_path": "/tmp",
-        }
-        result = _send_broadcast("Subj", "Msg", user_info, False, False, None, None)
-        assert result is True
-        assert any("Broadcasting" in p for p in printed)
-        assert any("2/2" in p for p in printed)
-
-    def test_send_broadcast_failure_path(self, monkeypatch):
-        """When send_to_broadcast returns string results (error), prints error."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.get_all_branches",
-            lambda: [{"name": "A", "email": "@a"}],
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.send_to_broadcast",
-            lambda *a, **kw: (False, 0, 1, "load failed"),
-        )
-        errors: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: None
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.error",
-            lambda msg: errors.append(msg),
-        )
-
-        from aipass.ai_mail.apps.modules.email_send import _send_broadcast
-
-        user_info = {
-            "email_address": "@ai_mail",
-            "display_name": "AI_MAIL",
-            "mailbox_path": "/tmp",
-        }
-        result = _send_broadcast("Subj", "Msg", user_info, False, False, None, None)
-        assert result is False
-        assert any("Failed to load" in e for e in errors)
-
-
-# ===========================================================================
-# email_send.py: print_introspection
-# ===========================================================================
-
-
-class TestEmailSendIntrospection:
-    """Tests for email_send.print_introspection."""
-
-    def test_print_introspection_outputs_module_info(self, monkeypatch):
-        """print_introspection prints function list and header."""
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg="", **kw: printed.append(str(msg))
-        monkeypatch.setattr(email_send_mod, "console", mock_console)
-
-        email_send_mod.print_introspection()
-        combined = "\n".join(printed)
-        assert "email_send Module" in combined
-        assert "handle_send" in combined
-        assert "_send_direct" in combined
-        assert "_send_broadcast" in combined
-        assert "_delivery_callback" in combined
-
-
-# ===========================================================================
-# email_send.py: _send_interactive complete path (user provides input)
-# ===========================================================================
-
-
-class TestSendInteractiveExtended:
-    """Extended tests for email_send._send_interactive."""
-
-    def test_send_interactive_without_a_terminal_refuses_before_listing_branches(self, monkeypatch):
-        """No TTY: refuse with usage, and do not print a branch list first.
-
-        `drone @ai_mail email` with no args used to reach the prompts through a
-        routed subprocess and block until drone's 30s timeout (measured live,
-        APLAN-0006). The listing must not print either — output that precedes a
-        certain refusal reads as progress toward a send that cannot happen.
-        """
-        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-        listed: list[str] = []
-        monkeypatch.setattr(
-            email_send_mod,
-            "get_all_branches",
-            lambda: listed.append("called") or [{"name": "ALPHA", "email": "@alpha"}],
-        )
-        errors: list[str] = []
-        monkeypatch.setattr(email_send_mod, "error", lambda msg: errors.append(str(msg)))
-
-        result = email_send_mod._send_interactive()
-
-        assert result is False
-        assert listed == []
-        assert any("terminal" in e for e in errors)
-
-    def test_send_interactive_complete_path(self, monkeypatch):
-        """User provides input successfully, send proceeds."""
-        # Same reason as test_send_interactive_mode: the no-TTY guard runs first
-        # under pytest, so the terminal has to be pinned to reach the send path.
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-        monkeypatch.setattr(
-            email_send_mod,
-            "get_all_branches",
-            lambda: [{"name": "ALPHA", "email": "@alpha"}],
-        )
-        monkeypatch.setattr(
-            email_send_mod,
-            "collect_interactive_input",
-            lambda branches: {
-                "to": "@alpha",
-                "subject": "Hi",
-                "message": "Hello there",
-            },
-        )
-        monkeypatch.setattr(
-            email_send_mod,
-            "resolve_sender_info",
-            lambda fb, rr, amd, gbe, gcu: {
-                "email_address": "@ai_mail",
-                "display_name": "AI_MAIL",
-                "mailbox_path": "/tmp/mailbox",
-            },
-        )
-        monkeypatch.setattr(email_send_mod, "send_to_single", lambda *a, **kw: (True, None))
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr(email_send_mod, "console", mock_console)
-        monkeypatch.setattr(email_send_mod, "error", lambda msg: None)
-
-        result = email_send_mod._send_interactive()
-        assert result is True
-        assert any("@alpha" in p for p in printed)
-        assert any("sent" in p.lower() for p in printed)
 
 
 class TestHandleReplyMultiArg:
@@ -1894,11 +913,7 @@ class TestHandleReplyMultiArg:
             "aipass.ai_mail.apps.modules.email.send_reply",
             lambda bp, orig, msg: (captured_msg.append(msg), "Reply sent", "r1")[1:],
         )
-        mock_console = MagicMock()
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
         _write_inbox(tmp_path)
-
-        from aipass.ai_mail.apps.modules.email import handle_reply
 
         result = handle_reply(["msg1", "Line one", "Line two", "Line three"])
         assert result is True
@@ -1922,11 +937,7 @@ class TestHandleReplyMultiArg:
             "aipass.ai_mail.apps.modules.email.send_reply",
             lambda bp, orig, msg: (captured_msg.append(msg), "Reply sent", "r1")[1:],
         )
-        mock_console = MagicMock()
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
         _write_inbox(tmp_path)
-
-        from aipass.ai_mail.apps.modules.email import handle_reply
 
         result = handle_reply(["msg1", "Complete single-line reply"])
         assert result is True
@@ -1944,7 +955,7 @@ class TestListingNeverHidesMail:
     fixture would share the bug's assumption and pass either way.
     """
 
-    def _run_inbox(self, monkeypatch, tmp_path, messages):
+    def _run_inbox(self, monkeypatch, tmp_path, messages, capsys: pytest.CaptureFixture[str]):
         """Run handle_inbox over the given store, return printed lines."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.resolve_inbox_target",
@@ -1969,64 +980,61 @@ class TestListingNeverHidesMail:
             "aipass.ai_mail.apps.modules.email.format_email_list_item",
             lambda i, msg, show_unread=True: f"{i}. {msg['subject']}",
         )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_inbox
+        printed = _StdoutLines(capsys)
 
         assert handle_inbox([]) is True
         return printed
 
-    def test_newest_message_listed_when_store_exceeds_limit(self, monkeypatch, tmp_path):
+    def test_newest_message_listed_when_store_exceeds_limit(
+        self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]
+    ):
         """CANARY: the newest arrival must be visible in an over-limit inbox."""
         # Newest first, exactly as delivery.py writes it.
         messages = [{"id": f"m{i:03d}", "subject": f"subject-{i:03d}", "status": "new"} for i in range(25)]
-        printed = self._run_inbox(monkeypatch, tmp_path, messages)
+        printed = self._run_inbox(monkeypatch, tmp_path, messages, capsys)
         blob = "\n".join(printed)
 
         assert "subject-000" in blob, "newest message was dropped from the listing"
         assert "subject-019" in blob, "20th-newest message should still list"
         assert "subject-024" not in blob, "oldest message should fall off, not the newest"
 
-    def test_over_limit_listing_says_it_truncated(self, monkeypatch, tmp_path):
+    def test_over_limit_listing_says_it_truncated(self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Truncation is reported as 'most recent of N', not a bare count."""
         messages = [{"id": f"m{i:03d}", "subject": f"subject-{i:03d}", "status": "new"} for i in range(25)]
-        printed = self._run_inbox(monkeypatch, tmp_path, messages)
+        printed = self._run_inbox(monkeypatch, tmp_path, messages, capsys)
         assert any("20 most recent of 25 messages" in p for p in printed)
 
-    def test_under_limit_lists_every_message_oldest_first(self, monkeypatch, tmp_path):
+    def test_under_limit_lists_every_message_oldest_first(
+        self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]
+    ):
         """Nothing is dropped under the limit; display order stays oldest-first."""
         messages = [{"id": f"m{i}", "subject": f"subject-{i}", "status": "new"} for i in range(3)]
-        printed = self._run_inbox(monkeypatch, tmp_path, messages)
+        printed = self._run_inbox(monkeypatch, tmp_path, messages, capsys)
         rows = [p for p in printed if p.strip().startswith(("1.", "2.", "3."))]
         assert [r.strip() for r in rows] == ["1. subject-2", "2. subject-1", "3. subject-0"]
         assert any("Showing 3 of 3 messages" in p for p in printed)
 
-    def test_row_that_fails_to_render_is_shown_raw_not_hidden(self, monkeypatch):
-        """CANARY: a row the console rejects degrades visibly instead of vanishing."""
-        printed: list[str] = []
+    def test_row_that_fails_to_render_is_shown_raw_not_hidden(
+        self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]
+    ):
+        """CANARY: a row the console rejects degrades visibly instead of vanishing.
 
-        def exploding_print(msg, **kw):
-            if kw.get("markup") is False:
-                printed.append(str(msg))
-                return
-            raise ValueError("closing tag '[/rc]' doesn't match any open tag")
+        The real console rejects the stray closing tag itself (leg 5 took out the
+        fake console that raised on cue), so the failure is Rich's own. The logger
+        is replaced so the degraded path writes no live log, and asserted. The row
+        is printed by `inbox` itself, not by the row helper (ai_mail, leg 14).
+        """
+        log = MagicMock()
+        monkeypatch.setattr(email_mod, "logger", log)
 
-        mock_console = MagicMock()
-        mock_console.print = exploding_print
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import _print_row
-
-        _print_row("1. Subject: RE: [/rc] recovered")
-
-        blob = "\n".join(printed)
+        messages = [{"id": "m0", "subject": "Subject: RE: [/rc] recovered", "status": "new"}]
+        blob = "\n".join(self._run_inbox(monkeypatch, tmp_path, messages, capsys))
         assert "RE: [/rc] recovered" in blob, "unrenderable row vanished instead of degrading"
         assert "RAW" in blob, "degraded row must carry a visible marker"
+        log.warning.assert_called_once()
+        assert log.warning.call_args.args[0] == "[email] row render failed, printing raw: %s"
 
-    def test_unreadable_sent_file_still_gets_a_row(self, monkeypatch, tmp_path):
+    def test_unreadable_sent_file_still_gets_a_row(self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]):
         """CANARY: a sent file that will not load is listed as a placeholder."""
         sent_folder = tmp_path / ".ai_mail.local" / "sent"
         sent_folder.mkdir(parents=True)
@@ -2036,18 +1044,13 @@ class TestListingNeverHidesMail:
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
             lambda: tmp_path,
         )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.load_email_file",
-            lambda f: None,
-        )
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_sent
+        # The stub stands for a file that will not load ("{}" would load); asserted on the file it was handed
+        load = MagicMock(return_value=None)
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.load_email_file", load)
+        printed = _StdoutLines(capsys)
 
         assert handle_sent([]) is True
+        load.assert_called_once_with(sent_folder / "aaaa1111.json")
         blob = "\n".join(printed)
         assert "aaaa1111.json" in blob, "unreadable sent file was silently skipped"
         assert "UNREADABLE FILE" in blob
@@ -2087,11 +1090,6 @@ class TestViewLatestResolvesNewest:
             "aipass.ai_mail.apps.modules.email.format_email_header",
             lambda data: "HEADER",
         )
-        mock_console = MagicMock()
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_view
-
         assert handle_view(["latest"]) is True
         assert opened == ["newest01"], f"'latest' opened {opened}, expected the newest message"
 
@@ -2106,8 +1104,12 @@ class TestBodyRendersWhateverTheSenderTyped:
     merely being escaped correctly.
     """
 
-    def _view_message(self, monkeypatch, tmp_path, body):
-        """Run handle_view over a message with the given body."""
+    def _view_message(self, monkeypatch, tmp_path, body, capsys: pytest.CaptureFixture[str]):
+        """Run handle_view over a message with the given body; return what stdout received.
+
+        The product's own console prints; leg 5 took out the Rich console on a
+        buffer that stood in its place (mock_console).
+        """
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email._resolve_branch_path",
             lambda: tmp_path,
@@ -2129,60 +1131,31 @@ class TestBodyRendersWhateverTheSenderTyped:
             lambda ed: "HEADER",
         )
 
-        from rich.console import Console
-
-        buffer = io.StringIO()
-        real_console = Console(file=buffer, width=200, no_color=True, highlight=False)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", real_console)
-
-        from aipass.ai_mail.apps.modules.email import handle_view
-
         assert handle_view(["body0001"]) is True
-        return buffer.getvalue()
+        return " ".join(capsys.readouterr().out.split())
 
-    def test_body_with_closing_tag_renders_instead_of_raising(self, monkeypatch, tmp_path):
+    def test_body_with_closing_tag_renders_instead_of_raising(
+        self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]
+    ):
         """CANARY: a body containing [/rc] must render, not abort the view."""
         body = "SHIPPED — [/rc] is live on the control bot. Re-verified this session."
-        out = self._view_message(monkeypatch, tmp_path, body)
+        out = self._view_message(monkeypatch, tmp_path, body, capsys)
         assert "[/rc] is live on the control bot" in out
 
-    def test_body_with_style_tag_keeps_its_text(self, monkeypatch, tmp_path):
+    def test_body_with_style_tag_keeps_its_text(self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]):
         """A body containing [dim] renders the tag literally, text intact."""
         body = "Line one [dim]note kept[/dim] and [skills] tag kept."
-        out = self._view_message(monkeypatch, tmp_path, body)
+        out = self._view_message(monkeypatch, tmp_path, body, capsys)
         assert "[dim]note kept[/dim]" in out
         assert "[skills] tag kept" in out
 
-    def test_body_renders_with_markup_disabled(self, monkeypatch, tmp_path):
-        """The body print explicitly passes markup=False rather than escaping."""
-        printed: list[tuple] = []
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email._resolve_branch_path",
-            lambda: tmp_path,
-        )
-        email_data = {
-            "id": "body0002",
-            "subject": "s",
-            "message": "raw [/rc] body",
-            "from_name": "X",
-            "from": "@x",
-            "timestamp": "t",
-        }
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.mark_as_opened",
-            lambda bp, mid: (True, "Opened", email_data),
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.format_email_header",
-            lambda ed: "HEADER",
-        )
-        mock_console = MagicMock()
-        mock_console.print = lambda msg, **kw: printed.append((str(msg), kw))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
+    def test_body_renders_with_markup_disabled(self, monkeypatch, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """A body's style tags reach stdout as written, never consumed as markup.
 
-        from aipass.ai_mail.apps.modules.email import handle_view
-
-        assert handle_view(["body0002"]) is True
-        body_calls = [(m, kw) for m, kw in printed if "raw [/rc] body" in m]
-        assert body_calls, "body was never printed"
-        assert body_calls[0][1].get("markup") is False, "body printed as markup — it can raise"
+        Read through the product's own console (ai_mail, leg 7). What the console
+        stand-in could see and stdout cannot: the markup=False keyword itself. A
+        body escaped by hand prints the same text, so this pins what the reader
+        sees, not which of the two routes produced it.
+        """
+        out = self._view_message(monkeypatch, tmp_path, "raw [bold]body[/bold] kept", capsys)
+        assert "raw [bold]body[/bold] kept" in out, "body printed as markup — its tags were consumed"

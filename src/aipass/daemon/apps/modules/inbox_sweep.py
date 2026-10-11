@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_sweep.py
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-11
-# Modified: 2026-09-10
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -117,7 +117,7 @@ def _apply_wake_policy(entries: List[dict]) -> None:
     against the same blocklist wake_branch itself enforces.
     """
     try:
-        from aipass.ai_mail.apps.handlers.dispatch.wake import is_wake_blocked
+        from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
     # OSError, not only ImportError: MEASURED 2026-08-31 - this import raises
     # FileNotFoundError under a dead working directory, and the sweep must degrade
     # rather than crash on an optional consult.
@@ -144,8 +144,8 @@ def _wake_message(entry: dict) -> str:
 
 def _wake_owner(entry: dict) -> tuple:
     """Wake one branch owner. Returns (ok: bool, detail: str)."""
-    # Cross-branch handler import authorized by DPLAN-0204 §2.8 (same path as run.py)
-    from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+    # Through ai_mail's published door (DPLAN-0404), as run.py and rotation.py
+    from aipass.ai_mail.apps.modules.door_wake import wake_branch
 
     owner = entry["owner"]
     _log(f"WAKE: {owner} — {entry['stale_count']} unread, oldest {entry['oldest_age_hours']:.0f}h")

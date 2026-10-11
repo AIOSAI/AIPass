@@ -1,11 +1,14 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_dead_cwd_imports.py - Dead-cwd import pins
-# Date: 2026-08-31
-# Version: 1.0.0
+# =================== AIPass ====================
+# Name: test_dead_cwd_imports.py
+# Description: Dead-cwd import pins
+# Version: 1.1.0
+# Created: 2026-08-31
+# Modified: 2026-10-08
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.1.0 (2026-10-08): The old guard's caller-is-None case, read through
+#     private names, becomes two dead-cwd pins on the v2 fence (DPLAN-0404)
 #   - v1.0.0 (2026-08-31): Windows round 4 - every skills module must import
 #     with an unreadable working directory, in two denial worlds
 #
@@ -13,37 +16,10 @@
 #   - Measures by RUNNING in a child process, never by grepping spellings
 # =============================================
 
-"""
-Every skills module must import when the working directory is unreadable.
+"""Tests that every skills module, and the guard in apps/handlers/__init__.py, survive a dead cwd."""
 
-THE DEFECT. ``ntpath.realpath`` calls ``os.getcwd()`` on its first lines
-UNCONDITIONALLY - before it checks whether the path is even relative.
-``posixpath.realpath`` reads the cwd only for relative paths, which is why this
-was invisible on Linux for as long as it existed. ``Path.resolve()`` routes
-through realpath, so on Windows every ``Path(__file__).resolve()`` REACHED AT
-IMPORT is an import-time crash for a process whose directory was deleted or
-whose network share dropped. Not "degrades" - cannot import.
-
-WHY TWO WORLDS. They convict different constructions and neither is sufficient:
-
-  World A - take the Windows reading of realpath (call getcwd first), then deny
-            getcwd. Convicts a raw ``Path.resolve()`` reached at import.
-            It CANNOT convict ``inspect.stack()``: denying getcwd kills
-            abspath, so ``getmodule`` dies inside ``getabsfile`` where inspect
-            already catches it, and stack() completes green for the wrong
-            reason.
-  World B - deny ``os.path.realpath`` outright and leave abspath working.
-            Convicts ``inspect.stack()`` through getmodule's UNGUARDED
-            ``os.path.realpath`` at inspect.py:1009.
-
-WHY SUBPROCESSES. The defect is import-time. A module already in
-``sys.modules`` cannot demonstrate it, and the denial has to be installed
-before the first import rather than around it.
-
-WHY A ``-c`` STRING AND NOT STDIN. A probe piped through stdin gets cached by
-linecache under the ``<stdin>`` key, and the probe then lies green. The child
-rides a string-pseudo frame instead.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — posixpath and ntpath realpath() themselves; only whether a world reaches them
 
 import ast
 import os
@@ -68,20 +44,25 @@ BRANCH_ROOT = Path(__file__).resolve().parents[1]
 GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 
 
-def _skills_modules() -> list:
+def _skills_modules(branch_root: Path = BRANCH_ROOT) -> list:
     """Every importable skills module, by dotted name.
+
+    Skips are judged on the parts relative to branch_root, never the whole
+    path, so a checkout under a directory named dropbox is still walked.
+    dropbox is a sandbox nothing runs out of (the owner's ruling of
+    2026-09-27); docs.local is untracked scratch no import can spell.
 
     Returns:
         list[str]: Dotted module names, tests and templates excluded.
     """
     mods = []
-    for path in sorted((SRC_ROOT / "aipass" / "skills").rglob("*.py")):
-        rel = path.relative_to(SRC_ROOT)
+    for path in sorted(branch_root.rglob("*.py")):
+        rel = path.relative_to(branch_root)
         if any(part.startswith(".") for part in rel.parts):
             continue
-        if {"tests", "__pycache__", "templates"} & set(rel.parts):
+        if {"tests", "__pycache__", "templates", "dropbox", "docs.local"} & set(rel.parts):
             continue
-        parts = list(rel.with_suffix("").parts)
+        parts = ["aipass", "skills", *rel.with_suffix("").parts]
         if parts[-1] == "__init__":
             parts = parts[:-1]
         mods.append(".".join(parts))
@@ -166,6 +147,21 @@ print("OK %s" % TARGET)
 """
 
 
+# WHY TWO WORLDS. They convict different constructions and neither is sufficient:
+#
+#   World A - take the Windows reading of realpath (call getcwd first), then deny
+#             getcwd. Convicts a raw ``Path.resolve()`` reached at import.
+#             It CANNOT convict ``inspect.stack()``: denying getcwd kills
+#             abspath, so ``getmodule`` dies inside ``getabsfile`` where inspect
+#             already catches it, and stack() completes green for the wrong
+#             reason.
+#   World B - deny ``os.path.realpath`` outright and leave abspath working.
+#             Convicts ``inspect.stack()`` through getmodule's UNGUARDED
+#             ``os.path.realpath`` at inspect.py:1009.
+#
+# WHY SUBPROCESSES. The defect is import-time. A module already in
+# ``sys.modules`` cannot demonstrate it, and the denial has to be installed
+# before the first import rather than around it.
 def _run_probe(mode: str, target: str, inject: bool = True):
     """Import one module in a child process under a denial world.
 
@@ -185,6 +181,9 @@ def _run_probe(mode: str, target: str, inject: bool = True):
     # its resolve. Inheriting it here made reverting that site survive every
     # pin — a measurement that quietly stopped reaching the code it measures.
     env.pop("AIPASS_TEST_LOG_DIR", None)
+    # A -c STRING AND NOT STDIN. A probe piped through stdin gets cached by
+    # linecache under the <stdin> key, and the probe then lies green. The child
+    # rides a string-pseudo frame instead.
     return subprocess.run(
         [
             sys.executable,
@@ -196,6 +195,7 @@ def _run_probe(mode: str, target: str, inject: bool = True):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=120,
@@ -239,11 +239,19 @@ def test_healthy_world_imports_everything():
     """
     failures = [(m, _run_probe("healthy", m)) for m in SKILLS_MODULES]
     red = [(m, r.stdout.strip() or r.stderr.strip()[-300:]) for m, r in failures if r.returncode != 0]
-    assert not red, f"modules failed to import in a HEALTHY world: {red}"
+    assert red == [], f"modules failed to import in a HEALTHY world: {red}"
 
 
 # ---------------------------------------------------------------------------
 # The measurement
+#
+# THE DEFECT. ntpath.realpath calls os.getcwd() on its first lines
+# UNCONDITIONALLY - before it checks whether the path is even relative.
+# posixpath.realpath reads the cwd only for relative paths, which is why this
+# was invisible on Linux for as long as it existed. Path.resolve() routes
+# through realpath, so on Windows every Path(__file__).resolve() REACHED AT
+# IMPORT is an import-time crash for a process whose directory was deleted or
+# whose network share dropped. Not "degrades" - cannot import.
 # ---------------------------------------------------------------------------
 
 
@@ -255,7 +263,7 @@ def test_every_module_imports_with_a_dead_cwd(mode):
         result = _run_probe(mode, module)
         if result.returncode != 0:
             red.append(result.stdout.strip() or result.stderr.strip()[-300:])
-    assert not red, (
+    assert red == [], (
         f"world {mode}: {len(red)} of {len(SKILLS_MODULES)} skills modules "
         f"cannot be imported with an unreadable cwd:\n" + "\n".join(red)
     )
@@ -302,7 +310,7 @@ def test_guard_contains_no_inspect_stack_call():
     names inspect.stack while explaining the defect.
     """
     lines = _inspect_stack_calls(GUARD_FILE.read_text(encoding="utf-8"))
-    assert not lines, (
+    assert lines == [], (
         f"inspect.stack() called in {GUARD_FILE} at line(s) {lines}; it needs a "
         f"readable cwd before any of the guard's own code runs (getmodule -> "
         f"os.path.realpath, inspect.py:1009, outside any try)"
@@ -372,6 +380,10 @@ if hasattr(_pl, "_NormalAccessor"):
     _pl._NormalAccessor.realpath = staticmethod(_denied_realpath)
 
 sys.path.insert(0, sys.argv[1])
+# The driver loads the shim first, from a <string> frame the fence reads as
+# transport: a_named_module sits under tmp, a foreign seat the fence refuses
+# (DPLAN-0404). The caller's name is this pin's subject; the fence has its own.
+import aipass.skills.apps.handlers.json.json_handler
 import a_named_module
 
 # inspect memoises filename -> module name, and a cache HIT returns before
@@ -418,6 +430,7 @@ def test_caller_module_name_survives_and_still_answers(tmp_path):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=60,
@@ -482,6 +495,7 @@ def _run_runtime_probe():
         [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", _RUNTIME_PROBE],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=60,
@@ -524,95 +538,91 @@ def test_skill_creation_refuses_rather_than_guessing():
 
 
 # ---------------------------------------------------------------------------
-# The caller-is-None branch, measured by BEHAVIOUR as well as by parse tree
+# The fence under a dead cwd, through its public shape (DPLAN-0404)
 #
-# The round-4 guidance said only an AST ban can watch this branch. That was too
-# strong, and spawn measured the correction: the branch is unreachable from
-# IMPORT-shaped pins (apps/__init__.py always supplies a real-file frame), but
-# calling _guard_branch_access() DIRECTLY from a -c child reaches it - every
-# frame is then string-pseudo or importlib, both skipped, so _find_real_caller
-# returns None and the branch runs. A regrown inspect.stack() walk dies there
-# under a realpath denial; the cured plain return survives.
-#
-# The AST ban stays: it needs no subprocess and names the defect precisely.
-# This is its behavioural sibling, not its replacement.
+# The fence reads every frame's path, and Path.resolve reaches realpath, which
+# on Windows reads the cwd first. The child removes its own cwd (POSIX; Windows
+# holds a process's cwd open, so there world A's denial stands in for it), arms
+# world A on top, then runs tests/support_fence.py from a seat: kin must still
+# be let through and a seat outside any branch must still be refused by name.
 # ---------------------------------------------------------------------------
 
 
-_NONE_BRANCH_PROBE = r"""
+_FENCE_DEAD_CWD_DRIVER = r"""
 import os
-import os.path
+import runpy
 import sys
 
-import aipass.skills.apps.handlers as guard
-
-
-def _denied_realpath(*a, **k):
-    raise FileNotFoundError(2, "No such file or directory (dead cwd)")
-
-
-os.path.realpath = _denied_realpath
-
-# Pre-3.11 pathlib captured its realpath at class creation, so a bare module
-# rebind leaves the world inert on 3.10. Takes any arguments because a plain
-# function on a class arrives BOUND - the accessor is passed as self.
-import pathlib as _pl
-
-if hasattr(_pl, "_NormalAccessor"):
-    _pl._NormalAccessor.realpath = staticmethod(_denied_realpath)
-
-# ARMING PROBE 1 - the denial actually bites the call the defect makes. A world
-# spelled too realistically (running this as a script, where every frame is a
-# real on-disk file and getsourcefile early-returns) leaves the denial inert
-# and turns the assertion below vacuously green.
-import inspect
-
-inspect.modulesbyfile.clear()
-inspect._filesbymodname.clear()
+seat, shape, doomed = sys.argv[2:5]
+os.chdir(doomed)
 try:
-    inspect.stack()
+    os.rmdir(doomed)
 except OSError:
-    print("ARMED_DENIAL=1")
+    print("REMOVED=0")
+exec(os.environ["SKILLS_WORLD_TEXT"])
+
+# ARMING PROBE - a cwd the child can still read would make the verdict below
+# say nothing about a dead one.
+try:
+    os.getcwd()
+except OSError:
+    print("ARMED_CWD=1")
 else:
-    print("ARMED_DENIAL=0")
+    print("ARMED_CWD=0")
 
-# ARMING PROBE 2 - we are really in the caller-is-None branch, not some other
-# path that happens to return quietly.
-caller_file, _line = guard._find_real_caller()
-print("ARMED_NONE=%s" % (1 if caller_file is None else 0))
-
-guard._guard_branch_access()
-print("GUARD_RETURNED=1")
+sys.argv = [seat, shape]
+runpy.run_path(seat, run_name="__main__")
 """
 
 
-def test_caller_is_none_branch_returns_without_a_readable_cwd():
-    """Reaching the caller-is-None branch must not need a cwd.
+def _run_fence_with_a_dead_cwd(seat: Path, tmp_path: Path) -> list:
+    """Run the fence probe at `seat` (shape pkg) in a child whose cwd is gone.
 
-    Both arming probes must report before the assertion means anything: a
-    denial that does not bite, or a stack that never produced None, would make
-    this pass over a live defect.
+    Returns:
+        list[str]: The child's stdout lines.
     """
-    env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
-    env.pop("AIPASS_TEST_LOG_DIR", None)
+    doomed = tmp_path / "doomed_cwd"
+    doomed.mkdir()
+    env = dict(os.environ, PYTHONPATH=str(SRC_ROOT), SKILLS_WORLD_TEXT=WORLD_A)
     result = subprocess.run(
-        [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", _NONE_BRANCH_PROBE],
+        [
+            sys.executable,
+            "-c",
+            "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))",
+            _FENCE_DEAD_CWD_DRIVER,
+            str(seat),
+            "pkg",
+            str(doomed),
+        ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
-        cwd=str(SRC_ROOT),
+        cwd=str(tmp_path),
         timeout=60,
     )
-    assert "ARMED_DENIAL=1" in result.stdout, (
-        f"the realpath denial did not bite inspect.stack(); this pin would be "
-        f"vacuously green. stdout={result.stdout!r} stderr={result.stderr[-400:]!r}"
-    )
-    assert "ARMED_NONE=1" in result.stdout, (
-        f"_find_real_caller did not return None, so the branch under test never ran. stdout={result.stdout!r}"
-    )
-    assert result.returncode == 0 and "GUARD_RETURNED=1" in result.stdout, (
-        f"the guard could not complete the caller-is-None branch with an unreadable cwd: {result.stderr[-800:]}"
-    )
+    assert result.returncode == 0, f"the fence probe crashed under a dead cwd: {result.stderr[-800:]}"
+    lines = result.stdout.strip().splitlines()
+    assert "ARMED_CWD=1" in lines, f"the cwd was still readable, so this pin asserts nothing: {lines}"
+    return lines
+
+
+def test_the_fence_lets_kin_through_with_a_dead_cwd(tmp_path):
+    """The branch's own seat imports its handlers with no readable cwd."""
+    kin_seat = BRANCH_ROOT / "tests" / "support_fence.py"
+    assert _run_fence_with_a_dead_cwd(kin_seat, tmp_path)[-1] == "ALLOWED"
+
+
+def test_the_fence_refuses_an_elsewhere_seat_with_a_dead_cwd(tmp_path):
+    """A seat outside any branch is still refused, and named, with no readable cwd.
+
+    Without this, a fence that stopped working under a dead cwd would pass the
+    kin pin above by letting everybody in.
+    """
+    seat = tmp_path / "elsewhere" / "probe.py"
+    seat.parent.mkdir()
+    seat.write_bytes((BRANCH_ROOT / "tests" / "support_fence.py").read_bytes())
+    assert _run_fence_with_a_dead_cwd(seat, tmp_path)[-1] == "DENIED Caller branch: unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +685,7 @@ def test_absent_telethon_is_not_announced_on_every_import():
         [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", _IMPORT_WARNING_PROBE],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=60,
@@ -831,6 +842,7 @@ def _run_emulation(shape: str, world: str, call: str = "cwd", platform: str = "h
         [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", source],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(SRC_ROOT),
         timeout=60,
@@ -842,21 +854,13 @@ def _run_emulation(shape: str, world: str, call: str = "cwd", platform: str = "h
 class TestTheAccessorTrapIsReproducibleLocally:
     """Pin the 3.10 discrimination on whatever interpreter is running."""
 
-    def test_a_bare_module_patch_does_not_reach_a_captured_accessor(self):
-        """This is the defect: rebinding a name nothing reads again.
-
-        The accessor took its copy of os.getcwd at class creation, so the
-        world reports no denial at all - and every pin underneath it would be
-        vacuously green.
-        """
-        assert _run_emulation(ACCESSOR_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=NO_RAISE"
-
     def test_the_shipped_world_does_reach_a_captured_accessor(self):
         """The cure, measured against the same emulation.
 
         Same shape, same call, different world text - and this one arms. That
-        difference IS the fix; without it this pin and the one above would
-        agree and neither would mean anything.
+        difference IS the fix; without it this pin and the bare-patch pin in
+        test_the_emulation_itself_captures_eagerly would agree and neither
+        would mean anything.
         """
         assert _run_emulation(ACCESSOR_SHAPE, WORLD_A) == "VERDICT=RAISED"
 
@@ -880,6 +884,9 @@ class TestTheAccessorTrapIsReproducibleLocally:
         instrument would quietly stop measuring the thing it exists for.
         """
         assert _run_emulation(_LAZY_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=RAISED"
+        # This is the defect: rebinding a name nothing reads again. The accessor
+        # took its copy of os.getcwd at class creation, so the world reports no
+        # denial at all - and every pin underneath it would be vacuously green.
         assert _run_emulation(ACCESSOR_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=NO_RAISE"
 
     def test_the_runtime_world_also_reaches_a_captured_accessor(self):
@@ -941,7 +948,7 @@ class TestTheAccessorTrapIsReproducibleLocally:
             }
             if len(set(verdicts.values())) != 1:
                 moved.append((call, verdicts))
-        assert not moved, f"verdicts moved with the platform: {moved}"
+        assert moved == [], f"verdicts moved with the platform: {moved}"
 
 
 class TestTheArmingProbeIsDialectDependent:
@@ -989,6 +996,7 @@ class TestTheArmingProbeIsDialectDependent:
             [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", source],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
             cwd=str(SRC_ROOT),
             timeout=60,
@@ -1054,6 +1062,7 @@ class TestTheArmingProbeIsDialectDependent:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
             cwd=str(SRC_ROOT),
             timeout=60,
@@ -1075,7 +1084,7 @@ class TestTheAccessorTrapResolveRoute:
     nothing about the other.
     """
 
-    def test_world_a_reaches_the_captured_accessor_on_the_RESOLVE_route(self):
+    def test_world_a_reaches_the_captured_accessor_on_the_resolve_route(self):
         """WORLD_A patches two accessor attributes; this measures the second.
 
         ``Path.cwd()`` and ``Path.resolve()`` go through DIFFERENT captured
@@ -1092,3 +1101,20 @@ class TestTheAccessorTrapResolveRoute:
         other reason rather than because it reached the accessor.
         """
         assert _run_emulation(ACCESSOR_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve") == "VERDICT=NO_RAISE"
+
+
+class TestTheModuleWalk:
+    def test_the_walk_skips_sandboxes_by_name_relative_to_its_root(self, tmp_path):
+        """Pins the shipped defect: docs.local/ scratch tools were walked and went RED as modules.
+
+        The root stands inside a directory named dropbox, so a skip judged on
+        the whole path would hide the branch itself. A test module cannot be
+        served by the mutant runner; this pin stands on red first alone.
+        """
+        branch = tmp_path / "dropbox" / "skills"
+        for rel in ("apps/a.py", "dropbox/tool.py", "docs.local/x/tool.py", ".archive/old.py", "tests/test_a.py"):
+            target = branch / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("", encoding="utf-8")
+
+        assert _skills_modules(branch) == ["aipass.skills.apps.a"]

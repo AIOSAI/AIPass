@@ -70,7 +70,10 @@ skill from a template; the validator checks requirements; the switch owns the
 on/off state and its systemd actuation. Two handlers are infrastructure rather
 than a verb: `module_paths.py`, which locates a module without ever reading the
 working directory, and the `json/` shim, which binds the fleet's one JSON
-service.
+service. One module is not a command but a door (DPLAN-0404): `door_notifier`
+publishes the Telegram push notification to @daemon, so no other branch
+imports this branch's handlers. `apps/handlers/__init__.py` is the fence that
+refuses one that tries.
 
 Built-in skills live under `lib/`, one directory each, and the templates the
 creator stamps live under `templates/`. The directory tree is not drawn here:

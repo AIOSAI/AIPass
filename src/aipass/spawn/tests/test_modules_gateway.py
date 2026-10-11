@@ -1,30 +1,16 @@
 # =================== META ====================
 # Name: test_modules_gateway.py
 # Description: Tests for the apps.modules package gateway re-exports
-# Version: 1.1.0
+# Version: 1.1.3
 # Created: 2026-08-28
-# Modified: 2026-09-19
+# Modified: 2026-10-08
 # =============================================
 
-"""Tests for spawn's modules-package gateway (DPLAN-0319 wave 3).
+"""Tests for apps/modules/__init__.py's gateway re-exports (DPLAN-0319 wave 3)."""
 
-``apps/handlers/__init__.py`` refuses cross-branch handler imports at import
-time, and its own refusal message points the caller at
-``aipass.spawn.apps.modules``. Until this gateway existed there was nothing to
-point at for the class registry, so @seedgo's architecture check carried a
-drift-pinned MIRROR of the class table (their commit 5ffc468b) — which makes
-the auditor a fleet-wide single point of failure the moment spawn renames a
-class.
-
-These pins guard the contract that lets that mirror die:
-
-    from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
-
-The gateway is a re-export, never a reimplementation. The identity pins below
-(``is`` the handler's own callable) exist so that a second copy of the logic
-cannot be introduced here without a test going red — a gateway that drifts from
-its handler is the same failure the mirror was, one layer closer in.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — docstrings on get_template_dir, refuse_legacy_class and docs_page_template
+# seedgo: no-test-needed(ruff) — that apps/handlers/class_registry.py and apps/handlers/docs_page.py parse and import
 
 import inspect
 import subprocess
@@ -33,6 +19,30 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
+from aipass.spawn.apps import modules
+from aipass.spawn.apps.handlers import docs_page
+from aipass.spawn.apps.handlers.class_registry import get_template_dir as _class_registry_get_template_dir
+from aipass.spawn.apps.handlers.class_registry import refuse_legacy_class as _class_registry_refuse_legacy_class
+from aipass.spawn.apps.handlers.docs_page import docs_page_template as _docs_page_module_docs_page_template
+from aipass.spawn.apps.modules import docs_page_template, get_template_dir, refuse_legacy_class
+
+# ``apps/handlers/__init__.py`` refuses cross-branch handler imports at import
+# time, and its own refusal message points the caller at
+# ``aipass.spawn.apps.modules``. Until this gateway existed there was nothing to
+# point at for the class registry, so @seedgo's architecture check carried a
+# drift-pinned MIRROR of the class table (their commit 5ffc468b) — which makes
+# the auditor a fleet-wide single point of failure the moment spawn renames a
+# class.
+#
+# These pins guard the contract that lets that mirror die:
+#
+#     from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
+#
+# The gateway is a re-export, never a reimplementation. The identity pins below
+# (``is`` the handler's own callable) exist so that a second copy of the logic
+# cannot be introduced here without a test going red — a gateway that drifts from
+# its handler is the same failure the mirror was, one layer closer in.
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -49,14 +59,12 @@ class TestGatewayImportPath:
 
     def test_both_names_import_from_the_modules_package(self):
         """The documented one-liner works verbatim."""
-        from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
 
         assert callable(get_template_dir)
         assert callable(refuse_legacy_class)
 
     def test_names_are_declared_public_in_all(self):
         """__all__ names them, so the export is intentional rather than incidental."""
-        from aipass.spawn.apps import modules
 
         assert "get_template_dir" in modules.__all__
         assert "refuse_legacy_class" in modules.__all__
@@ -86,6 +94,7 @@ class TestGatewayImportPath:
             [sys.executable, str(probe)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(REPO_ROOT),
         )
 
@@ -94,7 +103,6 @@ class TestGatewayImportPath:
 
     def test_the_docs_page_door_is_public_and_answers_an_outside_caller(self, tmp_path):
         """@seedgo's docs_page render reads the skeleton through this door (DPLAN-0351)."""
-        from aipass.spawn.apps import modules
 
         assert "docs_page_template" in modules.__all__
 
@@ -114,6 +122,7 @@ class TestGatewayImportPath:
             [sys.executable, str(probe)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(REPO_ROOT),
         )
 
@@ -130,27 +139,19 @@ class TestGatewayIsTheHandlerItself:
     """The gateway export and the handler function are one callable."""
 
     def test_get_template_dir_is_the_handler_callable(self):
-        from aipass.spawn.apps.modules import get_template_dir as gateway
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir as handler
 
-        assert gateway is handler
+        assert get_template_dir is _class_registry_get_template_dir
 
     def test_refuse_legacy_class_is_the_handler_callable(self):
-        from aipass.spawn.apps.modules import refuse_legacy_class as gateway
-        from aipass.spawn.apps.handlers.class_registry import refuse_legacy_class as handler
 
-        assert gateway is handler
+        assert refuse_legacy_class is _class_registry_refuse_legacy_class
 
     def test_docs_page_template_is_the_handler_callable(self):
-        from aipass.spawn.apps.modules import docs_page_template as gateway
-        from aipass.spawn.apps.handlers.docs_page import docs_page_template as handler
 
-        assert gateway is handler
+        assert docs_page_template is _docs_page_module_docs_page_template
 
     def test_docs_page_template_reads_the_file_on_every_call(self, tmp_path, monkeypatch):
         """No cached copy: an edit to the skeleton reaches the next render unchanged."""
-        from aipass.spawn.apps.handlers import docs_page
-        from aipass.spawn.apps.modules import docs_page_template
 
         skeleton = tmp_path / "docs_page.md"
         monkeypatch.setattr(docs_page, "DOCS_PAGE_TEMPLATE", skeleton)
@@ -162,8 +163,6 @@ class TestGatewayIsTheHandlerItself:
 
     def test_docs_page_template_raises_when_the_skeleton_is_gone(self, tmp_path, monkeypatch):
         """Unreachable is said, never papered over with a fallback shape."""
-        from aipass.spawn.apps.handlers import docs_page
-        from aipass.spawn.apps.modules import docs_page_template
 
         monkeypatch.setattr(docs_page, "DOCS_PAGE_TEMPLATE", tmp_path / "absent.md")
 
@@ -175,7 +174,6 @@ class TestSignaturesAreStable:
     """Signature pins — seedgo calls these positionally, by name, and bare."""
 
     def test_get_template_dir_signature(self):
-        from aipass.spawn.apps.modules import get_template_dir
 
         sig = inspect.signature(get_template_dir)
         assert list(sig.parameters) == ["citizen_class"]
@@ -186,7 +184,6 @@ class TestSignaturesAreStable:
         assert sig.return_annotation is Path
 
     def test_refuse_legacy_class_signature(self):
-        from aipass.spawn.apps.modules import refuse_legacy_class
 
         sig = inspect.signature(refuse_legacy_class)
         assert list(sig.parameters) == ["name"]
@@ -198,7 +195,6 @@ class TestSignaturesAreStable:
         assert sig.return_annotation is str
 
     def test_docs_page_template_signature(self):
-        from aipass.spawn.apps.modules import docs_page_template
 
         sig = inspect.signature(docs_page_template)
         assert list(sig.parameters) == [], "seedgo calls the door bare on every render"
@@ -215,7 +211,6 @@ class TestGetTemplateDirThroughGateway:
 
     @pytest.mark.parametrize("citizen_class", ["manager", "specialist"])
     def test_both_live_classes_resolve_to_the_one_template(self, citizen_class):
-        from aipass.spawn.apps.modules import get_template_dir
 
         result = get_template_dir(citizen_class)
 
@@ -223,13 +218,11 @@ class TestGetTemplateDirThroughGateway:
         assert result == SPAWN_BRANCH / "templates" / "citizen"
 
     def test_bare_call_resolves_to_the_default_class(self):
-        from aipass.spawn.apps.modules import get_template_dir
 
         assert get_template_dir().name == "citizen"
 
     def test_retired_name_raises_naming_its_replacement(self):
         """seedgo reads this message straight into its violation text."""
-        from aipass.spawn.apps.modules import get_template_dir
 
         with pytest.raises(ValueError) as exc:
             get_template_dir("aipass_framework")
@@ -239,7 +232,6 @@ class TestGetTemplateDirThroughGateway:
         assert "specialist" in message
 
     def test_forbidden_class_raises_by_name(self):
-        from aipass.spawn.apps.modules import get_template_dir
 
         with pytest.raises(ValueError) as exc:
             get_template_dir("admin")
@@ -247,7 +239,6 @@ class TestGetTemplateDirThroughGateway:
         assert "admin" in str(exc.value)
 
     def test_unknown_class_raises_listing_the_registered_ones(self):
-        from aipass.spawn.apps.modules import get_template_dir
 
         with pytest.raises(ValueError) as exc:
             get_template_dir("wizard")
@@ -269,34 +260,35 @@ class TestRefuseLegacyClassThroughGateway:
         ],
     )
     def test_every_retired_name_names_both_values(self, retired, replacement):
-        from aipass.spawn.apps.modules import refuse_legacy_class
+        """The refusal ties THIS retired name to THIS replacement.
+
+        A bare ``replacement in message`` could not fail: the sentence names both
+        'manager' and 'specialist' for every retired name. The pairing is the claim.
+
+        Mutant: now means '{replacement}' -> now means 'specialist' -> red.
+        """
 
         message = refuse_legacy_class(retired)
 
-        assert message
-        assert retired in message
-        assert replacement in message
+        assert f"'{retired}' now means '{replacement}'" in message, message
+        assert f"Pass '{replacement}' explicitly" in message, message
 
     @pytest.mark.parametrize("live", ["manager", "specialist"])
     def test_live_classes_are_not_refused(self, live):
-        from aipass.spawn.apps.modules import refuse_legacy_class
 
         assert refuse_legacy_class(live) == ""
 
     def test_forbidden_is_not_a_legacy_name(self):
         """'admin' is a permanent refusal, not a rename — different lane."""
-        from aipass.spawn.apps.modules import refuse_legacy_class
 
         assert refuse_legacy_class("admin") == ""
 
     @pytest.mark.parametrize("empty", [None, "", "   "])
     def test_empty_input_is_not_refused(self, empty):
-        from aipass.spawn.apps.modules import refuse_legacy_class
 
         assert refuse_legacy_class(empty) == ""
 
     def test_case_insensitive(self):
-        from aipass.spawn.apps.modules import refuse_legacy_class
 
         assert refuse_legacy_class("AIPASS_Framework")
 
@@ -307,62 +299,21 @@ class TestRefuseLegacyClassThroughGateway:
 
 
 class TestHandlerGuard:
-    """The guard the gateway exists to answer — pinned as it actually behaves.
+    """The fence the gateway exists to answer, pinned through the real import.
 
-    MEASURED 2026-08-28, reported to @devpulse: the guard refuses an outside
-    caller when it RUNS, but at real import time it is pre-empted and never
-    runs. ``apps/__init__.py:1`` is ``from . import handlers`` — so importing
-    anything under ``aipass.spawn.apps`` (this gateway included) executes the
-    handlers package first, with a caller frame inside spawn, which the guard
-    allows. ``aipass.spawn.apps.handlers`` is then in ``sys.modules`` and every
-    later import from any branch is a cache hit that never reaches the guard.
-
-    Both halves are pinned below so the state is a measurement, not a belief.
-    If the pre-emption is ever fixed, the second test goes red and names what
-    changed rather than leaving a silently-stale claim behind.
+    The 2026-08-28 pin here recorded a hole: ``apps/__init__.py`` imported the
+    handlers eagerly, so the fence never saw a foreign caller and a direct
+    handler import from outside spawn succeeded. Spawn's fence leg (DPLAN-0404)
+    removed that line and installed fence v2.1; the private-name case that
+    called ``_guard_branch_access`` directly is gone, and the hole pin is turned
+    to the closed state. The full shape table is tests/test_handlers_fence.py.
     """
 
-    def test_guard_refuses_an_outside_caller_when_it_runs(self, tmp_path):
-        """Called directly with an outside caller frame, the guard says no.
+    def test_a_direct_handler_import_from_outside_spawn_is_refused(self, tmp_path):
+        """A script outside any aipass tree imports a handler and is refused, by name.
 
-        The probe lives in tmp_path, not REPO_ROOT. It used to be written beside
-        the repo root and unlinked in a finally — which still counts as two
-        writes into a tree the suite does not own, and @seedgo's audit-tests
-        write gate named them (2026-08-30). Only the CWD needs to be REPO_ROOT,
-        so that aipass resolves on the import path; the file does not.
-        """
-        probe = tmp_path / "probe_guard_direct.py"
-        probe.write_text(
-            textwrap.dedent(
-                """
-                from aipass.spawn.apps.handlers import _guard_branch_access
-
-                try:
-                    _guard_branch_access()
-                except ImportError as exc:
-                    print("BLOCKED" if "ACCESS DENIED" in str(exc) else "OTHER")
-                else:
-                    print("ALLOWED")
-                """
-            ).strip(),
-            encoding="utf-8",
-        )
-        result = subprocess.run(
-            [sys.executable, str(probe)],
-            capture_output=True,
-            text=True,
-            cwd=str(REPO_ROOT),
-        )
-
-        assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == "BLOCKED"
-
-    def test_import_time_enforcement_is_currently_pre_empted(self, tmp_path):
-        """KNOWN HOLE — a direct handler import from outside spawn SUCCEEDS today.
-
-        This pins the hole rather than the wish. Reported to @devpulse
-        2026-08-28; the fix is @spawn's ``apps/__init__.py`` eager
-        ``from . import handlers``, which is out of scope for wave 3.
+        The probe lives in tmp_path and runs there, in a fresh interpreter, so the
+        fence's first import in that process is this one.
         """
         probe = tmp_path / "probe_handler_from_outside.py"
         probe.write_text(
@@ -375,12 +326,11 @@ class TestHandlerGuard:
             [sys.executable, str(probe)],
             capture_output=True,
             text=True,
-            cwd=str(REPO_ROOT),
+            encoding="utf-8",
+            cwd=str(tmp_path),
         )
 
-        assert result.returncode == 0, (
-            "the import-time hole appears to be CLOSED — good news. "
-            "Update this pin and the class docstring, and tell @seedgo the "
-            "gateway is now the only door.\n" + result.stderr
-        )
-        assert result.stdout.strip() == "citizen"
+        assert result.returncode != 0, result.stdout
+        assert "ACCESS DENIED" in result.stderr, result.stderr[-600:]
+        assert "Caller branch: unknown" in result.stderr, result.stderr[-600:]
+        assert result.stdout == ""

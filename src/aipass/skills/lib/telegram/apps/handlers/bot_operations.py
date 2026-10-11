@@ -28,7 +28,7 @@ from pathlib import Path
 from aipass.prax import logger
 
 # JSON handler (seedgo standard)
-from aipass.skills.apps.handlers.json import json_handler  # noqa: F401
+from aipass.skills.apps.handlers.json import json_handler
 
 # Internal handler imports
 from .base_bot import BaseBot

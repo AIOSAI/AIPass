@@ -1,25 +1,27 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 1.0.0
+# Version: 2.3.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-09-18
+# Modified: 2026-10-08
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
 
 The owner's ruling, 2026-09-18 22:17 (devpulse 1d041cfc), after @memory's rollover
-was found writing Vera Studio's .trinity files:
+was found writing Vera Studio's .trinity files, narrowed on 2026-09-30 (DPLAN-0356
+item 5, one identity rail):
 
 - An agent is sandboxed to its own files: the files in its directory.
-- @devpulse edits anywhere, system-wide. The one seat (the verified admin rail,
-  modules/admin_seat, never a name).
-- @seedgo and @spawn edit any file inside AIPass and NEVER beyond it.
-- A project's manager (its registry ``owner`` row: @vera in Vera Studio, like
-  @devpulse in AIPass) edits her own project's files, within her project only.
-- Everyone else: own files only. Reading is allowed; writing another's, never.
+- The verified admin seat (modules/admin_seat's 5-leg grant, @devpulse) edits
+  anywhere. It is the ONLY exemption, and a grant, never a name.
+- Until 2026-09-30 three more lanes stood on names and rows: @seedgo and @spawn
+  wrote across AIPass (TRUSTED_CROSS_WRITERS, a directory name), and a project's
+  manager row wrote across its project. A directory name and a registry flag
+  decide nothing now; those seats write their own branch like every other.
+- Reading is allowed; writing another's, never.
 
 Until this module the gate drew those lines from path SHAPES: a project was any
 directory holding a ``*_REGISTRY.json``, a branch was whatever sat at
@@ -37,18 +39,20 @@ rollover) never passes through a tool call, so no hook sees it. That fence is th
 service's own to carry.
 """
 
+import errno
+import fnmatch
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.modules import admin_seat
 from aipass.hooks.apps.modules.bash_writes import HELD_BY_INTERPRETER
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-#: Trusted AIPass-wide, and only inside the project whose registry is AIPASS_REGISTRY.json.
-TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
 AIPASS_REGISTRY = "AIPASS_REGISTRY.json"
 # A project root is the nearest ancestor holding a *_REGISTRY.json, the marker
 # @ai_mail's find_project_root uses (handlers/paths.py): the file fence and the mail
@@ -60,9 +64,14 @@ AIPASS_REGISTRY = "AIPASS_REGISTRY.json"
 # An unreadable or empty marker still counts: a boundary is never dropped on doubt.
 PROJECT_MARKER = "*_REGISTRY.json"
 
+# A shell target that cannot be probed is refused in one line (devpulse 729ffaa9):
+# Windows has no pathconf, so its long-path ceiling stands in; the word is cut here.
+_WINDOWS_PATH_MAX = 32767
+_SHOWN_CHARS = 120
+
 _WHO = (
-    "Who writes where (the owner's ruling, 2026-09-18): each agent its own branch; a project's manager "
-    "(its registry owner) that whole project; @seedgo and @spawn all of AIPass; @devpulse everywhere."
+    "Who writes where (the owner's rulings, 2026-09-18 and 2026-09-30): each agent its own branch; "
+    "the verified admin seat (@devpulse) everywhere. A name or a manager row grants nothing."
 )
 
 
@@ -129,6 +138,10 @@ def _branches(data: object, root: Path) -> tuple[Branch, ...] | None:
     return tuple(rows)
 
 
+class ProjectUnreadable(OSError):
+    """A directory on the project walk could not be listed: whose file a write lands in is unknown."""
+
+
 def project_of(start: Path) -> Project | None:
     """The project *start* stands in: the nearest ancestor (itself included) holding a project registry.
 
@@ -136,21 +149,67 @@ def project_of(start: Path) -> Project | None:
     directory, and starting one level up reads a write INTO a project root as a
     write into the tree that contains it. None when no project is found — a fence
     that cannot locate a boundary must not invent one.
+
+    Raises:
+        ProjectUnreadable: A directory on the walk cannot be listed (2.2.0, fleet
+            green leg 5). ``glob`` answered [] there, so a registry in a writable
+            but unlistable directory was read as "no project" and the crossing and
+            project-level fences went quiet. Every edit_gate caller turns the raise
+            into its crash refusal; the tripwire logs it and reports nothing.
     """
     current = _resolved(start)
     if current is None:
         return None
     for candidate in [current, *current.parents]:
+        if not candidate.is_dir():  # a file, or a target not yet written: nothing to list (glob's [] there)
+            continue
         try:
-            markers = sorted(candidate.glob(PROJECT_MARKER))
+            with os.scandir(candidate) as entries:
+                markers = sorted(Path(e.path) for e in entries if fnmatch.fnmatch(e.name, PROJECT_MARKER))
         except OSError as exc:
-            logger.info("[HOOKS] write_ownership: project marker scan failed at %s: %s", candidate, exc)
-            return None
+            raise ProjectUnreadable(f"{candidate} cannot be listed, so its registry cannot be read: {exc}") from exc
         for marker in markers:
             data = _read(marker)
             if isinstance(data, dict) and data and "branches" not in data:
                 continue
             return Project(candidate, marker, _branches(data, candidate))
+    return None
+
+
+def _path_max() -> int:
+    """The host's PATH_MAX; Windows publishes none, so its long-path ceiling. 0 when unknown: the probe alone judges."""
+    pathconf = getattr(os, "pathconf", None)
+    if pathconf is None:
+        return _WINDOWS_PATH_MAX
+    try:
+        return pathconf("/", "PC_PATH_MAX")
+    except (OSError, ValueError) as exc:
+        logger.info("[HOOKS] write_ownership: PATH_MAX unpublished here, the probe alone judges length: %s", exc)
+        return 0
+
+
+def unprobeable(targets: list[tuple[Path, str]]) -> str | None:
+    """Why a shell target cannot be placed on disk, in one line, or None when every one can (devpulse 729ffaa9).
+
+    project_of stats each target, and an OSError there (ENAMETOOLONG on a printf
+    format read as a path) reached edit_gate as its crash refusal, traceback and
+    all. The call is still refused, a write the fence cannot place is not let
+    through, but the reason names the word and the errno. A target not written
+    yet is the ordinary case.
+    """
+    limit = _path_max()
+    for target, how in targets:
+        text = str(target)
+        try:
+            if limit and len(text) > limit:
+                raise OSError(errno.ENAMETOOLONG, f"longer than PATH_MAX ({limit})")
+            os.stat(target)
+        except OSError as exc:
+            if exc.errno in (errno.ENOENT, errno.ENOTDIR):  # not written yet
+                continue
+            name = errno.errorcode.get(exc.errno or 0, type(exc).__name__)
+            shown = text if len(text) <= _SHOWN_CHARS else f"{text[:_SHOWN_CHARS]}… ({len(text)} chars)"
+            return f"edit_gate cannot probe a path this call names ({name}), so it is refused: {shown} ({how})"
     return None
 
 
@@ -189,6 +248,16 @@ def branch_at(project: Project | None, path: Path, package: str) -> Branch | Non
     return None
 
 
+def in_a_branch(path: Path) -> bool:
+    """True when *path* is a branch directory or inside one: its project's rows, else the src/<package>/<branch> shape.
+
+    The edit gate's default-deny lane asks it of a word's first existing ancestor
+    (devpulse 73358617): src/aipass itself, a project root or anything above a
+    branch is no branch's, so a flag value resolving there names no file.
+    """
+    return branch_at(project_of(path), path, package_of(path)) is not None
+
+
 def ownership_refusal(
     caller: Project | None, landing: Project | None, cwd: str, target: Path, how: str = ""
 ) -> str | None:
@@ -196,6 +265,8 @@ def ownership_refusal(
 
     Crossings are not decided here: the caller refuses them first and lets only
     the admin seat through. A target in no project at all (a temp file) is nobody's.
+    Within a project the one exemption is the verified admin grant, asked only
+    when a write would otherwise be refused (the rail does file I/O).
     *how* names the shell verb for the scripted lane; an interpreter's held paths
     are never convicted here, because a read cannot be told from a write and
     reading another branch is allowed.
@@ -206,13 +277,19 @@ def ownership_refusal(
         return None
     package = package_of(Path(cwd))
     seat = branch_at(caller, Path(cwd), package)
-    if seat is None or seat.manager:
-        return None
-    if seat.name in TRUSTED_CROSS_WRITERS and (caller is None or caller.is_aipass):
+    if seat is None:
         return None
     owner = branch_at(caller, target, package)
     if owner is not None and owner.path == seat.path:
         return None
+    refusal = _refusal(caller, seat, owner, target, how)
+    if refusal is None or admin_seat.is_admin_seat(cwd):
+        return None
+    return refusal
+
+
+def _refusal(caller: Project | None, seat: Branch, owner: Branch | None, target: Path, how: str) -> str | None:
+    """The refusal text for a write by *seat* that lands outside it, or None when the target is nobody's."""
     lane = f" ({how})" if how else ""
     if owner is not None:
         verb = "email" if owner.manager else "dispatch"

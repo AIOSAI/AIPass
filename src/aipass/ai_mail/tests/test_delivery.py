@@ -1,28 +1,27 @@
 # =================== AIPass ====================
 # Name: test_delivery.py
 # Description: Tests for email delivery handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for email delivery handler -- inbox migration, private branch check, delivery."""
+"""Tests for apps/handlers/email/delivery.py."""
+
+# Inbox migration, private branch check, delivery.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — _auto_register_sender()'s broad except Exception around contact auto-registration
 
 import json
 import pytest
 from contextlib import contextmanager
 from pathlib import Path
-from typing import cast, Dict
 from unittest.mock import patch, MagicMock
 
 import aipass.ai_mail.apps.handlers.email.delivery as delivery_mod
-from aipass.ai_mail.apps.handlers.email.delivery import (
-    _check_cross_project_boundary,
-    _migrate_inbox_format,
-    _is_private_branch_email,
-    _resolve_reply_path,
-    deliver_email_to_branch,
-)
+from aipass.memory.apps.modules import fleet
+from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 
 
 # ---- Fixtures ------------------------------------------------
@@ -93,12 +92,12 @@ def test_migrate_old_inbox_key(tmp_path):
     old_data = {"inbox": [{"id": "m1", "status": "new"}]}
     inbox_file.write_text(json.dumps(old_data), encoding="utf-8")
 
-    result = _migrate_inbox_format(old_data, inbox_file)
+    result = _deliver_onto(inbox_file)
 
     assert "inbox" not in result, "Old 'inbox' key should be removed"
-    assert result["messages"] == [{"id": "m1", "status": "new"}]
+    assert result["messages"][1:] == [{"id": "m1", "status": "new"}]
     assert result["mailbox"] == "inbox"
-    assert result["total_messages"] == 1
+    assert result["total_messages"] == 2
     assert result["unread_count"] == 1
 
 
@@ -108,11 +107,11 @@ def test_migrate_list_input(tmp_path):
     raw_list = [{"id": "m1", "status": "opened"}]
     inbox_file.write_text(json.dumps(raw_list), encoding="utf-8")
 
-    result = _migrate_inbox_format(cast(Dict, raw_list), inbox_file)
+    result = _deliver_onto(inbox_file)
 
     assert isinstance(result, dict)
-    assert result["messages"] == [{"id": "m1", "status": "opened"}]
-    assert result["total_messages"] == 1
+    assert result["messages"][1:] == [{"id": "m1", "status": "opened"}]
+    assert result["total_messages"] == 2
     assert result["unread_count"] == 0  # status=opened is not new
 
 
@@ -122,28 +121,16 @@ def test_migrate_missing_messages_key(tmp_path):
     data = {"mailbox": "inbox"}
     inbox_file.write_text(json.dumps(data), encoding="utf-8")
 
-    result = _migrate_inbox_format(data, inbox_file)
+    result = _deliver_onto(inbox_file)
 
-    assert result["messages"] == []
-    assert result["total_messages"] == 0
+    assert result["messages"][1:] == []
+    assert result["total_messages"] == 1
     assert result["unread_count"] == 0
 
 
-def test_migrate_already_v2_no_write(tmp_path):
-    """Fully valid v2 data does not rewrite the file."""
-    inbox_file = tmp_path / "inbox.json"
-    v2_data = {
-        "mailbox": "inbox",
-        "total_messages": 1,
-        "unread_count": 1,
-        "messages": [{"id": "m1", "status": "new"}],
-    }
-    original_text = json.dumps(v2_data, indent=2, ensure_ascii=False)
-    inbox_file.write_text(original_text, encoding="utf-8")
-
-    _migrate_inbox_format(v2_data, inbox_file)
-
-    assert inbox_file.read_text(encoding="utf-8") == original_text
+# test_migrate_already_v2_no_write retired (ai_mail, leg 15, @devpulse's leg 14
+# ruling): "already v2 is not rewritten" cannot be seen through any caller, as
+# both delivery lanes rewrite the inbox inside the same lock, so it proved nothing.
 
 
 def test_migrate_unread_count_mixed_statuses(tmp_path):
@@ -159,10 +146,10 @@ def test_migrate_unread_count_mixed_statuses(tmp_path):
     }
     inbox_file.write_text(json.dumps(data), encoding="utf-8")
 
-    result = _migrate_inbox_format(data, inbox_file)
+    result = _deliver_onto(inbox_file)
 
-    assert result["unread_count"] == 2  # m1 (new) + m3 (no status, not read)
-    assert result["total_messages"] == 4
+    assert result["unread_count"] == 2  # m1 (new) + m3 (no status, not read); the delivered one is opened
+    assert result["total_messages"] == 5
 
 
 def test_migrate_persists_to_disk(tmp_path):
@@ -171,15 +158,15 @@ def test_migrate_persists_to_disk(tmp_path):
     old_data = {"inbox": [{"id": "m1", "status": "new"}]}
     inbox_file.write_text(json.dumps(old_data), encoding="utf-8")
 
-    _migrate_inbox_format(old_data, inbox_file)
+    _deliver_onto(inbox_file)
 
     with open(inbox_file, "r", encoding="utf-8") as f:
         persisted = json.load(f)
 
     assert "inbox" not in persisted
-    assert persisted["messages"] == [{"id": "m1", "status": "new"}]
+    assert persisted["messages"][1:] == [{"id": "m1", "status": "new"}]
     assert persisted["mailbox"] == "inbox"
-    assert persisted["total_messages"] == 1
+    assert persisted["total_messages"] == 2
     assert persisted["unread_count"] == 1
 
 
@@ -188,7 +175,7 @@ def test_migrate_persists_to_disk(tmp_path):
 
 def test_private_branch_email_no_registry(repo_root):
     """No registry file -> not private."""
-    assert _is_private_branch_email("@secret") is False
+    assert _private_refusal(repo_root, "@secret") == ""
 
 
 def test_private_branch_email_found(repo_root):
@@ -202,8 +189,8 @@ def test_private_branch_email_found(repo_root):
     }
     registry_path.write_text(json.dumps(registry_data), encoding="utf-8")
 
-    assert _is_private_branch_email("@secret") is True
-    assert _is_private_branch_email("@hidden") is True
+    assert _private_refusal(repo_root, "@secret") == "Cannot deliver to private branch: @secret"
+    assert _private_refusal(repo_root, "@hidden") == "Cannot deliver to private branch: @hidden"
 
 
 def test_private_branch_email_not_found(repo_root):
@@ -212,7 +199,7 @@ def test_private_branch_email_not_found(repo_root):
     registry_data = {"branches": [{"email": "@secret", "name": "SECRET"}]}
     registry_path.write_text(json.dumps(registry_data), encoding="utf-8")
 
-    assert _is_private_branch_email("@public") is False
+    assert _private_refusal(repo_root, "@public") == ""
 
 
 def test_private_branch_email_corrupted_json(repo_root):
@@ -220,7 +207,7 @@ def test_private_branch_email_corrupted_json(repo_root):
     registry_path = repo_root / "PRIVATE_BRANCH_REGISTRY.json"
     registry_path.write_text("not json", encoding="utf-8")
 
-    assert _is_private_branch_email("@secret") is False
+    assert _private_refusal(repo_root, "@secret") == ""
 
 
 # ---- deliver_email_to_branch() tests ------------------------------
@@ -240,6 +227,53 @@ def _setup_branch(tmp_path, email: str = "@target", name: str = "TARGET"):
     }
     inbox_file.write_text(json.dumps(inbox_data, indent=2), encoding="utf-8")
     return [{"name": name, "path": str(branch_path), "email": email}]
+
+
+# The helpers below reach delivery's private checks through its public lanes
+# instead of calling them (ai_mail, leg 14).
+
+
+def _deliver_into(recipient: Path, to_branch: str = "@target", sender: str = "@sender"):
+    """deliver_email_to_branch with the registry stubbed so `to_branch` names `recipient`.
+
+    Returns (success, message); the tmp inbox is provisioned and written when it passes.
+    """
+    lookup = MagicMock(return_value=[{"name": "T", "path": str(recipient), "email": to_branch}])
+    with patch.object(delivery_mod, "get_all_branches", lookup):
+        success, msg = deliver_email_to_branch(to_branch, _make_email_data(sender=sender, recipient=to_branch))
+    lookup.assert_called_with()
+    return success, msg
+
+
+def _boundary(recipient: Path, sender: str):
+    """The cross-project verdict as delivery acts on it: (refused, message)."""
+    success, msg = _deliver_into(recipient, sender=sender)
+    return not success, msg
+
+
+def _private_refusal(repo_root: Path, to_branch: str) -> str:
+    """The refusal a delivery to `to_branch` meets, "" when it is delivered."""
+    success, msg = _deliver_into(repo_root / "seats" / to_branch.lstrip("@"), to_branch=to_branch)
+    return "" if success else msg
+
+
+def _reply_path_stamped(tmp_path: Path) -> str:
+    """The reply_path a delivered message carries, "" when none was stamped."""
+    recipient = tmp_path / "recipient" / "target"
+    success, msg = _deliver_into(recipient)
+    assert success is True, msg
+    inbox = json.loads((recipient / ".ai_mail.local" / "inbox.json").read_text(encoding="utf-8"))
+    return inbox["messages"][0].get("reply_path", "")
+
+
+_DELIVERED = {"id": "d1", "from": "@sender", "subject": "S", "message": "M", "status": "opened"}
+
+
+def _deliver_onto(inbox_file: Path) -> dict:
+    """deliver_to_inbox_file onto `inbox_file` (migrated on the way); the inbox as it lands."""
+    success, err, _rid = delivery_mod.deliver_to_inbox_file(inbox_file, dict(_DELIVERED))
+    assert success is True, err
+    return json.loads(inbox_file.read_text(encoding="utf-8"))
 
 
 def test_deliver_happy_path(tmp_path, repo_root, noop_inbox_lock):
@@ -284,6 +318,28 @@ def test_deliver_unknown_branch(repo_root, noop_inbox_lock):
     assert success is False
     assert "Unknown branch email" in error
     assert "@nonexistent" in error
+
+
+def test_deliver_says_so_when_the_external_tier_cannot_answer(repo_root, noop_inbox_lock, monkeypatch):
+    """A gateway that cannot answer is not "unknown address": delivery names it.
+
+    Before leg 11 get_external_branches answered {} on any gateway failure, so a
+    dispatch to an external citizen was refused as an unknown branch while the
+    tier that knows it was down. The refusal keeps delivery's (False, message)
+    shape that trigger already handles. Its proof is the mutant that answers {}
+    again (ai_mail, leg 11).
+    """
+
+    def _gateway_down(**kwargs):
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(fleet, "external_branches", _gateway_down)
+
+    with patch.object(delivery_mod, "get_all_branches", return_value=[]):
+        success, error = deliver_email_to_branch("@nonexistent", _make_email_data())
+
+    assert success is False
+    assert error == "External citizen tier unavailable, @nonexistent not resolved: gateway down"
 
 
 def test_deliver_private_branch_blocked(tmp_path, repo_root, noop_inbox_lock):
@@ -427,11 +483,11 @@ def test_deliver_path_input_resolves_to_email(tmp_path, repo_root, noop_inbox_lo
     assert error == ""
 
 
-def test_deliver_path_input_unresolvable(repo_root, noop_inbox_lock):
+def test_deliver_path_input_unresolvable(repo_root, noop_inbox_lock, tmp_path):
     """Unresolvable path returns failure."""
     with patch.object(delivery_mod, "get_all_branches", return_value=[]):
         success, error = deliver_email_to_branch(
-            "/nonexistent/path",
+            str(tmp_path / "nonexistent" / "path"),
             _make_email_data(),
         )
 
@@ -442,10 +498,10 @@ def test_deliver_path_input_unresolvable(repo_root, noop_inbox_lock):
 # ---- _resolve_reply_path() tests ------------------------------
 
 
-def test_resolve_reply_path_no_env(monkeypatch):
+def test_resolve_reply_path_no_env(tmp_path, monkeypatch):
     """Returns empty string when AIPASS_CALLER_CWD is not set."""
     monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
-    assert _resolve_reply_path() == ""
+    assert _reply_path_stamped(tmp_path) == ""
 
 
 def test_resolve_reply_path_inbox_in_cwd(tmp_path, monkeypatch):
@@ -456,7 +512,7 @@ def test_resolve_reply_path_inbox_in_cwd(tmp_path, monkeypatch):
     inbox_file.write_text("{}", encoding="utf-8")
 
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
-    assert _resolve_reply_path() == str(inbox_file)
+    assert _reply_path_stamped(tmp_path) == str(inbox_file)
 
 
 def test_resolve_reply_path_inbox_in_parent(tmp_path, monkeypatch):
@@ -470,13 +526,13 @@ def test_resolve_reply_path_inbox_in_parent(tmp_path, monkeypatch):
     nested_cwd.mkdir(parents=True)
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(nested_cwd))
 
-    assert _resolve_reply_path() == str(inbox_file)
+    assert _reply_path_stamped(tmp_path) == str(inbox_file)
 
 
 def test_resolve_reply_path_no_inbox(tmp_path, monkeypatch):
     """Returns empty string when no .ai_mail.local/inbox.json found in tree."""
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
-    assert _resolve_reply_path() == ""
+    assert _reply_path_stamped(tmp_path) == ""
 
 
 def test_deliver_stores_reply_path_from_env(tmp_path, repo_root, noop_inbox_lock, monkeypatch):
@@ -508,7 +564,7 @@ def test_deliver_stores_reply_path_from_env(tmp_path, repo_root, noop_inbox_lock
 def test_cross_project_no_caller_cwd_allows(tmp_path, monkeypatch):
     """No AIPASS_CALLER_CWD → host-internal, always allowed."""
     monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
-    refused, _ = _check_cross_project_boundary(tmp_path, "@sender")
+    refused, _ = _boundary(tmp_path, "@sender")
     assert refused is False
 
 
@@ -521,7 +577,7 @@ def test_cross_project_same_root_allows(tmp_path, monkeypatch):
     recipient_dir.mkdir(parents=True)
 
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(sender_dir))
-    refused, _ = _check_cross_project_boundary(recipient_dir, "@branch_b")
+    refused, _ = _boundary(recipient_dir, "@branch_b")
     assert refused is False
 
 
@@ -540,7 +596,7 @@ def test_cross_project_different_roots_refuses(tmp_path, monkeypatch):
     sender_dir.mkdir(parents=True)
 
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(sender_dir))
-    refused, msg = _check_cross_project_boundary(recipient_dir, "@proj_agent")
+    refused, msg = _boundary(recipient_dir, "@proj_agent")
     assert refused is True
     assert "Cross-project mail refused" in msg
     assert "feedback channel" in msg
@@ -556,7 +612,7 @@ def test_cross_project_sender_no_registry_allows(tmp_path, monkeypatch):
     recipient.mkdir(parents=True)
     (tmp_path / "host" / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
 
-    refused, _ = _check_cross_project_boundary(recipient, "@branch")
+    refused, _ = _boundary(recipient, "@branch")
     assert refused is False
 
 
@@ -570,7 +626,7 @@ def test_cross_project_recipient_no_registry_allows(tmp_path, monkeypatch):
     recipient = tmp_path / "orphan"
     recipient.mkdir()
 
-    refused, _ = _check_cross_project_boundary(recipient, "@orphan")
+    refused, _ = _boundary(recipient, "@orphan")
     assert refused is False
 
 
@@ -741,3 +797,89 @@ def test_verified_admin_still_crosses_to_the_external_tier(external_world, monke
     assert (success, error) == (True, "")
     inbox = json.loads((external_world["vera"] / ".ai_mail.local" / "inbox.json").read_text(encoding="utf-8"))
     assert [m["from"] for m in inbox["messages"]] == ["@devpulse"]
+
+
+def test_an_unreadable_caller_registry_refuses_rather_than_serving_a_namesake(external_world, monkeypatch):
+    """A project whose registry cannot be read never has its mail served to another project's namesake.
+
+    Lab has its own @vera, and its LAB_REGISTRY.json is not JSON. Before leg 12
+    the caller's registry answered {} on that, the walk climbed on, and the
+    external tier served Vera-Studio's @vera; a verified admin is exempt from the
+    boundary, so the mail meant for Lab's @vera landed in Vera-Studio. Now
+    delivery refuses and names the registry (ai_mail, leg 12).
+    """
+    lab = external_world["tmp"] / "Lab"
+    lab_vera = lab / "src" / "lab" / "vera"
+    lab_vera.mkdir(parents=True)
+    (lab / "LAB_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(lab_vera))
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+
+    with patch(
+        "aipass.ai_mail.apps.handlers.users.verified_caller.verify_admin_caller",
+        return_value=(True, "admin grant verified"),
+    ):
+        success, error = deliver_email_to_branch("@vera", _make_email_data(sender="@devpulse", recipient="@vera"))
+
+    assert success is False
+    assert error.startswith("Caller's project registry unreadable, @vera not resolved: LAB_REGISTRY.json ")
+    assert not (external_world["vera"] / ".ai_mail.local").exists(), "the namesake must not be served"
+
+
+def test_an_unreadable_hosted_registry_refuses_the_admin_rather_than_serving_a_namesake(external_world, monkeypatch):
+    """The admin sweep never hands a hosted project's mail to another root's namesake.
+
+    projects/lab hosts its own @vera and its registry is not JSON. Before leg 12
+    the sweep skipped it, the external tier served Vera-Studio's @vera, and the
+    verified admin is exempt from the boundary, so the mail landed there. Green
+    from its first run on the cured tree; its proof is the mutant that skips the
+    registry again (ai_mail, leg 12).
+    """
+    lab = external_world["tmp"] / "AIPass" / "projects" / "lab"
+    (lab / "vera").mkdir(parents=True)
+    (lab / "LAB_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(external_world["devpulse"]))
+
+    with patch(
+        "aipass.ai_mail.apps.handlers.users.verified_caller.verify_admin_caller",
+        return_value=(True, "admin grant verified"),
+    ):
+        success, error = deliver_email_to_branch("@vera", _make_email_data(sender="@devpulse", recipient="@vera"))
+
+    assert success is False
+    assert error.startswith("Hosted project registry unreadable, @vera not resolved: LAB_REGISTRY.json ")
+    assert not (external_world["vera"] / ".ai_mail.local").exists(), "the namesake must not be served"
+
+
+def test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_namesake(external_world, monkeypatch):
+    """Mail for an AIPass citizen never lands on a hosted project's citizen of the same name.
+
+    AIPASS_REGISTRY.json is not JSON, so get_all_branches answers [] (stood in
+    here: the real one reads this checkout's registry). Before leg 12 the admin
+    sweep then found projects/lab's @target and the verified admin, exempt from
+    the boundary, had the mail delivered there. Now delivery refuses and names
+    the AIPass registry (ai_mail, leg 12).
+    """
+    home = external_world["tmp"] / "AIPass"
+    (home / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    lab_target = home / "projects" / "lab" / "target"
+    lab_target.mkdir(parents=True)
+    (home / "projects" / "lab" / "LAB_REGISTRY.json").write_text(
+        json.dumps({"branches": [{"name": "target", "email": "@target", "path": str(lab_target)}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(delivery_mod, "get_all_branches", lambda *a, **kw: [])
+    # No caller cwd: from the admin seat's cwd the caller-project walk already
+    # reaches AIPASS_REGISTRY.json and refuses; this is the lane with no walk.
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+
+    with patch(
+        "aipass.ai_mail.apps.handlers.users.verified_caller.verify_admin_caller",
+        return_value=(True, "admin grant verified"),
+    ):
+        success, error = deliver_email_to_branch("@target", _make_email_data(sender="@devpulse", recipient="@target"))
+
+    assert success is False
+    assert error.startswith("AIPass registry unreadable, @target not resolved: AIPASS_REGISTRY.json ")
+    assert not (lab_target / ".ai_mail.local").exists(), "the namesake must not be served"

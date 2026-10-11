@@ -1,22 +1,15 @@
 # =================== AIPass ====================
 # Name: test_generic_adapter.py
 # Description: Tests for generic_adapter.capture_main()
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for generic_adapter.capture_main().
+"""Tests for apps/handlers/generic_adapter.py, capture_main()."""
 
-Covers:
-- stdout / stderr capture from a target module's ``main()``
-- exit_code from normal return, SystemExit(0), SystemExit(1), SystemExit(None)
-- Exception handling (ValueError, ImportError)
-- Non-int exit codes coerced to 1
-- sys.argv construction with various combinations
-- sys.argv / sys.stdout / sys.stderr restoration after success and failure
-- json_handler.log_operation is called with expected args
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — the sys.stdout and sys.stderr swap beneath capture_main
 
 from __future__ import annotations
 

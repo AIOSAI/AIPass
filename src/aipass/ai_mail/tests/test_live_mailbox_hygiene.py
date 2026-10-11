@@ -1,33 +1,35 @@
 # =================== AIPass ====================
 # Name: test_live_mailbox_hygiene.py
 # Description: Guard that test fixtures never appear in real citizens' mailboxes
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-10-02
 # =============================================
 
-"""Guard against test fixtures leaking into live mailboxes.
+"""Tests for apps/handlers/paths.py's find_repo_root(), guarding live mailboxes for fixture leakage."""
 
-@devpulse flagged (2026-08-16) that a fixture-shaped mail — subject 'hello',
-body 'body', stamped ``2026-08-14T12:50:00Z`` — appeared in their live inbox,
-and asked whether this suite writes through the real delivery lane.
+# @devpulse flagged (2026-08-16) that a fixture-shaped mail — subject 'hello',
+# body 'body', stamped ``2026-08-14T12:50:00Z`` — appeared in their live inbox,
+# and asked whether this suite writes through the real delivery lane.
+#
+# Measured answer: it does not. A full suite run leaves all 17 live inboxes and
+# the notification feed byte-identical, and no fixture-shaped message exists in
+# any of them. I could not find the specific message they cited anywhere in the
+# mailbox tree.
+#
+# But their instinct about the SHAPE was exactly right, which is why this guard
+# exists. ``tests/test_delivery.py`` builds email_data with a default timestamp of
+# ``2026-03-29T12:00:00Z`` — ISO-8601 with a Z suffix. Live mail never looks like
+# that: every real producer writes ``YYYY-MM-DD HH:MM:SS`` (``create.py`` and
+# ``reply.py`` both use ``strftime``). So a Z-suffixed timestamp in a real inbox
+# is a reliable signature of fixture data written through the real lane.
+#
+# This test reads live mailboxes deliberately. It is the only way to check the
+# property that actually matters — the harness being correct in principle is what
+# was already believed on the day the fixture appeared.
 
-Measured answer: it does not. A full suite run leaves all 17 live inboxes and
-the notification feed byte-identical, and no fixture-shaped message exists in
-any of them. I could not find the specific message they cited anywhere in the
-mailbox tree.
-
-But their instinct about the SHAPE was exactly right, which is why this guard
-exists. ``tests/test_delivery.py`` builds email_data with a default timestamp of
-``2026-03-29T12:00:00Z`` — ISO-8601 with a Z suffix. Live mail never looks like
-that: every real producer writes ``YYYY-MM-DD HH:MM:SS`` (``create.py`` and
-``reply.py`` both use ``strftime``). So a Z-suffixed timestamp in a real inbox
-is a reliable signature of fixture data written through the real lane.
-
-This test reads live mailboxes deliberately. It is the only way to check the
-property that actually matters — the harness being correct in principle is what
-was already believed on the day the fixture appeared.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
 
 import json
 import re
@@ -35,6 +37,7 @@ from pathlib import Path
 
 import pytest
 
+import aipass.ai_mail.tests.test_live_mailbox_hygiene as guard_mod
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 # Live mail: "2026-08-16 10:03:15". Fixtures: "2026-03-29T12:00:00Z".
@@ -59,12 +62,16 @@ class TestNoFixturesInLiveMailboxes:
             pytest.skip("not a source checkout — no live mailboxes to audit")
 
         strays = []
+        unread = []
         for inbox in inboxes:
             try:
                 data = json.loads(inbox.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                # A mailbox we cannot read is not evidence of a fixture, and
-                # this guard must never be the thing that reports it.
+            except (OSError, json.JSONDecodeError) as exc:
+                # A mailbox we cannot read is not evidence of a fixture, so it
+                # never fails the guard on its own. It is named in the failure
+                # text so a stray report also says which mailboxes went unchecked
+                # (ai_mail, leg 7).
+                unread.append(f"{Path(inbox).parts[-3]}: {type(exc).__name__}")
                 continue
             for msg in data.get("messages", []):
                 if not isinstance(msg, dict):
@@ -72,7 +79,12 @@ class TestNoFixturesInLiveMailboxes:
                 if FIXTURE_TIMESTAMP.match(str(msg.get("timestamp", ""))):
                     strays.append(f"{Path(inbox).parts[-3]}: {msg.get('id')} {msg.get('subject')!r}")
 
-        assert not strays, "Test fixtures found in live mailboxes:\n  " + "\n  ".join(strays)
+        assert strays == [], (
+            "Test fixtures found in live mailboxes:\n  "
+            + "\n  ".join(strays)
+            + "\nUnread, not checked:\n  "
+            + "\n  ".join(unread or ["none"])
+        )
 
     def test_the_guard_can_actually_see_the_mailboxes(self):
         """A guard that silently finds nothing to check protects nothing.
@@ -93,8 +105,6 @@ class TestNoFixturesInLiveMailboxes:
         asserts the guard fails. Without this, a guard that never fires is
         indistinguishable from a guard that cannot fire.
         """
-        import aipass.ai_mail.tests.test_live_mailbox_hygiene as guard_mod
-
         mailbox = tmp_path / "src" / "aipass" / "devpulse" / ".ai_mail.local"
         mailbox.mkdir(parents=True)
         (mailbox / "inbox.json").write_text(
@@ -107,10 +117,16 @@ class TestNoFixturesInLiveMailboxes:
             ),
             encoding="utf-8",
         )
+        # A torn mailbox beside it: never a failure on its own, named in the text
+        torn = tmp_path / "src" / "aipass" / "seedgo" / ".ai_mail.local"
+        torn.mkdir(parents=True)
+        (torn / "inbox.json").write_text("{not json", encoding="utf-8")
         monkeypatch.setattr(guard_mod, "find_repo_root", lambda: tmp_path)
 
-        with pytest.raises(AssertionError, match="42284adc"):
+        with pytest.raises(AssertionError, match="42284adc") as failure:
             self.test_no_fixture_shaped_timestamps_in_live_inboxes()
+        unchecked = str(failure.value).split("Unread, not checked:")[1].split()
+        assert unchecked[0] == "seedgo:"
 
     def test_the_signature_matches_this_suites_own_fixture_default(self):
         """Pin the guard to the shape it is guarding against.

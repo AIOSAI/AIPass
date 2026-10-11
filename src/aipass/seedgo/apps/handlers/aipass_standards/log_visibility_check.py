@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_visibility_check.py
 # Description: Log Visibility Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -28,6 +28,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: logging in key operations is a product decision.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 # Patterns built via concatenation to avoid self-detection by checkers
@@ -110,7 +112,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not has_getlogger and not has_filehandler:
         return {
             "passed": True,
-            "checks": [{"name": "Log visibility", "passed": True, "message": "No logging usage found (skipped)"}],
+            "checks": [
+                {
+                    "name": "Log visibility",
+                    "passed": True,
+                    "message": "No logging usage found (skipped)",
+                    "declined": True,
+                }
+            ],
             "score": 100,
             "standard": "LOG_VISIBILITY",
         }

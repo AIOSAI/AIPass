@@ -1,44 +1,59 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.3.0
+# Version: 1.6.1
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-09-18
+# Modified: 2026-10-10
 # =============================================
 
-"""Tests for edit_gate's scripted lane and the devpulse admin exemption.
+"""Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
 
-The owner's ruling, 2026-08-30 (devpulse compass 322): the cross-project write
-fence stays for every agent and devpulse is the sole exemption — "It is only you
-who can reach outwards. Nobody else."
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that edit_gate.py and bash_writes.py parse and import
+# seedgo: no-test-needed(constant) — NO_WRITE_VERB's text, the marker testwrite_gate reads
 
-Two halves, one boundary:
-
-1. The admin seat passes, but only on a VERIFIED grant. Every test that grants
-   the exemption also has a twin that withholds the grant from the same seat, so
-   nothing here can pass on a directory name.
-2. Every other seat is blocked on BOTH lanes. The tool lane was already fenced;
-   the shell lane (sed -i, redirection, tee, cp, a python heredoc) was open to
-   all 18 citizens until this file.
-
-POSIX literals in this suite STAY (devpulse ruling, 2026-09-08): the literal
-IS the test data - a command string is what the gate reads, spelled as agents
-type it.
-
-A path put INTO a command string is spelled with as_posix(), the form bash takes
-on every OS (devpulse 401ee814, PR #762). The Windows backslash spelling is
-tested on purpose, through _win(), only in the classes that pin it.
-"""
-
+import importlib
 import json
 import os
+import shutil
+import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import patch
 
 import pytest
 
-_RAIL = "aipass.ai_mail.apps.handlers.users.verified_caller"
+from aipass.hooks.apps.handlers.security import edit_gate
+from aipass.hooks.apps.modules import bash_writes
+from aipass.hooks.apps.modules.bash_writes import write_targets
+
+# edit_gate's Edit/Write lane into memory files lives in tests/test_edit_gate.py and
+# tests/test_edit_gate_trinity.py.
+#
+# The owner's ruling, 2026-08-30 (devpulse compass 322): the cross-project write
+# fence stays for every agent and devpulse is the sole exemption — "It is only you
+# who can reach outwards. Nobody else."
+#
+# Two halves, one boundary:
+#
+# 1. The admin seat passes, but only on a VERIFIED grant. Every test that grants
+#    the exemption also has a twin that withholds the grant from the same seat, so
+#    nothing here can pass on a directory name.
+# 2. Every other seat is blocked on BOTH lanes. The tool lane was already fenced;
+#    the shell lane (sed -i, redirection, tee, cp, a python heredoc) was open to
+#    all 18 citizens until this file.
+#
+# POSIX literals in this suite STAY (devpulse ruling, 2026-09-08): the literal
+# IS the test data - a command string is what the gate reads, spelled as agents
+# type it.
+#
+# A path put INTO a command string is spelled with as_posix(), the form bash takes
+# on every OS (devpulse 401ee814, PR #762). The Windows backslash spelling is
+# tested on purpose, through _win(), only in the classes that pin it.
+
+_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
+# The parser's call-time import, refused for real through a None entry in sys.modules (fleet green leg 8).
+_BASH_WRITES = "aipass.hooks.apps.modules.bash_writes"
 
 
 @pytest.fixture
@@ -103,10 +118,8 @@ def _names(targets, *parts: str) -> bool:
 
 
 def _run(cwd: str, *, command: str | None = None, file_path: str | None = None, tool: str = "Bash") -> dict:
-    from aipass.hooks.apps.handlers.security.edit_gate import handle
-
     tool_input = {"command": command} if command is not None else {"file_path": file_path}
-    return handle({"tool_name": tool, "tool_input": tool_input, "cwd": cwd})
+    return edit_gate.handle({"tool_name": tool, "tool_input": tool_input, "cwd": cwd})
 
 
 def _blocked(result: dict) -> bool:
@@ -198,9 +211,10 @@ class TestAdminIdentityIsVerifiedNotClaimed:
         _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
         assert "AIPASS_CALLER_CWD" not in os.environ
 
-    def test_an_existing_caller_stamp_is_never_overwritten(self, sibling_projects: dict, monkeypatch):
+    def test_an_existing_caller_stamp_is_never_overwritten(self, sibling_projects: dict, monkeypatch, tmp_path: Path):
         """A drone-invoked caller keeps the identity drone gave it."""
-        monkeypatch.setenv("AIPASS_CALLER_CWD", "/somewhere/else")
+        elsewhere = str(tmp_path / "elsewhere")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", elsewhere)
         seen: dict[str, str] = {}
 
         def spy() -> bool:
@@ -210,25 +224,28 @@ class TestAdminIdentityIsVerifiedNotClaimed:
         with patch(f"{_RAIL}.is_verified_admin_caller", side_effect=spy):
             _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
 
-        assert seen["cwd"] == "/somewhere/else"
+        assert seen["cwd"] == elsewhere
 
     def test_a_raising_rail_fails_closed(self, sibling_projects: dict):
         with patch(f"{_RAIL}.is_verified_admin_caller", side_effect=RuntimeError("registry unreadable")):
             result = _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
         assert _blocked(result)
 
-    def test_an_unimportable_rail_fails_closed(self, sibling_projects: dict):
-        """Only the rail is missing. Since 2026-09-18 the fence itself is a call-time import too."""
-        from aipass.hooks.apps.handlers.security import edit_gate
+    def test_an_unimportable_rail_fails_closed(self, sibling_projects: dict, grant_granted):
+        """Only the rail is missing. Since 2026-09-18 the fence itself is a call-time import too.
 
-        real = edit_gate.importlib.import_module
+        The grant is given (fleet green leg 8), so the dark rail is the only thing that can refuse:
+        without it this pin passed with the rail arm opened. Only the gate's own import seam is
+        refused; a None entry in sys.modules was tried and did not isolate the rail arm.
+        """
+        real = edit_gate._import_module
 
         def _no_rail(name: str):
             if name.endswith("admin_seat") or name.startswith("aipass.ai_mail"):
                 raise ImportError("no ai_mail")
             return real(name)
 
-        with patch.object(edit_gate.importlib, "import_module", side_effect=_no_rail):
+        with patch.object(edit_gate, "_import_module", side_effect=_no_rail):
             result = _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
         assert _blocked(result)
 
@@ -360,8 +377,16 @@ class TestScriptedLaneDoesNotOverreach:
         command = f"cat {sibling_projects['foreign_file']} > ./local_copy.json"
         assert self._run_plain(sibling_projects, command)["exit_code"] == 0
 
-    def test_sed_without_in_place_is_a_filter_not_a_write(self, sibling_projects: dict):
-        assert self._run_plain(sibling_projects, f"sed s/a/b/ {sibling_projects['foreign_file']}")["exit_code"] == 0
+    def test_a_program_that_only_reads_may_name_a_foreign_file(self, sibling_projects: dict):
+        """DPLAN-0356 phase 4, P2: default-deny. Only a read-only program may name it as an operand.
+
+        sed without -i was allowed until phase 4; its script can still write (w) or run (e),
+        so it is no longer read as a filter. grep and cat are.
+        """
+        foreign = Path(sibling_projects["foreign_file"]).as_posix()  # bash eats an unquoted backslash (PR #774)
+        assert self._run_plain(sibling_projects, f"sed s/a/b/ {foreign}")["exit_code"] == 2
+        assert self._run_plain(sibling_projects, f"grep a {foreign}")["exit_code"] == 0
+        assert self._run_plain(sibling_projects, f"cat {foreign}")["exit_code"] == 0
 
     def test_listing_a_foreign_project_is_allowed(self, sibling_projects: dict):
         assert self._run_plain(sibling_projects, f"ls -la {sibling_projects['vera']}")["exit_code"] == 0
@@ -386,18 +411,25 @@ class TestScriptedLaneDoesNotOverreach:
     def test_an_empty_command_is_allowed(self, sibling_projects: dict):
         assert self._run_plain(sibling_projects, "")["exit_code"] == 0
 
-    def test_a_parser_failure_allows_and_says_so(self, sibling_projects: dict):
-        from aipass.hooks.apps.handlers.security import edit_gate
+    def test_a_parser_failure_refuses_the_call(self, sibling_projects: dict, monkeypatch):
+        """DPLAN-0356 item 2: a fence that cannot read a command does not let it through.
 
-        with patch.object(edit_gate.importlib, "import_module", side_effect=RuntimeError("boom")):
-            result = self._run_plain(sibling_projects, f"sed -i s/a/b/ {sibling_projects['foreign_file']}")
-        assert result["exit_code"] == 0
+        The parser is made unimportable for real (fleet green leg 8); the error the refusal must carry
+        is asked of the interpreter, not named here.
+        """
+        monkeypatch.setitem(sys.modules, _BASH_WRITES, None)
+        with pytest.raises(ImportError) as raised:
+            importlib.import_module(_BASH_WRITES)
+        result = self._run_plain(sibling_projects, f"sed -i s/a/b/ {sibling_projects['foreign_file']}")
+        assert result["exit_code"] == 2
+        assert str(raised.value) in json.loads(result["stdout"])["reason"]
 
     def test_a_seat_outside_any_project_is_not_fenced(self, tmp_path: Path):
         """A fence that cannot locate a boundary must not invent one."""
         loose = tmp_path / "loose"
         loose.mkdir()
-        assert _run(str(loose), command="sed -i s/a/b/ /tmp/whatever.txt")["exit_code"] == 0
+        target = (tmp_path / "whatever.txt").as_posix()
+        assert _run(str(loose), command=f"sed -i s/a/b/ {target}")["exit_code"] == 0
 
     def test_an_interpreter_reading_another_branch_is_allowed(self, registered_projects: dict):
         """Inside one project the branch fence convicts on write grammar only.
@@ -408,14 +440,17 @@ class TestScriptedLaneDoesNotOverreach:
         docs/edit_gate.md; the project fence still reads held paths.
         """
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
-        for command in (f"python3 -c \"print(open('{target}').read())\"", f"awk '/def /' {target}", f"cat {target}"):
+        for command in (f"python3 -c \"print(open('{target}').read())\"", f"grep def {target}", f"cat {target}"):
             assert _run(registered_projects["hooks"], command=command)["exit_code"] == 0, command
+        # DPLAN-0356 phase 4, P2: awk is not a read-only program (print > file, system()), so it may not name it.
+        assert _run(registered_projects["hooks"], command=f"awk '/def /' {target}")["exit_code"] == 2
 
-    def test_seedgo_and_the_manager_write_across_branches_from_a_shell(self, registered_projects: dict):
+    def test_seedgo_and_the_manager_no_longer_write_across_branches_from_a_shell(self, registered_projects: dict):
+        """DPLAN-0356 item 5: a name (seedgo) and a manager row (vera) decide nothing in the shell lane either."""
         memory = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
         writer = (Path(registered_projects["writer"]) / "draft.md").as_posix()
-        assert _run(registered_projects["seedgo"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 0
-        assert _run(registered_projects["vera_seat"], command=f"sed -i s/a/b/ {writer}")["exit_code"] == 0
+        assert _run(registered_projects["seedgo"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 2
+        assert _run(registered_projects["vera_seat"], command=f"sed -i s/a/b/ {writer}")["exit_code"] == 2
 
     def test_writing_your_own_branch_stays_allowed(self, registered_projects: dict):
         own = (Path(registered_projects["hooks"]) / "docs" / "x.md").as_posix()
@@ -530,61 +565,110 @@ class TestShellMemoryRuleDoesNotOverreach:
         assert "passport.json" in _reason(result)
 
 
+class TestTheVerbIsReadTheSameOnEveryHost:
+    """One program, four spellings — the reading the gates share (DPLAN-0352).
+
+    Found while curing git_gate and rm_gate on 2026-09-19: this parser had the
+    same hole. ``CP.EXE`` and ``cp.exe`` are cp on a Windows host, and the
+    scripted lane read them as an unknown program that names no target.
+    """
+
+    def test_verb_name_reads_path_extension_and_case(self):
+        assert bash_writes.verb_name("rm") == "rm"
+        assert bash_writes.verb_name("RM.EXE") == "rm"
+        assert bash_writes.verb_name("/usr/bin/git") == "git"
+        assert bash_writes.verb_name("C:\\Program Files\\Git\\bin\\git.exe") == "git"
+        assert bash_writes.verb_name("git.cmd") == "git"
+
+    def test_a_non_executable_extension_is_part_of_the_name(self):
+        """A file NAMED for a program is not that program — `git.py` stays quiet."""
+        assert bash_writes.verb_name("git.py") == "git.py"
+        assert bash_writes.verb_name("some/path/rm.txt") == "rm.txt"
+        assert bash_writes.verb_name(".bashrc") == ".bashrc"
+
+    def test_a_renamed_write_verb_still_names_its_target(self, tmp_path: Path):
+        mine = str(tmp_path / "Mine")
+        assert _names(write_targets("CP.EXE a.json /work/Other/b.json", mine), "Other", "b.json")
+        assert _names(write_targets("TOUCH /work/Other/new.json", mine), "Other", "new.json")
+
+
 class TestBashWritesParser:
     """Unit-level reading of the parser, independent of the fence."""
 
-    def test_unbalanced_quotes_fall_back_rather_than_going_quiet(self):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
-        targets = write_targets("echo 'unterminated > /tmp/x.json", "/tmp")
+    def test_unbalanced_quotes_fall_back_rather_than_going_quiet(self, tmp_path: Path):
+        targets = write_targets("echo 'unterminated > x.json", str(tmp_path))
         assert any(str(t).endswith("x.json") for t, _ in targets)
 
-    def test_a_variable_path_is_skipped_not_guessed(self):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
+    def test_a_variable_path_is_skipped_not_guessed(self, tmp_path: Path):
+        assert write_targets("sed -i s/a/b/ $TARGET/schedule.json", str(tmp_path)) == []
 
-        assert write_targets("sed -i s/a/b/ $TARGET/schedule.json", "/tmp") == []
+    def test_descriptor_duplication_is_not_a_filename(self, tmp_path: Path):
+        assert write_targets("some_command 2>&1", str(tmp_path)) == []
 
-    def test_descriptor_duplication_is_not_a_filename(self):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
-        assert write_targets("some_command 2>&1", "/tmp") == []
-
-    def test_a_quoted_heredoc_body_is_data_not_shell(self):
+    def test_a_quoted_heredoc_body_is_data_not_shell(self, tmp_path: Path):
         """Found live: this gate blocked the reply describing its own proof.
 
         A mail body assembled with ``cat <<EOF`` that QUOTES a shell command had
         its quoted text read as real syntax. cat cannot write anywhere; the
         redirection inside the body belongs to the prose, not to the shell.
         """
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         command = "BODY=$(cat <<'EOF'\necho probe > /other/Project/x.tmp\nEOF\n)\ndrone @ai_mail reply id \"$BODY\""
-        assert write_targets(command, "/tmp") == []
+        assert write_targets(command, str(tmp_path)) == []
 
-    def test_stripping_heredoc_bodies_does_not_weaken_the_interpreter_rule(self):
+    def test_stripping_heredoc_bodies_does_not_weaken_the_interpreter_rule(self, tmp_path: Path):
         """The python-heredoc catch was the point; it survives the fix."""
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         command = "python3 <<'EOF'\nfrom pathlib import Path\nPath('/other/Project/x.json').write_text('{}')\nEOF"
-        targets = write_targets(command, "/tmp")
+        targets = write_targets(command, str(tmp_path))
         assert _names(targets, "other", "Project", "x.json"), f"heredoc body surrendered nothing: {targets}"
 
-    def test_a_real_redirection_on_the_heredoc_opening_line_still_counts(self):
+    def test_a_real_redirection_on_the_heredoc_opening_line_still_counts(self, tmp_path: Path):
         """Only the BODY stops being syntax — the opening line is still shell."""
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         command = "cat <<'EOF' > /other/Project/out.txt\njust some text\nEOF"
-        targets = write_targets(command, "/tmp")
+        targets = write_targets(command, str(tmp_path))
         assert _names(targets, "other", "Project", "out.txt"), f"opening-line redirection lost: {targets}"
 
     def test_the_residual_gap_is_published_not_implied(self):
         """What the parser cannot see is data, so the reply, README and tests agree."""
-        from aipass.hooks.apps.modules.bash_writes import NOT_CAUGHT
-
-        assert NOT_CAUGHT
-        joined = " ".join(NOT_CAUGHT)
+        assert bash_writes.NOT_CAUGHT
+        joined = " ".join(bash_writes.NOT_CAUGHT)
         for named in ("symlink", "xargs", "chmod", "git", "pipe", "no separator", "joined", "sponge"):
             assert named in joined
+
+    def test_no_usable_cwd_raises_rather_than_reading_no_writes(self, tmp_path: Path, monkeypatch):
+        """Fleet green leg 5: with no cwd to resolve against, the reader answered [] ("writes nothing").
+
+        Every gate read that as nothing to judge and let a relative write through. It
+        now raises, and each gate's crash refusal refuses the call. The platform is
+        asked inside the test: Windows refuses to remove a process's cwd, and then
+        the cwd stays usable and the command is read as before.
+        """
+        gone = tmp_path / "gone"
+        gone.mkdir()
+        monkeypatch.chdir(gone)
+        shutil.rmtree(gone, ignore_errors=True)  # the platform answers by whether the directory is still there
+        if not gone.exists():
+            with pytest.raises(OSError):
+                bash_writes.write_targets_by_segment("echo hi > out.txt", "")
+        else:
+            assert write_targets("echo hi > out.txt", "") == [(gone / "out.txt", "redirection (>)")]
+
+    @pytest.mark.parametrize(
+        ("command", "named"),
+        [
+            ("sed -i 68,90p other/branch/file.py", ["other/branch/file.py"]),
+            ("sed -ni 1p file.py", ["file.py"]),
+            ("sed -i.bak 1d file.py", ["file.py"]),
+            ("sed -Ei 's/a/b/' file.py", ["file.py"]),
+            ("sed -e 1d -i file.py", ["file.py"]),
+            ("sed -i 1d a.py b.py", ["a.py", "b.py"]),
+            ("sed -i s/a/b/ file.py", ["file.py"]),
+            ("sed -n 68,90p file.py", []),
+        ],
+        ids=["non-path-script", "ni-cluster", "i-suffix", "Ei-cluster", "e-script", "two-files", "script", "read"],
+    )
+    def test_sed_in_place_names_every_file_and_never_its_script(self, tmp_path: Path, command: str, named: list):
+        """Pad row 87 (devpulse 953c8a70): a non-path script dropped the real target, and -ni was not in place."""
+        assert write_targets(command, str(tmp_path)) == [(tmp_path / name, "sed -i") for name in named]
 
 
 class TestEveryLineIsACommand:
@@ -596,41 +680,29 @@ class TestEveryLineIsACommand:
     """
 
     def test_a_write_on_line_two_is_seen(self, tmp_path: Path):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         targets = write_targets("true\ntouch made.json", str(tmp_path))
         assert _names(targets, tmp_path.name, "made.json"), targets
 
     def test_a_cd_on_its_own_line_moves_the_ground(self, tmp_path: Path):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         targets = write_targets(f"cd {(tmp_path / 'sub').as_posix()}\nsed -i s/a/b/ f.json", str(tmp_path))
         assert _names(targets, "sub", "f.json"), targets
 
     def test_a_continued_line_is_still_one_command(self, tmp_path: Path):
         """The newline split must not break a backslash continuation in two."""
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         targets = write_targets("sed -i s/a/b/ \\\n  f.json", str(tmp_path))
         assert _names(targets, tmp_path.name, "f.json"), targets
 
     def test_a_comment_line_ends_at_its_newline(self, tmp_path: Path):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         targets = write_targets("# the next line writes\ntouch made.json", str(tmp_path))
         assert _names(targets, tmp_path.name, "made.json"), targets
 
     def test_a_trailing_comment_names_no_target(self, tmp_path: Path):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         targets = write_targets("cp a.json b.json # was c.json", str(tmp_path))
         assert _names(targets, tmp_path.name, "b.json")
         assert not _names(targets, tmp_path.name, "c.json"), targets
 
     def test_a_hash_inside_a_word_is_not_a_comment(self, tmp_path: Path):
         """shlex's own rule cut the line at ANY '#', so a URL fragment hid the write after it."""
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         targets = write_targets("echo host/#frag && touch made.json", str(tmp_path))
         assert _names(targets, tmp_path.name, "made.json"), targets
 
@@ -638,14 +710,10 @@ class TestEveryLineIsACommand:
         """The '#' starts a word INSIDE the quotes - only quote tracking keeps it data.
         (MUTATION-CHECK: "'# header'" put it after the quote, where it never
         starts a word, so the pin passed with quote tracking switched off.)"""
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         targets = write_targets("echo 'see # header' > made.json", str(tmp_path))
         assert _names(targets, tmp_path.name, "made.json"), targets
 
     def test_a_subshell_cd_ends_with_the_subshell(self, tmp_path: Path):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         command = f"(cd {(tmp_path / 'sub').as_posix()} && touch inner.json); touch outer.json"
         targets = write_targets(command, str(tmp_path))
         assert _names(targets, "sub", "inner.json"), targets
@@ -670,16 +738,12 @@ class TestAnInterpreterHoldsOnlyItsOwnText:
     """
 
     def test_another_commands_path_is_not_claimed(self, tmp_path: Path):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         command = f"python3 - <<'EOF'\nprint(1)\nEOF\ncd {(tmp_path / 'sub').as_posix()} && cat data/x.json"
         targets = write_targets(command, str(tmp_path))
         assert not any("x.json" in t.parts for t, _ in targets), targets
 
     def test_each_heredoc_goes_to_the_interpreter_that_opened_it(self, tmp_path: Path):
         """Attribution AND ground: the second body resolves where the second python stands."""
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         sub = (tmp_path / "sub").as_posix()
         command = f"python3 - <<'A'\nopen('one/x.json')\nA\ncd {sub} && python3 - <<'B'\nopen('two/y.json')\nB"
         targets = write_targets(command, str(tmp_path))
@@ -689,16 +753,12 @@ class TestAnInterpreterHoldsOnlyItsOwnText:
         assert not _names(targets, "sub", "one", "x.json"), targets
 
     def test_its_own_arguments_are_still_held(self, tmp_path: Path):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         targets = write_targets("cat notes.txt && python3 tool.py out/r.json", str(tmp_path))
         assert _names(targets, tmp_path.name, "out", "r.json"), targets
 
     def test_openers_and_bodies_that_disagree_keep_the_whole_command_read(self, tmp_path: Path):
         """A here-string looks like a heredoc to the body reader and not to the lexer.
         When the two cannot be paired, every interpreter keeps the old, broader read."""
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         command = "python3 -c 'print(1)' && cat <<<EOF\nfar/z.json\nEOF"
         targets = write_targets(command, str(tmp_path))
         assert _names(targets, tmp_path.name, "far", "z.json"), targets
@@ -813,34 +873,30 @@ class TestWindowsSpelledPathsAreStillFenced:
 class TestBothSpellingsAreRead:
     """Parser level: neither dialect may be chosen at the other's expense."""
 
-    def test_posix_escaped_space_survives(self):
+    def test_posix_escaped_space_survives(self, tmp_path: Path):
         """shlex's escape reading is still produced — it is correct for POSIX.
 
         `cp a\\ b.txt dest` names ONE source file with a space in it. If the
         separator reading had replaced the escape reading rather than joining
         it, this filename would have become two tokens on every OS.
         """
-        from aipass.hooks.apps.modules import bash_writes
+        segments = bash_writes.write_targets_by_segment(r"cp a\ b.txt dest.txt", str(tmp_path))
+        readings = [tokens for tokens, _ in segments]
 
-        readings = bash_writes._readings(r"cp a\ b.txt /tmp/dest.txt")
+        assert ["cp", "a b.txt", "dest.txt"] in readings, f"escape reading lost: {readings}"
 
-        assert ["cp", "a b.txt", "/tmp/dest.txt"] in readings, f"escape reading lost: {readings}"
-
-    def test_separator_reading_is_produced_too(self):
+    def test_separator_reading_is_produced_too(self, tmp_path: Path):
         """The reading that was missing entirely until 2026-08-31."""
-        from aipass.hooks.apps.modules import bash_writes
-
-        readings = bash_writes._readings(r"sed -i s/a/b/ C:\Proj\Vera\f.json")
+        segments = bash_writes.write_targets_by_segment(r"sed -i s/a/b/ C:\Proj\Vera\f.json", str(tmp_path))
+        readings = [tokens for tokens, _ in segments]
 
         assert any(r"C:\Proj\Vera\f.json" in tokens for tokens in readings), (
             f"no reading kept the separators: {readings}"
         )
 
-    def test_a_command_with_no_backslash_is_read_once(self):
+    def test_a_command_with_no_backslash_is_read_once(self, tmp_path: Path):
         """No cost where the dialects agree — and no duplicate refusal lines."""
-        from aipass.hooks.apps.modules import bash_writes
-
-        assert len(bash_writes._readings("echo hi > out.txt")) == 1
+        assert len(bash_writes.write_targets_by_segment("echo hi > out.txt", str(tmp_path))) == 1
 
     def test_a_target_named_twice_is_reported_once(self):
         """Both readings can find the SAME write; the caller is told once.
@@ -851,10 +907,9 @@ class TestBothSpellingsAreRead:
         carries a backslash (so both readings run) on something that is not the
         target, so both readings agree on `out.txt` and the duplicate is real.
         """
-        from aipass.hooks.apps.modules import bash_writes
-
         command = r'python3 -c "print(\"hi\")" > out.txt'
-        assert len(bash_writes._readings(command)) == 2, "precondition: both readings must run"
+        readings = bash_writes.write_targets_by_segment(command, str(Path.cwd()))
+        assert len(readings) == 2, "precondition: both readings must run"
 
         hits = bash_writes.write_targets(command, str(Path.cwd()))
 
@@ -866,16 +921,12 @@ class TestBothSpellingsAreRead:
         Harmless to the verdict — filesystem root holds no registry — but a
         refusal listing paths the command never named is one nobody believes.
         """
-        from aipass.hooks.apps.modules import bash_writes
-
         hits = bash_writes.write_targets(r'python3 -c "print(\"hi\")"', str(Path.cwd()))
 
         assert all(any(c.isalnum() for c in t.name) for t, _ in hits), f"separator-only target: {hits}"
 
     def test_the_cross_os_root_limit_is_published(self):
         """A drive letter names nothing on Linux — said as data, not discovered."""
-        from aipass.hooks.apps.modules import bash_writes
-
         assert any("operating system" in gap for gap in bash_writes.NOT_CAUGHT), (
             "the cross-OS root residual is not in NOT_CAUGHT"
         )
@@ -915,8 +966,6 @@ class TestTargetSpellingIsNotPartOfTheContract:
         in precisely the place this train was fixing.
         """
         from pathlib import Path as LocalPath
-
-        from aipass.hooks.apps.modules.bash_writes import write_targets
 
         targets = write_targets("echo x > sub/out.txt", str(LocalPath.cwd()))
 
@@ -968,24 +1017,18 @@ class TestTheGitBashDriveSpelling:
         ],
     )
     def test_a_drive_path_names_the_drive_on_windows(self, monkeypatch, command):
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         _read_as(monkeypatch, PureWindowsPath)
 
         assert [t for t, _ in write_targets(command, self.SEAT)] == [self.VERA_FILE]
 
     def test_the_bare_drive_is_its_root(self, monkeypatch):
         """/c alone is C:/, never the drive-relative C:, which pathlib joins as the seat itself."""
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         _read_as(monkeypatch, PureWindowsPath)
 
         assert [t for t, _ in write_targets("cd /c && touch x.json", self.SEAT)] == [PureWindowsPath(r"C:\x.json")]
 
     def test_a_longer_first_component_is_not_a_drive(self, monkeypatch):
         """/cache is a directory on the seat's drive, not drive C with 'ache' under it."""
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         _read_as(monkeypatch, PureWindowsPath)
 
         targets = [t for t, _ in write_targets("sed -i s/a/b/ /cache/f.json", self.SEAT)]
@@ -998,19 +1041,194 @@ class TestTheGitBashDriveSpelling:
         is green here either way. This is the evidence that C:/... reaches the
         real file on Windows, rather than a directory under the seat.
         """
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         _read_as(monkeypatch, PureWindowsPath)
         command = "(cd C:/Work/AIPass && sed -i s/a/b/ src/aipass/hooks/te" + "sts/test_existing.py)"
 
         targets = [t for t, _ in write_targets(command, self.SEAT)]
         assert targets == [PureWindowsPath(self.SEAT) / "tests" / "test_existing.py"], targets
 
-    def test_on_posix_a_one_letter_directory_is_only_a_directory(self, monkeypatch):
+    def test_on_posix_a_one_letter_directory_is_only_a_directory(self, monkeypatch, tmp_path: Path):
         """The drive reading is Windows-only. On Linux /c is a real directory named c."""
-        from aipass.hooks.apps.modules.bash_writes import write_targets
-
         _read_as(monkeypatch, PurePosixPath)
 
-        targets = [t for t, _ in write_targets("sed -i s/a/b/ /c/Work/f.json", "/work/AIPass")]
+        targets = [t for t, _ in write_targets("sed -i s/a/b/ /c/Work/f.json", tmp_path.as_posix())]
         assert targets == [PurePosixPath("/c/Work/f.json")], targets
+
+
+class TestTheBranchAndMemoryLanesAreDefaultDeny:
+    """DPLAN-0356 phase 4, P2 in edit_gate: an unlisted write verb passed the branch and .trinity fences."""
+
+    def test_an_unlisted_program_naming_another_branch_is_refused(self, registered_projects: dict):
+        target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        assert _blocked(_run(registered_projects["hooks"], command=f"unknownwriter --in-place {target}"))
+        assert _run(registered_projects["hooks"], command=f"grep def {target}")["exit_code"] == 0
+
+    def test_an_unlisted_program_naming_a_memory_file_is_refused(self, registered_projects: dict):
+        seat = Path(registered_projects["hooks"])
+        memory = (seat / ".trinity" / "local.json").as_posix()
+        assert _blocked(_run(str(seat), command=f"unknownwriter {memory}"))
+        assert _run(str(seat), command=f"jq . {memory}")["exit_code"] == 0
+
+    @pytest.mark.parametrize("cd", ["cd", "pushd"])
+    def test_a_cd_into_another_branch_is_a_read_not_a_write(self, registered_projects: dict, grant_withheld, cd):
+        """Trigger a837a4c7, 54 hits from 10-01: `cd <AIPass>/src/aipass && ...` was refused, cd's directory
+        read as a write. Only the cd is cured: pytest naming another branch's directory stays that branch's."""
+        seat = Path(registered_projects["hooks"])
+        other = Path(registered_projects["memory"]).as_posix()
+        for command in (f"{cd} {seat.parent.as_posix()} && pytest hooks/tests -q", f"{cd} {other} && popd"):
+            result = _run(registered_projects["hooks"], command=command)
+            assert result["exit_code"] == 0, result["stdout"]
+
+    def test_a_cd_does_not_carry_a_delete_past_the_fence(self, registered_projects: dict, grant_withheld):
+        other = Path(registered_projects["memory"]).as_posix()
+        assert _blocked(_run(registered_projects["hooks"], command=f"cd {other} && rm apps/x.py"))
+
+    @pytest.mark.parametrize("flags", ["-p no:cacheprovider", "-k cd_into", "-k slow/net"])
+    def test_a_flag_value_is_not_a_branch_write(self, registered_projects: dict, grant_withheld, flags):
+        """devpulse 73358617: a word that does not exist, whose first existing ancestor is src/aipass, names no file.
+
+        `-k slow/net` is the one the first-existing-ancestor walk decides: its own parent
+        (src/aipass/slow) reads as a branch by the path shape; src/aipass, where the walk stops, does not.
+        """
+        aipass = Path(registered_projects["hooks"]).parent.as_posix()
+        result = _run(registered_projects["hooks"], command=f"cd {aipass} && pytest hooks/tests {flags}")
+        assert result["exit_code"] == 0, result["stdout"]
+
+    def test_a_new_file_in_another_branch_is_still_a_write(self, registered_projects: dict, grant_withheld):
+        aipass = Path(registered_projects["hooks"]).parent
+        other = (aipass / "flow" / "new.py").as_posix()
+        assert _blocked(_run(registered_projects["hooks"], command=f"cd {aipass.as_posix()} && cp x {other}"))
+        assert _blocked(_run(registered_projects["hooks"], command=f"unknownwriter {other}"))
+
+    def test_an_existing_file_in_another_branch_is_still_refused(self, registered_projects: dict, grant_withheld):
+        existing = Path(registered_projects["memory"]) / "existing.py"
+        existing.write_text("x = 1\n", encoding="utf-8")
+        assert _blocked(_run(registered_projects["hooks"], command=f"rm {existing.as_posix()}"))
+
+    def test_a_project_whose_directory_cannot_be_listed_is_refused_not_read_as_none(
+        self, registered_projects: dict, grant_withheld, tmp_path: Path
+    ):
+        """Fleet green leg 5: glob answered [] for a writable directory it could not list, so the registry
+        inside was read as no project and a crossing into it passed. Mode 0o300 keeps write and enter,
+        drops list. Where the platform still lists it (Windows, root) the crossing rule refuses instead:
+        the test asks os.scandir with its own hands and asserts the refusal either way."""
+        locked = tmp_path / "Projects" / "Locked"
+        locked.mkdir(parents=True)
+        (locked / "LOCKED_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        locked.chmod(0o300)
+        try:
+            command = f"cp x {(locked / 'new.py').as_posix()}"
+            assert _blocked(_run(registered_projects["hooks"], command=command))
+            assert (
+                _run(registered_projects["hooks"], command=f"cp x {(scratch / 'new.py').as_posix()}")["exit_code"] == 0
+            ), "control: a listable directory in no project stays nobody's"
+        finally:
+            locked.chmod(0o700)
+
+    def test_drone_and_own_branch_work_still_pass(self, registered_projects: dict):
+        seat = registered_projects["hooks"]
+        for command in ("drone @seedgo checklist apps", "mkdir -p .archive && mv old.py .archive/", "pytest tests -q"):
+            assert _run(seat, command=command)["exit_code"] == 0, command
+
+
+class TestAWordTheGateCannotProbe:
+    """devpulse 729ffaa9: a long printf format string was probed as a path and crashed the gate (ENAMETOOLONG)."""
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param(
+                "x" * 300 + ".txt",
+                marks=pytest.mark.skipif(
+                    sys.platform == "win32", reason="the probe's errno for an over-long name is measured on POSIX only"
+                ),
+                id="name-over-NAME_MAX",
+            ),
+            pytest.param("x" * 40000, id="path-over-PATH_MAX"),
+        ],
+    )
+    def test_a_target_the_probe_cannot_read_is_refused_in_one_line(self, registered_projects: dict, name: str):
+        """Mutant: the OSError swallowed into an allow (exit 0)."""
+        result = _run(registered_projects["hooks"], command=f"echo hi > {name}")
+        assert _blocked(result)
+        reason = _reason(result)
+        assert "ENAMETOOLONG" in reason and "could not check" not in reason
+        assert "\n" not in reason and name not in reason
+
+    @pytest.mark.parametrize("program", ["printf", "echo"])
+    def test_a_format_string_is_data_and_its_redirect_is_the_write(
+        self, registered_projects: dict, grant_withheld, program: str
+    ):
+        """Mutant: the format string read as a path (refused as unprobeable)."""
+        seat = registered_projects["hooks"]
+        fmt = "row %s: " + "x" * 480
+        result = _run(seat, command=f"for b in a b c; do {program} '{fmt}' $b 1 2 > head_$b.txt; done")
+        assert result["exit_code"] == 0, result["stdout"]
+        other = (Path(registered_projects["memory"]) / "head.txt").as_posix()
+        refused = _run(seat, command=f"{program} '{fmt}' a > {other}")
+        assert _blocked(refused) and "ENAMETOOLONG" not in _reason(refused)
+
+
+class TestASedPrintScriptIsARead:
+    """hooks todo 80 (devpulse c393e2f8): `sed -n 68,90p .claude/provider_manifest.json` was refused as a write."""
+
+    def _manifest(self, registered_projects: dict) -> str:
+        manifest = registered_projects["aipass"] / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir()
+        manifest.write_text("{}\n", encoding="utf-8")
+        return manifest.as_posix()
+
+    def test_the_refused_read_is_allowed(self, registered_projects: dict, grant_withheld):
+        """Mutant: sed read off the read-only table again (refused as a project-level write)."""
+        self._manifest(registered_projects)
+        aipass = registered_projects["aipass"].as_posix()
+        command = f"cd {aipass}; sed -n 68,90p .claude/provider_manifest.json"
+        result = _run(registered_projects["hooks"], command=command)
+        assert result["exit_code"] == 0, result["stdout"]
+
+    @pytest.mark.parametrize("script", ["-n 1,5p", "-n '1,5p;$p'", "-n -e 1p -e '$p'", "-nE 3q", "'2~3d'"])
+    def test_a_print_script_may_name_another_branch(self, registered_projects: dict, grant_withheld, script: str):
+        target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        result = _run(registered_projects["hooks"], command=f"sed {script} {target}")
+        assert result["exit_code"] == 0, result["stdout"]
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "sed -n '68,90w copy.txt' {manifest}",
+            "sed -n 1e {manifest}",
+            "sed -n '1r /dev/null' {manifest}",
+            "sed -n -f edit.sed {manifest}",
+            "sed -n s/a/b/p {manifest}",
+            "sed -n -l 5 1p {manifest}",
+        ],
+        ids=["w-command", "e-command", "r-command", "script-file", "substitute", "unread-flag"],
+    )
+    def test_a_script_that_can_write_or_run_still_names_its_operands(
+        self, registered_projects: dict, grant_withheld, command: str
+    ):
+        """Mutant: every sed without -i read as a read (all six allowed)."""
+        manifest = self._manifest(registered_projects)
+        result = _run(registered_projects["hooks"], command=command.format(manifest=manifest))
+        assert _blocked(result)
+        assert "sed (not a read-only program)" in _reason(result)
+
+    @pytest.mark.parametrize("flags", ["-i -n", "-ni", "--in-place -n", "-n -i.bak"])
+    def test_sed_in_place_on_the_same_path_stays_refused(self, registered_projects: dict, grant_withheld, flags: str):
+        """Both lanes hold all four: every sed read as a read still refuses here, through bash_writes (pad row 87)."""
+        manifest = self._manifest(registered_projects)
+        result = _run(registered_projects["hooks"], command=f"sed {flags} 68,90p {manifest}")
+        assert _blocked(result)
+        assert "provider_manifest.json" in _reason(result)
+
+    def test_a_print_read_of_a_memory_file_is_allowed_and_its_writes_are_not(self, registered_projects: dict):
+        """Refused by the memory lane until 1.3.0 of shell_programs, like cat and jq it now reads."""
+        seat = Path(registered_projects["hooks"])
+        (seat / ".trinity").mkdir()
+        (seat / ".trinity" / "local.json").write_text("{}\n", encoding="utf-8")
+        read = _run(str(seat), command="sed -n 68,90p .trinity/local.json")
+        assert read["exit_code"] == 0, read["stdout"]
+        for command in ("sed -i -n 68,90p .trinity/local.json", "sed -n s/a/b/p .trinity/local.json"):
+            assert "Memory files are not written from a shell" in _reason(_run(str(seat), command=command)), command

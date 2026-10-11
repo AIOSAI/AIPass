@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seedgo_proof.py
 # Description: Self-proof orchestrator — discovers and runs proof packs
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-02
 # =============================================
 
 """Seedgo Proof — Self-check orchestrator for standards pack integrity.
@@ -106,10 +106,14 @@ def _discover_proof_handlers(pack_dir: Path) -> List[Path]:
 
     Returns:
         Sorted list of handler Paths
+
+    Raises:
+        OSError: the directory cannot be listed. Every caller hands it a
+            directory that came out of handlers_dir.iterdir(); the guard that
+            answered a missing one with an empty list, in silence, was dropped
+            (seedgo, fleet green leg 6).
     """
     handlers = []
-    if not pack_dir.exists():
-        return handlers
     for f in sorted(pack_dir.iterdir()):
         if not f.is_file():
             continue

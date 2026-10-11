@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_check.py
 # Description: README Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.3.3
 # Created: 2026-03-05
-# Modified: 2026-09-19
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -46,6 +46,8 @@ from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_D
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 
 # Audit scope: entry points only (apps/{name}.py)
+# APPLIES_TO: README.md through the entry point.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
 
 
@@ -151,7 +153,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks.append(sections_check)
 
     # Check 3: Last Updated freshness
-    freshness_check = check_last_updated_freshness(lines, branch_root, module_path, bypass_rules)
+    freshness_check = check_last_updated_freshness(lines, module_path, bypass_rules)
     checks.append(freshness_check)
 
     # Check 4: Directory tree accuracy
@@ -231,11 +233,12 @@ def check_required_sections(lines: List[str], file_path: str, bypass_rules: list
     return {"name": "Required sections", "passed": False, "message": f"Missing sections: {', '.join(missing)}"}
 
 
-def check_last_updated_freshness(
-    lines: List[str], branch_root: Path, file_path: str, bypass_rules: list | None = None
-) -> Dict:
+def check_last_updated_freshness(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
     """
     Check that the README declares a well-formed "Last Updated" date.
+
+    It took branch_root like its sibling checks and never read it: the date is
+    judged from the README's lines alone. Dropped (seedgo, fleet green leg 8).
 
     Local-file only: verifies the field is present and parseable. Does NOT
     compare against code history — recency is not a property of the files on
@@ -338,10 +341,13 @@ def check_directory_tree(lines: List[str], branch_root: Path, file_path: str, by
 
     # Check which mentioned directories exist somewhere under branch root
     missing_dirs = []
+    # Recorded, not skipped: a directory "not found" under a subtree the walk
+    # could not list is unverified, and the message has to say which subtree.
+    unreadable: List[OSError] = []
     for dir_name in mentioned_dirs:
         # Check if this directory exists anywhere in the branch
         found = False
-        for _, dirs, _ in os.walk(str(branch_root)):
+        for _, dirs, _ in os.walk(str(branch_root), onerror=unreadable.append):
             if dir_name in dirs:
                 found = True
                 break
@@ -357,10 +363,14 @@ def check_directory_tree(lines: List[str], branch_root: Path, file_path: str, by
             "message": f"All {len(mentioned_dirs)} directories in tree verified",
         }
 
+    message = f"Directories in tree not found on disk: {', '.join(sorted(missing_dirs))}"
+    if unreadable:
+        unread = sorted({str(error.filename) for error in unreadable})
+        message += f"; not verified, {len(unread)} subtree(s) could not be read: {', '.join(unread)}"
     return {
         "name": "Directory tree accuracy",
         "passed": False,
-        "message": f"Directories in tree not found on disk: {', '.join(sorted(missing_dirs))}",
+        "message": message,
     }
 
 
@@ -677,6 +687,10 @@ BRANCH_INPUTS = ("docs/*.md",)
 
 _DOCS_DIRNAME = "docs"
 
+#: An advisory that could not read what it reads says so in one line, never the
+#: [] of a branch with nothing to report (seedgo fleet green leg 15).
+UNREAD = "readme advisory not run: cannot read "
+
 #: Nouns whose count in a README rots the moment code lands. Deliberately NOT
 #: a duplicate of check 7: that check scores whether a TEST count is accurate
 #: today; this one says the number should not live in the face at all, because
@@ -773,7 +787,7 @@ def check_branch_info(branch_path: str) -> List[str]:
         content = readme_path.read_text(encoding="utf-8")
     except OSError as e:
         logger.info("[readme] cannot read README for advisory lines at %s: %s", readme_path, e)
-        return []
+        return [f"{UNREAD}{readme_path} ({e})"]
 
     readme_lines = content.split("\n")
     lines: List[str] = []
@@ -845,7 +859,7 @@ def _docs_index_lines(branch_root: Path, content: str) -> List[str]:
         docs_files = sorted(docs_dir.glob("*.md"))
     except OSError as e:
         logger.info("[readme] cannot list %s: %s", docs_dir, e)
-        return []
+        return [f"{UNREAD}{docs_dir} ({e})"]
     if not docs_files:
         return []
 
@@ -895,7 +909,7 @@ def _named_path_lines(branch_root: Path, content: str) -> List[str]:
         tops = {entry.name for entry in branch_root.iterdir()}
     except OSError as e:
         logger.info("[readme] cannot list branch root %s: %s", branch_root, e)
-        return []
+        return [f"{UNREAD}{branch_root} ({e})"]
 
     link_spans = [(m.start(2), m.end(2)) for m in _MARKDOWN_LINK_RE.finditer(content)]
     missing: List[str] = []

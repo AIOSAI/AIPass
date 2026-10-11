@@ -3,26 +3,38 @@
 # Description: Critical path tests for API branch core functions
 # Version: 1.0.0
 # Created: 2026-03-31
-# Modified: 2026-03-31
+# Modified: 2026-10-03
 # =============================================
 
-"""
-Critical path tests for the API branch.
+"""Tests for apps/modules/api_key.py and apps/modules/openrouter_client.py, the request pipeline."""
 
-Covers the 4 core functions that form the API request pipeline:
+# Critical path tests for the API branch.
+#
+# Covers the 4 core functions that form the API request pipeline:
+#
+# 1. get_api_key() - Key retrieval from secrets file
+# 2. validate_key() - Key format validation per provider rules
+# 3. get_response() - Main API call orchestrator
+# 4. extract_response() - Response content extraction
+#
+# All external dependencies are mocked. File-based tests use tmp_path.
 
-1. get_api_key() - Key retrieval from secrets file
-2. validate_key() - Key format validation per provider rules
-3. get_response() - Main API call orchestrator
-4. extract_response() - Response content extraction
-
-All external dependencies are mocked. File-based tests use tmp_path.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — the real OpenRouter request; make_api_request is mocked, no network in tests
+# seedgo: no-test-needed(ruff) — that api_key.py and openrouter_client.py parse and import
 
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from aipass.api.apps.modules import api_key
 from aipass.api.apps.modules import openrouter_client
+
+
+def _home_at(monkeypatch, home):
+    """Point Path.home() at `home` through the environment it reads on every platform."""
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
 
 
 # =============================================
@@ -34,7 +46,7 @@ class TestGetApiKey:
     """Tests for fetch_api_key() — key retrieval from secrets file (single source)."""
 
     @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
-    def test_key_from_secrets_file(self, mock_jh, tmp_path):
+    def test_key_from_secrets_file(self, mock_jh, tmp_path, monkeypatch):
         """Key found in ~/.secrets/aipass/.env is returned after validation."""
         secrets_dir = tmp_path / ".secrets" / "aipass"
         secrets_dir.mkdir(parents=True)
@@ -44,24 +56,24 @@ class TestGetApiKey:
             encoding="utf-8",
         )
 
-        with patch("aipass.api.apps.handlers.auth.keys.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = tmp_path
-            result = api_key.fetch_api_key("openrouter")
+        # api, fleet green leg 3: home is redirected through the environment
+        # (the edge Path.home() reads), not by replacing pathlib.Path in keys.
+        _home_at(monkeypatch, tmp_path)
+        result = api_key.fetch_api_key("openrouter")
 
         assert result == "sk-or-v1-fake-test-key-do-not-use-aabbccdd0011"
         mock_jh.log_operation.assert_called_once()
 
     @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
-    def test_no_key_found_returns_none(self, mock_jh, tmp_path):
+    def test_no_key_found_returns_none(self, mock_jh, tmp_path, monkeypatch):
         """Returns None when no secrets file exists."""
-        with patch("aipass.api.apps.handlers.auth.keys.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = tmp_path / "nonexistent_home"
-            result = api_key.fetch_api_key("openrouter")
+        _home_at(monkeypatch, tmp_path / "nonexistent_home")
+        result = api_key.fetch_api_key("openrouter")
 
         assert result is None
 
     @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
-    def test_invalid_key_format_returns_none(self, mock_jh, tmp_path):
+    def test_invalid_key_format_returns_none(self, mock_jh, tmp_path, monkeypatch):
         """Key in secrets with wrong prefix returns None."""
         secrets_dir = tmp_path / ".secrets" / "aipass"
         secrets_dir.mkdir(parents=True)
@@ -71,11 +83,38 @@ class TestGetApiKey:
             encoding="utf-8",
         )
 
-        with patch("aipass.api.apps.handlers.auth.keys.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = tmp_path
-            result = api_key.fetch_api_key("openrouter")
+        _home_at(monkeypatch, tmp_path)
+        result = api_key.fetch_api_key("openrouter")
 
         assert result is None
+
+    @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
+    def test_an_unreadable_secrets_file_raises_naming_only_the_error(self, mock_jh, tmp_path, monkeypatch):
+        """A secrets file that does not read raises KeyUnavailable, with no byte of the file in it.
+
+        It used to answer None, which read the same as "no key set". The
+        reason is what the interpreter itself raises on the same read, asked
+        here with the test's own hands (api, fleet green leg 11).
+        """
+        secrets_dir = tmp_path / ".secrets" / "aipass"
+        secrets_dir.mkdir(parents=True)
+        env_file = secrets_dir / ".env"
+        env_file.write_bytes(b"OPENROUTER_API_KEY=\xff\xfeQZ\n")
+        try:
+            env_file.read_text(encoding="utf-8")
+        except Exception as own:
+            expected = getattr(own, "strerror", None) or type(own).__name__
+        else:
+            pytest.fail("the stand-in file read cleanly; it cannot stand for an unreadable one")
+
+        _home_at(monkeypatch, tmp_path)
+        with pytest.raises(api_key.keys.KeyUnavailable) as caught:
+            api_key.fetch_api_key("openrouter")
+
+        assert str(caught.value) == f"The secrets file could not be read ({expected})"
+        assert caught.value.__cause__ is None
+        assert caught.value.__suppress_context__ is True
+        mock_jh.log_operation.assert_not_called()
 
 
 # =============================================
@@ -239,6 +278,19 @@ class TestExtractResponse:
         response.model = "test/model"
 
         assert openrouter_client.extract_response(response) is None
+
+    def test_unreadable_response_raises_with_the_reason(self):
+        """A response object that fails to read raises OpenRouterUnavailable naming why.
+
+        It used to answer None, which read the same as an empty reply (api, fleet green leg 10).
+        """
+        response = MagicMock()
+        response.choices.__getitem__.side_effect = RuntimeError("bad shape")
+
+        with pytest.raises(openrouter_client.client.OpenRouterUnavailable) as caught:
+            openrouter_client.extract_response(response)
+
+        assert str(caught.value) == "OpenRouter response could not be read: bad shape"
 
     def test_response_missing_message(self):
         """Response choice without message attribute returns None."""

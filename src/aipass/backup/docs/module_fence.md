@@ -2,42 +2,47 @@
 
 # The handlers fence
 
-The access guard on `apps/handlers/__init__.py`: how kinship is decided, and the rules its own tests must obey.
+The access guard on `apps/handlers/__init__.py`, the door other branches use instead, and the tests that prove both.
 
-### Fabricated filenames never name the real tree (round 12)
+### What the fence decides
 
-The fence pins drive the guard by compiling `check()` under a made-up caller
-filename. coverage.py records every executed code object BY FILENAME, existing
-file or not -- so a fabrication that looks like a real tree file makes the
-coverage *report* step exit 1 with `No source for code` while every test passes.
-That is what reddened the coverage CI leg on `5bfd5b63`.
+The fence is the fleet's v2.1 template (DPLAN-0404), rendered for backup. It
+reads the stack once, when the handlers package is first imported, and sorts
+every frame into kin (a file under this branch), transport (importlib, the
+frozen bootstrap, the standard library, site-packages) or foreign (everything
+else). The first foreign frame decides: refused when no kin frame stood between
+it and the fence, or when its own source line names `aipass.backup.apps.handlers`;
+allowed when kin code imported on its behalf.
 
-Two rules, both pinned:
+`apps/__init__.py` no longer carries `from . import handlers`. That line, added
+fleet-wide on 2026-04-25 for a Python 3.10 `mock.patch` failure, made the apps
+package the first frame every import showed the fence, so the fence never
+refused anything. The transport rule replaces it.
 
-- Every fabricated filename lives under `tmp_path`, outside coverage's `source`
-  filter. Real-tree adjacency (is `src/aipass/memory` foreign? is a real backup
-  file kin?) is asserted on `_is_kin`, which is pure and compiles nothing.
-- There is exactly ONE `compile()` in the test file, and it refuses a filename
-  that `abspath`s inside the source tree. `abspath`, not the literal: coverage
-  resolves a relative name against the cwd at trace time, so a Windows-spelled
-  literal is inert from the repo root and a minter from the branch directory.
+A pseudo filename such as `<string>` is never resolved: resolved, it would read
+against the process cwd, and a cwd inside this branch would make every bootstrap
+frame look like kin.
 
-### Kinship is spelled, not compared raw (round 5)
+The fence fires on the first import in a process only; after that the package is
+served from `sys.modules`. The write-time wall is seedgo's `encapsulation` row.
 
-The handlers fence asks one question -- is this caller inside my branch? -- and
-until 2026-08-31 it asked it with a raw substring test that normalised only ONE
-side. On Windows `_BRANCH_ROOT` arrives from `Path` with backslashes while the
-caller had just had its backslashes replaced with forward slashes, so the test
-could never match: every file in this branch read as FOREIGN and the whole tree
-died at the door with backup's own ACCESS DENIED message.
+### The door
 
-Both sides now go through `_spell_for_kinship()`. Case is folded only when
-`os.name == "nt"` -- folding everywhere would ADMIT a foreign `/tmp/BACKUP` on a
-case-sensitive filesystem, which is a wider fence, not a safer one. The guard's
-own-frame skip uses the same rule for a sharper reason: if that skip misses,
-`__init__.py` becomes the reported caller, is trivially kin, and the real
-foreign frame beneath it is never examined.
+Other branches reach backup through `apps/modules/door_trail.py`, which publishes
+`log_operation` from `apps/handlers/audit/trail.py` and nothing else. A door is
+not a command: it has no `handle_command`, so the router never offers it.
 
+### The tests
+
+- `tests/test_handlers_fence.py` runs `tests/support_fence.py` in a fresh
+  interpreter per case: six foreign import shapes from a seat under `tmp_path`,
+  each run with a tmp cwd and with the cwd at the branch root, a seat with no
+  branch at all, the kin seat in five shapes, and the door from a foreign seat.
+- `tests/test_dead_cwd_imports.py` runs the kin probe from a child whose cwd was
+  removed under it, and expects ALLOWED.
+
+The mutants run against both on 2026-10-08 are listed in the fleet's DPLAN-0404
+reply from backup.
 
 ---
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for devpulse tests
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2025-11-08
-# Modified: 2026-09-03
+# Modified: 2026-10-10
 # =============================================
 
 """Shared pytest fixtures for devpulse tests.
@@ -16,19 +16,20 @@ only redirect a suite needs. Nothing patches handler attributes any more.
 """
 
 import os
+import sys
 import tempfile
 
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
-from unittest.mock import patch
-
 import pytest
-import shutil
 from pathlib import Path
 from typing import Generator
 
+from aipass.cli.apps.modules import display
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
+from aipass.devpulse.apps.handlers.watchdog import timer as watch_timer
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -36,35 +37,69 @@ def pytest_configure(config: pytest.Config) -> None:
     # -c pyproject.toml) never reads this branch's ini, and its
     # --strict-markers would turn an unknown marker into an error.
     config.addinivalue_line("markers", "integration: live-dispatch integration tests (WATCHDOG_INTEGRATION=1)")
+    config.addinivalue_line(
+        "markers", "live_default_store: reads the watchdog's real default store path; the seal stands aside"
+    )
+
+
+@pytest.fixture(autouse=True)
+def sealed_watchdog_store(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the watchdog's default stores at this test's tmp_path.
+
+    The registry and the timer resolve their default file on every call. Unsealed,
+    a test that reaches register(), a sweep or an arm without naming a store writes
+    the live .watchdog/ of the seat running the suite, and a sweep there signals
+    live wires: 2026-09-27 03:40, a mutant of the owner gate armed a real wire from
+    inside pytest and killed the seat's own. File-local seals run after this one
+    and still win; a test that measures the default path itself carries the
+    live_default_store marker.
+    """
+    if request.node.get_closest_marker("live_default_store"):
+        return
+    store = tmp_path / "_sealed_watchdog"
+    monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store / "watchdog_active.json")
+    monkeypatch.setattr(watch_timer, "default_storage_path", lambda: store / "watchdog_timers.json")
+
+
+class _SysAs:
+    """A stand-in for one module's ``sys`` name: ``platform`` is the pretended one,
+    every other attribute reads the real ``sys`` at the moment it is asked."""
+
+    def __init__(self, platform: str) -> None:
+        self.platform = platform
+
+    def __getattr__(self, name: str):
+        return getattr(sys, name)
 
 
 @pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
+def pretend_platform(monkeypatch: pytest.MonkeyPatch):
+    """Make ONE module see another ``sys.platform``: ``pretend_platform(wire, "darwin")``.
+
+    Setting sys.platform itself is process-wide: every module and the prax logger's
+    threads would see it until the test ends. Swapping only the module's own ``sys``
+    name keeps the pretence inside the code under test.
+    """
+
+    def _pretend(module, platform: str) -> None:
+        monkeypatch.setattr(module, "sys", _SysAs(platform))
+
+    return _pretend
 
 
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data."""
-    return {"test_key": "test_value", "sample_data": "example"}
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
 
 
-@pytest.fixture
-def mock_logger():
-    """Mock the prax logger to suppress output during tests."""
-    with patch("aipass.prax.logger") as mock_log:
-        yield mock_log
-
-
-@pytest.fixture
-def mock_json_handler():
-    """Mock json_handler to prevent filesystem writes during tests."""
-    with patch("aipass.devpulse.apps.handlers.json.json_handler.log_operation") as mock_json:
-        yield mock_json
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -116,12 +151,11 @@ def hermetic_mail_doors(tmp_path_factory, monkeypatch):
     feed = aipass_dir / "notifications.jsonl"
     register = aipass_dir / "dispatch_register.jsonl"
     monkeypatch.setattr("aipass.ai_mail.feed_path", lambda: feed)
-    monkeypatch.setattr("aipass.ai_mail.register_path", lambda: register)
     # The register transplant lives INSIDE @ai_mail (outstanding_dispatches →
-    # register_file), which resolves through its own find_repo_root — the
-    # public register_path door above never enters that path. Patching another
-    # branch's internal symbol is a reach, done knowingly and only in-process:
-    # @ai_mail is dispatched (2026-08-23) about giving the transplant a seam
-    # that does not require this; when that lands, this line becomes harmless.
-    monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.register.find_repo_root", lambda: live)
+    # register_file). register.py 1.3.0 (DPLAN-0404 leg 15) reads
+    # AIPASS_DISPATCH_REGISTER at every rootless call and the public
+    # register_path door follows it, so one variable moves both. The old patch
+    # of @ai_mail's private find_repo_root is gone: its handlers fence refuses
+    # that reach from this seat now.
+    monkeypatch.setenv("AIPASS_DISPATCH_REGISTER", str(register))
     return live

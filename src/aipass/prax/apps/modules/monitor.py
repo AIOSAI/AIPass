@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2025-11-23
-# Modified: 2026-08-12
+# Modified: 2026-10-02
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -583,14 +583,16 @@ def _file_watcher_worker():
         "standards_checklist_log.json": "seedgo checklist",
     }
 
-    handler = MonitoringFileHandler(
-        event_queue=_event_queue,
-        command_indicator_files=COMMAND_INDICATOR_FILES,
-    )
-
     from aipass.prax.apps.handlers.config.load import _find_repo_root
 
     repo_root = _find_repo_root()
+
+    handler = MonitoringFileHandler(
+        event_queue=_event_queue,
+        command_indicator_files=COMMAND_INDICATOR_FILES,
+        sandbox_root=repo_root,
+    )
+
     watch_dirs = _get_watch_directories(repo_root)
 
     if not watch_dirs:

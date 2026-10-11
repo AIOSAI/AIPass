@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Centralized log file watcher for system_logs directory
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-01-31
-# Modified: 2026-09-15
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -69,9 +69,12 @@ except ImportError:
 _log_observer: Any = None
 
 
-def _generate_error_hash(module_name: str, message: str) -> str:
+def generate_error_hash(module_name: str, message: str) -> str:
     """
     Generate hash for error deduplication.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     Args:
         module_name: Module that generated the error
@@ -84,9 +87,12 @@ def _generate_error_hash(module_name: str, message: str) -> str:
     return hashlib.md5(content.encode()).hexdigest()[:8]
 
 
-def _detect_branch_from_log(log_file: str) -> str:
+def detect_branch_from_log(log_file: str) -> str:
     """
     Detect branch from log filename.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     Log files follow pattern: branch_operation.log
     Example: seedgo_audit.log -> SEEDGO
@@ -108,9 +114,12 @@ def _detect_branch_from_log(log_file: str) -> str:
         return "UNKNOWN"
 
 
-def _detect_log_level(log_line: str) -> str:
+def detect_log_level(log_line: str) -> str:
     """
     Detect log level from log line content.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     Args:
         log_line: Raw log line
@@ -129,9 +138,12 @@ def _detect_log_level(log_line: str) -> str:
     return "info"
 
 
-def _parse_log_message(log_line: str) -> str:
+def parse_log_message(log_line: str) -> str:
     """
     Extract clean message from log line.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     Raw format: [BRANCH_NAME] TIMESTAMP | SOURCE | LEVEL | MESSAGE
 
@@ -150,9 +162,12 @@ def _parse_log_message(log_line: str) -> str:
     return log_line.strip()
 
 
-def _extract_module_name(log_line: str) -> str:
+def extract_module_name(log_line: str) -> str:
     """
     Extract module name from log line.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     Args:
         log_line: Raw log line
@@ -167,9 +182,12 @@ def _extract_module_name(log_line: str) -> str:
     return "unknown"
 
 
-def _should_skip_log(log_line: str) -> bool:
+def should_skip_log(log_line: str) -> bool:
     """
     Filter out initialization noise.
+
+    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
+    so its tests call it by name.
 
     Args:
         log_line: Raw log line
@@ -283,9 +301,9 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         if not tail.strip():
             return
 
-        branch = _detect_branch_from_log(file_path)
+        branch = detect_branch_from_log(file_path)
         for line in tail.strip().split("\n"):
-            if line.strip() and not _should_skip_log(line):
+            if line.strip() and not should_skip_log(line):
                 self._process_log_line(branch, line, file_path)
 
     def _read_new_lines(self, file_path: str) -> None:
@@ -326,9 +344,9 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
             f.seek(last_pos)
             new_lines = f.read()
             if new_lines.strip():
-                branch = _detect_branch_from_log(file_path)
+                branch = detect_branch_from_log(file_path)
                 for line in new_lines.strip().split("\n"):
-                    if line.strip() and not _should_skip_log(line):
+                    if line.strip() and not should_skip_log(line):
                         self._process_log_line(branch, line, file_path)
             self._record_position(file_path, f.tell())
 
@@ -362,11 +380,11 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         try:
             from aipass.trigger.apps.modules.core import trigger
 
-            level = _detect_log_level(log_line)
-            message = _parse_log_message(log_line)
-            module_name = _extract_module_name(log_line)
+            level = detect_log_level(log_line)
+            message = parse_log_message(log_line)
+            module_name = extract_module_name(log_line)
             timestamp = datetime.now().isoformat()
-            error_hash = _generate_error_hash(module_name, message)
+            error_hash = generate_error_hash(module_name, message)
 
             event_data = {
                 "branch": branch,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: todo_content.py
 # Description: TODO Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -42,8 +42,8 @@ def get_todo_standards() -> str:
         "",
         "  [yellow]Skips:[/yellow]",
         "  - [dim]__init__.py[/dim] files",
-        "  - Content inside docstrings (triple-quoted strings)",
-        "  - Only matches comments (lines containing [dim]#[/dim])",
+        "  - Any string or docstring: only a real comment counts, read from the tokenizer",
+        "  - A file Python cannot tokenize fails by name ([dim]File tokenizable[/dim])",
         "",
         "[bold cyan]VIOLATIONS:[/bold cyan]",
         "",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock.py
 # Description: Host API Lock Handler — the screen lock's position, proxied from @skills
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-09-13
-# Modified: 2026-09-13
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -78,6 +78,7 @@ Classes:
 
 Functions:
     read_lock() - The screen lock's position, at most one read per second
+    forget()    - Drop the cached reading so the next read asks @skills' lock_state() again
 """
 
 from typing import Any, Dict
@@ -91,6 +92,12 @@ LOCK_TTL_SECONDS = 1.0
 
 # One question, one key: the route takes no parameters.
 _STATE_KEY = "state"
+
+# What the client is told when the door raises. Fixed, never the exception's
+# own words: those can carry host paths and module names, and this sentence
+# travels to a handset (CodeQL py/stack-trace-exposure, PR #774). The words
+# themselves go to the host log, with the traceback.
+DOOR_RAISED = "@skills' lock_state() raised; the error is in this host's log"
 
 _state = ReadCache("lock_state", LOCK_TTL_SECONDS)
 
@@ -114,6 +121,11 @@ def read_lock() -> Dict[str, Any]:
     return _state.get(_STATE_KEY, _ask_the_skill)
 
 
+def forget() -> None:
+    """Drop the cached reading so the next read asks @skills' lock_state() again."""
+    _state.clear()
+
+
 def _ask_the_skill() -> Dict[str, Any]:
     """
     One read through @skills' published door.
@@ -132,10 +144,9 @@ def _ask_the_skill() -> Dict[str, Any]:
     except Exception as exc:
         # The skill never raises for a reading, so reaching here is a defect in
         # the door itself: named, logged, and a 503 — never a 500 traceback.
-        message = f"@skills' lock_state() raised {type(exc).__name__}: {exc}"
-        logger.error("[host_api] %s", message)
+        logger.error("[host_api] @skills' lock_state() raised %s: %s", type(exc).__name__, exc, exc_info=True)
         json_handler.log_operation("host_api_lock_door_failed", {"error": type(exc).__name__})
-        raise LockDoorFailed(message) from exc
+        raise LockDoorFailed(DOOR_RAISED) from exc
 
     fault = _shape_fault(answer)
     if fault:

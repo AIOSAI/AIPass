@@ -1,8 +1,11 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_activity.py - Activity, Catchup, and Digest Tests
+# Description: Tests for apps/handlers/activity/activity_ops.py, catchup_ops.py and digest_ops.py
 # Date: 2026-03-28
 # Version: 1.0.0
+# Created: 2026-03-28
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,30 +17,22 @@
 #   - Mocks prax logger and json_handler to avoid side-effect dependencies
 # =============================================
 
-"""
-Unit tests for activity, catchup, and digest subsystems.
+"""Tests for apps/handlers/activity/activity_ops.py, catchup_ops.py and digest_ops.py."""
 
-Covers:
-- _relative_time() and _truncate() pure helpers (activity_ops)
-- _calculate_time_label() pure helper (catchup_ops)
-- run_activity orchestrator (activity_ops, mocked DB)
-- run_catchup orchestrator (catchup_ops, mocked DB)
-- Digest DB helpers: _get_activity_totals, _get_most_active_branches,
-  _get_new_branches, _get_top_posts (with initialized_db fixture)
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/activity/, catchup/, digest/ parses and imports
+# seedgo: no-test-needed(covered) — what query_catchup_data() gathers for catchup: test_space_catchup
 
+import sqlite3
 from datetime import datetime, timezone, timedelta
+from typing import Any, Dict
 from unittest.mock import patch, MagicMock
 
+import pytest
 
-from aipass.commons.apps.handlers.activity.activity_ops import _relative_time, _truncate, run_activity
-from aipass.commons.apps.handlers.catchup.catchup_ops import _calculate_time_label, run_catchup
-from aipass.commons.apps.handlers.digest.digest_ops import (
-    _get_activity_totals,
-    _get_most_active_branches,
-    _get_new_branches,
-    _get_top_posts,
-)
+from aipass.commons.apps.handlers.activity.activity_ops import run_activity
+from aipass.commons.apps.handlers.catchup.catchup_ops import run_catchup
+from aipass.commons.apps.handlers.digest.digest_ops import show_digest
 
 
 # =============================================================================
@@ -99,102 +94,211 @@ def _insert_comment(
     return cursor.lastrowid
 
 
+def _ago(**delta: float) -> str:
+    """An ISO-Z timestamp the given timedelta before now (negative values reach into the future)."""
+    return (datetime.now(timezone.utc) - timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@pytest.fixture
+def activity_db(initialized_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
+    """Point run_activity at the tmp database, and its operation log at nothing."""
+    monkeypatch.setattr("aipass.commons.apps.handlers.activity.activity_ops.get_db", lambda: initialized_db)
+    monkeypatch.setattr("aipass.commons.apps.handlers.activity.activity_ops.close_db", lambda conn: None)
+    monkeypatch.setattr(
+        "aipass.commons.apps.handlers.activity.activity_ops.json_handler.log_operation", lambda *a, **k: None
+    )
+    _insert_agent(initialized_db, "TEST_BRANCH", "Test")
+    return initialized_db
+
+
+def _one_activity(conn: sqlite3.Connection, content: str = "c", created_at: str | None = None) -> Dict[str, Any]:
+    """Post one comment, run 'commons activity', return the one activity row it shows."""
+    conn.execute("DELETE FROM comments")
+    conn.commit()
+    post_id = _insert_post(conn, "Post", "Body", "general", "TEST_BRANCH")
+    _insert_comment(conn, post_id, "TEST_BRANCH", content)
+    if created_at is not None:
+        # Set after the insert: _insert_comment reads "" as "use the default", and "" is a case here.
+        conn.execute("UPDATE comments SET created_at = ?", (created_at,))
+        conn.commit()
+    result = run_activity([])
+    assert result["success"] is True, result
+    assert len(result["activities"]) == 1
+    return result["activities"][0]
+
+
+@pytest.fixture
+def catchup_db(initialized_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
+    """Point run_catchup at the tmp database with CATCHUP_BRANCH as the caller."""
+    monkeypatch.setattr("aipass.commons.apps.handlers.catchup.catchup_ops.get_db", lambda: initialized_db)
+    monkeypatch.setattr("aipass.commons.apps.handlers.catchup.catchup_ops.close_db", lambda conn: None)
+    monkeypatch.setattr(
+        "aipass.commons.apps.handlers.catchup.catchup_ops.get_caller_branch", lambda: {"name": "CATCHUP_BRANCH"}
+    )
+    monkeypatch.setattr(
+        "aipass.commons.apps.handlers.catchup.catchup_ops.json_handler.log_operation", lambda *a, **k: None
+    )
+    _insert_agent(initialized_db, "CATCHUP_BRANCH")
+    return initialized_db
+
+
+def _catchup_label(conn: sqlite3.Connection, last_active: str) -> str:
+    """Give CATCHUP_BRANCH a last visit, run 'commons catchup', return its time label."""
+    conn.execute("UPDATE agents SET last_active = ? WHERE branch_name = 'CATCHUP_BRANCH'", (last_active,))
+    conn.commit()
+    result = run_catchup()
+    assert result["success"] is True, result
+    assert result["is_first_visit"] is False
+    return result["time_label"]
+
+
+@pytest.fixture
+def digest_db(initialized_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
+    """Point show_digest at the tmp database, and its operation log at nothing."""
+    monkeypatch.setattr("aipass.commons.apps.handlers.digest.digest_ops.get_db", lambda: initialized_db)
+    monkeypatch.setattr("aipass.commons.apps.handlers.digest.digest_ops.close_db", lambda conn: None)
+    monkeypatch.setattr(
+        "aipass.commons.apps.handlers.digest.digest_ops.json_handler.log_operation", lambda *a, **k: None
+    )
+    return initialized_db
+
+
+def _digest() -> Dict[str, Any]:
+    """Run 'commons digest' and return its data."""
+    result = show_digest()
+    assert result["success"] is True, result
+    return result
+
+
 # =============================================================================
-# _relative_time — pure function tests
+# activity's relative time — the "time" column of 'commons activity'
 # =============================================================================
 
 
-def test_relative_time_just_now() -> None:
-    """Timestamps less than 60 seconds ago should return 'just now'."""
-    ts = (datetime.now(timezone.utc) - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert _relative_time(ts) == "just now"
+def test_relative_time_just_now(activity_db: sqlite3.Connection) -> None:
+    """Timestamps less than 60 seconds ago should show 'just now'.
+
+    Mutant: `if total_seconds < 60:` -> `if total_seconds < 5:` reddens this.
+    """
+    assert _one_activity(activity_db, created_at=_ago(seconds=10))["time"] == "just now"
 
 
-def test_relative_time_minutes_ago() -> None:
-    """Timestamps a few minutes ago should return '<N>m ago'."""
-    ts = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert _relative_time(ts) == "5m ago"
+def test_relative_time_minutes_ago(activity_db: sqlite3.Connection) -> None:
+    """Timestamps a few minutes ago should show '<N>m ago'.
+
+    Mutant: `minutes = total_seconds // 60` -> `minutes = total_seconds // 30` reddens this.
+    """
+    assert _one_activity(activity_db, created_at=_ago(minutes=5))["time"] == "5m ago"
 
 
-def test_relative_time_hours_ago() -> None:
-    """Timestamps a few hours ago should return '<N>h ago'."""
-    ts = (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert _relative_time(ts) == "3h ago"
+def test_relative_time_hours_ago(activity_db: sqlite3.Connection) -> None:
+    """Timestamps a few hours ago should show '<N>h ago'.
+
+    Mutant: `hours = total_seconds // 3600` -> `hours = total_seconds // 60` reddens this.
+    """
+    assert _one_activity(activity_db, created_at=_ago(hours=3))["time"] == "3h ago"
 
 
-def test_relative_time_days_ago() -> None:
-    """Timestamps days ago should return '<N>d ago'."""
-    ts = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert _relative_time(ts) == "7d ago"
+def test_relative_time_days_ago(activity_db: sqlite3.Connection) -> None:
+    """Timestamps days ago should show '<N>d ago'.
+
+    Mutant: `days = total_seconds // 86400` -> `days = total_seconds // 3600` reddens this.
+    """
+    assert _one_activity(activity_db, created_at=_ago(days=7))["time"] == "7d ago"
 
 
-def test_relative_time_future_timestamp() -> None:
-    """Future timestamps produce negative deltas; should return 'just now' (negative seconds < 60)."""
-    ts = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+def test_relative_time_future_timestamp(activity_db: sqlite3.Connection) -> None:
+    """Future timestamps produce negative deltas; should show 'just now' (negative seconds < 60).
+
+    Mutant: `if total_seconds < 60:` -> `if 0 <= total_seconds < 60:` reddens this.
+    """
     # A negative delta is still < 60, so the first arm claims it and a clock
     # skew reads as "just now" rather than "unknown" or a negative "-60m ago".
     # Naming the string is what makes that a decision instead of an accident.
-    assert _relative_time(ts) == "just now"
+    assert _one_activity(activity_db, created_at=_ago(hours=-1))["time"] == "just now"
 
 
 @patch("aipass.commons.apps.handlers.activity.activity_ops.logger")
-def test_relative_time_invalid_string(mock_logger: object) -> None:
-    """Invalid timestamp strings should return 'unknown'."""
-    assert _relative_time("not-a-timestamp") == "unknown"
-    assert _relative_time("") == "unknown"
+def test_relative_time_invalid_string(mock_logger: MagicMock, activity_db: sqlite3.Connection) -> None:
+    """Invalid timestamp strings should show 'unknown'.
+
+    Mutant: the except branch's `return "unknown"` -> `return "just now"` reddens this.
+    """
+    assert _one_activity(activity_db, created_at="not-a-timestamp")["time"] == "unknown"
+    assert _one_activity(activity_db, created_at="")["time"] == "unknown"
+    assert mock_logger.warning.call_count == 2
 
 
 # =============================================================================
-# _truncate — pure function tests
+# activity's truncation — the "content" column of 'commons activity' (60 chars)
 # =============================================================================
 
 
-def test_truncate_short_text_unchanged() -> None:
-    """Text shorter than max_len should be returned as-is."""
-    assert _truncate("hello world", 60) == "hello world"
+def test_truncate_short_text_unchanged(activity_db: sqlite3.Connection) -> None:
+    """Text shorter than max_len should be shown as-is.
+
+    Mutant: `if len(text) <= max_len:` -> `if len(text) <= 5:` reddens this.
+    """
+    assert _one_activity(activity_db, content="hello world")["content"] == "hello world"
 
 
-def test_truncate_long_text_with_ellipsis() -> None:
-    """Text longer than max_len should be truncated with '...' appended."""
-    long_text = "A" * 100
-    result = _truncate(long_text, 20)
-    assert len(result) == 20
+def test_truncate_long_text_with_ellipsis(activity_db: sqlite3.Connection) -> None:
+    """Text longer than max_len should be truncated with '...' appended.
+
+    Mutant: `text[: max_len - 3] + "..."` -> `text[:max_len] + "..."` reddens this.
+    """
+    result = _one_activity(activity_db, content="A" * 100)["content"]
+    assert len(result) == 60
     assert result.endswith("...")
 
 
-def test_truncate_exact_boundary() -> None:
-    """Text exactly at max_len should not be truncated."""
+def test_truncate_exact_boundary(activity_db: sqlite3.Connection) -> None:
+    """Text exactly at max_len should not be truncated.
+
+    Mutant: `if len(text) <= max_len:` -> `if len(text) < max_len:` reddens this.
+    """
     text = "A" * 60
-    assert _truncate(text, 60) == text
+    assert _one_activity(activity_db, content=text)["content"] == text
 
 
 # =============================================================================
-# _calculate_time_label — pure function tests
+# catchup's time label — how 'commons catchup' names the last visit
 # =============================================================================
 
 
-def test_calculate_time_label_minutes() -> None:
-    """Timestamps less than an hour ago should show minutes."""
-    ts = (datetime.now(timezone.utc) - timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert _calculate_time_label(ts) == "15 minutes ago"
+def test_calculate_time_label_minutes(catchup_db: sqlite3.Connection) -> None:
+    """Timestamps less than an hour ago should show minutes.
+
+    Mutant: `if hours < 1:` -> `if hours < 0:` reddens this.
+    """
+    assert _catchup_label(catchup_db, _ago(minutes=15)) == "15 minutes ago"
 
 
-def test_calculate_time_label_hours() -> None:
-    """Timestamps a few hours ago should show hours."""
-    ts = (datetime.now(timezone.utc) - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert _calculate_time_label(ts) == "6 hours ago"
+def test_calculate_time_label_hours(catchup_db: sqlite3.Connection) -> None:
+    """Timestamps a few hours ago should show hours.
+
+    Mutant: `elif hours < 24:` -> `elif hours < 2:` reddens this.
+    """
+    assert _catchup_label(catchup_db, _ago(hours=6)) == "6 hours ago"
 
 
-def test_calculate_time_label_days() -> None:
-    """Timestamps more than 24 hours ago should show days."""
-    ts = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert _calculate_time_label(ts) == "3 days ago"
+def test_calculate_time_label_days(catchup_db: sqlite3.Connection) -> None:
+    """Timestamps more than 24 hours ago should show days.
+
+    Mutant: `days = hours // 24` -> `days = hours // 12` reddens this.
+    """
+    assert _catchup_label(catchup_db, _ago(days=3)) == "3 days ago"
 
 
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.logger")
-def test_calculate_time_label_invalid(mock_logger: object) -> None:
-    """Invalid timestamps should return fallback string."""
-    assert _calculate_time_label("garbage") == "your last visit"
+def test_calculate_time_label_invalid(mock_logger: MagicMock, catchup_db: sqlite3.Connection) -> None:
+    """Invalid timestamps should show the fallback string.
+
+    Mutant: the except branch's `return "your last visit"` -> `return "the last 24 hours"` reddens this.
+    """
+    assert _catchup_label(catchup_db, "garbage") == "your last visit"
+    parse_warnings = [c for c in mock_logger.warning.call_args_list if "last_active" in str(c)]
+    assert len(parse_warnings) == 1
 
 
 # =============================================================================
@@ -206,17 +310,15 @@ def test_calculate_time_label_invalid(mock_logger: object) -> None:
 @patch("aipass.commons.apps.handlers.activity.activity_ops.close_db")
 @patch("aipass.commons.apps.handlers.activity.activity_ops.get_db")
 def test_run_activity_returns_formatted_activity(
-    mock_get_db: object,
-    mock_close: object,
+    mock_get_db: MagicMock,
+    mock_close: MagicMock,
     mock_json: object,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """run_activity should query comments and return formatted activity dicts."""
-    import sqlite3
-
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
-    mock_get_db.return_value = conn  # type: ignore[union-attr]
-    mock_close.side_effect = lambda c: None  # type: ignore[union-attr]
+    conn: sqlite3.Connection = initialized_db
+    mock_get_db.return_value = conn
+    mock_close.side_effect = lambda c: None
 
     _insert_agent(conn, "TEST_BRANCH", "Test")
     post_id = _insert_post(conn, "Test Post", "Some content", "general", "TEST_BRANCH")
@@ -236,7 +338,6 @@ def test_run_activity_returns_formatted_activity(
 
 
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_onboarding_nudge", create=True)
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.update_last_active")
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.query_catchup_data")
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_last_active")
@@ -244,21 +345,29 @@ def test_run_activity_returns_formatted_activity(
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_db")
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_caller_branch")
 def test_run_catchup_first_visit(
-    mock_caller: object,
-    mock_get_db: object,
-    mock_close: object,
-    mock_last_active: object,
-    mock_query: object,
-    mock_update: object,
-    mock_nudge: object,
+    mock_caller: MagicMock,
+    mock_get_db: MagicMock,
+    mock_close: MagicMock,
+    mock_last_active: MagicMock,
+    mock_query: MagicMock,
+    mock_update: MagicMock,
     mock_json: object,
 ) -> None:
-    """run_catchup for a first-time visitor should set is_first_visit True."""
-    mock_caller.return_value = {"name": "NEW_BRANCH"}  # type: ignore[union-attr]
-    mock_get_db.return_value = MagicMock()  # type: ignore[union-attr]
-    mock_close.side_effect = lambda c: None  # type: ignore[union-attr]
-    mock_last_active.return_value = None  # type: ignore[union-attr]
-    mock_query.return_value = {  # type: ignore[union-attr]
+    """run_catchup for a first-time visitor should set is_first_visit True.
+
+    get_onboarding_nudge is no longer patched here: catchup_ops imports it
+    locally inside run_catchup (`from ...welcome_handler import
+    get_onboarding_nudge`), so a patch on the catchup_ops module attribute
+    never reaches the call — a dead patch (discarded_patch.md's known limit),
+    not a discarded one. Dropping it changes nothing: the real function
+    already ran against the mocked db connection either way, and any error
+    it raises is swallowed by run_catchup's own except-and-warn.
+    """
+    mock_caller.return_value = {"name": "NEW_BRANCH"}
+    mock_get_db.return_value = MagicMock()
+    mock_close.side_effect = lambda c: None
+    mock_last_active.return_value = None
+    mock_query.return_value = {
         "unread_mentions": [],
         "replies": [],
         "trending": None,
@@ -266,9 +375,9 @@ def test_run_catchup_first_visit(
         "new_comments_count": 0,
         "karma_change": 0,
     }
-    mock_update.return_value = None  # type: ignore[union-attr]
+    mock_update.return_value = None
 
-    result = run_catchup([])
+    result = run_catchup()
 
     assert result["success"] is True
     assert result["is_first_visit"] is True
@@ -276,51 +385,52 @@ def test_run_catchup_first_visit(
 
 
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_caller_branch")
-def test_run_catchup_no_caller(mock_caller: object) -> None:
+def test_run_catchup_no_caller(mock_caller: MagicMock) -> None:
     """run_catchup without a detectable caller branch should fail."""
-    mock_caller.return_value = None  # type: ignore[union-attr]
-    result = run_catchup([])
+    mock_caller.return_value = None
+    result = run_catchup()
     assert result["success"] is False
     assert "Could not detect" in result["error"]
 
 
 # =============================================================================
-# DIGEST DB HELPERS — use initialized_db fixture directly
+# DIGEST — the four boards of 'commons digest', reached through show_digest
 # =============================================================================
 
 
-def test_get_activity_totals_with_data(initialized_db: object) -> None:
-    """_get_activity_totals should count posts and comments from the last 24h."""
-    import sqlite3
+def test_get_activity_totals_with_data(digest_db: sqlite3.Connection) -> None:
+    """The digest totals count posts and comments from the last 24h.
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    Mutant: the comment total's `FROM comments WHERE created_at >=` -> `FROM posts WHERE created_at >=` reddens this.
+    """
+    conn = digest_db
 
     _insert_agent(conn, "DIGEST_BRANCH", "Digest Tester")
     post_id = _insert_post(conn, "Digest Post", "Content here", "general", "DIGEST_BRANCH")
     _insert_comment(conn, post_id, "DIGEST_BRANCH", "Comment one")
     _insert_comment(conn, post_id, "DIGEST_BRANCH", "Comment two")
 
-    totals = _get_activity_totals(conn, hours=24)
+    totals = _digest()["totals"]
     assert totals["total_posts"] == 1
     assert totals["total_comments"] == 2
 
 
-def test_get_activity_totals_empty_db(initialized_db: object) -> None:
-    """_get_activity_totals on an empty DB should return zeros."""
-    import sqlite3
+def test_get_activity_totals_empty_db(digest_db: sqlite3.Connection) -> None:
+    """The digest totals on an empty DB are zeros.
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
-
-    totals = _get_activity_totals(conn, hours=24)
+    Mutant: _get_activity_totals' return -> `{"total_posts": post_count + 1, ...}` reddens this.
+    """
+    totals = _digest()["totals"]
     assert totals["total_posts"] == 0
     assert totals["total_comments"] == 0
 
 
-def test_get_most_active_branches(initialized_db: object) -> None:
-    """_get_most_active_branches should return branches sorted by activity."""
-    import sqlite3
+def test_get_most_active_branches(digest_db: sqlite3.Connection) -> None:
+    """The digest's active branches are sorted by activity.
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    Mutant: `ORDER BY total_activity DESC` -> `ORDER BY total_activity ASC` reddens this.
+    """
+    conn = digest_db
 
     _insert_agent(conn, "ACTIVE_A", "Active A")
     _insert_agent(conn, "ACTIVE_B", "Active B")
@@ -330,31 +440,31 @@ def test_get_most_active_branches(initialized_db: object) -> None:
     _insert_post(conn, "Post 2", "Content", "general", "ACTIVE_A")
     _insert_post(conn, "Post 3", "Content", "general", "ACTIVE_B")
 
-    branches = _get_most_active_branches(conn, hours=24, limit=5)
+    branches = _digest()["active_branches"]
     assert len(branches) >= 2
     # First branch should be the most active
     assert branches[0]["agent"] == "ACTIVE_A"
     assert branches[0]["total_activity"] == 2
 
 
-def test_get_new_branches(initialized_db: object) -> None:
-    """_get_new_branches should return recently joined branches."""
-    import sqlite3
+def test_get_new_branches(digest_db: sqlite3.Connection) -> None:
+    """The digest's new branches include a branch that joined just now.
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
-
+    Mutant: `AND branch_name NOT IN ('SYSTEM',` -> `AND branch_name IN ('SYSTEM',` reddens this.
+    """
     # Insert a branch with a recent joined_at (default is 'now')
-    _insert_agent(conn, "FRESH_BRANCH", "Fresh Branch")
+    _insert_agent(digest_db, "FRESH_BRANCH", "Fresh Branch")
 
-    new_branches = _get_new_branches(conn, hours=24)
+    new_branches = _digest()["new_branches"]
     assert "FRESH_BRANCH" in new_branches
 
 
-def test_get_top_posts_by_engagement(initialized_db: object) -> None:
-    """_get_top_posts should return posts ordered by engagement."""
-    import sqlite3
+def test_get_top_posts_by_engagement(digest_db: sqlite3.Connection) -> None:
+    """The digest's top posts are ordered by engagement.
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    Mutant: `COALESCE(c.comment_count, 0) AS comment_count,` -> `0 AS comment_count,` reddens this.
+    """
+    conn = digest_db
 
     _insert_agent(conn, "TOP_AUTHOR", "Top Author")
     post_id = _insert_post(conn, "Popular Post", "Great content", "general", "TOP_AUTHOR")
@@ -363,7 +473,29 @@ def test_get_top_posts_by_engagement(initialized_db: object) -> None:
     _insert_comment(conn, post_id, "TOP_AUTHOR", "Self-reply 1")
     _insert_comment(conn, post_id, "TOP_AUTHOR", "Self-reply 2")
 
-    top = _get_top_posts(conn, hours=24, limit=3)
+    top = _digest()["top_posts"]
     assert len(top) >= 1
     assert top[0]["title"] == "Popular Post"
     assert top[0]["comment_count"] == 2
+
+
+def test_run_catchup_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    The lookup raises before any database is opened.
+    Mutant: catchup_ops `except CallerLookupFailed as exc:` -> `except KeyError as exc:` turns this red.
+    """
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_db") as db,
+    ):
+        result = run_catchup()
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

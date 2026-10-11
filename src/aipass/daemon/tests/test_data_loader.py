@@ -1,20 +1,16 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_data_loader.py - Data Loader Tests
-# Date: 2026-03-24
-# Version: 1.1.0
-# Category: daemon/tests
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.1.0 (2026-09-19): Pin both inbox readers to the dotted .ai_mail.local mailbox
-#   - v1.0.0 (2026-03-24): Initial creation - data_loader handler tests
-#
-# CODE STANDARDS:
-#   - Pytest conventions
-#   - Temp dir isolation (no reads from real data files)
+# =================== AIPass ====================
+# Name: test_data_loader.py
+# Description: Data loader tests — inbox and local.json loading, message triage, the real mailbox path
+# Version: 1.2.1
+# Created: 2026-03-24
+# Modified: 2026-10-06
 # =============================================
 
-"""Tests for the data_loader handler."""
+"""Tests for apps/handlers/update/data_loader.py, and apps/daemon_wakeup.py's shared inbox path and --help guard."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — json.load's own parse of a well-formed file
+# seedgo: no-test-needed(constant) — LOCAL_PATH's location; every test here redirects it to a temp file
 
 import json
 from pathlib import Path
@@ -89,30 +85,32 @@ def _write_json(path: Path, data: object) -> None:
 
 class TestLoadInbox:
     def test_load_valid_inbox(self, isolate_paths, sample_inbox_data, monkeypatch):
-        """Loading a well-formed inbox.json returns its full contents."""
-        monkeypatch.setattr(_dl_mod.json_handler, "log_operation", lambda *a, **kw: None)
+        """Loading a well-formed inbox.json returns its full contents and logs the load.
+
+        Mutant killed: the json_handler.log_operation("data_loaded") call removed from load_inbox.
+        """
+        ops = []
+        monkeypatch.setattr(_dl_mod.json_handler, "log_operation", lambda *a, **kw: ops.append(a))
         _write_json(isolate_paths["inbox"], sample_inbox_data)
         result = load_inbox()
+        assert ops == [("data_loaded",)]
         assert result["mailbox"] == "inbox"
         assert result["total_messages"] == 2
         assert len(result["messages"]) == 2
 
-    def test_load_inbox_missing_file(self, isolate_paths, monkeypatch):
+    def test_load_inbox_missing_file(self, isolate_paths):
         """Missing inbox.json returns empty default structure."""
-        monkeypatch.setattr(_dl_mod.json_handler, "log_operation", lambda *a, **kw: None)
         result = load_inbox()
         assert result == {"messages": [], "total_messages": 0, "unread_count": 0}
 
-    def test_load_inbox_malformed_json(self, isolate_paths, monkeypatch):
+    def test_load_inbox_malformed_json(self, isolate_paths):
         """Malformed JSON falls back to empty default structure."""
-        monkeypatch.setattr(_dl_mod.json_handler, "log_operation", lambda *a, **kw: None)
         isolate_paths["inbox"].write_text("{not valid json!!!", encoding="utf-8")
         result = load_inbox()
         assert result == {"messages": [], "total_messages": 0, "unread_count": 0}
 
-    def test_load_inbox_empty_messages(self, isolate_paths, monkeypatch):
+    def test_load_inbox_empty_messages(self, isolate_paths):
         """Inbox with zero messages returns its original data."""
-        monkeypatch.setattr(_dl_mod.json_handler, "log_operation", lambda *a, **kw: None)
         data = {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []}
         _write_json(isolate_paths["inbox"], data)
         result = load_inbox()
@@ -329,3 +327,27 @@ class TestGetEscalations:
         messages = [{"id": "1"}]
         result = get_escalations(messages)
         assert result == []
+
+
+class TestWakeupHelpAfterAnArgument:
+    """daemon_wakeup <arg> --help shows the help and runs nothing (daemon, fleet green leg 5)."""
+
+    def test_help_after_an_argument_prints_help_and_runs_nothing(self, tmp_path, monkeypatch, capsys):
+        """Red first: main read only args[0], so `daemon_wakeup run --help` ran the wake-up job.
+
+        The lock file is moved under tmp_path and the job is a recorder, so the old
+        code's run touches nothing live.
+        Mutant killed: the --help guard on the arguments after the first removed.
+        """
+        from unittest.mock import patch
+
+        ran: list[bool] = []
+        monkeypatch.setattr(_wakeup_mod, "LOCK_FILE", tmp_path / "wakeup.lock")
+        monkeypatch.setattr(_wakeup_mod, "_run_locked", lambda: ran.append(True) or 0)
+        logged: list[tuple] = []
+        monkeypatch.setattr(_wakeup_mod.json_handler, "log_operation", lambda *a, **k: logged.append(a))
+        with patch("sys.argv", ["daemon_wakeup", "run", "--help"]):
+            assert _wakeup_mod.main() == 0
+        assert ran == [], "a --help after an argument must not run the wake-up job"
+        assert logged == [], f"a --help must not record a wake-up trigger: {logged}"
+        assert "USAGE:" in capsys.readouterr().out

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: project_scope.py
 # Description: Project-Scope Resolution (a project is its register)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-08-22
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -63,13 +63,25 @@ REGISTER_GLOB = "*_REGISTRY.json"
 REGISTER_KEY = "branches"
 
 
+class UnreadableRegisterError(Exception):
+    """A register candidate exists but cannot be listed, read or parsed."""
+
+
 def _holds_register(directory: Path) -> bool:
     """True if `directory` holds a project register.
 
-    A read failure is NOT treated as "yes". An unreadable or malformed
-    candidate tells us nothing about whether this directory is a project, and
-    answering "yes" on no evidence is how a subdirectory becomes its own
-    project and its rows fall out of the real project's scope.
+    A read failure is neither "yes" nor "no". "Yes" on no evidence makes a
+    subdirectory its own project and its rows fall out of the real project's
+    scope. "No" was the answer until leg 6 of fleet green, and it is the
+    namesake defect: the walk went on upward, so the rows (and a caller
+    standing there) were attributed to the enclosing project, and a close
+    --all from either side could sweep the other's plans. It raises now
+    (flow's decision, leg 6).
+
+    Raises:
+        UnreadableRegisterError: The directory cannot be listed, or a
+            ``*_REGISTRY.json`` candidate in it cannot be read or parsed.
+            Chained from the OSError or decode error underneath.
     """
     try:
         # exactly_named, not the glob alone: pathlib's glob is case-INSENSITIVE
@@ -81,16 +93,14 @@ def _holds_register(directory: Path) -> bool:
         # lowercase name would make a subdirectory read as its own project.
         candidates = exactly_named(sorted(directory.glob(REGISTER_GLOB)), "_REGISTRY.json")
     except OSError as e:
-        logger.warning(f"[{MODULE_NAME}] Cannot list {directory}: {e}")
-        return False
+        raise UnreadableRegisterError(f"Cannot list {directory} for a project register: {e}") from e
 
     for candidate in candidates:
         try:
             with open(candidate, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
         except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
-            logger.warning(f"[{MODULE_NAME}] Unreadable register candidate {candidate}: {e}")
-            continue
+            raise UnreadableRegisterError(f"Unreadable project register {candidate}: {e}") from e
         if isinstance(data, dict) and REGISTER_KEY in data:
             return True
     return False
@@ -112,6 +122,12 @@ def find_project_root(start: Optional[Path], cache: Optional[Dict[Path, Optional
     Returns:
         The project root, or None when no register stands above `start`.
 
+    Raises:
+        UnreadableRegisterError: A directory on the walk cannot be listed or
+            holds a register candidate that cannot be read. The cache is left
+            untouched for the walk that failed.
+        OSError: ``start`` cannot be resolved.
+
     A relative path is refused rather than resolved. ``Path("").resolve()`` is
     the process CWD, so an empty ``location`` field would silently attribute
     that row to whoever happened to be running the command -- the row would
@@ -125,12 +141,11 @@ def find_project_root(start: Optional[Path], cache: Optional[Dict[Path, Optional
         logger.warning(f"[{MODULE_NAME}] Refusing to attribute relative path: {start}")
         return None
 
+    # An OSError from resolve() propagates: None would read as "no register
+    # above it", a claim nobody checked (flow's decision, leg 6). A symlink
+    # loop raises RuntimeError on 3.12 and nothing on 3.13; neither is caught.
     current = start if start.is_dir() else start.parent
-    try:
-        current = current.resolve()
-    except OSError as e:
-        logger.warning(f"[{MODULE_NAME}] Cannot resolve {start}: {e}")
-        return None
+    current = current.resolve()
 
     memo: Dict[Path, Optional[Path]] = cache if cache is not None else {}
     walked = []
@@ -175,6 +190,10 @@ def caller_project_root() -> Optional[Path]:
     Logged once per invocation, not per row: this is the single answer every
     scope decision in the run is measured against, and when a sweep later
     looks wrong the first question is which project it thought it was in.
+
+    Raises:
+        UnreadableRegisterError, OSError: As find_project_root, never logged
+            as resolved.
     """
     cwd = caller_cwd()
     root = find_project_root(cwd)

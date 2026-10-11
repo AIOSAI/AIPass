@@ -1,20 +1,30 @@
-"""Tests for 5 seedgo checker handlers: stderr_routing, todo, trigger, dead_code, unused_function.
-
-Was 6. The test_quality section retired 2026-09-07 with the v4 standard itself
-(FPLAN-0491); disposal copy in tests/.archive/deleted_2026-09-07_test_quality_v4.py.
-"""
-
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.0.0
+# Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-10-10
 # =============================================
 
-from pathlib import Path
+"""Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
+
+# Tests for 5 seedgo checker handlers: stderr_routing, todo, trigger, dead_code,
+# unused_function. Was 6. The test_quality section retired 2026-09-07 with the v4
+# standard itself (FPLAN-0491); disposal copy in
+# tests/.archive/deleted_2026-09-07_test_quality_v4.py.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(retired) — the v4 test_quality checker, retired with its standard in FPLAN-0491
+# seedgo: no-test-needed(stdlib) — tokenize's own error classes; the fallback they trigger is pinned via check_branch
+
+import tokenize
+from pathlib import Path, PureWindowsPath
+
+import pytest
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from aipass.seedgo.apps.handlers.aipass_standards import unused_function_check
 
 from aipass.seedgo.apps.handlers.aipass_standards.stderr_routing_check import (
     check_module as stderr_check_module,
@@ -27,6 +37,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
 )
 from aipass.seedgo.apps.handlers.aipass_standards.dead_code_check import (
     check_branch as dead_code_check_branch,
+    reported_path as dead_code_reported_path,
 )
 from aipass.seedgo.apps.handlers.aipass_standards.unused_function_check import (
     check_branch as unused_function_check_branch,
@@ -94,7 +105,7 @@ class TestStderrRoutingCheck:
         """Bypass rules produce score=100."""
         py_file = tmp_path / "bypassed_module.py"
         _write_file(py_file, ("from rich.console import Console\nerr = Console(stderr=True)\n"))
-        bypass = [{"standard": "stderr_routing"}]
+        bypass = [{"file": py_file.name, "standard": "stderr_routing"}]
         result = stderr_check_module(str(py_file), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
@@ -130,11 +141,39 @@ class TestTodoCheck:
         assert result["score"] == 0
         assert any("TODO" in c["message"] for c in result["checks"])
 
+    def test_todo_tag_inside_a_string_is_not_a_comment(self, mock_json, tmp_path: Path) -> None:
+        """A hash-TODO inside a string literal is text, not a comment (fleet green leg 13).
+
+        Red first: the line scan read the string on one line and the second line of
+        an assigned triple-quoted string as comments and scored 0.
+        """
+        py_file = tmp_path / "specimen.py"
+        _write_file(py_file, ('text = "# TODO: a specimen"\nblock = """\n# FIXME: also text\n"""\n'))
+        result = todo_check_module(str(py_file))
+        assert result["score"] == 100
+        assert result["checks"][0]["message"] == "No TODO/FIXME/HACK/XXX comments found"
+
+    def test_todo_real_comment_beside_a_string_still_convicts(self, mock_json, tmp_path: Path) -> None:
+        """Control: a real hash-TODO comment after a string on the same line is still one."""
+        py_file = tmp_path / "beside.py"
+        _write_file(py_file, ('text = "# fine"  # TODO: real\n'))
+        result = todo_check_module(str(py_file))
+        assert result["score"] == 0
+        assert result["checks"][0]["message"] == "Found 1 TODO-type comment (TODO: 1)"
+
+    def test_todo_untokenizable_file_fails_by_name(self, mock_json, tmp_path: Path) -> None:
+        """A file Python cannot tokenize has unknown comments: it fails by name, never reads clean."""
+        py_file = tmp_path / "unclosed.py"
+        _write_file(py_file, ('text = """never closed\n'))
+        result = todo_check_module(str(py_file))
+        assert result["score"] == 0
+        assert result["checks"][0]["name"] == "File tokenizable"
+
     def test_todo_bypass_respected(self, mock_json, tmp_path: Path) -> None:
         """Bypass rules produce score=100."""
         py_file = tmp_path / "bypassed.py"
         _write_file(py_file, ("# TODO: this should be bypassed\nx = 1\n"))
-        bypass = [{"standard": "todo"}]
+        bypass = [{"file": py_file.name, "standard": "todo"}]
         result = todo_check_module(str(py_file), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
@@ -170,7 +209,7 @@ class TestTriggerCheck:
         """Bypass rules produce score=100."""
         py_file = tmp_path / "bypassed_trigger.py"
         _write_file(py_file, ("def create_backup(data):\n    pass\n"))
-        bypass = [{"standard": "trigger"}]
+        bypass = [{"file": py_file.name, "standard": "trigger"}]
         result = trigger_check_module(str(py_file), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
@@ -250,10 +289,23 @@ class TestDeadCodeCheck:
             branch / "apps" / "modules" / "orphan.py",
             "def lonely():\n    pass\n",
         )
-        bypass = [{"standard": "dead_code"}]
+        bypass = [{"file": str(branch), "standard": "dead_code"}]
         result = dead_code_check_branch(str(branch), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
+
+    @pytest.mark.parametrize("spelled", ["apps/handlers/lifecycle/orphan.py", "handlers/lifecycle/orphan.py"])
+    def test_a_file_rule_spelled_from_the_branch_root_or_from_apps_silences_its_file_alone(
+        self, mock_json, tmp_path: Path, spelled: str
+    ) -> None:
+        """hooks' rows began 'apps/handlers/...' and dead_code matched only 'handlers/...': they silenced nothing."""
+        branch = _make_branch(tmp_path)
+        _write_file(branch / "apps" / "handlers" / "lifecycle" / "orphan.py", "def lonely():\n    pass\n")
+        _write_file(branch / "apps" / "handlers" / "lifecycle" / "stray.py", "def alone():\n    pass\n")
+        _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command(): pass\n")
+        result = dead_code_check_branch(str(branch), bypass_rules=[{"file": spelled, "standard": "dead_code"}])
+        message = result["checks"][0]["message"]
+        assert "stray.py" in message and "orphan.py" not in message
 
     def test_dead_code_ignores_tools_dir_by_default(self, mock_json, tmp_path: Path) -> None:
         """Orphan modules under apps/tools/ are skipped via the global .seedgoignore default."""
@@ -328,6 +380,28 @@ class TestDeadCodeCheck:
         assert result["score"] == 0
         assert "repo_door.py" in result["checks"][0]["message"]
 
+    @pytest.mark.parametrize(
+        ("tail", "dead"),
+        [("", False), ("\n\ndef log_more():\n    return log_operation\n", True)],
+        ids=["shaped_door_is_referenced", "door_that_defines_a_function_is_dead"],
+    )
+    def test_a_door_counts_as_referenced_by_its_shape(self, mock_json, tmp_path: Path, tail: str, dead: bool) -> None:
+        """A door is called from other branches, so its own corpus never names it (DPLAN-0404).
+
+        spawn's door_class_registry and door_owner read unreferenced on 2026-10-08.
+        A door_*.py that passes Door shape is referenced the way the entry point is;
+        one that fails Door shape is read like any other module.
+        """
+        branch = _make_branch(tmp_path)
+        _write_file(branch / "apps" / "handlers" / "trail.py", "def log_operation():\n    return True\n")
+        door = f'from aipass.{branch.name}.apps.handlers.trail import log_operation\n\n__all__ = ["log_operation"]\n'
+        _write_file(branch / "apps" / "modules" / "door_trail.py", door + tail)
+        _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command(): pass\n")
+
+        result = dead_code_check_branch(str(branch))
+
+        assert ("door_trail.py" in result["checks"][0]["message"]) is dead
+
 
 # =============================================
 # 6. unused_function_check (check_branch)
@@ -388,6 +462,39 @@ class TestUnusedFunctionCheck:
         assert len(unused_checks) > 0
         assert any("never_called_delta" in u["name"] for c in unused_checks for u in c["unused"])
 
+    def test_a_method_overriding_an_imported_base_is_used_by_the_base(self, mock_json, tmp_path: Path) -> None:
+        """socketserver calls handle() by name; the override is used though the branch never names it.
+
+        The controls stay convicted: a method the base does not define, and an
+        override of a base the imports cannot resolve (seedgo, fleet green leg 10).
+        """
+        branch = _make_branch(tmp_path)
+        _write_file(
+            branch / "apps" / "handlers" / "server.py",
+            (
+                "import socketserver\n"
+                "from socketserver import BaseRequestHandler\n"
+                "\n"
+                "class Echo(BaseRequestHandler):\n"
+                "    def handle(self):\n"
+                "        return 1\n"
+                "\n"
+                "    def never_overridden(self):\n"
+                "        return 2\n"
+                "\n"
+                "class Dotted(socketserver.BaseRequestHandler):\n"
+                "    def finish(self):\n"
+                "        return 3\n"
+                "\n"
+                "class Unresolved(Unknown):\n"
+                "    def setup(self):\n"
+                "        return 4\n"
+            ),
+        )
+        result = unused_function_check_branch(str(branch))
+        names = {u["name"] for c in result["checks"] for u in c.get("unused", [])}
+        assert names == {"never_overridden", "setup"}
+
     def test_unused_function_bypass_respected(self, mock_json, tmp_path: Path) -> None:
         """Bypass rules produce score=100."""
         branch = _make_branch(tmp_path)
@@ -395,7 +502,7 @@ class TestUnusedFunctionCheck:
             branch / "apps" / "modules" / "orphan.py",
             "def never_called():\n    pass\n",
         )
-        bypass = [{"standard": "unused_function"}]
+        bypass = [{"file": str(branch), "standard": "unused_function"}]
         result = unused_function_check_branch(str(branch), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
@@ -431,6 +538,7 @@ def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_log, tmp_
     left this test green while the checker crashed in production. Patching the
     attribute keeps the real module in place: the name has to EXIST for the patch
     to bind, and the pin fails the moment it does not.
+    Mutant: check_completed's `"unused_count": len(unused_functions)` to `total_functions` — killed.
     """
     branch = tmp_path / "victim"
     (branch / "apps").mkdir(parents=True)
@@ -443,12 +551,286 @@ def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_log, tmp_
 
     assert result["score"] > 0
     assert "error" not in result
+    # A file Python cannot parse is named, not counted as a file with no functions (seedgo, fleet green leg 12).
+    assert result.get("unparsed") == ["apps/midsave.py"]
+    # The completed scan is logged last, with what it measured: alpha has no caller, beta has one.
+    # (json_handler is the fleet's shared shim, so the .seedgoignore load logs through it first.)
+    mock_log.assert_called_with(
+        "check_completed",
+        {
+            "branch": str(branch),
+            "score": 50,
+            "standard": "unused_function",
+            "total_functions": 2,
+            "unused_count": 1,
+        },
+    )
 
 
-def test_unused_function_strip_non_code_degrades_on_syntax_error():
-    from aipass.seedgo.apps.handlers.aipass_standards.unused_function_check import _strip_non_code
+def test_unused_function_counts_a_call_made_from_a_file_that_cannot_be_tokenized(tmp_path):
+    """A file caught mid-save still counts as a caller: the tokenizer falls back to the raw corpus.
 
-    source = "def helper():\n    return 1\n  stray = 2\n"
-
+    Was a direct call of the private _strip_non_code; now through check_branch.
+    Mutant: the fallback's `return _MAIN_BLOCK_RE.sub("", source)` to `return ""` — killed.
+    """
+    branch = tmp_path / "victim"
+    (branch / "apps").mkdir(parents=True)
+    (branch / "apps" / "good.py").write_text("def beta():\n    return 1\n", encoding="utf-8")
     # Falls back to the raw corpus rather than raising -- the name must survive.
-    assert "helper" in _strip_non_code(source)
+    (branch / "apps" / "midsave.py").write_text("def helper():\n    return beta()\n  stray = 2\n", encoding="utf-8")
+
+    result = unused_function_check_branch(str(branch))
+
+    assert result["score"] == 100
+    assert result["checks"][0]["message"] == "All 1 functions are referenced"
+
+
+def _fstring_branch(tmp_path: Path, use: str) -> dict:
+    """A branch whose one function, helper, is named only by the line *use*."""
+    branch = tmp_path / "victim"
+    _write_file(branch / "apps" / "lib.py", f"def helper():\n    return 1\n\n\nMESSAGE = {use}\n")
+    return unused_function_check_branch(str(branch))
+
+
+def _one_string_per_fstring(readline):
+    """The 3.10/3.11 token shape on any interpreter: an f-string as ONE STRING token.
+
+    3.12+ tokenizes an f-string as FSTRING_START/MIDDLE/END around real tokens;
+    this folds each such run back into the single STRING the older tokenizer
+    hands over. On 3.10/3.11 there is nothing to fold. Single-line specimens only.
+    """
+    start, end = getattr(tokenize, "FSTRING_START", None), getattr(tokenize, "FSTRING_END", None)
+    depth, opened = 0, (0, 0)
+    for tok in tokenize.generate_tokens(readline):
+        if start is not None and tok.type == start:
+            opened = tok.start if depth == 0 else opened
+            depth += 1
+        elif end is not None and tok.type == end:
+            depth -= 1
+            if depth == 0:
+                text = tok.line[opened[1] : tok.end[1]]
+                yield tokenize.TokenInfo(tokenize.STRING, text, opened, tok.end, tok.line)
+        elif depth == 0:
+            yield tok
+
+
+@pytest.fixture
+def older_tokenizer(monkeypatch):
+    """Hand the checker the 3.10/3.11 tokenizer where the checker looks for it (compass 493)."""
+    older = SimpleNamespace(
+        generate_tokens=_one_string_per_fstring,
+        STRING=tokenize.STRING,
+        COMMENT=tokenize.COMMENT,
+        TokenError=tokenize.TokenError,
+    )
+    monkeypatch.setattr(unused_function_check, "tokenize", older)
+
+
+FSTRING_FIELD_USES = ['f"{helper()}"', 'f"total {helper() + 1:>{helper()}}"', "f'{obj.helper}'"]
+
+
+@pytest.mark.parametrize("tokenizer", ["host", "older"])
+@pytest.mark.parametrize("use", FSTRING_FIELD_USES)
+def test_a_name_in_an_fstring_field_is_a_reference(tmp_path, request, tokenizer, use):
+    """A replacement field is code, so the name in it is a caller (seedgo, fleet green leg 9).
+
+    Asked of the host's tokenizer and of the 3.10/3.11 token shape, so the
+    verdict is one across the CI matrix. Red first on the older shape: before
+    leg 9 the single STRING was blanked whole and helper had no caller.
+    """
+    if tokenizer == "older":
+        request.getfixturevalue("older_tokenizer")
+
+    result = _fstring_branch(tmp_path, use)
+
+    assert result["checks"][0]["message"] == "All 1 functions are referenced", result
+
+
+DOTTED_PATH_USES = ['f"{ROOT}.lib.helper"', '"aipass.victim.lib.helper"']
+
+
+@pytest.mark.parametrize("tokenizer", ["host", "older"])
+@pytest.mark.parametrize("use", DOTTED_PATH_USES)
+def test_a_string_that_is_a_dotted_path_names_its_last_segment(tmp_path, request, tokenizer, use):
+    """A registry names a handler by its import path, and a loader calls it (seedgo, fleet green leg 11).
+
+    hooks config/gates.py: f"{_SECURITY}.edit_gate.tripwire". Red first: the
+    string was blanked as prose and tripwire had no caller.
+    """
+    if tokenizer == "older":
+        request.getfixturevalue("older_tokenizer")
+
+    result = _fstring_branch(tmp_path, use)
+
+    assert result["checks"][0]["message"] == "All 1 functions are referenced", result
+
+
+FSTRING_TEXT_USES = [
+    'f"call helper later {1}"',
+    "f'helper'",
+    'f"{1:helper}"',
+    '"see lib.helper for details"',
+    '"lib.helper.txt"',
+    'f"{ROOT}.lib.helper()"',
+    '".helper"',
+    "\"use 'lib.helper' here\"",
+    "f\"use '{ROOT}.lib.helper' here\"",
+]
+
+
+@pytest.mark.parametrize("tokenizer", ["host", "older"])
+@pytest.mark.parametrize("use", FSTRING_TEXT_USES)
+def test_a_name_in_fstring_text_is_not_a_reference(tmp_path, request, tokenizer, use):
+    """The literal text of an f-string is prose, as in any string: helper still has no caller.
+
+    Red first on 3.12+, where FSTRING_MIDDLE was kept as code. Asked of both
+    token shapes, so the verdict is one on every interpreter.
+    """
+    if tokenizer == "older":
+        request.getfixturevalue("older_tokenizer")
+
+    result = _fstring_branch(tmp_path, use)
+
+    assert result["score"] == 0, result
+    assert [row["name"] for row in result["checks"][0]["unused"]] == ["helper"], result
+
+
+def _charged_with_a_live_copy(root):
+    """(file, name) of every row check_branch charges: apps/m.py and its .live-* copy define g."""
+    body = "def g():\n    return 1\n"
+    (root / "apps").mkdir(parents=True)
+    (root / "apps" / "m.py").write_text(body, encoding="utf-8")
+    copy = root / ".live-20260101T000000Z"
+    copy.mkdir()
+    (copy / "m.py").write_text(body, encoding="utf-8")
+    checks = unused_function_check.check_branch(str(root))["checks"]
+    return [(Path(row["file"]), row["name"]) for row in checks[0].get("unused", [])]
+
+
+def test_a_top_level_dot_directory_copy_is_not_charged(tmp_path):
+    """hooks keeps promoted engine copies under .live-<stamp>/ (seedgo, fleet green leg 16).
+
+    A copy is not edited, so a row charged to it can never be cured: g is
+    reported once, for apps/m.py.
+    """
+    assert _charged_with_a_live_copy(tmp_path / "branchroot") == [(Path("apps", "m.py"), "g")]
+
+
+def test_a_root_standing_inside_a_dotted_directory_is_still_read(tmp_path):
+    """The skip reads the parts relative to the branch root, never the whole path."""
+    assert _charged_with_a_live_copy(tmp_path / ".live-x" / "branchroot") == [(Path("apps", "m.py"), "g")]
+
+
+def _charged_names(root: Path, files: dict[str, str]) -> list[str]:
+    """Sorted names check_branch charges for a branch made of ``files``."""
+    for relative, body in files.items():
+        _write_file(root / relative, body)
+    return sorted(row["name"] for row in unused_function_check.check_branch(str(root))["checks"][0].get("unused", []))
+
+
+def test_one_pass_over_the_corpus_counts_as_the_per_name_scans_did(tmp_path):
+    """Words and definition lines are counted once per branch (seedgo, fleet green leg 18).
+
+    The per-name scans held 398 of 1033 profiled seconds of seedgo's own
+    audit. ``run`` is not used by ``run_all``, ``async def`` with two spaces
+    is still idle's definition line, and helper is called from another file.
+    Green on the per-name scans too: its proof is its mutants.
+    """
+    body = (
+        "async def  idle():\n    return run_all()\n\n\n"
+        "def run_all():\n    return 1\n\n\n"
+        "def run():\n    return 2\n\n\n"
+        "def  helper():\n    return 3\n"
+    )
+    files = {"apps/a.py": body, "apps/b.py": "x = helper()\n"}
+    assert _charged_names(tmp_path / "branchroot", files) == ["idle", "run"]
+
+
+def test_a_name_with_a_mark_no_word_pattern_reads_is_still_counted(tmp_path):
+    """A name holding a character ``\\w`` does not match is counted by its own scan.
+
+    U+093F is a combining vowel sign: valid in an identifier, not a word
+    character, so the one-pass count would split the name and charge it while
+    it is called (seedgo, fleet green leg 18). Green on the per-name scans too:
+    its proof is its mutant.
+    """
+    name = "aिb"
+    files = {"apps/a.py": f"def {name}():\n    return 1\n", "apps/b.py": f"x = {name}()\n"}
+    assert _charged_names(tmp_path / "branchroot", files) == []
+
+
+def _dead(branch: Path) -> list[str]:
+    """The unreferenced files dead_code names, relative to apps/."""
+    message = dead_code_check_branch(str(branch))["checks"][0]["message"]
+    return sorted(message.split(": ", 1)[1].split(" -- ")[0].split(", ")) if "unreferenced" in message else []
+
+
+class TestDeadCodeReadsTheProjectConfig:
+    """A handler the engine dispatches by dotted path in .aipass/*.json is referenced (seedgo, leg fed78ad8)."""
+
+    HANDLERS = ("lifecycle/boot.py", "security/gate.py")
+
+    def _project(self, tmp_path, config, registry=True, config_name="x.json"):
+        project = tmp_path / "proj"
+        branch = project / "src" / "aipass" / "mybranch"
+        _make_branch(branch)
+        _write_file(branch / "apps" / "mybranch.py", "def handle_command():\n    pass\n")
+        for handler in self.HANDLERS:
+            _write_file(branch / "apps" / "handlers" / handler, "def handle(data):\n    return data\n")
+        if registry:
+            _write_file(project / "PROJ_REGISTRY.json", "{}")
+        _write_file(project / ".aipass" / config_name, config)
+        return branch
+
+    @pytest.mark.parametrize("registry", [True, False], ids=["seat", "clean_checkout"])
+    def test_the_install_config_references_a_handler_with_or_without_the_registry(self, tmp_path, registry):
+        """AIPASS_REGISTRY.json is git-ignored: CI read hooks 88 where the seat read 100 (addendum d13d7c68 B)."""
+        config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot.handle"}'
+        branch = self._project(tmp_path, config, registry=registry, config_name="hooks.json")
+        assert _dead(branch) == ["handlers/security/gate.py"]
+
+    def test_a_dotted_path_in_the_config_references_a_handler_and_a_stem_does_not(self, tmp_path):
+        config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot.handle", "b": "gate"}'
+        assert _dead(self._project(tmp_path, config)) == ["handlers/security/gate.py"]
+
+    def test_a_longer_module_name_does_not_reference_its_prefix(self, tmp_path):
+        config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot_extra.handle", "b": "x.aipass.mybranch.apps.handlers.security.gate"}'
+        assert _dead(self._project(tmp_path, config)) == ["handlers/lifecycle/boot.py", "handlers/security/gate.py"]
+
+    def test_a_config_with_no_registry_root_above_the_branch_references_nothing(self, tmp_path):
+        config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot.handle"}'
+        assert _dead(self._project(tmp_path, config, registry=False)) == [
+            "handlers/lifecycle/boot.py",
+            "handlers/security/gate.py",
+        ]
+
+
+class TestASkipNamedPackageIsSource:
+    """commons keeps live code in apps/handlers/artifacts/, a SOURCE_SKIP_DIRS name (seedgo, leg fed78ad8)."""
+
+    def _commons_shape(self, tmp_path):
+        branch = _make_branch(tmp_path)
+        _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command():\n    pass\n")
+        _write_file(branch / "apps" / "handlers" / "artifacts" / "__init__.py", "")
+        _write_file(branch / "apps" / "handlers" / "artifacts" / "trade_ops.py", "def never_traded():\n    return 1\n")
+        return branch
+
+    def test_dead_code_reads_a_skip_named_package(self, tmp_path):
+        assert _dead(self._commons_shape(tmp_path)) == ["handlers/artifacts/trade_ops.py"]
+
+    def test_unused_function_reads_a_skip_named_package(self, tmp_path):
+        checks = unused_function_check_branch(str(self._commons_shape(tmp_path)))["checks"]
+        assert [u["name"] for c in checks if c.get("unused") for u in c["unused"]] == ["never_traded"]
+
+    def test_an_archive_beside_the_package_is_still_skipped(self, tmp_path):
+        branch = self._commons_shape(tmp_path)
+        _write_file(branch / "apps" / "handlers" / ".archive" / "old_ops.py", "def retired():\n    return 1\n")
+        assert _dead(branch) == ["handlers/artifacts/trade_ops.py"]
+
+
+class TestDeadCodeReportsAForwardSlashPath:
+    """Windows CI printed 'handlers\\\\security\\\\gate.py' where the oracles read a slash (addendum d13d7c68 D)."""
+
+    def test_a_windows_shaped_path_is_reported_with_forward_slashes(self):
+        target = PureWindowsPath("C:/proj/apps/handlers/security/gate.py")
+        assert dead_code_reported_path(target, PureWindowsPath("C:/proj/apps")) == "handlers/security/gate.py"

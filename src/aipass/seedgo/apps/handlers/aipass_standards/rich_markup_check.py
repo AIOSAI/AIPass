@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rich_markup_check.py
 # Description: Rich Markup Standards Checker Handler
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-08-11
-# Modified: 2026-09-15
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -518,6 +518,12 @@ def _result(passed: bool, name: str, message: str, score: int) -> Dict:
     }
 
 
+def _declined(result: Dict) -> Dict:
+    """Mark a single-check result as a file this standard does not judge (out of the row's average)."""
+    result["checks"][0]["declined"] = True
+    return result
+
+
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """
     Check a Python file for markup Rich loses at render time.
@@ -553,7 +559,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     if found is None:
         # Unparseable Python is the diagnostics lane's finding, not this one.
-        return _result(True, "Rich markup placeholders", f"Not parseable as Python, skipped: {error}", 100)
+        return _declined(_result(True, "Rich markup placeholders", f"Not parseable as Python, skipped: {error}", 100))
 
     # A followed literal has two lines an author might reasonably silence: the
     # one the token sits on and the one that prints it. Either bypass works --

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.2.0
+# Version: 3.4.0
 # Created: 2026-03-02
-# Modified: 2026-09-15
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -30,6 +30,13 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.dispatch import session_pointer
+from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
+    acquire_lock,
+    check_lock,
+    check_pid_alive,
+    clean_zombies,
+    is_branch_occupied,
+)
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import (
     refresh_recipient_dashboard as _refresh_recipient_dashboard,
 )
@@ -40,21 +47,27 @@ def _find_claude_bin() -> str:
 
     Background processes (trigger Medic, prax watchdog) may have a restricted
     PATH without ~/.local/bin. This resolves the absolute path directly.
+    Called by wake_branch at each wake, not once at import: a binary installed
+    or moved after the module loaded is the one spawned (ai_mail, leg 16).
+
+    Raises:
+        FileNotFoundError: no claude on PATH or at a known location; the
+            message names what was searched. It used to answer the bare name,
+            and the headless lane then handed the monitor a binary nobody had.
     """
     found = shutil.which("claude")
     if found:
         return found
-    for candidate in [
+    candidates = [
         Path.home() / ".local" / "bin" / "claude",
         Path("/usr/local/bin/claude"),
         Path("/usr/bin/claude"),
-    ]:
+    ]
+    for candidate in candidates:
         if candidate.exists():
             return str(candidate)
-    return "claude"  # Last resort — will raise FileNotFoundError if not found
-
-
-_CLAUDE_BIN = _find_claude_bin()
+    searched = ", ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(f"claude not found on PATH or at {searched}")
 
 
 # Infrastructure paths
@@ -166,7 +179,12 @@ def fable_allowed() -> frozenset:
     an accident — it is the spelling for revoking the grant from everyone, and
     it is distinguishable from the key being absent.
     """
-    config = _read_json(CONFIG_FILE)
+    try:
+        config = _read_json(CONFIG_FILE)
+    except JsonUnreadable as e:
+        # Unreadable falls to the written ruling, as above (ai_mail, leg 13).
+        logger.warning("[wake] %s — the Fable grant falls back to the default", e)
+        return FABLE_GRANT_DEFAULT
     if not isinstance(config, dict) or FABLE_GRANT_KEY not in config:
         return FABLE_GRANT_DEFAULT
     granted = config[FABLE_GRANT_KEY]
@@ -287,96 +305,24 @@ class DispatchStatus:
 # ─── Helpers ────────────────────────────────────────────
 
 
+class JsonUnreadable(Exception):
+    """A JSON file that exists and cannot be read or parsed (ai_mail, leg 13)."""
+
+
 def _read_json(filepath: Path) -> Optional[dict]:
-    """Read and parse a JSON file, returning None on failure."""
+    """Read and parse a JSON file; None when it does not exist.
+
+    Raises:
+        JsonUnreadable: The file exists and cannot be read or parsed. Each
+            caller gives its own answer for that (ai_mail, leg 13).
+    """
     if not filepath.exists():
         return None
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning("[wake] Failed to read %s: %s", filepath, e)
-        return None
-
-
-def _pid_alive_windows(pid: int) -> bool:
-    """Windows-safe liveness check via OpenProcess + GetExitCodeProcess."""
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return False
-        return exit_code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-def _check_lock(branch_path: Path) -> Optional[dict]:
-    """Check if branch has an active dispatch lock. Returns lock data or None."""
-    lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
-    if not lock_file.exists():
-        return None
-    try:
-        with open(lock_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        pid = data.get("pid")
-        if pid is not None:
-            if _check_pid_alive(pid):
-                return data
-            logger.info("[wake] Lock PID %s dead — cleaning stale lock", pid)
-        # Stale lock — check age (10 min timeout)
-        ts = data.get("timestamp", "")
-        if ts:
-            try:
-                from datetime import datetime
-
-                lock_time = datetime.fromisoformat(ts)
-                age = (datetime.now() - lock_time).total_seconds()
-                if age > 600:
-                    lock_file.unlink(missing_ok=True)
-                    return None
-            except (ValueError, TypeError):
-                logger.info("[wake] Unparseable lock timestamp at %s", lock_file)
-        # Dead process, remove stale lock
-        lock_file.unlink(missing_ok=True)
-        return None
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("[wake] Failed to read lock file %s: %s", lock_file, e)
-        return None
-
-
-def _acquire_lock(branch_path: Path, pid: int) -> Tuple[bool, str]:
-    """Acquire dispatch lock for branch. Atomic creation."""
-    lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
-    lock_data = {"pid": pid, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "branch": str(branch_path)}
-    try:
-        lock_file.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        with os.fdopen(fd, "w") as f:
-            json.dump(lock_data, f, indent=2)
-        return True, "Lock acquired"
-    except FileExistsError as e:
-        logger.warning("[wake] Lock file already exists at %s: %s", lock_file, e)
-        return False, "Lock file already exists"
-    except OSError as e:
-        logger.warning("[wake] Lock acquisition failed at %s: %s", lock_file, e)
-        return False, f"Lock failed: {e}"
+        raise JsonUnreadable(f"{filepath.name} could not be read ({filepath}): {e}") from e
 
 
 def _load_config() -> dict:
@@ -389,155 +335,6 @@ def _load_config() -> dict:
         if key not in config:
             config[key] = val
     return config
-
-
-def _get_pid_cwd(pid_str: str) -> Optional[str]:
-    """Get the cwd of a process. Cross-platform: Linux /proc, macOS lsof."""
-    if sys.platform == "linux":
-        try:
-            return os.readlink(f"/proc/{pid_str}/cwd")
-        except (OSError, PermissionError):
-            logger.info("[wake] Cannot read cwd for PID %s", pid_str)
-            return None
-    if sys.platform == "darwin":
-        return _get_pid_cwd_darwin(pid_str)
-    logger.info("[wake] Cannot determine cwd for PID %s on %s", pid_str, sys.platform)
-    return None
-
-
-def _get_pid_cwd_darwin(pid_str: str) -> Optional[str]:
-    """macOS: get process cwd via lsof."""
-    try:
-        result = subprocess.run(
-            ["lsof", "-a", "-p", pid_str, "-d", "cwd", "-Fn"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Cannot read cwd for PID %s on macOS", pid_str)
-        return None
-    if result.returncode != 0:
-        return None
-    for line in result.stdout.strip().split("\n"):
-        if line.startswith("n/"):
-            return line[1:]
-    return None
-
-
-def _read_session_type(pid_str: str) -> str:
-    """Read AIPASS_SESSION_TYPE from process environment. Returns 'interactive' if unset."""
-    if sys.platform == "linux":
-        try:
-            with open(f"/proc/{pid_str}/environ", "rb") as f:
-                data = f.read()
-            for entry in data.split(b"\0"):
-                if entry.startswith(b"AIPASS_SESSION_TYPE="):
-                    return entry.split(b"=", 1)[1].decode("utf-8")
-        except (OSError, PermissionError):
-            logger.info("[wake] Cannot read session type for PID %s", pid_str)
-        return "interactive"
-    if sys.platform == "darwin":
-        return _read_session_type_darwin(pid_str)
-    return "interactive"
-
-
-def _read_session_type_darwin(pid_str: str) -> str:
-    """macOS: read AIPASS_SESSION_TYPE from ps environment output."""
-    try:
-        result = subprocess.run(
-            ["ps", "-p", pid_str, "-wwE", "-o", "command="],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Cannot read session type for PID %s on macOS", pid_str)
-        return "interactive"
-    if result.returncode != 0:
-        return "interactive"
-    for token in result.stdout.split():
-        if token.startswith("AIPASS_SESSION_TYPE="):
-            return token.split("=", 1)[1]
-    return "interactive"
-
-
-# Session types that should NOT block dispatch (idle/background sessions)
-_NON_BLOCKING_SESSION_TYPES = {"dispatched", "daemon"}
-
-
-def _is_branch_occupied(branch_path: Path) -> bool:
-    """Check if an interactive Claude session is running in this branch directory."""
-    resolved = str(branch_path.resolve())
-    try:
-        result = subprocess.run(["pgrep", "-x", "claude"], capture_output=True, text=True, timeout=5)
-        if result.returncode != 0:
-            return False
-        for pid_str in result.stdout.strip().split("\n"):
-            pid_str = pid_str.strip()
-            if not pid_str:
-                continue
-            cwd = _get_pid_cwd(pid_str)
-            if cwd is None:
-                continue
-            if str(Path(cwd).resolve()) == resolved:
-                session_type = _read_session_type(pid_str)
-                if session_type not in _NON_BLOCKING_SESSION_TYPES:
-                    return True
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Failed to check branch occupancy")
-    return False
-
-
-def _clean_zombies() -> int:
-    """Find and report zombie Claude processes. Returns count found."""
-    count = 0
-    try:
-        result = subprocess.run(["ps", "-eo", "pid,stat,comm"], capture_output=True, text=True, timeout=5)
-        for line in result.stdout.strip().split("\n"):
-            parts = line.split()
-            if len(parts) >= 3 and parts[2] == "claude" and "Z" in parts[1]:
-                count += 1
-                logger.info("[wake] Found zombie Claude process PID %s", parts[0])
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Failed to check for zombie processes")
-    return count
-
-
-def _check_pid_alive(pid: int) -> bool:
-    """Check if a process is alive (not zombie)."""
-    if sys.platform == "win32":
-        try:
-            return _pid_alive_windows(pid)
-        except Exception as exc:
-            logger.info("[wake] PID %s Windows check failed (assuming alive): %s", pid, exc)
-            return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError as exc:
-        logger.warning("[wake] PID %s not found: %s", pid, exc)
-        return False
-    except PermissionError as exc:
-        logger.warning("[wake] PID %s permission denied: %s", pid, exc)
-        return True
-    except OSError as exc:
-        logger.warning("[wake] PID %s os.kill error (assuming dead): %s", pid, exc)
-        return False
-    if sys.platform == "linux" and _is_zombie_linux(pid):
-        return False
-    return True
-
-
-def _is_zombie_linux(pid: int) -> bool:
-    """Return True if PID is a zombie (Linux /proc/status check)."""
-    try:
-        with open(f"/proc/{pid}/status", "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("State:"):
-                    return "Z" in line
-    except FileNotFoundError as exc:
-        logger.warning("[wake] PID %s /proc not found: %s", pid, exc)
-    return False
 
 
 def _spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lock_file_path, custom_message, status):
@@ -623,26 +420,40 @@ def is_manager(branch_email: str) -> bool:
     the manager then heard nothing at all (@devpulse P0, 2026-08-21). Managers are
     mailed instead — the promise has to say so.
 
-    Fails toward "not a manager": an unreadable or missing passport keeps the
-    ordinary wake path, which is the behaviour that predates this helper. Inventing
-    a manager would silently suppress a wake that should happen.
+    Agrees with wake_branch's manager gate on every passport: a missing passport
+    declares no class (False, the ordinary path); a passport that exists but
+    cannot be read fails closed (True), because the gate then skips the wake and
+    the caller mails, so "you will be MAILED" is the promise that holds
+    (ai_mail, leg 11; before it, an unreadable passport answered False).
 
     Args:
         branch_email: Address of the branch to classify (e.g. "@devpulse").
 
     Returns:
-        bool: True only when a readable passport says citizen_class == "manager".
+        bool: True when a readable passport says citizen_class == "manager", or
+        when the passport exists and cannot be read.
     """
-    resolved = resolve_branch(branch_email)
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+    try:
+        resolved = resolve_branch(branch_email)
+    except RegistryUnreadable as exc:
+        # Which seat this is cannot be known, so its class cannot either: fail
+        # closed, as for an unreadable passport (ai_mail, leg 12).
+        logger.warning("[wake] %s unresolvable — treated as a manager: %s", branch_email, exc)
+        return True
     if not resolved:
         return False
     branch_path, _ = resolved
     try:
         with open(branch_path / ".trinity" / "passport.json", "r", encoding="utf-8") as f:
             passport = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
-        logger.info("[wake] Could not classify %s: %s", branch_email, exc)
+    except FileNotFoundError as exc:
+        logger.info("[wake] No passport to classify %s: %s", branch_email, exc)
         return False
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("[wake] Passport of %s unreadable — treated as a manager: %s", branch_email, exc)
+        return True
     return passport.get("identity", {}).get("citizen_class", "") == "manager"
 
 
@@ -694,11 +505,23 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
             never claimed here) may see step 3, the projects/* sweep. Left
             False, this function behaves exactly as it did before phase 5:
             no widening for anyone unverified.
+
+    Raises:
+        RegistryUnreadable: the AIPass registry, the caller's project registry
+            or (admin) a hosted one exists and cannot be read. Its two callers,
+            wake_branch and is_manager, catch it at their own door (ai_mail,
+            leg 12).
     """
     email = f"@{branch_email.lstrip('@').lower()}"
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
 
-    # Step 1: AIPass registry (local branches)
-    registry = _read_json(BRANCH_REGISTRY)
+    # Step 1: AIPass registry (local branches). One that exists and cannot be
+    # read refuses: read as absent, steps 2-4 could serve another project's
+    # namesake, and the daemon wakes with no caller cwd (ai_mail, leg 12).
+    try:
+        registry = _read_json(BRANCH_REGISTRY)
+    except JsonUnreadable as e:
+        raise RegistryUnreadable(f"{BRANCH_REGISTRY.name} could not be read ({BRANCH_REGISTRY})") from e
     if registry is not None:
         for branch in registry.get("branches", []):
             if branch.get("email", "").lower() == email:
@@ -721,6 +544,10 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
                 branch_path = Path(branch_path_str)
                 if branch_path.exists():
                     return branch_path, email
+        except RegistryUnreadable:
+            # The caller's own project cannot say who it names: refuse rather
+            # than let steps 3-4 serve a namesake (ai_mail, leg 12).
+            raise
         except Exception as e:
             logger.warning("[wake] resolve_branch caller registry fallback failed: %s", e)
 
@@ -738,6 +565,10 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
                 if branch_path.exists():
                     logger.info("[wake] %s resolved via projects/ sweep — admin bridge", email)
                     return branch_path, email
+        except RegistryUnreadable:
+            # A hosted registry that cannot be read may hold this citizen; the
+            # external tier would serve its namesake (ai_mail, leg 12).
+            raise
         except Exception as e:
             logger.warning("[wake] resolve_branch projects sweep failed: %s", e)
 
@@ -847,8 +678,11 @@ def _spawn_manager_interactive(
     prompt: str,
     model: str,
     status: "DispatchStatus",
+    claude_bin: str,
 ) -> Tuple["DispatchStatus", bool]:
     """Spawn an interactive tmux session for a manager branch.
+
+    `claude_bin` is the binary wake_branch resolved for this wake.
 
     The attachable path: a session the user CAN attach to (same pattern as the
     manual tmux interactive wake). Used only for @daemon self-wakes that passed
@@ -884,7 +718,7 @@ def _spawn_manager_interactive(
 
     session = f"{DAEMON_SESSION_PREFIX}{branch_path.name}-{time.strftime('%H%M%S')}"
     claude_line = (
-        f"{shlex.quote(_CLAUDE_BIN)} --model {shlex.quote(model)} "
+        f"{shlex.quote(claude_bin)} --model {shlex.quote(model)} "
         f"--permission-mode bypassPermissions "
         f'"$(cat {shlex.quote(str(prompt_file))})"'
     )
@@ -995,8 +829,16 @@ def wake_branch(
         logger.warning("[wake] BLOCKED %s — system paused", branch_email)
         return status, False
 
-    # Step 2: Resolve branch
-    result = resolve_branch(branch_email, admin=admin)
+    # Step 2: Resolve branch. An unreadable registry fails this step by name
+    # rather than waking whoever a later source names (ai_mail, leg 12).
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+    try:
+        result = resolve_branch(branch_email, admin=admin)
+    except RegistryUnreadable as exc:
+        status.fail("resolve", f"{branch_email} not resolved: {exc}")
+        logger.warning("[wake] %s not resolved: %s", branch_email, exc)
+        return status, False
     if result is None:
         status.fail("resolve", f"Branch not found: {branch_email}")
         return status, False
@@ -1037,6 +879,18 @@ def wake_branch(
         with open(passport_file, "r", encoding="utf-8") as f:
             passport = json.load(f)
         citizen_class = passport.get("identity", {}).get("citizen_class", "")
+        # The refusal first, then the three lanes: one level shallower than an
+        # elif chain ending in the refusal, same order (ai_mail, leg 16).
+        if citizen_class == MANAGER_CLASS and not (scheduled or admin or sender == "@daemon"):
+            # Returns True having woken nothing and sent nothing. The caller
+            # owns the notification: the dispatch pipeline already mailed this
+            # manager before calling, and dispatch_monitor's wake-back mails it
+            # via _mail_wake_back(). Saying "mail delivered" here asserted a
+            # delivery this function never makes, which is how the wake-back's
+            # silent drop read as success for months (@devpulse P0, 2026-08-21).
+            status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
+            logger.info("[wake] %s is citizen_class=manager — wake skipped, no mail sent here", email)
+            return status, True
         if citizen_class == MANAGER_CLASS:
             if scheduled:
                 status.ok("manager", f"{email} manager gate bypassed — scheduled wake")
@@ -1046,22 +900,28 @@ def wake_branch(
                 status.ok("manager", f"{email} manager gate bypassed — verified admin dispatch")
                 status.ok("admin", "Headless lane — dispatch_monitor pipeline (admin grant verified by caller)")
                 logger.info("[wake] %s manager woken headless — admin lane", email)
-            elif sender == "@daemon":
+            else:
+                # sender == "@daemon", the one lane the refusal above left.
                 manager_scheduled = True
                 status.ok("manager", f"{email} manager gate bypassed — daemon-scheduled self-wake")
                 logger.info("[wake] %s manager gate bypassed — @daemon scheduled wake", email)
-            else:
-                # Returns True having woken nothing and sent nothing. The caller
-                # owns the notification: the dispatch pipeline already mailed this
-                # manager before calling, and dispatch_monitor's wake-back mails it
-                # via _mail_wake_back(). Saying "mail delivered" here asserted a
-                # delivery this function never makes, which is how the wake-back's
-                # silent drop read as success for months (@devpulse P0, 2026-08-21).
-                status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
-                logger.info("[wake] %s is citizen_class=manager — wake skipped, no mail sent here", email)
-                return status, True
-    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
-        logger.info("[wake] Could not read passport for %s: %s", email, exc)
+    except FileNotFoundError as exc:
+        # No passport: no class was ever declared, so nothing marks this target
+        # a manager. The ordinary path stands (pinned: missing passport continues).
+        logger.info("[wake] No passport for %s: %s", email, exc)
+    except (json.JSONDecodeError, OSError) as exc:
+        # A passport that exists but cannot be read leaves the class unknown, and
+        # the target may be a manager. Fail closed in the lane that never wakes
+        # managers: skip the wake, the caller mails. The scheduled, admin and
+        # @daemon lanes wake managers too, so they go on (ai_mail, leg 11).
+        if not (scheduled or admin or sender == "@daemon"):
+            status.info(
+                "manager",
+                f"{email} passport unreadable — class unknown, treated as a manager: wake skipped, caller must mail",
+            )
+            logger.warning("[wake] %s passport unreadable, treated as a manager — wake skipped: %s", email, exc)
+            return status, True
+        logger.warning("[wake] %s passport unreadable, waking in a lane that wakes managers too: %s", email, exc)
 
     # Step 3b: Model policy, decided ONCE for both spawn lanes. Resolved here
     # rather than at each spawn site because a second site would be a second
@@ -1082,14 +942,14 @@ def wake_branch(
         status.ok("model", resolved_model)
 
     # Step 4: Zombie check (pre-flight)
-    zombie_count = _clean_zombies()
+    zombie_count = clean_zombies()
     if zombie_count > 0:
         status.warn("zombies", f"{zombie_count} zombie Claude process(es) detected")
     else:
         status.ok("pre-flight", "No zombie processes")
 
     # Step 5: Lock check
-    existing = _check_lock(branch_path)
+    existing = check_lock(branch_path)
     if existing is not None:
         pid = existing.get("pid", "?")
         since = existing.get("timestamp", "?")
@@ -1105,7 +965,7 @@ def wake_branch(
     status.ok("lock", "No active lock — agent is sleeping")
 
     # Step 6: Occupancy check
-    if _is_branch_occupied(branch_path):
+    if is_branch_occupied(branch_path):
         status.warn("occupancy", f"Interactive Claude session in {branch_path}")
         status.fail("blocked", "Cannot spawn — interactive session running")
         logger.warning("[wake] BLOCKED %s — interactive session", email)
@@ -1118,16 +978,34 @@ def wake_branch(
     # and all three spawn lanes below (tmux manager, systemd scope, detached
     # Popen) are downstream — so the dashboard is written exactly when a session
     # is certain to start, and exactly once. Fail-open; see the helper.
+    # Step 6a: the claude binary, resolved at this wake for both spawn lanes.
+    # Before the dashboard refresh, so a wake that cannot spawn writes nothing,
+    # and before any lock (ai_mail, leg 16).
+    try:
+        claude_bin = _find_claude_bin()
+    except FileNotFoundError as e:
+        status.fail("claude", str(e))
+        logger.warning("[wake] %s not woken: %s", email, e)
+        return status, False
+
     _refresh_recipient_dashboard(branch_path, email, status)
 
     # A @daemon-sender manager wake spawns an interactive tmux session instead
     # of the -p/monitor pipeline below. The scheduled lane deliberately does not
     # set this flag — an unattended run belongs in the monitored pipeline.
     if manager_scheduled:
-        return _spawn_manager_interactive(branch_path, email, custom_message or DEFAULT_PROMPT, resolved_model, status)
+        return _spawn_manager_interactive(
+            branch_path, email, custom_message or DEFAULT_PROMPT, resolved_model, status, claude_bin
+        )
 
     # Step 7: Build spawn command
-    config = _load_config()
+    # An unreadable safety config refuses the wake: its max_turns may be lower
+    # than the default 100 (ai_mail, leg 13). No lock is held yet.
+    try:
+        config = _load_config()
+    except JsonUnreadable as e:
+        status.fail("config", str(e))
+        return status, False
     max_turns = config.get("max_turns_per_wake", 100)
 
     if custom_message:
@@ -1139,7 +1017,15 @@ def wake_branch(
     # still alive lets a second monitor spawn onto a "clear" lock, and the two
     # then race over one lock file. Rationale from reading the cleanup paths —
     # not a logged incident; the monitor's PID-verified cleanup is the guard.
+    # Spec first, build to it, audit last (DPLAN-0354): of 66 worker
+    # transcripts, 61 ran the checklist after writing and 0 read the
+    # standards before. Kept ahead of every other instruction so it is read first.
     prompt += (
+        "Before you build: read the seedgo standards rows for what you touch "
+        "(src/aipass/seedgo/docs/aipass_standards.md; drone @seedgo checklist names the "
+        "rows for a file) and the test template for tests "
+        "(src/aipass/seedgo/templates/test_template_v1.md); build to them; run the "
+        "checklist last, to find what you missed. "
         "IMPORTANT: run any sub-agents synchronously (foreground) and wait for them to "
         "finish before ending your turn — headless dispatch kills orphaned background "
         "work after 600s with no reply sent."
@@ -1175,7 +1061,7 @@ def wake_branch(
             logger.warning("[wake] %s pointer write failed for session %s — spawning anyway", email, session_id)
         logger.info("[wake] %s fresh session %s", email, session_id)
         status.ok("session", f"fresh session {session_id[:8]}")
-        claude_cmd = [_CLAUDE_BIN, *base_args, "--session-id", session_id]
+        claude_cmd = [claude_bin, *base_args, "--session-id", session_id]
     else:
         resume_id, reason = session_pointer.resolve_resume_target(branch_path)
         # Verbatim: this reason string is the only trace left when an agent
@@ -1183,10 +1069,10 @@ def wake_branch(
         logger.info("[wake] %s session decision: %s", email, reason)
         if resume_id:
             status.ok("session", f"resuming {resume_id[:8]} (pointer)")
-            claude_cmd = [_CLAUDE_BIN, "--resume", resume_id, *base_args]
+            claude_cmd = [claude_bin, "--resume", resume_id, *base_args]
         else:
             status.info("session", "no pointer — continuing newest transcript (-c)")
-            claude_cmd = [_CLAUDE_BIN, "-c", *base_args]
+            claude_cmd = [claude_bin, "-c", *base_args]
 
     # Step 7: Spawn via dispatch_monitor
     log_dir = branch_path / "logs"
@@ -1232,7 +1118,7 @@ def wake_branch(
             spawn_env.pop(key)
 
     # Acquire lock BEFORE spawn to prevent TOCTOU race (DPLAN-0155 Phase 5).
-    acquired, lock_msg = _acquire_lock(branch_path, os.getpid())
+    acquired, lock_msg = acquire_lock(branch_path, os.getpid())
     if not acquired:
         status.fail("lock-acquire", f"Lock failed: {lock_msg}")
         return status, False
@@ -1365,7 +1251,7 @@ def wake_branch(
             logger.info("[wake] Cannot verify systemd unit %s: %s", _unit, e)
             status.warn("alive", "Cannot verify systemd unit status — assuming running")
     else:
-        if _check_pid_alive(monitor_pid):
+        if check_pid_alive(monitor_pid):
             status.ok("alive", f"Agent responding (PID {monitor_pid} alive)")
         else:
             status.fail("alive", f"Agent died immediately (PID {monitor_pid})")

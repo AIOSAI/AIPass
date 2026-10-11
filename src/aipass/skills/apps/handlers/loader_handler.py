@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: loader_handler.py
 # Description: Skill loading handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -75,7 +75,12 @@ def import_handler(skill_path, skill_name):
         skill_name: Name of the skill (used for module naming).
 
     Returns:
-        module or None: The imported handler module, or None on failure.
+        module or None: The imported handler module, or None when the skill
+        has no handler.py.
+
+    Raises:
+        Exception: Whatever handler.py raised while importing. A broken handler
+        is a failure the caller reports, never a skill without a handler.
     """
     handler_file = Path(skill_path) / "handler.py"
     if not handler_file.exists():
@@ -83,17 +88,18 @@ def import_handler(skill_path, skill_name):
 
     module_name = f"skills_handler_{skill_name.replace('-', '_')}"
 
+    spec = importlib.util.spec_from_file_location(module_name, str(handler_file))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot build an import spec for {handler_file}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     try:
-        spec = importlib.util.spec_from_file_location(module_name, str(handler_file))
-        if spec is None or spec.loader is None:
-            return None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
         spec.loader.exec_module(module)
-        return module
-    except Exception:
-        logger.warning(f"Failed to load handler for {skill_name}")
-        return None
+    except BaseException:
+        # A half-executed module must not stay importable under its name.
+        sys.modules.pop(module_name, None)
+        raise
+    return module
 
 
 def find_skill_in_registry(name, registry):
@@ -165,7 +171,18 @@ def load_skill(name, registry):
     # Import handler if present
     handler = None
     if isinstance(metadata, dict) and metadata.get("has_handler", False):
-        handler = import_handler(skill_path, name)
+        try:
+            handler = import_handler(skill_path, name)
+        except Exception as exc:
+            logger.error(f"Failed to import handler.py for {name}: {type(exc).__name__}: {exc}")
+            return {
+                "success": False,
+                "metadata": metadata,
+                "body": body,
+                "handler": None,
+                "path": skill_path,
+                "error": f"Failed to import handler.py for {name}: {type(exc).__name__}: {exc}",
+            }
 
     json_handler.log_operation(
         "skill_load",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: todo_check.py
 # Description: TODO/FIXME Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -11,11 +11,15 @@ TODO/FIXME Standards Checker Handler
 
 Detects TODO, FIXME, HACK, and XXX comments in Python source files.
 These tags indicate incomplete work, known hacks, or code needing attention.
+Only a real comment counts: comments are read from the tokenizer, so a tag
+inside a string or a docstring is never one.
 Each file is scored: passed if zero tags found, failed otherwise with
 a count and tag breakdown in the message.
 """
 
+import io
 import re
+import tokenize
 from pathlib import Path
 from typing import Dict
 
@@ -23,6 +27,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: a TODO in a test is as unfinished as one in a module.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 # Tags to detect, case-insensitive
@@ -34,6 +40,25 @@ _TAG_RE = re.compile(
     r"#\s*(TODO|FIXME|HACK|XXX)\b[:\s]*(.*)",
     re.IGNORECASE,
 )
+
+
+def _comments(content: str) -> list[str] | None:
+    """
+    Return the text of every comment token in the source, or None.
+
+    None means Python cannot tokenize the source (an unclosed string, a
+    bad dedent), so which text is a comment is unknown; the caller fails
+    the file by name rather than reading it as clean.
+    """
+    try:
+        return [
+            token.string
+            for token in tokenize.generate_tokens(io.StringIO(content).readline)
+            if token.type == tokenize.COMMENT
+        ]
+    except (tokenize.TokenError, SyntaxError) as e:
+        logger.info("Cannot tokenize source: %s", e)
+        return None
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -63,6 +88,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "TODO/FIXME comments",
                     "passed": True,
                     "message": "__init__.py skipped",
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -118,31 +144,27 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "TODO",
         }
 
-    # Scan for TODO/FIXME/HACK/XXX tags in comment lines
+    # Read the comments from the tokenizer: a tag inside a string or a
+    # docstring is never a COMMENT token (seedgo fleet green leg 13)
+    comments = _comments(content)
+    if comments is None:
+        return {
+            "passed": False,
+            "checks": [
+                {
+                    "name": "File tokenizable",
+                    "passed": False,
+                    "message": "Python cannot tokenize this file, so its comments are unknown",
+                }
+            ],
+            "score": 0,
+            "standard": "TODO",
+        }
+
     tag_counts: dict[str, int] = {}
     total_found = 0
-    in_docstring = False
-    docstring_char: str | None = None
-
-    for line in content.splitlines():
-        stripped = line.strip()
-
-        # Track docstring boundaries
-        if not in_docstring:
-            if stripped.startswith('"""') or stripped.startswith("'''"):
-                docstring_char = stripped[:3]
-                # Single-line docstring: opens and closes on the same line
-                if stripped.count(docstring_char) >= 2:
-                    continue
-                in_docstring = True
-                continue
-        else:
-            if docstring_char and docstring_char in stripped:
-                in_docstring = False
-            continue
-
-        # Only match in comment portions (the regex already requires #)
-        match = _TAG_RE.search(line)
+    for comment in comments:
+        match = _TAG_RE.search(comment)
         if match:
             tag = match.group(1).upper()
             tag_counts[tag] = tag_counts.get(tag, 0) + 1

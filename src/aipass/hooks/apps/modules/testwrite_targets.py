@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testwrite_targets.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Which write targets are NEW test files — the classification behind the test-write gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-09-21
 # =============================================
 
 """Decides one question: is this path a test file that does not exist yet?
@@ -80,8 +80,7 @@ def is_test_file(path: Path) -> bool:
     Returns:
         True when both halves of the shape hold.
     """
-    parts = path.parts
-    if TEST_DIR not in parts:
+    if not in_test_tree(path):
         return False
     name = path.name
     if name in _COLLECTABLE_NAMES:
@@ -89,6 +88,27 @@ def is_test_file(path: Path) -> bool:
     if name.endswith(_COLLECTABLE_SUFFIXES):
         return True
     return name.startswith(_COLLECTABLE_PREFIXES) and name.endswith(".py")
+
+
+def in_test_tree(path: Path) -> bool:
+    """True when some component of *path* is a ``tests`` directory.
+
+    The first half of :func:`is_test_file`, named so a second caller can ask the
+    narrower question without growing a second reading of the same shape. The
+    template pointer (DPLAN-0354) is that caller: its contract is ``tests/**``,
+    every file under a test tree and not only the pytest-collectable ones, so it
+    needs this half alone. The separator question is already answered before we
+    get here — both dialects are normalised in ``bash_writes._resolve`` and a
+    tool payload arrives as a path — which is why this reads ``parts`` rather
+    than matching text.
+
+    Args:
+        path: A write target, as the tool or the shell parser named it.
+
+    Returns:
+        True when the path sits inside a test tree at any depth.
+    """
+    return TEST_DIR in path.parts
 
 
 def is_new(path: Path) -> bool:

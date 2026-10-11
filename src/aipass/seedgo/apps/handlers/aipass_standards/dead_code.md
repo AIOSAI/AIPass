@@ -1,6 +1,6 @@
 # Dead Code Standard
-**Status:** Draft v1
-**Date:** 2026-03-22
+**Status:** v1.5
+**Date:** 2026-10-10
 
 ---
 
@@ -40,11 +40,13 @@ For each collected file, the checker builds a search corpus from ALL `.py` conte
 | importlib.import_module | `import_module("...foo_handler")` |
 | Glob-based discovery | `glob("*_check.py")`, `glob("*.py")` |
 | Filename string literal | `"foo_handler.py"` in source |
+| Project config, dotted path only | `"aipass.branch.apps.handlers.foo.handle"` in the project's `.aipass/*.json`, the project root being the nearest directory at or above the branch holding a `*_REGISTRY.json` (since 2026-10-08: hooks names 28 handlers only there), or the AIPass install, known as hooks' loader knows it: `.aipass/hooks.json` beside `src/aipass/` (since 2026-10-10: `AIPASS_REGISTRY.json` is git-ignored, so a clean checkout read hooks 88 where the seat read 100). A stem or filename in a json acquits nothing |
 
 ### Always Considered Used
 
 - `__init__.py` (package structure)
 - Entry point files (`apps/{branch}.py`)
+- Doors (`apps/modules/door_*.py`) that pass the modules standard's Door shape row (DPLAN-0404, since 2026-10-08): a door is called from other branches, so its own branch never names it. A `door_` file that fails Door shape is read like any other module
 - Glob-discovered patterns (`*_check.py`, `*_content.py`) when a matching glob call exists
 - Direct children of `modules/` when `glob("*.py")` exists in the source
 
@@ -53,6 +55,8 @@ For each collected file, the checker builds a search corpus from ALL `.py` conte
 The following directories are excluded from both collection and corpus building:
 
 `__pycache__`, `.archive`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache`, `json_templates`, `logs`, `tools`, `.venv`, `venv`, `node_modules`, `.git`, `site-packages`, `.trinity`, `.aipass`, `.ai_mail.local`, `.spawn`, `backups`, `reports`, `docs`, `tests`, `.sorting_unprocessed`
+
+The set is `SOURCE_SKIP_DIRS` plus `tests` and `json_templates`, read below the branch root only. A `SOURCE_SKIP_DIRS` name that is an importable package (an identifier directory holding `__init__.py`) is source and is read: commons keeps live code in `apps/handlers/artifacts/` (since 2026-10-08).
 
 ---
 
@@ -98,7 +102,7 @@ from aipass.branch.apps.handlers.legacy import old_processor
 - **Threshold:** Score >= 75 to pass overall
 - A branch with 20/25 files referenced scores 80 (passes)
 - A branch with 15/25 files referenced scores 60 (fails)
-- The violation message lists up to 10 unreferenced files
+- The violation message lists up to 10 unreferenced files, each relative to `apps/` with forward slashes on every host (`handlers/x/y.py`, never `handlers\x\y.py`; since 2026-10-10, Windows CI)
 
 ---
 
@@ -109,17 +113,15 @@ Add an entry to `.seedgo/bypass.json`:
 ```json
 {
     "standard": "dead_code",
-    "file": "path/to/file.py"
+    "file": "apps/handlers/path/to/file.py"
 }
 ```
 
-The entire standard can also be bypassed at branch level:
-
-```json
-{
-    "standard": "dead_code"
-}
-```
+`file` is matched as a substring of the path from the branch root, so `apps/handlers/x.py`
+and `handlers/x.py` both match (checker 1.4.0, 2026-10-08). Until then dead_code alone was
+handed the `apps/`-relative path: @hooks' rows written `apps/handlers/lifecycle/session_boot.py`
+silenced nothing, and `bypass prune`'s dead-rule report could not see it because every other
+lane matched them. A rule naming no `file` is inert (owner, 2026-09-25), not branch-wide.
 
 ---
 

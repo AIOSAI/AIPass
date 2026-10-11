@@ -1,21 +1,15 @@
 # =================== AIPass ====================
 # Name: test_commands.py
 # Description: Tests for the custom command registry
-# Version: 1.0.0
+# Version: 1.0.4
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-10-05
 # =============================================
 
-"""Tests for the custom command registry.
+"""Tests for apps/modules/commands.py and the command registry handlers it drives."""
 
-Covers:
-- CRUD operations (add, remove, update, exists)
-- Exact-match lookup
-- Multi-word greedy matching
-- Registry auto-creation
-- List filtering by branch
-- Module orchestrator (handle_command)
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 import json
 from pathlib import Path
@@ -24,6 +18,8 @@ from typing import Any
 import pytest
 
 from aipass.drone.apps.handlers.command_registry import ops, lookup
+from aipass.drone.apps.modules import RegistryError
+from aipass.drone.apps.modules.commands import handle_command, list_all
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +50,48 @@ def _seed_registry(registry_file: Path, commands: dict[str, Any] | None = None) 
     registry_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+@pytest.fixture
+def unreadable_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ops' own ``open`` refuses every read; writes go to the real open.
+
+    The stand-in is a module global of ops only, never the builtin, so nothing
+    else in the process is touched. No mode bit: the refusal is this test's.
+    """
+    real_open = open
+
+    def refusing_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if "r" in mode:
+            raise OSError("stand-in: this registry cannot be read")
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(ops, "open", refusing_open, raising=False)
+
+
+class TestUnreadableRegistry:
+    """An existing registry that cannot be read raises naming it; a missing one is still created (fleet green leg 7)."""
+
+    def test_an_existing_unreadable_registry_raises_and_is_not_overwritten(
+        self, isolated_registry: Path, unreadable_reads: None
+    ) -> None:
+        """Mutant killed: the raise replaced by the old recreate (an empty registry saved over the commands)."""
+        _seed_registry(isolated_registry, {"audit": {"name": "audit", "target": "@seedgo"}})
+        before = isolated_registry.read_text(encoding="utf-8")
+
+        with pytest.raises(RegistryError) as raised:
+            ops.load_registry()
+
+        assert str(isolated_registry) in str(raised.value)
+        assert "stand-in: this registry cannot be read" in str(raised.value)
+        assert isolated_registry.read_text(encoding="utf-8") == before
+
+    def test_control_a_missing_registry_is_created(self, isolated_registry: Path, unreadable_reads: None) -> None:
+        """Control: under the same stand-in, a file that does not exist is recreated, never refused."""
+        registry = ops.load_registry()
+
+        assert registry["commands"] == {}
+        assert json.loads(isolated_registry.read_bytes())["commands"] == {}
+
+
 # ===================================================================
 # 1. Registry auto-creation
 # ===================================================================
@@ -72,23 +110,39 @@ class TestRegistryAutoCreation:
         assert "metadata" in registry
         assert registry["metadata"]["command_count"] == 0
 
-    def test_load_recreates_on_corrupt_json(self, isolated_registry: Path) -> None:
-        """Corrupt JSON triggers auto-recreation."""
-        isolated_registry.write_text("{{{bad json", encoding="utf-8")
+    def test_a_registry_that_is_not_json_raises_and_is_not_overwritten(self, isolated_registry: Path) -> None:
+        """Not JSON raises naming the path and the parser's own text; the file is byte-equal after (fleet green leg 8).
 
-        registry = ops.load_registry()
+        The parser's text (with its line and column) is asked of this interpreter
+        here, never written down. Red first against the old recreate; its mutant
+        is the proof.
+        """
+        broken = b'{"commands": {"audit": '
+        isolated_registry.write_bytes(broken)
+        with pytest.raises(json.JSONDecodeError) as parsed:
+            json.loads(broken.decode("utf-8"))
 
-        assert registry["commands"] == {}
-        assert registry["metadata"]["command_count"] == 0
+        with pytest.raises(RegistryError) as raised:
+            ops.load_registry()
 
-    def test_load_recreates_on_non_dict(self, isolated_registry: Path) -> None:
-        """Non-dict top-level JSON triggers auto-recreation."""
-        isolated_registry.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+        assert str(isolated_registry) in str(raised.value)
+        assert str(parsed.value) in str(raised.value)
+        assert isolated_registry.read_bytes() == broken
 
-        registry = ops.load_registry()
+    def test_a_registry_that_is_not_a_dict_raises_and_is_not_overwritten(self, isolated_registry: Path) -> None:
+        """JSON that is a list raises naming the path and the type; the file is byte-equal after (fleet green leg 8).
 
-        assert isinstance(registry, dict)
-        assert "commands" in registry
+        Red first against the old recreate; its mutant is the proof.
+        """
+        listed = json.dumps([{"name": "audit"}]).encode("utf-8")
+        isolated_registry.write_bytes(listed)
+
+        with pytest.raises(RegistryError) as raised:
+            ops.load_registry()
+
+        assert str(isolated_registry) in str(raised.value)
+        assert str(raised.value).endswith("is not a JSON object (list)")
+        assert isolated_registry.read_bytes() == listed
 
     def test_auto_heals_missing_keys(self, isolated_registry: Path) -> None:
         """Missing 'commands' or 'metadata' keys are auto-healed."""
@@ -301,6 +355,19 @@ class TestMultiWordMatching:
 
         assert result is None
 
+    def test_registry_load_failure_raises_not_no_match(
+        self, isolated_registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A registry that cannot load raises, never reads as "no match"; mutant: the except returns None."""
+
+        def unreadable() -> dict[str, Any]:
+            raise RegistryError("registry unreadable")
+
+        monkeypatch.setattr(lookup, "load_registry", unreadable)
+
+        with pytest.raises(RegistryError, match="registry unreadable"):
+            lookup.match_command(["audit"])
+
     def test_exact_match_no_remaining(self, isolated_registry: Path) -> None:
         """match_command with no extra args returns empty remaining list."""
         ops.add_command("audit", "@seedgo", "audit")
@@ -384,17 +451,16 @@ class TestSaveValidation:
 
 
 class TestModuleOrchestrator:
-    def test_handle_command_introspection(self, isolated_registry: Path) -> None:
-        """handle_command with no args triggers introspection."""
-        from aipass.drone.apps.modules.commands import handle_command
+    def test_handle_command_introspection(self, isolated_registry: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """handle_command with no args triggers introspection; mutant killed: introspection skipped."""
 
         result = handle_command()
 
         assert result is True
+        assert "commands Module" in capsys.readouterr().out
 
     def test_handle_command_add(self, isolated_registry: Path) -> None:
         """handle_command 'add' creates a command."""
-        from aipass.drone.apps.modules.commands import handle_command
 
         result = handle_command("add", ["test_cmd", "@branch", "do_thing", "--desc=A test"])
 
@@ -406,7 +472,6 @@ class TestModuleOrchestrator:
 
     def test_handle_command_remove(self, isolated_registry: Path) -> None:
         """handle_command 'remove' deletes a command."""
-        from aipass.drone.apps.modules.commands import handle_command
 
         ops.add_command("doomed", "@t", "c")
         result = handle_command("remove", ["doomed"])
@@ -414,18 +479,17 @@ class TestModuleOrchestrator:
         assert result is True
         assert ops.command_exists("doomed") is False
 
-    def test_handle_command_list(self, isolated_registry: Path) -> None:
-        """handle_command 'list' succeeds."""
-        from aipass.drone.apps.modules.commands import handle_command
+    def test_handle_command_list(self, isolated_registry: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """handle_command 'list' prints each command; mutant killed: the list loop printing nothing."""
 
         ops.add_command("a", "@t", "c1")
         result = handle_command("list", [])
 
         assert result is True
+        assert "a -> @t c1" in capsys.readouterr().out
 
     def test_handle_command_unknown(self, isolated_registry: Path) -> None:
         """handle_command with unknown subcommand returns False."""
-        from aipass.drone.apps.modules.commands import handle_command
 
         result = handle_command("unknown_sub", ["arg"])
 
@@ -442,7 +506,6 @@ class TestListAll:
 
     def test_list_all_empty(self, isolated_registry: Path) -> None:
         """list_all returns empty list when no commands registered."""
-        from aipass.drone.apps.modules.commands import list_all
 
         result = list_all()
         assert result == []
@@ -453,8 +516,6 @@ class TestListAll:
         ops.add_command("alpha", "@t", "c2")
         ops.add_command("middle", "@t", "c3")
 
-        from aipass.drone.apps.modules.commands import list_all
-
         result = list_all()
         names = [c["name"] for c in result]
         assert names == ["alpha", "middle", "zebra"]
@@ -462,8 +523,6 @@ class TestListAll:
     def test_list_all_returns_all_fields(self, isolated_registry: Path) -> None:
         """list_all returns full command dicts with expected keys."""
         ops.add_command("audit", "@seedgo", "audit", ["aipass"], "Run audit", "seedgo")
-
-        from aipass.drone.apps.modules.commands import list_all
 
         result = list_all()
         assert len(result) == 1

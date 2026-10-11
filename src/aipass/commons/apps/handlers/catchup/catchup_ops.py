@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: catchup_ops.py
 # Description: Catchup Operations Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -14,7 +14,6 @@ they missed since their last visit. Returns dicts for module display layer.
 """
 
 from datetime import datetime, timezone, timedelta
-from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -24,7 +23,7 @@ from aipass.commons.apps.handlers.database.catchup_queries import (
     get_last_active,
     update_last_active,
 )
-from aipass.commons.apps.modules.commons_identity import get_caller_branch
+from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 from aipass.commons.apps.handlers.json import json_handler
 
 
@@ -65,19 +64,19 @@ def _calculate_time_label(last_active: str) -> str:
 # =============================================================================
 
 
-def run_catchup(args: List[str]) -> dict:
+def run_catchup() -> dict:
     """
     Show what the branch missed since last visit.
 
     Usage: commons catchup
 
-    Args:
-        args: Command arguments (currently unused)
-
     Returns:
         Dict with success, is_first_visit, time_label, data, nudge keys
     """
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch. Run from a branch directory."}
 

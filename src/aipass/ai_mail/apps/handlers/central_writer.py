@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: central_writer.py
 # Description: AI_MAIL Central File Writer
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2025-11-27
-# Modified: 2025-11-27
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -33,13 +33,13 @@ stdlib_json = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stdlib_json)
 sys.path = _saved_path
 
-from pathlib import Path  # noqa: E402
-from datetime import datetime  # noqa: E402
-from typing import Dict, Any, List, Tuple  # noqa: E402
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any, List, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: E402
-from aipass.ai_mail.apps.handlers.json import json_handler  # noqa: E402
-from aipass.ai_mail.apps.handlers.paths import find_repo_root  # noqa: E402
+from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -66,13 +66,35 @@ CENTRAL_FILE = AI_CENTRAL_DIR / "AI_MAIL.central.json"
 # It was also the only reason `/backups/` behaved differently on Windows —
 # that check was a literal forward-slash match, so the same tree counted on
 # POSIX and did not on Windows. Names have no separators, so both agree now.
-EXCLUDED_DIR_NAMES = frozenset({".backup", ".archive", "backups"})
+#
+# dropbox and .archive: the owner's ruling of 09-27 (20:37, 20:42) - a dropbox is
+# a sandbox like .archive, nothing looks into it. docs.local, artifacts and
+# system_logs are output directories: no mailbox lives in one (read 09-29, ai_mail
+# leg 3). Never seedgo's skip list: it names .ai_mail.local, which this walk finds.
+EXCLUDED_DIR_NAMES = frozenset({".backup", ".archive", "backups", "dropbox", "docs.local", "artifacts", "system_logs"})
 BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 
 
 # =============================================================================
 # CORE FUNCTIONS
 # =============================================================================
+
+
+def _raise_walk_error(err: OSError) -> None:
+    """
+    os.walk's onerror hook: a directory it cannot list is raised, not skipped.
+
+    Raised rather than recorded because the callers consume a plain list and
+    every one of them already wraps update_central() and logs its failure: a
+    stale central file is honest, counts over a partly unread tree are not.
+
+    Args:
+        err: The OSError os.walk's scandir raised.
+
+    Raises:
+        OSError: Always, the error as given.
+    """
+    raise err
 
 
 def find_all_inbox_files() -> List[Path]:
@@ -101,7 +123,7 @@ def find_all_inbox_files() -> List[Path]:
     """
     inbox_files = []
 
-    for dirpath, dirnames, _filenames in os.walk(_REPO_ROOT):
+    for dirpath, dirnames, _filenames in os.walk(_REPO_ROOT, onerror=_raise_walk_error):
         # Mutating dirnames in place is what stops os.walk descending.
         dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIR_NAMES]
 

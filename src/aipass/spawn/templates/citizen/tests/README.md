@@ -2,13 +2,13 @@
 
 Pytest unit tests for `{{BRANCHNAME}}`.
 
-- `conftest.py` — Shared fixtures: temp dirs, sample data, a capturing logger, an
-  isolated `JsonHandler`, and an autouse guard that repoints this branch's
-  json_handler singleton at a tmp dir so tests never write into `{{BRANCH}}_json/`.
+- `conftest.py` — Shared fixtures: a capturing logger, and an autouse guard that
+  points this branch's json writes at a tmp dir so tests never write into
+  `{{BRANCH}}_json/`. Use pytest's own `tmp_path` for a scratch directory.
 - `test_cli_routing.py` — Starter suite for the entry point: no-args introspection,
   `--help`/`-h`/`help`, `--version`/`-V`, subcommand `--help` (never executes the
   command), and the unknown-command refusal exiting non-zero.
-- `test_scaffold.py` — Smoke test proving pytest infrastructure works here.
+- `test_scaffold.py` — The handler guard's structural pin: it never walks `inspect.stack()`.
 - `test_*.py` — Your own tests. Custom tests cover branch-specific domain logic.
 
 The starter suite is yours to replace as this branch grows its own — it ships at

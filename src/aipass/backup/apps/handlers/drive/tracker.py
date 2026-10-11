@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tracker.py
 # Description: Drive upload tracker — mtime+size dedup for file sync
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-16
-# Modified: 2026-09-03
+# Modified: 2026-09-27
 # =============================================
 
 """Drive upload tracker.
@@ -91,7 +91,10 @@ def check_needs_upload(
         backup_root: Root directory for computing relative paths.
 
     Returns:
-        True if the file is new or has changed since last sync.
+        True if the file is new or has changed since last sync. Also True when
+        the file cannot be made relative to backup_root or cannot be stat'ed:
+        the upload that follows names the real failure, where False would skip
+        the file on every run without a word.
     """
     try:
         rel_key = str(local_file.relative_to(backup_root))

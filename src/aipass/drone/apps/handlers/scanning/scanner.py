@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scanner.py
 # Description: Module scanning for command discovery
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-09-28
 # =============================================
 
 """Core scanning logic for discovering available commands in a branch.
@@ -46,25 +46,26 @@ def scan_help_output(branch_path: str, branch_name: str) -> list[dict]:
 
     Returns:
         List of command dicts ``{"name": ..., "description": ..., "source": "help"}``.
+
+    Raises:
+        subprocess.TimeoutExpired, OSError: the entry point could not be run. An empty
+            list here would read as "a branch with no commands"; ``scan_branch`` catches
+            these and names the failure.
     """
     entry_point = get_entry_point(branch_path, branch_name)
     if entry_point is None:
         return []
 
-    try:
-        result = subprocess.run(
-            [sys.executable, str(entry_point.relative_to(branch_path)), "--help"],
-            cwd=branch_path,
-            capture_output=True,
-            timeout=10,
-            shell=False,
-        )
-        help_text = result.stdout.decode("utf-8", errors="replace")
-        if not help_text:
-            help_text = result.stderr.decode("utf-8", errors="replace")
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        logger.info("scan_help_output: entry point execution failed for %s: %s", branch_name, exc)
-        return []
+    result = subprocess.run(
+        [sys.executable, str(entry_point.relative_to(branch_path)), "--help"],
+        cwd=branch_path,
+        capture_output=True,
+        timeout=10,
+        shell=False,
+    )
+    help_text = result.stdout.decode("utf-8", errors="replace")
+    if not help_text:
+        help_text = result.stderr.decode("utf-8", errors="replace")
 
     command_names = parse_help_for_commands(help_text)
 
@@ -171,7 +172,7 @@ def _extract_module_description(source: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def scan_branch(branch_path: str, branch_name: str) -> list[dict]:
+def scan_branch(branch_path: str, branch_name: str, help_errors: list[str] | None = None) -> list[dict]:
     """Perform a full scan of a branch to discover available commands.
 
     Combines both ``--help`` parsing and ``apps/modules/*.py`` file scanning,
@@ -181,11 +182,22 @@ def scan_branch(branch_path: str, branch_name: str) -> list[dict]:
     Args:
         branch_path: Absolute path to the branch directory.
         branch_name: Branch name (without ``@`` prefix).
+        help_errors: When a list is given, a failed ``--help`` scan appends its
+            error text here, so the caller can say it on screen; the result is
+            then module files only. None (the default) collects nothing.
 
     Returns:
         List of command dicts with keys ``name``, ``description``, ``source``.
     """
-    help_commands = scan_help_output(branch_path, branch_name)
+    help_error = ""
+    try:
+        help_commands = scan_help_output(branch_path, branch_name)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        help_error = str(exc)
+        help_commands = []
+        logger.warning("@%s: the --help scan failed (%s); module files only", branch_name, exc)
+        if help_errors is not None:
+            help_errors.append(help_error)
     module_commands = scan_module_files(branch_path)
 
     # Merge: help results take priority for duplicates.
@@ -205,6 +217,7 @@ def scan_branch(branch_path: str, branch_name: str) -> list[dict]:
             "help_count": len(help_commands),
             "module_count": len(module_commands),
             "total": len(merged),
+            "help_error": help_error,
         },
     )
 

@@ -1,6 +1,6 @@
 # AIPass — Navigation map
 
-<!-- Tier 1 — injected on cadence 5, at session start, and post-compaction, on the same beat as the kernel (tier0_kernel.md, also cadence 5; hooks/hooks_json/custom_config/cadence_config.json is the source). Cap: ~8,000 chars per fire (hook truncates near 10k). Format: .aipass/PROMPT_STYLE.md, read before editing. -->
+<!-- Tier 1 — injected at session start and post-compaction only, alongside the kernel (tier0_kernel.md); no periodic beat since 2026-09-30 (DPLAN-0355; hooks/hooks_json/custom_config/cadence_config.json is the source). Cap: ~8,000 chars per fire (hook truncates near 10k). Format: .aipass/PROMPT_STYLE.md, read before editing. -->
 
 AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, serving each other and external projects. Each lives in a branch, its home and address. Everything routes through `drone`. Open source, public repo on GitHub: strangers read and scan this code; treat external findings as contributions.
 
@@ -80,8 +80,9 @@ Plans carry context so you don't have to. Create only via `drone @flow create <p
 # Sub-agents
 
  - Default to sub-agents for reading, searching, building, testing, research. Do it yourself only for tiny edits, your own memories/plans, one-liners.
- - One clear task per agent. Brief with full context — they know nothing of your conversation.
- - No git, no memory, no dispatch. They build and report; you decide and act.
+ - One clear task per agent. Brief with full context — they know nothing of your conversation. Read the work list yourself before you write the task, and hand the brief whole as a file: a paraphrase is where a rule loses its clause.
+ - No git, no memory, no dispatch. They build and report; you decide and act. Read every sub-agent's diff before accepting it: a pass count, an audit score and a file list stay green through a deleted docstring, a widened name and an oracle that cannot fail.
+ - HELD is an answer. A cure the brief did not name, or whose own mutant survives, stops there: leave the line, say HELD and why.
  - Sub-agent = local disposable worker. Dispatch (`@ai_mail`) = wake a citizen with memory and identity. Branch-expert work → dispatch; else → sub-agent.
  - Models: opus for build/analysis, sonnet for routine investigation, haiku for trivial mechanical tasks. Never fable for sub-agents.
 

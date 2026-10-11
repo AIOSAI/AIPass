@@ -22,6 +22,8 @@ drone @devpulse watchdog baseline --once
 
 It syncs whatever queued while you were logged out (`MISSED` lines), then sits silent. It **exits** on the first completion of a dispatch this seat sent, or on a dead monitor — and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out; with nothing out, arm nothing. The newest sign-in owns delivery and logs out any older one. At idle the whole system is one `stat()` a second, 0.033 % of a core, and **zero model turns**.
 
+Arm it bare: no pipe and no redirect after the command. The wire reads its own stdout to tell which wrapper carries it; behind a pipe it still wakes on exit, but it records `foreground`, the statusline does not count it, and the wire says so on stderr at arm time.
+
 Why not the Monitor tool: Claude Code 2.1.271 changed Monitor watches "to always have a deadline (at most 30 minutes…) and notify Claude to re-arm, replacing the no-timeout `persistent` option". No setting restores it. A continuous wire under Monitor therefore dies every 30 minutes and wakes the seat to say so — measured at 33 empty wakes across one 15-hour absence, enough to force an auto-compact. Background Bash has no timer on it, survives `/compact`, and notifies exactly once, on exit — which is the shape `--once` was built for.
 
 Measured proof, 2026-09-16: a `--once` wire armed at 20:33 stayed silent for 31 minutes — past the Monitor cap — and exited once, at 21:03, with `DISPATCH @hooks title="@hooks completed"` and `delivered=1 ticks=1875`. No wake before it.
@@ -67,7 +69,7 @@ Commit `5444dd9a`. It polled ~19 branches' `.dispatch.lock` every 2 s to synthes
 
 ## Stall detection on one long job
 
-`watchdog agent @target [--timeout s]` remains for **mid-run stall detection** on a single long job (`[watchdog.stall]` / `[watchdog.resumed]` after 120 s of JSONL silence with no in-flight tool) — it is not needed to be woken, and arming one per dispatch is a second poller doing the receiver's job. It prints per-line events, so it needs the Monitor tool and inherits its 30-minute deadline. `@target` resolves in the caller's own project, then falls back to `~/Projects` registries.
+`watchdog agent @target [--timeout s]` remains for **mid-run stall detection** on a single long job (`[watchdog.stall]` / `[watchdog.resumed]` after 120 s of JSONL silence with no in-flight tool) — it is not needed to be woken, and arming one per dispatch is a second poller doing the receiver's job. Under background Bash its per-line events land in the task's output file and are read when it exits (a 72-minute watch ran that way on 2026-09-25), so it does not need the Monitor tool. It is not the sign-in: on 2026-09-25 a day of `watchdog agent` wires with no `baseline --once` armed left 27 completions queued as `MISSED` while the statusline read `idle`, so the verb now says at arm time whether this session holds a sign-in wire, and names it. `@target` resolves in the caller's own project, then falls back to `~/Projects` registries.
 
 ## Known caveat
 

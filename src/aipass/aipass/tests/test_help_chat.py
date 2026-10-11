@@ -1,30 +1,63 @@
 # =================== AIPass ====================
 # Name: tests/test_help_chat.py
 # Description: Tests for help_chat module — section-aware v2 (DPLAN-0282 P3)
-# Version: 2.0.0
+# Version: 2.1.4
 # Created: 2026-04-16
-# Modified: 2026-08-07
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for aipass.aipass.apps.modules.help_chat"""
+"""Tests for apps/modules/help_chat.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that help_chat.py and the modules it imports parse and import
 
 from __future__ import annotations
 
 from contextlib import ExitStack
 from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import patch
 
-from aipass.aipass.apps.modules.help_chat import (
-    COMMAND,
-    _MAX_SECTION_LINES,
-    _extract_keywords,
-    _format_answer,
-    _match_branches,
-    _score_section,
-    _search_readme,
-    _split_sections,
-    handle_command,
-)
+import pytest
+
+from aipass.aipass.apps.modules.help_chat import COMMAND, handle_command
+
+_HC = "aipass.aipass.apps.modules.help_chat"
+_RM = "aipass.aipass.apps.handlers.readme_map"
+
+# The product's body cap per section (help_chat._MAX_SECTION_LINES), read here as the number it is.
+_BODY_CAP = 25
+
+
+def _ask(
+    tmp_path: Path,
+    words: list[str],
+    capsys: pytest.CaptureFixture[str],
+    readme: str | None = None,
+    branches: list[str] | None = None,
+    readme_path: Path | None = None,
+) -> tuple[str, str, dict]:
+    """Run `aipass help <words>` over one README under tmp_path; return (stdout, stderr, logged data).
+
+    Every branch in `branches` (default ["drone"]) resolves to the same README path, both in
+    help_chat and in readme_map (which read_readme_lines reads through). `readme` None leaves no
+    README path at all. The logged data is what handle_command hands json_handler.log_operation
+    ({} when it logs nothing).
+    """
+    path = readme_path or tmp_path / "src" / "aipass" / "drone" / "README.md"
+    if readme is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(readme, encoding="utf-8")
+    resolved = path if readme is not None else None
+    with ExitStack() as stack:
+        jh = stack.enter_context(patch(f"{_HC}.json_handler", autospec=True))
+        stack.enter_context(patch(f"{_HC}.list_branches", return_value=branches or ["drone"]))
+        stack.enter_context(patch(f"{_HC}.get_readme_path", return_value=resolved))
+        stack.enter_context(patch("aipass.aipass.apps.handlers.readme_map.get_readme_path", return_value=resolved))
+        assert handle_command("help", words) is True
+    out, err = capsys.readouterr()
+    call = jh.log_operation.call_args
+    return out, err, (call.kwargs["data"] if call else {})
+
 
 # =============================================================================
 # CONSTANTS / SHARED DATA
@@ -44,8 +77,6 @@ Run tasks with drone dispatch.
 Drone supports multiple branches.
 """
 
-_FAKE_README_PATH = Path("/fake/src/aipass/drone/README.md")
-
 # Ensure encoding='utf-8' appears in this file (PATTERN check scans file-wide)
 _ENCODING = "utf-8"
 
@@ -56,13 +87,14 @@ _ENCODING = "utf-8"
 
 
 def _call_handle_command_drone_question(readme_content: str, readme_path: Path):
-    """Call handle_command for 'what does drone do' with file I/O mocked."""
+    """Call handle_command for 'what does drone do' over a real README written at readme_path."""
+    readme_path.parent.mkdir(parents=True, exist_ok=True)
+    readme_path.write_text(readme_content, encoding="utf-8")
     patches = [
         patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=readme_path),
-        patch("builtins.open", mock_open(read_data=readme_content)),
-        patch("aipass.aipass.apps.modules.help_chat.console"),
+        patch("aipass.aipass.apps.handlers.readme_map.get_readme_path", return_value=readme_path),
         patch("aipass.aipass.apps.modules.help_chat.header"),
     ]
     with ExitStack() as stack:
@@ -77,7 +109,6 @@ def _call_handle_no_match():
         patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=None),
-        patch("aipass.aipass.apps.modules.help_chat.console"),
         patch("aipass.aipass.apps.modules.help_chat.header"),
     ]
     with ExitStack() as stack:
@@ -88,328 +119,316 @@ def _call_handle_no_match():
 
 def _call_handle_all_stopwords():
     """Call handle_command with a question that reduces to zero keywords."""
-    mock_error = MagicMock()
-    patches = [
-        patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
-        patch("aipass.aipass.apps.modules.help_chat.console"),
-        patch("aipass.aipass.apps.modules.help_chat.error", mock_error),
-    ]
-    with ExitStack() as stack:
-        for p in patches:
-            stack.enter_context(p)
-        result = handle_command("help", ["what", "is", "the"])
-    return result, mock_error
+    with patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True):
+        return handle_command("help", ["what", "is", "the"])
 
 
-def _capture_depth_offer_prints(readme_path: Path):
-    """Call handle_command for 'drone' where open() raises OSError; capture console output."""
-    printed: list[str] = []
-
-    def capture(*args, **kwargs):
-        """Capture positional string args from console.print calls."""
-        if args:
-            printed.append(str(args[0]))
-
-    mock_console = MagicMock()
-    mock_console.print.side_effect = capture
+def _capture_depth_offer_prints(readme_path: Path) -> None:
+    """Call handle_command for 'drone' where readme_path is never written, so open() raises OSError."""
     patches = [
         patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=readme_path),
-        patch("builtins.open", side_effect=OSError("no file")),
+        patch("aipass.aipass.apps.handlers.readme_map.get_readme_path", return_value=readme_path),
         patch("aipass.aipass.apps.modules.help_chat.logger"),
-        patch("aipass.aipass.apps.modules.help_chat.console", mock_console),
         patch("aipass.aipass.apps.modules.help_chat.header"),
     ]
     with ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)
         handle_command("help", ["drone"])
-    return printed
 
 
 # =============================================================================
-# _extract_keywords
+# Keyword extraction (_extract_keywords), read through `aipass help`
 # =============================================================================
 
 
 class TestExtractKeywords:
-    """Tests for _extract_keywords: stopword filtering and punctuation stripping."""
+    """Keyword extraction, read from the keywords `aipass help` logs for its question."""
 
-    def test_strips_stopwords(self):
-        """Known stopwords must not appear in the result."""
-        result = _extract_keywords("what does drone do")
-        assert "drone" in result
-        assert "what" not in result
-        assert "does" not in result
-        assert "do" not in result
+    def test_strips_stopwords(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Known stopwords must not appear in the result.
 
-    def test_strips_question_mark(self):
+        Mutant: `stripped not in _STOPWORDS and` dropped from the filter -> red.
+        """
+        _out, _err, data = _ask(tmp_path, ["what", "does", "drone", "do"], capsys)
+        assert data["keywords"] == ["drone"]
+
+    def test_strips_question_mark(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Trailing ? on a word must be stripped before comparison."""
-        result = _extract_keywords("how does drone work?")
-        assert "work" in result
-        assert "work?" not in result
+        _out, _err, data = _ask(tmp_path, ["how", "does", "drone", "work?"], capsys)
+        assert data["keywords"] == ["drone", "work"]
 
-    def test_strips_comma_and_period(self):
+    def test_strips_comma_and_period(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Commas and periods attached to words must be stripped."""
-        result = _extract_keywords("drone, flow, prax.")
-        assert "drone" in result
-        assert "flow" in result
-        assert "prax" in result
+        _out, _err, data = _ask(tmp_path, ["drone,", "flow,", "prax."], capsys)
+        assert data["keywords"] == ["drone", "flow", "prax"]
 
-    def test_lowercases_words(self):
+    def test_lowercases_words(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """All output keywords must be lowercase."""
-        result = _extract_keywords("What Is DRONE")
-        assert "drone" in result
-        assert "DRONE" not in result
+        _out, _err, data = _ask(tmp_path, ["What", "Is", "DRONE"], capsys)
+        assert data["keywords"] == ["drone"]
 
-    def test_filters_single_char_words(self):
+    def test_filters_single_char_words(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Single-character tokens must be excluded from output."""
-        result = _extract_keywords("a b c drone")
-        assert "a" not in result
-        assert "b" not in result
-        assert "c" not in result
-        assert "drone" in result
+        _out, _err, data = _ask(tmp_path, ["a", "b", "c", "drone"], capsys)
+        assert data["keywords"] == ["drone"]
 
-    def test_empty_question_returns_empty_list(self):
-        """Empty string input must return an empty list."""
-        assert _extract_keywords("") == []
+    def test_empty_question_returns_empty_list(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """A question of bare punctuation extracts nothing: error printed, nothing logged."""
+        _out, err, data = _ask(tmp_path, ["?", "!"], capsys)
+        assert "Could not extract keywords from question" in err
+        assert data == {}
 
-    def test_all_stopwords_returns_empty_list(self):
-        """A question composed entirely of stopwords must return []."""
-        assert _extract_keywords("what is the") == []
+    def test_all_stopwords_returns_empty_list(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """A question composed entirely of stopwords extracts nothing: error printed, nothing logged."""
+        _out, err, data = _ask(tmp_path, ["what", "is", "the"], capsys)
+        assert "Could not extract keywords from question" in err
+        assert data == {}
 
-    def test_mixed_content_extracts_content_words(self):
+    def test_mixed_content_extracts_content_words(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Only non-stopword, non-punctuation words of length > 1 returned."""
-        result = _extract_keywords("how do i send mail to another branch?")
-        assert "send" in result
-        assert "mail" in result
-        assert "branch" in result
-        assert "how" not in result
-        assert "do" not in result
-        assert "i" not in result
-        assert "to" not in result
+        words = ["how", "do", "i", "send", "mail", "to", "another", "branch?"]
+        _out, _err, data = _ask(tmp_path, words, capsys)
+        assert data["keywords"] == ["send", "mail", "another", "branch"]
 
 
 # =============================================================================
-# _match_branches
+# Branch matching (_match_branches), read through `aipass help`
 # =============================================================================
 
 
 class TestMatchBranches:
-    """Tests for _match_branches: branch-name matching and fallback behaviour."""
+    """Branch matching, read from the branches `aipass help` logs as searched (first three)."""
 
-    @patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=_FAKE_BRANCHES)
-    def test_exact_branch_name_match_is_first(self, _mock):
-        """A keyword exactly matching a branch name places it first in results."""
-        result = _match_branches(["drone"])
-        assert "drone" in result
-        assert result[0] == "drone"
+    def test_exact_branch_name_match_is_first(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """A keyword exactly matching a branch name places it first in results.
 
-    @patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=_FAKE_BRANCHES)
-    def test_multiple_direct_matches_included(self, _mock):
+        Mutant: `if kw in available and kw not in direct:` -> `if False:` (no direct match) -> red.
+        """
+        _out, _err, data = _ask(tmp_path, ["spawn"], capsys, branches=_FAKE_BRANCHES)
+        assert data["branches_searched"] == ["spawn"]
+
+    def test_multiple_direct_matches_included(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Multiple exact branch-name keywords all appear in results."""
-        result = _match_branches(["drone", "flow"])
-        assert "drone" in result
-        assert "flow" in result
+        _out, _err, data = _ask(tmp_path, ["drone", "flow"], capsys, branches=_FAKE_BRANCHES)
+        assert data["branches_searched"] == ["drone", "flow"]
 
-    @patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=_FAKE_BRANCHES)
-    def test_fallback_returns_all_branches_when_no_match(self, _mock):
-        """Unrecognised keyword triggers broad fallback — all branches returned."""
-        result = _match_branches(["xyzzy999"])
-        assert result == _FAKE_BRANCHES
+    def test_fallback_returns_all_branches_when_no_match(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Unrecognised keyword falls back to every branch; the first three are searched and logged.
 
-    @patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=_FAKE_BRANCHES)
-    def test_partial_keyword_in_branch_name(self, _mock):
-        """Keyword 'mail' contained in branch name 'ai_mail' must be included."""
-        result = _match_branches(["mail"])
-        assert "ai_mail" in result
+        Every branch resolves to one README holding the word, so a searched branch prints its
+        section: what is searched is read off the screen, what is logged off the log call.
+        Mutants: the search loop over `branches` uncapped -> red at the fourth branch printed;
+        the log of `branches` uncapped -> red at the logged list.
+        """
+        readme = "# Topic\nxyzzy999 here\n"
+        out, _err, data = _ask(tmp_path, ["xyzzy999"], capsys, readme=readme, branches=_FAKE_BRANCHES)
+        searched = [b for b in _FAKE_BRANCHES if f"{b} — Topic" in out]
+        assert searched == _FAKE_BRANCHES[:3]
+        assert data["branches_searched"] == _FAKE_BRANCHES[:3]
 
-    @patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=[])
-    def test_empty_branches_list_returns_empty(self, _mock):
-        """When no branches exist, result must be an empty list."""
-        assert _match_branches(["drone"]) == []
+    def test_partial_keyword_in_branch_name(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Keyword 'mail' contained in branch name 'ai_mail' is searched after the direct match."""
+        _out, _err, data = _ask(tmp_path, ["drone", "mail"], capsys, branches=_FAKE_BRANCHES)
+        assert data["branches_searched"] == ["drone", "ai_mail"]
 
-    @patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=_FAKE_BRANCHES)
-    def test_no_duplicates_in_result(self, _mock):
+    def test_empty_branches_list_returns_empty(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """When no branches exist, nothing is searched and nothing is found."""
+        with patch(f"{_HC}.list_branches", return_value=[]):
+            with patch(f"{_HC}.json_handler", autospec=True) as jh:
+                assert handle_command("help", ["drone"]) is True
+        assert jh.log_operation.call_args.kwargs["data"]["branches_searched"] == []
+        assert "No relevant information found." in capsys.readouterr().out
+
+    def test_no_duplicates_in_result(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Passing the same keyword twice must not produce duplicate branch entries."""
-        result = _match_branches(["drone", "drone"])
-        assert result.count("drone") == 1
+        _out, _err, data = _ask(tmp_path, ["drone", "drone"], capsys, branches=_FAKE_BRANCHES)
+        assert data["branches_searched"] == ["drone"]
 
 
 # =============================================================================
-# _search_readme
+# Section splitting and ranking (_split_sections, _score_section, _search_readme),
+# read through `aipass help`
 # =============================================================================
 
 
 class TestSplitSections:
-    """Tests for _split_sections: heading-bounded splitting."""
+    """Heading-bounded splitting, read from the sections `aipass help drone` prints."""
 
-    def test_splits_on_headings(self):
-        """Each #/##/### heading starts a new section."""
-        sections = _split_sections(_SAMPLE_README.splitlines(keepends=True))
-        titles = [s["title"] for s in sections]
-        assert "Drone" in titles
-        assert "Usage" in titles
+    def test_splits_on_headings(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Each #/##/### heading starts a new section, each printed with its own title.
 
-    def test_preamble_becomes_intro_section(self):
+        Mutant: `_HEADING_RE.match(line)` -> `None` (no heading ever splits) -> red.
+        """
+        out, _err, _data = _ask(tmp_path, ["drone", "usage"], capsys, readme=_SAMPLE_README)
+        assert "drone — Drone  (src/aipass/drone/README.md:1-4)" in out
+        assert "drone — Usage  (src/aipass/drone/README.md:5-9)" in out
+
+    def test_preamble_becomes_intro_section(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Content before the first heading is kept as an untitled section."""
-        sections = _split_sections(["intro line\n", "# Title\n", "body\n"])
-        assert sections[0]["title"] == ""
-        assert "intro line" in sections[0]["lines"]
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme="intro drone line\n# Title\nbody\n")
+        assert "drone — (intro)  (src/aipass/drone/README.md:1-1)" in out
+        assert "intro drone line" in out
 
-    def test_line_numbers_1_indexed_and_bounded(self):
+    def test_line_numbers_1_indexed_and_bounded(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """start = heading line, end = last line of the section."""
-        sections = _split_sections(_SAMPLE_README.splitlines(keepends=True))
-        drone_sec = next(s for s in sections if s["title"] == "Drone")
-        assert drone_sec["start"] == 1
-        assert drone_sec["end"] >= drone_sec["start"]
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme="# Other\nx\n# Drone\nThe drone router.\n")
+        assert "drone — Drone  (src/aipass/drone/README.md:3-4)" in out
 
-    def test_heading_inside_code_fence_ignored(self):
+    def test_heading_inside_code_fence_ignored(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """A # line inside ``` fences is body text, not a section break."""
-        sections = _split_sections(["# Real\n", "```\n", "# not a heading\n", "```\n", "tail\n"])
-        assert len(sections) == 1
-        assert "# not a heading" in sections[0]["lines"]
+        readme = "# Real\n```\n# not a heading drone\n```\ntail\n"
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme=readme)
+        assert "drone — Real  (src/aipass/drone/README.md:1-5)" in out
+        assert "# not a heading drone" in out
+        assert out.count("drone — ") == 1
 
-    def test_empty_input_returns_empty(self):
-        """No lines → no sections."""
-        assert _split_sections([]) == []
+    def test_empty_input_returns_empty(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """An empty README has no sections: nothing found."""
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme="")
+        assert "No relevant information found." in out
 
 
 class TestScoreSection:
-    """Tests for _score_section: title weighting and body-hit capping."""
+    """Section scoring, read from the order `aipass help drone` prints sections in."""
 
-    def _sec(self, title: str, body: list[str]) -> dict:
-        return {"title": title, "start": 1, "end": len(body) + 1, "lines": body}
+    def test_exact_title_match_beats_containment(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Title == keyword outranks keyword-in-title, even when it comes later in the file.
 
-    def test_exact_title_match_beats_containment(self):
-        """Title == keyword scores higher than keyword-in-title."""
-        exact = _score_section(self._sec("Drone", []), ["drone"])
-        contains = _score_section(self._sec("Drone Commands", []), ["drone"])
-        assert exact > contains
+        Mutant: `6 if kw == title_lower else 3` -> `3` (no exact-title bonus) -> red.
+        """
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme="# Drone Commands\n# Drone\n")
+        assert out.index("README.md:2-2") < out.index("README.md:1-1")
 
-    def test_body_hit_lines_are_capped(self):
-        """30 hit lines score no more than the cap allows — tables can't drown intros."""
-        long_body = [f"drone line {i}" for i in range(30)]
-        short_body = ["drone here", "drone again", "drone third", "drone fourth", "drone fifth"]
-        assert _score_section(self._sec("x", long_body), ["drone"]) == _score_section(
-            self._sec("x", short_body), ["drone"]
-        )
+    def test_body_hit_lines_are_capped(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """30 hit lines score the same as 5 — tables can't drown the earlier intro.
 
-    def test_no_hits_scores_zero(self):
-        """Section without any keyword scores 0."""
-        assert _score_section(self._sec("Other", ["nothing here"]), ["drone"]) == 0
+        Equal scores tie to document order, so each section comes first when it comes first in
+        the README: a long section scored higher loses the first order, lower loses the second.
+        Mutants: `min(hit_lines, 5)` -> `hit_lines` (no cap) -> red at the first order;
+        the long section scored lower -> red at the second.
+        """
+        short = "# Short\n" + "".join(f"drone s{i}\n" for i in range(5))
+        long = "# Long\n" + "".join(f"drone l{i}\n" for i in range(30))
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme=short + long)
+        assert out.index("drone — Short") < out.index("drone — Long")
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme=long + short)
+        assert out.index("drone — Long") < out.index("drone — Short")
+
+    def test_no_hits_scores_zero(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """A section without any keyword is never printed."""
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme="# Other\nnothing here\n")
+        assert "Other" not in out
+        assert "No relevant information found." in out
 
 
 class TestSearchReadme:
-    """Tests for _search_readme: live reads, section ranking, error handling."""
+    """Live README reads and section ranking, through `aipass help` over a README on disk."""
 
-    def _mock_lines(self, content):
-        """Return a patch that makes read_readme_lines return content as lines."""
-        lines = content.splitlines(keepends=True)
-        return patch("aipass.aipass.apps.modules.help_chat.read_readme_lines", return_value=lines)
+    def test_returns_whole_sections(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """The matched section is printed whole: title, citation and every body line."""
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme=_SAMPLE_README)
+        assert "drone — Usage  (src/aipass/drone/README.md:5-9)" in out
+        assert "Run tasks with drone dispatch." in out
+        assert "Drone supports multiple branches." in out
 
-    def test_returns_whole_sections(self):
-        """Results are section dicts with title/start/end/lines."""
-        with self._mock_lines(_SAMPLE_README):
-            results = _search_readme("drone", ["drone"])
-        assert len(results) > 0
-        assert all({"title", "start", "end", "lines"} <= set(s.keys()) for s in results)
+    def test_returns_at_most_two_sections(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """No more than two sections are printed per branch.
 
-    def test_returns_at_most_two_sections(self):
-        """No more than _MAX_SECTIONS sections come back."""
-        content = "\n".join(f"# S{i}\ndrone body {i}\n" for i in range(6))
-        with self._mock_lines(content):
-            results = _search_readme("drone", ["drone"])
-        assert len(results) <= 2
+        Mutant: `hits[:_MAX_SECTIONS]` -> `hits` -> red.
+        """
+        readme = "".join(f"# S{i}\ndrone body {i}\n" for i in range(6))
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme=readme)
+        assert out.count("drone — S") == 2
 
-    def test_no_keyword_match_returns_empty(self):
-        """Keyword with no hits in the README must return an empty list."""
-        with self._mock_lines(_SAMPLE_README):
-            results = _search_readme("drone", ["xyzzy999"])
-        assert results == []
+    def test_no_keyword_match_returns_empty(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Keyword with no hits in the README prints no section."""
+        out, _err, _data = _ask(tmp_path, ["drone", "xyzzy999"], capsys, readme="# Intro\nnothing\n")
+        assert "Intro" not in out
+        assert "No relevant information found." in out
 
-    def test_handler_returns_none_returns_empty_and_logs(self):
-        """None from handler must return [] and call logger.warning."""
-        with patch("aipass.aipass.apps.modules.help_chat.read_readme_lines", return_value=None):
-            with patch("aipass.aipass.apps.modules.help_chat.logger") as mock_logger:
-                results = _search_readme("nonexistent", ["drone"])
-        assert results == []
-        mock_logger.warning.assert_called_once()
+    def test_handler_returns_none_returns_empty_and_logs(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """An unreadable README prints no section and logs a warning naming the branch."""
+        readme_path = tmp_path / "src" / "aipass" / "drone" / "README.md"  # never written
+        with ExitStack() as stack:
+            stack.enter_context(patch(f"{_HC}.json_handler", autospec=True))
+            stack.enter_context(patch(f"{_HC}.list_branches", return_value=["drone"]))
+            stack.enter_context(patch(f"{_HC}.get_readme_path", return_value=readme_path))
+            stack.enter_context(patch(f"{_RM}.get_readme_path", return_value=readme_path))
+            mock_logger = stack.enter_context(patch(f"{_HC}.logger"))
+            assert handle_command("help", ["drone"]) is True
+        mock_logger.warning.assert_called_once_with("[help_chat] Could not read README for branch %s", "drone")
+        assert "No relevant information found." in capsys.readouterr().out
 
-    def test_matching_is_case_insensitive(self):
-        """Uppercase text in README must still match a lowercase query keyword."""
-        with self._mock_lines("# Intro\nDRONE does routing\n"):
-            results = _search_readme("drone", ["drone"])
-        assert len(results) == 1
+    def test_matching_is_case_insensitive(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Uppercase text in README must still match a lowercase query keyword.
 
-    def test_exact_title_section_ranked_first(self):
+        Mutant: `line_lower = line.lower()` -> `line_lower = line` -> red.
+        """
+        out, _err, _data = _ask(tmp_path, ["routing"], capsys, readme="# Intro\nDRONE does ROUTING\n")
+        assert "DRONE does ROUTING" in out
+
+    def test_exact_title_section_ranked_first(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """The '# Drone' intro outranks a longer commands section for 'drone'."""
-        content = "# Drone\nThe drone router.\n\n## Commands\n" + "\n".join(f"drone cmd {i}" for i in range(20))
-        with self._mock_lines(content):
-            results = _search_readme("drone", ["drone"])
-        assert results[0]["title"] == "Drone"
+        readme = "# Drone\nThe drone router.\n\n## Commands\n" + "\n".join(f"drone cmd {i}" for i in range(20))
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme=readme)
+        assert out.index("drone — Drone") < out.index("drone — Commands")
 
 
 # =============================================================================
-# _format_answer
+# Answer rendering (_format_answer), read through `aipass help`
 # =============================================================================
 
 
 class TestFormatAnswer:
-    """Tests for _format_answer: section rendering, citations, truncation."""
+    """Answer rendering — citations, titles, truncation — as `aipass help` prints it."""
 
-    def _path(self, branch: str) -> Path:
-        """Return a fake absolute README path for the given branch."""
-        return Path(f"/home/user/Projects/AIPass/src/aipass/{branch}/README.md")
+    def test_citation_range_format_present(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Citation must follow the (src/aipass/{branch}/README.md:{start}-{end}) format.
 
-    def _sec(self, title: str, start: int, end: int, body: list[str]) -> dict:
-        return {"title": title, "start": start, "end": end, "lines": body}
+        Mutant: `f"({rel_path}:{sec['start']}-{sec['end']})"` -> `f"({rel_path})"` -> red.
+        """
+        readme = "# A\nx\n# Drone\ntask-runner\nmore\n\n\nend\n"
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme=readme)
+        assert "(src/aipass/drone/README.md:3-8)" in out
 
-    def test_citation_range_format_present(self):
-        """Citation must follow the (src/aipass/{branch}/README.md:{start}-{end}) format."""
-        path = self._path("drone")
-        result = _format_answer("drone", path, [self._sec("Drone", 3, 8, ["task-runner"])])
-        assert "(src/aipass/drone/README.md:3-8)" in result
-
-    def test_branch_and_title_in_output(self):
+    def test_branch_and_title_in_output(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Output must include the branch name and section title."""
-        path = self._path("drone")
-        result = _format_answer("drone", path, [self._sec("Overview", 1, 4, ["some line"])])
-        assert "drone" in result
-        assert "Overview" in result
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme="# Overview\ndrone line\n")
+        assert "drone — Overview" in out
 
-    def test_multiple_sections_all_cited(self):
+    def test_multiple_sections_all_cited(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Every section must carry its own line-range citation."""
-        path = self._path("flow")
-        sections = [
-            self._sec("One", 1, 4, ["a"]),
-            self._sec("Two", 5, 9, ["b"]),
-        ]
-        result = _format_answer("flow", path, sections)
-        assert "(src/aipass/flow/README.md:1-4)" in result
-        assert "(src/aipass/flow/README.md:5-9)" in result
+        path = tmp_path / "src" / "aipass" / "flow" / "README.md"
+        readme = "# One\nflow a\n\n\n# Two\nflow b\n\n\n\n"
+        out, _err, _data = _ask(tmp_path, ["flow"], capsys, readme=readme, branches=["flow"], readme_path=path)
+        assert "(src/aipass/flow/README.md:1-4)" in out
+        assert "(src/aipass/flow/README.md:5-9)" in out
 
-    def test_fallback_citation_when_src_not_in_path(self):
+    def test_fallback_citation_when_src_not_in_path(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """When path lacks 'src', fallback citation must still include branch and range."""
-        path = Path("/unusual/path/drone/README.md")
-        with patch("aipass.aipass.apps.modules.help_chat.logger"):
-            result = _format_answer("drone", path, [self._sec("X", 7, 9, ["some content"])])
-        assert "src/aipass/drone/README.md:7-9" in result
+        path = tmp_path / "unusual" / "path" / "drone" / "README.md"
+        with patch(f"{_HC}.logger"):
+            out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme="# X\ndrone content\n", readme_path=path)
+        assert "(src/aipass/drone/README.md:1-2)" in out
 
-    def test_long_section_truncated_with_read_hint(self):
-        """Bodies beyond _MAX_SECTION_LINES are cut and point at aipass read."""
-        path = self._path("drone")
-        body = [f"line {i}" for i in range(_MAX_SECTION_LINES + 10)]
-        result = _format_answer("drone", path, [self._sec("Big", 1, len(body) + 1, body)])
-        assert "aipass read drone" in result
-        assert f"line {_MAX_SECTION_LINES + 5}" not in result
+    def test_long_section_truncated_with_read_hint(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Bodies beyond the 25-line cap are cut and point at aipass read.
 
-    def test_untitled_section_labeled_intro(self):
+        Mutant: `if len(body) > _MAX_SECTION_LINES:` -> `if False:` (never truncated) -> red.
+        """
+        readme = "# Drone\n" + "".join(f"row{i:02d}\n" for i in range(_BODY_CAP + 10))
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme=readme)
+        assert f"row{_BODY_CAP - 1:02d}" in out
+        assert f"row{_BODY_CAP:02d}" not in out
+        assert "aipass read drone for the full document" in out
+
+    def test_untitled_section_labeled_intro(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """A preamble section with no heading renders with an (intro) label."""
-        path = self._path("drone")
-        result = _format_answer("drone", path, [self._sec("", 1, 2, ["preamble text"])])
-        assert "(intro)" in result
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme="drone preamble text\n")
+        assert "drone — (intro)" in out
 
 
 # =============================================================================
@@ -448,30 +467,37 @@ class TestHandleCommand:
         assert result is True
         mock_intro.assert_called_once()
 
-    def test_valid_drone_question_returns_true(self):
-        """A well-formed question about drone must return True."""
+    def test_valid_drone_question_returns_true(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Mutant: found answer not printed -> red.
+
+        Mutant: readme_map's `return fh.readlines()` -> `return []` (README on disk never read) -> red.
+        """
         readme_content = "# Drone\nDrone dispatches tasks to branches.\n"
-        result = _call_handle_command_drone_question(readme_content, _FAKE_README_PATH)
+        readme_path = tmp_path / "src" / "aipass" / "drone" / "README.md"
+        result = _call_handle_command_drone_question(readme_content, readme_path)
         assert result is True
+        out, _err = capsys.readouterr()
+        assert "Drone dispatches tasks to branches." in out
 
-    def test_no_readme_match_still_returns_true(self):
-        """handle_command must return True even when no README path resolves."""
+    def test_no_readme_match_still_returns_true(self, capsys: pytest.CaptureFixture[str]):
+        """Mutant: no-match notice not printed -> red."""
         assert _call_handle_no_match() is True
+        out, _err = capsys.readouterr()
+        assert "No relevant information found." in out
 
-    def test_all_stopwords_returns_true_and_calls_error(self):
-        """A question of only stopwords must return True and call error()."""
-        result, mock_error = _call_handle_all_stopwords()
+    def test_all_stopwords_returns_true_and_calls_error(self, capsys: pytest.CaptureFixture[str]):
+        """Mutant: error() for empty keywords dropped -> red."""
+        result = _call_handle_all_stopwords()
         assert result is True
-        mock_error.assert_called_once()
+        _out, err = capsys.readouterr()
+        assert "Could not extract keywords from question" in err
 
-    def test_depth_offer_always_printed(self):
+    def test_depth_offer_always_printed(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """Depth offer lines must appear even when the README cannot be opened.
 
-        The `or` is gone (v5 assertion_shape, 2026-09-08): both clauses were
-        about the same captured text, so either alone carried the assertion.
-        The surviving clause is the one the code prints, measured by running
-        this unit against the real depth-offer path.
+        Mutant: depth-offer 'aipass read' line dropped -> red.
         """
-        printed = _capture_depth_offer_prints(_FAKE_README_PATH)
-        combined = "\n".join(printed)
-        assert "aipass read" in combined
+        readme_path = tmp_path / "src" / "aipass" / "drone" / "README.md"
+        _capture_depth_offer_prints(readme_path)
+        out, _err = capsys.readouterr()
+        assert "aipass read" in out

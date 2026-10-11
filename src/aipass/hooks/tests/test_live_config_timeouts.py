@@ -1,11 +1,25 @@
-"""Pins against the live .aipass/ configs, not fixtures — see each class docstring.
+# =================== AIPass ====================
+# Name: test_live_config_timeouts.py
+# Version: 1.0.1
+# Description: Pins against the live .aipass/hooks.json and .aipass/project_hooks.json
+# Branch: hooks
+# Created: 2026-08-13
+# Modified: 2026-09-27
+# =============================================
 
-Both classes here read the REAL repo-root files on purpose, which is why this
-file is one of the four that red a copied tree in @seedgo's audit-tests control
-run: measuring the live installation is the whole point, and a copy is not it.
-New live-config pins belong HERE rather than in a fifth file, so that
-position-dependence stays concentrated where it is declared.
-"""
+"""Tests for the live .aipass/ hook configs that apps/handlers/config/loader.py hands the engine."""
+
+# Pins against the live .aipass/ configs, not fixtures — see each class docstring.
+#
+# Both classes here read the REAL repo-root files on purpose, which is why this
+# file is one of the four that red a copied tree in @seedgo's audit-tests control
+# run: measuring the live installation is the whole point, and a copy is not it.
+# New live-config pins belong HERE rather than in a fifth file, so that
+# position-dependence stays concentrated where it is declared.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — _run_handler's timeout_s default of 30, owned by tests/test_engine.py
+# seedgo: no-test-needed(stdlib) — json.loads reading the files; a malformed file fails every test here at once
 
 
 class TestLiveProjectConfigTimeouts:

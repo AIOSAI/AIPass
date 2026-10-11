@@ -39,6 +39,11 @@ def print_introspection():
 def print_help():
     """Display help for this module."""
     print_introspection()
+    console.print()
+    console.print("[yellow]Usage:[/yellow]")
+    console.print("  drive_check run — test Drive auth and folder access")
+    console.print()
+    console.print("The check is account-wide; it takes no project argument.")
 
 
 def run_drive_check() -> bool:
@@ -80,8 +85,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Screen the WHOLE sequence, not just args[0]. The default branch
-    # below runs the check for ANY unrecognised first arg, so
+    # Screen the WHOLE sequence, not just args[0]. There used to be a default
+    # branch below that ran the check for ANY unrecognised first arg, so
     # 'drive_check foo --help' made a live Drive auth call (proven
     # 2026-08-13). Bare "help" stays first-position-only.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
@@ -92,8 +97,22 @@ def handle_command(command: str, args: list) -> bool:
         run_drive_check()
         return True
 
-    # Default: run the check
-    run_drive_check()
+    # There is NO default branch any more. Until now the bottom of this
+    # function was a bare run_drive_check(), so every unrecognised first
+    # argument -- 'drive_check statuss', 'drive_check --froce' -- was a LIVE
+    # Google Drive auth against the real account. The --help shape of that
+    # hole was closed 2026-08-13 by the gate above; the plain typo was not.
+    #
+    # Refuse by name, through error(): it writes to stderr and calls
+    # mark_command_failed(), so main()'s resolve_exit reports 2 instead of 0.
+    # Return True, not False: route_command stops at the first module that
+    # claims the command, and a False here makes main() print its own
+    # "Unknown command: drive_check" -- naming the command that exists rather
+    # than the verb that does not, while this refusal scrolls past above it.
+    cli_error(
+        f"Unknown drive_check verb: {args[0]}",
+        suggestion="drive_check run  (verbs: run, help; flags: --help, -h)",
+    )
     return True
 
 

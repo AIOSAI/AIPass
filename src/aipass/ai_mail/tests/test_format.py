@@ -1,11 +1,21 @@
-"""Tests for email formatting handler -- lookup, preview, header, list item."""
+# =================== AIPass ====================
+# Name: test_format.py
+# Description: Tests for email formatting handler
+# Version: 1.0.0
+# Created: 2026-04-25
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/email/format.py -- lookup, preview, header, list item."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — format_update_count(), unrelated to display formatting: tests/test_upsert.py
 
 import io
 import json
 
 import pytest
 from unittest.mock import MagicMock
-from pathlib import Path
 
 import aipass.ai_mail.apps.handlers.email.format as mod
 
@@ -144,9 +154,9 @@ def test_format_email_preview_default_max_length():
 # --- format_email_header tests ---------------------------------------
 
 
-def test_format_email_header_contains_all_fields(monkeypatch):
+def test_format_email_header_contains_all_fields(monkeypatch, tmp_path):
     """Header includes From, Date, Subject, and separator lines."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "from_name": "TEAM_1",
         "from": "@team_1",
@@ -160,9 +170,9 @@ def test_format_email_header_contains_all_fields(monkeypatch):
     assert "=" * 70 in result
 
 
-def test_format_email_header_missing_fields(monkeypatch):
+def test_format_email_header_missing_fields(monkeypatch, tmp_path):
     """Uses defaults for missing email_data fields."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     result = mod.format_email_header({})
     assert "From: Unknown (unknown)" in result
     assert "Date: Unknown" in result
@@ -172,9 +182,10 @@ def test_format_email_header_missing_fields(monkeypatch):
 def test_format_email_header_logs_operation(
     _suppress_log_operation: MagicMock,
     monkeypatch,
+    tmp_path,
 ):
     """format_email_header calls json_handler.log_operation."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data: dict[str, str] = {"subject": "Log Test"}
     mod.format_email_header(email_data)
     _suppress_log_operation.log_operation.assert_called_once_with("format_email_header", {"subject": "Log Test"})
@@ -195,9 +206,9 @@ def test_format_email_header_with_alias(registry_file):
 # --- format_email_list_item tests ------------------------------------
 
 
-def test_format_email_list_item_new_message(monkeypatch):
+def test_format_email_list_item_new_message(monkeypatch, tmp_path):
     """New/unread message shows the new-mail emoji marker."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "id": "abc123",
         "from_name": "SENDER",
@@ -213,9 +224,9 @@ def test_format_email_list_item_new_message(monkeypatch):
     assert "Subject: New Mail" in result
 
 
-def test_format_email_list_item_opened_message(monkeypatch):
+def test_format_email_list_item_opened_message(monkeypatch, tmp_path):
     """Opened message shows the opened-mailbox emoji marker."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "id": "def456",
         "from_name": "SENDER",
@@ -229,9 +240,9 @@ def test_format_email_list_item_opened_message(monkeypatch):
     assert "\U0001f4ec" in result  # opened-mailbox emoji
 
 
-def test_format_email_list_item_read_fallback(monkeypatch):
+def test_format_email_list_item_read_fallback(monkeypatch, tmp_path):
     """Falls back to 'read' field when 'status' is absent."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "id": "ghi789",
         "from_name": "SENDER",
@@ -245,9 +256,9 @@ def test_format_email_list_item_read_fallback(monkeypatch):
     assert "\U0001f4ec" in result  # opened-mailbox emoji (read=True)
 
 
-def test_format_email_list_item_show_unread_false(monkeypatch):
+def test_format_email_list_item_show_unread_false(monkeypatch, tmp_path):
     """When show_unread=False, shows 'To:' instead of sender with emoji."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "id": "jkl012",
         "to": "@recipient",
@@ -261,17 +272,17 @@ def test_format_email_list_item_show_unread_false(monkeypatch):
     assert "\U0001f4ec" not in result
 
 
-def test_format_email_list_item_missing_fields(monkeypatch):
+def test_format_email_list_item_missing_fields(monkeypatch, tmp_path):
     """Uses defaults for missing email_data fields."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     result = mod.format_email_list_item(1, {})
     assert "[????????]" in result
     assert "Subject: No Subject" in result
 
 
-def test_format_email_list_item_truncates_long_message(monkeypatch):
+def test_format_email_list_item_truncates_long_message(monkeypatch, tmp_path):
     """Long message is truncated in the preview."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "id": "trunc1",
         "from_name": "SENDER",
@@ -314,9 +325,9 @@ def _render(markup_text: str) -> str:
         "RE: [PLAN-42] uppercase bracket tag",
     ],
 )
-def test_list_item_subject_survives_rich_render(monkeypatch, subject):
+def test_list_item_subject_survives_rich_render(monkeypatch, subject, tmp_path):
     """Every bracket/angle shape renders visibly instead of vanishing or raising."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "id": "brack01",
         "from_name": "SKILLS",
@@ -331,9 +342,9 @@ def test_list_item_subject_survives_rich_render(monkeypatch, subject):
     assert "brack01" in out
 
 
-def test_list_item_preview_markup_survives_render(monkeypatch):
+def test_list_item_preview_markup_survives_render(monkeypatch, tmp_path):
     """A body preview containing markup renders literally, row intact."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "id": "prev001",
         "from_name": "SENDER",
@@ -347,9 +358,9 @@ def test_list_item_preview_markup_survives_render(monkeypatch):
     assert "SHIPPED [dim]note and [/rc] tag" in out
 
 
-def test_list_item_sender_name_markup_survives_render(monkeypatch):
+def test_list_item_sender_name_markup_survives_render(monkeypatch, tmp_path):
     """A sender display name carrying markup cannot eat the row."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "id": "send001",
         "from_name": "[bold]EVIL",
@@ -364,9 +375,9 @@ def test_list_item_sender_name_markup_survives_render(monkeypatch):
     assert "plain subject" in out
 
 
-def test_list_item_recipient_markup_survives_render(monkeypatch):
+def test_list_item_recipient_markup_survives_render(monkeypatch, tmp_path):
     """The sent-listing branch (show_unread=False) escapes the 'to' field too."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "id": "sent001",
         "to": "@team [dim]one",
@@ -379,9 +390,9 @@ def test_list_item_recipient_markup_survives_render(monkeypatch):
     assert "sent subject <target>" in out
 
 
-def test_email_header_subject_markup_survives_render(monkeypatch):
+def test_email_header_subject_markup_survives_render(monkeypatch, tmp_path):
     """The view header escapes subject and sender as well as the listing."""
-    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "nonexistent")
     email_data = {
         "from_name": "SKILLS",
         "from": "@skills",

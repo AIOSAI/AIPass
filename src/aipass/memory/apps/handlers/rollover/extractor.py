@@ -3,7 +3,7 @@
 # Description: Memory Extraction Handler
 # Version: 0.8.0
 # Created: 2025-11-16
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -568,7 +568,7 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 # =============================================================================
 
 
-def extract_items(file_path: Path, percentage: int | None = None) -> Dict[str, Any]:
+def extract_items(file_path: Path) -> Dict[str, Any]:
     """
     Extract items from memory file (WITH BACKUP SAFETY)
 
@@ -577,7 +577,6 @@ def extract_items(file_path: Path, percentage: int | None = None) -> Dict[str, A
 
     Args:
         file_path: Path to memory JSON file
-        percentage: Percentage of items to extract (auto-calculated if None)
 
     Returns:
         Dict with extracted items and metadata
@@ -630,7 +629,7 @@ def extract_items(file_path: Path, percentage: int | None = None) -> Dict[str, A
 # =============================================================================
 
 
-def extract_with_metadata(file_path: Path, percentage: int | None = None) -> Dict[str, Any]:
+def extract_with_metadata(file_path: Path) -> Dict[str, Any]:
     """
     Extract items with enriched metadata for vectorization
 
@@ -638,13 +637,12 @@ def extract_with_metadata(file_path: Path, percentage: int | None = None) -> Dic
 
     Args:
         file_path: Path to memory JSON file
-        percentage: Percentage of items to extract (auto-calculated if None)
 
     Returns:
         Dict with extracted items + vectorization metadata
     """
     # Do standard extraction
-    result = extract_items(file_path, percentage)
+    result = extract_items(file_path)
 
     if not result["success"]:
         return result

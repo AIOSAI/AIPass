@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: secrets.py
 # Description: Secrets Store Handler
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-06-15
-# Modified: 2026-06-15
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -59,7 +59,9 @@ def get_secret(provider: str, slug: str, as_json: bool = False) -> Optional[Any]
     provider_dir = SECRETS_BASE / provider
 
     if not provider_dir.exists() or not provider_dir.is_dir():
-        logger.warning(f"Provider directory not found: {provider_dir}")
+        # The provider's name, never its directory: a path inside the secrets
+        # base reads as a secret's location (seedgo clear_text_secret_logging).
+        logger.warning(f"Provider directory not found under the secrets base: {provider}")
         return None
 
     # Try JSON file first
@@ -78,7 +80,13 @@ def get_secret(provider: str, slug: str, as_json: bool = False) -> Optional[Any]
             json_handler.log_operation("secret_retrieved", {"provider": provider, "slug": slug, "format": "raw"})
             return result
 
-    logger.warning(f"Secret not found: {provider}/{slug}")
+    # The provider only, as an argument. The slug is the caller's to name:
+    # callers list slugs out of the store (list_secrets) and hand them back
+    # here, so a slug on this line is a value read out of the secrets store
+    # reaching a log (CodeQL py/clear-text-logging-sensitive-data, PR #774
+    # round eleven: telegram list_bot_configs -> migrate_bot_config ->
+    # _get_secret -> get_secret -> this f-string -> prax logger.py:135).
+    logger.warning("Secret not found under provider %s: no JSON or raw document for the requested slug", provider)
     return None
 
 
@@ -184,7 +192,9 @@ def _read_json_secret(path: Path, as_json: bool) -> Optional[Any]:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"Error reading secret file {path}: {e}")
+        # No path: get_secret's "Secret not found: provider/slug" line that
+        # follows names which one, without saying where it lives.
+        logger.warning(f"Error reading a JSON secret file: {e}")
         return None
 
     if as_json:
@@ -213,5 +223,5 @@ def _read_raw_secret(path: Path) -> Optional[str]:
         with open(path, "r", encoding="utf-8") as f:
             return f.read().strip()
     except OSError as e:
-        logger.warning(f"Error reading secret file {path}: {e}")
+        logger.warning(f"Error reading a raw secret file: {e}")
         return None

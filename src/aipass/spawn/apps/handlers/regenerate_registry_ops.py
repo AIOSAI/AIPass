@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: regenerate_registry_ops.py
 # Description: Regenerate .template_registry.json for spawn template directories
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-03-25
-# Modified: 2026-03-25
+# Modified: 2026-10-10
 # =============================================
 
 """Regenerate template registry — walk template directory, hash files, build registry.
@@ -39,6 +39,34 @@ _SKIP_SPAWN_FILES = {".template_registry.json", ".branch_meta.json"}
 _BRANCH_PLACEHOLDERS = ("{{BRANCH}}", "{{BRANCHNAME}}")
 
 
+def _registry_date() -> str:
+    """Today's date as the registry stamps it (YYYY-MM-DD) — the clock seam.
+
+    The body is exactly the call it replaced. It exists for the tests, and says
+    so: it closes the midnight window of the last_updated date tests (they
+    compared this clock against their own date.today(), so a run that crossed
+    midnight read two days), and it lets tests/test_regenerate_registry_ops.py
+    stop patching the stdlib datetime process-wide. Spawn's decision,
+    DPLAN-0354 leg 3.
+    """
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _existing_newline(registry_path: Path) -> str:
+    """The line ending the manifest on disk already uses: CRLF if it has one, else LF.
+
+    Args:
+        registry_path: The .template_registry.json about to be written.
+
+    Returns:
+        "\\r\\n" when the existing file holds a CRLF, "\\n" otherwise or when absent.
+    """
+    try:
+        return "\r\n" if b"\r\n" in registry_path.read_bytes() else "\n"
+    except FileNotFoundError:
+        return "\n"
+
+
 # =============================================================================
 # PUBLIC API
 # =============================================================================
@@ -56,6 +84,9 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     Returns:
         dict with keys: metadata, files, directories, stats.
         The stats key is extra (not written to JSON) — used for CLI output.
+        On a refusal, a dict with the single key error: the directory is
+        missing, the existing manifest is there but unreadable (nothing is
+        written), or the write failed.
     """
     template_dir = Path(template_dir)
 
@@ -63,8 +94,16 @@ def regenerate_template_registry(template_dir: Path) -> dict:
         logger.error(f"Template directory does not exist: {template_dir}")
         return {"error": f"Template directory does not exist: {template_dir}"}
 
-    # Load existing registry for ID preservation
+    # Load existing registry for ID preservation. A manifest that is there but
+    # cannot be read is refused, not read as absent: absent mints fresh ids, and
+    # those written over a manifest that exists are a wrong identity (spawn's
+    # finding in leg 5 of DPLAN-0354, cured in leg 6).
+    registry_path = template_dir / _SPAWN_DIR / _TEMPLATE_REGISTRY_FILE
     existing_registry = load_template_registry(template_dir)
+    if existing_registry is None and registry_path.exists():
+        msg = f"Template registry {registry_path} is there but cannot be read; fix or remove it (nothing regenerated)"
+        logger.error(f"[regenerate-registry] {msg}")
+        return {"error": msg}
 
     # Scan and build new registry entries
     files, directories = _scan_template_directory(template_dir, existing_registry)
@@ -89,7 +128,7 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     if unchanged and existing_metadata.get("last_updated"):
         last_updated = existing_metadata["last_updated"]
     else:
-        last_updated = datetime.now().strftime("%Y-%m-%d")
+        last_updated = _registry_date()
 
     registry = {
         "metadata": {
@@ -104,16 +143,16 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     # Write the registry
     spawn_dir = template_dir / _SPAWN_DIR
     spawn_dir.mkdir(parents=True, exist_ok=True)
-    registry_path = spawn_dir / _TEMPLATE_REGISTRY_FILE
 
     try:
         # Staged under a unique mkstemp name rather than a fixed ".tmp": two
         # concurrent regenerations used to share one staging path, and a failed
         # write left that path orphaned beside the registry.
-        atomic_write_text(
-            registry_path,
-            json.dumps(registry, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        )
+        # The manifest keeps the line endings it already has: a CRLF checkout
+        # (Windows, autocrlf) rewritten as LF is every line changed on a no-op.
+        # json.dumps escapes newlines inside strings, so every "\n" is a line end.
+        text = json.dumps(registry, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+        atomic_write_text(registry_path, text.replace("\n", _existing_newline(registry_path)))
     except (IOError, OSError) as exc:
         logger.error(f"Failed to write template registry: {exc}")
         return {"error": f"Failed to write registry: {exc}"}

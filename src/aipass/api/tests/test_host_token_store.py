@@ -1,39 +1,44 @@
 # =================== AIPass ====================
 # Name: test_host_token_store.py
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-09-17
+# Modified: 2026-10-11
 # =============================================
 
-"""
-Tests for the Token Store's Accountability Fields
+"""Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
 
-Devpulse's ruling, granted 2026-08-14 after an operate-scoped token appeared on
-this machine and the store could not say who minted it. Three fields:
+# Tests for the Token Store's Accountability Fields
+#
+# Devpulse's ruling, granted 2026-08-14 after an operate-scoped token appeared on
+# this machine and the store could not say who minted it. Three fields:
+#
+#   minted_by   - best-effort provenance. WHO ran issue-token.
+#   revoked_at  - when a token stopped working.
+#   last_used   - whether a live token is actually live, or merely un-revoked.
+#
+# THE HAZARD THESE TESTS EXIST FOR, and it is not the fields.
+#
+# `last_used` means a write on EVERY authenticated request, against a JSON file
+# that issue and revoke also write. Two things could go wrong, and the second one
+# is the dangerous one:
+#
+#   1. Two writers race and one update is lost. For telemetry, survivable.
+#   2. A telemetry write, holding a record list it read BEFORE a revoke landed,
+#      writes that stale list back — and un-revokes the token. A revoked device
+#      starts working again because somebody looked at a timestamp.
+#
+# So the load-bearing test in this file is not "last_used is written". It is
+# "a concurrent revoke survives a touch". Telemetry must never undo security.
+#
+# And one more: a truncated store reads as empty, which denies every request. With
+# per-request writes that window stops being theoretical, so the write is atomic —
+# a reader sees the old file or the new one, never half of either.
 
-  minted_by   - best-effort provenance. WHO ran issue-token.
-  revoked_at  - when a token stopped working.
-  last_used   - whether a live token is actually live, or merely un-revoked.
-
-THE HAZARD THESE TESTS EXIST FOR, and it is not the fields.
-
-`last_used` means a write on EVERY authenticated request, against a JSON file
-that issue and revoke also write. Two things could go wrong, and the second one
-is the dangerous one:
-
-  1. Two writers race and one update is lost. For telemetry, survivable.
-  2. A telemetry write, holding a record list it read BEFORE a revoke landed,
-     writes that stale list back — and un-revokes the token. A revoked device
-     starts working again because somebody looked at a timestamp.
-
-So the load-bearing test in this file is not "last_used is written". It is
-"a concurrent revoke survives a touch". Telemetry must never undo security.
-
-And one more: a truncated store reads as empty, which denies every request. With
-per-request writes that window stops being theoretical, so the write is atomic —
-a reader sees the old file or the new one, never half of either.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — scope_allows() and resolve_token(), tests/test_host_api.py
+# seedgo: no-test-needed(covered) — the failed-auth audit line, tests/test_host_auth_audit.py
+# seedgo: no-test-needed(stdlib) — secrets.token_urlsafe's randomness itself
 
 import importlib.util
 import json
@@ -47,6 +52,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.modules import host_api as host_api_module
 
@@ -240,6 +246,28 @@ class TestLastUsedAnswersLiveOrDormant:
 
         assert _record(record["id"])["last_used"] != first
 
+    def test_an_unreadable_stamp_is_rewritten_and_said_without_its_value(self, store: Path) -> None:
+        """
+        A hand-edited stamp is due, rewritten readable, and named in words only.
+
+        The stamp is read out of the credential store, and ValueError's own text
+        quotes it, so neither reaches the log line (PR #774 r10).
+        """
+        record, _ = host_tokens.issue_token("pixel-8", scope="read")
+        records = host_tokens.load_tokens()
+        for stored in records:
+            stored["last_used"] = "not-a-date"
+        host_tokens.save_tokens(records)
+
+        with patch(PATCH_TOKENS_LOGGER) as log:
+            host_tokens.touch_token(record["id"])
+
+        assert _record(record["id"])["last_used"] != "not-a-date"
+        message, *values = log.warning.call_args.args
+        logged = message % tuple(values)
+        assert "unreadable last_used stamp, treating as due" in logged
+        assert "not-a-date" not in logged
+
     def test_touching_an_unknown_id_changes_nothing(self, store: Path) -> None:
         """No record created, no error raised."""
         host_tokens.issue_token("pixel-8", scope="read")
@@ -338,9 +366,17 @@ class TestTelemetryNeverUndoesSecurity:
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
 
         with patch.object(host_tokens, "_store_lock", side_effect=OSError("lock is held")):
-            host_tokens.touch_token(record["id"])
+            with patch(PATCH_TOKENS_LOGGER) as log:
+                host_tokens.touch_token(record["id"])
 
         assert _record(record["id"])["last_used"] is None
+        # Said out loud, but never with the id: it is read out of the credential
+        # store (CodeQL py/clear-text-logging-sensitive-data, PR #774 r10).
+        message, *values = log.warning.call_args.args
+        logged = message % tuple(values)
+        assert "could not record last_used for the presented token" in logged
+        assert "lock is held" in logged
+        assert record["id"] not in logged
 
 
 # ==============================================
@@ -413,7 +449,9 @@ class TestOlderRecordsStillWork:
             stored.pop("minted_by", None)
         host_tokens.save_tokens(records)
 
-        assert host_tokens.verify_token(raw) is not None
+        verified = host_tokens.verify_token(raw)
+        assert verified is not None
+        assert verified["id"] == record["id"]
 
     def test_a_version_one_record_lists_without_inventing_a_minter(self, store: Path) -> None:
         """
@@ -453,8 +491,6 @@ class TestTheServerTouchesOnEveryAuthenticatedRequest:
 
     def test_a_successful_verification_touches_the_token(self, store: Path) -> None:
         """Where 'last_used' actually comes from."""
-        from aipass.api.apps.handlers.host import server as host_server
-
         from fastapi.testclient import TestClient
 
         record, raw = host_tokens.issue_token("pixel-8", scope="read")
@@ -470,8 +506,6 @@ class TestTheServerTouchesOnEveryAuthenticatedRequest:
 
     def test_a_refused_request_touches_nothing(self, store: Path) -> None:
         """A rejected token was not used — it was presented and refused."""
-        from aipass.api.apps.handlers.host import server as host_server
-
         from fastapi.testclient import TestClient
 
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
@@ -583,66 +617,145 @@ class TestTheLockIsRealNotDecorative:
         assert host_tokens.verify_token(raw) is None
         assert not host_tokens.lock_path().exists()
 
-    def test_an_access_denial_that_never_clears_still_fails_at_the_deadline(self, store: Path) -> None:
+    def test_a_held_lock_fails_issue_at_the_deadline(self, store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        A fresh lock another writer holds (FILE EXISTS) is waited for, then refused.
+
+        Through issue_token with a real lock file at lock_path(), its mtime now,
+        so it is not stale. The wait is shortened through LOCK_WAIT_SECONDS,
+        read at the call (api, fleet green leg 14); elapsed >= wait with the
+        poll below the wait says the loop polled more than once.
+        """
+        wait = 0.1
+        monkeypatch.setattr(host_tokens, "LOCK_WAIT_SECONDS", wait)
+        monkeypatch.setattr(host_tokens, "LOCK_POLL_SECONDS", 0.01)
+        lock = host_tokens.lock_path()
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_bytes(b"")
+
+        started = time.monotonic()
+        with pytest.raises(OSError) as raised:
+            host_tokens.issue_token("pixel-8", scope="read")
+        elapsed = time.monotonic() - started
+
+        assert elapsed >= wait
+        assert str(raised.value) == f"Token store lock held longer than {wait}s at {lock}"
+        assert raised.value.__cause__ is None
+        assert lock.exists(), "a fresh lock held by another writer was broken"
+
+    def test_an_access_denial_that_never_clears_still_fails_at_the_deadline(
+        self, store: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """
         Waiting out a delete is not forgiving a permissions problem.
 
-        A directory this process cannot write answers the same PermissionError
-        forever. It is polled inside the wait and never past it, and what is
-        raised still carries the denial: fail honestly, never retry forever.
+        Through issue_token, with the lock's directory made unwritable for real.
+        It is polled inside the wait and never past it, and what is raised still
+        carries the denial. Whether the host refuses at all is asked of the host
+        itself: root, and Windows, which ignores a directory's read-only mode,
+        create anyway, and there the issue simply lands (api, fleet green leg 14).
         """
         wait = 0.1
-        lock_file = str(host_tokens.lock_path())
-        real_open = os.open
-        lock_attempts = []
+        monkeypatch.setattr(host_tokens, "LOCK_WAIT_SECONDS", wait)
+        monkeypatch.setattr(host_tokens, "LOCK_POLL_SECONDS", 0.01)
+        lock = host_tokens.lock_path()
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        mode = lock.parent.stat().st_mode
+        lock.parent.chmod(0o500)
+        try:
+            probe = lock.parent / "probe.lock"
+            host_refusals: list = []
+            try:
+                os.close(os.open(str(probe), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+            except PermissionError as refusal:
+                host_refusals.append(refusal)
+            else:
+                probe.unlink()
 
-        def always_denied(path: Any, flags: int, mode: int = 0o777, **kwargs: Any) -> int:
-            if path == lock_file:
-                lock_attempts.append(flags)
-                if len(lock_attempts) > 1000:
-                    raise RuntimeError("the lock loop retried past its deadline")
-                raise PermissionError(13, "Permission denied", path)
-            return real_open(path, flags, mode, **kwargs)
-
-        started = time.monotonic()
-        with patch.object(host_tokens.os, "open", new=always_denied):
-            with pytest.raises(OSError) as raised:
-                with host_tokens._store_lock(wait=wait):
-                    pytest.fail("the lock was reported taken")
-        elapsed = time.monotonic() - started
-
-        assert len(lock_attempts) > 1
-        assert elapsed >= wait
-        assert isinstance(raised.value.__cause__, PermissionError)
-        assert f"{wait}s" in str(raised.value)
+            started = time.monotonic()
+            if host_refusals:
+                host_refusal = host_refusals[0]
+                with pytest.raises(OSError) as raised:
+                    host_tokens.issue_token("pixel-8", scope="read")
+                elapsed = time.monotonic() - started
+                assert elapsed >= wait
+                assert str(raised.value).startswith(f"Token store lock at {lock} still denied access after {wait}s: ")
+                assert type(raised.value.__cause__) is type(host_refusal)
+            else:
+                record, _raw = host_tokens.issue_token("pixel-8", scope="read")
+                assert _record(record["id"])["revoked"] is False
+        finally:
+            lock.parent.chmod(mode)
 
     def test_a_lock_that_cannot_be_removed_is_said_out_loud(self, store: Path) -> None:
         """
-        A release refused ACCESS DENIED has not found the lock already gone.
+        A release refused by the platform has not found the lock already gone.
 
-        The lock is still on disk and every write after it waits for it, so it
-        is a warning, never a debug line claiming it vanished. Still never
-        raised: a release that throws masks whatever the body was doing.
+        Through issue_token: the save stand-in turns the lock into something
+        unlink refuses. POSIX unlinks a held file, so a directory takes its
+        place (IsADirectoryError on Linux, PermissionError on macOS). Windows
+        refuses to unlink a file this process holds open, so there a second
+        handle is kept open past the release instead. The host is asked which
+        by the unlink itself (api, fleet green leg 14). A warning, never a
+        debug line claiming it vanished, and never raised.
         """
-        lock_path = host_tokens.lock_path()
+        lock = host_tokens.lock_path()
+        refusals: list = []
+        held: list = []
 
-        def denied(path: Any, **kwargs: Any) -> None:
-            raise PermissionError(13, "Permission denied", path)
+        def save_and_wedge(*args: Any, **kwargs: Any) -> None:
+            try:
+                os.unlink(str(lock))
+            except PermissionError as refusal:
+                refusals.append(refusal)
+                held.append(open(lock, "rb"))
+            else:
+                lock.mkdir()
 
-        with patch.object(host_tokens.os, "unlink", new=denied), patch(PATCH_TOKENS_LOGGER) as log:
-            host_tokens._drop_lock(lock_path)
+        try:
+            with patch.object(host_tokens, "save_tokens", side_effect=save_and_wedge):
+                with patch(PATCH_TOKENS_LOGGER) as log:
+                    host_tokens.issue_token("pixel-8", scope="read")
+        finally:
+            for handle in held:
+                handle.close()
+            if lock.is_dir():
+                lock.rmdir()
 
+        assert len(held) == len(refusals), "every refused unlink kept its handle open past the release"
         assert log.warning.call_count == 1
         message, *values = log.warning.call_args.args
-        assert str(lock_path) in message % tuple(values)
+        # Named in words, and the only value on the line is the OSError: the
+        # lock's path stays off it (seedgo clear_text_secret_logging, PR #774).
+        assert "token store lock" in message
+        assert len(values) == 1
+        assert isinstance(values[0], OSError)
 
     def test_a_lock_already_gone_at_release_stays_quiet(self, store: Path) -> None:
-        """The ordinary outcome of a stale-lock break racing a release: debug, not a warning."""
-        with patch(PATCH_TOKENS_LOGGER) as log:
-            host_tokens._drop_lock(host_tokens.lock_path())
+        """
+        The ordinary outcome of a stale-lock break racing a release: debug, not a warning.
+
+        Through issue_token: the save stand-in removes the lock mid-body. Windows
+        refuses to unlink a file this process holds open, so there the state
+        cannot arise and the release removes the lock quietly instead; the host
+        is asked by the unlink itself (api, fleet green leg 14).
+        """
+        lock = host_tokens.lock_path()
+        refusals: list = []
+
+        def save_and_break_the_lock(*args: Any, **kwargs: Any) -> None:
+            try:
+                os.unlink(str(lock))
+            except PermissionError as refusal:
+                refusals.append(refusal)
+
+        with patch.object(host_tokens, "save_tokens", side_effect=save_and_break_the_lock):
+            with patch(PATCH_TOKENS_LOGGER) as log:
+                host_tokens.issue_token("pixel-8", scope="read")
 
         assert log.warning.call_count == 0
-        assert log.debug.call_count == 1
+        assert log.debug.call_count == (0 if refusals else 1)
+        assert not lock.exists()
 
 
 class TestTheLockSurvivesAFailedWrite(object):
@@ -667,59 +780,103 @@ class TestTheListingSaysWhatTheStoreNowKnows:
     unanswerable at the place it gets asked.
     """
 
-    def _lines(self, printer: Any) -> str:
-        """Everything the listing printed, as one searchable blob."""
-        return "\n".join(str(call.args[0]) if call.args else "" for call in printer.print.call_args_list)
+    def _listing(self, capsys: pytest.CaptureFixture) -> str:
+        """Run the operator's own command and return what it printed."""
+        assert host_api_module.handle_command("host-api", ["list-tokens"]) is True
+        out, _ = capsys.readouterr()
+        return out
 
-    def test_the_listing_names_the_minter(self, minted_by_baud: Path) -> None:
+    def test_the_listing_names_the_minter(self, minted_by_baud: Path, capsys: pytest.CaptureFixture) -> None:
         """The exact question that could not be answered on the night."""
         host_tokens.issue_token("phase6-verify", scope="operate")
+        capsys.readouterr()
 
-        with patch.object(host_api_module, "console") as printer, patch.object(host_api_module, "header"):
-            host_api_module._cmd_list_tokens()
+        assert "minted by baud" in self._listing(capsys)
 
-        assert "minted by baud" in self._lines(printer)
-
-    def test_an_unused_token_says_so_rather_than_showing_a_blank(self, store: Path) -> None:
+    def test_an_unused_token_says_so_rather_than_showing_a_blank(
+        self, store: Path, capsys: pytest.CaptureFixture
+    ) -> None:
         """Minted-but-never-presented is a different state from live."""
         host_tokens.issue_token("pixel-8", scope="read")
+        capsys.readouterr()
 
-        with patch.object(host_api_module, "console") as printer, patch.object(host_api_module, "header"):
-            host_api_module._cmd_list_tokens()
+        assert "never used" in self._listing(capsys)
 
-        assert "never used" in self._lines(printer)
-
-    def test_a_revoked_token_shows_when_it_died(self, store: Path) -> None:
+    def test_a_revoked_token_shows_when_it_died(self, store: Path, capsys: pytest.CaptureFixture) -> None:
         """Revoked is a state; revoked_at is the thing an incident needs."""
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
         host_tokens.revoke_token(record["id"])
+        capsys.readouterr()
 
-        with patch.object(host_api_module, "console") as printer, patch.object(host_api_module, "header"):
-            host_api_module._cmd_list_tokens()
+        assert "revoked 20" in self._listing(capsys)
 
-        assert "revoked 20" in self._lines(printer)
-
-    def test_a_used_token_shows_a_readable_time_not_an_iso_blob(self, store: Path) -> None:
+    def test_a_used_token_shows_a_readable_time_not_an_iso_blob(
+        self, store: Path, capsys: pytest.CaptureFixture
+    ) -> None:
         """An operator reads this at a terminal, so microseconds are noise."""
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
         host_tokens.touch_token(record["id"])
+        capsys.readouterr()
 
-        with patch.object(host_api_module, "console") as printer, patch.object(host_api_module, "header"):
-            host_api_module._cmd_list_tokens()
-
-        printed = self._lines(printer)
+        printed = self._listing(capsys)
         assert "last used 20" in printed
         assert "never used" not in printed
 
-    def test_an_unparseable_stamp_is_shown_raw_and_never_as_nothing(self) -> None:
+    @pytest.mark.parametrize(
+        ("stamp", "provenance"),
+        [
+            ("not-a-time", "minted by unknown · last used not-a-time"),
+            (None, "minted by unknown · never used"),
+            ("2026-09-28T05:41:07.123456", "minted by unknown · last used 2026-09-28 05:41"),
+        ],
+        ids=["hand-edited", "never-presented", "presented"],
+    )
+    def test_an_unparseable_stamp_is_shown_raw_and_never_as_nothing(
+        self, store: Path, capsys: pytest.CaptureFixture, stamp: str | None, provenance: str
+    ) -> None:
         """
         A stamp that renders as an empty string reads as 'absent'.
 
         Hand-edited stores exist. Showing the odd value is how someone notices;
-        showing nothing is how it stays wrong.
+        showing nothing is how it stays wrong. One rendering per case, so a red
+        names the rendering that broke (api, fleet green leg 4).
         """
-        assert host_api_module._stamp("not-a-time") == "not-a-time"
-        assert host_api_module._provenance({"minted_by": "", "last_used": None}) == "minted by unknown · never used"
+        host_tokens.issue_token("one-token", scope="read")
+        records = host_tokens.load_tokens()
+        for stored in records:
+            stored["minted_by"] = ""
+            stored["last_used"] = stamp
+        host_tokens.save_tokens(records)
+        capsys.readouterr()
+
+        # Pinned exactly, line by line (api, fleet green leg 3): a substring passed a
+        # provenance line with anything around it. Mutants: the unknown-minter word,
+        # 'never used', and the stamp format each changed.
+        lines = {line.strip() for line in self._listing(capsys).splitlines()}
+        assert provenance in lines
+
+    def test_an_unparseable_stamp_is_logged_without_its_value(self, store: Path, capsys: pytest.CaptureFixture) -> None:
+        """
+        The listing shows the odd stamp to the operator; the log line only names it.
+
+        The value and ValueError's text are read out of the credential store, and
+        nothing read from there reaches a log (PR #774 r10).
+        """
+        host_tokens.issue_token("one-token", scope="read")
+        records = host_tokens.load_tokens()
+        for stored in records:
+            stored["last_used"] = "not-a-date"
+        host_tokens.save_tokens(records)
+        capsys.readouterr()
+
+        with patch.object(host_api_module, "logger") as log:
+            listing = self._listing(capsys)
+
+        assert "last used not-a-date" in listing
+        message, *values = log.warning.call_args.args
+        logged = message % tuple(values)
+        assert "unreadable timestamp in the token store" in logged
+        assert "not-a-date" not in logged
 
 
 def test_the_reserved_comment_is_gone(store: Any) -> None:

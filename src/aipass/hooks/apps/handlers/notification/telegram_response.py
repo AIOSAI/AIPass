@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: telegram_response.py
-# Version: 2.1.0
+# Version: 2.1.3
 # Description: Telegram response delivery on Stop event (ported from Dev-Pass)
 # Branch: hooks
 # Layer: apps/handlers/notification
 # Created: 2026-06-15
-# Modified: 2026-08-14
+# Modified: 2026-10-05
 # =============================================
 
 """Telegram response delivery on Stop event.
@@ -104,7 +104,7 @@ def _in_mirror_dir(path: Path) -> bool:
         return False
 
 
-def find_pending_file(session_id: str) -> Path | None:  # noqa: ARG001
+def find_pending_file() -> Path | None:
     """Find pending file matching current context via multi-bot matching.
 
     Priority 1: AIPASS_BOT_ID env var -> bot-{bot_id}.json (mirror dir first, then pending)
@@ -539,6 +539,16 @@ def edit_telegram_message(bot_token: str, chat_id: int, message_id: int, text: s
         return {"ok": False}
 
 
+def _sleep(seconds: float) -> None:
+    """The retry waits' one clock: the send backoff and the JSONL and mirror extraction retries.
+
+    A seam: test_telegram_response is the reason it exists. Its retry tests reach these waits through
+    handle(), whose signature is the hook's, and record the delays here in place of patching time.sleep,
+    which every reader in the process shares. Hooks' decision, fleet green leg 12.
+    """
+    time.sleep(seconds)
+
+
 def _send_with_retry(bot_token: str, chat_id: int, text: str, retries: int = 3) -> dict:
     """Send with retry and exponential backoff. Returns dict with ok, message_id, text."""
     for attempt in range(retries):
@@ -548,7 +558,7 @@ def _send_with_retry(bot_token: str, chat_id: int, text: str, retries: int = 3) 
         if attempt < retries - 1:
             delay = 1.0 * (2**attempt)
             logger.info("[HOOKS] telegram: send retry %d/%d after %.0fs", attempt + 2, retries, delay)
-            time.sleep(delay)
+            _sleep(delay)
     return {"ok": False}
 
 
@@ -567,7 +577,7 @@ def handle(hook_data: dict) -> dict:
     if not session_id:
         return {"stdout": "", "exit_code": 0}
 
-    pending_file = find_pending_file(session_id)
+    pending_file = find_pending_file()
     if not pending_file:
         return {"stdout": "", "exit_code": 0}
 
@@ -613,7 +623,7 @@ def handle(hook_data: dict) -> dict:
         chunks, bot_token, chat_id, processing_message_id, logs_were_active, streaming
     )
 
-    _write_delivery_log(response_text, chunks, chunk_results, session_id)
+    _write_delivery_log(response_text, chunk_results, session_id)
 
     if all_sent:
         _advance_pending(pending_file, pending_data, transcript_path)
@@ -642,7 +652,7 @@ def _extract_response(hook_data: dict, transcript_path: str, pending_data: dict)
             if attempt < 2:
                 delay = [0.2, 0.5][attempt]
                 logger.info("[HOOKS] telegram: JSONL retry %.1fs (attempt %d/3)", delay, attempt + 1)
-                time.sleep(delay)
+                _sleep(delay)
 
     if not response_text and not pending_data.get("delivered"):
         response_text = (hook_data.get("last_assistant_message") or "").strip()
@@ -665,14 +675,20 @@ def _extract_mirror_response(transcript_path: str, pending_data: dict) -> str | 
         if attempt < 2:
             delay = [0.2, 0.5][attempt]
             logger.info("[HOOKS] telegram: mirror retry %.1fs (attempt %d/3)", delay, attempt + 1)
-            time.sleep(delay)
+            _sleep(delay)
     return None
 
 
-def _prepend_branch_prefix(text: str) -> str:
-    """Prepend @branch identifier so user knows which branch responded."""
+def _prepend_branch_prefix(text: str, cwd=None) -> str:
+    """Prepend @branch identifier so user knows which branch responded.
+
+    cwd is a seam, looked up at the call: handle() passes nothing and the real Path.cwd answers.
+    test_telegram_response's unreadable-cwd test hands one that raises OSError, because a cwd that
+    cannot be read cannot be made on every platform (Windows refuses to delete the directory it
+    stands in). Hooks' decision, fleet green leg 12.
+    """
     try:
-        branch_name = Path.cwd().name
+        branch_name = (cwd or Path.cwd)().name
         return f"@{branch_name}\n\n{text}"
     except OSError:
         logger.info("[HOOKS] telegram: could not resolve CWD for branch prefix")
@@ -756,7 +772,7 @@ def _advance_pending(pending_file: Path, pending_data: dict, transcript_path: st
             pending_file.unlink(missing_ok=True)
 
 
-def _write_delivery_log(intended_text: str, chunks: list[str], chunk_results: list[dict], session_id: str) -> None:
+def _write_delivery_log(intended_text: str, chunk_results: list[dict], session_id: str) -> None:
     """Write JSONL record documenting what was delivered to Telegram."""
     intended_sha = hashlib.sha256(intended_text.encode("utf-8")).hexdigest()[:16]
 

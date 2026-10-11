@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: filesystem_handler.py
 # Description: FileSystem Event Handler
-# Version: 0.1.1
+# Version: 0.3.0
 # Created: 2026-03-08
-# Modified: 2026-08-08
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -48,10 +48,13 @@ class MonitoringFileHandler(FileSystemEventHandler):
         self,
         event_queue: Optional[MonitoringQueue] = None,
         command_indicator_files: Optional[Dict[str, str]] = None,
+        sandbox_root: Optional[Path] = None,
     ):
         super().__init__()
         self._event_queue = event_queue
         self._command_indicator_files = command_indicator_files or {}
+        # Below this root no event from a dropbox or an .archive is shown (should_monitor)
+        self._sandbox_root = sandbox_root
         json_handler.log_operation("file_change_handled", {"has_queue": event_queue is not None})
         # Track last command emitted per file to avoid duplicate separators
         self._last_file_command: Dict[str, str] = {}
@@ -509,20 +512,23 @@ class MonitoringFileHandler(FileSystemEventHandler):
         try:
             file_path = Path(path_str)
 
-            if not should_monitor(file_path):
+            if not should_monitor(file_path, self._sandbox_root):
                 return
 
             branch = detect_branch_from_path(str(file_path))
 
+            # Markers use forward slashes; match on a local copy so Windows paths match too
+            norm = path_str.replace("\\", "/")
+
             # Claude Code JSONL files: parse agent activity
-            if file_path.suffix == ".jsonl" and ".claude/projects/" in path_str:
-                if "/subagents/" in path_str:
+            if file_path.suffix == ".jsonl" and ".claude/projects/" in norm:
+                if "/subagents/" in norm:
                     branch = branch + " agent"
                 if self._parse_agent_activity(file_path, branch):
                     return
 
             # Codex JSONL files: parse agent activity
-            if file_path.suffix == ".jsonl" and ".codex/sessions/" in path_str:
+            if file_path.suffix == ".jsonl" and ".codex/sessions/" in norm:
                 codex_branch = self._get_codex_branch(file_path, path_str)
                 if self._parse_codex_activity(file_path, codex_branch):
                     return

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: restore_ops.py
 # Description: Plan Restore Implementation Handler
-# Version: 1.1.0
+# Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -190,10 +190,6 @@ def recover_plan_from_backup(
         original_location = str(FLOW_ROOT)
         relative_path = "flow"
 
-    # Copy file to ORIGINAL location (preserve backup) using the original filename
-    target = Path(original_location) / plan_file.name
-    copy2(plan_file, target)
-
     # Derive display label from the backup filename
     plan_label = plan_file.stem  # e.g. "FPLAN-0165" or "DPLAN-0004"
 
@@ -203,7 +199,15 @@ def recover_plan_from_backup(
     actual_prefix = _extract_prefix(plan_label)
     reg_file = f"{actual_prefix.lower()}_registry.json" if actual_prefix else None
 
+    # Loaded BEFORE the copy: an unreadable registry raises, and a raise after
+    # the copy would leave a plan file on disk that no registry names (flow's
+    # decision, leg 6).
     registry = load_registry(registry_file=reg_file) if reg_file else load_registry()
+
+    # Copy file to ORIGINAL location (preserve backup) using the original filename
+    target = Path(original_location) / plan_file.name
+    copy2(plan_file, target)
+
     registry["plans"][plan_key] = {
         "location": original_location,
         "relative_path": relative_path,
@@ -215,10 +219,17 @@ def recover_plan_from_backup(
         "closed_reason": "recovered_from_backup",
         "template_type": "default",
     }
+    # save_registry answers False when it could not write: the row does not
+    # exist, so this is no recovery (flow's decision, leg 10).
     if reg_file:
-        save_registry(registry, registry_file=reg_file)
+        saved = save_registry(registry, registry_file=reg_file)
     else:
-        save_registry(registry)
+        saved = save_registry(registry)
+    if not saved:
+        return False, (
+            f"Copied {plan_file.name} to {target}, but could not save the registry, "
+            f"so no row names it: {plan_label} was not recovered"
+        )
 
     return True, f"Recovered {plan_label} from {plan_file.name} to {original_location}"
 
@@ -471,17 +482,35 @@ def restore_plan_impl(
         plan_info.pop("memory_file", None)
 
         if reg_file:
-            save_registry(registry, registry_file=reg_file)
+            saved = save_registry(registry, registry_file=reg_file)
         else:
-            save_registry(registry)
+            saved = save_registry(registry)
+        if not saved:
+            logger.error(f"[{MODULE_NAME}] Could not save the registry: {plan_key} is still closed")
+            messages.append(
+                {
+                    "type": "error",
+                    "error_type": "general",
+                    "plan_key": plan_key,
+                    "details": "could not save the registry, so the plan is still closed. Run restore again.",
+                    "prefix": plan_prefix,
+                }
+            )
+            return {
+                "success": False,
+                "messages": messages,
+                "plan_key": plan_key,
+                "restored_location": "",
+            }
         logger.info(f"[{MODULE_NAME}] Restored plan {plan_key} to open status")
 
         # 8. UPDATE DASHBOARDS: Sync dashboard files (handlers)
         dashboard_success = update_dashboard_local()
         central_success = push_to_plans_central()
 
-        # Log dashboard update results
-        if not dashboard_success:
+        # Log dashboard update results. None is "flow has no dashboard", not a
+        # failure (flow's decision, leg 4).
+        if dashboard_success is False:
             logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
         if not central_success:
             logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")

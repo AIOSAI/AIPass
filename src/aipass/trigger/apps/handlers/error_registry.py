@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_registry.py
 # Description: Structured error tracking and registry for Medic v2
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-02-13
-# Modified: 2026-08-02
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -226,18 +226,21 @@ _circuit_breaker = _load_circuit_breaker_state()
 # ---------------------------------------------------------------------------
 
 
-def _evaluate_state() -> None:
+def _evaluate_state(now: Optional[float] = None) -> None:
     """Evaluate circuit breaker state transitions on read.
 
     If state is 'open' and cooldown has expired, transition to 'half_open'
     with the probe slot available. Called by both circuit_breaker_allows()
     and get_circuit_breaker_status() so the breaker self-heals even when
     medic is off and no dispatches are running.
+
+    Args:
+        now: The clock reading to judge by, as from time.time(); None reads the clock
     """
     global _circuit_breaker
     if _circuit_breaker.state != "open":
         return
-    elapsed = time.time() - _circuit_breaker.opened_at
+    elapsed = (time.time() if now is None else now) - _circuit_breaker.opened_at
     if elapsed >= _circuit_breaker.cooldown_seconds:
         _circuit_breaker.state = "half_open"
         _circuit_breaker.half_open_allow = True
@@ -245,7 +248,7 @@ def _evaluate_state() -> None:
         _save_circuit_breaker_state()
 
 
-def circuit_breaker_allows() -> bool:
+def circuit_breaker_allows(now: Optional[float] = None) -> bool:
     """Check if the circuit breaker allows dispatch.
 
     Three states:
@@ -258,11 +261,17 @@ def circuit_breaker_allows() -> bool:
       If another error comes, circuit_breaker_record_error() re-opens
       with doubled cooldown.
 
+    Args:
+        now: The clock reading to judge the cooldown by; None (every product
+            caller) reads time.time(). It exists so a test can hand in a
+            reading past the cooldown instead of rewriting the breaker's
+            private opened_at.
+
     Returns:
         True if dispatch is allowed, False if breaker is blocking
     """
     global _circuit_breaker
-    _evaluate_state()
+    _evaluate_state(now)
 
     if _circuit_breaker.state == "closed":
         return True
@@ -277,7 +286,7 @@ def circuit_breaker_allows() -> bool:
     return False
 
 
-def circuit_breaker_record_error() -> None:
+def circuit_breaker_record_error(now: Optional[float] = None) -> None:
     """Record a new error occurrence for circuit breaker tracking.
 
     Adds the current timestamp to recent_errors. Prunes errors outside
@@ -286,9 +295,15 @@ def circuit_breaker_record_error() -> None:
 
     In half_open state, any error re-opens the breaker with doubled
     cooldown (up to max_cooldown).
+
+    Args:
+        now: The clock reading to stamp the error with; None (every product
+            caller) reads time.time(). It exists so a test can place errors
+            inside or outside the trip window without sleeping.
     """
     global _circuit_breaker
-    now = time.time()
+    if now is None:
+        now = time.time()
 
     if _circuit_breaker.state == "half_open":
         # Error during probe - re-open with doubled cooldown
@@ -322,6 +337,7 @@ def circuit_breaker_trip(reason: str = "") -> None:
         reason: Optional reason string for logging/diagnostics
     """
     global _circuit_breaker
+    logger.info("Circuit breaker tripped: %s", reason or "manual")
     _circuit_breaker.state = "open"
     _circuit_breaker.opened_at = time.time()
     _circuit_breaker.summary_sent = False
@@ -364,20 +380,27 @@ def circuit_breaker_reset() -> None:
     _clear_circuit_breaker_state()
 
 
-def get_circuit_breaker_status() -> dict:
+def get_circuit_breaker_status(now: Optional[float] = None) -> dict:
     """Get current circuit breaker state as a dictionary.
 
     Evaluates state transitions first so the returned state is always
     up-to-date (e.g. an expired open breaker will report as half_open).
 
+    Args:
+        now: The clock reading to judge the cooldown by; None (every product
+            caller) reads time.time(). It exists so a test can hand in a
+            reading instead of rewriting the breaker's private opened_at.
+
     Returns:
         Dict with keys: state, opened_at, cooldown_seconds,
         recent_error_count, summary_sent, remaining_seconds
     """
-    _evaluate_state()
+    if now is None:
+        now = time.time()
+    _evaluate_state(now)
     remaining = 0
     if _circuit_breaker.state == "open":
-        remaining = max(0, int(_circuit_breaker.cooldown_seconds - (time.time() - _circuit_breaker.opened_at)))
+        remaining = max(0, int(_circuit_breaker.cooldown_seconds - (now - _circuit_breaker.opened_at)))
     return {
         "state": _circuit_breaker.state,
         "opened_at": _circuit_breaker.opened_at,
@@ -459,7 +482,7 @@ def is_suppressed(fingerprint: str) -> bool:
         return False
 
 
-def should_dispatch(fingerprint: str) -> bool:
+def should_dispatch(fingerprint: str, now: Optional[float] = None) -> bool:
     """Check if this fingerprint should be dispatched.
 
     Two independent gates, in order:
@@ -476,6 +499,9 @@ def should_dispatch(fingerprint: str) -> bool:
 
     Args:
         fingerprint: Error fingerprint to check
+        now: The clock reading to judge the backoff by; None (every product
+            caller) reads time.time(). It exists so a test can hand in a
+            reading past the backoff instead of rewriting private dispatch times.
 
     Returns:
         True if this fingerprint may be dispatched now
@@ -493,7 +519,7 @@ def should_dispatch(fingerprint: str) -> bool:
 
     last_dispatch = max(times)
     backoff = get_backoff_seconds(count)
-    elapsed = time.time() - last_dispatch
+    elapsed = (time.time() if now is None else now) - last_dispatch
 
     return elapsed >= backoff
 
@@ -543,8 +569,10 @@ def normalize_message(message: str) -> str:
     # Strip date-only patterns (2026-02-13)
     normalized = re.sub(r"\d{4}-\d{2}-\d{2}", "<date>", normalized)
 
-    # Strip absolute paths (any /path/to/something)
-    normalized = re.sub(r"/[\w./-]+", "<path>", normalized)
+    # Strip absolute paths: a drive-letter path with either separator
+    # (C:\path\to\x, C:/path/to/x) or any /path/to/something. The drive
+    # colon is eaten here, before the port rule below can see it.
+    normalized = re.sub(r"\b[A-Za-z]:[\\/][\w.\\/-]*|/[\w./-]+", "<path>", normalized)
 
     # Strip line numbers ("line 42" -> "line N")
     normalized = re.sub(r"\bline \d+\b", "line N", normalized, flags=re.IGNORECASE)
@@ -842,7 +870,8 @@ def clear_resolved(days: int = 7) -> int:
         days: Age threshold in days (default: 7)
 
     Returns:
-        Count of removed entries
+        Count of removed entries (0 when nothing qualified), or -1 when the
+        registry could not be read or walked - a count can never be negative.
     """
     try:
         registry = _load_registry()
@@ -867,7 +896,7 @@ def clear_resolved(days: int = 7) -> int:
 
     except Exception as exc:
         logger.warning("Failed to clear resolved entries: %s", exc)
-        return 0
+        return -1
 
 
 def purge_stale(days: int = 30) -> int:
@@ -877,7 +906,8 @@ def purge_stale(days: int = 30) -> int:
         days: Age threshold in days (default: 30)
 
     Returns:
-        Count of removed entries
+        Count of removed entries (0 when nothing qualified), or -1 when the
+        registry could not be read or walked - a count can never be negative.
     """
     try:
         registry = _load_registry()
@@ -901,7 +931,7 @@ def purge_stale(days: int = 30) -> int:
 
     except Exception as exc:
         logger.warning("Failed to purge stale entries: %s", exc)
-        return 0
+        return -1
 
 
 def get_stats() -> dict:

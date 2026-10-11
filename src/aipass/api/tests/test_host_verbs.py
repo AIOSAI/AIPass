@@ -1,26 +1,30 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_verbs.py
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the Verb Lane
+"""Tests for apps/handlers/host/verbs.py and the server routes that reach it: wake, kill, lock."""
 
-Phase 3. The read lane could only ever return the wrong bytes; this lane spawns
-agents, ends sessions and locks a machine. So the tests here are mostly about
-what this server REFUSES to do.
+# Tests for the Verb Lane
+#
+# Phase 3. The read lane could only ever return the wrong bytes; this lane spawns
+# agents, ends sessions and locks a machine. So the tests here are mostly about
+# what this server REFUSES to do.
+#
+# The through-line is D0: this server owns the pipe and never the meaning. Every
+# verb is a proxy to the branch that owns the mechanism, and a test in this file
+# reads the module's own source to prove no mechanism was quietly reimplemented
+# here — no tmux, no loginctl, no send-keys. That check is deliberately crude,
+# because the failure it guards against is somebody helpfully inlining "just the
+# one line" on a night when the seam is missing.
 
-The through-line is D0: this server owns the pipe and never the meaning. Every
-verb is a proxy to the branch that owns the mechanism, and a test in this file
-reads the module's own source to prove no mechanism was quietly reimplemented
-here — no tmux, no loginctl, no send-keys. That check is deliberately crude,
-because the failure it guards against is somebody helpfully inlining "just the
-one line" on a night when the seam is missing.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that verbs.py parses and imports
+# seedgo: no-test-needed(external) — drone's real wake and baud's real end_room; both doors are patched
+# seedgo: no-test-needed(covered_elsewhere) — resolve_branch_root itself, tests/test_host_read_lane.py
 
 from pathlib import Path
 from typing import Any
@@ -70,16 +74,16 @@ def quiet():
 
 
 @pytest.fixture
-def routed(quiet: Any):
+def routed(quiet: Any, tmp_path: Path):
     """A patched drone door that reports a successful wake."""
     with patch(PATCH_VERBS_DRONE) as door:
         door.route_command.return_value = MagicMock(exit_code=0, stdout="woken", stderr="")
-        with patch(PATCH_RESOLVE, return_value=Path("/tmp/branch")):
+        with patch(PATCH_RESOLVE, return_value=tmp_path / "branch"):
             yield door
 
 
 @pytest.fixture
-def killer(quiet: Any):
+def killer(quiet: Any, tmp_path: Path):
     """@baud's kill door, patched, answering the ordinary success envelope."""
     with patch(PATCH_VERBS_FLEET) as door:
         door.FleetUnavailable = host_fleet.FleetUnavailable
@@ -91,7 +95,7 @@ def killer(quiet: Any):
             "detail": "ended 'baud-memory'",
             "error": None,
         }
-        with patch(PATCH_RESOLVE, return_value=Path("/tmp/branch")):
+        with patch(PATCH_RESOLVE, return_value=tmp_path / "branch"):
             yield door
 
 
@@ -144,7 +148,7 @@ class TestWakeGoesThroughThePublicDoor:
         with pytest.raises(host_verbs.VerbRefused):
             host_verbs.wake_branch("", PROJECT)
 
-    def test_a_failed_wake_is_never_reported_as_ok(self, quiet: Any) -> None:
+    def test_a_failed_wake_is_never_reported_as_ok(self, quiet: Any, tmp_path: Path) -> None:
         """
         drone exiting non-zero means the wake did not happen.
 
@@ -153,12 +157,12 @@ class TestWakeGoesThroughThePublicDoor:
         """
         with patch(PATCH_VERBS_DRONE) as door:
             door.route_command.return_value = MagicMock(exit_code=2, stdout="", stderr="Wake failed for @memory")
-            with patch(PATCH_RESOLVE, return_value=Path("/tmp/branch")):
+            with patch(PATCH_RESOLVE, return_value=tmp_path / "branch"):
                 result = host_verbs.wake_branch("memory", PROJECT)
 
         assert result["ok"] is False
 
-    def test_the_doors_own_sentence_survives_a_refusal(self, quiet: Any) -> None:
+    def test_the_doors_own_sentence_survives_a_refusal(self, quiet: Any, tmp_path: Path) -> None:
         """
         @baud renders `detail` verbatim on the chip, so this is what the
         operator reads. A status word would tell them nothing they can act on.
@@ -171,7 +175,7 @@ class TestWakeGoesThroughThePublicDoor:
         blocked = "target @devpulse is protected from manual wake"
         with patch(PATCH_VERBS_DRONE) as door:
             door.route_command.return_value = MagicMock(exit_code=1, stdout="", stderr=blocked)
-            with patch(PATCH_RESOLVE, return_value=Path("/tmp/branch")):
+            with patch(PATCH_RESOLVE, return_value=tmp_path / "branch"):
                 result = host_verbs.wake_branch("devpulse", PROJECT)
 
         assert result["detail"] == blocked
@@ -392,14 +396,14 @@ class TestTheKillSwitchIsOperationalNotStructural:
         """The door exists now, and the switch reflects that."""
         assert host_verbs.KILL_SEAM_READY is True
 
-    def test_a_closed_switch_refuses_rather_than_pretending(self, quiet: Any) -> None:
+    def test_a_closed_switch_refuses_rather_than_pretending(self, quiet: Any, tmp_path: Path) -> None:
         """A shrug that returns 200 is worse than an error."""
         with patch.object(host_verbs, "KILL_SEAM_READY", False):
-            with patch(PATCH_RESOLVE, return_value=Path("/tmp/branch")):
+            with patch(PATCH_RESOLVE, return_value=tmp_path / "branch"):
                 with pytest.raises(host_verbs.VerbUnavailable):
                     host_verbs.kill_room("memory", PROJECT)
 
-    def test_a_closed_switch_never_reaches_the_binary(self, quiet: Any) -> None:
+    def test_a_closed_switch_never_reaches_the_binary(self, quiet: Any, tmp_path: Path) -> None:
         """
         Checked BEFORE the exec, which is the entire point of a kill switch.
 
@@ -407,14 +411,14 @@ class TestTheKillSwitchIsOperationalNotStructural:
         control.
         """
         with patch.object(host_verbs, "KILL_SEAM_READY", False):
-            with patch(PATCH_RESOLVE, return_value=Path("/tmp/branch")):
+            with patch(PATCH_RESOLVE, return_value=tmp_path / "branch"):
                 with patch(PATCH_VERBS_FLEET) as door:
                     with pytest.raises(host_verbs.VerbUnavailable):
                         host_verbs.kill_room("memory", PROJECT)
 
                     assert not door.end_room.called
 
-    def test_a_closed_switch_says_the_switch_is_closed(self, quiet: Any) -> None:
+    def test_a_closed_switch_says_the_switch_is_closed(self, quiet: Any, tmp_path: Path) -> None:
         """
         The refusal must not still claim a missing seam.
 
@@ -423,7 +427,7 @@ class TestTheKillSwitchIsOperationalNotStructural:
         cause — a flag on this host — goes unlooked-at.
         """
         with patch.object(host_verbs, "KILL_SEAM_READY", False):
-            with patch(PATCH_RESOLVE, return_value=Path("/tmp/branch")):
+            with patch(PATCH_RESOLVE, return_value=tmp_path / "branch"):
                 with pytest.raises(host_verbs.VerbUnavailable) as caught:
                     host_verbs.kill_room("memory", PROJECT)
 
@@ -703,6 +707,13 @@ class TestNoMechanismIsReimplementedHere:
         assert "import subprocess" not in source
         assert "Popen" not in source
         assert "os.system" not in source
+        # The other doors a program can be run through, which the terminal-lane
+        # pin below does not watch: the exec and spawn families, and the
+        # from-import spelling that dodges "import subprocess".
+        assert "from subprocess" not in source
+        assert "os.exec" not in source
+        assert "os.spawn" not in source
+        assert "os.popen" not in source
 
     def test_the_verb_lane_still_executes_nothing_after_the_terminal_lane(self) -> None:
         """
@@ -764,12 +775,21 @@ def client(tmp_path: Path):
     from fastapi.testclient import TestClient
 
     store = tmp_path / "secrets"
-    with patch(PATCH_SECRETS_BASE, store), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
-        with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER), patch(PATCH_SERVER_LOGGER):
-            with patch(PATCH_SERVER_JSON), patch(PATCH_FACE_JSON), patch(PATCH_FACE_LOGGER):
-                with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER):
-                    with patch(PATCH_SEATED, return_value=PROJECT):
-                        yield TestClient(host_server.create_app(), raise_server_exceptions=False)
+    with (
+        patch(PATCH_SECRETS_BASE, store),
+        patch(PATCH_SECRETS_JSON),
+        patch(PATCH_SECRETS_LOGGER),
+        patch(PATCH_TOKENS_JSON),
+        patch(PATCH_TOKENS_LOGGER),
+        patch(PATCH_SERVER_LOGGER),
+        patch(PATCH_SERVER_JSON),
+        patch(PATCH_FACE_JSON),
+        patch(PATCH_FACE_LOGGER),
+        patch(PATCH_VERBS_JSON),
+        patch(PATCH_VERBS_LOGGER),
+        patch(PATCH_SEATED, return_value=PROJECT),
+    ):
+        yield TestClient(host_server.create_app(), raise_server_exceptions=False)
 
 
 def _body(**extra: Any) -> dict:
@@ -881,11 +901,11 @@ class TestTheVerbRouteTableIsExactlyThreeThings:
 class TestTheVerbRoutesAnswer:
     """An operate token reaches the lane; the lane's own rules still apply."""
 
-    def test_wake_reaches_the_door(self, client: Any) -> None:
+    def test_wake_reaches_the_door(self, client: Any, tmp_path: Path) -> None:
         """The proxy runs and reports the branch back."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
-        with patch(PATCH_VERBS_DRONE) as door, patch(PATCH_RESOLVE, return_value=Path("/tmp/b")):
+        with patch(PATCH_VERBS_DRONE) as door, patch(PATCH_RESOLVE, return_value=tmp_path / "b"):
             door.route_command.return_value = MagicMock(exit_code=0, stdout="ok", stderr="")
             response = client.post("/v1/verbs/wake", json=_body(), headers={"Authorization": f"Bearer {raw}"})
 
@@ -908,11 +928,11 @@ class TestTheVerbRoutesAnswer:
 
         assert response.status_code == 400
 
-    def test_kill_reaches_the_door_and_reports_the_room(self, client: Any) -> None:
+    def test_kill_reaches_the_door_and_reports_the_room(self, client: Any, tmp_path: Path) -> None:
         """The seam landed; the route carries their envelope through."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
-        with patch(PATCH_VERBS_FLEET) as door, patch(PATCH_RESOLVE, return_value=Path("/tmp/b")):
+        with patch(PATCH_VERBS_FLEET) as door, patch(PATCH_RESOLVE, return_value=tmp_path / "b"):
             door.FleetUnavailable = host_fleet.FleetUnavailable
             door.end_room.return_value = {"room": "baud-memory", "ended": True, "detail": "ended", "error": None}
             response = client.post("/v1/verbs/kill", json=_body(), headers={"Authorization": f"Bearer {raw}"})
@@ -921,12 +941,12 @@ class TestTheVerbRoutesAnswer:
         assert response.json()["ended"] is True
         assert response.json()["room"] == "baud-memory"
 
-    def test_kill_answers_503_when_the_switch_is_closed(self, client: Any) -> None:
+    def test_kill_answers_503_when_the_switch_is_closed(self, client: Any, tmp_path: Path) -> None:
         """The operational switch still produces an honest refusal, not a 200."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
         with patch.object(host_verbs, "KILL_SEAM_READY", False):
-            with patch(PATCH_RESOLVE, return_value=Path("/tmp/b")):
+            with patch(PATCH_RESOLVE, return_value=tmp_path / "b"):
                 response = client.post("/v1/verbs/kill", json=_body(), headers={"Authorization": f"Bearer {raw}"})
 
         assert response.status_code == 503
@@ -969,7 +989,7 @@ class TestTheClientIsNeverTrusted:
     will never send a `confirmed` field, and this server would not honour one.
     """
 
-    def test_a_confirmed_flag_reaches_nothing_on_the_kill_lane(self, client: Any) -> None:
+    def test_a_confirmed_flag_reaches_nothing_on_the_kill_lane(self, client: Any, tmp_path: Path) -> None:
         """
         Their confirm dialog is pocket-safety, not a gate this server honours.
 
@@ -980,7 +1000,7 @@ class TestTheClientIsNeverTrusted:
         """
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
-        with patch(PATCH_VERBS_FLEET) as door, patch(PATCH_RESOLVE, return_value=Path("/tmp/b")):
+        with patch(PATCH_VERBS_FLEET) as door, patch(PATCH_RESOLVE, return_value=tmp_path / "b"):
             door.FleetUnavailable = host_fleet.FleetUnavailable
             door.end_room.return_value = {"room": None, "ended": False, "detail": "nothing to end", "error": None}
             client.post(
@@ -991,11 +1011,11 @@ class TestTheClientIsNeverTrusted:
 
         assert door.end_room.call_args.args == ("memory", PROJECT_AS_SENT)
 
-    def test_an_admin_field_in_the_body_reaches_nothing(self, client: Any) -> None:
+    def test_an_admin_field_in_the_body_reaches_nothing(self, client: Any, tmp_path: Path) -> None:
         """Unknown keys are ignored, and `admin` is not a key this lane reads."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
-        with patch(PATCH_VERBS_DRONE) as door, patch(PATCH_RESOLVE, return_value=Path("/tmp/b")):
+        with patch(PATCH_VERBS_DRONE) as door, patch(PATCH_RESOLVE, return_value=tmp_path / "b"):
             door.route_command.return_value = MagicMock(exit_code=0, stdout="ok", stderr="")
             client.post(
                 "/v1/verbs/wake",

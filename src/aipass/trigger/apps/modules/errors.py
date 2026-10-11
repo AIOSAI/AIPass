@@ -3,7 +3,7 @@
 # Description: Error registry management module for Medic v2 commands
 # Version: 1.4.0
 # Created: 2026-02-13
-# Modified: 2026-08-02
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -438,8 +438,13 @@ def _cmd_resolve(console, args: list) -> bool:
 
 def _cmd_clear_resolved(console, args: list) -> bool:
     """Purge old resolved entries. Optional --days=N (default 7)."""
+    from aipass.cli.apps.modules import error
+
     days = int(_parse_args(args).get("days", "7"))
     removed = clear_resolved(days=days)
+    if removed < 0:
+        error("Failed to clear resolved errors - the registry could not be read", suggestion="See the trigger log")
+        return True
     if removed > 0:
         logger.info(f"[ERRORS] Cleared {removed} resolved entries older than {days} days")
         console.print(f"[green]Cleared {removed} resolved error(s)[/green] older than {days} days")
@@ -453,6 +458,11 @@ def _cmd_purge(console, args: list) -> bool:
     parsed = _parse_args(args)
     days = int(parsed.get("days", "30"))
     removed = purge_stale(days=days)
+    if removed < 0:
+        from aipass.cli.apps.modules import error
+
+        error("Failed to purge stale errors - the registry could not be read", suggestion="See the trigger log")
+        return True
     console.print(f"Purged {removed} entries older than {days} days")
     json_handler.log_operation("error_purge", {"days": days, "removed": removed})
     return True

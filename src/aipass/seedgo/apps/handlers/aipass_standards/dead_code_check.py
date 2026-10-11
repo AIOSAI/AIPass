@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.5.0
 # Created: 2026-03-22
-# Modified: 2026-09-14
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -13,24 +13,52 @@ Detects unused Python modules and handlers within an AIPass branch.
 
 Scans .py files in apps/modules/ and apps/handlers/, then checks whether
 anything in the branch's apps/ directory imports or references them.
-Files with zero references are flagged as dead code.
+Files with zero references are flagged as dead code. A handler the engine
+dispatches by dotted path from the project's ``.aipass/*.json`` is referenced
+there (seedgo, leg fed78ad8): hooks names 28 handlers only in that config.
 
 Score: referenced_files / total_files * 100, threshold 75%.
 """
 
 import re
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
-from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir, is_disabled_file
+from aipass.seedgo.apps.handlers.aipass_standards.modules_check import check_door
 
+# APPLIES_TO: pytest calls test functions by discovery, so every one would read unreferenced.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "branch_level"
 
-# Directories to skip when collecting source files
-_SKIP_DIRS = SOURCE_SKIP_DIRS | {"tests", "json_templates"}
+# Skipped beside SOURCE_SKIP_DIRS (read through in_skipped_dir, which spares a
+# live package such as commons' apps/handlers/artifacts/), whatever they hold.
+_EXTRA_SKIP_DIRS = frozenset({"tests", "json_templates"})
+
+#: A project root holds one of these; hooks' config loader reads the same marker.
+_PROJECT_MARKER = "*_REGISTRY.json"
+
+#: The AIPass install holds both, and hooks' loader (aipass_home) knows it by them
+#: alone: AIPASS_REGISTRY.json is git-ignored, so a clean checkout has no marker
+#: and dead_code read hooks 88 in CI where the seat read 100 (addendum d13d7c68 B).
+_INSTALL_CONFIG = Path(".aipass") / "hooks.json"
+_INSTALL_SOURCE = Path("src") / "aipass"
+
+
+def _is_shaped_door(py_file: Path) -> bool:
+    """Whether this is an ``apps/modules/door_*.py`` that passes Door shape (DPLAN-0404).
+
+    A door is called from other branches, never its own, so its branch's corpus
+    never names it; its shape is its reference, the way the entry point's name is.
+    A ``door_`` file that fails Door shape is read like any other module.
+    """
+    if not (py_file.name.startswith("door_") and py_file.parent.name == "modules"):
+        return False
+    content = py_file.read_text(encoding="utf-8", errors="ignore")
+    return check_door(content, py_file.as_posix())["passed"]
 
 
 # =============================================
@@ -44,10 +72,11 @@ _SKIP_DIRS = SOURCE_SKIP_DIRS | {"tests", "json_templates"}
 
 
 def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
-    """Check whether any parent directory component is in the skip set, file is
+    """Check whether a directory below the branch root is skipped, the file is
     disabled, or the path is excluded via .seedgoignore / the global default."""
     return (
-        any(part in _SKIP_DIRS for part in path.parts)
+        in_skipped_dir(path, branch_root)
+        or any(part in _EXTRA_SKIP_DIRS for part in path.relative_to(branch_root).parts)
         or is_disabled_file(path.name)
         or is_seedgo_ignored(str(path), branch_root, ignore_entries)
     )
@@ -87,6 +116,34 @@ def _collect_source_text(apps_dir: Path, branch_root: Path, ignore_entries: list
             logger.info("Skipped unreadable file during source collection: %s", py_file)
             continue
     return "\n".join(parts)
+
+
+def _project_config_text(branch_root: Path) -> str:
+    """The project's ``.aipass/*.json`` text, read-only, or "" outside a project.
+
+    The project root is the nearest directory at or above the branch holding a
+    ``*_REGISTRY.json``, or the AIPass install (``.aipass/hooks.json`` beside
+    ``src/aipass/``), so a clean checkout reads what the seat reads. Only a
+    dotted module path in this text is a reference (``_named_in_config``): a
+    stem in a plan log or a per-feature json is not.
+    """
+    for root in (branch_root.resolve(), *branch_root.resolve().parents):
+        is_install = (root / _INSTALL_CONFIG).is_file() and (root / _INSTALL_SOURCE).is_dir()
+        if not (is_install or any(root.glob(_PROJECT_MARKER))):
+            continue
+        chunks: list[str] = []
+        for config in sorted((root / ".aipass").glob("*.json")):
+            try:
+                chunks.append(config.read_text(encoding="utf-8", errors="ignore"))
+            except OSError as exc:
+                logger.info("Skipped unreadable project config %s: %s", config, exc)
+        return "\n".join(chunks)
+    return ""
+
+
+def _named_in_config(import_path: str, config_text: str) -> bool:
+    """Whether the config names this module by its whole dotted path (``boot`` is not ``boot_extra``)."""
+    return re.search(rf"(?<![\w.]){re.escape(import_path)}(?!\w)", config_text) is not None
 
 
 # =============================================
@@ -147,6 +204,7 @@ def _check_file_used(
     branch_name: str,
     source_text: str,
     entry_point_name: str,
+    config_text: str = "",
 ) -> bool:
     """
     Determine if a .py file is referenced anywhere in the branch source.
@@ -159,6 +217,7 @@ def _check_file_used(
     5. Stem appears in an import statement in corpus, on one line or inside a
        parenthesised multi-line block
     6. Filename string reference in corpus
+    7. Full dotted path named in the project's .aipass/*.json (config_text)
     """
     stem = py_file.stem
 
@@ -168,6 +227,10 @@ def _check_file_used(
 
     # Rule 2: entry point
     if py_file.name == f"{entry_point_name}.py" and py_file.parent.name == "apps":
+        return True
+
+    # Rule 2b: a door, by its shape
+    if _is_shaped_door(py_file):
         return True
 
     # Rule 3: glob/discovery convention files
@@ -226,12 +289,36 @@ def _check_file_used(
     if re.search(rf'["\']{re.escape(filename)}["\']', source_text):
         return True
 
-    return False
+    # Rule 7: the engine dispatches it from the project's config
+    return bool(config_text) and _named_in_config(import_path, config_text)
 
 
 # =============================================
 # BRANCH-LEVEL CHECK (audit pipeline entry)
 # =============================================
+
+
+def _branch_relative(target: Path, branch_root: Path) -> str:
+    """The target as a posix path from the branch root (``apps/handlers/x.py``), else as given.
+
+    A bypass rule's ``file`` is a substring match, so both ``apps/handlers/x.py``
+    and ``handlers/x.py`` match this spelling; only the apps-relative one
+    matched before.
+    """
+    try:
+        return target.relative_to(branch_root).as_posix()
+    except ValueError:
+        logger.info("[dead_code] %s is outside %s; its bypass is matched on the full path", target, branch_root)
+        return target.as_posix()
+
+
+def reported_path(path: PurePath, root: PurePath) -> str:
+    """The path from root as the finding prints it: ``handlers/x.py``, forward slashes on every host.
+
+    Raises:
+        ValueError: path is not below root.
+    """
+    return path.relative_to(root).as_posix()
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
@@ -320,22 +407,27 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     # Build the source corpus (all .py content from apps/)
     source_text = _collect_source_text(apps_dir, bp, ignore_entries)
+    config_text = _project_config_text(bp)
 
     # Check each target for references
     total_files = len(targets)
     dead_files: list[str] = []
 
     for target in targets:
-        used = _check_file_used(target, bp, branch_name, source_text, entry_point_name)
+        used = _check_file_used(target, bp, branch_name, source_text, entry_point_name, config_text)
         if not used:
             # Check per-file bypass
             try:
-                rel = target.relative_to(apps_dir)
+                rel = reported_path(target, apps_dir)
             except ValueError:
                 logger.info("File %s not relative to apps dir, using full path", target)
-                rel = target
-            if not is_bypassed(str(rel), "dead_code", bypass_rules=bypass_rules):
-                dead_files.append(str(rel))
+                rel = target.as_posix()
+            # The rule is matched against the BRANCH-relative path (apps/...), the
+            # spelling every other checker is handed and dead_rules reads. Matched
+            # against "handlers/..." alone, a row written "apps/handlers/..."
+            # silenced nothing and nobody was told (hooks, 1.4.0).
+            if not is_bypassed(_branch_relative(target, bp), "dead_code", bypass_rules=bypass_rules):
+                dead_files.append(rel)
 
     referenced_files = total_files - len(dead_files)
     score = int(referenced_files / total_files * 100) if total_files > 0 else 100

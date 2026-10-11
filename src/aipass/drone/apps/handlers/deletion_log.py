@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete drone performs
-# Version: 1.2.0
+# Version: 1.2.3
 # Created: 2026-08-14
-# Modified: 2026-09-13
+# Modified: 2026-09-30
 # =============================================
 
 """Durable record of every delete drone performs.
@@ -128,6 +128,17 @@ def _resolve_citizen_caller(cwd: Path | None) -> str:
     return UNKNOWN_CALLER
 
 
+def _temp_dir() -> Path:
+    """The host's temp directory, where a deletion outside any project is recorded.
+
+    Its body is the call deletion_log_path made inline. It has a name of its own
+    for the tests: they hand the ledger a temp home under tmp_path through this
+    name instead of replacing tempfile.tempdir for the whole process (drone's
+    decision, DPLAN-0354 leg 5).
+    """
+    return Path(tempfile.gettempdir())
+
+
 def deletion_log_path(project_root: Path | None = None) -> Path:
     """Return the deletion log path for the project the deletion belongs to.
 
@@ -154,7 +165,7 @@ def deletion_log_path(project_root: Path | None = None) -> Path:
 
     root = project_root if project_root is not None else _find_project_root()
     if root is None:
-        return Path(tempfile.gettempdir()) / _LOG_NAME
+        return _temp_dir() / _LOG_NAME
     return root / _LOG_DIR_NAME / _LOG_NAME
 
 
@@ -196,8 +207,11 @@ def _measure_tree(path: Path) -> dict:
     total = 0
     unreadable = 0
     measured = "exact"
+    # A folder the walk cannot list is not walked; without the hook it drops out
+    # silently and the size of a tree never read goes into the record as exact.
+    unlisted: list[OSError] = []
 
-    for dirpath, dirnames, filenames in os.walk(path):
+    for dirpath, dirnames, filenames in os.walk(path, onerror=unlisted.append):
         here = Path(dirpath)
         for name in (*dirnames, *filenames):
             if entries >= _MEASURE_ENTRY_CAP:
@@ -220,6 +234,7 @@ def _measure_tree(path: Path) -> dict:
         if measured == "capped":
             break
 
+    unreadable += len(unlisted)
     if unreadable:
         if measured == "exact":
             measured = "partial"
@@ -293,6 +308,7 @@ def record_deletion(
     project_root: Path | None = None,
     mode: str | None = None,
     age: str | None = None,
+    target: Path | str | None = None,
 ) -> dict:
     """Write one deletion record to both channels and return it.
 
@@ -318,6 +334,11 @@ def record_deletion(
             the twelve keys it always had, so a plain delete writes the same
             bytes it did before stale mode existed.
         age: The age limit the mode ran with, exactly as typed (``10d``).
+        target: What a symlink pointed at, when the deleted path is a link.
+            ``path`` is then the link itself, where it lived, so the record
+            never reads as if the target went. Given, the record gains a
+            ``target`` key and the prax line names it; a plain delete gains
+            nothing.
 
     Never raises. A failed record is reported at ERROR and the caller carries
     on: losing the log must not turn into losing the delete.
@@ -340,11 +361,14 @@ def record_deletion(
     if mode is not None:
         record["mode"] = mode
         record["age"] = age
+    if target is not None:
+        record["target"] = str(target)
 
     logger.info(
-        "deletion record: %s %s by %s — %s (%s, size=%s, entries=%s)%s",
+        "deletion record: %s %s%s by %s — %s (%s, size=%s, entries=%s)%s",
         outcome,
         record["path"],
+        f" -> {target}" if target is not None else "",
         caller,
         lane,
         record["kind"],

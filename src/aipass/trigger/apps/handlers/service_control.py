@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: service_control.py
 # Description: systemd unit lifecycle for the trigger log watcher
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-09-12
+# Modified: 2026-10-02
 # =============================================
 
 """The systemd user unit behind the log watcher, and nothing else.
@@ -15,9 +15,12 @@ management of a systemd unit. This is the second one. It is a handler because
 installing a unit file and shelling out to systemctl is an implementation
 detail; which branch is muted is not.
 
-Every name here is imported back into medic under its original spelling, so
-``patch.object(medic, "_systemctl", ...)`` in the suite still binds the symbol
+medic imports systemctl, is_service_active and ensure_service_installed by
+name, so ``patch.object(medic, "systemctl", ...)`` in the suite binds the symbol
 medic's own code resolves. The move is a move: no behaviour changed with it.
+The four were private until fleet green leg 8 (2026-10-02, trigger's
+proposal, devpulse's approval): medic, another module, is their real caller.
+The rename changed no answer, argument or side effect.
 
 SYSTEMD IS A HOST FACT, NOT A GIVEN (2026-09-12, seedgo host_portability).
 ``systemctl`` exists only where systemd runs: macOS has none, Windows has none,
@@ -33,6 +36,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.config import TRIGGER_ROOT
@@ -59,7 +63,7 @@ def systemd_available() -> bool:
     return shutil.which("systemctl") is not None
 
 
-def _get_aipass_home() -> Path:
+def get_aipass_home() -> Path:
     """Resolve AIPASS_HOME from env var or git repo root."""
     env = os.environ.get("AIPASS_HOME")
     if env:
@@ -78,7 +82,7 @@ def _get_aipass_home() -> Path:
     return find_repo_root(caller="medic")
 
 
-def _ensure_service_installed() -> bool:
+def ensure_service_installed() -> bool:
     """Install systemd unit from template if missing. Returns True if ready.
 
     The systemd probe comes before the ``exists`` short-circuit: a unit file
@@ -96,7 +100,7 @@ def _ensure_service_installed() -> bool:
         logger.warning("[MEDIC] Service template not found: %s", _TEMPLATE_PATH)
         return False
 
-    aipass_home = _get_aipass_home()
+    aipass_home = get_aipass_home()
     from aipass.trigger.apps.config import read_text_file, write_text_file
 
     template = read_text_file(_TEMPLATE_PATH)
@@ -115,7 +119,7 @@ def _ensure_service_installed() -> bool:
     return True
 
 
-def _run_systemctl(*args: str) -> bool:
+def _run_systemctl(*args: str) -> Optional[bool]:
     """Run ``systemctl --user <args>`` and report whether it succeeded.
 
     Takes the argv tail whole rather than one action, because two of the four
@@ -128,14 +132,18 @@ def _run_systemctl(*args: str) -> bool:
         args: the systemctl argv after ``--user``
 
     Returns:
-        True if the command succeeded (exit code 0); False when it failed and
-        False when this host has no systemd, each said by name in the log.
+        True if the command exited 0; False if systemctl answered with a
+        non-zero exit; None if systemctl could not be asked at all (no
+        systemd on this host, the binary gone at exec, a timeout, any other
+        exec failure), each said by name in the log. None is not False: a
+        hung ``is-active`` is not a stopped unit, and medic status says which.
     """
     spelled = " ".join(args)
-    if shutil.which("systemctl") is None:
-        logger.warning("[MEDIC] systemctl %s refused: %s", spelled, NO_SYSTEMD_REASON)
-        return False
     try:
+        # The probe comes before exec: no systemctl on PATH is the same fact
+        # exec would raise, said without starting a process.
+        if shutil.which("systemctl") is None:
+            raise FileNotFoundError("systemctl is not on PATH")
         result = subprocess.run(
             ["systemctl", "--user", *args],
             capture_output=True,
@@ -145,24 +153,29 @@ def _run_systemctl(*args: str) -> bool:
         return result.returncode == 0
     except FileNotFoundError as exc:
         logger.warning("[MEDIC] systemctl %s refused: %s (%s)", spelled, NO_SYSTEMD_REASON, exc)
-        return False
+        return None
     except Exception as exc:
-        logger.warning(f"[MEDIC] systemctl {spelled} failed: {exc}")
-        return False
+        logger.warning(f"[MEDIC] systemctl {spelled} could not be asked: {exc}")
+        return None
 
 
-def _systemctl(action: str) -> bool:
+def systemctl(action: str) -> Optional[bool]:
     """Run a systemctl --user action against the log watcher unit.
 
     Args:
         action: unit-scoped systemctl action (start, stop, restart, is-active)
 
     Returns:
-        True if command succeeded (exit code 0)
+        True on exit 0, False on a non-zero exit, None when systemctl could
+        not be asked (see _run_systemctl)
     """
     return _run_systemctl(action, SERVICE_NAME)
 
 
-def _is_service_active() -> bool:
-    """Check if the log watcher systemd service is running."""
-    return _systemctl("is-active")
+def is_service_active() -> Optional[bool]:
+    """Check if the log watcher systemd service is running.
+
+    Returns:
+        True running, False not running, None when systemctl never answered
+    """
+    return systemctl("is-active")

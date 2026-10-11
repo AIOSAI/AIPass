@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unified_stream.py
 # Description: Unified Display Handler
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2025-11-23
-# Modified: 2026-08-12
+# Modified: 2026-09-24
 # =============================================
 
 """
@@ -234,7 +234,13 @@ def print_hook_event(branch: str, message: str, action: str = "unknown"):
         else:
             style = "white"
             symbol = "?"
-        console.print(f"[dim]{timestamp}[/dim] [{style}]{symbol} HOOK {_plain(message)}[/{style}]")
+        # The branch is the column that tells two hook lines apart — coloured
+        # like every other branch label in this module, and escaped with it.
+        branch_color = BRANCH_COLORS.get(branch.upper(), "white")
+        branch_label = f"[{branch_color}]{_plain(branch.upper())}[/{branch_color}]"
+        console.print(
+            f"[dim]{timestamp}[/dim] [{style}]{symbol} HOOK[/{style}] {branch_label} [{style}]{_plain(message)}[/{style}]"
+        )
 
 
 def print_status(watched_branches: List[str], verbosity: int, filters: Optional[Dict] = None):

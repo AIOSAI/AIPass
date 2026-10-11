@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: purge.py
 # Description: Sent/Deleted Auto-Purge Handler
-# Version: 2.0.0
+# Version: 2.0.2
 # Created: 2026-02-04
-# Modified: 2026-09-12
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -89,7 +89,7 @@ def purge_sent_folder(mailbox_path: Path) -> Dict[str, Any]:
     # Files to purge (oldest, beyond threshold)
     files_to_purge = email_files[MAX_EMAILS:]
 
-    return _purge_email_files(mailbox_path, files_to_purge, "sent")
+    return _purge_email_files(files_to_purge, "sent")
 
 
 def purge_deleted_folder(mailbox_path: Path) -> Dict[str, Any]:
@@ -119,10 +119,10 @@ def purge_deleted_folder(mailbox_path: Path) -> Dict[str, Any]:
     # Files to purge (oldest, beyond threshold)
     files_to_purge = email_files[MAX_EMAILS:]
 
-    return _purge_email_files(mailbox_path, files_to_purge, "deleted")
+    return _purge_email_files(files_to_purge, "deleted")
 
 
-def _purge_email_files(mailbox_path: Path, files: List[Path], folder_type: str) -> Dict[str, Any]:
+def _purge_email_files(files: List[Path], folder_type: str) -> Dict[str, Any]:
     """
     Purge list of email files (vectorize, then delete originals).
 
@@ -131,7 +131,6 @@ def _purge_email_files(mailbox_path: Path, files: List[Path], folder_type: str) 
     files are preserved on failure.
 
     Args:
-        mailbox_path: Path to .ai_mail.local directory
         files: List of file paths to purge
         folder_type: "sent" or "deleted" for logging
 
@@ -160,12 +159,15 @@ def _purge_email_files(mailbox_path: Path, files: List[Path], folder_type: str) 
     # Only delete originals if vectorization succeeded — no data loss
     if not vectorize_result.get("success", False):
         logger.warning("[purge] Vectorization failed for %s — keeping %d files", folder_type, len(files))
+        # "error" carries @memory's own reason to whoever holds the dict; before
+        # 2026-10-02 it reached only the log warning (ai_mail, leg 8)
         return {
             "success": False,
             "purged_count": 0,
             "vectorized": False,
             "message": f"Vectorization failed, {len(files)} files preserved",
             "load_errors": load_errors if load_errors else None,
+            "error": vectorize_result.get("error"),
         }
 
     # Delete original files (data is safely in @memory)

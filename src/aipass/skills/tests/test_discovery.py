@@ -1,20 +1,24 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_discovery.py - Unit tests for skills discovery
-# Date: 2026-03-07
+# =================== AIPass ====================
+# Name: test_discovery.py
+# Description: Unit tests for skills discovery
 # Version: 1.0.0
+# Created: 2026-03-07
+# Modified: 2026-09-27
 # Category: skills/tests
 # =============================================
 
-"""Tests for the skills discovery module."""
+"""Tests for apps/handlers/discovery_handler.py and the skill discovery it powers."""
 
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that discovery_handler.py and module_paths.py parse and import
+# seedgo: no-test-needed(constant) — the "discovery_scan" log-operation name json_handler records
+
+import pytest
 import tempfile
 from pathlib import Path
 
+from aipass.skills.apps.handlers import discovery_handler
 from aipass.skills.apps.handlers.discovery_handler import (
-    _extract_frontmatter,
-    _parse_simple_value,
-    _simple_frontmatter_parse,
     discover_skills_in_path,
     get_search_paths,
     parse_frontmatter,
@@ -38,90 +42,111 @@ class TestGetSearchPaths:
 
 
 class TestExtractFrontmatter:
-    def test_valid_frontmatter(self):
-        content = "---\nname: test\ndescription: A test skill\n---\n\n# Body"
-        result = _extract_frontmatter(content)
+    """Reached through parse_frontmatter() on a SKILL.md under tmp_path (item 10);
+    PyYAML is installed here so this already exercises the real yaml.safe_load path,
+    same as it did when called directly."""
+
+    def test_valid_frontmatter(self, tmp_path):
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text("---\nname: test\ndescription: A test skill\n---\n\n# Body", encoding="utf-8")
+        result = parse_frontmatter(skill_md)
         assert result is not None
         assert result["name"] == "test"
         assert result["description"] == "A test skill"
 
-    def test_no_frontmatter(self):
-        content = "# Just a markdown file\nNo frontmatter here."
-        result = _extract_frontmatter(content)
+    def test_no_frontmatter(self, tmp_path):
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text("# Just a markdown file\nNo frontmatter here.", encoding="utf-8")
+        result = parse_frontmatter(skill_md)
         assert result is None
 
-    def test_unclosed_frontmatter(self):
-        content = "---\nname: test\nno closing delimiter"
-        result = _extract_frontmatter(content)
+    def test_unclosed_frontmatter(self, tmp_path):
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text("---\nname: test\nno closing delimiter", encoding="utf-8")
+        result = parse_frontmatter(skill_md)
         assert result is None
 
-    def test_empty_content(self):
-        result = _extract_frontmatter("")
+    def test_empty_content(self, tmp_path):
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text("", encoding="utf-8")
+        result = parse_frontmatter(skill_md)
         assert result is None
 
-    def test_boolean_values(self):
-        content = "---\nname: test\nhas_handler: true\n---\n"
-        result = _extract_frontmatter(content)
+    def test_boolean_values(self, tmp_path):
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text("---\nname: test\nhas_handler: true\n---\n", encoding="utf-8")
+        result = parse_frontmatter(skill_md)
         assert result is not None
         assert result["has_handler"] is True
 
-    def test_list_values(self):
-        content = "---\nname: test\ntags: [dev, git, ci]\n---\n"
-        result = _extract_frontmatter(content)
+    def test_list_values(self, tmp_path):
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text("---\nname: test\ntags: [dev, git, ci]\n---\n", encoding="utf-8")
+        result = parse_frontmatter(skill_md)
         assert result is not None
         assert result["tags"] == ["dev", "git", "ci"]
 
 
 class TestSimpleFrontmatterParse:
-    def test_flat_key_value(self):
-        text = "name: my-skill\ndescription: Does a thing"
-        result = _simple_frontmatter_parse(text)
+    """The no-yaml fallback parser, reached through parse_frontmatter() on a
+    SKILL.md under tmp_path (item 10). PyYAML is installed in this environment
+    and would otherwise intercept every case below, so the module's `yaml`
+    binding is patched to None to force the real fallback branch — the same
+    edge the product falls back to when PyYAML is absent."""
+
+    @pytest.fixture(autouse=True)
+    def _force_no_yaml(self, monkeypatch):
+        monkeypatch.setattr(discovery_handler, "yaml", None)
+
+    @staticmethod
+    def _parse(tmp_path, frontmatter_text):
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text(f"---\n{frontmatter_text}\n---\n", encoding="utf-8")
+        result = parse_frontmatter(skill_md)
+        assert result is not None
+        return result
+
+    def test_flat_key_value(self, tmp_path):
+        result = self._parse(tmp_path, "name: my-skill\ndescription: Does a thing")
         assert result["name"] == "my-skill"
         assert result["description"] == "Does a thing"
 
-    def test_inline_list(self):
-        text = "tags: [a, b, c]"
-        result = _simple_frontmatter_parse(text)
+    def test_inline_list(self, tmp_path):
+        result = self._parse(tmp_path, "tags: [a, b, c]")
         assert result["tags"] == ["a", "b", "c"]
 
-    def test_empty_list(self):
-        text = "tags: []"
-        result = _simple_frontmatter_parse(text)
+    def test_empty_list(self, tmp_path):
+        result = self._parse(tmp_path, "tags: []")
         assert result["tags"] == []
 
-    def test_boolean_true(self):
-        text = "has_handler: true"
-        result = _simple_frontmatter_parse(text)
+    def test_boolean_true(self, tmp_path):
+        result = self._parse(tmp_path, "has_handler: true")
         assert result["has_handler"] is True
 
-    def test_boolean_false(self):
-        text = "has_handler: false"
-        result = _simple_frontmatter_parse(text)
+    def test_boolean_false(self, tmp_path):
+        result = self._parse(tmp_path, "has_handler: false")
         assert result["has_handler"] is False
 
-    def test_nested_keys(self):
-        text = "requires:\n  pip: [praw]\n  bins: [gh]\n  config: [MY_TOKEN]"
-        result = _simple_frontmatter_parse(text)
+    def test_nested_keys(self, tmp_path):
+        result = self._parse(tmp_path, "requires:\n  pip: [praw]\n  bins: [gh]\n  config: [MY_TOKEN]")
         assert result["requires"]["pip"] == ["praw"]
         assert result["requires"]["bins"] == ["gh"]
         assert result["requires"]["config"] == ["MY_TOKEN"]
 
-    def test_nested_block_list(self):
+    def test_nested_block_list(self, tmp_path):
         # The no-yaml fallback silently answered "" here, so a skill's declared
         # systemd units read as empty on any runner without PyYAML. That is the
         # CI red of 2026-08-19 (run 32222871212), not a machine-state problem.
-        text = "switch:\n  systemd_user:\n    - telegram-bot@api\n    - telegram-bot@base"
-        result = _simple_frontmatter_parse(text)
+        result = self._parse(tmp_path, "switch:\n  systemd_user:\n    - telegram-bot@api\n    - telegram-bot@base")
         assert result["switch"]["systemd_user"] == ["telegram-bot@api", "telegram-bot@base"]
 
-    def test_top_level_block_list(self):
+    def test_top_level_block_list(self, tmp_path):
         # Same defect one level up, and already live: screen_lock and github
         # both declare when_to_use this way, and both parsed to {} without yaml.
-        text = 'when_to_use:\n  - "lock the screen"\n  - "walking away"'
-        result = _simple_frontmatter_parse(text)
+        result = self._parse(tmp_path, 'when_to_use:\n  - "lock the screen"\n  - "walking away"')
         assert result["when_to_use"] == ["lock the screen", "walking away"]
 
-    def test_a_block_list_does_not_leak_into_the_next_key(self):
+    def test_a_block_list_does_not_leak_into_the_next_key(self, tmp_path):
         # The items must land under the key they follow. An earlier draft of
         # this test put no "- " line AFTER the second key, so a parser that
         # never closed the open list still passed it — the leak needs a later
@@ -130,63 +155,75 @@ class TestSimpleFrontmatterParse:
         # list cursor, so only that shape can leak. Two earlier drafts of this
         # test used a top-level list and passed against a parser that never
         # closed the cursor at all.
-        text = "requires:\n  pip: [praw]\nwhen_to_use:\n  - stolen-if-broken\nversion: 3"
-        result = _simple_frontmatter_parse(text)
+        result = self._parse(tmp_path, "requires:\n  pip: [praw]\nwhen_to_use:\n  - stolen-if-broken\nversion: 3")
 
         assert result["requires"]["pip"] == ["praw"]
         assert result["when_to_use"] == ["stolen-if-broken"]
         assert result["version"] == 3
 
-    def test_an_empty_nested_key_swallows_nothing_from_its_siblings(self):
+    def test_an_empty_nested_key_swallows_nothing_from_its_siblings(self, tmp_path):
         # Reaches the undecided-nested-key branch for real: "pip:" carries no
         # value and no list follows, so the parser must leave it empty and let
         # the sibling keys parse normally.
-        text = "requires:\n  pip:\n  bins: [gh]\n  config: [TOKEN]"
-        result = _simple_frontmatter_parse(text)
+        result = self._parse(tmp_path, "requires:\n  pip:\n  bins: [gh]\n  config: [TOKEN]")
 
         assert not result["requires"]["pip"]
         assert result["requires"]["bins"] == ["gh"]
         assert result["requires"]["config"] == ["TOKEN"]
 
-    def test_an_empty_nested_key_still_takes_its_own_block_list(self):
-        text = "switch:\n  systemd_user:\n    - one\n  other: [x]"
-        result = _simple_frontmatter_parse(text)
+    def test_an_empty_nested_key_still_takes_its_own_block_list(self, tmp_path):
+        result = self._parse(tmp_path, "switch:\n  systemd_user:\n    - one\n  other: [x]")
 
         assert result["switch"]["systemd_user"] == ["one"]
         assert result["switch"]["other"] == ["x"]
 
-    def test_integer_value(self):
-        text = "version: 42"
-        result = _simple_frontmatter_parse(text)
+    def test_integer_value(self, tmp_path):
+        result = self._parse(tmp_path, "version: 42")
         assert result["version"] == 42
 
-    def test_quoted_string(self):
-        text = 'description: "A quoted value"'
-        result = _simple_frontmatter_parse(text)
+    def test_quoted_string(self, tmp_path):
+        result = self._parse(tmp_path, 'description: "A quoted value"')
         assert result["description"] == "A quoted value"
 
 
 class TestParseSimpleValue:
-    def test_empty_list(self):
-        assert _parse_simple_value("[]") == []
+    """Value parsing reached through parse_frontmatter() on a single keyed
+    line (item 10), with the module's `yaml` binding patched to None so the
+    no-yaml fallback — and its value parser — resolves the type, the same
+    branch exercised directly before."""
 
-    def test_inline_list(self):
-        assert _parse_simple_value("[a, b]") == ["a", "b"]
+    @pytest.fixture(autouse=True)
+    def _force_no_yaml(self, monkeypatch):
+        monkeypatch.setattr(discovery_handler, "yaml", None)
 
-    def test_true(self):
-        assert _parse_simple_value("true") is True
+    @staticmethod
+    def _value_for(tmp_path, raw_value):
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text(f"---\nvalue: {raw_value}\n---\n", encoding="utf-8")
+        result = parse_frontmatter(skill_md)
+        assert result is not None
+        return result["value"]
 
-    def test_false(self):
-        assert _parse_simple_value("false") is False
+    def test_empty_list(self, tmp_path):
+        assert self._value_for(tmp_path, "[]") == []
 
-    def test_integer(self):
-        assert _parse_simple_value("42") == 42
+    def test_inline_list(self, tmp_path):
+        assert self._value_for(tmp_path, "[a, b]") == ["a", "b"]
 
-    def test_float(self):
-        assert _parse_simple_value("3.14") == 3.14
+    def test_true(self, tmp_path):
+        assert self._value_for(tmp_path, "true") is True
 
-    def test_string(self):
-        assert _parse_simple_value("hello") == "hello"
+    def test_false(self, tmp_path):
+        assert self._value_for(tmp_path, "false") is False
+
+    def test_integer(self, tmp_path):
+        assert self._value_for(tmp_path, "42") == 42
+
+    def test_float(self, tmp_path):
+        assert self._value_for(tmp_path, "3.14") == 3.14
+
+    def test_string(self, tmp_path):
+        assert self._value_for(tmp_path, "hello") == "hello"
 
 
 class TestDiscoverSkillsInPath:
@@ -198,8 +235,8 @@ class TestDiscoverSkillsInPath:
         assert "system_status" in names
         assert "drone_commands" in names
 
-    def test_nonexistent_path(self):
-        skills = discover_skills_in_path("/nonexistent/path", "test")
+    def test_nonexistent_path(self, tmp_path):
+        skills = discover_skills_in_path(str(tmp_path / "nonexistent" / "path"), "test")
         assert skills == []
 
     def test_empty_dir(self):
@@ -234,7 +271,9 @@ class TestDiscoverSkillsInPath:
         with tempfile.TemporaryDirectory() as tmpdir:
             skill_dir = Path(tmpdir) / "my-skill"
             skill_dir.mkdir()
-            (skill_dir / "SKILL.md").write_text("---\nname: my-skill\ndescription: A test\n---\n\n# Test\n")
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: my-skill\ndescription: A test\n---\n\n# Test\n", encoding="utf-8"
+            )
             skills = discover_skills_in_path(tmpdir, "project")
             assert len(skills) == 1
             assert skills[0]["name"] == "my-skill"
@@ -251,6 +290,6 @@ class TestParseFrontmatter:
             assert result["name"] == "test"
         Path(f.name).unlink()
 
-    def test_invalid_file(self):
-        result = parse_frontmatter("/nonexistent/file.md")
+    def test_invalid_file(self, tmp_path):
+        result = parse_frontmatter(str(tmp_path / "nonexistent" / "file.md"))
         assert result is None

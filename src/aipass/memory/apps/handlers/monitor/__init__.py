@@ -3,4 +3,4 @@
 
 # Python 3.10 mock.patch compatibility — submodules must be importable as
 # attributes for mock._dot_lookup to resolve dotted paths.
-from . import detector  # noqa: F401
+from . import detector

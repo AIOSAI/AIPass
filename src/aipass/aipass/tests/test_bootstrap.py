@@ -1,17 +1,22 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.0.0
+# Version: 1.2.1
 # Created: 2026-05-04
-# Modified: 2026-05-04
+# Modified: 2026-10-10
 # =============================================
 
-"""Tests for the init bootstrap handler.
+"""Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
 
-Covers _sanitize_name(), init_project(), update_project(), and
-scaffold_content generators — all file operations use tmp_path to
-stay fully isolated from the live filesystem.
-"""
+# Covers init_project() (and the name sanitizing inside it), AIPASS_HOME,
+# scaffold_content generators, and throwaway paths — all file operations use
+# tmp_path to stay fully isolated from the live filesystem. Split 2026-10-08
+# (fleet green, oversize_test_file): update_project's conffile/retrofit/seed/
+# cleanup/.updateignore tests live in test_bootstrap_update.py, hooks.json and
+# the tier files in test_bootstrap_hooks.py.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
 import uuid
@@ -21,83 +26,61 @@ from pathlib import Path
 import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import (
-    _merge_hooks_json,
-    _sanitize_name,
     is_throwaway_path,
     init_project,
     update_project,
 )
 from aipass.aipass.apps.handlers.init import bootstrap
-from aipass.aipass.apps.handlers.init.scaffold_manifest import sha256_text as sc_sha256
 from aipass.aipass.shared import scaffold_content as sc
+from aipass.aipass.shared.registry_discovery import registries_in
+from aipass.aipass.tests.support_bootstrap import _expected_aipass_home
 
 
-def _expected_aipass_home() -> str:
-    """The AIPASS_HOME the detector must find, derived independently of it.
+# ---------------------------------------------------------------------------
+# Project-name sanitizing (_sanitize_name), read through init_project, its one
+# caller, off the registry file it names (fleet green leg 4). The old bare-""
+# case is gone: init_project reads an empty name as "use the directory's name".
+# ---------------------------------------------------------------------------
 
-    project_home._detect_aipass_home walks up from the installed ``aipass``
-    package to the repo root. This reads the same fact off the package itself
-    rather than calling the detector, so the pin is a second derivation and not
-    a restatement of the code under test.
+
+@pytest.mark.parametrize(
+    "raw,registry_name,package",
+    [
+        ("my_project", "MY_PROJECT", "my_project"),  # lowercase is uppercased
+        ("my-project", "MY-PROJECT", "my_project"),  # hyphens are kept
+        ("my project!v2", "MY_PROJECT_V2", "my_project_v2"),  # other characters become underscores
+        ("foo.bar/baz", "FOO_BAR_BAZ", "foo_bar_baz"),  # dots and slashes too
+        ("...name...", "NAME", "name"),  # leading and trailing underscores are stripped
+        ("hello world", "HELLO_WORLD", "hello_world"),  # spaces become underscores
+        ("ALPHA", "ALPHA", "alpha"),  # uppercase passes through
+    ],
+)
+def test_project_name_is_sanitized_into_the_registry_name(tmp_path, raw: str, registry_name: str, package: str):
+    """The registry file and the src/ package carry the sanitized name, and no other registry lands.
+
+    Mutant: _sanitize_name's .upper() dropped -> red. Mutant: package_name read off the
+    raw name again -> the punctuated cases red (a trailing-dot directory crashed on Windows).
     """
-    import aipass
-
-    return str(Path(aipass.__file__).resolve().parent.parent.parent)
-
-
-# ---------------------------------------------------------------------------
-# _sanitize_name tests
-# ---------------------------------------------------------------------------
-
-
-def test_sanitize_name_normal_input():
-    """Normal lowercase string is uppercased."""
-    assert _sanitize_name("my_project") == "MY_PROJECT"
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name=raw)
+    assert [p.name for p in registries_in(target)] == [f"{registry_name}_REGISTRY.json"]
+    packages = sorted(p.parent.relative_to(target / "src").as_posix() for p in (target / "src").rglob("__init__.py"))
+    assert packages == [package]
+    assert package.isidentifier()
 
 
-def test_sanitize_name_preserves_hyphens():
-    """Hyphens are kept as-is (valid filename chars)."""
-    assert _sanitize_name("my-project") == "MY-PROJECT"
+@pytest.mark.parametrize("raw", ["!!!", "___"])
+def test_a_name_that_sanitizes_to_nothing_is_refused(tmp_path, raw: str):
+    """A name with nothing left after sanitizing is refused, and no registry is written.
 
-
-def test_sanitize_name_replaces_special_chars():
-    """Non-alphanumeric characters (except _ and -) become underscores."""
-    assert _sanitize_name("my project!v2") == "MY_PROJECT_V2"
-
-
-def test_sanitize_name_replaces_dots_and_slashes():
-    """Dots and slashes are replaced with underscores."""
-    assert _sanitize_name("foo.bar/baz") == "FOO_BAR_BAZ"
-
-
-def test_sanitize_name_strips_leading_trailing_underscores():
-    """Leading/trailing underscores from replacement are stripped."""
-    assert _sanitize_name("...name...") == "NAME"
-
-
-def test_sanitize_name_spaces_become_underscores():
-    """Spaces are not alphanumeric, so they become underscores."""
-    assert _sanitize_name("hello world") == "HELLO_WORLD"
-
-
-def test_sanitize_name_empty_after_sanitize():
-    """All-special-character input collapses to empty string."""
-    assert _sanitize_name("!!!") == ""
-
-
-def test_sanitize_name_already_upper():
-    """Already-uppercase names pass through unchanged."""
-    assert _sanitize_name("ALPHA") == "ALPHA"
-
-
-def test_sanitize_name_empty_string():
-    """Empty input returns empty string."""
-    assert _sanitize_name("") == ""
-
-
-def test_sanitize_name_only_underscores():
-    """All-underscore input is stripped to empty string."""
-    assert _sanitize_name("___") == ""
+    Mutant: _sanitize_name's .strip("_") dropped -> "___" survives as a name -> red.
+    """
+    target = tmp_path / "proj"
+    target.mkdir()
+    with pytest.raises(ValueError, match="Cannot derive project name"):
+        init_project(target, project_name=raw)
+    assert registries_in(target) == []
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +287,7 @@ def test_init_project_settings_no_hooks(tmp_path, monkeypatch):
     """.claude/settings.json has no hooks — all hooks fire from provider level."""
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
+        lambda home: home != _expected_aipass_home(),
     )
     target = tmp_path / "proj"
     target.mkdir()
@@ -444,393 +427,6 @@ def test_init_project_agents_md_no_trinity(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# update_project tests
-# ---------------------------------------------------------------------------
-
-
-def test_update_project_raises_if_no_registry(tmp_path):
-    """ValueError when target has no *_REGISTRY.json (not an AIPass project)."""
-    target = tmp_path / "bare"
-    target.mkdir()
-
-    with pytest.raises(ValueError, match="No AIPass project found"):
-        update_project(target)
-
-
-def test_update_project_return_dict_structure(tmp_path):
-    """Return dict contains all required keys."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="upd")
-
-    result = update_project(target)
-
-    assert set(result.keys()) == {
-        # Plan shape (DPLAN-0335). Exact-set, not superset: a key added here
-        # without a decision is a key @hooks and doctor may start reading.
-        "project_name",
-        "target",
-        "aipass_home",
-        "aipass_version",
-        "stamped_version",
-        "stamp_pending",
-        "stamp_only",
-        "applied",
-        "pending",
-        "files",
-        "handlers",
-        "trust_reenrol",
-        "backup_dir",
-        # Legacy shape — the CLI and older pins read these.
-        "updated_files",
-        "already_current",
-        "kept_files",
-        "ignored_files",
-        "skipped_files",
-        "removed_files",
-        "trust_enrolled",
-    }
-    assert result["project_name"] == "UPD"
-    assert result["target"] == str(target.resolve())
-    assert isinstance(result["updated_files"], list)
-    assert isinstance(result["already_current"], list)
-    assert isinstance(result["skipped_files"], list)
-
-
-def _windows_newline_world(monkeypatch):
-    """Make this Linux process translate newlines the way Windows does.
-
-    THE PLATFORM ORACLE (FPLAN-0529 shape). CPython's ``write_text`` with the
-    default ``newline=None`` translates every ``\n`` to ``os.linesep`` on the
-    way to disk — a no-op here, ``\r\n`` on Windows. That single difference
-    made PR #761's windows-setup job red while all three Linux legs were green,
-    so pinning it needs the Windows-shaped world manufactured, not a runner.
-
-    The fake is faithful in the one way that matters: it translates ONLY when
-    the caller left ``newline`` unset, which is exactly the condition the cure
-    removes. A writer that pins ``newline="\n"`` passes straight through.
-    """
-    real_write_text = Path.write_text
-
-    def windows_write_text(self, data, encoding=None, errors=None, newline=None):
-        if newline is None:
-            # newline="" then stops the real writer translating a second time.
-            return real_write_text(self, data.replace("\n", "\r\n"), encoding=encoding, errors=errors, newline="")
-        return real_write_text(self, data, encoding=encoding, errors=errors, newline=newline)
-
-    monkeypatch.setattr(Path, "write_text", windows_write_text)
-
-
-def test_managed_files_land_lf_even_where_the_platform_translates(tmp_path, monkeypatch):
-    """Every file init writes holds LF bytes, on a platform that would give CRLF.
-
-    The manifest hashes bytes on disk while the plan hashes the template string,
-    so the two can only ever agree if what lands on disk IS the string. This
-    pins that invariant at the source rather than at one symptom.
-    """
-    _windows_newline_world(monkeypatch)
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="crlf")
-
-    for rel in bootstrap._MANIFEST_TRACKED:
-        path = target / rel
-        if path.is_file():
-            assert b"\r\n" not in path.read_bytes(), f"{rel} landed with CRLF"
-
-    # And the recorded hash is the hash of the template string, not of some
-    # platform-translated variant of it.
-    prep = target / ".claude" / "commands" / "prep.md"
-    manifest = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["files"][".claude/commands/prep.md"] == sc_sha256(sc.prep_md())
-    assert prep.read_bytes() == sc.prep_md().encode("utf-8")
-
-
-def test_update_after_init_is_clean_where_the_platform_translates(tmp_path, monkeypatch):
-    """PR #761 windows-setup, reproduced on Linux: a fresh project must be current.
-
-    Before the cure this reported `.claude/commands/prep.md` as an update on the
-    first run and a kept-local (with a spurious `.aipass-new` beside it) on the
-    second — a file nobody had touched, on a project AIPass had just written.
-    """
-    _windows_newline_world(monkeypatch)
-    monkeypatch.setattr(
-        "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
-    )
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="crlfupd")
-
-    first = update_project(target)
-    second = update_project(target)
-
-    assert first["updated_files"] == []
-    assert first["kept_files"] == []
-    assert second["updated_files"] == []
-    assert not (target / ".claude" / "commands" / "prep.md.aipass-new").exists()
-
-
-def _age_the_stamp(target: Path) -> None:
-    """Rewind a project's manifest to an older AIPass, leaving every file alone.
-
-    The state every existing project is in the morning after a release that
-    changed no template: files current, record behind.
-    """
-    manifest_path = target / ".aipass" / "scaffold_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["aipass_version"] = "0.0.1"
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-
-
-def test_a_plan_that_only_moves_the_version_is_stamp_only(tmp_path):
-    """DPLAN-0337 R1: nothing written but the manifest -> stamp_only, still pending.
-
-    Pending stays True on purpose — the stamp IS a write, and exit 2 keeps
-    meaning "there is a plan to read". stamp_only is the separate fact that
-    no FILE would change, which is what lets that plan apply without a go.
-    """
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="stamponly")
-    _age_the_stamp(target)
-
-    plan = update_project(target, apply=False)
-
-    assert plan["stamp_pending"] is True
-    assert plan["pending"] is True
-    assert plan["stamp_only"] is True
-    assert not any(entry["writes"] for entry in plan["files"])
-    assert plan["handlers"] == []
-
-
-def test_a_current_project_is_not_stamp_only(tmp_path):
-    """Nothing to write AND nothing to stamp is "current", not "stamp only".
-
-    Found by mutation: dropping the stamp half of the predicate survived every
-    pin above, because each one aged the stamp first. On a current project that
-    mutant would tell the manager "no go is needed — run the apply" for a plan
-    with nothing in it.
-    """
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="current")
-
-    plan = update_project(target, apply=False)
-
-    assert plan["stamp_pending"] is False
-    assert plan["pending"] is False
-    assert plan["stamp_only"] is False
-
-
-def test_a_kept_file_still_needing_its_sidecar_is_not_stamp_only(tmp_path):
-    """One kept-local file whose template has not been written beside it yet
-    means apply WOULD write a file — so this plan still needs a go."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="keptnew")
-    _age_the_stamp(target)
-    (target / ".claude" / "commands" / "prep.md").write_text("# my own prep\n", encoding="utf-8")
-
-    plan = update_project(target, apply=False)
-
-    kept = [e for e in plan["files"] if e["action"] == "kept-local"]
-    assert len(kept) == 1 and kept[0]["writes"] is True
-    assert plan["stamp_only"] is False
-
-
-def test_a_kept_file_whose_sidecar_is_current_stays_stamp_only(tmp_path):
-    """The Vera-Studio shape: kept files already settled beside their template.
-
-    Kept is a standing decision, not a pending write, so a project that has
-    already received its sidecars is stamp-only on the next release — which
-    is exactly the live case R1 was ruled on (0 of 8 would change).
-    """
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="keptold")
-    (target / ".claude" / "commands" / "prep.md").write_text("# my own prep\n", encoding="utf-8")
-    update_project(target)  # writes the sidecar once
-    _age_the_stamp(target)
-
-    plan = update_project(target, apply=False)
-
-    kept = [e for e in plan["files"] if e["action"] == "kept-local"]
-    assert len(kept) == 1 and kept[0]["writes"] is False
-    assert plan["stamp_only"] is True
-
-
-def test_applying_a_stamp_only_plan_changes_nothing_but_the_stamp(tmp_path):
-    """The receipt's promise, checked against the disk: every tracked file
-    byte-identical, no backup taken, and the manifest's version moved."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="stampapply")
-    _age_the_stamp(target)
-    before = {rel: (target / rel).read_bytes() for rel in bootstrap._MANIFEST_TRACKED if (target / rel).is_file()}
-
-    result = update_project(target)
-
-    assert result["stamp_only"] is True
-    assert result["updated_files"] == []
-    assert result["backup_dir"] is None
-    after = {rel: (target / rel).read_bytes() for rel in before}
-    assert after == before
-    manifest = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["aipass_version"] == result["aipass_version"] != "0.0.1"
-
-
-def test_update_project_already_current_after_init(tmp_path, monkeypatch):
-    """Running update immediately after init reports all managed files as already current."""
-    monkeypatch.setattr(
-        "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
-    )
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="fresh")
-
-    result = update_project(target)
-
-    assert len(result["updated_files"]) == 0
-    assert len(result["already_current"]) >= 5
-
-
-def test_update_project_idempotent(tmp_path, monkeypatch):
-    """Running update twice in a row produces no changes on second run."""
-    monkeypatch.setattr(
-        "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
-    )
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="idem")
-
-    result1 = update_project(target)
-    result2 = update_project(target)
-
-    # Both runs should be identical
-    assert result1["updated_files"] == result2["updated_files"]
-    assert result1["already_current"] == result2["already_current"]
-
-
-def test_update_project_keeps_a_managed_file_the_project_edited(tmp_path):
-    """The conffile rule: an edited managed file is KEPT, template lands beside it.
-
-    This is the Vera case (DPLAN-0334/0335) in miniature — the update must not
-    be able to undo a manager's own work. prep.md is the subject because it is
-    generated locally, so the pin holds with or without a detectable AIPASS_HOME.
-    """
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="mod")
-
-    prep = target / ".claude" / "commands" / "prep.md"
-    prep.write_text("# My own prep\n", encoding="utf-8")
-
-    result = update_project(target)
-
-    assert str(prep.resolve()) in result["kept_files"]
-    assert str(prep.resolve()) not in result["updated_files"]
-    # The edit survives verbatim, and the template is readable beside it.
-    assert prep.read_text(encoding="utf-8") == "# My own prep\n"
-    sidecar = prep.with_name("prep.md.aipass-new")
-    assert sidecar.is_file()
-    assert sidecar.read_text(encoding="utf-8") == sc.prep_md()
-
-    entry = next(e for e in result["files"] if e["path"] == ".claude/commands/prep.md")
-    assert entry["action"] == "kept-local"
-
-
-def test_update_project_rewrites_a_managed_file_nobody_touched(tmp_path):
-    """The other arm: hash still matches the manifest, so the template wins.
-
-    Simulated by recording the on-disk hash — the state a project is in when
-    AIPass wrote the file and the template has since moved on.
-    """
-    import hashlib
-
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="mod")
-
-    prep = target / ".claude" / "commands" / "prep.md"
-    prep.write_text("# superseded template\n", encoding="utf-8")
-    manifest_path = target / ".aipass" / "scaffold_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["files"][".claude/commands/prep.md"] = hashlib.sha256(prep.read_bytes()).hexdigest()
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-
-    result = update_project(target)
-
-    assert str(prep.resolve()) in result["updated_files"]
-    assert prep.read_text(encoding="utf-8") == sc.prep_md()
-    assert not prep.with_name("prep.md.aipass-new").exists()
-
-    # And the old content is recoverable, never just gone.
-    backups = list((target / ".aipass" / ".backup").glob("scaffold_*/.claude/commands/prep.md"))
-    assert len(backups) == 1
-    assert backups[0].read_text(encoding="utf-8") == "# superseded template\n"
-
-
-def test_update_project_never_touches_user_owned_files(tmp_path):
-    """Registry, README, STATUS, .gitignore are always in skipped_files."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="skip")
-
-    # Modify user-owned files
-    (target / "README.md").write_text("# My custom README\n", encoding="utf-8")
-    (target / ".gitignore").write_text("# custom\n", encoding="utf-8")
-
-    result = update_project(target)
-
-    skipped = result["skipped_files"]
-    assert any("REGISTRY" in s for s in skipped)
-    assert any("README.md" in s for s in skipped)
-    assert any(".gitignore" in s for s in skipped)
-
-    # User customisations are preserved
-    assert (target / "README.md").read_text(encoding="utf-8") == "# My custom README\n"
-
-
-def test_update_project_creates_missing_managed_dirs(tmp_path):
-    """update_project recreates .aipass/ and .claude/ if they were deleted."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="recover")
-
-    # Delete only the managed subdirectories (not root files like CLAUDE.md)
-    import shutil
-
-    shutil.rmtree(target / ".aipass")
-    shutil.rmtree(target / ".claude")
-
-    result = update_project(target)
-
-    assert (target / ".claude" / "settings.json").exists()
-    # Managed files in deleted dirs re-written (tier0_kernel, tier1_navmap,
-    # hooks.json, settings.json, settings.local.json, prep)
-    if result["aipass_home"]:
-        assert len(result["updated_files"]) == 6
-    else:
-        assert len(result["updated_files"]) == 2
-    assert len(result["already_current"]) >= 2
-
-
-def test_update_project_skipped_files_count(tmp_path):
-    """update_project skips 3 user-owned files."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="count")
-
-    result = update_project(target)
-
-    # 3 user-owned (registry, README, .gitignore)
-    assert len(result["skipped_files"]) == 3
-
-
-# ---------------------------------------------------------------------------
 # DPLAN-0121: AIPASS_HOME tests
 # ---------------------------------------------------------------------------
 
@@ -854,10 +450,13 @@ def test_init_project_returns_aipass_home(tmp_path):
 
 
 def test_init_project_settings_has_aipass_home_when_detected(tmp_path, monkeypatch):
-    """When AIPASS_HOME is detected, settings.local.json (not settings.json) includes env.AIPASS_HOME."""
+    """When AIPASS_HOME is detected, settings.local.json (not settings.json) includes env.AIPASS_HOME.
+
+    Mutant: is_throwaway_path asked about str(target) instead of aipass_home -> red.
+    """
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
+        lambda home: home != _expected_aipass_home(),
     )
     target = tmp_path / "proj"
     target.mkdir()
@@ -890,7 +489,7 @@ def test_update_project_adds_aipass_home_if_missing(tmp_path, monkeypatch):
     """update_project recreates settings.local.json with AIPASS_HOME if missing."""
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
+        lambda home: home != _expected_aipass_home(),
     )
     target = tmp_path / "proj"
     target.mkdir()
@@ -912,560 +511,14 @@ def test_update_project_adds_aipass_home_if_missing(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# update_project — claudeMdExcludes retrofit (nested projects/<name> fence)
-# ---------------------------------------------------------------------------
-
-
-def _make_nested_project(tmp_path):
-    """<host>/projects/<name> with registries at both levels (is_projects_child == True)."""
-    host = tmp_path / "host"
-    host.mkdir()
-    (host / "HOST_REGISTRY.json").write_text("{}", encoding="utf-8")
-    projects = host / "projects"
-    projects.mkdir()
-    target = projects / "myapp"
-    target.mkdir()
-    (target / "MYAPP_REGISTRY.json").write_text("{}", encoding="utf-8")
-    return host, target
-
-
-def test_update_project_retrofits_claude_md_excludes_into_existing_settings(tmp_path, monkeypatch):
-    """update_project adds claudeMdExcludes to an existing settings.local.json that only has env.AIPASS_HOME.
-
-    Real-world case: a nested project created before the fence feature shipped
-    has env.AIPASS_HOME but no claudeMdExcludes — running update_project must
-    retrofit the fence without disturbing the existing env block.
-    """
-    from aipass.aipass.apps.handlers.init import bootstrap
-
-    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
-    host, target = _make_nested_project(tmp_path)
-    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
-
-    claude_dir = target / ".claude"
-    claude_dir.mkdir()
-    local_settings_path = claude_dir / "settings.local.json"
-    local_settings_path.write_text(json.dumps({"env": {"AIPASS_HOME": str(host)}}, indent=2) + "\n", encoding="utf-8")
-
-    result = bootstrap.update_project(target)
-
-    data = json.loads(local_settings_path.read_text(encoding="utf-8"))
-    assert data["env"]["AIPASS_HOME"] == str(host)
-    assert data["claudeMdExcludes"] == [(host / "CLAUDE.md").as_posix(), (host / ".claude" / "CLAUDE.md").as_posix()]
-    assert str(local_settings_path) in result["updated_files"]
-
-
-def test_update_project_claude_md_excludes_retrofit_is_idempotent(tmp_path, monkeypatch):
-    """Running update_project a second time after the retrofit reports no further changes."""
-    from aipass.aipass.apps.handlers.init import bootstrap
-
-    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
-    host, target = _make_nested_project(tmp_path)
-    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
-
-    claude_dir = target / ".claude"
-    claude_dir.mkdir()
-    local_settings_path = claude_dir / "settings.local.json"
-    local_settings_path.write_text(json.dumps({"env": {"AIPASS_HOME": str(host)}}, indent=2) + "\n", encoding="utf-8")
-
-    result1 = bootstrap.update_project(target)
-    before = local_settings_path.read_text(encoding="utf-8")
-    result2 = bootstrap.update_project(target)
-    after = local_settings_path.read_text(encoding="utf-8")
-
-    assert str(local_settings_path) in result1["updated_files"]
-    assert str(local_settings_path) in result2["already_current"]
-    assert str(local_settings_path) not in result2["updated_files"]
-    assert before == after
-
-
-def test_update_project_preserves_custom_claude_md_excludes_entries(tmp_path, monkeypatch):
-    """update_project unions in the official fence entries without dropping a user's hand-added ones."""
-    from aipass.aipass.apps.handlers.init import bootstrap
-
-    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
-    host, target = _make_nested_project(tmp_path)
-    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
-
-    claude_dir = target / ".claude"
-    claude_dir.mkdir()
-    local_settings_path = claude_dir / "settings.local.json"
-    custom_entry = "/custom/extra/CLAUDE.md"
-    local_settings_path.write_text(
-        json.dumps(
-            {"env": {"AIPASS_HOME": str(host)}, "claudeMdExcludes": [custom_entry]},
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    bootstrap.update_project(target)
-
-    data = json.loads(local_settings_path.read_text(encoding="utf-8"))
-    assert data["claudeMdExcludes"] == [
-        custom_entry,
-        (host / "CLAUDE.md").as_posix(),
-        (host / ".claude" / "CLAUDE.md").as_posix(),
-    ]
-
-
-# ---------------------------------------------------------------------------
-# DPLAN-0190: hooks.json + /memo tests
-# ---------------------------------------------------------------------------
-
-
-def test_init_project_no_memo_md(tmp_path):
-    """init_project does NOT create memo.md — it belongs at provider level."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    init_project(target, project_name="memo")
-
-    memo_path = target / ".claude" / "commands" / "memo.md"
-    assert not memo_path.exists()
-
-
-def test_init_project_creates_hooks_json(tmp_path):
-    """init_project creates .aipass/hooks.json from project_hooks.json template."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    result = init_project(target, project_name="hooks")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    hooks_json = target / ".aipass" / "hooks.json"
-    assert hooks_json.exists(), ".aipass/hooks.json should be created"
-    data = json.loads(hooks_json.read_text(encoding="utf-8"))
-    assert data.get("hooks_enabled") is True
-    assert "UserPromptSubmit" in data
-
-
-def test_init_project_hooks_json_matches_template(tmp_path):
-    """hooks.json content matches the project_hooks.json template."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    result = init_project(target, project_name="tmpl")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    hooks_json = target / ".aipass" / "hooks.json"
-    template = Path(result["aipass_home"]) / ".aipass" / "project_hooks.json"
-    if not template.exists():
-        pytest.skip("project_hooks.json template not found")
-
-    assert hooks_json.read_bytes() == template.read_bytes()
-
-
-def test_init_project_hooks_json_in_created_files(tmp_path):
-    """hooks.json path appears in created_files list."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    result = init_project(target, project_name="created")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    assert any("hooks.json" in f for f in result["created_files"])
-
-
-def test_init_project_no_hooks_json_without_aipass_home(tmp_path, monkeypatch):
-    """When AIPASS_HOME is not detectable, hooks.json is not created."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    monkeypatch.setattr(
-        "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
-        lambda: None,
-    )
-
-    init_project(target, project_name="nohooks")
-
-    assert not (target / ".aipass" / "hooks.json").exists()
-
-
-def test_init_project_no_hook_scripts_shipped(tmp_path):
-    """No hook scripts are shipped to .claude/hooks/ (engine runs from $AIPASS_HOME)."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    init_project(target, project_name="noscripts")
-
-    # THE GUARD BECAME AN EXPRESSION (v5 unentered_assert, 2026-09-08). The
-    # `if hooks_dir.exists():` arm had no else, so the case this test is named
-    # for - no hooks directory at all - passed having checked nothing, and so
-    # did the case where the directory was never created because init crashed
-    # earlier. An absent directory ships no scripts, which is the same verdict
-    # said out loud.
-    hooks_dir = target / ".claude" / "hooks"
-    shipped = sorted(f.name for f in hooks_dir.iterdir()) if hooks_dir.exists() else []
-    assert shipped == [], f"No hook scripts should be shipped: {shipped}"
-
-
-def test_init_project_settings_has_no_hook_events(tmp_path):
-    """settings.json contains no hooks — provider handles all events."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    init_project(target, project_name="events")
-
-    settings = json.loads((target / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    assert "hooks" not in settings
-
-
-def test_update_project_creates_hooks_json_if_missing(tmp_path):
-    """update_project creates hooks.json from template when missing."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    registry_data = {
-        "metadata": {
-            "id": "test-id",
-            "name": "MISS",
-            "version": "1.0.0",
-            "created": "2026-01-01",
-            "last_updated": "2026-01-01",
-            "total_branches": 0,
-        },
-        "branches": [],
-    }
-    (target / "MISS_REGISTRY.json").write_text(json.dumps(registry_data), encoding="utf-8")
-
-    hooks_json = target / ".aipass" / "hooks.json"
-    assert not hooks_json.exists()
-
-    result = update_project(target)
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    assert hooks_json.exists()
-    assert any("hooks.json" in f for f in result["updated_files"])
-    data = json.loads(hooks_json.read_text(encoding="utf-8"))
-    assert data.get("hooks_enabled") is True
-
-
-def test_update_project_union_merge_preserves_user_enabled(tmp_path):
-    """update preserves user's enabled=false for existing hooks."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    result = init_project(target, project_name="merge")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    hooks_json = target / ".aipass" / "hooks.json"
-    data = json.loads(hooks_json.read_text(encoding="utf-8"))
-    data["PreToolUse"]["git_gate"]["enabled"] = False
-    hooks_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-    update_project(target)
-
-    updated = json.loads(hooks_json.read_text(encoding="utf-8"))
-    assert updated["PreToolUse"]["git_gate"]["enabled"] is False
-
-
-def test_update_project_union_merge_adds_new_hooks(tmp_path):
-    """update adds hooks from template that user doesn't have."""
-    existing = {
-        "hooks_enabled": True,
-        "UserPromptSubmit": {
-            "identity_injector": {"enabled": True, "handler": "old.handler", "matcher": ""},
-        },
-    }
-    template = {
-        "hooks_enabled": True,
-        "UserPromptSubmit": {
-            "identity_injector": {"enabled": True, "handler": "new.handler", "matcher": ""},
-            "brand_new_hook": {"enabled": True, "handler": "brand.new", "matcher": ""},
-        },
-        "Stop": {
-            "stop_sound": {"enabled": True, "handler": "stop.handler", "matcher": ""},
-        },
-    }
-
-    merged = _merge_hooks_json(existing, template)
-
-    assert "brand_new_hook" in merged["UserPromptSubmit"]
-    assert "Stop" in merged
-    assert merged["Stop"]["stop_sound"]["enabled"] is True
-
-
-def test_update_project_union_merge_preserves_user_hooks():
-    """User's custom hooks not in template are kept."""
-    existing = {
-        "hooks_enabled": True,
-        "UserPromptSubmit": {
-            "my_custom_hook": {"enabled": True, "handler": "custom.handler", "matcher": ""},
-        },
-    }
-    template = {
-        "hooks_enabled": True,
-        "UserPromptSubmit": {
-            "identity_injector": {"enabled": True, "handler": "std.handler", "matcher": ""},
-        },
-    }
-
-    merged = _merge_hooks_json(existing, template)
-
-    assert "my_custom_hook" in merged["UserPromptSubmit"]
-    assert "identity_injector" in merged["UserPromptSubmit"]
-
-
-def test_merge_hooks_json_preserves_hooks_enabled_false():
-    """User's hooks_enabled=false is preserved over template's true."""
-    existing = {"hooks_enabled": False}
-    template = {"hooks_enabled": True, "Stop": {"s": {"enabled": True, "handler": "h", "matcher": ""}}}
-
-    merged = _merge_hooks_json(existing, template)
-
-    assert merged["hooks_enabled"] is False
-
-
-def test_update_project_hooks_json_already_current(tmp_path):
-    """update reports hooks.json as already_current when unchanged."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    result = init_project(target, project_name="curr")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    result = update_project(target)
-
-    assert not any("hooks.json" in f for f in result["updated_files"])
-    assert any("hooks.json" in f for f in result["already_current"])
-
-
-# ---------------------------------------------------------------------------
-# Tiered prompt injection tests (FPLAN-0284)
-# ---------------------------------------------------------------------------
-
-
-def test_init_project_creates_tier_files(tmp_path):
-    """init_project seeds tier0_kernel.md and tier1_navmap.md when AIPASS_HOME available."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    result = init_project(target, project_name="tiers")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    assert (target / ".aipass" / "tier0_kernel.md").exists()
-    assert (target / ".aipass" / "tier1_navmap.md").exists()
-
-
-def test_init_project_tier_files_match_canonical(tmp_path):
-    """Tier files in new project match the canonical source exactly."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    result = init_project(target, project_name="canon")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
-        canonical = Path(result["aipass_home"]) / ".aipass" / tier_file
-        if not canonical.exists():
-            pytest.skip(f"{tier_file} not found in canonical .aipass/")
-        assert (target / ".aipass" / tier_file).read_bytes() == canonical.read_bytes()
-
-
-def test_init_project_tier_files_in_created_list(tmp_path):
-    """Tier files appear in created_files list."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    result = init_project(target, project_name="listed")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    assert any("tier0_kernel.md" in f for f in result["created_files"])
-    assert any("tier1_navmap.md" in f for f in result["created_files"])
-
-
-def test_init_project_no_tier_files_without_aipass_home(tmp_path, monkeypatch):
-    """Without AIPASS_HOME, tier files are not created."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    monkeypatch.setattr(
-        "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
-        lambda: None,
-    )
-
-    init_project(target, project_name="notiers")
-
-    assert not (target / ".aipass" / "tier0_kernel.md").exists()
-    assert not (target / ".aipass" / "tier1_navmap.md").exists()
-
-
-def test_init_project_hooks_json_has_tiers_enabled(tmp_path):
-    """hooks.json from template has tier0_kernel and navmap enabled, no global_prompt."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    result = init_project(target, project_name="hookstier")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    hooks_json = target / ".aipass" / "hooks.json"
-    data = json.loads(hooks_json.read_text(encoding="utf-8"))
-    ups = data["UserPromptSubmit"]
-
-    assert ups["tier0_kernel"]["enabled"] is True
-    assert ups["navmap"]["enabled"] is True
-    assert "global_prompt" not in ups
-
-
-def test_update_project_adds_tier_files_to_existing(tmp_path):
-    """update_project adds tier files to a project that lacks them."""
-    target = tmp_path / "proj"
-    target.mkdir()
-
-    registry_data = {
-        "metadata": {
-            "id": "test-id",
-            "name": "OLD",
-            "version": "1.0.0",
-            "created": "2026-01-01",
-            "last_updated": "2026-01-01",
-            "total_branches": 0,
-        },
-        "branches": [],
-    }
-    (target / "OLD_REGISTRY.json").write_text(json.dumps(registry_data), encoding="utf-8")
-    (target / ".aipass").mkdir()
-
-    result = update_project(target)
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    assert (target / ".aipass" / "tier0_kernel.md").exists()
-    assert (target / ".aipass" / "tier1_navmap.md").exists()
-    assert any("tier0_kernel.md" in f for f in result["updated_files"])
-    assert any("tier1_navmap.md" in f for f in result["updated_files"])
-
-
-def test_update_project_tier_files_already_current(tmp_path):
-    """update reports tier files as already_current when unchanged."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    result = init_project(target, project_name="tiercurr")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    result = update_project(target)
-
-    assert any("tier0_kernel.md" in f for f in result["already_current"])
-    assert any("tier1_navmap.md" in f for f in result["already_current"])
-
-
-def test_update_project_skips_files_the_owner_protected(tmp_path):
-    """.updateignore outranks every other rule — no write, no backup, no sidecar.
-
-    The owner, 2026-09-09: "project owners decide what update skips." The pin
-    covers all three of the file's documented spellings at once: a full
-    relative path, a bare filename matched at any depth, and a directory.
-    """
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="owned")
-
-    (target / ".updateignore").write_text(
-        "# mine now\n\n.claude/commands/prep.md\ntier0_kernel.md\n.claude/\n",
-        encoding="utf-8",
-    )
-    prep = target / ".claude" / "commands" / "prep.md"
-    prep.write_text("# my own prep\n", encoding="utf-8")
-
-    result = update_project(target)
-
-    assert str(prep.resolve()) in result["ignored_files"]
-    assert str(prep.resolve()) not in result["kept_files"]
-    assert prep.read_text(encoding="utf-8") == "# my own prep\n"
-    assert not prep.with_name("prep.md.aipass-new").exists()
-    assert not (target / ".aipass" / ".backup").exists()
-
-    entry = next(e for e in result["files"] if e["path"] == ".claude/commands/prep.md")
-    assert entry["action"] == "skipped"
-    assert entry["reason"] == ".updateignore"
-
-    # A bare filename reaches a nested path, and a directory pattern covers
-    # everything under it.
-    protected = {e["path"] for e in result["files"] if e["action"] == "skipped"}
-    assert ".aipass/tier0_kernel.md" in protected
-    assert ".claude/settings.json" in protected
-
-
-def test_update_project_leaves_a_protected_file_out_of_the_manifest(tmp_path):
-    """No recorded hash for an ignored file, so un-ignoring it behaves like backfill.
-
-    Recording the on-disk hash would make the next update read the file as
-    "unmodified since AIPass wrote it" and overwrite the very thing the owner
-    protected — the failure the conffile rule exists to prevent, re-entered
-    through the back door.
-    """
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="unignore")
-
-    prep = target / ".claude" / "commands" / "prep.md"
-    (target / ".updateignore").write_text(".claude/commands/prep.md\n", encoding="utf-8")
-    prep.write_text("# my own prep\n", encoding="utf-8")
-    update_project(target)
-
-    manifest = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))
-    assert ".claude/commands/prep.md" not in manifest["files"]
-
-    # Un-ignore: the file is now unknown provenance, so it is kept, not clobbered.
-    (target / ".updateignore").unlink()
-    result = update_project(target)
-
-    assert str(prep.resolve()) in result["kept_files"]
-    assert prep.read_text(encoding="utf-8") == "# my own prep\n"
-
-
-def test_update_project_keeps_an_edited_tier_file(tmp_path):
-    """A tier file the project rewrote is kept — this is literally the Vera navmap."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    result = init_project(target, project_name="stale")
-
-    if result["aipass_home"] is None:
-        pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    navmap = target / ".aipass" / "tier1_navmap.md"
-    navmap.write_text("# The studio's own map\n", encoding="utf-8")
-
-    result = update_project(target)
-
-    assert str(navmap.resolve()) in result["kept_files"]
-    assert navmap.read_text(encoding="utf-8") == "# The studio's own map\n"
-    assert navmap.with_name("tier1_navmap.md.aipass-new").is_file()
-
-
-# ---------------------------------------------------------------------------
 # scaffold_content — global_prompt_md tests
 # ---------------------------------------------------------------------------
 
 
 def test_global_prompt_md_returns_string():
-    """global_prompt_md() returns a non-empty string."""
+    """Mutant: global_prompt_md returns a stub string -> red."""
     result = sc.global_prompt_md("TestProject")
-    assert isinstance(result, str)
-    assert len(result) > 0
+    assert result.splitlines()[:3] == ["# TestProject — Project Context", "<!-- Injected every turn via hook. -->", ""]
 
 
 def test_global_prompt_md_contains_project_name():
@@ -1493,10 +546,9 @@ def test_global_prompt_md_contains_aipass_context():
 
 
 def test_prep_md_returns_string():
-    """prep_md() returns a non-empty string."""
+    """Mutant: prep_md returns a stub string -> red."""
     result = sc.prep_md()
-    assert isinstance(result, str)
-    assert len(result) > 0
+    assert result.splitlines()[:2] == ["# Session Wrap-Up", ""]
 
 
 def test_prep_md_contains_session_wrap_up():
@@ -1552,148 +604,26 @@ def test_inbox_json_has_mailbox_structure():
 
 def test_with_source_prepends_header(tmp_path):
     """with_source() prepends a source comment to content."""
-    from pathlib import Path
-
-    result = sc.with_source("hello world", Path("/foo/bar.md"))
-    assert result.startswith("<!-- Source: /foo/bar.md -->")
+    path = tmp_path / "foo" / "bar.md"
+    result = sc.with_source("hello world", path)
+    assert result.startswith(f"<!-- Source: {path.as_posix()} -->")
     assert "hello world" in result
 
 
-def test_with_source_preserves_content():
+def test_with_source_preserves_content(tmp_path):
     """with_source() does not alter the original content."""
-    from pathlib import Path
-
     original = "line 1\nline 2\nline 3"
-    result = sc.with_source(original, Path("/a/b.md"))
+    result = sc.with_source(original, tmp_path / "a" / "b.md")
     assert result.endswith(original)
 
 
-def test_with_source_header_is_first_line():
+def test_with_source_header_is_first_line(tmp_path):
     """with_source() puts the source header on line 1, content on line 2+."""
-    from pathlib import Path
-
-    result = sc.with_source("content", Path("/test.md"))
+    path = tmp_path / "test.md"
+    result = sc.with_source("content", path)
     lines = result.split("\n")
-    assert lines[0] == "<!-- Source: /test.md -->"
+    assert lines[0] == f"<!-- Source: {path.as_posix()} -->"
     assert lines[1] == "content"
-
-
-# ---------------------------------------------------------------------------
-# GAP 1: AGENTS.md sync on update (#676)
-# ---------------------------------------------------------------------------
-
-
-def test_update_project_never_rewrites_a_seed(tmp_path):
-    """Seeds exist to be filled in, so update leaves AGENTS.md and CLAUDE.md alone.
-
-    No sidecar either — a seed is not a file AIPass has an opinion about once
-    it exists, so offering a template to diff against would be noise.
-    """
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="sync")
-
-    for seed_name in ("AGENTS.md", "CLAUDE.md"):
-        (target / seed_name).write_text(f"# My own {seed_name}\n", encoding="utf-8")
-
-    result = update_project(target)
-
-    for seed_name in ("AGENTS.md", "CLAUDE.md"):
-        seed = target / seed_name
-        assert seed.read_text(encoding="utf-8") == f"# My own {seed_name}\n"
-        assert str(seed.resolve()) in result["already_current"]
-        assert str(seed.resolve()) not in result["updated_files"]
-        assert not seed.with_name(f"{seed_name}.aipass-new").exists()
-        entry = next(e for e in result["files"] if e["path"] == seed_name)
-        assert entry["reason"] == "seed — never rewritten"
-
-
-def test_update_project_creates_missing_agents_md(tmp_path):
-    """update creates AGENTS.md if it was deleted from the project."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="miss")
-
-    agents_md = target / "AGENTS.md"
-    agents_md.unlink()
-
-    result = update_project(target)
-
-    assert agents_md.exists()
-    assert str(agents_md.resolve()) in result["updated_files"]
-    content = agents_md.read_text(encoding="utf-8")
-    assert "# MISS" in content
-
-
-def test_update_project_agents_md_already_current(tmp_path):
-    """update reports AGENTS.md as already_current when unchanged."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="cur")
-
-    result = update_project(target)
-
-    assert any("AGENTS.md" in f for f in result["already_current"])
-    assert not any("AGENTS.md" in f for f in result["updated_files"])
-
-
-# ---------------------------------------------------------------------------
-# GAP 2: Cruft cleanup on update (#676)
-# ---------------------------------------------------------------------------
-
-
-def test_update_project_removes_stale_global_prompt(tmp_path):
-    """update removes retired .aipass/aipass_global_prompt.md."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="cruft")
-
-    stale = target / ".aipass" / "aipass_global_prompt.md"
-    stale.write_text("# old\n", encoding="utf-8")
-
-    result = update_project(target)
-
-    assert not stale.exists()
-    assert str(stale) in result["removed_files"]
-
-
-def test_update_project_cleanup_does_not_touch_user_files(tmp_path):
-    """Cruft cleanup never removes user-owned files."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="safe")
-
-    readme = target / "README.md"
-    registry = target / "SAFE_REGISTRY.json"
-
-    result = update_project(target)
-
-    assert readme.exists()
-    assert registry.exists()
-    assert len(result["removed_files"]) == 0
-
-
-def test_update_project_removed_files_in_result(tmp_path):
-    """Return dict always contains the removed_files key."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="rkey")
-
-    result = update_project(target)
-
-    assert "removed_files" in result
-    assert isinstance(result["removed_files"], list)
-
-
-def test_update_project_cleanup_no_stale_is_noop(tmp_path):
-    """When no stale files exist, removed_files is empty."""
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="clean")
-
-    result = update_project(target)
-
-    assert result["removed_files"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -1723,8 +653,6 @@ def test_throwaway_path_allows_project():
 
 def test_settings_omits_throwaway_aipass_home(tmp_path, monkeypatch):
     """init_project skips settings.local.json when detected AIPASS_HOME is a throwaway path."""
-    from aipass.aipass.apps.handlers.init import bootstrap
-
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(tmp_path))
 
     target = tmp_path / "proj"
@@ -1747,11 +675,9 @@ def test_minted_tracked_files_have_no_absolute_paths(tmp_path, monkeypatch):
     files. This walks every minted file that would actually be committed
     and greps it for the (fake) AIPASS_HOME value.
     """
-    from aipass.aipass.apps.handlers.init import bootstrap
-
     fake_home = str(tmp_path / f"fake_aipass_home_{uuid.uuid4().hex}")
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: fake_home)
-    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != fake_home)
 
     target = tmp_path / "proj"
     target.mkdir()

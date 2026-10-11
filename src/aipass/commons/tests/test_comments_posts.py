@@ -1,8 +1,11 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_comments_posts.py - Comment and Post Operations Tests
+# Description: Tests for apps/handlers/comments/comment_ops.py and apps/handlers/posts/post_ops.py
 # Date: 2026-04-03
 # Version: 1.0.0
+# Created: 2026-04-03
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,13 +17,10 @@
 #   - Mocks get_db, close_db, get_caller_branch at the source module level
 # =============================================
 
-"""
-Unit Tests for Comment and Post Operations
+"""Tests for apps/handlers/comments/comment_ops.py and apps/handlers/posts/post_ops.py."""
 
-Tests the handler functions in comment_ops.py and post_ops.py,
-mocking external dependencies (database connections, caller identity)
-and verifying return values and side effects.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/comments/, handlers/posts/ parses and imports
 
 import sqlite3
 from pathlib import Path
@@ -32,6 +32,11 @@ import pytest
 # unittest.mock.patch tries to resolve the dotted attribute paths.
 import aipass.commons.apps.handlers.comments.comment_ops as _comment_ops_mod  # noqa: F401
 import aipass.commons.apps.handlers.posts.post_ops as _post_ops_mod  # noqa: F401
+
+from aipass.commons.apps.handlers.comments.comment_ops import add_comment, vote_on_content
+from aipass.commons.apps.handlers.posts.post_ops import create_post, delete_post, view_thread
+from aipass.commons.apps.modules import comment as comment_module
+from aipass.commons.apps.modules import post as post_module
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +215,51 @@ def _insert_comment(
 
 
 # ===========================================================================
+# PRINTED LINES, THROUGH THE COMMAND (ruling 5, DPLAN-0354 leg 4)
+# ===========================================================================
+
+
+class TestMentionsNotDeliveredIsPrinted:
+    """The post and comment commands print the handler's mentions_error."""
+
+    @pytest.mark.usefixtures("_mock_caller_test_branch")
+    def test_post_command_prints_that_mentions_were_not_delivered(
+        self, mock_db: sqlite3.Connection, capsys: pytest.CaptureFixture[str]
+    ):
+        with (
+            patch("aipass.commons.apps.handlers.posts.post_ops.extract_mentions", return_value=None) as lookup,
+            patch("aipass.commons.apps.modules.post.resolve_display_name", side_effect=lambda name: name),
+            patch("aipass.commons.apps.modules.post.json_handler", autospec=True),
+        ):
+            assert post_module.handle_command("post", ["general", "Hello", "ping @drone"]) is True
+
+        lookup.assert_called_once_with("Hello ping @drone")
+        out, err = capsys.readouterr()
+        assert "Posted; mentions not delivered: the agents lookup failed" in " ".join(out.split())
+        assert "mentions not delivered" not in err
+        assert mock_db.execute("SELECT COUNT(*) FROM posts WHERE title = 'Hello'").fetchone()[0] == 1
+
+    @pytest.mark.usefixtures("_mock_caller_test_branch")
+    def test_comment_command_prints_that_mentions_were_not_delivered(
+        self, mock_db: sqlite3.Connection, capsys: pytest.CaptureFixture[str]
+    ):
+        post_id = _insert_post(mock_db)
+        with (
+            patch("aipass.commons.apps.handlers.comments.comment_ops.extract_mentions", return_value=None) as lookup,
+            patch("aipass.commons.apps.modules.comment.resolve_display_name", side_effect=lambda name: name),
+            patch("aipass.commons.apps.modules.comment.json_handler", autospec=True),
+        ):
+            assert comment_module.handle_command("comment", [str(post_id), "ping @drone"]) is True
+
+        lookup.assert_called_once_with("ping @drone")
+        out, err = capsys.readouterr()
+        assert "Commented; mentions not delivered: the agents lookup failed" in " ".join(out.split())
+        assert "mentions not delivered" not in err
+        stored = mock_db.execute("SELECT content FROM comments WHERE post_id = ?", (post_id,)).fetchall()
+        assert [row[0] for row in stored] == ["ping @drone"]
+
+
+# ===========================================================================
 # COMMENT OPS TESTS
 # ===========================================================================
 
@@ -220,8 +270,6 @@ class TestAddComment:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_add_comment_success(self, mock_db):
         """add_comment with valid args returns success dict with comment_id."""
-        from aipass.commons.apps.handlers.comments.comment_ops import add_comment
-
         post_id = _insert_post(mock_db)
         result = add_comment([str(post_id), "Hello world"])
 
@@ -235,8 +283,6 @@ class TestAddComment:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_add_comment_missing_args(self, mock_db):
         """add_comment with fewer than 2 positional args returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import add_comment
-
         result = add_comment(["1"])
         assert result["success"] is False
         assert "Usage" in result["error"]
@@ -244,8 +290,6 @@ class TestAddComment:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_add_comment_no_args(self, mock_db):
         """add_comment with empty args returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import add_comment
-
         result = add_comment([])
         assert result["success"] is False
         assert "Usage" in result["error"]
@@ -253,8 +297,6 @@ class TestAddComment:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_add_comment_nonexistent_post(self, mock_db):
         """add_comment on a nonexistent post returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import add_comment
-
         result = add_comment(["9999", "No such post"])
         assert result["success"] is False
         assert "not found" in result["error"]
@@ -262,8 +304,6 @@ class TestAddComment:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_add_comment_invalid_post_id(self, mock_db):
         """add_comment with non-integer post_id returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import add_comment
-
         result = add_comment(["abc", "content"])
         assert result["success"] is False
         assert "Invalid post_id" in result["error"]
@@ -271,8 +311,6 @@ class TestAddComment:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_add_comment_duplicate_detection(self, mock_db):
         """add_comment rejects identical content from same author within 5 min."""
-        from aipass.commons.apps.handlers.comments.comment_ops import add_comment
-
         post_id = _insert_post(mock_db)
         first = add_comment([str(post_id), "Duplicate text"])
         assert first["success"] is True
@@ -284,8 +322,6 @@ class TestAddComment:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_add_comment_with_parent(self, mock_db):
         """add_comment with --parent flag creates a nested reply."""
-        from aipass.commons.apps.handlers.comments.comment_ops import add_comment
-
         post_id = _insert_post(mock_db)
         parent_result = add_comment([str(post_id), "Parent comment"])
         assert parent_result["success"] is True
@@ -305,8 +341,6 @@ class TestAddComment:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_add_comment_invalid_parent(self, mock_db):
         """add_comment with --parent pointing to nonexistent comment returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import add_comment
-
         post_id = _insert_post(mock_db)
         result = add_comment(
             [
@@ -322,8 +356,6 @@ class TestAddComment:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_add_comment_invalid_parent_value(self, mock_db):
         """add_comment with non-integer --parent value returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import add_comment
-
         result = add_comment(["1", "Reply", "--parent", "xyz"])
         assert result["success"] is False
         assert "Invalid --parent" in result["error"]
@@ -331,8 +363,6 @@ class TestAddComment:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_add_comment_updates_comment_count(self, mock_db):
         """add_comment increments the post comment_count."""
-        from aipass.commons.apps.handlers.comments.comment_ops import add_comment
-
         post_id = _insert_post(mock_db)
 
         row_before = mock_db.execute("SELECT comment_count FROM posts WHERE id = ?", (post_id,)).fetchone()
@@ -350,8 +380,6 @@ class TestVoteOnContent:
     @pytest.mark.usefixtures("_mock_caller_other_branch")
     def test_upvote_post(self, mock_db):
         """Upvoting a post returns success with new_score=1."""
-        from aipass.commons.apps.handlers.comments.comment_ops import vote_on_content
-
         post_id = _insert_post(mock_db, author="test-branch")
         result = vote_on_content(["post", str(post_id), "up"])
 
@@ -365,8 +393,6 @@ class TestVoteOnContent:
     @pytest.mark.usefixtures("_mock_caller_other_branch")
     def test_downvote_post(self, mock_db):
         """Downvoting a post returns success with new_score=-1."""
-        from aipass.commons.apps.handlers.comments.comment_ops import vote_on_content
-
         post_id = _insert_post(mock_db, author="test-branch")
         result = vote_on_content(["post", str(post_id), "down"])
 
@@ -378,8 +404,6 @@ class TestVoteOnContent:
     @pytest.mark.usefixtures("_mock_caller_other_branch")
     def test_upvote_comment(self, mock_db):
         """Upvoting a comment returns success with new_score=1."""
-        from aipass.commons.apps.handlers.comments.comment_ops import vote_on_content
-
         post_id = _insert_post(mock_db, author="test-branch")
         comment_id = _insert_comment(mock_db, post_id, author="test-branch")
         result = vote_on_content(["comment", str(comment_id), "up"])
@@ -391,8 +415,6 @@ class TestVoteOnContent:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_self_vote_prevented(self, mock_db):
         """Voting on your own content returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import vote_on_content
-
         post_id = _insert_post(mock_db, author="test-branch")
         result = vote_on_content(["post", str(post_id), "up"])
 
@@ -402,8 +424,6 @@ class TestVoteOnContent:
     @pytest.mark.usefixtures("_mock_caller_other_branch")
     def test_vote_toggle_off(self, mock_db):
         """Voting same direction twice toggles the vote off."""
-        from aipass.commons.apps.handlers.comments.comment_ops import vote_on_content
-
         post_id = _insert_post(mock_db, author="test-branch")
         vote_on_content(["post", str(post_id), "up"])
         result = vote_on_content(["post", str(post_id), "up"])
@@ -415,8 +435,6 @@ class TestVoteOnContent:
     @pytest.mark.usefixtures("_mock_caller_other_branch")
     def test_vote_change_direction(self, mock_db):
         """Changing vote direction adjusts score by 2."""
-        from aipass.commons.apps.handlers.comments.comment_ops import vote_on_content
-
         post_id = _insert_post(mock_db, author="test-branch")
         vote_on_content(["post", str(post_id), "up"])
         result = vote_on_content(["post", str(post_id), "down"])
@@ -428,32 +446,24 @@ class TestVoteOnContent:
     @pytest.mark.usefixtures("_mock_caller_other_branch")
     def test_vote_nonexistent_target(self, mock_db):
         """Voting on a nonexistent target returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import vote_on_content
-
         result = vote_on_content(["post", "9999", "up"])
         assert result["success"] is False
         assert "not found" in result["error"]
 
     def test_vote_missing_args(self, mock_db):
         """vote_on_content with fewer than 3 args returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import vote_on_content
-
         result = vote_on_content(["post", "1"])
         assert result["success"] is False
         assert "Usage" in result["error"]
 
     def test_vote_invalid_target_type(self, mock_db):
         """vote_on_content with bad target_type returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import vote_on_content
-
         result = vote_on_content(["thread", "1", "up"])
         assert result["success"] is False
         assert "Invalid target type" in result["error"]
 
     def test_vote_invalid_direction(self, mock_db):
         """vote_on_content with bad direction returns error."""
-        from aipass.commons.apps.handlers.comments.comment_ops import vote_on_content
-
         result = vote_on_content(["post", "1", "sideways"])
         assert result["success"] is False
         assert "Invalid direction" in result["error"]
@@ -470,8 +480,6 @@ class TestCreatePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_create_post_success(self, mock_db):
         """create_post with valid args returns success dict with post_id."""
-        from aipass.commons.apps.handlers.posts.post_ops import create_post
-
         result = create_post(["general", "My Title", "Body text"])
 
         assert result["success"] is True
@@ -485,8 +493,6 @@ class TestCreatePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_create_post_missing_args(self, mock_db):
         """create_post with fewer than 3 positional args returns error."""
-        from aipass.commons.apps.handlers.posts.post_ops import create_post
-
         result = create_post(["general", "Title only"])
         assert result["success"] is False
         assert "Usage" in result["error"]
@@ -494,8 +500,6 @@ class TestCreatePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_create_post_no_args(self, mock_db):
         """create_post with empty args returns error."""
-        from aipass.commons.apps.handlers.posts.post_ops import create_post
-
         result = create_post([])
         assert result["success"] is False
         assert "Usage" in result["error"]
@@ -503,8 +507,6 @@ class TestCreatePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_create_post_nonexistent_room(self, mock_db):
         """create_post in a room that does not exist returns error."""
-        from aipass.commons.apps.handlers.posts.post_ops import create_post
-
         result = create_post(["nonexistent-room", "Title", "Content"])
         assert result["success"] is False
         assert "not found" in result["error"]
@@ -512,8 +514,6 @@ class TestCreatePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_create_post_with_type_flag(self, mock_db):
         """create_post with --type flag sets the post_type."""
-        from aipass.commons.apps.handlers.posts.post_ops import create_post
-
         result = create_post(
             [
                 "general",
@@ -530,8 +530,6 @@ class TestCreatePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_create_post_invalid_type(self, mock_db):
         """create_post with invalid --type value returns error."""
-        from aipass.commons.apps.handlers.posts.post_ops import create_post
-
         result = create_post(
             [
                 "general",
@@ -547,8 +545,6 @@ class TestCreatePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_create_post_room_name_lowered(self, mock_db):
         """create_post lowercases the room name."""
-        from aipass.commons.apps.handlers.posts.post_ops import create_post
-
         result = create_post(["GENERAL", "Title", "Content"])
         assert result["success"] is True
         assert result["room"] == "general"
@@ -556,8 +552,6 @@ class TestCreatePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_create_post_stored_in_db(self, mock_db):
         """create_post actually inserts the row into the posts table."""
-        from aipass.commons.apps.handlers.posts.post_ops import create_post
-
         result = create_post(["general", "DB Check", "Verify insert"])
         assert result["success"] is True
 
@@ -575,8 +569,6 @@ class TestViewThread:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_view_thread_success(self, mock_db):
         """view_thread returns post dict and list of comment dicts."""
-        from aipass.commons.apps.handlers.posts.post_ops import view_thread
-
         post_id = _insert_post(mock_db)
         _insert_comment(mock_db, post_id, content="Comment A")
         _insert_comment(mock_db, post_id, content="Comment B")
@@ -593,8 +585,6 @@ class TestViewThread:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_view_thread_no_comments(self, mock_db):
         """view_thread on a post with no comments returns empty list."""
-        from aipass.commons.apps.handlers.posts.post_ops import view_thread
-
         post_id = _insert_post(mock_db)
         result = view_thread([str(post_id)])
 
@@ -603,24 +593,18 @@ class TestViewThread:
 
     def test_view_thread_nonexistent(self, mock_db):
         """view_thread on nonexistent post returns error."""
-        from aipass.commons.apps.handlers.posts.post_ops import view_thread
-
         result = view_thread(["9999"])
         assert result["success"] is False
         assert "not found" in result["error"]
 
     def test_view_thread_no_args(self, mock_db):
         """view_thread with no args returns error."""
-        from aipass.commons.apps.handlers.posts.post_ops import view_thread
-
         result = view_thread([])
         assert result["success"] is False
         assert "Usage" in result["error"]
 
     def test_view_thread_invalid_id(self, mock_db):
         """view_thread with non-integer id returns error."""
-        from aipass.commons.apps.handlers.posts.post_ops import view_thread
-
         result = view_thread(["abc"])
         assert result["success"] is False
         assert "Invalid post_id" in result["error"]
@@ -632,8 +616,6 @@ class TestDeletePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_delete_own_post(self, mock_db):
         """delete_post on your own post succeeds and removes the row."""
-        from aipass.commons.apps.handlers.posts.post_ops import delete_post
-
         post_id = _insert_post(mock_db, author="test-branch")
         result = delete_post([str(post_id)])
 
@@ -648,8 +630,6 @@ class TestDeletePost:
     @pytest.mark.usefixtures("_mock_caller_other_branch")
     def test_delete_other_post_fails(self, mock_db):
         """delete_post on someone else's post returns permission error."""
-        from aipass.commons.apps.handlers.posts.post_ops import delete_post
-
         post_id = _insert_post(mock_db, author="test-branch")
         result = delete_post([str(post_id)])
 
@@ -660,24 +640,18 @@ class TestDeletePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_delete_nonexistent_post(self, mock_db):
         """delete_post on nonexistent post returns error."""
-        from aipass.commons.apps.handlers.posts.post_ops import delete_post
-
         result = delete_post(["9999"])
         assert result["success"] is False
         assert "not found" in result["error"]
 
     def test_delete_no_args(self, mock_db):
         """delete_post with no args returns error."""
-        from aipass.commons.apps.handlers.posts.post_ops import delete_post
-
         result = delete_post([])
         assert result["success"] is False
         assert "Usage" in result["error"]
 
     def test_delete_invalid_id(self, mock_db):
         """delete_post with non-integer id returns error."""
-        from aipass.commons.apps.handlers.posts.post_ops import delete_post
-
         result = delete_post(["xyz"])
         assert result["success"] is False
         assert "Invalid post_id" in result["error"]
@@ -685,8 +659,6 @@ class TestDeletePost:
     @pytest.mark.usefixtures("_mock_caller_test_branch")
     def test_delete_cascades_comments_and_votes(self, mock_db):
         """delete_post cascade-deletes comments and votes on the post."""
-        from aipass.commons.apps.handlers.posts.post_ops import delete_post
-
         post_id = _insert_post(mock_db, author="test-branch")
         comment_id = _insert_comment(mock_db, post_id, author="other-branch")
 
@@ -722,3 +694,107 @@ class TestDeletePost:
             (comment_id,),
         ).fetchall()
         assert len(comment_votes) == 0
+
+
+# ---------------------------------------------------------------------------
+# Failure paths named to the user (DPLAN-0354 leg 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("_mock_caller_test_branch")
+def test_create_post_still_posts_but_names_undelivered_mentions(mock_db):
+    """A failed mention lookup leaves the post made and says the mentions were lost.
+
+    Before: extract_mentions answered [] on failure, so "@drone" vanished silently;
+    with None the loop raised and the committed post was reported as a failure.
+    Mutant: post_ops `if mentions is None:` -> `if False:` turns this red.
+    """
+    with patch("aipass.commons.apps.handlers.posts.post_ops.extract_mentions", return_value=None) as lookup:
+        result = create_post(["general", "Hello", "ping @drone"])
+
+    lookup.assert_called_once_with("Hello ping @drone")
+    assert result["success"] is True
+    assert result["mentions"] == []
+    assert "mentions not delivered" in result["mentions_error"]
+    stored = mock_db.execute("SELECT title FROM posts WHERE id = ?", (result["post_id"],)).fetchone()
+    assert stored[0] == "Hello"
+
+
+@pytest.mark.usefixtures("_mock_caller_test_branch")
+def test_add_comment_still_comments_but_names_undelivered_mentions(mock_db):
+    """A failed mention lookup leaves the comment made and says the mentions were lost.
+
+    Mutant: comment_ops `if mentions is None:` -> `if False:` turns this red.
+    """
+    post_id = _insert_post(mock_db)
+    with patch("aipass.commons.apps.handlers.comments.comment_ops.extract_mentions", return_value=None) as lookup:
+        result = add_comment([str(post_id), "ping @drone"])
+
+    lookup.assert_called_once_with("ping @drone")
+    assert result["success"] is True
+    assert result["mentions"] == []
+    assert "mentions not delivered" in result["mentions_error"]
+    stored = mock_db.execute("SELECT content FROM comments WHERE id = ?", (result["comment_id"],)).fetchone()
+    assert stored[0] == "ping @drone"
+
+
+def _break_caller_lookup():
+    """Make get_caller_branch's inner lookup raise, as a dead disk or registry would."""
+    return patch(
+        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+        side_effect=OSError("registry unreadable"),
+    )
+
+
+def test_create_post_refuses_naming_a_failed_caller_lookup(mock_db):
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    """
+    with _break_caller_lookup() as lookup:
+        result = create_post(["general", "Hello", "Body"])
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed" in result["error"]
+    assert "registry unreadable" in result["error"]
+    assert mock_db.execute("SELECT COUNT(*) FROM posts WHERE title = 'Hello'").fetchone()[0] == 0
+
+
+def test_vote_on_content_refuses_naming_a_failed_caller_lookup(mock_db):
+    """The votes family names a broken caller lookup, and no vote is written."""
+    post_id = _insert_post(mock_db)
+    with _break_caller_lookup() as lookup:
+        result = vote_on_content(["post", str(post_id), "up"])
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+    assert mock_db.execute("SELECT COUNT(*) FROM votes").fetchone()[0] == 0
+
+
+def test_add_comment_refuses_naming_a_failed_caller_lookup(mock_db):
+    """A broken caller lookup is refused by name on the comment path too."""
+    post_id = _insert_post(mock_db)
+    with _break_caller_lookup() as lookup:
+        result = add_comment([str(post_id), "Hello"])
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed" in result["error"]
+    assert "registry unreadable" in result["error"]
+    assert mock_db.execute("SELECT COUNT(*) FROM comments").fetchone()[0] == 0
+
+
+def test_delete_post_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup refuses the delete by name, before any database is opened."""
+    with (
+        _break_caller_lookup() as lookup,
+        patch("aipass.commons.apps.handlers.posts.post_ops.get_db") as db,
+    ):
+        result = delete_post(["1"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

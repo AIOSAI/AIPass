@@ -30,6 +30,8 @@ apps/handlers/ (Implementation Layer)
 
 **Note:** All branches use `apps/` subdirectory for their code (e.g., `spawn/apps/`, `seedgo/apps/`, `flow/apps/`).
 
+**The library layer:** a `shared/` directory beside `apps/` is a branch's pre-install library and passes the layer check as `Library layer (shared/, beside apps/)`. @aipass keeps `project_home.py` there because it runs before prax can be imported. A `shared/` with no `apps/` beside it, and any other top-level `.py`, still fails (seedgo, 2026-10-08).
+
 ---
 
 ## Template Baseline Compliance (Class-Aware, Live Scan)

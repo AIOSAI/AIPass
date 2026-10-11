@@ -28,7 +28,6 @@ Filters:
     list all      - List all plans
 """
 
-# ruff: noqa: E402
 import sys
 import os
 

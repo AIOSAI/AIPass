@@ -1,29 +1,33 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for hooks's entry point routing, help and introspection
-# Version: 1.2.0
+# Version: 1.2.3
 # Created: 2026-09-03
-# Modified: 2026-09-07
+# Modified: 2026-10-05
 # =============================================
 
-"""Tests for hooks's CLI entry point.
+"""Tests for apps/hooks.py, the branch's CLI entry point."""
 
-Covers the four things the entry point promises: no-args shows introspection,
---help shows help without executing anything, a subcommand's --help never runs
-that subcommand, and an unknown command fails loudly with a non-zero code.
+# Covers the four things the entry point promises: no-args shows introspection,
+# --help shows help without executing anything, a subcommand's --help never runs
+# that subcommand, and an unknown command fails loudly with a non-zero code.
+#
+# The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
+# shell reads as success, so the refusal path is pinned by test rather than assumed.
+#
+# Arrived with the citizen template on 2026-09-03 (the DPLAN-0325 lane adds any
+# missing template file) and is adapted here to the entry point hooks actually
+# has. Three template assumptions do not hold for this branch and are asserted in
+# this branch's spelling instead of the template's: help sections are uppercase
+# (``USAGE:``), ``--version`` prints the lowercase branch name, and the refusal
+# message is written with the rest of the CLI's output rather than to stderr. The
+# template's ``__version__`` and ``_module_import_path`` pins are dropped
+# outright — hooks.py has neither name, so there was nothing to measure.
 
-The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
-shell reads as success, so the refusal path is pinned by test rather than assumed.
-
-Arrived with the citizen template on 2026-09-03 (the DPLAN-0325 lane adds any
-missing template file) and is adapted here to the entry point hooks actually
-has. Three template assumptions do not hold for this branch and are asserted in
-this branch's spelling instead of the template's: help sections are uppercase
-(``USAGE:``), ``--version`` prints the lowercase branch name, and the refusal
-message is written with the rest of the CLI's output rather than to stderr. The
-template's ``__version__`` and ``_module_import_path`` pins are dropped
-outright — hooks.py has neither name, so there was nothing to measure.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that hooks.py parses and imports, ruff and collection cover it
+# seedgo: no-test-needed(documentation) — the help text's prose beyond its section headers, the documentation checker
+# seedgo: no-test-needed(stdlib) — importlib.import_module's submodule resolution, the stdlib's own
 
 import importlib
 import os
@@ -34,6 +38,8 @@ from pathlib import Path
 import pytest
 
 from aipass.hooks.apps import hooks as branch_entry
+
+_MODULES_PACKAGE = "aipass.hooks.apps.modules"
 
 
 class _StubModule:
@@ -253,7 +259,7 @@ def test_branch_name_is_set_at_import_time(monkeypatch):
     """
     monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
 
-    reloaded = importlib.reload(sys.modules["aipass.hooks.apps.hooks"])
+    reloaded = importlib.reload(branch_entry)
 
     assert os.environ["AIPASS_BRANCH_NAME"] == "hooks"
     assert reloaded.discover_modules is not None
@@ -272,49 +278,38 @@ class TestDiscoverySkipsRetiredModules:
         monkeypatch.setattr(branch_entry, "MODULES_DIR", tmp_path)
         return tmp_path
 
+    @staticmethod
+    def _stand_in(monkeypatch, stem, module):
+        """Serve `module` from sys.modules under the name discovery computes for `stem`.
+
+        The real import_module returns a sys.modules entry before it looks at any
+        file, so a retired stem that discovery failed to skip would come back as
+        this stand-in. importlib itself is never replaced (fleet green leg 7).
+        """
+        monkeypatch.setitem(sys.modules, f"{_MODULES_PACKAGE}.{stem}", module)
+
     def test_a_disabled_module_is_never_imported(self, monkeypatch, tmp_path):
         self._modules_dir(monkeypatch, tmp_path)
-        (tmp_path / "presence(disabled).py").write_text("raise AssertionError('imported')\n")
-
-        imported = []
-        monkeypatch.setattr(
-            branch_entry.importlib,
-            "import_module",
-            lambda name: imported.append(name) or pytest.fail(f"imported {name}"),
-        )
+        (tmp_path / "presence(disabled).py").write_text("raise AssertionError('imported')\n", encoding="utf-8")
+        self._stand_in(monkeypatch, "presence(disabled)", _StubModule())
 
         assert branch_entry.discover_modules() == []
-        assert imported == []
 
     def test_a_live_module_beside_it_still_loads(self, monkeypatch, tmp_path):
         self._modules_dir(monkeypatch, tmp_path)
-        (tmp_path / "presence(disabled).py").write_text("")
-        (tmp_path / "sessions.py").write_text("")
-
+        (tmp_path / "presence(disabled).py").write_text("", encoding="utf-8")
+        (tmp_path / "sessions.py").write_text("", encoding="utf-8")
         stub = _StubModule()
-        seen = []
-
-        def fake_import(name):
-            seen.append(name)
-            if name.endswith("sessions"):
-                return stub
-            raise ImportError(name)
-
-        monkeypatch.setattr(branch_entry.importlib, "import_module", fake_import)
+        self._stand_in(monkeypatch, "sessions", stub)
+        self._stand_in(monkeypatch, "presence(disabled)", _StubModule())
 
         assert branch_entry.discover_modules() == [stub]
-        assert all("(disabled)" not in name for name in seen)
 
     def test_the_mark_is_matched_anywhere_in_the_name(self, monkeypatch, tmp_path):
         # The convention writes the mark as a suffix, but a stem like
         # "presence(disabled)_v2" is the same retirement and must not sneak back.
         self._modules_dir(monkeypatch, tmp_path)
-        (tmp_path / "presence(disabled)_v2.py").write_text("")
-
-        monkeypatch.setattr(
-            branch_entry.importlib,
-            "import_module",
-            lambda name: pytest.fail(f"imported {name}"),
-        )
+        (tmp_path / "presence(disabled)_v2.py").write_text("", encoding="utf-8")
+        self._stand_in(monkeypatch, "presence(disabled)_v2", _StubModule())
 
         assert branch_entry.discover_modules() == []

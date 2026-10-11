@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2025-11-27
-# Modified: 2026-09-15
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -24,6 +24,7 @@ import subprocess
 import logging
 import hashlib
 from pathlib import Path
+from typing import TextIO
 from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,31 @@ def _store_vectors(branch, memory_type, embeddings, documents, metadatas, db_pat
     }
 
 
+def embedder_reason(completed) -> str:
+    """The reason a failed embed run gave: its JSON refusal on stdout first, then stderr.
+
+    The embedder reports its own failure as ``{"success": false, "error": ...}`` on
+    stdout and exits 1, so a reader of stderr alone answered a bare "Embedding
+    failed" while the cause sat unread (194 refusals to ai_mail; leg 9 of DPLAN-0354).
+    Every caller of embed_subprocess.py reads its refusal through this one function:
+    this module, the rollover orchestrator, the search executor and the plans processor.
+
+    Args:
+        completed: The finished embed run (``subprocess.CompletedProcess``).
+
+    Returns:
+        The embedder's own error, else its stderr, else "no reason given".
+    """
+    try:
+        reply = json.loads(completed.stdout)
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        logger.warning(f"[chroma_subprocess] Failed embed run left no JSON reason on stdout ({exc}); reading stderr")
+        reply = None
+    if isinstance(reply, dict) and reply.get("error"):
+        return str(reply["error"])
+    return (completed.stderr or "").strip() or "no reason given"
+
+
 def _vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None):
     """Encode raw texts and store them -- the text-in entry point.
 
@@ -161,7 +187,10 @@ def _vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None):
         return {"success": False, "error": f"Embedding subprocess failed: {e}"}
 
     if completed.returncode != 0:
-        return {"success": False, "error": completed.stderr or "Embedding failed"}
+        return {
+            "success": False,
+            "error": f"Embedding failed (exit {completed.returncode}): {embedder_reason(completed)}",
+        }
 
     try:
         embed_reply = json.loads(completed.stdout)
@@ -457,10 +486,17 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
 # =============================================================================
 
 
-def main():
-    """Process ChromaDB operation from stdin JSON."""
+def main(stdin: TextIO | None = None):
+    """Process ChromaDB operation from stdin JSON.
+
+    Args:
+        stdin: The stream the request is read from; None reads sys.stdin, as
+            every product caller does. The parameter exists for the tests,
+            which send a request through this entry without patching sys.stdin
+            for the whole process.
+    """
     try:
-        input_data = json.load(sys.stdin)
+        input_data = json.load(sys.stdin if stdin is None else stdin)
         operation = input_data.get("operation")
 
         if operation == "store_vectors":

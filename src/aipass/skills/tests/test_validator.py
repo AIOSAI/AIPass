@@ -1,19 +1,25 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_validator.py - Unit tests for skills validator
-# Date: 2026-03-07
+# =================== AIPass ====================
+# Name: test_validator.py
+# Description: Unit tests for skills validator
 # Version: 1.0.0
+# Created: 2026-03-07
+# Modified: 2026-09-27
 # Category: skills/tests
 # =============================================
 
-"""Tests for the skills validator handler."""
+"""Tests for apps/handlers/validator.py, the requires-block check behind validate."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — how shutil.which() and importlib.util.find_spec() search
 
 from aipass.skills.apps.handlers.validator import validate_skill
 
 
 class TestValidateSkill:
-    def test_no_requirements(self):
-        result = validate_skill({})
+    def test_null_requirement_lists_mean_no_requirements(self):
+        # A YAML `pip:` with nothing under it loads as None, not [].
+        # Mutant killed 2026-09-27: the `or []` dropped from the pip line.
+        result = validate_skill({"requires": {"pip": None, "bins": None, "config": None}})
         assert result["valid"] is True
         assert result["missing_pip"] == []
         assert result["missing_bins"] == []

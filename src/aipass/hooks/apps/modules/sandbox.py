@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sandbox.py
-# Version: 1.0.0
+# Version: 1.0.2
 # Description: Sandbox wrapper — launches commands inside srt (kernel FS boundary)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-09
-# Modified: 2026-06-09
+# Modified: 2026-10-05
 # =============================================
 
 """Sandbox wrapper — launches commands inside srt kernel filesystem boundary.
@@ -43,6 +43,9 @@ def _srt_resolve_cwd() -> str:
     allow_write, bwrap creates 0-byte mount-point files that persist after exit.
     Running the resolver from /var/tmp (never in allow_write) makes srt skip
     those entries entirely — no bwrap args, no mount points, no pollution.
+
+    The leg 7 gettempdir seam is gone (fleet green leg 8): its tests now read
+    the fallback through resolve_bwrap_command, so nothing passed it.
     """
     if _VAR_TMP.is_dir():
         return str(_VAR_TMP)

@@ -46,6 +46,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# APPLIES_TO: the shim's sha256, a handler file.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "branch_level"
 
 # Ruling 6: the scored triplets live in {branch}_json/, outside apps/. PRESENCE

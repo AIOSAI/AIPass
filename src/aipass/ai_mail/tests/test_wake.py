@@ -1,769 +1,43 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-03-29
-# Modified: 2026-04-26
+# Modified: 2026-10-10
 # =============================================
 
-"""Tests for wake handler -- branch resolution, lock checking, PID checks, helpers."""
+"""Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model and marking."""
+
+# Split on 2026-10-08: the helpers and the manager lanes are their own files.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — DEFAULT_PROMPT's exact literal text
+# seedgo: no-test-needed(shared) — DispatchStatus, pid_lock and resolve_branch(): tests/test_wake_helpers.py
+# seedgo: no-test-needed(shared) — the manager lanes and the dashboard refresh: tests/test_wake_managers.py
 
 import json
-import os
 import subprocess
-import sys
-import threading
 import pytest
-from datetime import datetime, timedelta
 from pathlib import Path as _Path
+from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
-import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
+from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
-    _read_json,
-    _check_lock,
-    _check_pid_alive,
-    _get_pid_cwd,
-    _get_pid_cwd_darwin,
-    _read_session_type,
-    _read_session_type_darwin,
-    _is_zombie_linux,
-    _clean_zombies,
-    _find_claude_bin,
-    resolve_branch,
-    DispatchStatus,
     KNOWN_MODEL_ALIASES,
     DEFAULT_MODEL,
-    _acquire_lock,
-    _load_config,
-    _is_branch_occupied,
     wake_branch,
 )
-
-
-# --- Fixtures --------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _suppress_log_operation(monkeypatch):
-    """Prevent json_handler.log_operation from touching real files."""
-    monkeypatch.setattr(
-        "aipass.ai_mail.apps.handlers.dispatch.wake.json_handler.log_operation",
-        lambda *args, **kwargs: None,
-    )
-
-
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
-    """Redirect _REPO_ROOT and BRANCH_REGISTRY to tmp_path."""
-    registry_file = tmp_path / "AIPASS_REGISTRY.json"
-    monkeypatch.setattr(wake_mod, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", registry_file)
-    return tmp_path
-
-
-# --- DispatchStatus tests --------------------------------------------
-
-
-def test_dispatch_status_ok_step():
-    """ok() appends a step with 'ok' status."""
-    ds = DispatchStatus()
-    ds.ok("resolve", "found it")
-    assert ds.steps == [("ok", "resolve", "found it")]
-    assert ds.success is True
-
-
-def test_dispatch_status_fail_marks_failure():
-    """fail() appends a step and sets success to False."""
-    ds = DispatchStatus()
-    ds.ok("step1", "good")
-    ds.fail("step2", "bad")
-    assert ds.success is False
-    assert len(ds.steps) == 2
-    assert ds.steps[1][0] == "fail"
-
-
-def test_dispatch_status_summary_uses_last_step():
-    """summary property returns label: detail of the last step."""
-    ds = DispatchStatus()
-    ds.ok("resolve", "found")
-    ds.info("delivery", "routed")
-    assert ds.summary == "delivery: routed"
-
-
-def test_dispatch_status_summary_empty():
-    """summary returns 'no status' when no steps recorded."""
-    ds = DispatchStatus()
-    assert ds.summary == "no status"
-
-
-def test_dispatch_status_find_step_returns_match():
-    """find_step() returns the full (status, label, detail) tuple."""
-    ds = DispatchStatus()
-    ds.ok("resolve", "found")
-    ds.info("manager", "@devpulse is a manager — mail only, wake skipped")
-    assert ds.find_step("manager") == ("info", "manager", "@devpulse is a manager — mail only, wake skipped")
-
-
-def test_dispatch_status_find_step_missing_returns_none():
-    """find_step() returns None when the label was never recorded."""
-    ds = DispatchStatus()
-    ds.ok("resolve", "found")
-    assert ds.find_step("manager") is None
-
-
-def test_dispatch_status_find_step_distinguishes_gate_outcomes():
-    """The manager label carries ok (daemon bypass) vs info (skipped) — callers rely on it."""
-    skipped = DispatchStatus()
-    skipped.info("manager", "mail only, wake skipped")
-    bypassed = DispatchStatus()
-    bypassed.ok("manager", "gate bypassed — daemon-scheduled self-wake")
-    skipped_step = skipped.find_step("manager")
-    bypassed_step = bypassed.find_step("manager")
-    assert skipped_step is not None and bypassed_step is not None
-    assert skipped_step[0] == "info"
-    assert bypassed_step[0] == "ok"
-
-
-def test_dispatch_status_find_step_returns_last_occurrence():
-    """A repeated label resolves to the most recent record."""
-    ds = DispatchStatus()
-    ds.info("spawn", "first try")
-    ds.ok("spawn", "second try")
-    assert ds.find_step("spawn") == ("ok", "spawn", "second try")
-
-
-def test_dispatch_status_format_output():
-    """format() produces multi-line output with icons."""
-    ds = DispatchStatus()
-    ds.ok("resolve", "found")
-    ds.fail("spawn", "died")
-    output = ds.format()
-    lines = output.strip().split("\n")
-    assert len(lines) == 2
-    assert "resolve" in lines[0]
-    assert "spawn" in lines[1]
-
-
-# --- _read_json tests ------------------------------------------------
-
-
-def test_read_json_valid(tmp_path):
-    """Valid JSON file returns parsed dict."""
-    f = tmp_path / "data.json"
-    f.write_text(json.dumps({"key": "value"}), encoding="utf-8")
-    result = _read_json(f)
-    assert result == {"key": "value"}
-
-
-def test_read_json_missing_file(tmp_path):
-    """Missing file returns None."""
-    result = _read_json(tmp_path / "nope.json")
-    assert result is None
-
-
-def test_read_json_corrupt(tmp_path):
-    """Corrupt JSON returns None."""
-    f = tmp_path / "bad.json"
-    f.write_text("{not valid", encoding="utf-8")
-    result = _read_json(f)
-    assert result is None
-
-
-# --- _check_pid_alive tests ------------------------------------------
-
-
-def test_check_pid_alive_dead(monkeypatch):
-    """Dead PID returns False."""
-    monkeypatch.setattr(os, "kill", _raise_process_lookup)
-    assert _check_pid_alive(99999) is False
-
-
-def test_check_pid_alive_permission_error(monkeypatch):
-    """PermissionError means process exists but cannot signal -- returns True."""
-    monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setattr(os, "kill", _raise_permission)
-    assert _check_pid_alive(1) is True
-
-
-def test_check_pid_alive_running_non_zombie(monkeypatch, tmp_path):
-    """Running non-zombie process returns True on Linux."""
-    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
-    monkeypatch.setattr("sys.platform", "linux")
-    # Create a fake /proc/{pid}/status
-    proc_dir = tmp_path / "proc" / "42"
-    proc_dir.mkdir(parents=True)
-    status_file = proc_dir / "status"
-    status_file.write_text("Name:\tfake\nState:\tS (sleeping)\n", encoding="utf-8")
-    monkeypatch.setattr(
-        "builtins.open",
-        _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
-    )
-    assert _check_pid_alive(42) is True
-
-
-def test_check_pid_alive_zombie(monkeypatch, tmp_path):
-    """Zombie process (State: Z) returns False on Linux."""
-    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
-    monkeypatch.setattr("sys.platform", "linux")
-    proc_dir = tmp_path / "proc" / "42"
-    proc_dir.mkdir(parents=True)
-    status_file = proc_dir / "status"
-    status_file.write_text("Name:\tfake\nState:\tZ (zombie)\n", encoding="utf-8")
-    monkeypatch.setattr(
-        "builtins.open",
-        _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
-    )
-    assert _check_pid_alive(42) is False
-
-
-# --- _read_session_type tests ----------------------------------------
-
-
-def test_read_session_type_found(monkeypatch, tmp_path):
-    """Reads AIPASS_SESSION_TYPE from proc environ."""
-    monkeypatch.setattr("sys.platform", "linux")
-    env_file = tmp_path / "environ"
-    env_file.write_bytes(b"HOME=/home/user\x00AIPASS_SESSION_TYPE=daemon\x00PATH=/usr/bin\x00")
-    monkeypatch.setattr(
-        "builtins.open",
-        _fake_open_factory(str(env_file), {"/proc/123/environ": str(env_file)}),
-    )
-    assert _read_session_type("123") == "daemon"
-
-
-def test_read_session_type_not_set(monkeypatch, tmp_path):
-    """Missing env var returns 'interactive'."""
-    monkeypatch.setattr("sys.platform", "linux")
-    env_file = tmp_path / "environ"
-    env_file.write_bytes(b"HOME=/home/user\x00PATH=/usr/bin\x00")
-    monkeypatch.setattr(
-        "builtins.open",
-        _fake_open_factory(str(env_file), {"/proc/456/environ": str(env_file)}),
-    )
-    assert _read_session_type("456") == "interactive"
-
-
-def test_read_session_type_non_linux(monkeypatch):
-    """Non-linux, non-darwin platform returns 'interactive' immediately."""
-    monkeypatch.setattr("sys.platform", "win32")
-    assert _read_session_type("999") == "interactive"
-
-
-def test_read_session_type_darwin_found(monkeypatch):
-    """macOS: reads AIPASS_SESSION_TYPE from ps -wwE output."""
-    monkeypatch.setattr("sys.platform", "darwin")
-
-    class FakeResult:
-        returncode = 0
-        stdout = "/usr/bin/claude AIPASS_SESSION_TYPE=dispatched HOME=/Users/u"
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-    assert _read_session_type("123") == "dispatched"
-
-
-def test_read_session_type_darwin_not_set(monkeypatch):
-    """macOS: missing env var returns 'interactive'."""
-    monkeypatch.setattr("sys.platform", "darwin")
-
-    class FakeResult:
-        returncode = 0
-        stdout = "/usr/bin/claude HOME=/Users/u"
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-    assert _read_session_type("456") == "interactive"
-
-
-def test_read_session_type_darwin_ps_failure(monkeypatch):
-    """macOS: ps failure returns 'interactive'."""
-    assert _read_session_type_darwin("999") == "interactive"
-
-
-# --- _get_pid_cwd tests ------------------------------------------------
-
-
-def test_get_pid_cwd_linux(monkeypatch, tmp_path):
-    """Linux: reads /proc/{pid}/cwd via readlink."""
-    monkeypatch.setattr("sys.platform", "linux")
-    target = str(tmp_path / "project")
-    monkeypatch.setattr(os, "readlink", lambda p: target)
-    assert _get_pid_cwd("100") == target
-
-
-def test_get_pid_cwd_linux_oserror(monkeypatch):
-    """Linux: OSError returns None."""
-    monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setattr(os, "readlink", lambda p: (_ for _ in ()).throw(OSError("no proc")))
-    assert _get_pid_cwd("100") is None
-
-
-def test_get_pid_cwd_darwin(monkeypatch):
-    """macOS: reads cwd via lsof.
-
-    The target is a synthetic POSIX literal, never a path from tmp_path: fake
-    lsof output is DATA the parser reads, not a directory the host has to own.
-    On a Windows runner tmp_path is a drive-letter path, the 'n/' prefix the
-    parser requires never appears, and the test reads None (CI 35058244702).
-    """
-    monkeypatch.setattr("sys.platform", "darwin")
-    target = "/private/var/folders/aipass/pytest-project"
-
-    class FakeResult:
-        returncode = 0
-        stdout = f"p100\nn{target}\n"
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-    assert _get_pid_cwd("100") == target
-
-
-def test_get_pid_cwd_darwin_ignores_a_name_line_that_is_not_an_absolute_path(monkeypatch):
-    """The leading slash is load-bearing: 'n' alone is not a cwd.
-
-    lsof -Fn prefixes every name line with 'n'; the parser takes only the ones
-    that are absolute POSIX paths. Without the slash a non-path name line would
-    be returned as a cwd. This is the mechanism behind CI 35058244702.
-    """
-    monkeypatch.setattr("sys.platform", "darwin")
-
-    class FakeResult:
-        returncode = 0
-        stdout = "p100\nnD:\\build\\project\n"
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-    assert _get_pid_cwd("100") is None
-
-
-def test_get_pid_cwd_darwin_failure(monkeypatch):
-    """macOS: lsof failure returns None."""
-
-    class FailedResult:
-        returncode = 1
-        stdout = ""
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FailedResult())
-    assert _get_pid_cwd_darwin("999") is None
-
-
-def test_get_pid_cwd_unsupported_platform(monkeypatch):
-    """Unsupported platform returns None."""
-    monkeypatch.setattr("sys.platform", "win32")
-    assert _get_pid_cwd("100") is None
-
-
-# --- _is_zombie_linux tests --------------------------------------------
-
-
-def test_is_zombie_linux_not_zombie(monkeypatch, tmp_path):
-    """Non-zombie process returns False."""
-    status_file = tmp_path / "status"
-    status_file.write_text("Name:\tclaude\nState:\tS (sleeping)\nPid:\t42\n")
-    monkeypatch.setattr(
-        "builtins.open",
-        _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
-    )
-    assert _is_zombie_linux(42) is False
-
-
-def test_is_zombie_linux_zombie(monkeypatch, tmp_path):
-    """Zombie process returns True."""
-    status_file = tmp_path / "status"
-    status_file.write_text("Name:\tclaude\nState:\tZ (zombie)\nPid:\t42\n")
-    monkeypatch.setattr(
-        "builtins.open",
-        _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
-    )
-    assert _is_zombie_linux(42) is True
-
-
-def test_is_zombie_linux_no_proc(monkeypatch):
-    """Missing /proc entry returns False (not zombie, just gone)."""
-    _real_open = open
-
-    def _fake_open(path, *a, **kw):
-        if "/proc/99999/" in str(path):
-            raise FileNotFoundError(path)
-        return _real_open(path, *a, **kw)
-
-    monkeypatch.setattr("builtins.open", _fake_open)
-    assert _is_zombie_linux(99999) is False
-
-
-# --- _check_lock tests ------------------------------------------------
-
-
-def test_check_lock_no_file(tmp_path):
-    """No lock file returns None."""
-    result = _check_lock(tmp_path)
-    assert result is None
-
-
-def test_check_lock_alive_pid(tmp_path, monkeypatch):
-    """Lock with alive PID returns the lock data."""
-    lock_dir = tmp_path / ".ai_mail.local"
-    lock_dir.mkdir(parents=True)
-    lock_file = lock_dir / ".dispatch.lock"
-    lock_data = {"pid": 1234, "timestamp": "2026-03-29T10:00:00"}
-    lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
-    monkeypatch.setattr(wake_mod, "_check_pid_alive", lambda pid: True)
-    result = _check_lock(tmp_path)
-    assert result is not None
-    assert result["pid"] == 1234
-
-
-def test_check_lock_dead_pid_removes_lock(tmp_path, monkeypatch):
-    """Lock with dead PID removes the lock file and returns None."""
-    lock_dir = tmp_path / ".ai_mail.local"
-    lock_dir.mkdir(parents=True)
-    lock_file = lock_dir / ".dispatch.lock"
-    lock_data = {"pid": 99999, "timestamp": "2026-03-29T10:00:00"}
-    lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
-    monkeypatch.setattr(wake_mod, "_check_pid_alive", lambda pid: False)
-    result = _check_lock(tmp_path)
-    assert result is None
-    assert not lock_file.exists()
-
-
-def test_check_lock_stale_old_timestamp(tmp_path, monkeypatch):
-    """Lock with dead PID and timestamp >10 min old is removed."""
-    lock_dir = tmp_path / ".ai_mail.local"
-    lock_dir.mkdir(parents=True)
-    lock_file = lock_dir / ".dispatch.lock"
-    old_ts = (datetime.now() - timedelta(minutes=15)).isoformat()
-    lock_data = {"pid": 99999, "timestamp": old_ts}
-    lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
-    monkeypatch.setattr(os, "kill", _raise_process_lookup)
-    result = _check_lock(tmp_path)
-    assert result is None
-    assert not lock_file.exists()
-
-
-def test_check_lock_permission_error_treated_active(tmp_path, monkeypatch):
-    """Lock PID that raises PermissionError is treated as active."""
-    monkeypatch.setattr("sys.platform", "linux")
-    lock_dir = tmp_path / ".ai_mail.local"
-    lock_dir.mkdir(parents=True)
-    lock_file = lock_dir / ".dispatch.lock"
-    lock_data = {"pid": 1, "timestamp": "2026-03-29T10:00:00"}
-    lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
-    monkeypatch.setattr(os, "kill", _raise_permission)
-    result = _check_lock(tmp_path)
-    assert result is not None
-    assert result["pid"] == 1
-
-
-def test_check_lock_corrupt_json(tmp_path):
-    """Corrupt lock file returns None."""
-    lock_dir = tmp_path / ".ai_mail.local"
-    lock_dir.mkdir(parents=True)
-    lock_file = lock_dir / ".dispatch.lock"
-    lock_file.write_text("{bad json", encoding="utf-8")
-    result = _check_lock(tmp_path)
-    assert result is None
-
-
-# --- resolve_branch tests --------------------------------------------
-
-
-def test_resolve_branch_found(repo_root):
-    """Resolves @branch to (Path, email) when registry entry exists."""
-    branch_dir = repo_root / "src" / "aipass" / "flow"
-    branch_dir.mkdir(parents=True)
-    registry = {
-        "branches": [
-            {"email": "@flow", "path": "src/aipass/flow"},
-        ]
-    }
-    wake_mod.BRANCH_REGISTRY.write_text(json.dumps(registry), encoding="utf-8")
-    result = resolve_branch("@flow")
-    assert result is not None
-    path, email = result
-    assert path == branch_dir
-    assert email == "@flow"
-
-
-def test_resolve_branch_not_in_registry(repo_root):
-    """Returns None if branch is not in registry."""
-    registry = {"branches": []}
-    wake_mod.BRANCH_REGISTRY.write_text(json.dumps(registry), encoding="utf-8")
-    result = resolve_branch("@ghost")
-    assert result is None
-
-
-def test_resolve_branch_no_registry(repo_root, monkeypatch):
-    """Returns None when registry file does not exist.
-
-    Clears AIPASS_CALLER_CWD explicitly: with it set, step 2's caller-project
-    walk finds the real repo registry and this test would assert the opposite
-    of its own name depending on who ran it.
-    """
-    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
-    result = resolve_branch("@flow")
-    assert result is None
-
-
-def test_resolve_branch_directory_missing(repo_root):
-    """Returns None when registry entry path does not exist on disk."""
-    registry = {
-        "branches": [
-            {"email": "@flow", "path": "src/aipass/flow"},
-        ]
-    }
-    wake_mod.BRANCH_REGISTRY.write_text(json.dumps(registry), encoding="utf-8")
-    # Do NOT create the directory
-    result = resolve_branch("@flow")
-    assert result is None
-
-
-def test_resolve_branch_case_insensitive(repo_root):
-    """Branch resolution is case-insensitive."""
-    branch_dir = repo_root / "src" / "aipass" / "flow"
-    branch_dir.mkdir(parents=True)
-    registry = {
-        "branches": [
-            {"email": "@Flow", "path": "src/aipass/flow"},
-        ]
-    }
-    wake_mod.BRANCH_REGISTRY.write_text(json.dumps(registry), encoding="utf-8")
-    result = resolve_branch("@FLOW")
-    assert result is not None
-    _, email = result
-    assert email == "@flow"
-
-
-def test_resolve_branch_absolute_path(repo_root):
-    """Absolute path in registry is used directly."""
-    branch_dir = repo_root / "absolute" / "branch"
-    branch_dir.mkdir(parents=True)
-    registry = {
-        "branches": [
-            {"email": "@abs", "path": str(branch_dir)},
-        ]
-    }
-    wake_mod.BRANCH_REGISTRY.write_text(json.dumps(registry), encoding="utf-8")
-    result = resolve_branch("@abs")
-    assert result is not None
-    path, _ = result
-    assert path == branch_dir
-
-
-def test_resolve_branch_strips_leading_at(repo_root):
-    """Input with or without leading @ resolves the same."""
-    branch_dir = repo_root / "src" / "aipass" / "flow"
-    branch_dir.mkdir(parents=True)
-    registry = {
-        "branches": [
-            {"email": "@flow", "path": "src/aipass/flow"},
-        ]
-    }
-    wake_mod.BRANCH_REGISTRY.write_text(json.dumps(registry), encoding="utf-8")
-    result_with = resolve_branch("@flow")
-    result_without = resolve_branch("flow")
-    assert result_with is not None
-    assert result_without is not None
-    assert result_with[1] == result_without[1]
-
-
-# --- _clean_zombies tests -------------------------------------------
-
-
-def test_clean_zombies_finds_zombie(monkeypatch):
-    """Detects zombie claude processes from ps output."""
-
-    class FakeResult:
-        stdout = "  100 Z+   claude\n  200 Ss   claude\n  300 Z    claude\n"
-        returncode = 0
-
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *args, **kwargs: FakeResult(),
-    )
-    count = _clean_zombies()
-    assert count == 2
-
-
-def test_clean_zombies_none_found(monkeypatch):
-    """Returns 0 when no zombie processes exist."""
-
-    class FakeResult:
-        stdout = "  PID STAT COMM\n  200 Ss   claude\n"
-        returncode = 0
-
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *args, **kwargs: FakeResult(),
-    )
-    count = _clean_zombies()
-    assert count == 0
-
-
-def test_clean_zombies_subprocess_error(monkeypatch):
-    """Returns 0 on subprocess failure."""
-    monkeypatch.setattr(
-        "subprocess.run",
-        _raise_subprocess_error,
-    )
-    count = _clean_zombies()
-    assert count == 0
-
-
-# --- Helpers ---------------------------------------------------------
-
-_REAL_OPEN = open
-
-
-def _raise_process_lookup(pid, sig):
-    raise ProcessLookupError(f"No such process: {pid}")
-
-
-def _raise_permission(pid, sig):
-    raise PermissionError(f"Operation not permitted: {pid}")
-
-
-def _raise_subprocess_error(*args, **kwargs):
-    import subprocess
-
-    raise subprocess.SubprocessError("failed")
-
-
-def _fake_open_factory(real_status_path, mapping):
-    """Return an open() replacement that redirects /proc paths to real files."""
-
-    def _fake_open(path, *args, **kwargs):
-        path_str = str(path)
-        if path_str in mapping:
-            return _REAL_OPEN(mapping[path_str], *args, **kwargs)
-        return _REAL_OPEN(path, *args, **kwargs)
-
-    return _fake_open
-
-
-# --- Model flag tests ---------------------------------------------------
-
-
-def test_known_model_aliases_has_expected_entries():
-    """KNOWN_MODEL_ALIASES should contain sonnet, opus, haiku."""
-    assert "sonnet" in KNOWN_MODEL_ALIASES
-    assert "opus" in KNOWN_MODEL_ALIASES
-    assert "haiku" in KNOWN_MODEL_ALIASES
-
-
-def test_default_model_is_opus():
-    """Default model should be opus (the owner ruling 2026-08-01)."""
-    assert DEFAULT_MODEL == "opus"
-
-
-def test_known_model_aliases_are_bare_names():
-    """All KNOWN_MODEL_ALIASES should be bare alias names (no 'claude-' prefix).
-
-    The floor below is the whole point: the only assertion here is inside the
-    loop, so emptying KNOWN_MODEL_ALIASES — which would break every wake — made
-    this unit pass having checked nothing. Four is measured 2026-09-08: sonnet,
-    opus, haiku, fable.
-    """
-    assert len(KNOWN_MODEL_ALIASES) == 4, sorted(KNOWN_MODEL_ALIASES)
-    for alias in KNOWN_MODEL_ALIASES:
-        assert not alias.startswith("claude-"), f"{alias} should be a bare alias"
-
-
-# --- _find_claude_bin tests ------------------------------------------
-
-
-class TestFindClaudeBin:
-    """Tests for _find_claude_bin() — resolves claude binary path."""
-
-    def test_uses_shutil_which_when_found(self, monkeypatch):
-        """Returns shutil.which result when claude is on PATH."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.shutil.which",
-            lambda _: "/usr/local/bin/claude",
-        )
-        result = _find_claude_bin()
-        assert result == "/usr/local/bin/claude"
-
-    def test_falls_back_to_local_bin(self, monkeypatch, tmp_path):
-        """Falls back to ~/.local/bin/claude when not on PATH."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.shutil.which",
-            lambda _: None,
-        )
-        fake_local_bin = tmp_path / ".local" / "bin"
-        fake_local_bin.mkdir(parents=True)
-        fake_claude = fake_local_bin / "claude"
-        fake_claude.touch()
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.Path.home",
-            lambda: tmp_path,
-        )
-        result = _find_claude_bin()
-        assert result == str(fake_claude)
-
-    def test_falls_back_to_name_when_not_found(self, monkeypatch, tmp_path):
-        """Returns bare 'claude' when no known location has the binary."""
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.shutil.which",
-            lambda _: None,
-        )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.dispatch.wake.Path.home",
-            lambda: tmp_path,
-        )
-        result = _find_claude_bin()
-        assert result == "claude"
-
-
-class TestResolveBranchCallerRegistry:
-    """resolve_branch() falls back to caller's project registry for cross-project wake."""
-
-    def test_resolves_from_caller_registry(self, tmp_path, monkeypatch):
-        """Branch not in AIPass registry is found via AIPASS_CALLER_CWD."""
-        # External branch path
-        branch_path = tmp_path / "src" / "strategy"
-        branch_path.mkdir(parents=True)
-        (branch_path / ".ai_mail.local").mkdir()
-
-        # External registry
-        registry = {"branches": [{"name": "STRATEGY", "email": "@strategy", "path": str(branch_path)}]}
-        (tmp_path / "VERA_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
-
-        # AIPass registry has no @strategy
-        aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
-        aipass_registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", aipass_registry)
-        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
-
-        result = resolve_branch("@strategy")
-        assert result is not None
-        resolved_path, email = result
-        assert email == "@strategy"
-        assert resolved_path == branch_path
-
-    def test_aipass_registry_takes_precedence(self, tmp_path, monkeypatch):
-        """AIPass registry result is returned before checking caller registry."""
-        branch_path = tmp_path / "src" / "drone"
-        branch_path.mkdir(parents=True)
-
-        aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
-        aipass_registry.write_text(
-            json.dumps({"branches": [{"name": "DRONE", "email": "@drone", "path": str(branch_path)}]}), encoding="utf-8"
-        )
-        monkeypatch.setattr(wake_mod, "_REPO_ROOT", tmp_path)
-        monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", aipass_registry)
-        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
-
-        result = resolve_branch("@drone")
-        assert result is not None
-        assert result[1] == "@drone"
-
-    def test_returns_none_when_not_found_anywhere(self, tmp_path, monkeypatch):
-        """Returns None when branch is missing from both registries."""
-        aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
-        aipass_registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", aipass_registry)
-        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
-        # No *_REGISTRY.json in tmp_path other than the aipass one (which has no @nonexistent)
-
-        result = resolve_branch("@nonexistent")
-        assert result is None
+from aipass.ai_mail.tests.support_wake import (
+    _FakeProc,
+    _claude_args,
+    _make_scheduled_fixtures,
+    _make_wake_fixtures,
+    _patch_wake_deps,
+    _record_spawn_routes,
+)
+
+pytestmark = pytest.mark.usefixtures("wake_log_operation_suppressed")
 
 
 class TestWakeBranchSpawnEnv:
@@ -809,236 +83,44 @@ class TestWakeBranchSpawnEnv:
             return FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(wake_mod, "_check_pid_alive", lambda pid: True)
-        monkeypatch.setattr(wake_mod, "_clean_zombies", lambda: 0)
-        monkeypatch.setattr(wake_mod, "_is_branch_occupied", lambda p: False)
-        monkeypatch.setattr(wake_mod, "_acquire_lock", lambda p, pid: (True, "ok"))
-        monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.time.sleep", lambda _: None)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        # The liveness probe and the occupancy scan stay walls in front of host pids and
+        # live sessions; each is asserted on what it was asked (ai_mail, leg 7)
+        pid_alive = MagicMock(return_value=True)
+        monkeypatch.setattr(wake_mod, "check_pid_alive", pid_alive)
+        monkeypatch.setattr(wake_mod, "clean_zombies", lambda: 0)
+        occupied = MagicMock(return_value=False)
+        monkeypatch.setattr(wake_mod, "is_branch_occupied", occupied)
+        monkeypatch.setattr(wake_mod, "acquire_lock", lambda p, pid: (True, "ok"))
+        sleep = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.time.sleep", sleep)
+        # send_notification appends to the live feed, so it stays patched and is asserted (ai_mail, leg 6)
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
+
+        # The test owns the binary it needs: a CI runner has no claude anywhere, and a
+        # host lookup made this pass only where ~/.local/bin/claude exists (PR #774).
+        claude_bin = tmp_path / "bin" / "claude"
+        claude_bin.parent.mkdir()
+        claude_bin.touch()
+        which = MagicMock(side_effect=lambda name: str(claude_bin) if name == "claude" else None)
+        monkeypatch.setattr(wake_mod.shutil, "which", which)
 
         wake_mod.wake_branch("@testbranch", fresh=True)
 
-        assert captured_envs, "Popen was not called"
+        which.assert_any_call("claude")
+
+        sleep.assert_called_once_with(2)
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
+        assert len(captured_envs) == 1, "Popen must be called exactly once"
+        pid_alive.assert_called_once_with(99999)
+        occupied.assert_called_once_with(branch_path)
         env = captured_envs[0]
         assert local_bin in env.get("PATH", ""), f"~/.local/bin not in spawn_env PATH: {env.get('PATH', '')}"
 
 
-# ─── NEW LINE COVERAGE TESTS ──────────────────────────────────
-
-
-# --- _acquire_lock tests -----------------------------------------------
-
-
-class TestAcquireLock:
-    """Tests for _acquire_lock() — atomic lock file creation."""
-
-    def test_successful_lock_creation(self, tmp_path):
-        """Successful lock writes pid, timestamp, and branch to JSON file."""
-        ok, msg = _acquire_lock(tmp_path, 12345)
-        assert ok is True
-        assert msg == "Lock acquired"
-        lock_file = tmp_path / ".ai_mail.local" / ".dispatch.lock"
-        assert lock_file.exists()
-        data = json.loads(lock_file.read_text(encoding="utf-8"))
-        assert data["pid"] == 12345
-        assert "timestamp" in data
-        assert data["branch"] == str(tmp_path)
-
-    def test_file_exists_error(self, tmp_path):
-        """FileExistsError returns (False, 'Lock file already exists')."""
-        lock_dir = tmp_path / ".ai_mail.local"
-        lock_dir.mkdir(parents=True)
-        lock_file = lock_dir / ".dispatch.lock"
-        lock_file.write_text("{}", encoding="utf-8")
-        ok, msg = _acquire_lock(tmp_path, 999)
-        assert ok is False
-        assert msg == "Lock file already exists"
-
-    def test_os_error(self, tmp_path, monkeypatch):
-        """OSError returns (False, error message)."""
-        original_os_open = os.open
-
-        def _fail_open(path, flags, *args, **kwargs):
-            if ".dispatch.lock" in str(path):
-                raise OSError("disk full")
-            return original_os_open(path, flags, *args, **kwargs)
-
-        monkeypatch.setattr(os, "open", _fail_open)
-        ok, msg = _acquire_lock(tmp_path, 999)
-        assert ok is False
-        assert "Lock failed:" in msg
-        assert "disk full" in msg
-
-
-# --- _load_config tests -------------------------------------------------
-
-
-class TestLoadConfig:
-    """Tests for _load_config() — safety config loading with defaults."""
-
-    def test_no_config_file_returns_defaults(self, tmp_path, monkeypatch):
-        """Missing config file returns default dict."""
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", tmp_path / "nonexistent.json")
-        result = _load_config()
-        assert result == {"max_turns_per_wake": 100}
-
-    def test_partial_config_fills_defaults(self, tmp_path, monkeypatch):
-        """Config file without max_turns_per_wake gets default filled in."""
-        config_file = tmp_path / "safety_config.json"
-        config_file.write_text(json.dumps({"other_key": "value"}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config_file)
-        result = _load_config()
-        assert result["max_turns_per_wake"] == 100
-        assert result["other_key"] == "value"
-
-    def test_full_config_returned(self, tmp_path, monkeypatch):
-        """Config file with all keys returned as-is."""
-        config_file = tmp_path / "safety_config.json"
-        config_file.write_text(json.dumps({"max_turns_per_wake": 50}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config_file)
-        result = _load_config()
-        assert result["max_turns_per_wake"] == 50
-
-
-# --- _is_branch_occupied tests ------------------------------------------
-
-
-class TestIsBranchOccupied:
-    """Tests for _is_branch_occupied() — checks for interactive Claude sessions."""
-
-    def test_no_claude_processes(self, monkeypatch):
-        """pgrep returns non-zero (no claude processes) -> not occupied."""
-
-        class FakeResult:
-            returncode = 1
-            stdout = ""
-
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-        assert _is_branch_occupied(_Path("/some/branch")) is False
-
-    def test_claude_in_different_dir(self, tmp_path, monkeypatch):
-        """Claude running in a different directory -> not occupied."""
-        monkeypatch.setattr("sys.platform", "linux")
-
-        class FakeResult:
-            returncode = 0
-            stdout = "100\n"
-
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-        monkeypatch.setattr(os, "readlink", lambda p: "/some/other/dir")
-        assert _is_branch_occupied(tmp_path) is False
-
-    def test_claude_in_same_dir_interactive(self, tmp_path, monkeypatch):
-        """Claude in same dir with interactive session -> occupied."""
-        monkeypatch.setattr("sys.platform", "linux")
-        resolved = str(tmp_path.resolve())
-
-        class FakeResult:
-            returncode = 0
-            stdout = "100\n"
-
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-        monkeypatch.setattr(os, "readlink", lambda p: resolved)
-        # _read_session_type returns "interactive" for this PID
-        monkeypatch.setattr(wake_mod, "_read_session_type", lambda pid_str: "interactive")
-        assert _is_branch_occupied(tmp_path) is True
-
-    def test_claude_in_same_dir_daemon_not_blocking(self, tmp_path, monkeypatch):
-        """Claude in same dir with daemon session -> not blocking."""
-        monkeypatch.setattr("sys.platform", "linux")
-        resolved = str(tmp_path.resolve())
-
-        class FakeResult:
-            returncode = 0
-            stdout = "100\n"
-
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-        monkeypatch.setattr(os, "readlink", lambda p: resolved)
-        monkeypatch.setattr(wake_mod, "_read_session_type", lambda pid_str: "daemon")
-        assert _is_branch_occupied(tmp_path) is False
-
-    def test_pgrep_subprocess_failure_returns_false(self, monkeypatch):
-        """subprocess failure returns False."""
-
-        def _fail(*a, **kw):
-            raise subprocess.SubprocessError("pgrep failed")
-
-        monkeypatch.setattr(subprocess, "run", _fail)
-        assert _is_branch_occupied(_Path("/some/branch")) is False
-
-    def test_readlink_oserror_continues(self, tmp_path, monkeypatch):
-        """OSError on readlink is caught, continues to next PID."""
-        monkeypatch.setattr("sys.platform", "linux")
-
-        class FakeResult:
-            returncode = 0
-            stdout = "100\n200\n"
-
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-
-        def _fail_readlink(p):
-            raise OSError("no such file")
-
-        monkeypatch.setattr(os, "readlink", _fail_readlink)
-        assert _is_branch_occupied(tmp_path) is False
-
-
 # --- wake_branch integration tests -------------------------------------
-
-
-def _make_wake_fixtures(tmp_path, monkeypatch):
-    """Helper: set up branch directory, registry, and monkeypatched module constants."""
-    branch_path = tmp_path / "src" / "aipass" / "testbranch"
-    branch_path.mkdir(parents=True)
-    (branch_path / ".ai_mail.local").mkdir()
-
-    registry_file = tmp_path / "AIPASS_REGISTRY.json"
-    registry_file.write_text(
-        json.dumps({"branches": [{"name": "TESTBRANCH", "email": "@testbranch", "path": str(branch_path)}]}),
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(wake_mod, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", registry_file)
-    monkeypatch.setattr(wake_mod, "PAUSE_FILE", tmp_path / ".aipass" / "autonomous_pause")
-    monkeypatch.setattr(wake_mod, "CONFIG_FILE", tmp_path / "safety_config.json")
-    monkeypatch.setattr(wake_mod, "MONITOR_SCRIPT", tmp_path / "dispatch_monitor.py")
-    (tmp_path / "dispatch_monitor.py").touch()
-
-    return branch_path
-
-
-def _patch_wake_deps(monkeypatch, **overrides):
-    """Monkeypatch all wake_branch dependencies with sane defaults; override as needed."""
-    defaults = {
-        "_check_lock": lambda p: None,
-        "_clean_zombies": lambda: 0,
-        "_is_branch_occupied": lambda p: False,
-        "_acquire_lock": lambda p, pid: (True, "ok"),
-        "_check_pid_alive": lambda pid: True,
-        # Stubbed by default: a unit test of the wake must not read the fleet's
-        # real .central.json files or write a dashboard into tmp_path. The pins
-        # that are ABOUT the refresh put the real hook back (see
-        # TestRecipientDashboardRefresh._real_refresh).
-        "_refresh_recipient_dashboard": lambda path, email, status: None,
-    }
-    defaults.update(overrides)
-    for attr, val in defaults.items():
-        monkeypatch.setattr(wake_mod, attr, val)
-
-    monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.time.sleep", lambda _: None)
-    monkeypatch.delenv("INVOCATION_ID", raising=False)
-
-
-class _FakeProc:
-    """Minimal stand-in for subprocess.Popen return value."""
-
-    def __init__(self, pid: int = 55555):
-        self.pid = pid
 
 
 class TestWakeBranch:
@@ -1063,6 +145,67 @@ class TestWakeBranch:
         assert ok is False
         assert any(s[0] == "fail" and "resolve" in s[1] for s in status.steps)
 
+    def test_an_unreadable_registry_refuses_rather_than_waking_an_external_namesake(self, tmp_path, monkeypatch):
+        """A scheduled wake never lands on another root's citizen because the AIPass registry cannot be read.
+
+        Before leg 12 an unreadable AIPASS_REGISTRY.json read as no registry, and
+        resolution fell through to the external tier, which served a declared
+        root's @testbranch, so the wake spawned the namesake. Now the resolve step
+        fails and names the registry (ai_mail, leg 12).
+        """
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        namesake = tmp_path / "Elsewhere" / "testbranch"
+        namesake.mkdir(parents=True)
+        external = [{"email": "@testbranch", "path": str(namesake)}]
+        monkeypatch.setattr(wake_mod, "_external_citizens", lambda root: external)
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", scheduled=True, sender="@daemon")
+
+        assert ok is False
+        resolve = status.find_step("resolve")
+        assert resolve is not None
+        assert resolve[0] == "fail"
+        assert resolve[2].startswith("@testbranch not resolved: AIPASS_REGISTRY.json could not be read")
+        assert calls["popen"] == [] and calls["tmux"] == []
+
+    @pytest.mark.parametrize("where", ["caller_project", "hosted_project"])
+    def test_an_unreadable_project_registry_refuses_rather_than_waking_a_namesake(self, tmp_path, monkeypatch, where):
+        """A project registry that cannot be read stops resolution before the external tier.
+
+        @vera lives in Lab, and Lab's registry is not JSON. Before leg 12 step 2
+        (the caller's project) and step 3 (the admin sweep of projects/) logged
+        the failure and went on, and the external tier served another root's
+        @vera. Now the resolve step fails and names Lab's registry (ai_mail,
+        leg 12).
+        """
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        lab = tmp_path / "projects" / "lab"
+        (lab / "vera").mkdir(parents=True)
+        (lab / "LAB_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        namesake = tmp_path / "Elsewhere" / "vera"
+        namesake.mkdir(parents=True)
+        external = [{"email": "@vera", "path": str(namesake)}]
+        monkeypatch.setattr(wake_mod, "_external_citizens", lambda root: external)
+        if where == "caller_project":
+            monkeypatch.setenv("AIPASS_CALLER_CWD", str(lab / "vera"))
+        else:
+            monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@vera", admin=where == "hosted_project")
+
+        assert ok is False
+        resolve = status.find_step("resolve")
+        assert resolve is not None
+        assert resolve[0] == "fail"
+        assert resolve[2].startswith("@vera not resolved: LAB_REGISTRY.json could not be read")
+        assert calls["popen"] == [] and calls["tmux"] == []
+
     # --- manager check ---
 
     def test_manager_target_skips_wake(self, tmp_path, monkeypatch):
@@ -1078,6 +221,29 @@ class TestWakeBranch:
         assert ok is True
         assert any(s[1] == "manager" for s in status.steps)
 
+    def test_unreadable_passport_fails_closed_as_a_manager(self, tmp_path, monkeypatch):
+        """A passport that exists but cannot be read never lets the target be woken.
+
+        Its class is unknown, and the target may be a manager; before leg 11 the
+        gate fell through and spawned it. Now the default lane treats it as a
+        manager: wake skipped, the caller mails. Its proof is the mutant that
+        falls through again (ai_mail, leg 11).
+        """
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        trinity = branch_path / ".trinity"
+        trinity.mkdir(parents=True, exist_ok=True)
+        (trinity / "passport.json").write_text("{not json", encoding="utf-8")
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 0)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch")
+
+        assert ok is True
+        manager = status.find_step("manager")
+        assert manager is not None
+        assert manager[0] == "info"
+        assert calls["popen"] == [] and calls["tmux"] == []
+
     def test_manager_daemon_scheduled_wake_spawns_interactive(self, tmp_path, monkeypatch):
         """Manager + sender=@daemon bypasses the gate and spawns an interactive
         tmux session — managers are never headless. Self-authored
@@ -1089,7 +255,7 @@ class TestWakeBranch:
             json.dumps({"identity": {"citizen_class": "manager"}}),
             encoding="utf-8",
         )
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 0)
         tmux_calls = []
 
         def _fake_run(cmd, **kwargs):
@@ -1127,11 +293,13 @@ class TestWakeBranch:
             json.dumps({"identity": {"citizen_class": "manager"}}),
             encoding="utf-8",
         )
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
-        monkeypatch.setattr(wake_mod.shutil, "which", lambda name: None)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 0)
+        which = MagicMock(return_value=None)
+        monkeypatch.setattr(wake_mod.shutil, "which", which)
         status, ok = wake_branch("@testbranch", sender="@daemon")
         assert ok is False
         assert any(s[0] == "fail" and s[1] == "tmux" for s in status.steps)
+        which.assert_any_call("tmux")
 
     def test_non_manager_target_continues(self, tmp_path, monkeypatch):
         """Target with non-manager citizen_class proceeds to spawn."""
@@ -1142,46 +310,46 @@ class TestWakeBranch:
             json.dumps({"identity": {"citizen_class": "aipass_framework"}}),
             encoding="utf-8",
         )
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 0)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         assert not any(s[1] == "manager" for s in status.steps)
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     def test_missing_passport_continues(self, tmp_path, monkeypatch):
         """No passport.json — wake proceeds normally."""
         _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 0)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         assert not any(s[1] == "manager" for s in status.steps)
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     # --- zombie check ---
 
     def test_zombie_check_warns_but_continues(self, tmp_path, monkeypatch):
         """Zombie detected adds warning but dispatch continues."""
         _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 2)
+        _patch_wake_deps(monkeypatch, clean_zombies=lambda: 2)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         assert any(s[0] == "warn" and "zombie" in s[2].lower() for s in status.steps)
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     # --- lock exists ---
 
@@ -1190,8 +358,8 @@ class TestWakeBranch:
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(
             monkeypatch,
-            _check_lock=lambda p: {"pid": 111, "timestamp": "2026-01-01T00:00:00"},
-            _clean_zombies=lambda: 0,
+            check_lock=lambda p: {"pid": 111, "timestamp": "2026-01-01T00:00:00"},
+            clean_zombies=lambda: 0,
         )
         status, ok = wake_branch("@testbranch", auto=True)
         assert ok is False
@@ -1202,8 +370,8 @@ class TestWakeBranch:
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(
             monkeypatch,
-            _check_lock=lambda p: {"pid": 111, "timestamp": "2026-01-01T00:00:00"},
-            _clean_zombies=lambda: 0,
+            check_lock=lambda p: {"pid": 111, "timestamp": "2026-01-01T00:00:00"},
+            clean_zombies=lambda: 0,
         )
         status, ok = wake_branch("@testbranch", auto=False)
         assert ok is True
@@ -1213,9 +381,11 @@ class TestWakeBranch:
 
     def test_branch_occupied_blocks(self, tmp_path, monkeypatch):
         """Interactive session running -> blocked."""
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _is_branch_occupied=lambda p: True)
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        occupied = MagicMock(return_value=True)
+        _patch_wake_deps(monkeypatch, is_branch_occupied=occupied)
         status, ok = wake_branch("@testbranch")
+        occupied.assert_called_once_with(branch_path)
         assert ok is False
         assert any(s[0] == "fail" and "blocked" in s[1] for s in status.steps)
 
@@ -1233,11 +403,8 @@ class TestWakeBranch:
             return _FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch", fresh=True)
         assert ok is True
         # The claude subcommand is embedded after "--" in monitor_cmd
@@ -1247,6 +414,9 @@ class TestWakeBranch:
         sep_idx = cmd.index("--")
         claude_part = cmd[sep_idx + 1 :]
         assert "-c" not in claude_part
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     def test_fresh_false_has_continue_flag(self, tmp_path, monkeypatch):
         """fresh=False -> claude_cmd includes '-c' flag."""
@@ -1260,11 +430,8 @@ class TestWakeBranch:
             return _FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch", fresh=False)
         assert ok is True
         assert captured_cmds
@@ -1272,6 +439,9 @@ class TestWakeBranch:
         sep_idx = cmd.index("--")
         claude_part = cmd[sep_idx + 1 :]
         assert "-c" in claude_part
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     # --- custom message ---
 
@@ -1287,11 +457,8 @@ class TestWakeBranch:
             return _FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch", custom_message="Run the audit")
         assert ok is True
         assert captured_cmds
@@ -1302,6 +469,8 @@ class TestWakeBranch:
         p_idx = claude_part.index("-p")
         prompt = claude_part[p_idx + 1]
         assert prompt.startswith("Hi. Run the audit")
+        # The custom message, not the default, is the feed body
+        notify.assert_called_once_with("@testbranch waking", "Run the audit", source="testbranch", kind="wake")
 
     def test_prompt_does_not_ask_agent_to_delete_lock(self, tmp_path, monkeypatch):
         """Monitor owns lock cleanup — the prompt must not also tell the agent to delete it.
@@ -1319,11 +488,8 @@ class TestWakeBranch:
             return _FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         cmd = captured_cmds[0]
@@ -1333,6 +499,9 @@ class TestWakeBranch:
         prompt = claude_part[p_idx + 1]
         assert "delete" not in prompt.lower()
         assert ".dispatch.lock" not in prompt
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     def test_prompt_instructs_synchronous_subagents(self, tmp_path, monkeypatch):
         """Prompt tells the agent to run sub-agents in the foreground, not background.
@@ -1350,11 +519,8 @@ class TestWakeBranch:
             return _FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         cmd = captured_cmds[0]
@@ -1363,6 +529,47 @@ class TestWakeBranch:
         p_idx = claude_part.index("-p")
         prompt = claude_part[p_idx + 1]
         assert "synchronously" in prompt.lower()
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
+
+    def test_prompt_puts_the_spec_before_the_build(self, tmp_path, monkeypatch):
+        """Prompt sends the builder to the standards and the test template first, the checklist last.
+
+        Measured on 66 worker transcripts: 61 ran the checklist after writing,
+        0 read the standards page before (DPLAN-0354). The spec line comes
+        ahead of every other instruction so it is read first.
+        """
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+
+        captured_cmds: list = []
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _FakeProc()
+
+        monkeypatch.setattr("subprocess.Popen", fake_popen)
+        notified: list = []
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.notify.send_notification",
+            lambda *a, **kw: notified.append(kw.get("kind")),
+            raising=False,
+        )
+        status, ok = wake_branch("@testbranch")
+        assert ok is True
+        assert notified == ["wake"]  # the real feed was never written
+        cmd = captured_cmds[0]
+        sep_idx = cmd.index("--")
+        claude_part = cmd[sep_idx + 1 :]
+        p_idx = claude_part.index("-p")
+        prompt = claude_part[p_idx + 1]
+        spec_at = prompt.find("Before you build:")
+        assert spec_at != -1
+        assert "src/aipass/seedgo/docs/aipass_standards.md" in prompt
+        assert "src/aipass/seedgo/templates/test_template_v1.md" in prompt
+        assert spec_at < prompt.find("IMPORTANT: run any sub-agents")
+        assert prompt.find("checklist last") > spec_at
 
     # --- spawn errors ---
 
@@ -1397,7 +604,7 @@ class TestWakeBranch:
     def test_lock_acquisition_fails_before_spawn(self, tmp_path, monkeypatch):
         """Lock fails before spawn -> fail step, returns False (DPLAN-0155 lock-before-spawn)."""
         _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _acquire_lock=lambda p, pid: (False, "Lock file already exists"))
+        _patch_wake_deps(monkeypatch, acquire_lock=lambda p, pid: (False, "Lock file already exists"))
         status, ok = wake_branch("@testbranch")
         assert ok is False
         assert any(s[0] == "fail" and "lock-acquire" in s[1] for s in status.steps)
@@ -1407,7 +614,8 @@ class TestWakeBranch:
     def test_alive_check_fails_cleans_up_lock(self, tmp_path, monkeypatch):
         """Agent dies immediately -> cleans up lock, returns False."""
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _check_pid_alive=lambda pid: False)
+        pid_alive = MagicMock(return_value=False)
+        _patch_wake_deps(monkeypatch, check_pid_alive=pid_alive)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
         # Create the lock file so we can verify it gets cleaned up
         lock_dir = branch_path / ".ai_mail.local"
@@ -1415,6 +623,7 @@ class TestWakeBranch:
         lock_file = lock_dir / ".dispatch.lock"
         lock_file.write_text("{}", encoding="utf-8")
         status, ok = wake_branch("@testbranch")
+        pid_alive.assert_called_once_with(_FakeProc().pid)
         assert ok is False
         assert any(s[0] == "fail" and "alive" in s[1] for s in status.steps)
         # Lock file should be cleaned up
@@ -1427,11 +636,8 @@ class TestWakeBranch:
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.handlers.notify.send_notification",
-            lambda *a, **kw: None,
-            raising=False,
-        )
+        notify = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", notify)
         status, ok = wake_branch("@testbranch")
         assert ok is True
         assert status.success is True
@@ -1443,6 +649,9 @@ class TestWakeBranch:
         assert "spawn" in labels
         assert "lock-acquire" in labels
         assert "alive" in labels
+        notify.assert_called_once_with(
+            "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
+        )
 
     # --- notification failure doesn't break success ---
 
@@ -1464,394 +673,7 @@ class TestWakeBranch:
         assert ok is True
 
 
-# --- scheduled lane (DPLAN-0287) ---------------------------------------
-
-
-def _make_scheduled_fixtures(tmp_path, monkeypatch, email="@testbranch", citizen_class="manager"):
-    """Branch + registry + passport for scheduled-lane tests.
-
-    `email` other than @testbranch is added as a second registry entry pointing
-    at the same directory — these tests care about the address, not the tree.
-    """
-    branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
-    if email != "@testbranch":
-        registry_file = tmp_path / "AIPASS_REGISTRY.json"
-        data = json.loads(registry_file.read_text(encoding="utf-8"))
-        data["branches"].append({"name": email.lstrip("@").upper(), "email": email, "path": str(branch_path)})
-        registry_file.write_text(json.dumps(data), encoding="utf-8")
-
-    trinity = branch_path / ".trinity"
-    trinity.mkdir(parents=True, exist_ok=True)
-    (trinity / "passport.json").write_text(
-        json.dumps({"identity": {"citizen_class": citizen_class}}),
-        encoding="utf-8",
-    )
-    return branch_path
-
-
-def _record_spawn_routes(monkeypatch):
-    """Capture both spawn routes so a test can name which one a wake took.
-
-    tmux interactive goes through subprocess.run; the headless monitor pipeline
-    goes through subprocess.Popen. Recording both is what makes "it went the
-    other way" a readable failure instead of a missing-call one.
-    """
-    calls: dict = {"tmux": [], "popen": []}
-
-    def _fake_run(cmd, **kwargs):
-        calls["tmux"].append(list(cmd))
-
-        class _Done:
-            returncode = 0
-            stderr = ""
-
-        return _Done()
-
-    def _fake_popen(cmd, **kwargs):
-        calls["popen"].append({"cmd": list(cmd), "env": dict(kwargs.get("env") or {})})
-        return _FakeProc()
-
-    monkeypatch.setattr(wake_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(wake_mod.subprocess, "run", _fake_run)
-    monkeypatch.setattr("subprocess.Popen", _fake_popen)
-    monkeypatch.setattr(
-        "aipass.ai_mail.apps.handlers.notify.send_notification",
-        lambda *a, **kw: None,
-        raising=False,
-    )
-    return calls
-
-
-class TestScheduledManagerLane:
-    """The opt-in scheduled lane: manager wakes run headless with the 350k pin.
-
-    The pin itself lives in dispatch_monitor (see
-    test_dispatch_monitor.test_auto_compact_window_pinned_to_350k). What wake
-    can prove is the route: a scheduled manager wake must hand off to the
-    monitor, because the monitor is the only thing that writes the pin.
-    """
-
-    def test_daemon_manager_wake_is_interactive_tmux_with_no_pin(self, tmp_path, monkeypatch):
-        """The hole this lane closes: a @daemon-sender manager wake spawns tmux.
-
-        tmux never touches dispatch_monitor, so nothing sets
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW — the session inherits its model's
-        native window and sits unattended. True before and after this change:
-        the un-scheduled manager path is deliberately untouched.
-        """
-        _make_scheduled_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@testbranch", sender="@daemon")
-
-        assert ok is True
-        assert [c[:2] for c in calls["tmux"]] == [
-            ["tmux", "new-session"],
-            ["tmux", "set-option"],
-            ["tmux", "send-keys"],
-        ]
-        assert calls["popen"] == [], "interactive manager wake must not reach the monitor pipeline"
-        # No monitor process means no pin site at all.
-        assert not any(str(wake_mod.MONITOR_SCRIPT) in " ".join(c) for c in calls["tmux"])
-
-    def test_scheduled_manager_wake_routes_headless_through_monitor(self, tmp_path, monkeypatch):
-        """scheduled=True on a manager routes to dispatch_monitor, not tmux."""
-        _make_scheduled_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=True)
-
-        assert ok is True
-        assert calls["tmux"] == [], "scheduled manager wake must not spawn an interactive session"
-        assert len(calls["popen"]) == 1
-        assert str(wake_mod.MONITOR_SCRIPT) in calls["popen"][0]["cmd"]
-        assert any(s[0] == "ok" and s[1] == "scheduled" for s in status.steps)
-
-    def test_scheduled_manager_wake_hands_the_pin_site_the_spawn(self, tmp_path, monkeypatch):
-        """The monitor is argv[1] and wake's own env carries no CLAUDE_* leak.
-
-        dispatch_monitor writes the 350k pin after stripping CLAUDE*; wake must
-        deliver a spawn that is (a) the monitor and (b) free of a parent window
-        that could otherwise be read as the effective pin.
-        """
-        _make_scheduled_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch)
-        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "999999")
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=True)
-
-        assert ok is True
-        spawned = calls["popen"][0]
-        assert spawned["cmd"][1] == str(wake_mod.MONITOR_SCRIPT)
-        assert not any(k.startswith("CLAUDE") for k in spawned["env"])
-
-    def test_scheduled_wake_refuses_blocklisted_target_with_named_reason(self, tmp_path, monkeypatch):
-        """@devpulse stays refused in the scheduled lane — named reason, no spawn."""
-        _make_scheduled_fixtures(tmp_path, monkeypatch, email="@devpulse")
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@devpulse", sender="@daemon", scheduled=True)
-
-        assert ok is False
-        blocked = status.find_step("blocklist")
-        assert blocked is not None, "refusal must be a named step, not a silent False"
-        assert blocked[0] == "fail"
-        assert "@devpulse" in blocked[2]
-        assert calls["popen"] == [] and calls["tmux"] == []
-
-    def test_scheduled_blocklist_refusal_survives_an_unreadable_passport(self, tmp_path, monkeypatch):
-        """The refusal is checked before the passport read, so a missing or
-        corrupt passport can never be the reason a blocked target gets spawned."""
-        branch_path = _make_scheduled_fixtures(tmp_path, monkeypatch, email="@devpulse")
-        (branch_path / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@devpulse", sender="@daemon", scheduled=True)
-
-        assert ok is False
-        assert status.find_step("blocklist") is not None
-        assert calls["popen"] == [] and calls["tmux"] == []
-
-    def test_scheduled_defaults_false_and_is_keyword_only(self, tmp_path, monkeypatch):
-        """The param cannot be set positionally — existing call sites keep their meaning."""
-        import inspect
-
-        param = inspect.signature(wake_branch).parameters["scheduled"]
-        assert param.default is False
-        assert param.kind is inspect.Parameter.KEYWORD_ONLY
-
-    def test_scheduled_false_keeps_manager_wake_interactive(self, tmp_path, monkeypatch):
-        """Explicit scheduled=False on a manager is the tmux path, unchanged."""
-        _make_scheduled_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=False)
-
-        assert ok is True
-        assert [c[:2] for c in calls["tmux"]] == [
-            ["tmux", "new-session"],
-            ["tmux", "set-option"],
-            ["tmux", "send-keys"],
-        ]
-        assert calls["popen"] == []
-
-    def test_scheduled_non_manager_spawn_is_byte_identical(self, tmp_path, monkeypatch):
-        """Non-manager target: scheduled=True changes nothing about the spawn."""
-        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        _, ok_default = wake_branch("@testbranch", custom_message="nightly sweep", sender="@daemon")
-        _, ok_scheduled = wake_branch("@testbranch", custom_message="nightly sweep", sender="@daemon", scheduled=True)
-
-        assert ok_default is True and ok_scheduled is True
-        assert len(calls["popen"]) == 2
-        assert calls["popen"][0]["cmd"] == calls["popen"][1]["cmd"]
-        assert calls["tmux"] == []
-
-
-class TestAdminManagerLane:
-    """The admin lane (FPLAN-0401 Phase 4): a verified admin dispatch wakes a
-    manager-class target headless, like any citizen dispatch (wake.py 2.3.0).
-
-    wake_branch takes `admin` as an already-decided boolean. It cannot verify
-    the grant itself — the 5-leg check needs the caller env, which lives in
-    dispatch.py. Everything below is about what the flag ROUTES, not what
-    earns it (that is test_admin_lane.py).
-    """
-
-    def test_admin_manager_wake_routes_headless_through_monitor(self, tmp_path, monkeypatch):
-        """admin=True on a manager reaches dispatch_monitor, not tmux, not the skip."""
-        _make_scheduled_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@testbranch", sender="@devpulse", admin=True)
-
-        assert ok is True
-        assert calls["tmux"] == []
-        assert len(calls["popen"]) == 1
-        assert str(wake_mod.MONITOR_SCRIPT) in calls["popen"][0]["cmd"]
-
-    def test_admin_lane_records_a_named_status_step(self, tmp_path, monkeypatch):
-        """A caller can see WHICH lane fired, not just that something spawned."""
-        _make_scheduled_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch)
-        _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@testbranch", sender="@devpulse", admin=True)
-
-        admin_step = status.find_step("admin")
-        assert admin_step is not None and admin_step[0] == "ok"
-        manager_step = status.find_step("manager")
-        assert manager_step is not None and manager_step[0] == "ok"
-        # The scheduled lane did not fire — the two must stay distinguishable.
-        assert status.find_step("scheduled") is None
-
-    def test_admin_false_leaves_the_manager_gate_exactly_as_it_was(self, tmp_path, monkeypatch):
-        """Default: mail only, wake skipped, nothing spawned."""
-        _make_scheduled_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@testbranch", sender="@devpulse")
-
-        assert ok is True
-        assert calls["popen"] == [] and calls["tmux"] == []
-        manager_step = status.find_step("manager")
-        assert manager_step is not None and manager_step[0] == "info"
-        assert status.find_step("admin") is None
-
-    def test_admin_wake_still_refuses_a_blocklisted_target(self, tmp_path, monkeypatch):
-        """@devpulse stays undispatchable — admin raises the stakes, not the fence."""
-        _make_scheduled_fixtures(tmp_path, monkeypatch, email="@devpulse")
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@devpulse", sender="@devpulse", admin=True)
-
-        assert ok is False
-        blocked = status.find_step("blocklist")
-        assert blocked is not None and blocked[0] == "fail"
-        assert "@devpulse" in blocked[2]
-        assert calls["popen"] == [] and calls["tmux"] == []
-
-    def test_admin_non_manager_spawn_is_byte_identical(self, tmp_path, monkeypatch):
-        """Non-manager target: admin=True changes nothing about the spawn."""
-        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        _, ok_default = wake_branch("@testbranch", custom_message="work", sender="@devpulse")
-        _, ok_admin = wake_branch("@testbranch", custom_message="work", sender="@devpulse", admin=True)
-
-        assert ok_default is True and ok_admin is True
-        assert len(calls["popen"]) == 2
-        assert calls["popen"][0]["cmd"] == calls["popen"][1]["cmd"]
-
-    def test_admin_is_keyword_only_and_defaults_false(self):
-        """No positional path to privilege — every existing call site keeps its meaning."""
-        import inspect
-
-        param = inspect.signature(wake_branch).parameters["admin"]
-        assert param.default is False
-        assert param.kind is inspect.Parameter.KEYWORD_ONLY
-
-    def test_scheduled_lane_wins_when_both_flags_are_set(self, tmp_path, monkeypatch):
-        """Both route headless; the status names the scheduled lane, so a 5am
-        rotation is never reported as an admin dispatch."""
-        _make_scheduled_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=True, admin=True)
-
-        assert ok is True
-        assert len(calls["popen"]) == 1
-        assert status.find_step("scheduled") is not None
-        assert status.find_step("admin") is None
-
-
-# --- wake-back opt-out (library callers) -------------------------------
-
-
-class TestWakeBackOptOut:
-    """wake_back=False: a library caller (@daemon's scheduled nudges) declines
-    the completion wake-back. A nudge owes no reply, so waking @daemon back to
-    read an empty inbox was a wasted session.
-
-    It travels to the monitor as an ARGV flag between the four positionals and
-    '--', never an env var: spawn_env becomes the agent's own environment and
-    would leak into any dispatch that agent makes (the AIPASS_DISPATCH_ID class).
-    """
-
-    def test_wake_back_is_keyword_only_and_defaults_true(self):
-        """Every existing call site keeps the wake-back without saying so."""
-        import inspect
-
-        param = inspect.signature(wake_branch).parameters["wake_back"]
-        assert param.default is True
-        assert param.kind is inspect.Parameter.KEYWORD_ONLY
-
-    def test_declining_puts_the_flag_before_the_separator(self, tmp_path, monkeypatch):
-        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@testbranch", custom_message="nudge", sender="@daemon", wake_back=False)
-
-        assert ok is True
-        spawned = calls["popen"][0]
-        cmd = spawned["cmd"]
-        sep = cmd.index("--")
-        assert sep == 7, "the flag sits between the four positionals and '--'"
-        assert cmd[2] == "@testbranch" and cmd[4] == "@daemon", "sender passes through unchanged"
-        assert cmd[sep - 1] == "--no-wake-back"
-        assert "--no-wake-back" not in cmd[sep + 1 :], "the flag must not reach claude's argv"
-        assert not any("WAKE_BACK" in key for key in spawned["env"]), "carried by argv, never by env"
-
-    def test_the_default_argv_keeps_the_separator_right_after_the_positionals(self, tmp_path, monkeypatch):
-        """Byte-identical to the shape before the option existed."""
-        branch_path = _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        status, ok = wake_branch("@testbranch", custom_message="work", sender="@devpulse")
-
-        assert ok is True
-        cmd = calls["popen"][0]["cmd"]
-        assert cmd[:7] == [
-            sys.executable,
-            str(wake_mod.MONITOR_SCRIPT),
-            "@testbranch",
-            str(branch_path / ".ai_mail.local" / ".dispatch.lock"),
-            "@devpulse",
-            str(branch_path / "logs" / "dispatch_stderr.log"),
-            "--",
-        ]
-        assert "--no-wake-back" not in cmd
-
-    def test_the_flag_is_the_only_difference_a_decline_makes(self, tmp_path, monkeypatch):
-        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
-        _patch_wake_deps(monkeypatch)
-        calls = _record_spawn_routes(monkeypatch)
-
-        wake_branch("@testbranch", custom_message="work", sender="@daemon")
-        wake_branch("@testbranch", custom_message="work", sender="@daemon", wake_back=True)
-        wake_branch("@testbranch", custom_message="work", sender="@daemon", wake_back=False)
-
-        default_cmd, explicit_cmd, declined_cmd = (c["cmd"] for c in calls["popen"])
-        assert explicit_cmd == default_cmd
-        assert declined_cmd != default_cmd
-        assert [a for a in declined_cmd if a != "--no-wake-back"] == default_cmd
-
-    def test_a_declined_wake_back_is_written_on_the_register_row(self, tmp_path, monkeypatch):
-        """A reader of the register can tell a declined wake-back from a lost one."""
-        from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
-
-        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
-        _patch_wake_deps(monkeypatch)
-        _record_spawn_routes(monkeypatch)
-
-        wake_branch("@testbranch", custom_message="nudge", sender="@daemon", wake_back=False)
-
-        rows = register_mod.outstanding()
-        assert len(rows) == 1
-        assert rows[0]["wake_back"] is False
-
-
 # --- session pointer wiring --------------------------------------------
-
-
-def _claude_args(popen_cmd: list) -> list:
-    """The claude command a monitor spawn was handed (everything after '--')."""
-    return popen_cmd[popen_cmd.index("--") + 1 :]
 
 
 class TestWakeSessionPointer:
@@ -1957,10 +779,11 @@ class TestWakeSessionPointer:
 
     def test_a_failing_pointer_write_still_spawns(self, tmp_path, monkeypatch, fake_home):
         """A read-only .ai_mail.local must cost precision, never the wake itself."""
-        _make_wake_fixtures(tmp_path, monkeypatch)
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
-        monkeypatch.setattr(wake_mod.session_pointer, "write_pointer", lambda *a, **kw: False)
+        write_pointer = MagicMock(return_value=False)
+        monkeypatch.setattr(wake_mod.session_pointer, "write_pointer", write_pointer)
 
         status, ok = wake_branch("@testbranch", fresh=True)
 
@@ -1969,6 +792,8 @@ class TestWakeSessionPointer:
         args = _claude_args(calls["popen"][0]["cmd"])
         # The id still goes to the CLI — only the record of it was lost.
         assert "--session-id" in args
+        session_id = args[args.index("--session-id") + 1]
+        write_pointer.assert_called_once_with(branch_path, session_id, "wake-fresh")
         assert status.find_step("session") is not None
 
     def test_the_rest_of_the_command_is_untouched(self, tmp_path, monkeypatch, fake_home):
@@ -1990,41 +815,6 @@ class TestWakeSessionPointer:
             assert args[args.index("--permission-mode") + 1] == "bypassPermissions"
             assert args[args.index("--output-format") + 1] == "json"
             assert "--max-turns" in args
-
-
-class TestIsManager:
-    """is_manager() — the promise at dispatch time must match the delivery."""
-
-    def _passport(self, tmp_path, name, citizen_class):
-        branch = tmp_path / name
-        (branch / ".trinity").mkdir(parents=True)
-        (branch / ".trinity" / "passport.json").write_text(
-            json.dumps({"identity": {"citizen_class": citizen_class}}), encoding="utf-8"
-        )
-        return branch
-
-    def test_manager_passport_is_manager(self, tmp_path, monkeypatch):
-        branch = self._passport(tmp_path, "devpulse", "manager")
-        monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (branch, e))
-        assert wake_mod.is_manager("@devpulse") is True
-
-    def test_ordinary_citizen_is_not(self, tmp_path, monkeypatch):
-        branch = self._passport(tmp_path, "prax", "aipass_framework")
-        monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (branch, e))
-        assert wake_mod.is_manager("@prax") is False
-
-    def test_unreadable_passport_is_not_a_manager(self, tmp_path, monkeypatch):
-        """Fail toward the ordinary path: an unknown citizen is woken, which is
-        the behaviour that existed before this helper. Never invent a manager."""
-        monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (tmp_path / "nope", e))
-        assert wake_mod.is_manager("@ghost") is False
-
-    def test_manager_gate_log_does_not_claim_mail_it_did_not_send(self):
-        """wake_branch's manager gate sends NO mail — the caller does. Its log line
-        claimed 'mail delivered', which is how a silent drop read as a delivery for
-        as long as it did (@devpulse P0, 2026-08-21)."""
-        src = _Path(wake_mod.__file__).read_text(encoding="utf-8")
-        assert "wake skipped, mail delivered" not in src
 
 
 # --- wake-lane rulings, the owner 2026-09-08 ------------------------------
@@ -2084,17 +874,14 @@ class TestWakeModelPolicy:
         assert "fable" in decision.refusal.lower(), decision.refusal
         assert "2026-09-08" in decision.refusal, decision.refusal
 
-    def test_a_refused_request_never_stalls_the_wake(self, granted):
-        """Refusing the WAKE would punish the target for its schedule's model
-        field. The wake happens; the model does not."""
-        granted(["@devpulse"])
-
-        assert wake_mod.resolve_wake_model("@vera", "fable").model == DEFAULT_MODEL
-
     def test_manager_class_no_longer_buys_fable(self, granted):
         """The superseded rule, pinned as superseded. This is the exact call the
         08-30 version answered with "fable" for any manager; @vera is
-        manager-class and holds no grant, so it is opus now."""
+        manager-class and holds no grant, so it is opus now.
+
+        The refused "fable" request still resolves to a model: refusing the WAKE
+        would punish the target for its schedule's model field. The wake
+        happens; the model does not."""
         granted(["@devpulse"])
 
         assert wake_mod.resolve_wake_model("@vera", None).model == DEFAULT_MODEL
@@ -2141,79 +928,6 @@ class TestWakeModelPolicy:
     def test_fable_is_a_known_alias(self):
         """The lane names a model the CLI actually resolves."""
         assert "fable" in KNOWN_MODEL_ALIASES
-
-
-class TestTheGrantIsReadFromTheUntrackedConfig:
-    """fable_allowed() — The owner edits the grant, the repo does not ship it.
-
-    The direction of every fallback here is the point: a grant that collapsed to
-    EMPTY on a bad file would demote @devpulse silently, and the only symptom
-    would be devpulse spawning on opus. Failing toward the written ruling is the
-    recoverable direction; failing toward nobody is not.
-    """
-
-    def test_a_missing_config_falls_back_to_the_written_default(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", tmp_path / "nothing_here.json")
-
-        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
-        assert "@devpulse" in wake_mod.fable_allowed()
-
-    def test_an_unparseable_config_falls_back_to_the_default(self, monkeypatch, tmp_path):
-        config = tmp_path / "safety_config.json"
-        config.write_text("{not json{{{", encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
-
-        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
-
-    def test_a_config_without_the_key_falls_back_to_the_default(self, monkeypatch, tmp_path):
-        config = tmp_path / "safety_config.json"
-        config.write_text(json.dumps({"max_turns_per_wake": 100}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
-
-        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
-
-    def test_a_grant_that_is_not_a_list_falls_back_to_the_default(self, monkeypatch, tmp_path):
-        """The typo shape: a bare string instead of a list. Iterating it would
-        grant '@', '@d', '@e' — a frozenset of letters that matches nobody, i.e.
-        a silent revocation dressed as a config."""
-        config = tmp_path / "safety_config.json"
-        config.write_text(json.dumps({"fable_allowed": "@devpulse"}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
-
-        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
-
-    def test_a_written_grant_replaces_the_default_entirely(self, monkeypatch, tmp_path):
-        """The owner moving the seat means the default no longer applies — this is
-        a replacement, not an addition, or a revoked seat could never be revoked."""
-        config = tmp_path / "safety_config.json"
-        config.write_text(json.dumps({"fable_allowed": ["@someone_else"]}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
-
-        assert wake_mod.fable_allowed() == frozenset({"@someone_else"})
-        assert "@devpulse" not in wake_mod.fable_allowed()
-
-    def test_an_explicit_empty_list_revokes_the_grant_from_everyone(self, monkeypatch, tmp_path):
-        """A decision, not an accident, and distinguishable from the key being
-        absent. It is the spelling for turning Fable off fleet-wide."""
-        config = tmp_path / "safety_config.json"
-        config.write_text(json.dumps({"fable_allowed": []}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
-
-        assert wake_mod.fable_allowed() == frozenset()
-        assert wake_mod.resolve_wake_model("@devpulse", "fable").model == DEFAULT_MODEL
-
-    def test_written_entries_are_normalised_like_every_other_address(self, monkeypatch, tmp_path):
-        config = tmp_path / "safety_config.json"
-        config.write_text(json.dumps({"fable_allowed": ["DevPulse", "@Vera"]}), encoding="utf-8")
-        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
-
-        assert wake_mod.fable_allowed() == frozenset({"@devpulse", "@vera"})
-
-    def test_the_grant_lives_where_the_repo_does_not_ship_it(self):
-        """The config path is inside .ai_mail.local/, which is gitignored. It
-        pointed at the branch root until 2026-09-08 — tracked territory, i.e.
-        the repo would have shipped an answer to who may run Fable."""
-        assert wake_mod.CONFIG_FILE.parent.name == ".ai_mail.local"
 
 
 def _tmux_line(calls, verb):
@@ -2382,8 +1096,6 @@ class TestDaemonSessionMarking:
         _patch_wake_deps(monkeypatch)
         _record_spawn_routes(monkeypatch)
 
-        from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
-
         opened = []
         monkeypatch.setattr(register_mod, "open_dispatch", lambda **kw: opened.append(kw) or "id", raising=True)
 
@@ -2517,256 +1229,3 @@ class TestModelPolicyReachesBothSpawnLanes:
         cmd = calls["popen"][0]["cmd"]
         assert cmd[cmd.index("--model") + 1] == DEFAULT_MODEL
         assert calls["tmux"] == []
-
-
-class TestDispatchStatusLabelsAreACrossBranchContract:
-    """@daemon's scheduler classifies BLOCKED-vs-FAILED by these four step
-    LABELS plus a fail status — never by matching ``status.summary``, because
-    summary is human prose I am free to reword (their S53, 2026-08-30).
-
-    That makes the labels a contract between two branches, and the contract is
-    pinned HERE rather than in their tree: the rename would be written in this
-    file, so this is where it has to go red. If one of these disappears, their
-    scheduler silently reclassifies "never started" as "ran and failed", stamps
-    last_run, and starts eating scheduling periods again — the exact defect they
-    fixed. Renaming one is allowed; doing it without telling @daemon is not.
-    """
-
-    CONTRACT = ("pause", "lock", "blocked", "lock-acquire")
-
-    def test_every_contracted_label_still_exists_in_the_wake_lane(self):
-        """Cheap and total: the four strings @daemon reads must still be emitted
-        somewhere in wake.py. A grep, deliberately — it survives refactors of
-        WHICH path emits a label, and only fails when a label truly leaves."""
-        src = _Path(wake_mod.__file__).read_text(encoding="utf-8")
-        missing = [label for label in self.CONTRACT if f'"{label}"' not in src]
-        assert missing == [], (
-            f"@daemon's scheduler reads these step labels: {missing} no longer exist. "
-            "Tell them before moving one — their block-vs-fail classification depends on it."
-        )
-
-    @staticmethod
-    def _kind(status, label):
-        """The step's kind ("ok", "fail", ...), or None when the label is absent."""
-        step = status.find_step(label)
-        return step[0] if step is not None else None
-
-    def test_pause_is_a_named_fail_step(self, tmp_path, monkeypatch):
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        pause = tmp_path / ".aipass" / "autonomous_pause"
-        pause.parent.mkdir(parents=True, exist_ok=True)
-        pause.touch()
-
-        status, ok = wake_branch("@testbranch", auto=True)
-
-        assert ok is False
-        assert self._kind(status, "pause") == "fail"
-
-    def test_an_active_lock_is_a_named_fail_step_under_auto(self, tmp_path, monkeypatch):
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _check_lock=lambda p: {"pid": 999, "timestamp": "now"})
-
-        status, ok = wake_branch("@testbranch", auto=True)
-
-        assert ok is False
-        assert self._kind(status, "lock") == "fail"
-
-    def test_occupancy_is_the_blocked_step(self, tmp_path, monkeypatch):
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _is_branch_occupied=lambda p: True)
-
-        status, ok = wake_branch("@testbranch", auto=True)
-
-        assert ok is False
-        assert self._kind(status, "blocked") == "fail"
-
-    def test_a_refused_lock_acquire_is_its_own_named_step(self, tmp_path, monkeypatch):
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        _patch_wake_deps(monkeypatch, _acquire_lock=lambda p, pid: (False, "held by 4242"))
-        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-
-        status, ok = wake_branch("@testbranch", auto=True)
-
-        assert self._kind(status, "lock-acquire") == "fail"
-
-    def test_resolve_and_blocklist_stay_failures_on_purpose(self, tmp_path, monkeypatch):
-        """The other half of their rule, pinned so it is not "fixed" into
-        consistency later: neither is transient, so nothing about waiting two
-        more minutes changes the answer. They must NOT join the blocked set."""
-        _make_wake_fixtures(tmp_path, monkeypatch)
-
-        status, ok = wake_branch("@nonexistent")
-
-        assert ok is False
-        assert self._kind(status, "resolve") == "fail"
-        assert status.find_step("blocked") is None, "a missing branch is not a transient block"
-
-
-class TestRecipientDashboardRefresh:
-    """The recipient's dashboard is refreshed BEFORE their session spawns.
-
-    FPLAN-0599 (FPLAN-0593 Phase 3). An agent's first turn reads
-    DASHBOARD.local.json as its single status glance; until now nothing
-    refreshed it on the way in, so a woken agent read whatever its last session
-    left behind — "0 unread" while three dispatches waited. The refresh is one
-    branch (measured 0.85-0.98 s), never the fleet, and it is FAIL-OPEN: a
-    dashboard is a convenience, a wake is the work, so every failure mode below
-    still spawns.
-    """
-
-    @staticmethod
-    def _prax(monkeypatch, fake=None, fleet_guard=True):
-        """Patch the prax entry point where the wake imports it from — the
-        MODULE door (apps/modules/dashboard.py), which is prax's published
-        surface and the only one another branch may read."""
-        import aipass.prax.apps.modules.dashboard as prax_refresh
-
-        if fake is not None:
-            monkeypatch.setattr(prax_refresh, "refresh_single_dashboard", fake)
-        if fleet_guard:
-
-            def _refused_fleet():
-                raise AssertionError("the wake must never refresh all 18 branches")
-
-            monkeypatch.setattr(prax_refresh, "refresh_all_dashboards", _refused_fleet)
-        return prax_refresh
-
-    @staticmethod
-    def _real_refresh(monkeypatch, **overrides):
-        """_patch_wake_deps, but with the REAL refresh hook left in place."""
-        _patch_wake_deps(
-            monkeypatch,
-            _refresh_recipient_dashboard=wake_mod._refresh_recipient_dashboard,
-            **overrides,
-        )
-
-    def test_the_recipient_dashboard_is_refreshed_before_the_spawn(self, tmp_path, monkeypatch):
-        """Order is the whole claim: refresh, THEN the process that reads it."""
-        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
-        self._real_refresh(monkeypatch)
-        order = []
-
-        def _fake_refresh(path):
-            order.append(("refresh", path))
-            return {"status": "success", "branch": path.name.upper()}
-
-        self._prax(monkeypatch, _fake_refresh)
-        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: order.append(("spawn", None)) or _FakeProc())
-
-        status, ok = wake_branch("@testbranch", auto=True)
-
-        assert ok is True
-        assert [step for step, _ in order] == ["refresh", "spawn"]
-        assert order[0][1] == branch_path, "the RECIPIENT's branch, not the caller's"
-        dashboard_step = status.find_step("dashboard")
-        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
-        assert dashboard_step[0] == "ok"
-
-    def test_the_refresh_is_one_branch_never_the_fleet(self, tmp_path, monkeypatch):
-        """--all is 18 branches and 18x the cost; the recipient is one."""
-        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
-        self._real_refresh(monkeypatch)
-        refreshed = []
-
-        self._prax(monkeypatch, lambda path: refreshed.append(path) or {"status": "success", "branch": "X"})
-        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-
-        status, ok = wake_branch("@testbranch", auto=True)
-
-        assert ok is True
-        assert refreshed == [branch_path]
-
-    def test_a_raising_refresh_does_not_cost_the_wake(self, tmp_path, monkeypatch):
-        """Fail-open, named: the warning carries the branch and the reason."""
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        self._real_refresh(monkeypatch)
-        spawned = []
-
-        def _boom(path):
-            raise RuntimeError("AIPASS_REGISTRY.json is unreadable")
-
-        self._prax(monkeypatch, _boom)
-        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: spawned.append(1) or _FakeProc())
-
-        status, ok = wake_branch("@testbranch", auto=True)
-
-        assert ok is True, "a wake must never die on a dashboard"
-        assert spawned == [1]
-        dashboard_step = status.find_step("dashboard")
-        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
-        kind, _, detail = dashboard_step
-        assert kind == "warn"
-        assert "@testbranch" in detail and "unreadable" in detail
-
-    def test_a_refresh_over_the_bound_does_not_cost_the_wake(self, tmp_path, monkeypatch):
-        """A refresh that hangs is overtaken, not waited on."""
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        self._real_refresh(monkeypatch)
-        # Patched where it is READ: the bound lives beside the function now.
-        monkeypatch.setattr(wake_dashboard_mod, "DASHBOARD_REFRESH_TIMEOUT", 0.05)
-        spawned = []
-        release = threading.Event()
-
-        def _hang(path):
-            release.wait(30)
-            return {"status": "success", "branch": "X"}
-
-        self._prax(monkeypatch, _hang)
-        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: spawned.append(1) or _FakeProc())
-
-        try:
-            status, ok = wake_branch("@testbranch", auto=True)
-        finally:
-            release.set()
-
-        assert ok is True
-        assert spawned == [1]
-        dashboard_step = status.find_step("dashboard")
-        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
-        kind, _, detail = dashboard_step
-        assert kind == "warn"
-        assert "@testbranch" in detail
-
-    def test_an_error_status_from_prax_is_a_warning_not_an_ok(self, tmp_path, monkeypatch):
-        """prax swallows its own exception and RETURNS the failure — read it."""
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        self._real_refresh(monkeypatch)
-
-        self._prax(monkeypatch, lambda path: {"status": "error", "branch": "TESTBRANCH", "error": "no centrals"})
-        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
-
-        status, ok = wake_branch("@testbranch", auto=True)
-
-        assert ok is True
-        dashboard_step = status.find_step("dashboard")
-        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
-        kind, _, detail = dashboard_step
-        assert kind == "warn"
-        assert "no centrals" in detail
-
-    def test_the_interactive_manager_lane_refreshes_too(self, tmp_path, monkeypatch):
-        """Placed above the tmux branch, so all three spawn lanes inherit it."""
-        _make_wake_fixtures(tmp_path, monkeypatch)
-        self._real_refresh(monkeypatch)
-        order = []
-
-        def _fake_run(cmd, **kwargs):
-            order.append(("tmux", list(cmd)[:2]))
-
-            class _Done:
-                returncode = 0
-                stderr = ""
-
-            return _Done()
-
-        self._prax(monkeypatch, lambda path: order.append(("refresh", path)) or {"status": "success", "branch": "X"})
-        monkeypatch.setattr(wake_mod.shutil, "which", lambda name: "/usr/bin/tmux")
-        monkeypatch.setattr(wake_mod.subprocess, "run", _fake_run)
-
-        status, ok = wake_branch("@testbranch", custom_message="go", sender="@daemon")
-
-        assert ok is True
-        assert order[0][0] == "refresh"
-        dashboard_step = status.find_step("dashboard")
-        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
-        assert dashboard_step[0] == "ok"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: meta_check.py
 # Description: META Block Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-05
-# Modified: 2026-03-16
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -88,7 +88,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if path.name == "__init__.py":
         return {
             "passed": True,
-            "checks": [{"name": "META check", "passed": True, "message": "__init__.py file (skipped)"}],
+            "checks": [
+                {"name": "META check", "passed": True, "message": "__init__.py file (skipped)", "declined": True}
+            ],
             "score": 100,
             "standard": "META",
         }

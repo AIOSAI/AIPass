@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.2.0
+# Version: 2.5.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-18
+# Modified: 2026-10-08
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -22,7 +22,6 @@ test runs: the repo-root conftest REFUSES a run that reaches a shim-bound
 Then per test by ``mock_infrastructure``, so each test gets its own tmp_path.
 """
 
-import importlib
 import json
 import os
 import shutil
@@ -36,9 +35,68 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 
+from aipass.cli.apps.modules import display
+from aipass.hooks.apps.handlers.config import diagnostics, trust_registry
 from aipass.hooks.apps.handlers.json import json_handler
+from aipass.hooks.apps.handlers.lifecycle import session_boot
+from aipass.hooks.apps.modules import cadence, cc_transcripts
+from aipass.hooks.apps.modules import diagnostics_state as ds
 
 collect_ignore_glob = [".archive/*"]
+
+
+@pytest.fixture(autouse=True)
+def isolated_engine_log(tmp_path_factory, monkeypatch) -> Path:
+    """The engine's diagnostics log goes to a file under the pytest temp root, per test.
+
+    diagnostics._get_log_file answers a shared directory under the system temp during
+    pytest, the same one for every run and every seat; engine._log writes through it
+    on every dispatch. Pointing the function at a sandbox, by name, lets a test that
+    does not pin the log stop patching engine._log (devpulse's decision G, leg 4).
+    No product change and no environment variable.
+    """
+    sandbox = tmp_path_factory.mktemp("engine_log") / "engine.jsonl"
+    monkeypatch.setattr(diagnostics, "_get_log_file", lambda: sandbox)
+    return sandbox
+
+
+class TriggerRecorder:
+    """Stands where cli keeps its trigger: records each fire and reaches no bus."""
+
+    def __init__(self) -> None:
+        self.fired: list[tuple[str, dict]] = []
+
+    def fire(self, event: str, **kwargs) -> None:
+        self.fired.append((event, kwargs))
+
+
+@pytest.fixture(autouse=True)
+def recorded_cli_trigger(monkeypatch) -> TriggerRecorder:
+    """cli's header fires cli_header_displayed on the real bus; here it fires on a recorder.
+
+    A test that leaves mock_console for the real console used to reach the trigger
+    bus through display._TRIGGER. The recorder stands on that name, and the loaded
+    flag stays set so cli never imports the real trigger in its place (leg 4, 5b).
+    """
+    recorder = TriggerRecorder()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return recorder
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -75,7 +133,6 @@ def isolated_trust_registry(tmp_path_factory, monkeypatch) -> Path:
     Returns:
         The sandbox registry path (absent until something writes it).
     """
-    trust_registry = importlib.import_module("aipass.hooks.apps.handlers.config.trust_registry")
     sandbox = tmp_path_factory.mktemp("trust_registry") / "trusted_projects.json"
     monkeypatch.setattr(trust_registry, "REGISTRY_PATH", sandbox)
     return sandbox
@@ -153,9 +210,74 @@ def isolated_cadence_state(tmp_path_factory, monkeypatch):
 
     Tests that exercise cadence itself patch _GUARD_DIR on top of this.
     """
-    cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
     monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path_factory.mktemp("cadence_state"))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "pytest-session")
+
+
+@pytest.fixture
+def _restore_cadence_globals(monkeypatch):
+    """Hand cadence's module caches back as they were found, whatever a test wrote.
+
+    _reset_module_globals below writes them directly, mid-test, to model a new
+    process; monkeypatch records the originals here first and restores them at
+    teardown, so no cached turn or config leaks into the next test file.
+    """
+    monkeypatch.setattr(cadence, "_turn", None)
+    monkeypatch.setattr(cadence, "_config", None)
+    monkeypatch.setattr(cadence, "_turn_degraded", None)
+    yield
+
+
+@pytest.fixture
+def _no_real_trust_banners():
+    """dispatch() now runs both trust banners unconditionally on UserPromptSubmit.
+
+    Neutralize by default so the many dispatch()-calling tests in this file
+    never do a real CWD-to-home walk against the actual ~/.aipass registry.
+    Tests that want to exercise the banners override with their own nested
+    patch, which takes precedence inside its `with` block.
+    """
+    with (
+        patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
+        patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
+    ):
+        yield
+
+
+# Classes that test the tmux lookups themselves — they must see the real thing.
+_TMUX_OWN_TESTS = {
+    "TestFindTmux",
+    "TestTmuxSessionExists",
+    "TestFindTmuxSessionForPid",
+    "TestTmuxLookupsSurviveAMachineWithoutTmux",
+}
+
+
+@pytest.fixture
+def _no_real_tmux_lookup(request):
+    """Keep the MENU tests off a real subprocess.
+
+    Rendering the multi-session menu describes each live process, which asks
+    tmux where that process lives. That is a real `tmux list-panes` call: it
+    raises WinError 2 on the Windows runner (6 CI failures, 2026-08-18) and is
+    slow everywhere else. Whether [Enter] continues the last chat is not a
+    platform question, so the lookup is stubbed for every test except the ones
+    whose subject IS the lookup.
+    """
+    if request.cls is not None and request.cls.__name__ in _TMUX_OWN_TESTS:
+        yield
+        return
+    with patch.object(session_boot, "_find_tmux_session_for_pid", return_value=None):
+        yield
+
+
+@pytest.fixture
+def fake_projects(tmp_path, monkeypatch):
+    """Point the transcript reader at a throwaway projects root."""
+    root = tmp_path / "projects_root"
+    root.mkdir()
+    monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", root)
+    return root
 
 
 @pytest.fixture(autouse=True)
@@ -165,11 +287,16 @@ def isolated_diagnostics_state(tmp_path_factory, monkeypatch):
     The file sits at src/aipass/ and every live session's auto_fix writes it. A test
     whose Edit targets a .py file reached edit_gate's diagnostics block with whatever
     error another branch had open at that moment. Measured 2026-09-18: @memory's
-    open import error turned two tests red in one run and green in the next. The
-    tests that exercise the state patch STATE_FILE on top of this.
+    open import error turned two tests red in one run and green in the next.
+
+    Measured 2026-09-27: TestAutofixPython wrote it, then removed it, so a run could
+    erase a live session's open error. Since leg 4 the state is one file per seat in
+    STATE_DIR under the system temp, and the version 1 file (LEGACY_FILE) is removed by
+    the next write: both point into one sandbox, and auto_fix writes through them.
     """
-    ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
-    monkeypatch.setattr(ds, "STATE_FILE", tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json")
+    sandbox = tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json"
+    monkeypatch.setattr(ds, "LEGACY_FILE", sandbox)
+    monkeypatch.setattr(ds, "STATE_DIR", sandbox.parent / "seats")
 
 
 @pytest.fixture
@@ -193,7 +320,7 @@ def registered_projects(tmp_path: Path) -> dict:
     aipass = projects / "AIPass"
     for name in ("devpulse", "hooks", "memory", "seedgo", "spawn", "flow"):
         (aipass / "src" / "aipass" / name).mkdir(parents=True)
-    rows = [{"name": name, "path": f"src/aipass/{name}"} for name in ("HOOKS", "seedgo", "spawn", "flow")]
+    rows: list[dict] = [{"name": name, "path": f"src/aipass/{name}"} for name in ("HOOKS", "seedgo", "spawn", "flow")]
     rows.append({"name": "memory", "path": str(aipass / "src" / "aipass" / "memory")})
     rows.append({"name": "devpulse", "path": "src/aipass/devpulse", "owner": True, "admin": True})
     (aipass / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": rows}), encoding="utf-8")

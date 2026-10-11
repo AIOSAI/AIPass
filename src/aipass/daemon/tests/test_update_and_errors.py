@@ -1,25 +1,22 @@
 # =================== AIPass ====================
 # Name: test_update_and_errors.py
 # Description: Tests for update command and error message formatting
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-30
-# Modified: 2026-03-30
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the update command (no longer a dead end) and error message
-formatting (no cascading double-errors).
+"""Tests for apps/modules/update.py, the actions refusal and branch-health's bare summary."""
 
-Covers:
-  - update: runs digest with no args, help flag works
-  - actions errors: single error message, no cascade
-  - branch-health: no-args shows all-branches summary
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that update.py, actions.py and activity_report.py parse and import
+# seedgo: no-test-needed(generated) — the digest's section layout; handlers/update/ builds its data
 
 from unittest.mock import patch, MagicMock
 
 import pytest
 
+from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
 from aipass.daemon.apps import daemon as _daemon_mod
 from aipass.daemon.apps.modules import update as _update_mod
 from aipass.daemon.apps.modules import actions as _actions_mod
@@ -46,40 +43,52 @@ def _mock_log_operations():
 class TestUpdateCommand:
     """Tests for the update module — no longer a dead end."""
 
-    def test_update_no_args_runs_digest(self) -> None:
-        """update with no args should run the digest, not show introspection."""
+    def test_update_no_args_runs_digest(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """update with no args should run the digest, not show introspection. Mutant killed: digest not printed."""
         with (
             patch.object(_update_mod, "load_inbox", return_value={"messages": [], "total_messages": 0}),
             patch.object(_update_mod, "load_local", return_value={}),
         ):
             result = _update_mod.handle_command("update", [])
         assert result is True
+        out = capsys.readouterr().out
+        assert "INBOX STATUS" in out
+        assert "update Module" not in out, "bare update must run the digest, not introspection"
 
-    def test_update_no_args_calls_load_inbox(self) -> None:
-        """update with no args should call load_inbox (proving it runs the digest)."""
-        mock_inbox = MagicMock(return_value={"messages": [], "total_messages": 0})
+    def test_update_no_args_calls_load_inbox(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """update with no args should call load_inbox (proving it runs the digest). Mutant killed: total pinned to 0."""
+        mock_inbox = MagicMock(return_value={"messages": [], "total_messages": 7})
         with (
             patch.object(_update_mod, "load_inbox", mock_inbox),
             patch.object(_update_mod, "load_local", return_value={}),
         ):
             _update_mod.handle_command("update", [])
-        mock_inbox.assert_called_once()
+        mock_inbox.assert_called_once_with()
+        assert "Total messages: 7" in capsys.readouterr().out, "load_inbox's answer must reach the digest"
 
-    def test_update_help_flag(self) -> None:
-        """update --help should show help and return True."""
-        result = _update_mod.handle_command("update", ["--help"])
+    def test_update_help_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """update --help should show help and return True. Mutant killed: the --help branch removed."""
+        with patch.object(_update_mod, "load_inbox") as mock_inbox:
+            result = _update_mod.handle_command("update", ["--help"])
         assert result is True
+        mock_inbox.assert_not_called()
+        assert "drone @daemon update" in capsys.readouterr().out
 
     def test_update_wrong_command(self) -> None:
         """update module should not handle other commands."""
         result = _update_mod.handle_command("schedule", [])
         assert result is False
 
-    def test_update_error_returns_true(self) -> None:
-        """update should return True even on error (command was handled)."""
+    def test_update_error_exits_1(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A failed digest exits 1, never the success answer.
+
+        Mutants killed: error() not called; `return True` after the failure (exit 0).
+        """
         with patch.object(_update_mod, "load_inbox", side_effect=Exception("test error")):
-            result = _update_mod.handle_command("update", [])
-        assert result is True
+            with pytest.raises(SystemExit) as exited:
+                _update_mod.handle_command("update", [])
+        assert exited.value.code == 1, "a failed digest must not exit 0"
+        assert "test error" in capsys.readouterr().err, "the failure must be reported once, on stderr"
 
     def test_no_escalation_warning_when_nothing_to_escalate(self, capsys: pytest.CaptureFixture[str]) -> None:
         """A clean digest must not emit a stderr warning.
@@ -114,8 +123,6 @@ class TestUpdateCommand:
 # Error cascade tests — single error message, no double-error
 # ============================================================================
 
-
-from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
 
 ROUTER = "aipass.daemon.apps.daemon"
 
@@ -185,18 +192,25 @@ class TestErrorCascade:
 class TestBranchHealthFallback:
     """Tests that branch-health with no args shows all-branches summary."""
 
-    def test_branch_health_no_args_returns_true(self) -> None:
-        """branch-health with no args should return True (shows summary)."""
-        result = _activity_mod.handle_command("branch-health", [])
+    def test_branch_health_no_args_returns_true(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """branch-health with no args should return True (shows summary). Mutant killed: summary not printed."""
+        with patch.object(_activity_mod, "generate_activity_report", return_value="ALL-BRANCHES-SUMMARY") as mock_gen:
+            result = _activity_mod.handle_command("branch-health", [])
         assert result is True
+        mock_gen.assert_called_once_with(since_hours=24, verbosity="normal")
+        assert "ALL-BRANCHES-SUMMARY" in capsys.readouterr().out
 
     def test_branch_health_no_args_not_introspection(self) -> None:
         """branch-health with no args should NOT call print_introspection."""
-        with patch.object(_activity_mod, "print_introspection") as mock_intro:
+        with (
+            patch.object(_activity_mod, "print_introspection") as mock_intro,
+            patch.object(_activity_mod, "generate_activity_report", return_value="summary"),
+        ):
             _activity_mod.handle_command("branch-health", [])
         mock_intro.assert_not_called()
 
-    def test_branch_health_help_flag(self) -> None:
-        """branch-health --help should return True."""
+    def test_branch_health_help_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """branch-health --help should return True. Mutant killed: help heading dropped."""
         result = _activity_mod.handle_command("branch-health", ["--help"])
         assert result is True
+        assert "BRANCH-HEALTH - Single Branch Deep Dive" in capsys.readouterr().out

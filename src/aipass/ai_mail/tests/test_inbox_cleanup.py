@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_inbox_cleanup.py
 # Description: Tests for inbox cleanup handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-10-02
 # =============================================
 
-"""Tests for inbox cleanup handler -- mark_all_read, mark_as_opened, mark_as_closed."""
+"""Tests for apps/handlers/email/inbox_cleanup.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
 
 import json
 from contextlib import contextmanager
@@ -16,6 +19,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.email.inbox_cleanup as mod
+import aipass.ai_mail.apps.handlers.email.inbox_ops as ops_mod
 
 
 # ---- Fixtures ------------------------------------------------
@@ -309,102 +313,109 @@ def test_mark_as_closed_and_archive_updates_counts(tmp_path: Path):
     assert inbox_data["unread_count"] == 1
 
 
-# ---- _sweep_closed tests ----------------------------------------
+# ---- the closed-message sweep, through load_inbox ----------------
+# The sweep is reached the way its callers reach it: load_inbox on a tmp_path
+# inbox, its far side the deleted/ folder beside it (ai_mail, leg 7).
 
 
-def test_sweep_closed_removes_closed_messages(tmp_path: Path):
-    """Messages with status=closed are archived to deleted/ and removed."""
+def _load_swept(monkeypatch, tmp_path: Path, messages: list) -> tuple:
+    """Write an inbox holding *messages*, load it, return (mailbox dir, ids left on disk)."""
+    monkeypatch.setattr(ops_mod, "_get_inbox_lock", lambda: _noop_lock)
     mailbox = tmp_path / ".ai_mail.local"
-    mailbox.mkdir(parents=True)
-    inbox_data = {
-        "messages": [
+    mailbox.mkdir(parents=True, exist_ok=True)
+    inbox_file = mailbox / "inbox.json"
+    inbox_file.write_text(
+        json.dumps({"mailbox": "inbox", "total_messages": len(messages), "unread_count": 0, "messages": messages}),
+        encoding="utf-8",
+    )
+    ops_mod.load_inbox(inbox_file)
+    persisted = json.loads(inbox_file.read_text(encoding="utf-8"))
+    return mailbox, [m["id"] for m in persisted["messages"]]
+
+
+def test_sweep_closed_removes_closed_messages(tmp_path: Path, monkeypatch):
+    """Messages with status=closed are archived to deleted/ and removed."""
+    mailbox, left = _load_swept(
+        monkeypatch,
+        tmp_path,
+        [
             {"id": "m1", "status": "new", "subject": "Active"},
             {"id": "m2", "status": "closed", "subject": "Done"},
             {"id": "m3", "status": "opened", "subject": "Read"},
-        ]
-    }
+        ],
+    )
 
-    swept = mod._sweep_closed(inbox_data, mailbox)
-
-    assert swept == 1
-    assert len(inbox_data["messages"]) == 2
-    assert all(m["id"] != "m2" for m in inbox_data["messages"])
+    assert left == ["m1", "m3"]
     deleted_files = list((mailbox / "deleted").glob("*.json"))
-    assert len(deleted_files) == 1
+    assert [json.loads(f.read_text(encoding="utf-8"))["id"] for f in deleted_files] == ["m2"]
 
 
-def test_sweep_closed_no_closed_messages_is_noop(tmp_path: Path):
-    """Inbox with zero closed messages returns 0 and makes no changes."""
-    mailbox = tmp_path / ".ai_mail.local"
-    mailbox.mkdir(parents=True)
-    original_messages = [
+def test_sweep_closed_no_closed_messages_is_noop(tmp_path: Path, monkeypatch):
+    """Inbox with zero closed messages is left byte for byte as it was."""
+    messages = [
         {"id": "m1", "status": "new", "subject": "A"},
         {"id": "m2", "status": "opened", "subject": "B"},
     ]
-    inbox_data = {"messages": list(original_messages)}
+    inbox_file = tmp_path / ".ai_mail.local" / "inbox.json"
+    inbox_file.parent.mkdir(parents=True)
+    inbox_file.write_text(
+        json.dumps({"mailbox": "inbox", "total_messages": 2, "unread_count": 0, "messages": messages}),
+        encoding="utf-8",
+    )
+    before = inbox_file.read_bytes()
 
-    swept = mod._sweep_closed(inbox_data, mailbox)
+    mailbox, left = _load_swept(monkeypatch, tmp_path, messages)
 
-    assert swept == 0
-    assert len(inbox_data["messages"]) == 2
+    assert left == ["m1", "m2"]
+    assert inbox_file.read_bytes() == before
     assert not (mailbox / "deleted").exists()
 
 
-def test_sweep_closed_multiple_closed(tmp_path: Path):
+def test_sweep_closed_multiple_closed(tmp_path: Path, monkeypatch):
     """Multiple closed messages are all swept in one pass."""
-    mailbox = tmp_path / ".ai_mail.local"
-    mailbox.mkdir(parents=True)
-    inbox_data = {
-        "messages": [
+    mailbox, left = _load_swept(
+        monkeypatch,
+        tmp_path,
+        [
             {"id": "m1", "status": "closed", "subject": "Done1"},
             {"id": "m2", "status": "closed", "subject": "Done2"},
             {"id": "m3", "status": "new", "subject": "Active"},
-        ]
-    }
+        ],
+    )
 
-    swept = mod._sweep_closed(inbox_data, mailbox)
-
-    assert swept == 2
-    assert len(inbox_data["messages"]) == 1
-    assert inbox_data["messages"][0]["id"] == "m3"
+    assert left == ["m3"]
     deleted_files = list((mailbox / "deleted").glob("*.json"))
-    assert len(deleted_files) == 2
+    assert sorted(json.loads(f.read_text(encoding="utf-8"))["id"] for f in deleted_files) == ["m1", "m2"]
 
 
 def test_sweep_closed_archive_failure_still_removes(tmp_path: Path, monkeypatch):
-    """If archival fails for one message, it's still removed from inbox."""
+    """If archival fails, the closed messages still leave the inbox.
+
+    The failure is the file system's own: deleted/ already stands as a file,
+    so no archive can be written under it. What this no longer shows (ai_mail,
+    leg 7): a later archive succeeding after an earlier one failed — the
+    stand-in that failed only the first call reached a private name.
+    """
     mailbox = tmp_path / ".ai_mail.local"
     mailbox.mkdir(parents=True)
+    (mailbox / "deleted").write_text("a file where the folder belongs", encoding="utf-8")
 
-    call_count = [0]
-    original_save = mod._save_to_deleted_folder
-
-    def _failing_save(mp, msg):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            raise OSError("disk full")
-        return original_save(mp, msg)
-
-    monkeypatch.setattr(mod, "_save_to_deleted_folder", _failing_save)
-
-    inbox_data = {
-        "messages": [
+    _, left = _load_swept(
+        monkeypatch,
+        tmp_path,
+        [
             {"id": "m1", "status": "closed", "subject": "Fail"},
             {"id": "m2", "status": "closed", "subject": "OK"},
             {"id": "m3", "status": "new", "subject": "Active"},
-        ]
-    }
+        ],
+    )
 
-    swept = mod._sweep_closed(inbox_data, mailbox)
-
-    assert swept == 2
-    assert len(inbox_data["messages"]) == 1
+    assert left == ["m3"]
+    assert (mailbox / "deleted").read_text(encoding="utf-8") == "a file where the folder belongs"
 
 
 def test_sweep_closed_on_read_via_load_inbox(tmp_path: Path, monkeypatch):
     """Closed message injected by raw JSON edit is swept on next load_inbox."""
-    import aipass.ai_mail.apps.handlers.email.inbox_ops as ops_mod
-
     monkeypatch.setattr(ops_mod, "_get_inbox_lock", lambda: _noop_lock)
 
     mailbox = tmp_path / ".ai_mail.local"

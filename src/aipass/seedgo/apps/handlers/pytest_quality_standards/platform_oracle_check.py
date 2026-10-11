@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: platform_oracle_check.py
 # Description: v5 - is this test's verdict a fact about the code or about the host
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-08
-# Modified: 2026-09-08
+# Modified: 2026-10-06
 # =============================================
 
 """Is this test's pass or fail a fact about the code, or a fact about the host?
@@ -787,14 +787,82 @@ def _seam_injects_the_failure(unit_node: ast.AST, module_strings: Dict[str, str]
     return ""
 
 
-def mode_injector_rows(unit: corpus.TestUnit, module_strings: Optional[Dict[str, str]] = None) -> List[Dict]:
-    """Findings for a failure injected by the filesystem's mood, not at a seam."""
+#: The test's own call of the kind a mode bit refuses, made to ask the platform.
+PROBE_CALLS: frozenset = frozenset({"unlink", "write_text", "write_bytes", "mkdir", "open"})
+
+
+def _is_probe_try(node: ast.AST) -> bool:
+    """True for a ``try`` whose body makes a PROBE_CALLS call."""
+    if not isinstance(node, ast.Try):
+        return False
+    calls = [child for statement in node.body for child in ast.walk(statement) if isinstance(child, ast.Call)]
+    return any(_tail(corpus.dotted_name(call.func)) in PROBE_CALLS for call in calls)
+
+
+def probe_helpers(tree: ast.Module) -> Set[str]:
+    """Module-level functions whose body holds a probe ``try``: the platform asked one call away."""
+    return {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(map(_is_probe_try, ast.walk(node)))
+    }
+
+
+def _assigned_names(statements: List[ast.stmt]) -> Set[str]:
+    """Every bare name assigned anywhere in these statements."""
+    return {
+        target.id
+        for statement in statements
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+
+
+def _probe_answers(unit_node: ast.AST, helpers: Set[str]) -> Set[str]:
+    """Names that hold what the platform answered to the test's own probe call."""
+    answers: Set[str] = set()
+    for node in ast.walk(unit_node):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            if corpus.dotted_name(node.value.func) in helpers:
+                answers |= {target.id for target in node.targets if isinstance(target, ast.Name)}
+        if isinstance(node, ast.Try) and _is_probe_try(node):
+            answers |= _assigned_names(node.body + [s for handler in node.handlers for s in handler.body])
+    return answers
+
+
+def _asks_the_platform(unit_node: ast.AST, after_line: int, helpers: Set[str]) -> bool:
+    """True when, after the injector, the unit branches on its own probe's answer (seedgo, fleet green leg 20).
+
+    The decision is inside the test: the same call made with the test's own
+    hands, its answer kept and read by an ``if``. Not read: whether the probe's
+    path stands under the chmod's directory - the checker follows no dataflow.
+    """
+    answers = _probe_answers(unit_node, helpers)
+    return any(
+        isinstance(node, ast.If) and node.lineno > after_line and bool(_names_under(node.test) & answers)
+        for node in ast.walk(unit_node)
+    )
+
+
+def mode_injector_rows(
+    unit: corpus.TestUnit, module_strings: Optional[Dict[str, str]] = None, helpers: Optional[Set[str]] = None
+) -> List[Dict]:
+    """Findings for a failure injected by the filesystem's mood, not at a seam.
+
+    ``helpers`` are the module's ``probe_helpers``; a unit that asks the
+    platform through one, or through a probe ``try`` of its own, and branches
+    on the answer is not a row.
+    """
     injectors = _injectors_in(unit.node)
     if not injectors or not _asserts_on_failure(unit):
         return []
     if _seam_injects_the_failure(unit.node, module_strings or {}):
         return []
     line, described = injectors[0]
+    if _asks_the_platform(unit.node, line, helpers or set()):
+        return []
     return [
         _finding(
             "MODE_INJECTOR",
@@ -1183,17 +1251,19 @@ def _finding(species: str, unit: corpus.TestUnit, line: int, detail: str) -> Dic
     return {"nodeid": unit.nodeid, "line": line, "species": species, "detail": detail}
 
 
-def unit_rows(unit: corpus.TestUnit, module_strings: Optional[Dict[str, str]] = None) -> List[Dict]:
+def unit_rows(
+    unit: corpus.TestUnit, module_strings: Optional[Dict[str, str]] = None, helpers: Optional[Set[str]] = None
+) -> List[Dict]:
     """Every platform-oracle finding in one unit, scoring and nominated alike.
 
-    `module_strings` defaults to none deliberately: a caller holding no tree
-    gets the reading for a unit standing alone, which is the pre-acquittal
-    reading, rather than a silently generous one.
+    `module_strings` and `helpers` default to none deliberately: a caller
+    holding no tree gets the reading for a unit standing alone, which is the
+    pre-acquittal reading, rather than a silently generous one.
     """
     strings = module_strings or {}
     return (
         listing_order_rows(unit)
-        + mode_injector_rows(unit, strings)
+        + mode_injector_rows(unit, strings, helpers)
         + oserror_attribute_rows(unit)
         + unresolved_tmp_path_rows(unit)
         + shallow_sandbox_rows(unit, strings)
@@ -1236,8 +1306,9 @@ def find_platform_oracles(scanned: corpus.Corpus) -> List[Dict]:
     rows: List[Dict] = []
     for parsed in scanned.files:
         strings = module_level_strings(parsed.tree)
+        helpers = probe_helpers(parsed.tree)
         for unit in parsed.units:
-            rows.extend(unit_rows(unit, strings))
+            rows.extend(unit_rows(unit, strings, helpers))
     return rows
 
 

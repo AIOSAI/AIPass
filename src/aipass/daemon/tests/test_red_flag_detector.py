@@ -1,26 +1,25 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_red_flag_detector.py - Red Flag Detector Tests
-# Date: 2026-03-24
-# Version: 1.0.0
-# Category: daemon/tests
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-03-24): Initial creation - red flag detection engine tests
-#
-# CODE STANDARDS:
-#   - Pytest conventions
-#   - unittest.mock.patch for external dependencies
+# =================== AIPass ====================
+# Name: test_red_flag_detector.py
+# Description: Red flag detection engine tests — code changed without a memory update
+# Version: 1.1.0
+# Created: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the red flag detection engine."""
+"""Tests for apps/handlers/monitoring/red_flag_detector.py — code changed with no memory update."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — the four STATUS_* strings (RED_FLAG, OK, NO_ACTIVITY, ERROR), compared by name
+# seedgo: no-test-needed(stdlib) — datetime.fromisoformat's accepted formats beyond the three pinned here
 
 from datetime import datetime
 from unittest.mock import patch
 
+import pytest
 
+
+from aipass.daemon.apps.handlers.monitoring import red_flag_detector
 from aipass.daemon.apps.handlers.monitoring.red_flag_detector import (
-    _parse_iso_datetime,
     get_branch_status,
     detect_red_flags,
     get_red_flag_summary,
@@ -63,52 +62,65 @@ def _make_activity(
 
 
 # =============================================
-# _parse_iso_datetime TESTS
+# mtime parsing, through get_branch_status
 # =============================================
 
 
+def _latest_code_change(tmp_path, mtime):
+    """The latest_code_change get_branch_status reports for one code file stamped `mtime`."""
+    with patch(MOCK_PATCH_ACTIVITY) as mock_scan:
+        mock_scan.return_value = _make_activity(code_files=[{"path": "app.py", "name": "app.py", "mtime": mtime}])
+        return get_branch_status("TEST", str(tmp_path / "test"))["latest_code_change"]
+
+
+class _FrozenNow(datetime):
+    """datetime whose now() is fixed: get_branch_status reads the clock for its window and ages."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2026, 3, 21, 12, 0, 0, tzinfo=tz)
+
+
 class TestParseIsoDatetime:
-    """Tests for ISO datetime string parsing."""
+    """A code file's ISO mtime string, as get_branch_status reads it back."""
 
-    def test_valid_iso_string(self):
-        """Parse a standard ISO datetime string."""
-        result = _parse_iso_datetime("2026-03-20T10:00:00")
-        assert result is not None
-        assert isinstance(result, datetime)
-        assert result.year == 2026
-        assert result.month == 3
-        assert result.day == 20
-        assert result.hour == 10
+    @pytest.fixture(autouse=True)
+    def frozen_clock(self, monkeypatch):
+        """Own the clock the code under test reads, so no expected value depends on the calendar."""
+        monkeypatch.setattr(red_flag_detector, "datetime", _FrozenNow)
 
-    def test_valid_iso_string_with_microseconds(self):
-        """Parse ISO datetime string containing microseconds."""
-        result = _parse_iso_datetime("2026-03-20T10:30:00.123456")
-        assert result is not None
-        assert isinstance(result, datetime)
-        assert result.microsecond == 123456
+    def test_valid_iso_string(self, tmp_path):
+        assert _latest_code_change(tmp_path, "2026-03-20T10:00:00") == "2026-03-20T10:00:00"
 
-    def test_valid_iso_date_only(self):
-        """Parse a date-only ISO string (no time component)."""
-        result = _parse_iso_datetime("2026-03-20")
-        assert result is not None
-        assert result.year == 2026
-        assert result.hour == 0
+    def test_valid_iso_string_with_microseconds(self, tmp_path):
+        """Parse ISO datetime string containing microseconds.
 
-    def test_empty_string_returns_none(self):
-        """Empty string returns None."""
-        assert _parse_iso_datetime("") is None
+        Mutant killed: _parse_iso_datetime drops microseconds (.replace(microsecond=0)).
+        """
+        assert _latest_code_change(tmp_path, "2026-03-20T10:30:00.123456") == "2026-03-20T10:30:00.123456"
 
-    def test_none_returns_none(self):
-        """None input returns None (falsy check)."""
-        assert _parse_iso_datetime(None) is None  # type: ignore[arg-type]
+    def test_valid_iso_date_only(self, tmp_path):
+        assert _latest_code_change(tmp_path, "2026-03-20") == "2026-03-20T00:00:00"
 
-    def test_invalid_string_returns_none(self):
-        """Invalid/garbage string returns None."""
-        assert _parse_iso_datetime("not-a-date") is None
+    def test_empty_string_returns_none(self, tmp_path):
+        assert _latest_code_change(tmp_path, "") is None
 
-    def test_partial_iso_returns_none(self):
-        """Malformed ISO string returns None."""
-        assert _parse_iso_datetime("2026-13-40T99:99:99") is None
+    def test_none_returns_none(self, tmp_path):
+        assert _latest_code_change(tmp_path, None) is None
+
+    def test_invalid_string_returns_none(self, tmp_path):
+        """Invalid/garbage string returns None.
+
+        Mutant killed: _parse_iso_datetime's except (ValueError, TypeError) removed.
+        """
+        assert _latest_code_change(tmp_path, "not-a-date") is None
+
+    def test_partial_iso_returns_none(self, tmp_path):
+        """Malformed ISO string returns None.
+
+        Mutant killed: _parse_iso_datetime's except (ValueError, TypeError) removed.
+        """
+        assert _latest_code_change(tmp_path, "2026-13-40T99:99:99") is None
 
 
 # =============================================
@@ -120,17 +132,17 @@ class TestGetBranchStatus:
     """Tests for single-branch status detection."""
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_no_code_changes_returns_no_activity(self, mock_scan):
+    def test_no_code_changes_returns_no_activity(self, mock_scan, tmp_path):
         """No code files modified -> NO_ACTIVITY status."""
         mock_scan.return_value = _make_activity(code_files=[], memory_files=[])
-        result = get_branch_status("TEST", "/fake/path/test")
+        result = get_branch_status("TEST", str(tmp_path / "test"))
         assert result["status"] == STATUS_NO_ACTIVITY
         assert result["branch_name"] == "TEST"
         assert result["code_change_count"] == 0
         assert "No code changes" in result["reason"]
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_code_changed_memory_updated_after_returns_ok(self, mock_scan):
+    def test_code_changed_memory_updated_after_returns_ok(self, mock_scan, tmp_path):
         """Code changed, memory updated after code -> OK."""
         mock_scan.return_value = _make_activity(
             code_files=[
@@ -140,14 +152,14 @@ class TestGetBranchStatus:
                 {"path": "/fake/.trinity/local.json", "name": "local.json", "mtime": "2026-03-20T12:00:00"},
             ],
         )
-        result = get_branch_status("TEST", "/fake/path/test")
+        result = get_branch_status("TEST", str(tmp_path / "test"))
         assert result["status"] == STATUS_OK
         assert result["code_change_count"] == 1
         assert result["latest_code_change"] is not None
         assert result["memory_last_update"] is not None
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_code_changed_memory_at_same_time_returns_ok(self, mock_scan):
+    def test_code_changed_memory_at_same_time_returns_ok(self, mock_scan, tmp_path):
         """Code and memory modified at the same timestamp -> OK."""
         timestamp = "2026-03-20T10:00:00"
         mock_scan.return_value = _make_activity(
@@ -158,12 +170,12 @@ class TestGetBranchStatus:
                 {"path": "/fake/.trinity/local.json", "name": "local.json", "mtime": timestamp},
             ],
         )
-        result = get_branch_status("TEST", "/fake/path/test")
+        result = get_branch_status("TEST", str(tmp_path / "test"))
         assert result["status"] == STATUS_OK
         assert result["hours_since_code"] == 0.0
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_code_changed_no_memory_returns_red_flag(self, mock_scan):
+    def test_code_changed_no_memory_returns_red_flag(self, mock_scan, tmp_path):
         """Code changed but no memory files modified at all -> RED_FLAG."""
         mock_scan.return_value = _make_activity(
             code_files=[
@@ -171,13 +183,13 @@ class TestGetBranchStatus:
             ],
             memory_files=[],
         )
-        result = get_branch_status("TEST", "/fake/path/test")
+        result = get_branch_status("TEST", str(tmp_path / "test"))
         assert result["status"] == STATUS_RED_FLAG
         assert result["code_change_count"] == 1
         assert "no memory updates" in result["reason"]
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_code_changed_memory_way_before_returns_red_flag(self, mock_scan):
+    def test_code_changed_memory_way_before_returns_red_flag(self, mock_scan, tmp_path):
         """Memory updated long before code changes (outside threshold) -> RED_FLAG."""
         mock_scan.return_value = _make_activity(
             code_files=[
@@ -187,12 +199,12 @@ class TestGetBranchStatus:
                 {"path": "/fake/.trinity/local.json", "name": "local.json", "mtime": "2026-03-19T01:00:00"},
             ],
         )
-        result = get_branch_status("TEST", "/fake/path/test", threshold_hours=2.0)
+        result = get_branch_status("TEST", str(tmp_path / "test"), threshold_hours=2.0)
         assert result["status"] == STATUS_RED_FLAG
         assert "BEFORE code" in result["reason"]
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_memory_slightly_before_within_threshold_returns_ok(self, mock_scan):
+    def test_memory_slightly_before_within_threshold_returns_ok(self, mock_scan, tmp_path):
         """Memory updated slightly before code but within threshold -> OK."""
         mock_scan.return_value = _make_activity(
             code_files=[
@@ -203,20 +215,20 @@ class TestGetBranchStatus:
             ],
         )
         # threshold_hours=2.0 means 1 hour before is acceptable
-        result = get_branch_status("TEST", "/fake/path/test", threshold_hours=2.0)
+        result = get_branch_status("TEST", str(tmp_path / "test"), threshold_hours=2.0)
         assert result["status"] == STATUS_OK
         assert "within threshold" in result["reason"].lower()
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_scanner_exception_returns_error(self, mock_scan):
+    def test_scanner_exception_returns_error(self, mock_scan, tmp_path):
         """If scan_branch_activity raises an exception -> ERROR status."""
         mock_scan.side_effect = RuntimeError("disk on fire")
-        result = get_branch_status("TEST", "/fake/path/test")
+        result = get_branch_status("TEST", str(tmp_path / "test"))
         assert result["status"] == STATUS_ERROR
         assert "disk on fire" in result["reason"]
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_multiple_code_files_uses_latest(self, mock_scan):
+    def test_multiple_code_files_uses_latest(self, mock_scan, tmp_path):
         """When multiple code files exist, the latest mtime drives the decision."""
         mock_scan.return_value = _make_activity(
             code_files=[
@@ -227,17 +239,17 @@ class TestGetBranchStatus:
                 {"path": "/fake/.trinity/local.json", "name": "local.json", "mtime": "2026-03-20T15:00:00"},
             ],
         )
-        result = get_branch_status("TEST", "/fake/path/test")
+        result = get_branch_status("TEST", str(tmp_path / "test"))
         assert result["status"] == STATUS_OK
         assert result["code_change_count"] == 2
         # latest_code_change should be the 14:00 file
         assert "14:00:00" in result["latest_code_change"]
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_result_dict_has_required_keys(self, mock_scan):
+    def test_result_dict_has_required_keys(self, mock_scan, tmp_path):
         """Verify all expected keys are present in the returned dict."""
         mock_scan.return_value = _make_activity(code_files=[], memory_files=[])
-        result = get_branch_status("TEST", "/fake/path/test")
+        result = get_branch_status("TEST", str(tmp_path / "test"))
         required_keys = {
             "branch_name",
             "branch_path",
@@ -255,22 +267,22 @@ class TestGetBranchStatus:
         assert required_keys.issubset(result.keys())
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_since_timestamp_passed_to_scanner(self, mock_scan):
+    def test_since_timestamp_passed_to_scanner(self, mock_scan, tmp_path):
         """Verify that since_timestamp is forwarded to the activity collector."""
         mock_scan.return_value = _make_activity(code_files=[], memory_files=[])
         since = datetime(2026, 3, 1, 0, 0, 0)
-        get_branch_status("TEST", "/fake/path/test", since_timestamp=since)
-        mock_scan.assert_called_once_with("TEST", "/fake/path/test", since)
+        get_branch_status("TEST", str(tmp_path / "test"), since_timestamp=since)
+        mock_scan.assert_called_once_with("TEST", str(tmp_path / "test"), since)
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_default_threshold_is_two_hours(self, mock_scan):
+    def test_default_threshold_is_two_hours(self, mock_scan, tmp_path):
         """Default threshold_hours should be 2.0."""
         mock_scan.return_value = _make_activity(code_files=[], memory_files=[])
-        result = get_branch_status("TEST", "/fake/path/test")
+        result = get_branch_status("TEST", str(tmp_path / "test"))
         assert result["threshold_hours"] == 2.0
 
     @patch(MOCK_PATCH_ACTIVITY)
-    def test_custom_threshold_respected(self, mock_scan):
+    def test_custom_threshold_respected(self, mock_scan, tmp_path):
         """Memory 3 hours before code is OK with threshold=4 but RED_FLAG with threshold=2."""
         mock_scan.return_value = _make_activity(
             code_files=[
@@ -281,11 +293,11 @@ class TestGetBranchStatus:
             ],
         )
         # 3 hours before code -- threshold=4 should be OK
-        result_ok = get_branch_status("TEST", "/fake/path/test", threshold_hours=4.0)
+        result_ok = get_branch_status("TEST", str(tmp_path / "test"), threshold_hours=4.0)
         assert result_ok["status"] == STATUS_OK
 
         # Same data -- threshold=2 should be RED_FLAG
-        result_red = get_branch_status("TEST", "/fake/path/test", threshold_hours=2.0)
+        result_red = get_branch_status("TEST", str(tmp_path / "test"), threshold_hours=2.0)
         assert result_red["status"] == STATUS_RED_FLAG
 
 

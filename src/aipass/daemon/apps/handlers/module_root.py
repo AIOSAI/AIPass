@@ -110,7 +110,7 @@ def _record_unresolved(path: Path, exc: OSError) -> None:
             path,
             type(exc).__name__,
         )
-    except Exception as inner:  # noqa: BLE001 - a log line must never take an import down
+    except Exception as inner:  # a log line must never take an import down
         _retain("logger", inner)
 
     try:
@@ -121,5 +121,5 @@ def _record_unresolved(path: Path, exc: OSError) -> None:
             {"path": str(path), "error": f"{type(exc).__name__}: {exc}"},
             module_name=MODULE_NAME,
         )
-    except Exception as inner:  # noqa: BLE001 - an audit line must never take an import down
+    except Exception as inner:  # an audit line must never take an import down
         _retain("audit", inner)

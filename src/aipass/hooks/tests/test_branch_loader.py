@@ -1,19 +1,29 @@
 # =================== AIPass ====================
 # Name: test_branch_loader.py
-# Version: 1.2.0
+# Version: 1.2.2
 # Description: Tests for branch_loader prompt handler (injection caps since 1.1.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-16
+# Modified: 2026-10-05
 # =============================================
 
-"""Tests for handlers/prompt/branch_loader.py."""
+"""Tests for apps/handlers/prompt/branch_loader.py."""
 
-import importlib
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that branch_loader.py parses and imports, ruff and collection cover it
+# seedgo: no-test-needed(documentation) — handle()'s and load_content()'s docstrings, the documentation standard
+# seedgo: no-test-needed(stdlib) — importlib.import_module's module resolution, the stdlib's own
 
-_real_import_module = importlib.import_module
+import contextlib
+import sys
+from collections.abc import Iterator
+from typing import Any
+from unittest.mock import MagicMock
+
+import pytest
+
+from aipass.hooks.apps.handlers.prompt.branch_loader import handle
+
 _CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
 
 
@@ -24,24 +34,26 @@ def _mock_cadence_fires():
     return mock
 
 
-def _patch_cadence(cadence_mock=None, error=None):
-    """Patch only the cadence import — load_content's own importlib.import_module
-    call (for grounding_content) must still resolve to the real module."""
+@contextlib.contextmanager
+def _patch_cadence(cadence_mock: Any = None, missing: bool = False) -> Iterator[None]:
+    """Stand the cadence module in sys.modules, where the real import_module looks first.
 
-    def _side_effect(name, *args, **kwargs):
-        if name == _CADENCE_MODULE:
-            if error is not None:
-                raise error
-            return cadence_mock
-        return _real_import_module(name, *args, **kwargs)
-
-    return patch("importlib.import_module", side_effect=_side_effect)
+    importlib itself is never replaced (fleet green leg 7, stdlib_patch), so
+    load_content's own import of grounding_content resolves to the real module.
+    missing=True registers None under the name: the real import then raises
+    ModuleNotFoundError, the stdlib's documented answer for a None entry.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        if missing:
+            mp.setitem(sys.modules, _CADENCE_MODULE, None)
+        else:
+            cadence_mock.__spec__ = None  # a MagicMock's __spec__ reads as a module still initializing
+            mp.setitem(sys.modules, _CADENCE_MODULE, cadence_mock)
+        yield
 
 
 class TestBranchLoaderHandler:
     def test_loads_branch_prompt(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         aipass_dir = tmp_path / ".aipass"
@@ -58,8 +70,6 @@ class TestBranchLoaderHandler:
         assert result["sound"] == "branch prompt"
 
     def test_loads_private_integrations(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         integration = tmp_path / "apps" / "integrations" / "test_int"
@@ -74,8 +84,6 @@ class TestBranchLoaderHandler:
         assert result["sound"] == "branch prompt"
 
     def test_loads_both_prompt_and_integrations(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         aipass_dir = tmp_path / ".aipass"
@@ -92,8 +100,6 @@ class TestBranchLoaderHandler:
         assert "Compass prompt" in result["stdout"]
 
     def test_returns_empty_when_no_branch_root(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
         with _patch_cadence(_mock_cadence_fires()):
             result = handle({"cwd": str(tmp_path)})
 
@@ -101,8 +107,6 @@ class TestBranchLoaderHandler:
         assert "sound" not in result
 
     def test_stops_at_repo_root(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
         (tmp_path / ".git").mkdir()
         nested = tmp_path / "some" / "deep" / "path"
         nested.mkdir(parents=True)
@@ -114,8 +118,6 @@ class TestBranchLoaderHandler:
         assert "sound" not in result
 
     def test_walks_up_to_find_branch(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         aipass_dir = tmp_path / ".aipass"
@@ -129,22 +131,18 @@ class TestBranchLoaderHandler:
 
         assert "Found it" in result["stdout"]
 
-    def test_empty_hook_data(self):
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
-        # Path.cwd patch must be OUTSIDE the importlib patch — mock.patch uses
-        # importlib.import_module to resolve "pathlib", which the inner mock hijacks.
-        with patch("pathlib.Path.cwd", return_value=Path("/tmp/nonexistent")):
-            with _patch_cadence(_mock_cadence_fires()):
-                result = handle({})
+    def test_empty_hook_data(self, tmp_path, monkeypatch):
+        # No cwd in the hook data: the real Path.cwd() is read, standing in an
+        # empty directory with no branch above it.
+        monkeypatch.chdir(tmp_path)
+        with _patch_cadence(_mock_cadence_fires()):
+            result = handle({})
 
         assert result["exit_code"] == 0
         assert result["stdout"] == ""
         assert "sound" not in result
 
     def test_no_prompt_file_but_has_branch_root(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
 
@@ -155,8 +153,6 @@ class TestBranchLoaderHandler:
         assert "sound" not in result
 
     def test_includes_source_path_in_output(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         aipass_dir = tmp_path / ".aipass"
@@ -188,8 +184,6 @@ class TestInjectedBlocksStayUnderTheirCaps:
         return aipass_dir / "aipass_local_prompt.md"
 
     def _render(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
         with _patch_cadence(_mock_cadence_fires()):
             return handle({"cwd": str(tmp_path)})["stdout"]
 
@@ -232,13 +226,11 @@ class TestInjectedBlocksStayUnderTheirCaps:
 
 def test_the_branch_prompt_is_withheld_when_cadence_raises(tmp_path, caplog):
     """The degraded fail mode (DPLAN-0347): 9,000 chars do not fire every turn on a broken cadence."""
-    from aipass.hooks.apps.handlers.prompt.branch_loader import handle
-
     seat = tmp_path / "seat"
     (seat / ".aipass").mkdir(parents=True)
     (seat / ".trinity").mkdir()
     (seat / ".aipass" / "aipass_local_prompt.md").write_text("BRANCH PROMPT", encoding="utf-8")
-    with _patch_cadence(error=ImportError("no cadence")):
+    with _patch_cadence(missing=True):
         result = handle({"cwd": str(seat)})
 
     assert result == {"stdout": "", "exit_code": 0}

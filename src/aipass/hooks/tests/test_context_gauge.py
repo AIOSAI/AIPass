@@ -1,18 +1,27 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Tests for context_gauge prompt handler (guard per context window since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for handlers/prompt/context_gauge.py."""
+"""Tests for apps/handlers/prompt/context_gauge.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/prompt/context_gauge.py parses and imports
+# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing the guard directory
+# seedgo: no-test-needed(documentation) — the module docstring's account of the trigger ratio
 
 import json
 from unittest.mock import patch
 
 import pytest
+
+from aipass.hooks.apps.handlers.prompt import context_gauge
+from aipass.hooks.apps.handlers.prompt.context_gauge import handle
+from aipass.hooks.apps.modules import context_window
 
 MODULE = "aipass.hooks.apps.handlers.prompt.context_gauge"
 CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
@@ -34,14 +43,10 @@ def _write_transcript(path, input_tokens=0, cache_read=0, cache_creation=0):
 
 class TestContextGaugeHandle:
     def test_no_transcript_path_is_a_noop(self):
-        from aipass.hooks.apps.handlers.prompt.context_gauge import handle
-
         result = handle({"session_id": "s1"})
         assert result == {"stdout": "", "exit_code": 0}
 
     def test_below_nudge_threshold_is_silent(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.context_gauge import handle
-
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
         transcript = tmp_path / "t.jsonl"
         _write_transcript(transcript, cache_read=50_000)
@@ -51,8 +56,6 @@ class TestContextGaugeHandle:
         assert result == {"stdout": "", "exit_code": 0}
 
     def test_fires_nudge_at_80_percent_of_trigger(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.context_gauge import handle
-
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
         transcript = tmp_path / "t.jsonl"
         # trigger = 200000 * 0.9 = 180000; 80% of that = 144000
@@ -67,8 +70,6 @@ class TestContextGaugeHandle:
         assert result["sound"] == "context gauge"
 
     def test_fires_escalate_at_95_percent_of_trigger(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.context_gauge import handle
-
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
         transcript = tmp_path / "t.jsonl"
         # 95% of 180000 trigger = 171000
@@ -82,8 +83,6 @@ class TestContextGaugeHandle:
         assert result["sound"] == "context gauge"
 
     def test_fires_once_per_threshold_per_session(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.context_gauge import handle
-
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
         transcript = tmp_path / "t.jsonl"
         _write_transcript(transcript, cache_read=145_000)
@@ -97,8 +96,6 @@ class TestContextGaugeHandle:
         assert second == {"stdout": "", "exit_code": 0}
 
     def test_different_sessions_fire_independently(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.context_gauge import handle
-
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
         transcript = tmp_path / "t.jsonl"
         _write_transcript(transcript, cache_read=145_000)
@@ -111,8 +108,6 @@ class TestContextGaugeHandle:
         assert "CONTEXT GAUGE" in second["stdout"]
 
     def test_missing_usage_is_a_noop(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.context_gauge import handle
-
         transcript = tmp_path / "t.jsonl"
         transcript.write_text(json.dumps({"type": "user", "message": {}}), encoding="utf-8")
 
@@ -120,9 +115,6 @@ class TestContextGaugeHandle:
         assert result == {"stdout": "", "exit_code": 0}
 
     def test_never_raises_on_unexpected_error(self, monkeypatch, tmp_path):
-        from aipass.hooks.apps.handlers.prompt import context_gauge
-        from aipass.hooks.apps.modules import context_window
-
         def _boom(*_args, **_kwargs):
             raise RuntimeError("boom")
 
@@ -147,8 +139,6 @@ class TestGaugeGuardIsPerWindow:
         return {"session_id": "s-window", "transcript_path": str(transcript), "cwd": str(tmp_path)}
 
     def test_the_next_window_gets_its_own_nudge(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.context_gauge import handle
-
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
         hook_data = self._data(tmp_path)
         stamps = [None, None, 1_758_000_000.0]
@@ -164,8 +154,6 @@ class TestGaugeGuardIsPerWindow:
         assert "CONTEXT GAUGE" in after_compact["stdout"], "a fresh window is a fresh climb"
 
     def test_an_unreadable_stamp_falls_back_to_one_key_and_warns(self, tmp_path, monkeypatch, caplog):
-        from aipass.hooks.apps.handlers.prompt.context_gauge import handle
-
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
 
         def _boom(*_args, **_kwargs):

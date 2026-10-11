@@ -11,5 +11,3 @@
 # CODE STANDARDS:
 #   - Apps layer: entry points and command routing
 # =============================================
-
-from . import handlers  # noqa: F401 — required for mock.patch resolution

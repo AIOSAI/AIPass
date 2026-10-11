@@ -1,36 +1,43 @@
 # =================== AIPass ====================
 # Name: test_templates_lane.py
 # Description: Pins for the live templates lane — spawn propagation, receipt status, the bump site, and two refusals
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-27
-# Modified: 2026-08-27
+# Modified: 2026-09-27
 # =============================================
 
-"""The templates module, after the pre-`.trinity` lane was retired.
+"""Tests for apps/modules/templates.py and the template_bump lane it drives."""
 
-Replaces `test_templates.py` and `test_templates_display.py`, archived with the
-handlers they pinned (`.archive/dead_template_lane_20260827/`). Their sixteen
-still-passing tests were all help-flag safety and routing; those behaviours are
-re-pinned here against the surface that actually exists.
+# The templates module, after the pre-`.trinity` lane was retired.
+#
+# Replaces `test_templates.py` and `test_templates_display.py`, archived with the
+# handlers they pinned (`.archive/dead_template_lane_20260827/`). Their sixteen
+# still-passing tests were all help-flag safety and routing; those behaviours are
+# re-pinned here against the surface that actually exists.
+#
+# WHAT THIS FILE EXISTS TO PREVENT
+# --------------------------------
+# A retired verb that silently does nothing is worse than one that is gone: it
+# answers, it looks like it worked, and the caller trusts it. `push-templates`
+# and `diff-templates` spent months confidently reporting on a layout no citizen
+# uses. So the pins are not "the code is deleted" — they are "the verb ANSWERS,
+# and what it says is where to go instead."
+#
+# The bump lane's pins all guard the same edge: a template version bump must heal
+# the fleet THROUGH the trinity push's gates, never around them. An automatic
+# fleet-wide rewrite triggered by a version number would be the exact unprompted
+# write `--confirm` exists to stop, and this branch has already performed one of
+# those by accident.
 
-WHAT THIS FILE EXISTS TO PREVENT
---------------------------------
-A retired verb that silently does nothing is worse than one that is gone: it
-answers, it looks like it worked, and the caller trusts it. `push-templates`
-and `diff-templates` spent months confidently reporting on a layout no citizen
-uses. So the pins are not "the code is deleted" — they are "the verb ANSWERS,
-and what it says is where to go instead."
-
-The bump lane's pins all guard the same edge: a template version bump must heal
-the fleet THROUGH the trinity push's gates, never around them. An automatic
-fleet-wide rewrite triggered by a version number would be the exact unprompted
-write `--confirm` exists to stop, and this branch has already performed one of
-those by accident.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — gold_versions() and bump_pending(), tests/test_marker7_memory_lane.py
+# seedgo: no-test-needed(documentation) — the wording of print_help() and print_introspection()
 
 from pathlib import Path
 from unittest.mock import patch
 
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.modules import templates
 from aipass.memory.apps.handlers.templates import template_bump
 
@@ -68,8 +75,6 @@ class TestRetiredVerbsAnswer:
         retired verb had worked. The refusal now goes through `error()`, and the
         pin is the exit code the entry point would return, not the routing bool.
         """
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-
         for verb in ("push-templates", "diff-templates"):
             for argv in ([verb, []], ["templates", [verb]]):
                 reset_command_state()
@@ -195,8 +200,6 @@ class TestStatusReadsTheLiveReceipts:
         assert "ledger" in _out(capsys).lower()
 
     def test_receipt_status_lists_every_fleet_branch(self):
-        from aipass.memory.apps.handlers.monitor import registry_scope
-
         status = template_bump.receipt_status()
 
         assert len(status["branches"]) == len(registry_scope.fleet_branches())

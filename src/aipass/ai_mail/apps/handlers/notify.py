@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: notify.py
 # Description: Notification Feed Writer
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-03-08
-# Modified: 2026-08-11
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -228,8 +228,11 @@ def jsonl_records(path: Path, strict: bool = False):
     if not path.exists():
         return
 
+    # Read as bytes, decoded line by line: a byte that is not UTF-8 is one
+    # malformed line, and decoding the whole file raised for every line after
+    # it, past the OSError arm (ai_mail, leg 16).
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "rb") as f:
             lines = f.readlines()
     except OSError as e:
         if strict:
@@ -242,8 +245,8 @@ def jsonl_records(path: Path, strict: bool = False):
         if not line:
             continue
         try:
-            yield json.loads(line)
-        except json.JSONDecodeError:
+            yield json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
             logger.warning("[notify] skipping malformed line %d in %s", number, path)
 
 
@@ -287,11 +290,15 @@ def _trim_jsonl(path: Path, max_lines: int, keep_lines: int) -> bool:
     hold a byte offset or line index across a trim; the feed's reader contract
     in the README says key on ``ts``, and the register is read whole.
 
+    The log is counted and kept as bytes: the trim never decodes it, so a line
+    that is not UTF-8 cannot make the append that just landed raise (ai_mail,
+    leg 16). Such a line ages out like any other.
+
     Returns:
         True if the log was trimmed, False if it was already within cap
     """
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "rb") as f:
             lines = f.readlines()
     except OSError as e:
         logger.error("[notify] trim could not read %s: %s", path, e)
@@ -304,7 +311,7 @@ def _trim_jsonl(path: Path, max_lines: int, keep_lines: int) -> bool:
     temp_path = path.with_name(path.name + ".trim")
 
     try:
-        with open(temp_path, "w", encoding="utf-8") as f:
+        with open(temp_path, "wb") as f:
             f.writelines(kept)
         os.replace(str(temp_path), str(path))
     except OSError as e:

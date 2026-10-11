@@ -1,59 +1,90 @@
 # =================== AIPass ====================
 # Name: test_flow_section_contract.py
 # Description: sections.flow has two writers — both must build the same shape
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-09-15
+# Modified: 2026-10-03
 # =============================================
 
-"""Contract cover for the 2026-08-16 sections.flow handoff (@devpulse dispatch).
+"""Tests for apps/handlers/dashboard/refresh.py."""
 
-``sections.flow`` is written by TWO services: @flow's ``push_flow_to_branch_dashboard``
-and prax's dashboard refresh. Both assign the section wholesale, so last writer
-wins. @flow's module went to 2.0.0 with a five-key contract
-(``managed_by``/``active_plans``/``open_recent``/``recently_closed``/``total_plans``);
-prax's refresh still built the old three-key block, so every refresh silently
-deleted ``open_recent`` and ``total_plans`` until flow's next push.
+# Contract cover for the 2026-08-16 sections.flow handoff (@devpulse dispatch).
+#
+# ``sections.flow`` is written by TWO services: @flow's ``push_flow_to_branch_dashboard``
+# and prax's dashboard refresh. Both assign the section wholesale, so last writer
+# wins. @flow's module went to 2.0.0 with a five-key contract
+# (``managed_by``/``active_plans``/``open_recent``/``recently_closed``/``total_plans``);
+# prax's refresh still built the old three-key block, so every refresh silently
+# deleted ``open_recent`` and ``total_plans`` until flow's next push.
+#
+# The invariant, same species as the quick_status one in test_dashboard_merge.py:
+# **no writer deletes a key it did not write** — applied here at section level.
+#
+# Two things this file pins that the dispatch did not ask for, both found while
+# building it:
+#
+# 1. The old ``_extract_flow_section`` read the central's TOP-LEVEL ``recently_closed``,
+#    which is the newest 5 closed plans FLEET-WIDE. Every branch's dashboard was
+#    published other branches' closed plans. The per-branch block was there the
+#    whole time at ``branches.<name>``.
+# 2. ``total_plans`` is NOT derivable from PLANS.central.json. The only per-branch
+#    closed number there (``branches.<name>.statistics.total_closed``) is capped at
+#    5 by construction, so prax preserves flow's value rather than inventing one.
+#
+# The handlers are bound at the top by import statement. The reload this file
+# used to do was for conftest's sys.modules stubs, which are gone (prax, leg 14).
 
-The invariant, same species as the quick_status one in test_dashboard_merge.py:
-**no writer deletes a key it did not write** — applied here at section level.
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — _calculate_quick_status, covered by tests/test_dashboard_merge.py
+# seedgo: no-test-needed(through_the_command) — plugin refresh(), covered by tests/test_devpulse_dashboard_plugin.py
+# seedgo: no-test-needed(dead_code) — _extract_ai_mail_section's block, which refresh pops before save
+# seedgo: no-test-needed(json_structure) — refresh_all_dashboards' log_operation record, covered by that row
 
-Two things this file pins that the dispatch did not ask for, both found while
-building it:
-
-1. The old ``_extract_flow_section`` read the central's TOP-LEVEL ``recently_closed``,
-   which is the newest 5 closed plans FLEET-WIDE. Every branch's dashboard was
-   published other branches' closed plans. The per-branch block was there the
-   whole time at ``branches.<name>``.
-2. ``total_plans`` is NOT derivable from PLANS.central.json. The only per-branch
-   closed number there (``branches.<name>.statistics.total_closed``) is capped at
-   5 by construction, so prax preserves flow's value rather than inventing one.
-
-Modules are imported inside each test — conftest.py installs autouse sys.modules
-mocks that must be in place first.
-"""
-
-import importlib
-import sys
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from aipass.prax.apps.handlers.dashboard import operations
+from aipass.prax.apps.handlers.dashboard import refresh
 
-REFRESH_PATH = "aipass.prax.apps.handlers.dashboard.refresh"
+#: The world _flow_section refreshes in: this test's tmp_path and monkeypatch.
+_WORLD: dict = {}
+
+
+@pytest.fixture(autouse=True)
+def _refresh_world(monkeypatch, tmp_path) -> None:
+    """Hand _flow_section this test's tmp_path; refresh reads the centrals it was handed."""
+    monkeypatch.setitem(_WORLD, "tmp_path", tmp_path)
+    monkeypatch.setitem(_WORLD, "calls", 0)
+    monkeypatch.setitem(_WORLD, "centrals", {})
+    monkeypatch.setattr(refresh, "read_all_centrals", lambda: _WORLD["centrals"])
+
+
+def _flow_section(centrals: dict, branch_name: str, existing: "dict | None" = None) -> dict:
+    """sections.flow as the public door writes it: refresh_single_dashboard on a
+    fresh branch dir under tmp_path, the centrals handed in, flow's prior section
+    on disk when ``existing`` is given (prax, leg 14: the tests used to call the
+    private _extract_flow_section; every one now goes through the refresh)."""
+    _WORLD["calls"] += 1
+    branch = _WORLD["tmp_path"] / f"refresh_{_WORLD['calls']}" / branch_name.lower()
+    branch.mkdir(parents=True)
+    if existing is not None:
+        (branch / "DASHBOARD.local.json").write_text(json.dumps({"sections": {"flow": existing}}), encoding="utf-8")
+    _WORLD["centrals"] = centrals
+
+    result = refresh.refresh_single_dashboard(branch)
+
+    assert result == {"status": "success", "branch": branch_name}
+    return json.loads((branch / "DASHBOARD.local.json").read_text(encoding="utf-8"))["sections"]["flow"]
+
 
 # @flow's published contract, pinned in their
 # tests/test_push_branch_dashboard.py::test_full_section_key_set_is_exactly_the_contract.
 # ``last_updated`` is not in flow's builder — write_section stamps it — but prax's
 # refresh writes the file directly, so it stamps its own.
 FLOW_CONTRACT_KEYS = {"managed_by", "active_plans", "open_recent", "recently_closed", "total_plans"}
-
-
-def _load(module_path: str):
-    """Import (or reimport) a dashboard handler under the active mocks."""
-    sys.modules.pop(module_path, None)
-    module = importlib.import_module(module_path)
-    return importlib.reload(module)
 
 
 def _plan(plan_id: str, branch: str, created: str, subject: str = "A plan") -> dict:
@@ -125,27 +156,23 @@ class TestFiveKeyContract:
 
     def test_section_carries_every_contract_key(self):
         """RED before this round: open_recent and total_plans were absent."""
-        refresh = _load(REFRESH_PATH)
-        section = refresh._extract_flow_section(_centrals(active=[_plan("FPLAN-0001", "prax", "2026-08-10")]), "PRAX")
+        section = _flow_section(_centrals(active=[_plan("FPLAN-0001", "prax", "2026-08-10")]), "PRAX")
 
         assert FLOW_CONTRACT_KEYS <= set(section), f"missing: {FLOW_CONTRACT_KEYS - set(section)}"
 
     def test_section_invents_no_key_outside_the_contract(self):
         """New keys are a deliberate act, not a drift — last_updated excepted."""
-        refresh = _load(REFRESH_PATH)
-        section = refresh._extract_flow_section(_centrals(), "PRAX")
+        section = _flow_section(_centrals(), "PRAX")
 
         assert set(section) - FLOW_CONTRACT_KEYS == {"last_updated"}
 
     def test_managed_by_still_names_flow(self):
         """prax builds the block; @flow owns it."""
-        refresh = _load(REFRESH_PATH)
-        assert refresh._extract_flow_section(_centrals(), "PRAX")["managed_by"] == "flow"
+        assert _flow_section(_centrals(), "PRAX")["managed_by"] == "flow"
 
     def test_empty_central_still_matches_the_contract(self):
         """The no-plans path is a shape too — it used to return three keys."""
-        refresh = _load(REFRESH_PATH)
-        section = refresh._extract_flow_section({}, "PRAX")
+        section = _flow_section({}, "PRAX")
 
         assert FLOW_CONTRACT_KEYS <= set(section)
         assert section["active_plans"] == 0
@@ -162,16 +189,14 @@ class TestActivePlansCount:
     """active_plans is an int, and it counts THIS branch only."""
 
     def test_active_plans_is_an_int_count(self):
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(active=[_plan(f"FPLAN-000{i}", "prax", f"2026-08-1{i}") for i in range(1, 4)])
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert section["active_plans"] == 3
         assert isinstance(section["active_plans"], int)
 
     def test_other_branches_plans_are_not_counted(self):
         """The per-branch block is the source; the fleet roll-up is not."""
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(
             active=[_plan("FPLAN-0001", "prax", "2026-08-10")],
             extra_branches={
@@ -181,7 +206,7 @@ class TestActivePlansCount:
                 }
             },
         )
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert section["active_plans"] == 1
 
@@ -196,9 +221,8 @@ class TestOpenRecent:
 
     def test_entry_shape_matches_flow(self):
         """flow publishes {plan_id, subject, created} — nothing more."""
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(active=[_plan("FPLAN-0001", "prax", "2026-08-10T09:00:00+00:00", "Log rotation")])
-        entry = refresh._extract_flow_section(centrals, "PRAX")["open_recent"][0]
+        entry = _flow_section(centrals, "PRAX")["open_recent"][0]
 
         assert entry == {
             "plan_id": "FPLAN-0001",
@@ -207,7 +231,6 @@ class TestOpenRecent:
         }
 
     def test_newest_first(self):
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(
             active=[
                 _plan("FPLAN-0001", "prax", "2026-08-01T00:00:00+00:00"),
@@ -215,35 +238,32 @@ class TestOpenRecent:
                 _plan("FPLAN-0002", "prax", "2026-08-02T00:00:00+00:00"),
             ]
         )
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert [e["plan_id"] for e in section["open_recent"]] == ["FPLAN-0003", "FPLAN-0002", "FPLAN-0001"]
 
     def test_capped_at_five_while_the_count_tells_the_truth(self):
         """The window is bounded; active_plans is what stops 5 rows reading as all."""
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(active=[_plan(f"FPLAN-{i:04d}", "prax", f"2026-08-{i:02d}") for i in range(1, 23)])
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert len(section["open_recent"]) == 5
         assert section["active_plans"] == 22
 
     def test_missing_created_sorts_last_instead_of_raising(self):
         """flow's builder tolerates it; so must this one."""
-        refresh = _load(REFRESH_PATH)
         undated = _plan("FPLAN-0099", "prax", "")
         undated.pop("created")
         centrals = _centrals(active=[undated, _plan("FPLAN-0001", "prax", "2026-08-01T00:00:00+00:00")])
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert [e["plan_id"] for e in section["open_recent"]] == ["FPLAN-0001", "FPLAN-0099"]
         assert section["open_recent"][-1]["created"] == ""
 
     def test_no_unbounded_list_ships_anywhere_in_the_section(self):
         """The owner's ruling, applied to prax's writer too."""
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(active=[_plan(f"FPLAN-{i:04d}", "prax", f"2026-08-{i:02d}") for i in range(1, 23)])
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         oversized = [k for k, v in section.items() if isinstance(v, list) and len(v) > 5]
         assert oversized == [], f"unbounded list still published: {oversized}"
@@ -258,10 +278,9 @@ class TestSubjectCap:
     """
 
     def test_an_essay_subject_is_cut_to_the_cap_in_open_recent(self):
-        refresh = _load(REFRESH_PATH)
         essay = "FPLAN-0593 " + "startup floor fleet-wide " * 20
         centrals = _centrals(active=[_plan("FPLAN-0593", "prax", "2026-09-15T09:00:00+00:00", essay)])
-        subject = refresh._extract_flow_section(centrals, "PRAX")["open_recent"][0]["subject"]
+        subject = _flow_section(centrals, "PRAX")["open_recent"][0]["subject"]
 
         assert len(essay) > 400, "the row this pins is an essay, not a subject"
         assert len(subject) <= 120
@@ -269,31 +288,26 @@ class TestSubjectCap:
         assert essay.startswith(subject[: -len("...")].rstrip())
 
     def test_an_essay_subject_is_cut_to_the_cap_in_recently_closed(self):
-        refresh = _load(REFRESH_PATH)
         essay = "DPLAN-0339 follow-up: " + "trigger imported inside the fire sites " * 10
         centrals = _centrals(closed=[_closed("FPLAN-0555", "prax", subject=essay)])
-        subject = refresh._extract_flow_section(centrals, "PRAX")["recently_closed"][0]["subject"]
+        subject = _flow_section(centrals, "PRAX")["recently_closed"][0]["subject"]
 
         assert len(subject) <= 120
         assert subject.endswith("...")
 
     def test_a_short_subject_is_published_whole(self):
         """The cap cuts essays; it must not touch the subjects that already fit."""
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(
             active=[_plan("FPLAN-0001", "prax", "2026-08-10T09:00:00+00:00", "Log rotation")],
             closed=[_closed("FPLAN-0002", "prax", subject="Done")],
         )
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert section["open_recent"][0]["subject"] == "Log rotation"
         assert section["recently_closed"][0]["subject"] == "Done"
 
     def test_the_cut_is_the_shared_number_not_a_second_copy(self):
         """One number for every writer: refresh, the devpulse plugin, @flow's push."""
-        refresh = _load(REFRESH_PATH)
-        from aipass.prax.apps.handlers.dashboard import operations
-
         assert refresh.cap_subject is operations.cap_subject
         assert operations.SUBJECT_CAP == 120
 
@@ -308,7 +322,6 @@ class TestRecentlyClosed:
 
     def test_only_this_branchs_closures_are_published(self):
         """RED before this round: the fleet-wide top-level list went to everyone."""
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(
             closed=[_closed("FPLAN-0378", "prax", subject="Mine")],
             extra_branches={
@@ -318,24 +331,22 @@ class TestRecentlyClosed:
                 }
             },
         )
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert [e["id"] for e in section["recently_closed"]] == ["FPLAN-0378"]
         assert all(e["subject"] == "Mine" for e in section["recently_closed"])
 
     def test_entry_shape_matches_flow(self):
         """flow publishes {id, subject, closed}; prax used to write {plan_id, subject}."""
-        refresh = _load(REFRESH_PATH)
         closed_at = _recent()
         centrals = _centrals(closed=[_closed("FPLAN-0378", "prax", closed_at, "Log rotation")])
-        entry = refresh._extract_flow_section(centrals, "PRAX")["recently_closed"][0]
+        entry = _flow_section(centrals, "PRAX")["recently_closed"][0]
 
         assert entry == {"id": "FPLAN-0378", "subject": "Log rotation", "closed": closed_at}
 
     def test_newest_first_and_capped_at_five(self):
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(closed=[_closed(f"FPLAN-{i:04d}", "prax", _recent(i * 0.5)) for i in range(1, 9)])
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert len(section["recently_closed"]) == 5
         assert [e["id"] for e in section["recently_closed"]][0] == "FPLAN-0001"
@@ -349,19 +360,17 @@ class TestClosedWindow:
     """
 
     def test_plans_closed_before_the_window_are_dropped(self):
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(
             closed=[
                 _closed("FPLAN-0428", "prax", _recent(2), "This week"),
                 _closed("FPLAN-0212", "prax", _recent(95), "Back in May"),
             ]
         )
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert [e["id"] for e in section["recently_closed"]] == ["FPLAN-0428"]
 
     def test_the_window_is_flows_seven_days(self):
-        refresh = _load(REFRESH_PATH)
         assert refresh.CLOSED_WINDOW_DAYS == 7
 
         centrals = _centrals(
@@ -370,23 +379,21 @@ class TestClosedWindow:
                 _closed("FPLAN-0002", "prax", _recent(7.1), "Just outside"),
             ]
         )
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert [e["id"] for e in section["recently_closed"]] == ["FPLAN-0001"]
 
     def test_a_plan_with_no_close_timestamp_never_ships(self):
         """flow's rule: falsy timestamp is skipped outright."""
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(closed=[_closed("FPLAN-0001", "prax", closed="x")])
         centrals["plans"]["branches"]["prax"]["recently_closed"][0]["closed"] = ""
 
-        assert refresh._extract_flow_section(centrals, "PRAX")["recently_closed"] == []
+        assert _flow_section(centrals, "PRAX")["recently_closed"] == []
 
     def test_an_unparseable_timestamp_ships_anyway(self):
         """flow includes it rather than letting a plan vanish on a bad field."""
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(closed=[_closed("FPLAN-0001", "prax", "last tuesday")])
-        section = refresh._extract_flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "PRAX")
 
         assert [e["id"] for e in section["recently_closed"]] == ["FPLAN-0001"]
 
@@ -401,15 +408,13 @@ class TestTotalPlansPreserved:
 
     def test_flows_value_survives_a_prax_refresh(self):
         """THE clobber this round exists to close."""
-        refresh = _load(REFRESH_PATH)
-        section = refresh._extract_flow_section(_centrals(), "PRAX", existing={"total_plans": 30})
+        section = _flow_section(_centrals(), "PRAX", existing={"total_plans": 30})
 
         assert section["total_plans"] == 30
 
     def test_absent_existing_section_reports_zero_not_a_guess(self):
         """No prior value and no honest source: 0, never a derived number."""
-        refresh = _load(REFRESH_PATH)
-        assert refresh._extract_flow_section(_centrals(), "PRAX")["total_plans"] == 0
+        assert _flow_section(_centrals(), "PRAX")["total_plans"] == 0
 
     def test_truncated_central_statistic_is_never_used_as_the_total(self):
         """branches.<name>.statistics.total_closed is capped at 5 by construction.
@@ -419,21 +424,19 @@ class TestTotalPlansPreserved:
         closed universe. A branch with 104 closed plans reports 5. Deriving
         total_plans from it would publish a knowingly wrong number.
         """
-        refresh = _load(REFRESH_PATH)
         centrals = _centrals(
             active=[_plan("FPLAN-0001", "prax", "2026-08-10")],
             closed=[_closed(f"FPLAN-{i:04d}", "prax", f"2026-08-{i:02d}T10:00:00+00:00") for i in range(1, 6)],
         )
         centrals["plans"]["branches"]["prax"]["statistics"]["total_closed"] = 5
 
-        section = refresh._extract_flow_section(centrals, "PRAX", existing={"total_plans": 105})
+        section = _flow_section(centrals, "PRAX", existing={"total_plans": 105})
 
         # 1 active + 5 "total_closed" would be 6. The real total is 105.
         assert section["total_plans"] == 105
 
     def test_a_real_refresh_does_not_delete_flows_keys(self, tmp_path):
         """End-to-end mirror of flow's test_push_preserves_another_services_todo_count."""
-        refresh = _load(REFRESH_PATH)
         branch = tmp_path / "prax"
         (branch / ".trinity").mkdir(parents=True)
         (branch / ".ai_mail.local").mkdir(parents=True)
@@ -447,8 +450,6 @@ class TestTotalPlansPreserved:
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(refresh, "read_all_centrals", lambda: _centrals())
             refresh.refresh_single_dashboard(branch)
-
-        import json
 
         section = json.loads((branch / "DASHBOARD.local.json").read_text(encoding="utf-8"))["sections"]["flow"]
         assert section["total_plans"] == 12, "prax refresh deleted a key it cannot write"

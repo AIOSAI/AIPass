@@ -1,19 +1,18 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Tests for module and command discovery
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-14
-# Modified: 2026-03-14
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for module and command discovery.
+"""Tests for apps/modules/discovery.py and the discovery and module registry handlers it drives."""
 
-Covers handler-layer functions (scan_modules_directory, parse_help_for_commands,
-get_help, get_module_introspective) and orchestration-layer functions
-(discover_modules, get_help, get_system_help) from the discovery module.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 import subprocess
+import sys
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -35,6 +34,7 @@ from aipass.drone.apps.handlers.exceptions import (
 from aipass.drone.apps.handlers.module_registry_handler import (
     get_module_introspective,
 )
+from aipass.drone.apps.modules.discovery import discover_modules, get_help, get_system_help, handle_command
 
 
 # =============================================================================
@@ -259,7 +259,7 @@ class TestHandlerGetHelp:
         assert "stop" in result.commands_found
 
     def test_returns_help_for_specific_command(self, temp_test_dir: Path):
-        """Should pass command argument through and set it on result."""
+        """Mutant killed: the command dropped from the help subprocess's argv."""
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir(parents=True)
         (apps_dir / "testbranch.py").write_text("# entry", encoding="utf-8")
@@ -268,10 +268,10 @@ class TestHandlerGetHelp:
         mock_result.stdout = b"Help for the run command\n"
         mock_result.stderr = b""
 
-        with patch("aipass.drone.apps.handlers.discovery_handler.subprocess.run", return_value=mock_result):
+        with patch("aipass.drone.apps.handlers.discovery_handler.subprocess.run", return_value=mock_result) as mock_run:
             result = handler_get_help(str(temp_test_dir), "testbranch", command="run")
 
-        assert result.command == "run"
+        assert mock_run.call_args[0][0][-2:] == ["run", "--help"]
         assert "Help for the run command" in result.text
 
     def test_raises_when_entry_point_missing(self, temp_test_dir: Path):
@@ -412,7 +412,6 @@ class TestOrchestrationDiscoverModules:
     @patch("aipass.drone.apps.handlers.discovery_handler.discover_modules")
     def test_resolves_and_delegates(self, mock_handler_discover, mock_resolve):
         """Should resolve branch path then delegate to handler."""
-        from aipass.drone.apps.modules.discovery import discover_modules
 
         mock_resolve.return_value = "/fake/path/to/branch"
         mock_handler_discover.return_value = ["cmd_a", "cmd_b"]
@@ -426,7 +425,6 @@ class TestOrchestrationDiscoverModules:
     @patch("aipass.drone.apps.modules.discovery.resolve_branch")
     def test_raises_on_invalid_branch(self, mock_resolve):
         """Should propagate BranchNotFoundError for unknown branches."""
-        from aipass.drone.apps.modules.discovery import discover_modules
 
         mock_resolve.side_effect = BranchNotFoundError("Branch '@nope' not found")
 
@@ -446,7 +444,6 @@ class TestOrchestrationGetHelp:
     @patch("aipass.drone.apps.handlers.discovery_handler.get_help")
     def test_returns_help_result(self, mock_handler_help, mock_resolve):
         """Should return HelpResult for a valid branch."""
-        from aipass.drone.apps.modules.discovery import get_help
 
         mock_resolve.return_value = "/fake/branch"
         mock_handler_help.return_value = HelpResult(
@@ -465,7 +462,6 @@ class TestOrchestrationGetHelp:
     @patch("aipass.drone.apps.modules.discovery.resolve_branch")
     def test_raises_on_invalid_branch(self, mock_resolve):
         """Should propagate BranchNotFoundError for unknown branches."""
-        from aipass.drone.apps.modules.discovery import get_help
 
         mock_resolve.side_effect = BranchNotFoundError("not found")
 
@@ -485,7 +481,6 @@ class TestOrchestrationGetSystemHelp:
     @patch("aipass.drone.apps.handlers.discovery_handler.get_system_help")
     def test_aggregates_across_branches(self, mock_sys_help, mock_list):
         """Should pass active branches to handler and return results."""
-        from aipass.drone.apps.modules.discovery import get_system_help
 
         mock_list.return_value = ["@alpha", "@beta"]
         mock_sys_help.return_value = {
@@ -508,28 +503,28 @@ class TestOrchestrationGetSystemHelp:
 class TestGetModuleIntrospective:
     """Tests for module_registry_handler.get_module_introspective()."""
 
-    @patch("aipass.drone.apps.handlers.module_registry_handler._INTERNAL_MODULES", {"testmod": "fake.module.path"})
+    @patch("aipass.drone.apps.handlers.module_registry_handler._INTERNAL_MODULES", {"testmod": "fake_drone_adapter"})
     @patch("aipass.drone.apps.handlers.module_registry_handler._EXTERNAL_MODULES", {})
-    def test_returns_introspective_output(self):
+    def test_returns_introspective_output(self, monkeypatch):
         """Should call get_introspective() on the internal module adapter."""
-        fake_mod = types.ModuleType("fake.module.path")
+        fake_mod = types.ModuleType("fake_drone_adapter")
         fake_mod.get_introspective = lambda: "Introspective info for testmod"  # type: ignore[attr-defined]
 
-        with patch("aipass.drone.apps.handlers.module_registry_handler.importlib.import_module", return_value=fake_mod):
-            result = get_module_introspective("testmod")
+        monkeypatch.setitem(sys.modules, "fake_drone_adapter", fake_mod)
+        result = get_module_introspective("testmod")
 
         assert result == "Introspective info for testmod"
 
-    @patch("aipass.drone.apps.handlers.module_registry_handler._INTERNAL_MODULES", {"testmod": "fake.module.path"})
+    @patch("aipass.drone.apps.handlers.module_registry_handler._INTERNAL_MODULES", {"testmod": "fake_drone_adapter"})
     @patch("aipass.drone.apps.handlers.module_registry_handler._EXTERNAL_MODULES", {})
-    def test_falls_back_to_help(self):
+    def test_falls_back_to_help(self, monkeypatch):
         """Should fall back to get_help(None) if get_introspective is missing."""
-        fake_mod = types.ModuleType("fake.module.path")
+        fake_mod = types.ModuleType("fake_drone_adapter")
         # Only attach get_help, no get_introspective
         fake_mod.get_help = lambda cmd: "Help fallback text"  # type: ignore[attr-defined]
 
-        with patch("aipass.drone.apps.handlers.module_registry_handler.importlib.import_module", return_value=fake_mod):
-            result = get_module_introspective("testmod")
+        monkeypatch.setitem(sys.modules, "fake_drone_adapter", fake_mod)
+        result = get_module_introspective("testmod")
 
         assert result == "Help fallback text"
 
@@ -551,7 +546,6 @@ class TestHandleCommand:
     @patch("aipass.drone.apps.modules.discovery.discover_modules")
     def test_modules_command_requires_arg(self, mock_discover):
         """'modules' command with no args should return False."""
-        from aipass.drone.apps.modules.discovery import handle_command
 
         result = handle_command("modules", [])
 
@@ -561,7 +555,6 @@ class TestHandleCommand:
     @patch("aipass.drone.apps.modules.discovery.discover_modules", return_value=["cmd1"])
     def test_modules_command_succeeds(self, mock_discover):
         """'modules' command with a target should return True."""
-        from aipass.drone.apps.modules.discovery import handle_command
 
         result = handle_command("modules", ["@mybranch"])
 
@@ -570,7 +563,6 @@ class TestHandleCommand:
 
     def test_help_command_requires_arg(self):
         """'help' command with no args should return False."""
-        from aipass.drone.apps.modules.discovery import handle_command
 
         result = handle_command("help", [])
 
@@ -579,7 +571,6 @@ class TestHandleCommand:
     @patch("aipass.drone.apps.modules.discovery.get_help")
     def test_help_command_with_branch(self, mock_get_help):
         """'help' command with a branch target should return True."""
-        from aipass.drone.apps.modules.discovery import handle_command
 
         mock_get_help.return_value = HelpResult(
             branch="branch",
@@ -596,7 +587,6 @@ class TestHandleCommand:
     @patch("aipass.drone.apps.modules.discovery.get_help")
     def test_help_command_with_subcommand(self, mock_get_help):
         """'help' command with branch and subcommand passes command through."""
-        from aipass.drone.apps.modules.discovery import handle_command
 
         mock_get_help.return_value = HelpResult(
             branch="branch",
@@ -613,7 +603,6 @@ class TestHandleCommand:
     @patch("aipass.drone.apps.modules.discovery.get_system_help")
     def test_system_command(self, mock_sys_help):
         """'system' command with no args should return True."""
-        from aipass.drone.apps.modules.discovery import handle_command
 
         mock_sys_help.return_value = {
             "alpha": HelpResult(branch="alpha", command=None, text="alpha help", commands_found=[]),
@@ -626,7 +615,6 @@ class TestHandleCommand:
 
     def test_unknown_command_returns_false(self):
         """Unknown command should return False."""
-        from aipass.drone.apps.modules.discovery import handle_command
 
         result = handle_command("nonexistent_command", [])
 

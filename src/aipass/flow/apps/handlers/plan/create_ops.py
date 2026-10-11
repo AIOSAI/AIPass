@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create_ops.py
 # Description: Plan Creation Implementation Handler
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -32,6 +32,7 @@ from aipass.flow.apps.handlers.json import json_handler
 # INFRASTRUCTURE
 # =============================================
 
+from aipass.flow.apps.handlers.registry.load_registry import next_free_number
 from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
@@ -71,9 +72,9 @@ def create_plan_impl(
     create_plan_file: Callable[..., tuple] | None = None,
     build_plan_registry_entry: Callable[..., Dict[str, Any]] | None = None,
     display_plan_created: Callable[..., str] | None = None,
-    update_dashboard_local: Callable[..., bool] | None = None,
+    update_dashboard_local: Callable[..., bool | None] | None = None,
     push_to_plans_central: Callable[..., bool] | None = None,
-    push_flow_to_branch_dashboard: Callable[..., bool] | None = None,
+    push_flow_to_branch_dashboard: Callable[..., bool | None] | None = None,
 ) -> Tuple[bool, int, str, str, str, List[Dict[str, Any]]]:
     """
     Implement plan creation workflow
@@ -154,8 +155,8 @@ def create_plan_impl(
             save_registry(registry, registry_file=registry_file)
             messages.append({"type": "dim", "text": f"[AUTO-CLEANUP] Closed {auto_closed_count} orphaned plan(s)"})
 
-        # STEP 3: Get next plan number
-        NEXT_NUM = registry["next_number"]
+        # STEP 3: Get next plan number -- never one a row already holds
+        NEXT_NUM = next_free_number(registry)
 
         # STEP 4: Resolve location (@folder syntax support)
         success, target_dir, error_msg = resolve_plan_location(location, ecosystem_root)
@@ -236,17 +237,26 @@ def create_plan_impl(
         dashboard_success = update_dashboard_local()
         central_success = push_to_plans_central()
 
-        # Log dashboard update results
-        if not dashboard_success:
+        # Log dashboard update results. None is "flow has no dashboard", not a
+        # failure (flow's decision, leg 4).
+        if dashboard_success is False:
             logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
         if not central_success:
             logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")
 
         # STEP 11b: Push flow section to branch's dashboard via write-through
+        # None: no dashboard there. False: the push failed (already logged).
         branch_dashboard_success = push_flow_to_branch_dashboard(target_dir)
-        if not branch_dashboard_success:
+        if branch_dashboard_success is None:
             messages.append(
                 {"type": "dim", "text": f"No branch dashboard at {target_dir} -- no branch is tracking this plan"}
+            )
+        elif not branch_dashboard_success:
+            messages.append(
+                {
+                    "type": "warning",
+                    "text": f"[WARNING] Failed to push flow section to branch dashboard at {target_dir} (see log)",
+                }
             )
 
         # STEP 12: Log success

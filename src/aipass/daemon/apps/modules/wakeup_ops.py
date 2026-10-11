@@ -50,7 +50,7 @@ def print_introspection():
 # =============================================
 
 
-def handle_command(command: str, args: list) -> bool:  # noqa: ARG001
+def handle_command(command: str, args: list) -> bool:
     """Handle commands routed by the entry point."""
     if command == "wakeup-ops":
         if not args:

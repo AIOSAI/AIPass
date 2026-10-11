@@ -1,59 +1,71 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_display_resilience.py
 # Description: The display consumer must survive an unrenderable event
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-10-03
 # =============================================
 
-"""Regression cover for the 2026-08-11 Mission Control consumer death.
+"""Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""
 
-A tailed log line containing ``[/usr/bin]`` reached ``print_event``, which
-interpolated it raw into a Rich markup string. Rich read it as a closing tag,
-raised ``MarkupError``, and the exception escaped ``_display_worker`` — killing
-the only consumer of the display queue for the life of the process. The queue
-then sat permanently full, ``event_queue`` warned every 30s for ~20 hours, and
-the Telegram relay (fed from the same code path) went silent.
+# Regression cover for the 2026-08-11 Mission Control consumer death.
+#
+# A tailed log line containing ``[/usr/bin]`` reached ``print_event``, which
+# interpolated it raw into a Rich markup string. Rich read it as a closing tag,
+# raised ``MarkupError``, and the exception escaped ``_display_worker`` — killing
+# the only consumer of the display queue for the life of the process. The queue
+# then sat permanently full, ``event_queue`` warned every 30s for ~20 hours, and
+# the Telegram relay (fed from the same code path) went silent.
+#
+# Two independent defects, covered separately here:
+#
+# 1. Event text is UNTRUSTED markup. Log lines carry ``[/usr/bin]`` (raises) and
+#    ``[event_queue]`` (silently eaten). Every dynamic value must be escaped.
+# 2. One unrenderable event must not kill the consumer. Even with (1) fixed, the
+#    loop has to survive whatever the next producer sends.
+#
+# Rendering goes through the product's own Rich console, read back with capsys —
+# a recording mock never renders, so it could not fail on either defect.
 
-Two independent defects, covered separately here:
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — handle_command and _run_monitor, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — _start_threads, _stop_threads, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — _get_watch_directories, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — the observer fallback, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — monitor.py's print_help(), covered by tests/test_help_markup.py
+# seedgo: no-test-needed(through_the_command) — print_status's formatting, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — the rate worker's scan_rates(), covered by tests/test_rate_tracker.py
+# seedgo: no-test-needed(constant) — COLORS, SYMBOLS and LEVEL_COLORS, the style tables print_event reads
 
-1. Event text is UNTRUSTED markup. Log lines carry ``[/usr/bin]`` (raises) and
-   ``[event_queue]`` (silently eaten). Every dynamic value must be escaped.
-2. One unrenderable event must not kill the consumer. Even with (1) fixed, the
-   loop has to survive whatever the next producer sends.
-
-Rendering goes through a REAL Rich console — the shared conftest installs a
-MagicMock console that records the call but never renders, so it cannot fail
-on either defect.
-"""
-
-import importlib
 import io
-import sys
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
 from rich.console import Console
+from rich.errors import MarkupError
 
+from aipass.prax.apps.handlers.monitoring import unified_stream
+from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
+from aipass.prax.apps.modules import monitor
 
 # ---------------------------------------------------------------------------
 # Real-console rendering helper
 # ---------------------------------------------------------------------------
 
 
-def _render(call):
-    """Run ``call(unified_stream)`` against a real Rich console, return output."""
-    module = importlib.import_module("aipass.prax.apps.handlers.monitoring.unified_stream")
-    buffer = io.StringIO()
-    real_console = Console(file=buffer, width=200, no_color=True, highlight=False, markup=True)
-    original = getattr(module, "console")
-    setattr(module, "console", real_console)
-    try:
-        call(module)
-    finally:
-        setattr(module, "console", original)
-    return buffer.getvalue()
+@pytest.fixture
+def render(monkeypatch, capsys):
+    """Run ``call(unified_stream)`` through the product's own console, return what it printed."""
+    monkeypatch.setattr(unified_stream, "json_handler", MagicMock())
+    monkeypatch.setattr(unified_stream, "logger", MagicMock())
+
+    def _render(call) -> str:
+        capsys.readouterr()
+        call(unified_stream)
+        return capsys.readouterr().out
+
+    return _render
 
 
 # The exact line that killed the live monitor (service log, 2026-08-11 11:29:04).
@@ -71,91 +83,97 @@ EATEN_MESSAGE = "[event_queue] The live monitor display queue is full"
 class TestEventTextIsUntrustedMarkup:
     """Whatever a branch logs must render, never raise and never vanish."""
 
+    @pytest.fixture(autouse=True)
+    def _keep_render(self, render):
+        self._render = render
+
     def test_closing_tag_in_message_does_not_raise(self):
         """A tailed line containing [/usr/bin] renders instead of killing the render."""
-        output = _render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
+        output = self._render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
         assert "/usr/bin" in output
 
     def test_closing_tag_keeps_its_brackets(self):
         """The path is shown as written — brackets included, nothing swallowed."""
-        output = _render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
+        output = self._render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
         assert "[/usr/bin]" in output
 
     def test_lowercase_tag_in_message_survives(self):
         """[event_queue] is a valid-looking Rich tag; it must still reach the screen."""
-        output = _render(lambda m: m.print_event("log", "PRAX", EATEN_MESSAGE, "warning"))
+        output = self._render(lambda m: m.print_event("log", "PRAX", EATEN_MESSAGE, "warning"))
         assert "[event_queue]" in output
 
     def test_branch_label_still_visible(self):
         """Escaping must not cost the bracketed branch column."""
-        output = _render(lambda m: m.print_event("log", "SEEDGO", "audit complete", "info"))
+        output = self._render(lambda m: m.print_event("log", "SEEDGO", "audit complete", "info"))
         assert "[SEEDGO" in output
         assert "audit complete" in output
 
     def test_lowercase_branch_label_survives(self):
         """A label Rich would read as a tag keeps its brackets (uppercase was luck)."""
-        output = _render(lambda m: m.print_event("log", "commons/feed", "post", "info"))
+        output = self._render(lambda m: m.print_event("log", "commons/feed", "post", "info"))
         assert "COMMONS/FEED" in output
 
     def test_hook_event_message_is_escaped(self):
         """print_hook_event takes the same untrusted text."""
-        output = _render(lambda m: m.print_hook_event("HOOKS", CRASHING_MESSAGE, "fired"))
+        output = self._render(lambda m: m.print_hook_event("HOOKS", CRASHING_MESSAGE, "fired"))
         assert "[/usr/bin]" in output
+
+    def test_hook_event_says_which_branch_fired(self):
+        """The branch the hook fired in must reach the screen.
+
+        print_hook_event accepted branch and never printed it (seedgo's
+        accepted_and_never_used_parameter rule, 2026-09-24), so every hook line
+        in Mission Control read the same whether it came from hooks, drone or an
+        external project — the one column that tells them apart was dropped.
+        """
+        output = self._render(lambda m: m.print_hook_event("SEEDGO", "cadence:fired loader=global", "fired"))
+        assert "SEEDGO" in output
+        assert "cadence:fired loader=global" in output
 
     def test_command_separator_is_escaped(self):
         """A command string can carry brackets too."""
-        output = _render(lambda m: m.print_command_separator("DRONE", CRASHING_MESSAGE, "DEVPULSE", "PRAX"))
+        output = self._render(lambda m: m.print_command_separator("DRONE", CRASHING_MESSAGE, "DEVPULSE", "PRAX"))
         assert "[/usr/bin]" in output
 
     def test_command_separator_keeps_attribution(self):
         """Escaping must not cost the CALLER → TARGET line."""
-        output = _render(lambda m: m.print_command_separator("DRONE", "audit", "DEVPULSE", "PRAX"))
+        output = self._render(lambda m: m.print_command_separator("DRONE", "audit", "DEVPULSE", "PRAX"))
         assert "DEVPULSE" in output
         assert "PRAX" in output
 
     def test_canary_unescaped_message_raises(self):
-        """Proof the assertions above can fail: raw interpolation still explodes."""
-        buffer = io.StringIO()
-        console = Console(file=buffer, width=200, no_color=True, highlight=False, markup=True)
-        with pytest.raises(Exception):
-            console.print(f"[white]{CRASHING_MESSAGE}[/white]")
+        """Proof the assertions above can fail: the line print_event draws, interpolated
+        raw into the same markup, explodes (prax, leg 12: the canary now reaches the
+        product it is the canary for)."""
+        output = self._render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
+        assert "[/usr/bin]" in output
 
-    def test_canary_unescaped_lowercase_tag_is_eaten(self):
-        """Proof the [event_queue] assertion can fail: raw interpolation swallows it."""
         buffer = io.StringIO()
         console = Console(file=buffer, width=200, no_color=True, highlight=False, markup=True)
-        console.print(f"[white]{EATEN_MESSAGE}[/white]")
-        assert "[event_queue]" not in buffer.getvalue()
+        with pytest.raises(MarkupError):
+            console.print(f"[white]{CRASHING_MESSAGE}[/white]")
 
 
 # ---------------------------------------------------------------------------
 # Defect 2 — one bad event must not kill the consumer
 # ---------------------------------------------------------------------------
 
-_MONITORING_MOCKS = (
-    "aipass.prax.apps.handlers.monitoring",
-    "aipass.prax.apps.handlers.monitoring.event_queue",
-    "aipass.prax.apps.handlers.monitoring.filesystem_handler",
-    "aipass.prax.apps.handlers.monitoring.log_watcher",
-    "aipass.prax.apps.handlers.monitoring.unified_stream",
-    "aipass.prax.apps.handlers.monitoring.module_tracker",
-    "aipass.prax.apps.handlers.monitoring.branch_detector",
-    "aipass.prax.apps.handlers.monitoring.interactive_filter",
-    "aipass.prax.apps.handlers.monitoring.monitoring_filters",
-    "aipass.prax.apps.handlers.monitoring.file_watcher_integration",
-    "aipass.prax.apps.handlers.monitoring.telegram_relay",
-    "aipass.prax.apps.handlers.monitoring.pid_cache",
-    "aipass.prax.apps.handlers.monitoring.instance_lock",
-)
+
+@pytest.fixture(autouse=True)
+def _monitor_fresh(monkeypatch):
+    """monitor.py, bound at the top and never reloaded, with its run state fresh and
+    its logger and relay doubled for each test (prax, leg 12)."""
+    monkeypatch.setattr(monitor, "logger", MagicMock())
+    monkeypatch.setattr(monitor, "relay_event", MagicMock())
+    monkeypatch.setattr(monitor, "_event_queue", None)
+    monkeypatch.setattr(monitor, "_stop_event", threading.Event())
+    monkeypatch.setattr(monitor, "_render_failures", 0)
+    monkeypatch.setattr(monitor, "_last_render_warning", 0.0)
 
 
 def _import_monitor():
-    """Import (or reload) monitor.py with all monitoring handlers mocked."""
-    fresh = {name: MagicMock() for name in _MONITORING_MOCKS}
-    with patch.dict(sys.modules, fresh):
-        if "aipass.prax.apps.modules.monitor" in sys.modules:
-            return importlib.reload(sys.modules["aipass.prax.apps.modules.monitor"])
-        return importlib.import_module("aipass.prax.apps.modules.monitor")
+    """The top-bound monitor; _monitor_fresh has reset its state."""
+    return monitor
 
 
 def _event(branch="DRONE"):
@@ -297,16 +315,12 @@ class TestStandaloneRunArgs:
 
     def test_run_token_does_not_reach_the_scope(self):
         """End to end: the parsed scope of `monitor run` is unscoped."""
-        from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
-
         mod = _import_monitor()
         cmd_args = mod._standalone_run_args(["run"], [])
         assert parse_scope(cmd_args[1:]).is_scoped is False
 
     def test_canary_old_parsing_scoped_to_run(self):
         """Proof this test can fail: the old form asked for a branch called RUN."""
-        from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
-
         legacy_scope = parse_scope(["run"])
         assert legacy_scope.is_scoped is True
         assert list(legacy_scope.names) == ["RUN"]

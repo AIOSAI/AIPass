@@ -58,62 +58,62 @@
     {
       "file": "apps/modules/capsule.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/database.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/reaction.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/profile.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/trade.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/central.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/space.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/notification.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/comment.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/room.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/artifact.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/modules/post.py",
       "standard": "introspection",
-      "reason": "Entry point (commons.py:338) intercepts --help before routing. Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
       "file": "apps/commons.py",
@@ -374,6 +374,41 @@
       "file": "apps/handlers/rooms/room_state_ops.py",
       "standard": "unused_function",
       "reason": "get_room_state(), set_mood(), set_flavor(), set_entrance() — spatial room state API used by space module and external branch visitors"
+    },
+    {
+      "file": "apps/commons.py",
+      "standard": "logged_fallback",
+      "lines": [191],
+      "reason": "True here means the command was claimed, not that it succeeded: the reader of stdout closed the pipe, so there is no caller left to tell (commons' decision, DPLAN-0354 leg 5)"
+    },
+    {
+      "file": "apps/modules/central.py",
+      "standard": "logged_fallback",
+      "lines": [85],
+      "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, the protocol of every handle_command (commons' decision, DPLAN-0354 leg 5)"
+    },
+    {
+      "file": "apps/modules/commons_identity.py",
+      "standard": "logged_fallback",
+      "lines": [137],
+      "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, the protocol of every handle_command (commons' decision, DPLAN-0354 leg 5)"
+    },
+    {
+      "file": "apps/modules/space.py",
+      "standard": "logged_fallback",
+      "lines": [281],
+      "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, pinned by test_decorate_refuses_naming_a_failed_caller_lookup (commons' decision, DPLAN-0354 leg 5)"
+    },
+    {
+      "file": "apps/handlers/artifacts/artifact_ops.py",
+      "standard": "logged_fallback",
+      "lines": [65],
+      "reason": "_validate_metadata: every None means the same thing, the input is not valid shallow JSON, and its one caller refuses all three with one true message; no system failure is hidden (commons' decision, DPLAN-0354 leg 5)"
+    },
+    {
+      "file": "tests/__init__.py",
+      "standard": "file_top",
+      "reason": "A package marker holding no test: items 6 and 7 (a subject path, a declared pass) have nothing to name. Item 5, the banner, was cured in leg 5. The checker passes no line, so the rule is file-wide (commons' decision, DPLAN-0354 leg 5)"
     }
   ],
   "notes": {

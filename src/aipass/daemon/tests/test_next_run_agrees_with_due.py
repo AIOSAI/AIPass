@@ -1,48 +1,53 @@
 # =================== AIPass ====================
 # Name: test_next_run_agrees_with_due.py
 # Description: next_run must name an instant is_job_due actually agrees with
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""One question, one answer: next_run and is_job_due must not disagree.
+"""Tests for handlers/schedule/runstate.py — next_run and is_job_due must not disagree."""
 
-FOUND LIVE, 2026-08-31. @vera's release-watch is `daily @ 10:00`. It fired at
-09:45:11 - correct, that is the leading edge of the +/-15min window - and the
-runstate then advertised next_run = 2026-08-31T10:00:00. Nine minutes away, and
-a fire that could never happen: _already_ran_today consumes the whole CALENDAR
-DAY, so is_job_due answered False at 09:55, 10:00, 10:05 and 10:14, and True
-only on 2026-09-01.
-
-THE MECHANISM: _calc_next_run is HANDED last_run_ts and, for daily/rotation and
-hourly, ignores it and reads the wall clock instead. It then asks a different
-question - "when does the target time next come round" - than the one the
-scheduler asks - "which period has already been consumed". Two implementations
-of one contract, which is the species that has bitten this branch before (S51:
-a guard that re-derived what it policed instead of consulting it).
-
-INTERVAL WAS ALREADY RIGHT, and that is the tell: it is the one branch that uses
-the timestamp it was given. The bug is not "daily is hard", it is "two branches
-reached for now() when the answer was in the argument list".
-
-WHY IT MATTERS even though nothing schedules off next_run: `drone @daemon queue`
-is the human status surface. An operator reading NEXT RUN 10:00 at 09:52 expects
-a wake in eight minutes. When it does not come, the field that lied is the first
-place they will look for the reason - so it points the investigation the wrong
-way at exactly the moment someone is already debugging a missed wake.
-
-THE PIN IS THE AGREEMENT, not a restatement of the arithmetic. Asserting
-"daily -> tomorrow" would be a third implementation. These tests drive
-is_job_due at the instant next_run names and require it to say True - and
-require False at every instant strictly before it, on the same window grid.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that runstate.py parses and imports
+# seedgo: no-test-needed(stdlib) — datetime's own arithmetic; the pins drive is_job_due at the instants next_run names
 
 from datetime import datetime, timedelta
 
 import pytest
 
 from aipass.daemon.apps.handlers.schedule import runstate
+
+# One question, one answer.
+#
+# FOUND LIVE, 2026-08-31. @vera's release-watch is `daily @ 10:00`. It fired at
+# 09:45:11 - correct, that is the leading edge of the +/-15min window - and the
+# runstate then advertised next_run = 2026-08-31T10:00:00. Nine minutes away, and
+# a fire that could never happen: _already_ran_today consumes the whole CALENDAR
+# DAY, so is_job_due answered False at 09:55, 10:00, 10:05 and 10:14, and True
+# only on 2026-09-01.
+#
+# THE MECHANISM: _calc_next_run is HANDED last_run_ts and, for daily/rotation and
+# hourly, ignores it and reads the wall clock instead. It then asks a different
+# question - "when does the target time next come round" - than the one the
+# scheduler asks - "which period has already been consumed". Two implementations
+# of one contract, which is the species that has bitten this branch before (S51:
+# a guard that re-derived what it policed instead of consulting it).
+#
+# INTERVAL WAS ALREADY RIGHT, and that is the tell: it is the one branch that uses
+# the timestamp it was given. The bug is not "daily is hard", it is "two branches
+# reached for now() when the answer was in the argument list".
+#
+# WHY IT MATTERS even though nothing schedules off next_run: `drone @daemon queue`
+# is the human status surface. An operator reading NEXT RUN 10:00 at 09:52 expects
+# a wake in eight minutes. When it does not come, the field that lied is the first
+# place they will look for the reason - so it points the investigation the wrong
+# way at exactly the moment someone is already debugging a missed wake.
+#
+# THE PIN IS THE AGREEMENT, not a restatement of the arithmetic. Asserting
+# "daily -> tomorrow" would be a third implementation. These tests drive
+# is_job_due at the instant next_run names and require it to say True - and
+# require False at every instant strictly before it, on the same window grid.
 
 
 def _state_after_firing(schedule: dict, fired_at: str) -> dict:

@@ -1,4 +1,19 @@
-"""Tests for the portable hook test runner (modules/hook_test.py)."""
+# =================== AIPass ====================
+# Name: test_hook_test.py
+# Version: 1.0.2
+# Description: Tests for the portable hook test runner
+# Branch: hooks
+# Layer: tests
+# Created: 2026-07-10
+# Modified: 2026-10-05
+# =============================================
+
+"""Tests for apps/modules/hook_test.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — MOCK_EVENTS' sample payloads and HELP_COMMANDS' display strings
+# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing where the synthetic file lands
+# seedgo: no-test-needed(ruff) — that modules/hook_test.py parses and imports the engine it drives
 
 import json
 import os
@@ -99,7 +114,7 @@ class TestPrintResults:
     def test_error_result_prints(self):
         with patch.object(hook_test.CONSOLE, "print") as mock_print:
             hook_test.print_results({"error": "No config found"})
-        mock_print.assert_called_once()
+        mock_print.assert_called_once_with("[red]No config found[/red]")
 
     def test_normal_results_print_summary(self):
         results = {
@@ -130,12 +145,14 @@ class TestHandleCommand:
     def test_runs_test_with_run_arg(self):
         with (
             patch.object(hook_test, "run_test", return_value={}) as mock_run,
-            patch.object(hook_test, "print_results"),
-            patch.object(hook_test.CONSOLE, "print"),
+            patch.object(hook_test, "print_results") as mock_results,
+            patch.object(hook_test.CONSOLE, "print") as mock_print,
         ):
             result = hook_test.handle_command("test", ["run"])
         assert result is True
-        mock_run.assert_called_once()
+        mock_run.assert_called_once_with(verbose=False)
+        mock_results.assert_called_once_with({}, verbose=False)
+        mock_print.assert_any_call("[bold cyan]HOOKS Test Runner[/bold cyan]")
 
 
 class TestProbeIsolation:
@@ -203,14 +220,15 @@ class TestProbeIsolation:
         branch = tmp_path / "hooks"
         (branch / ".trinity").mkdir(parents=True)
         monkeypatch.chdir(branch)
-        monkeypatch.setenv("AIPASS_HOME", "/sentinel/home")
+        sentinel_home = str(tmp_path / "sentinel" / "home")
+        monkeypatch.setenv("AIPASS_HOME", sentinel_home)
         monkeypatch.delenv(hook_test.PROBE_ENV_VAR, raising=False)
 
         with patch(f"{_MOD}.find_project_config", return_value=self._prep_config()):
             hook_test.run_test()
 
         assert Path.cwd() == branch
-        assert os.environ["AIPASS_HOME"] == "/sentinel/home"
+        assert os.environ["AIPASS_HOME"] == sentinel_home
         assert hook_test.PROBE_ENV_VAR not in os.environ
 
     def test_workspace_is_removed(self, tmp_path, monkeypatch):
@@ -218,20 +236,22 @@ class TestProbeIsolation:
         (branch / ".trinity").mkdir(parents=True)
         monkeypatch.chdir(branch)
 
-        captured = {}
-        real_build = hook_test._build_skeleton
+        seen = {}
 
-        def spy(real_branch, destination):
-            captured["workspace"] = destination
-            return real_build(real_branch, destination)
+        def spy(event_type, stdin_data, config):
+            # The workspace is the skeleton's parent; the hooks are told the skeleton as their cwd.
+            seen["workspace"] = Path(json.loads(stdin_data)["cwd"]).parent
+            seen["existed"] = seen["workspace"].is_dir()
+            return ("", 0)
 
         with (
             patch(f"{_MOD}.find_project_config", return_value=self._prep_config()),
-            patch(f"{_MOD}._build_skeleton", side_effect=spy),
+            patch(f"{_MOD}.dispatch", side_effect=spy),
         ):
             hook_test.run_test()
 
-        assert not captured["workspace"].exists()
+        assert seen["existed"] is True
+        assert not seen["workspace"].exists()
 
     def test_probe_flag_is_set_while_hooks_run(self, tmp_path, monkeypatch):
         """The flag the two mutation refusals read — proven live, not assumed."""
@@ -254,53 +274,69 @@ class TestProbeIsolation:
         assert seen["flag"] == "1"
 
 
-class TestBuildSkeleton:
-    def test_copies_the_memory_files(self, tmp_path):
-        # The floor, and the point of the test: the skeleton exists so no run
-        # touches real memory, so an emptied _SKELETON_MEMORY_FILES would mean
-        # NOTHING is copied - and the old loop would have called that a pass.
-        assert set(hook_test._SKELETON_MEMORY_FILES) == {"local.json", "observations.json", "passport.json"}
+_MEMORY_FILES = ("local.json", "observations.json", "passport.json")  # the skeleton's contract
 
+
+def _skeleton_at_dispatch(branch: Path, monkeypatch, look) -> dict:
+    """Run run_test() from `branch` and hand `look` the skeleton as the hooks are told it, mid-run."""
+    monkeypatch.chdir(branch)
+    seen: dict = {}
+
+    def spy(event_type, stdin_data, config):
+        seen.update(look(Path(json.loads(stdin_data)["cwd"])))
+        return ("", 0)
+
+    config = {"hooks_enabled": True, "PreCompact": {"p": {"enabled": True, "handler": "x.y.handle"}}}
+    with (
+        patch(f"{_MOD}.find_project_config", return_value=config),
+        patch(f"{_MOD}.dispatch", side_effect=spy),
+    ):
+        hook_test.run_test()
+    return seen
+
+
+class TestBuildSkeleton:
+    """The skeleton is read as the hooks see it, through run_test (fleet green leg 9)."""
+
+    def test_copies_the_memory_files(self, tmp_path, monkeypatch):
+        # The floor, and the point of the test: the skeleton exists so no run
+        # touches real memory, so a skeleton missing a file means a hook reads
+        # nothing where the real branch has memory.
         real = tmp_path / "hooks"
         (real / ".trinity").mkdir(parents=True)
-        for name in hook_test._SKELETON_MEMORY_FILES:
-            (real / ".trinity" / name).write_text('{"a": 1}', encoding="utf-8")
+        for name in _MEMORY_FILES:
+            (real / ".trinity" / name).write_text(f'{{"{name}": 1}}', encoding="utf-8")
 
-        skeleton = hook_test._build_skeleton(real, tmp_path / "work")
-        for name in hook_test._SKELETON_MEMORY_FILES:
-            assert (skeleton / ".trinity" / name).read_text(encoding="utf-8") == '{"a": 1}'
+        def look(skeleton: Path) -> dict:
+            return {name: (skeleton / ".trinity" / name).read_text(encoding="utf-8") for name in _MEMORY_FILES}
 
-    def test_tolerates_a_branch_with_no_memory_files(self, tmp_path):
+        seen = _skeleton_at_dispatch(real, monkeypatch, look)
+        assert seen == {name: f'{{"{name}": 1}}' for name in _MEMORY_FILES}
+
+    def test_tolerates_a_branch_with_no_memory_files(self, tmp_path, monkeypatch):
         real = tmp_path / "bare"
         real.mkdir()
-        skeleton = hook_test._build_skeleton(real, tmp_path / "work")
-        assert (skeleton / ".trinity").is_dir()
 
-    def test_skeleton_carries_no_registry(self, tmp_path):
+        def look(skeleton: Path) -> dict:
+            return {"trinity": (skeleton / ".trinity").is_dir(), "name": skeleton.name}
+
+        assert _skeleton_at_dispatch(real, monkeypatch, look) == {"trinity": True, "name": "bare"}
+
+    def test_skeleton_carries_no_registry(self, tmp_path, monkeypatch):
         """A temp repo root would not confine @memory's subprocess — see the module docstring."""
         real = tmp_path / "hooks"
         (real / ".trinity").mkdir(parents=True)
-        skeleton = hook_test._build_skeleton(real, tmp_path / "work")
-        assert not (skeleton / "AIPASS_REGISTRY.json").exists()
-        assert not (skeleton.parent / "AIPASS_REGISTRY.json").exists()
+
+        def look(skeleton: Path) -> dict:
+            return {
+                "in_branch": (skeleton / "AIPASS_REGISTRY.json").exists(),
+                "beside": (skeleton.parent / "AIPASS_REGISTRY.json").exists(),
+                "trinity": (skeleton / ".trinity").is_dir(),
+            }
+
+        assert _skeleton_at_dispatch(real, monkeypatch, look) == {"in_branch": False, "beside": False, "trinity": True}
 
 
-class TestRestoreEnv:
-    def test_unset_stays_unset(self, monkeypatch):
-        """_restore_env(name, None) removes a var that had no prior value.
-
-        The 'leaked' value is arranged with monkeypatch.setenv rather than a raw
-        os.environ assignment. In the passing run _restore_env deletes it either
-        way, but the environment is process-wide: if this assertion ever fails,
-        a raw write leaves AIPASS_PROBE_SENTINEL set for every later test in the
-        session. monkeypatch undoes it on every path (host_state, @seedgo).
-        """
-        monkeypatch.delenv("AIPASS_PROBE_SENTINEL", raising=False)
-        monkeypatch.setenv("AIPASS_PROBE_SENTINEL", "leaked")
-        hook_test._restore_env("AIPASS_PROBE_SENTINEL", None)
-        assert "AIPASS_PROBE_SENTINEL" not in os.environ
-
-    def test_prior_value_is_put_back(self, monkeypatch):
-        monkeypatch.setenv("AIPASS_PROBE_SENTINEL", "changed")
-        hook_test._restore_env("AIPASS_PROBE_SENTINEL", "original")
-        assert os.environ["AIPASS_PROBE_SENTINEL"] == "original"
+# _restore_env is read through run_test: test_cwd_and_env_are_restored pins the unset var
+# staying unset (PROBE_ENV_VAR) and the prior value put back (AIPASS_HOME); its direct pins
+# are retired (fleet green leg 9, ruling b).

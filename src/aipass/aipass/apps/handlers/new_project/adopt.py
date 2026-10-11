@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing projects/ directory into AIPass
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-20
-# Modified: 2026-07-20
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -43,7 +43,7 @@ from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
 from aipass.aipass.apps.handlers.init.bootstrap import _managed_manifest_entries
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.project_home import (
-    _claude_local_settings,
+    claude_local_settings,
     _claude_settings,
     _detect_aipass_home,
     _enroll_project,
@@ -179,7 +179,7 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
     if aipass_home and not is_throwaway_path(aipass_home):
         _write_if_missing(
             claude_dir / "settings.local.json",
-            _claude_local_settings(aipass_home, nested=True),
+            claude_local_settings(aipass_home, nested=True),
             dry_run=dry_run,
             planned=files,
         )

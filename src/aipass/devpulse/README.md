@@ -93,7 +93,7 @@ All via `drone @devpulse <module> <command>`. Each module's `--help` is the full
 src/aipass/devpulse/
 ├── apps/
 │   ├── devpulse.py        # Entry point — auto-discovers modules
-│   ├── modules/           # admin_grant, compass, feedback, release_notify, watchdog
+│   ├── modules/           # admin_grant (+ door_admin_grant, its handlers door), compass, feedback, release_notify, watchdog
 │   └── handlers/          # Implementation per module, plus the json shim and the owner gate
 ├── devpulse_json/         # Module storage through @prax's json service
 ├── tests/                 # pytest suite

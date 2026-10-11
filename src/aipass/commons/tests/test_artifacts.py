@@ -1,8 +1,11 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_artifacts.py - Artifact, Trade, and Capsule Tests
+# Description: Tests for apps/handlers/artifacts/artifact_ops.py, trade_ops.py and capsule_ops.py
 # Date: 2026-03-28
 # Version: 1.0.0
+# Created: 2026-03-28
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,35 +17,33 @@
 #   - Mocks prax logger, json_handler, get_db, close_db, get_caller_branch
 # =============================================
 
-"""
-Unit tests for artifact, trade, and capsule subsystems.
+"""Tests for apps/handlers/artifacts/artifact_ops.py, trade_ops.py and capsule_ops.py."""
 
-Covers:
-- _validate_metadata: valid/invalid JSON handling
-- craft_artifact / list_artifacts / inspect_artifact operations
-- _now_utc helper
-- sweep_expired / gift_artifact / drop_item operations
-- seal_capsule / list_capsules / open_capsule operations
-- Module routing for artifact, trade, capsule handle_command
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/artifacts/ parses and imports
+# seedgo: no-test-needed(constant) — the VALID_TYPES and VALID_RARITIES rosters; craft's success case names one of each
 
+import json
 import sqlite3
 from datetime import datetime, timezone, timedelta
+from typing import Any, Dict
 from unittest.mock import patch, MagicMock
 
+import pytest
 
 from aipass.commons.apps.handlers.artifacts.artifact_ops import (
-    _validate_metadata,
     craft_artifact,
     list_artifacts,
     inspect_artifact,
 )
 from aipass.commons.apps.handlers.artifacts.trade_ops import (
-    _now_utc,
     sweep_expired,
     gift_artifact,
     drop_item,
 )
+from aipass.commons.apps.modules import artifact as artifact_module
+from aipass.commons.apps.modules import capsule as capsule_module
+from aipass.commons.apps.modules import trade as trade_module
 from aipass.commons.apps.handlers.artifacts.capsule_ops import (
     seal_capsule,
     list_capsules,
@@ -65,41 +66,80 @@ def _insert_test_agent(conn: sqlite3.Connection, name: str = "TEST_BRANCH") -> N
 
 
 # =============================================================================
-# _validate_metadata — pure function, no DB needed
+# craft --metadata — the metadata validation, reached through craft_artifact
 # =============================================================================
 
 
-def test_validate_metadata_valid_json() -> None:
-    """Valid shallow JSON dict should return the parsed dict."""
-    result = _validate_metadata('{"key": "value", "count": 42}')
-    assert result is not None
-    assert isinstance(result, dict)
-    assert result["key"] == "value"
-    assert result["count"] == 42
+@pytest.fixture
+def craft_db(initialized_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
+    """Point craft_artifact at the tmp database with TEST_BRANCH as the caller.
+
+    Every metadata test takes this, the refusals too: a mutant that lets bad metadata
+    through reaches the caller lookup and the INSERT, and both must land here.
+    """
+    monkeypatch.setattr("aipass.commons.apps.handlers.artifacts.artifact_ops.get_db", lambda: initialized_db)
+    monkeypatch.setattr("aipass.commons.apps.handlers.artifacts.artifact_ops.close_db", lambda conn: None)
+    monkeypatch.setattr(
+        "aipass.commons.apps.handlers.artifacts.artifact_ops.json_handler.log_operation", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch", lambda: {"name": "TEST_BRANCH"}
+    )
+    _insert_test_agent(initialized_db)
+    return initialized_db
 
 
-def test_validate_metadata_malformed_json() -> None:
-    """Malformed JSON string should return None."""
-    result = _validate_metadata("{not valid json")
-    assert result is None
+def _craft_with_metadata(metadata: str) -> Dict[str, Any]:
+    """Craft an artifact the way 'commons craft "Gem" "desc" --metadata JSON' does."""
+    return craft_artifact(["Gem", "desc", "--metadata", metadata])
 
 
-def test_validate_metadata_nested_objects() -> None:
-    """JSON with nested objects or arrays should return None (shallow only)."""
-    result = _validate_metadata('{"nested": {"a": 1}}')
-    assert result is None
+def _assert_metadata_refused(conn: sqlite3.Connection, metadata: str) -> None:
+    """The craft is refused with the metadata error and nothing is stored."""
+    result = _craft_with_metadata(metadata)
+    assert result["success"] is False, result
+    assert "Invalid metadata" in result["error"]
+    assert conn.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0] == 0
 
-    result = _validate_metadata('{"list": [1, 2, 3]}')
-    assert result is None
+
+def test_validate_metadata_valid_json(craft_db: sqlite3.Connection) -> None:
+    """Valid shallow JSON dict is accepted and stored as the parsed dict.
+
+    Mutant: `for value in data.values():` -> `for value in [{}]:` (every dict refused) reddens this.
+    """
+    result = _craft_with_metadata('{"key": "value", "count": 42}')
+    assert result["success"] is True, result
+    row = craft_db.execute("SELECT metadata FROM artifacts WHERE id = ?", (result["artifact_id"],)).fetchone()
+    stored = json.loads(row["metadata"])
+    assert isinstance(stored, dict)
+    assert stored["key"] == "value"
+    assert stored["count"] == 42
 
 
-def test_validate_metadata_non_dict_json() -> None:
-    """JSON that parses to a non-dict (list, string, etc.) should return None."""
-    result = _validate_metadata("[1, 2, 3]")
-    assert result is None
+def test_validate_metadata_malformed_json(craft_db: sqlite3.Connection) -> None:
+    """Malformed JSON string is refused.
 
-    result = _validate_metadata('"just a string"')
-    assert result is None
+    Mutant: the decode-error branch's `return None` -> `return {}` reddens this.
+    """
+    _assert_metadata_refused(craft_db, "{not valid json")
+
+
+def test_validate_metadata_nested_objects(craft_db: sqlite3.Connection) -> None:
+    """JSON with nested objects or arrays is refused (shallow only).
+
+    Mutant: `isinstance(value, (dict, list))` -> `isinstance(value, (list,))` reddens this (the dict case).
+    """
+    _assert_metadata_refused(craft_db, '{"nested": {"a": 1}}')
+    _assert_metadata_refused(craft_db, '{"list": [1, 2, 3]}')
+
+
+def test_validate_metadata_non_dict_json(craft_db: sqlite3.Connection) -> None:
+    """JSON that parses to a non-dict (list, string, etc.) is refused.
+
+    Mutant: the non-dict branch's `return None` -> `return {}` reddens this.
+    """
+    _assert_metadata_refused(craft_db, "[1, 2, 3]")
+    _assert_metadata_refused(craft_db, '"just a string"')
 
 
 # =============================================================================
@@ -114,7 +154,7 @@ def test_craft_artifact_no_args() -> None:
     assert "Usage" in result["error"]
 
 
-@patch("aipass.commons.apps.modules.commons_identity.get_caller_branch", return_value={"name": "TEST_BRANCH"})
+@patch("aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch", return_value={"name": "TEST_BRANCH"})
 @patch("aipass.commons.apps.handlers.artifacts.artifact_ops.get_db")
 @patch("aipass.commons.apps.handlers.artifacts.artifact_ops.close_db")
 @patch("aipass.commons.apps.handlers.artifacts.artifact_ops.json_handler", autospec=True)
@@ -123,13 +163,13 @@ def test_craft_artifact_success(
     mock_close: MagicMock,
     mock_get_db: MagicMock,
     mock_caller: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Crafting an artifact with valid args should return success with artifact metadata."""
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda conn: None
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     result = craft_artifact(["Starforge Hammer", "A legendary smithing tool", "--rarity", "rare"])
@@ -157,13 +197,13 @@ def test_craft_artifact_success(
 def test_list_artifacts_with_data(
     mock_close: MagicMock,
     mock_get_db: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """list_artifacts with --all should return inserted artifacts."""
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda conn: None
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     conn.execute(
@@ -193,18 +233,38 @@ def test_inspect_artifact_no_args() -> None:
 
 
 # =============================================================================
-# _now_utc — pure function
+# sweep's clock — the ISO-Z "now" sweep_expired compares expires_at against
 # =============================================================================
 
 
-def test_now_utc_returns_iso_format() -> None:
-    """_now_utc should return a string in ISO format ending with Z."""
-    result = _now_utc()
-    assert isinstance(result, str)
-    assert result.endswith("Z")
-    # Should parse without error
-    parsed = datetime.strptime(result, "%Y-%m-%dT%H:%M:%SZ")
-    assert parsed is not None
+@patch("aipass.commons.apps.handlers.artifacts.trade_ops.get_db")
+@patch("aipass.commons.apps.handlers.artifacts.trade_ops.close_db")
+def test_now_utc_returns_iso_format(
+    mock_close: MagicMock,
+    mock_get_db: MagicMock,
+    initialized_db: sqlite3.Connection,
+) -> None:
+    """sweep_expired's "now" is UTC in ISO format ending with Z, comparable to a stored expires_at.
+
+    An item two minutes past its ISO-Z expiry is swept; one an hour short of it is kept.
+    Mutant: _now_utc's `strftime("%Y-%m-%dT%H:%M:%SZ")` -> `strftime("%Y-%m-%d %H:%M:%S")` reddens this.
+    """
+    mock_get_db.return_value = initialized_db
+    mock_close.side_effect = lambda conn: None
+    _insert_test_agent(initialized_db)
+
+    now = datetime.now(timezone.utc)
+    for name, when in (("Just Expired", now - timedelta(minutes=2)), ("Still Fresh", now + timedelta(hours=1))):
+        initialized_db.execute(
+            "INSERT INTO artifacts (name, type, creator, owner, rarity, description, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, "found", "TEST_BRANCH", "TEST_BRANCH", "common", "d", when.strftime("%Y-%m-%dT%H:%M:%SZ")),
+        )
+    initialized_db.commit()
+
+    assert sweep_expired() == 1
+    left = [r["name"] for r in initialized_db.execute("SELECT name FROM artifacts")]
+    assert left == ["Still Fresh"]
 
 
 # =============================================================================
@@ -217,13 +277,13 @@ def test_now_utc_returns_iso_format() -> None:
 def test_sweep_expired_removes_expired_items(
     mock_close: MagicMock,
     mock_get_db: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """sweep_expired should remove artifacts whose expires_at is in the past."""
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda conn: None
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     past = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -278,7 +338,7 @@ def test_seal_capsule_no_args() -> None:
     assert "Usage" in result["error"]
 
 
-@patch("aipass.commons.apps.modules.commons_identity.get_caller_branch", return_value={"name": "TEST_BRANCH"})
+@patch("aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch", return_value={"name": "TEST_BRANCH"})
 @patch("aipass.commons.apps.handlers.artifacts.capsule_ops.get_db")
 @patch("aipass.commons.apps.handlers.artifacts.capsule_ops.close_db")
 @patch("aipass.commons.apps.handlers.artifacts.capsule_ops.json_handler", autospec=True)
@@ -293,7 +353,7 @@ def test_seal_capsule_success(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda conn: None
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     result = seal_capsule(["Launch Day Note", "We did it!", "30"])
@@ -327,7 +387,7 @@ def test_list_capsules_empty_db(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda conn: None
 
-    result = list_capsules([])
+    result = list_capsules()
 
     assert result["success"] is True
     assert result["capsules"] == []
@@ -367,9 +427,7 @@ def test_artifact_handle_command_routes_craft(
         "description": "d",
     }
 
-    from aipass.commons.apps.modules.artifact import handle_command
-
-    result = handle_command("craft", ["Test", "desc"])
+    result = artifact_module.handle_command("craft", ["Test", "desc"])
 
     assert result is True
     mock_craft.assert_called_once_with(["Test", "desc"])
@@ -393,9 +451,7 @@ def test_trade_handle_command_routes_gift(
         "recipient": "B",
     }
 
-    from aipass.commons.apps.modules.trade import handle_command
-
-    result = handle_command("gift", ["1", "@BRANCH"])
+    result = trade_module.handle_command("gift", ["1", "@BRANCH"])
 
     assert result is True
     gift_mock.assert_called_once_with(["1", "@BRANCH"])
@@ -418,9 +474,201 @@ def test_capsule_handle_command_routes_capsule(
         "opens_at": "2026-04-04T00:00:00Z",
     }
 
-    from aipass.commons.apps.modules.capsule import handle_command
-
-    result = handle_command("capsule", ["Title", "Content", "7"])
+    result = capsule_module.handle_command("capsule", ["Title", "Content", "7"])
 
     assert result is True
     seal_mock.assert_called_once_with(["Title", "Content", "7"])
+
+
+def test_sweep_expired_answers_minus_one_when_the_database_fails() -> None:
+    """A failed sweep answers -1, never 0: 0 means "nothing expired", so the caller could not tell the two apart.
+
+    get_db is stubbed to raise, so nothing reaches the live database.
+    Mutant: the handler returns 0 again - the failure reads as "nothing expired".
+    """
+    with patch(
+        "aipass.commons.apps.handlers.artifacts.trade_ops.get_db",
+        side_effect=sqlite3.OperationalError("database is locked"),
+    ):
+        assert sweep_expired() == -1
+
+
+def test_gift_trade_mint_collab_name_an_unreadable_registry(tmp_path) -> None:
+    """An unreadable registry is reported as such, never as "branch not found".
+
+    The registry is a tmp_path file holding broken JSON; each command stops at the name lookup, before any
+    caller detection or database write.
+    Mutant: trade_ops/artifact_ops _resolve_branch_name returns None again - the error reads "not found".
+    """
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text("{not json", encoding="utf-8")
+    with (
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.BRANCH_REGISTRY_PATH", str(registry)),
+        patch("aipass.commons.apps.handlers.artifacts.artifact_ops.BRANCH_REGISTRY_PATH", str(registry)),
+    ):
+        results = [
+            gift_artifact(["1", "@ghost"]),
+            trade_module.trade_artifact(["1", "2", "@ghost"]),
+            trade_module.mint_event_artifact(["Event", "@ghost"]),
+            artifact_module.collab_artifact(["Name", "Desc", "@ghost"]),
+        ]
+    assert [r["success"] for r in results] == [False] * 4
+    assert [r["error"].startswith("Branch registry unreadable") for r in results] == [True] * 4
+
+
+def test_find_command_says_the_expired_sweep_failed_and_still_finds(
+    initialized_db: sqlite3.Connection,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """'commons find' still picks the item up when the expired-item sweep fails, and says the sweep failed.
+
+    Before the cure find_item dropped sweep_expired's -1 on the floor: the user was told nothing, and expired
+    drops piled up unseen. The find itself stays safe, since it checks the item's own expires_at.
+    sweep_expired is stubbed to answer -1; the find runs against the tmp database with a patched caller.
+    Mutants (runner, killed): trade_ops `sweep_failed = sweep_expired() == -1` -> `sweep_failed = False`;
+    trade `if result.get("sweep_failed"):` -> `if False:`.
+    """
+    _insert_test_agent(initialized_db)
+    _insert_test_agent(initialized_db, "FINDER")
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cursor = initialized_db.execute(
+        "INSERT INTO artifacts (name, type, creator, owner, rarity, description, expires_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("Lost Coin", "found", "TEST_BRANCH", "TEST_BRANCH", "common", "Shiny", future),
+    )
+    initialized_db.commit()
+    artifact_id = str(cursor.lastrowid)
+
+    with (
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.sweep_expired", return_value=-1) as sweep,
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.get_db", return_value=initialized_db),
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.close_db") as close,
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
+            return_value={"name": "FINDER"},
+        ),
+        patch("aipass.commons.apps.modules.trade.json_handler", autospec=True),
+    ):
+        handled = trade_module.handle_command("find", [artifact_id])
+
+    sweep.assert_called_once_with()
+    close.assert_called_once_with(initialized_db)
+    assert handled is True
+    captured = capsys.readouterr()
+    assert "Item Found!" in captured.out
+    assert "sweep of expired items failed" in " ".join(captured.err.split())
+    row = initialized_db.execute("SELECT owner FROM artifacts WHERE id = ?", (int(artifact_id),)).fetchone()
+    assert row["owner"] == "FINDER"
+
+
+def test_craft_artifact_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    The lookup raises before any database is opened.
+    """
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.artifacts.artifact_ops.get_db") as db,
+    ):
+        result = craft_artifact(["Pin Relic", "made by a pin"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_seal_capsule_refuses_naming_a_failed_caller_lookup():
+    """The capsule family names a broken caller lookup too (DPLAN-0354 leg 3)."""
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.artifacts.capsule_ops.get_db") as db,
+    ):
+        result = seal_capsule(["Pin", "sealed by a pin", "3"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        pytest.param(trade_module.gift_artifact, ["1", "@pal"], id="gift_artifact"),
+        pytest.param(trade_module.trade_artifact, ["1", "2", "@pal"], id="trade_artifact"),
+        pytest.param(trade_module.drop_item, ["Coin", "Shiny", "lobby"], id="drop_item"),
+        pytest.param(trade_module.find_item, ["1"], id="find_item"),
+    ],
+)
+def test_trade_commands_refuse_naming_a_failed_caller_lookup(tmp_path, command, args) -> None:
+    """Each trade_ops command names a broken caller lookup and opens no database."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text(json.dumps({"branches": [{"name": "PAL"}]}), encoding="utf-8")
+    with (
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.BRANCH_REGISTRY_PATH", str(registry)),
+        # find_item sweeps expired drops (its own get_db) before the lookup; stubbed so only the lookup is guarded.
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.sweep_expired", return_value=0),
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.get_db") as db,
+    ):
+        result = command(args)
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        pytest.param(artifact_module.list_artifacts, [], id="list_artifacts"),
+        pytest.param(artifact_module.collab_artifact, ["Pact", "made by a pin", "@pal"], id="collab_artifact"),
+        pytest.param(artifact_module.sign_artifact, ["1"], id="sign_artifact"),
+    ],
+)
+def test_artifact_commands_refuse_naming_a_failed_caller_lookup(tmp_path, command, args) -> None:
+    """Each artifact_ops command names a broken caller lookup and opens no database."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text(json.dumps({"branches": [{"name": "PAL"}]}), encoding="utf-8")
+    with (
+        patch("aipass.commons.apps.handlers.artifacts.artifact_ops.BRANCH_REGISTRY_PATH", str(registry)),
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.artifacts.artifact_ops.get_db") as db,
+    ):
+        result = command(args)
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_open_capsule_refuses_naming_a_failed_caller_lookup() -> None:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.artifacts.capsule_ops.get_db") as db,
+    ):
+        result = open_capsule(["1"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

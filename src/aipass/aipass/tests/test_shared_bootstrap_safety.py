@@ -1,23 +1,28 @@
 # =================== AIPass ====================
 # Name: test_shared_bootstrap_safety.py
 # Description: Guard test — shared/'s four modules must stay stdlib-only (pre-drone)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-10
-# Modified: 2026-09-04
+# Modified: 2026-09-27
 # =============================================
 
-"""Guard test: importing aipass.aipass.shared must NOT pull in branch dependencies.
+"""Tests that shared/project_home.py and its sibling shared/ modules import with no branch dependency."""
 
-The shared/ package is used by bootstrap.py during `aipass init` on fresh machines
-where drone/prax/trigger don't exist yet. If shared/ ever imports a branch
-dependency, init breaks. This test enforces the invariant via subprocess isolation.
+# Guard test: importing aipass.aipass.shared must NOT pull in branch dependencies.
+#
+# The shared/ package is used by bootstrap.py during `aipass init` on fresh machines
+# where drone/prax/trigger don't exist yet. If shared/ ever imports a branch
+# dependency, init breaks. This test enforces the invariant via subprocess isolation.
+#
+# Four modules, not five: ``shared/json_handler.py`` retired to ``shared/.archive/``
+# on 2026-09-04 (DPLAN-0325 / FPLAN-0489) once the fleet moved to the one shim over
+# prax's service. Its stdlib-only scan lives in prax's suite now, where the service
+# does — a leg for it here would import a file that no longer exists. The remaining
+# four stay: bootstrap has 22 production imports of them and no drone to fall back on.
 
-Four modules, not five: ``shared/json_handler.py`` retired to ``shared/.archive/``
-on 2026-09-04 (DPLAN-0325 / FPLAN-0489) once the fleet moved to the one shim over
-prax's service. Its stdlib-only scan lives in prax's suite now, where the service
-does — a leg for it here would import a file that no longer exists. The remaining
-four stay: bootstrap has 22 production imports of them and no drone to fall back on.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — project_home, registry_discovery and scaffold_content's
+# seedgo: no-test-needed(covered_elsewhere) — own return values; see tests/test_project_home.py and tests/test_adopt.py
 
 import subprocess
 import sys
@@ -60,6 +65,7 @@ class TestSharedBootstrapSafety:
             [sys.executable, "-c", SCRIPT],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
         )
         assert result.returncode == 0, f"shared/ pulled in branch dependencies:\n{result.stdout}\n{result.stderr}"

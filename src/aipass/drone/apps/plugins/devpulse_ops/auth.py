@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.2.1
+# Version: 1.2.8
 # Created: 2026-03-30
-# Modified: 2026-09-13
+# Modified: 2026-10-04
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -39,6 +39,9 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "diff",
             "log",
             "show",
+            "blame",
+            "tracked",
+            "export",
             "remote",
             "lock",
             "issue",
@@ -47,6 +50,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "branches",
             "tag-list",
         ],
+        # export reads the repo and writes only the empty directory it is handed
         "description": "Read-only — available to all branches",
     },
     "owner": {
@@ -54,6 +58,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "commit",
             "checkout",
             "sync",
+            "merge-main",
             "unlock",
             "merge",
             "smart-sync",
@@ -64,10 +69,56 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "delete-branch",
             "prune-temp",
             "tag",
+            "issue-write",
+            "run-write",
+            "workflow-write",
         ],
         "description": "Write operations — the project's own manager only",
     },
 }
+
+# The gh passthroughs split by subcommand (DPLAN-0356 leg 3, the owner's ruling of
+# 2026-09-30: only the admin writes, harmless reads stay fleet-wide). A read asks
+# the gate for the command itself (global tier); every write asks for
+# "<command>-write" (owner tier). A subcommand in neither list is refused.
+GH_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
+    "issue": {
+        "read": ("list", "view", "status"),
+        "write": (
+            "create",
+            "close",
+            "comment",
+            "delete",
+            "develop",
+            "edit",
+            "lock",
+            "pin",
+            "reopen",
+            "transfer",
+            "unlock",
+            "unpin",
+        ),
+    },
+    "run": {"read": ("list", "view", "watch"), "write": ("cancel", "delete", "download", "rerun")},
+    "workflow": {"read": ("list", "view"), "write": ("disable", "enable", "run")},
+}
+
+
+def gh_access_key(command: str, args: list[str]) -> str | None:
+    """The tier key a gh passthrough asks the gate for, or None when its subcommand is unknown.
+
+    No subcommand at all is gh's own usage page, a read. The subcommand must sit
+    in the first slot: a flag there (gh takes `issue -R x/y create`) is unknown.
+    """
+    if not args:
+        return command
+    table = GH_SUBCOMMANDS[command]
+    if args[0] in table["read"]:
+        return command
+    if args[0] in table["write"]:
+        return f"{command}-write"
+    return None
+
 
 # Owner-tier is earned, not listed (DPLAN-0281, the owner's ruling). A caller holds it
 # iff ALL of these hold — devpulse-in-AIPass qualifies through the general rule,
@@ -247,6 +298,19 @@ def _registry_entry(registry_data: dict, name: str) -> dict | None:
     return None
 
 
+def _resolve_location(path: Path) -> Path:
+    """Resolve a path the owner gate binds authority to: the registry's directory or a recorded home.
+
+    Product reason: the gate's one door to ``Path.resolve``, so both anchors of
+    path-binding resolve the same way and every failure is caught at the gate.
+    Test reason, said plainly: a resolve failure cannot be built in tmp_path on
+    every host (a symlink loop raises RuntimeError on 3.12, nothing on 3.13, and
+    symlinks are not portable), so tests replace this name rather than pathlib's
+    process-wide ``Path.resolve``.
+    """
+    return path.resolve()
+
+
 def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
     """Resolve a registry entry's recorded path, or None when it records none.
 
@@ -256,6 +320,9 @@ def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
     as written, so resolve here too rather than trusting the loader to have done
     it: an unresolved relative path would resolve against CWD and bind authority
     to wherever the caller happened to be standing.
+
+    Raises OSError when a recorded path is present but cannot be resolved, so
+    that failure is never reported as an entry that records no path.
     """
     raw = entry.get("path")
     if not raw:
@@ -264,12 +331,19 @@ def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
     if not recorded.is_absolute():
         recorded = repo_root / recorded
     try:
-        return recorded.resolve()
+        return _resolve_location(recorded)
     except OSError as exc:
-        # Returning None here reads downstream as "records no path", which would
+        # Raised, not None: None reads downstream as "records no path", which would
         # send someone hunting a registry entry that is in fact present and fine.
         logger.warning("Registry path %s could not be resolved: %s", recorded, exc)
-        return None
+        raise
+    except RuntimeError as exc:
+        # Python 3.12 answers a symlink loop in a non-strict resolve with
+        # RuntimeError, not OSError. Raised as OSError so the owner gate's refusal
+        # catches it: a failure is a refusal, never a traceback out of the gate.
+        # Named by its own type: RecursionError is a RuntimeError too, and not a loop.
+        logger.warning("Registry path %s could not be resolved: %s: %s", recorded, type(exc).__name__, exc)
+        raise OSError(f"{type(exc).__name__}: {exc}") from exc
 
 
 def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
@@ -338,8 +412,28 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
 
     # The registry file's own directory is the repo root by construction, which
     # keeps path-binding anchored to the SAME registry the checks above used.
-    repo_root = registry_path.parent.resolve()
-    recorded = _recorded_home(entry, repo_root)
+    try:
+        repo_root = _resolve_location(registry_path.parent)
+    except (OSError, RuntimeError) as exc:
+        # Fails CLOSED as a named refusal: before, this resolve sat outside any try,
+        # and a loop or an unreadable parent left the gate as a traceback.
+        logger.warning(
+            "Registry directory %s could not be resolved: %s: %s", registry_path.parent, type(exc).__name__, exc
+        )
+        return Refusal(
+            (
+                f"the directory of {registry_path.name} could not be resolved ({type(exc).__name__}: {exc}) — "
+                "cannot bind authority to a location"
+            ),
+            _AUTHORITY,
+        )
+    try:
+        recorded = _recorded_home(entry, repo_root)
+    except OSError as exc:
+        return Refusal(
+            f"registry path for '{caller.name}' could not be resolved ({exc}) — cannot bind authority to a location",
+            _AUTHORITY,
+        )
     if recorded is None:
         return Refusal(
             f"registry entry for '{caller.name}' records no path — cannot bind authority to a location", _AUTHORITY

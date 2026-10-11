@@ -3,7 +3,7 @@
 # Description: Gap detection, missed-window enumeration, catch-up queue and drain policy
 # Version: 1.0.0
 # Created: 2026-09-08
-# Modified: 2026-09-08
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -158,6 +158,9 @@ def detect_gap(runstate: dict, now: Optional[datetime] = None) -> Optional[dict]
     Returns None when there is no last_tick at all. That is the first tick after
     this lands, and it has no history to reason from; queueing off an unknown
     past would invent windows the fleet never actually missed.
+
+    An unparseable last_tick also answers None, for the same reason: a stamp
+    nobody can read is no history, and this tick's record_tick overwrites it.
     """
     if now is None:
         now = datetime.now()
@@ -266,7 +269,11 @@ def _enumerate_daily(schedule: dict, gap_start: datetime, gap_end: datetime) -> 
 
 
 def _enumerate_hourly(schedule: dict, gap_start: datetime, gap_end: datetime) -> List[str]:
-    """Hourly windows that both opened and closed inside the gap."""
+    """Hourly windows that both opened and closed inside the gap.
+
+    An unreadable ``time`` answers [] (no windows), because runstate's hourly
+    due check refuses the same value, so the job could never have fired then either.
+    """
     # An hourly job spells its target as ``time``, an INT MINUTE past the hour
     # ("30"), not "HH:MM" — the same field name as daily carrying a different
     # shape. Read it the way _is_hourly_due reads it or the enumeration and the
@@ -329,6 +336,9 @@ def _within_max_age(schedule: dict, instant: str, now: datetime) -> bool:
     Unlimited by default: The owner's ten-day case wants exactly one wake however
     long it has been. A job that sets the bound is saying its own late run stops
     being useful after N hours.
+
+    An unreadable bound or instant answers True, the same as an unset bound:
+    one late wake with an honest header costs less than a window dropped unreported.
     """
     limit = schedule.get(CATCH_UP_MAX_AGE_FIELD)
     if limit is None:
@@ -540,7 +550,11 @@ def record_attempt(entry: dict, now: Optional[datetime] = None) -> bool:
 
 
 def _humanise_ago(then: Optional[str], now: datetime) -> str:
-    """ " (2 days ago)" for a header, or "" when the instant is unknown/unreadable."""
+    """ " (2 days ago)" for a header, or "" when the instant is unknown/unreadable.
+
+    Unreadable answers "" like unknown, because the header still prints the raw
+    instant beside it and a guessed age would be a false fact about time.
+    """
     if not then:
         return ""
     try:

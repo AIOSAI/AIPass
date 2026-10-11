@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: welcome_handler.py
 # Description: Welcome & Onboarding Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -31,7 +31,13 @@ def create_welcome_post(conn: sqlite3.Connection, branch_name: str) -> Optional[
         branch_name: The branch name to welcome
 
     Returns:
-        Post ID of the created welcome post, or None if creation failed
+        Post ID of the created welcome post, or None if the branch was already welcomed
+
+    Raises:
+        sqlite3.Error: the post or its mention could not be written. The transaction is rolled back first,
+            so no half-written welcome post is left for a later commit to publish (commons' decision,
+            DPLAN-0354 leg 3: None used to mean both "already welcomed" and "failed", and the scan could
+            not tell a failure from a skip).
     """
     if has_been_welcomed(conn, branch_name):
         return None
@@ -56,12 +62,13 @@ def create_welcome_post(conn: sqlite3.Connection, branch_name: str) -> Optional[
         )
 
         conn.commit()
-        json_handler.log_operation("create_welcome_post", {"branch": branch_name, "post_id": post_id})
-        return post_id
-
-    except Exception as e:
+    except sqlite3.Error as e:
         logger.error(f"[welcome_handler] Failed to create welcome post for {branch_name}: {e}")
-        return None
+        conn.rollback()
+        raise
+
+    json_handler.log_operation("create_welcome_post", {"branch": branch_name, "post_id": post_id})
+    return post_id
 
 
 def has_been_welcomed(conn: sqlite3.Connection, branch_name: str) -> bool:
@@ -113,26 +120,35 @@ def get_onboarding_nudge(conn: sqlite3.Connection, branch_name: str) -> Optional
     return None
 
 
-def welcome_new_branches(conn: sqlite3.Connection) -> List[str]:
+def welcome_new_branches(conn: sqlite3.Connection, failed: Optional[List[str]] = None) -> List[str]:
     """
     Scan agents table and create welcome posts for any unwelcomed branches.
 
-    Skips the SYSTEM agent.
+    Skips the SYSTEM agent. A branch whose welcome post raises sqlite3.Error is logged, appended to
+    `failed` when the caller passes a list, and the scan goes on to the next branch.
 
     Args:
         conn: Database connection
+        failed: Optional list the scan appends the name of every branch it failed to welcome to
 
     Returns:
         List of branch names that were newly welcomed
     """
     rows = conn.execute("SELECT branch_name FROM agents WHERE branch_name != 'SYSTEM'").fetchall()
 
+    failures = failed if failed is not None else []
     welcomed = []
     for row in rows:
         name = row["branch_name"]
-        if not has_been_welcomed(conn, name):
+        if has_been_welcomed(conn, name):
+            continue
+        try:
             post_id = create_welcome_post(conn, name)
-            if post_id is not None:
-                welcomed.append(name)
+        except sqlite3.Error as e:
+            logger.warning(f"[welcome_handler] Welcome scan could not welcome {name}, going on: {e}")
+            failures.append(name)
+            continue
+        if post_id is not None:
+            welcomed.append(name)
 
     return welcomed

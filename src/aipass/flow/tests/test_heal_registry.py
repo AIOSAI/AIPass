@@ -3,21 +3,13 @@
 # Description: Tests for heal_registry doctrine self-heal handler
 # Version: 1.0.0
 # Created: 2026-07-29
-# Modified: 2026-07-29
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for the registry doctrine self-heal handler.
+"""Tests for apps/handlers/registry/heal_registry.py."""
 
-Covers the four corruption classes the doctrine must auto-fix:
-1. Number collision   -> resolved_collision
-2. Unregistered file  -> registered_unregistered_file
-3. Wrong-prefix row   -> removed_ghost_row / rehomed_wrong_prefix_row /
-                         removed_orphaned_wrong_prefix_row
-4. Missing-file orphan -> auto_closed_missing_file
-
-Invariant asserted throughout: on-disk .md files are NEVER renamed,
-moved or deleted by this handler — only registry JSON rows change.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import copy
 from pathlib import Path
@@ -25,15 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-
-# ─── Import helpers ───────────────────────────────────────
-
-
-def _import_heal_registry():
-    """Import heal_registry handler module and return it."""
-    import aipass.flow.apps.handlers.registry.heal_registry as mod
-
-    return mod
+from aipass.flow.apps.handlers.registry import heal_registry as mod
 
 
 # ─── Fake registry store (mimics load/save round-tripping to disk) ───
@@ -55,7 +39,7 @@ class FakeRegistryStore:
         key = registry_file or "fplan_registry.json"
         return copy.deepcopy(self.registries.get(key, {"plans": {}, "next_number": 1}))
 
-    def save(self, registry, registry_file=None):
+    def save(self, registry, registry_file=None) -> bool:
         """Store a detached copy of the registry and record the write."""
         key = registry_file or "fplan_registry.json"
         self.registries[key] = copy.deepcopy(registry)
@@ -68,10 +52,11 @@ class FakeRegistryStore:
 
 
 def _make_plan_file(directory: Path, name: str) -> Path:
-    """Create a real plan .md file so the filesystem walk can find it."""
+    """Create a real plan .md file, opening with its plan header, so the walk counts it."""
     directory.mkdir(parents=True, exist_ok=True)
     plan_file = directory / name
-    plan_file.write_text(f"# {name}\nContent that must never be touched.\n", encoding="utf-8")
+    identity = name.removesuffix(".md").split("_")[0]
+    plan_file.write_text(f"# {identity}: plan\nContent that must never be touched.\n", encoding="utf-8")
     return plan_file
 
 
@@ -85,6 +70,41 @@ def quiet_cross_prefix():
         yield mock
 
 
+def _heal(root, store, types, seats=None):
+    """Run the PUBLIC doctrine heal against a tmp_path world; return its heal actions.
+
+    The world is sealed on every side the heal reads or writes: plan files are
+    walked under ``root`` (a tmp_path), every registry read and write goes to the
+    in-memory ``store`` (injected, never flow_json/), the plan-type table is
+    handed in, and the citizen seat index — which would read the live ecosystem
+    registry — is handed in too.
+    """
+    with (
+        patch.object(mod, "_load_template_registry", return_value={"types": types}),
+        patch.object(mod, "_citizen_seat_index", return_value=seats or {}),
+    ):
+        return mod.heal_registry_doctrine_impl(root, store.load, store.save)["healed"]
+
+
+def _heal_orphans(root, store, seats):
+    """The doctrine heal over one FPLAN type with a handed-in seat index: (heals, quarantined)."""
+    with (
+        patch.object(mod, "_load_template_registry", return_value={"types": {"flow_plans": {"prefix": "FPLAN"}}}),
+        patch.object(mod, "_citizen_seat_index", return_value=seats),
+    ):
+        result = mod.heal_registry_doctrine_impl(root, store.load, store.save)
+    return result["healed"], result["quarantined"]
+
+
+def _is_orphan_through_heal(root, location, seats):
+    """Did the public heal treat a lone closed row at *location* as an orphan (heal or quarantine)?"""
+    store = FakeRegistryStore(
+        {"fplan_registry.json": {"plans": {"0001": {"status": "closed", "location": str(location)}}}}
+    )
+    actions, quarantined = _heal_orphans(root, store, seats)
+    return bool(actions or quarantined)
+
+
 # ═══════════════════════════════════════════════════════════
 # 1. _build_plan_file_index
 # ═══════════════════════════════════════════════════════════
@@ -95,35 +115,35 @@ class TestBuildPlanFileIndex:
 
     def test_indexes_by_prefix_and_number(self, tmp_path):
         """Same number under different prefixes must stay separate entries."""
-        mod = _import_heal_registry()
         _make_plan_file(tmp_path, "DPLAN-0011_alpha_2026-01-01.md")
         _make_plan_file(tmp_path / "sub", "TDPLAN-0011_beta_2026-01-02.md")
         _make_plan_file(tmp_path, "PPLAN-0011.md")
+        types = {"d": {"prefix": "DPLAN"}, "td": {"prefix": "TDPLAN"}, "p": {"prefix": "PPLAN"}}
 
-        index = mod._build_plan_file_index(tmp_path)
+        actions = _heal(tmp_path, FakeRegistryStore(), types)
 
-        assert ("DPLAN", "0011") in index
-        assert ("TDPLAN", "0011") in index
-        assert ("PPLAN", "0011") in index
-        assert len(index) == 3
+        # Mutant: `key = (match.group(1), match.group(2))` -> `key = ("", match.group(2))` reddens this.
+        registered = {(a["prefix"], a["number"]) for a in actions if a["action"] == "registered_unregistered_file"}
+        assert registered == {("DPLAN", "0011"), ("TDPLAN", "0011"), ("PPLAN", "0011")}
 
     def test_skips_ignored_folders_and_non_plan_files(self, tmp_path):
         """IGNORE_FOLDERS pruning and PLAN_PATTERN filtering both apply."""
-        mod = _import_heal_registry()
         _make_plan_file(tmp_path / ".git", "FPLAN-0001.md")
         _make_plan_file(tmp_path / ".archive", "FPLAN-0002.md")
         _make_plan_file(tmp_path, "FPLAN-0003.md")
         (tmp_path / "README.md").write_text("not a plan", encoding="utf-8")
         (tmp_path / "FPLAN-ABC.md").write_text("bad number", encoding="utf-8")
 
-        index = mod._build_plan_file_index(tmp_path)
+        actions = _heal(tmp_path, FakeRegistryStore(), {"f": {"prefix": "FPLAN"}})
 
-        assert index == {("FPLAN", "0003"): tmp_path / "FPLAN-0003.md"}
+        # Mutant: `if d not in IGNORE_FOLDERS` -> `if d` reddens this.
+        assert [(a["action"], a["file"]) for a in actions] == [
+            ("registered_unregistered_file", str(tmp_path / "FPLAN-0003.md"))
+        ]
 
     def test_missing_root_is_tolerated(self, tmp_path):
-        """A nonexistent root yields an empty index, not an exception."""
-        mod = _import_heal_registry()
-        assert mod._build_plan_file_index(tmp_path / "nope") == {}
+        """A nonexistent root yields no heals, not an exception."""
+        assert _heal(tmp_path / "nope", FakeRegistryStore(), {"f": {"prefix": "FPLAN"}}) == []
 
 
 # ═══════════════════════════════════════════════════════════
@@ -131,22 +151,84 @@ class TestBuildPlanFileIndex:
 # ═══════════════════════════════════════════════════════════
 
 
+class TestNotAPlanRows:
+    """Case 6 (leg 9): an open row whose present file is not a plan is closed, registry only.
+
+    Live: FPLAN 0564 to 0583 named reports the scan had renamed before leg 7.
+    Red first on the heal of leg 8. Mutants leg9 N1 (sweep not called), N2 (None
+    closed too), N3 (reason changed), N4 (closed row not saved) redden tests here.
+    """
+
+    REPORT = "FPLAN-0508 rows seedgo\n"
+
+    def test_a_row_naming_a_report_is_closed_and_the_report_stays(self, tmp_path, quiet_cross_prefix):
+        report = tmp_path / "devpulse" / "artifacts" / "reports" / "FPLAN-0516.md"
+        report.parent.mkdir(parents=True)
+        report.write_text(self.REPORT, encoding="utf-8")
+        store = FakeRegistryStore(
+            {"fplan_registry.json": {"plans": {"0569": {"status": "open", "file_path": str(report)}}}}
+        )
+
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
+
+        assert actions == [
+            {
+                "action": "closed_not_a_plan",
+                "prefix": "FPLAN",
+                "registry_file": "fplan_registry.json",
+                "number": "0569",
+                "file": str(report),
+            }
+        ]
+        row = store.plans("fplan_registry.json")["0569"]
+        assert (row.get("status"), row.get("closed_reason"), row.get("file_path")) == (
+            "closed",
+            "not_a_plan",
+            str(report),
+        )
+        assert report.read_text(encoding="utf-8") == self.REPORT
+        assert sorted(p.name for p in tmp_path.rglob("*.md")) == ["FPLAN-0516.md"]
+
+    def test_real_plans_in_both_header_forms_stay_open(self, tmp_path, quiet_cross_prefix):
+        """The guard against the risk named in leg 8: a real plan's row is never closed."""
+        colon = _make_plan_file(tmp_path, "DPLAN-0011_colon_2026-10-04.md")
+        dash = tmp_path / "FPLAN-0300_dash_2026-10-04.md"
+        dash.write_text("# FPLAN-0300 - an older plan\n", encoding="utf-8")
+        store = FakeRegistryStore(
+            {
+                "dplan_registry.json": {"plans": {"0011": {"status": "open", "file_path": str(colon)}}},
+                "fplan_registry.json": {"plans": {"0300": {"status": "open", "file_path": str(dash)}}},
+            }
+        )
+
+        actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}, "f": {"prefix": "FPLAN"}})
+
+        assert actions == []
+        assert store.plans("dplan_registry.json")["0011"]["status"] == "open"
+        assert store.plans("fplan_registry.json")["0300"]["status"] == "open"
+
+    def test_an_unreadable_file_leaves_its_row_open(self, tmp_path, quiet_cross_prefix):
+        """is_plan_file None: nobody can tell, so the row is neither closed nor touched."""
+        unreadable = tmp_path / "FPLAN-0564.md"
+        unreadable.write_bytes(b"\xff\xfe# FPLAN-0564: x\n")
+        row = {"status": "open", "file_path": str(unreadable)}
+        store = FakeRegistryStore({"fplan_registry.json": {"plans": {"0564": row}}})
+
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
+
+        assert actions == []
+        assert store.plans("fplan_registry.json")["0564"] == {"status": "open", "file_path": str(unreadable)}
+
+
 class TestUnregisteredFile:
     """A real plan file with no registry row gets registered."""
 
     def test_registers_under_own_number(self, tmp_path, quiet_cross_prefix):
         """A free number is claimed as-is, with self_healed marked True."""
-        mod = _import_heal_registry()
         plan_file = _make_plan_file(tmp_path, "DPLAN-0042_new_thing_2026-07-01.md")
         store = FakeRegistryStore({"dplan_registry.json": {"plans": {}, "next_number": 40}})
 
-        actions = mod._heal_type_registry(
-            "DPLAN",
-            "dplan_registry.json",
-            {("DPLAN", "0042"): plan_file},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}})
 
         assert len(actions) == 1
         assert actions[0]["action"] == "registered_unregistered_file"
@@ -159,26 +241,40 @@ class TestUnregisteredFile:
         # File itself is untouched — by design this handler never writes .md files.
         assert plan_file.exists()
 
+    def test_a_report_named_like_a_plan_is_not_registered(self, tmp_path, quiet_cross_prefix):
+        """Leg 7: hooks' DPLAN-0356_ph2_report.md in docs.local was registered as a plan.
+
+        The world of 2026-10-04 02:31:06: the scan had renamed the report to
+        DPLAN-0358.md, no row held 0358, and heal registered it as DPLAN-0358.
+        A file named like a plan with a free number must not be registered.
+        Mutant: the index's is_plan_file gate off reddens this (leg7 H1b).
+        """
+        plan = _make_plan_file(tmp_path / "devpulse", "DPLAN-0356_fleet_green_2026-10-01.md")
+        report = tmp_path / "hooks" / "docs.local" / "DPLAN-0358.md"
+        report.parent.mkdir(parents=True)
+        report.write_text("DPLAN-0356 phase 2 DONE\n", encoding="utf-8")
+        row = {"status": "open", "file_path": str(plan), "location": str(plan.parent)}
+        store = FakeRegistryStore({"dplan_registry.json": {"plans": {"0356": row}, "next_number": 357}})
+
+        actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}})
+
+        assert actions == []
+        assert store.plans("dplan_registry.json") == {"0356": row}
+        assert report.read_text(encoding="utf-8") == "DPLAN-0356 phase 2 DONE\n"
+
     def test_other_type_files_are_ignored(self, tmp_path, quiet_cross_prefix):
         """Only files whose prefix matches this registry are considered."""
-        mod = _import_heal_registry()
-        tdplan_file = _make_plan_file(tmp_path, "TDPLAN-0007.md")
+        _make_plan_file(tmp_path, "TDPLAN-0007.md")
         store = FakeRegistryStore({"dplan_registry.json": {"plans": {}, "next_number": 1}})
 
-        actions = mod._heal_type_registry(
-            "DPLAN",
-            "dplan_registry.json",
-            {("TDPLAN", "0007"): tdplan_file},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}})
 
+        # Mutant: `if pfx == prefix` -> `if True` reddens this.
         assert actions == []
         assert store.saves == []
 
     def test_correctly_registered_file_is_left_alone(self, tmp_path, quiet_cross_prefix):
         """A row already pointing at the on-disk file needs no heal."""
-        mod = _import_heal_registry()
         plan_file = _make_plan_file(tmp_path, "FPLAN-0100_ok_2026-05-05.md")
         store = FakeRegistryStore(
             {
@@ -189,13 +285,7 @@ class TestUnregisteredFile:
             }
         )
 
-        actions = mod._heal_type_registry(
-            "FPLAN",
-            "fplan_registry.json",
-            {("FPLAN", "0100"): plan_file},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
 
         assert actions == []
         assert store.saves == []
@@ -207,14 +297,18 @@ class TestUnregisteredFile:
 
 
 class TestNumberCollision:
-    """Ghost row + different real file on the same prefix+number."""
+    """Ghost row + different real file on the same prefix+number.
+
+    Reached through the public heal (leg 10). Its missing-file sweep runs
+    first and closes an OPEN row whose file is gone, so the collision code
+    only ever meets such a row closed: the worlds here hold it closed.
+    """
 
     def test_bumps_new_file_and_preserves_original_row(self, tmp_path, quiet_cross_prefix):
         """The on-disk file takes next_number; the ghost row survives intact."""
-        mod = _import_heal_registry()
         real_file = _make_plan_file(tmp_path, "FPLAN-0011_real_plan_2026-07-01.md")
         ghost_row = {
-            "status": "open",
+            "status": "closed",
             "subject": "ghost",
             "file_path": str(tmp_path / "gone" / "FPLAN-0011_ghost_2026-01-01.md"),
         }
@@ -222,13 +316,7 @@ class TestNumberCollision:
             {"fplan_registry.json": {"plans": {"0011": copy.deepcopy(ghost_row)}, "next_number": 356}}
         )
 
-        actions = mod._heal_type_registry(
-            "FPLAN",
-            "fplan_registry.json",
-            {("FPLAN", "0011"): real_file},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
 
         assert len(actions) == 1
         assert actions[0]["action"] == "resolved_collision"
@@ -243,11 +331,32 @@ class TestNumberCollision:
         # The on-disk file is never renamed or removed.
         assert real_file.exists()
 
+    def test_the_bump_never_lands_on_a_held_row(self, tmp_path, quiet_cross_prefix):
+        """next_number 356 beside a row at 0356: the bump takes 0357 and 0356 survives (leg 7).
+
+        Moved here from test_close_ops in leg 10: a collision reaches the
+        self-heal only through the heal. Mutant: the bump read from
+        next_number alone reddens this (leg7 C2, L1b).
+        """
+        real_file = _make_plan_file(tmp_path, "FPLAN-0011_real_plan_2026-07-01.md")
+        held = {"status": "closed", "subject": "held", "file_path": str(tmp_path / "gone" / "FPLAN-0356_h.md")}
+        ghost = {"status": "closed", "file_path": str(tmp_path / "gone" / "FPLAN-0011_ghost_2026-01-01.md")}
+        store = FakeRegistryStore(
+            {"fplan_registry.json": {"plans": {"0011": ghost, "0356": copy.deepcopy(held)}, "next_number": 356}}
+        )
+
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
+
+        assert [(a["action"], a["number"]) for a in actions] == [("resolved_collision", "0357")]
+        plans = store.plans("fplan_registry.json")
+        assert plans["0356"] == held
+        assert plans["0357"]["file_path"] == str(real_file)
+        assert store.registries["fplan_registry.json"]["next_number"] == 358
+
     def test_relocated_old_row_is_still_a_collision(self, tmp_path, quiet_cross_prefix):
         """An old row's file being safely archived says nothing about whether the
         different, real, live file now squatting on its number is registered --
         it isn't, so it's still a collision needing its own fresh slot."""
-        mod = _import_heal_registry()
         real_file = _make_plan_file(tmp_path, "FPLAN-0011_real_plan_2026-07-01.md")
         # The old row's own file really is archived elsewhere -- irrelevant to
         # whether `real_file` (a different plan) is registered under "0011".
@@ -257,7 +366,7 @@ class TestNumberCollision:
                 "fplan_registry.json": {
                     "plans": {
                         "0011": {
-                            "status": "open",
+                            "status": "closed",
                             "file_path": str(tmp_path / "gone" / "FPLAN-0011_ghost_2026-01-01.md"),
                         }
                     },
@@ -266,22 +375,16 @@ class TestNumberCollision:
             }
         )
 
-        actions = mod._heal_type_registry(
-            "FPLAN",
-            "fplan_registry.json",
-            {("FPLAN", "0011"): real_file},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
 
         assert len(actions) == 1
         assert actions[0]["action"] == "resolved_collision"
-        assert store.plans("fplan_registry.json")["0011"]["status"] == "open"
+        assert store.plans("fplan_registry.json")["0011"]["status"] == "closed"
+        assert store.plans("fplan_registry.json")["0356"]["file_path"] == str(real_file)
 
     def test_closed_row_not_relocated_is_still_a_collision(self, tmp_path, quiet_cross_prefix):
         """Closed status alone doesn't excuse a stale path -- an unrelated live file
         squatting on the same number is a genuine collision regardless of status."""
-        mod = _import_heal_registry()
         real_file = _make_plan_file(tmp_path, "DPLAN-0050_something_2026-07-01.md")
         store = FakeRegistryStore(
             {
@@ -297,23 +400,21 @@ class TestNumberCollision:
             }
         )
 
-        actions = mod._heal_type_registry(
-            "DPLAN",
-            "dplan_registry.json",
-            {("DPLAN", "0050"): real_file},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}})
 
         assert len(actions) == 1
         assert actions[0]["action"] == "resolved_collision"
         assert store.plans("dplan_registry.json")["0050"]["status"] == "closed"
+        assert store.plans("dplan_registry.json")["0060"]["file_path"] == str(real_file)
 
     def test_existing_registered_path_is_left_alone(self, tmp_path, quiet_cross_prefix):
-        """Two real files, one registered — not a doctrine case, hands off."""
-        mod = _import_heal_registry()
-        registered = _make_plan_file(tmp_path / "a", "FPLAN-0012_one_2026-07-01.md")
-        other = _make_plan_file(tmp_path / "b", "FPLAN-0012_two_2026-07-02.md")
+        """Two real files, one registered — not a doctrine case, hands off.
+
+        The walk keeps the first file it meets for a number, so the
+        unregistered one sits in the directory walked first: the heal sees it.
+        """
+        other = _make_plan_file(tmp_path / "a", "FPLAN-0012_two_2026-07-02.md")
+        registered = _make_plan_file(tmp_path / "b", "FPLAN-0012_one_2026-07-01.md")
         store = FakeRegistryStore(
             {
                 "fplan_registry.json": {
@@ -323,29 +424,23 @@ class TestNumberCollision:
             }
         )
 
-        actions = mod._heal_type_registry(
-            "FPLAN",
-            "fplan_registry.json",
-            {("FPLAN", "0012"): other},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
 
         assert actions == []
         assert store.saves == []
+        assert other.exists()
 
     def test_second_scan_of_same_collision_heals_nothing(self, tmp_path, quiet_cross_prefix):
         """Idempotency: the squatter keeps its OLD number in its filename forever, so a
         second scan must not mint a second fresh row for the file it already resolved
         on the first pass (the exact non-idempotency bug @devpulse caught live)."""
-        mod = _import_heal_registry()
         real_file = _make_plan_file(tmp_path, "DPLAN-0165_compass_wiring_2026-05-04.md")
         store = FakeRegistryStore(
             {
                 "dplan_registry.json": {
                     "plans": {
                         "0165": {
-                            "status": "open",
+                            "status": "closed",
                             "file_path": str(tmp_path / "gone" / "DPLAN-0165_old_2026-01-01.md"),
                         }
                     },
@@ -353,35 +448,28 @@ class TestNumberCollision:
                 }
             }
         )
-        on_disk_index = {("DPLAN", "0165"): real_file}
 
-        first_actions = mod._heal_type_registry("DPLAN", "dplan_registry.json", on_disk_index, store.load, store.save)
+        first_actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}})
         assert len(first_actions) == 1
         assert first_actions[0]["action"] == "resolved_collision"
         assert first_actions[0]["number"] == "0265"
 
-        second_actions = mod._heal_type_registry("DPLAN", "dplan_registry.json", on_disk_index, store.load, store.save)
+        second_actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}})
         assert second_actions == []
 
         plans = store.plans("dplan_registry.json")
-        assert plans["0165"]["status"] == "open"  # original row still untouched
+        assert plans["0165"]["status"] == "closed"  # original row still untouched
         assert plans["0265"]["file_path"] == str(real_file)
         assert "0267" not in plans  # no second-generation duplicate minted
 
     def test_row_without_file_path_is_left_alone(self, tmp_path, quiet_cross_prefix):
         """No file_path means nothing deterministic to compare — skip."""
-        mod = _import_heal_registry()
         real_file = _make_plan_file(tmp_path, "FPLAN-0013_thing_2026-07-01.md")
         store = FakeRegistryStore({"fplan_registry.json": {"plans": {"0013": {"status": "open"}}, "next_number": 20}})
 
-        actions = mod._heal_type_registry(
-            "FPLAN",
-            "fplan_registry.json",
-            {("FPLAN", "0013"): real_file},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
 
+        assert real_file.exists()
         assert actions == []
         assert store.saves == []
 
@@ -399,13 +487,12 @@ class TestMissingFileOrphan:
 
     def test_open_row_with_dead_file_path_is_closed(self, tmp_path, quiet_cross_prefix):
         """TDPLAN-0015-shaped case: file gone, nothing squats on the number."""
-        mod = _import_heal_registry()
         dead_path = str(tmp_path / "TDPLAN-0011_cross_os_acceptance_checks_2026-07-02.md")
         store = FakeRegistryStore(
             {"tdplan_registry.json": {"plans": {"0015": {"status": "open", "file_path": dead_path}}, "next_number": 16}}
         )
 
-        actions = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+        actions = _heal(tmp_path, store, {"td": {"prefix": "TDPLAN"}})
 
         assert len(actions) == 1
         assert actions[0] == {
@@ -422,21 +509,21 @@ class TestMissingFileOrphan:
 
     def test_second_scan_heals_nothing(self, tmp_path, quiet_cross_prefix):
         """Once closed, the row is no longer 'open' -- a re-scan is a no-op."""
-        mod = _import_heal_registry()
         dead_path = str(tmp_path / "TDPLAN-0011_gone_2026-07-02.md")
         store = FakeRegistryStore(
             {"tdplan_registry.json": {"plans": {"0015": {"status": "open", "file_path": dead_path}}, "next_number": 16}}
         )
 
-        first = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
-        second = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+        first = _heal(tmp_path, store, {"td": {"prefix": "TDPLAN"}})
+        second = _heal(tmp_path, store, {"td": {"prefix": "TDPLAN"}})
 
         assert len(first) == 1
         assert second == []
+        # Mutant: `if closed_count == 0: return []` -> `if False: ...` reddens this.
+        assert store.saves == ["tdplan_registry.json"], "the no-op re-scan still wrote the registry"
 
     def test_row_whose_file_still_exists_is_left_alone(self, tmp_path, quiet_cross_prefix):
         """A live file_path is not this doctrine case -- nothing changes."""
-        mod = _import_heal_registry()
         real_file = _make_plan_file(tmp_path, "TDPLAN-0020_still_here_2026-07-01.md")
         store = FakeRegistryStore(
             {
@@ -447,14 +534,13 @@ class TestMissingFileOrphan:
             }
         )
 
-        actions = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+        actions = _heal(tmp_path, store, {"td": {"prefix": "TDPLAN"}})
 
         assert actions == []
         assert store.saves == []
 
     def test_already_closed_row_is_not_reprocessed(self, tmp_path, quiet_cross_prefix):
         """A row that's already closed (any reason) is not this doctrine's target."""
-        mod = _import_heal_registry()
         dead_path = str(tmp_path / "TDPLAN-0016_dup_2026-07-02.md")
         store = FakeRegistryStore(
             {
@@ -471,7 +557,7 @@ class TestMissingFileOrphan:
             }
         )
 
-        actions = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+        actions = _heal(tmp_path, store, {"td": {"prefix": "TDPLAN"}})
 
         assert actions == []
         assert store.saves == []
@@ -489,19 +575,23 @@ TYPES = {
 
 
 class TestWrongPrefixRows:
-    """Rows sitting in the wrong type registry get removed or re-homed."""
+    """Rows sitting in the wrong type registry get removed or re-homed.
+
+    Reached through the public heal (leg 10). The sweep reads no status, and
+    the missing-file sweep that runs first would close an OPEN row whose file
+    is gone, so rows naming an absent file are held closed here.
+    """
 
     def test_ghost_duplicate_row_is_removed(self, tmp_path, quiet_cross_prefix):
         """The real FPLAN-0011 audit finding: ghost row, real plan already correct."""
-        mod = _import_heal_registry()
         tdplan_file = tmp_path / "TDPLAN-0011_team_thing_2026-04-10.md"
         correct_row = {"status": "closed", "subject": "team thing", "file_path": str(tdplan_file)}
         store = FakeRegistryStore(
             {
                 "fplan_registry.json": {
                     "plans": {
-                        "0011": {"status": "open", "subject": "ghost", "file_path": str(tdplan_file)},
-                        "0020": {"status": "open", "file_path": str(tmp_path / "FPLAN-0020.md")},
+                        "0011": {"status": "closed", "subject": "ghost", "file_path": str(tdplan_file)},
+                        "0020": {"status": "closed", "file_path": str(tmp_path / "FPLAN-0020.md")},
                     },
                     "next_number": 356,
                 },
@@ -509,7 +599,7 @@ class TestWrongPrefixRows:
             }
         )
 
-        actions = mod._heal_wrong_prefix_rows(TYPES, store.load, store.save)
+        actions = _heal(tmp_path, store, TYPES)
 
         assert len(actions) == 1
         assert actions[0]["action"] == "removed_ghost_row"
@@ -524,9 +614,12 @@ class TestWrongPrefixRows:
         assert store.registries["tdplan_registry.json"]["next_number"] == 15
 
     def test_real_file_is_rehomed_to_correct_registry(self, tmp_path, quiet_cross_prefix):
-        """A real file behind a wrong-prefix row moves to its own registry."""
-        mod = _import_heal_registry()
-        tdplan_file = _make_plan_file(tmp_path, "TDPLAN-0009_real_team_plan_2026-06-01.md")
+        """A real file behind a wrong-prefix row moves to its own registry.
+
+        The file lives outside the walked root: inside it, the type heal
+        registers it first and the row is then a ghost (the test above).
+        """
+        tdplan_file = _make_plan_file(tmp_path / "elsewhere", "TDPLAN-0009_real_team_plan_2026-06-01.md")
         store = FakeRegistryStore(
             {
                 "fplan_registry.json": {
@@ -536,8 +629,9 @@ class TestWrongPrefixRows:
                 "tdplan_registry.json": {"plans": {}, "next_number": 15},
             }
         )
+        (tmp_path / "root").mkdir()
 
-        actions = mod._heal_wrong_prefix_rows(TYPES, store.load, store.save)
+        actions = _heal(tmp_path / "root", store, TYPES)
 
         assert len(actions) == 1
         assert actions[0]["action"] == "rehomed_wrong_prefix_row"
@@ -551,13 +645,12 @@ class TestWrongPrefixRows:
 
     def test_orphaned_metadata_row_is_removed(self, tmp_path, quiet_cross_prefix):
         """No file anywhere and no correct registration — drop the dead row."""
-        mod = _import_heal_registry()
         store = FakeRegistryStore(
             {
                 "fplan_registry.json": {
                     "plans": {
                         "0030": {
-                            "status": "open",
+                            "status": "closed",
                             "file_path": str(tmp_path / "gone" / "TDPLAN-0030_vanished_2026-02-02.md"),
                         }
                     },
@@ -567,7 +660,7 @@ class TestWrongPrefixRows:
             }
         )
 
-        actions = mod._heal_wrong_prefix_rows(TYPES, store.load, store.save)
+        actions = _heal(tmp_path, store, TYPES)
 
         assert len(actions) == 1
         assert actions[0]["action"] == "removed_orphaned_wrong_prefix_row"
@@ -576,36 +669,34 @@ class TestWrongPrefixRows:
 
     def test_unknown_prefix_is_left_alone(self, tmp_path, quiet_cross_prefix):
         """Unregistered prefixes are never guessed at."""
-        mod = _import_heal_registry()
         store = FakeRegistryStore(
             {
                 "fplan_registry.json": {
-                    "plans": {"0040": {"status": "open", "file_path": str(tmp_path / "XPLAN-0040_weird.md")}},
+                    "plans": {"0040": {"status": "closed", "file_path": str(tmp_path / "XPLAN-0040_weird.md")}},
                     "next_number": 356,
                 },
                 "tdplan_registry.json": {"plans": {}, "next_number": 15},
             }
         )
 
-        actions = mod._heal_wrong_prefix_rows(TYPES, store.load, store.save)
+        actions = _heal(tmp_path, store, TYPES)
 
         assert actions == []
         assert "0040" in store.plans("fplan_registry.json")
 
     def test_matching_prefix_rows_are_untouched(self, tmp_path, quiet_cross_prefix):
         """Rows whose file_path prefix matches their host registry are fine."""
-        mod = _import_heal_registry()
         store = FakeRegistryStore(
             {
                 "fplan_registry.json": {
-                    "plans": {"0050": {"status": "open", "file_path": str(tmp_path / "FPLAN-0050_fine.md")}},
+                    "plans": {"0050": {"status": "closed", "file_path": str(tmp_path / "FPLAN-0050_fine.md")}},
                     "next_number": 356,
                 },
                 "tdplan_registry.json": {"plans": {}, "next_number": 15},
             }
         )
 
-        actions = mod._heal_wrong_prefix_rows(TYPES, store.load, store.save)
+        actions = _heal(tmp_path, store, TYPES)
 
         assert actions == []
         assert store.saves == []
@@ -621,7 +712,6 @@ class TestHealRegistryDoctrineImpl:
 
     def test_returns_summary_shape_and_logs_operation(self, tmp_path, quiet_cross_prefix, mock_json_handler):
         """healed_count matches len(healed) and the op is logged once."""
-        mod = _import_heal_registry()
         _make_plan_file(tmp_path, "TDPLAN-0003_fresh_plan_2026-07-01.md")
         store = FakeRegistryStore(
             {
@@ -644,7 +734,6 @@ class TestHealRegistryDoctrineImpl:
 
     def test_healthy_registry_produces_no_actions(self, tmp_path, quiet_cross_prefix):
         """A consistent registry is never written to."""
-        mod = _import_heal_registry()
         plan_file = _make_plan_file(tmp_path, "FPLAN-0200_all_good_2026-07-01.md")
         store = FakeRegistryStore(
             {
@@ -668,7 +757,6 @@ class TestHealRegistryDoctrineImpl:
         disk squats on its number -- this only used to self-heal as a side
         effect of *creating* a new TDPLAN. A scan with no on-disk TDPLAN files
         at all must still close it."""
-        mod = _import_heal_registry()
         dead_path = str(tmp_path / "TDPLAN-0011_cross_os_acceptance_checks_2026-07-02.md")
         store = FakeRegistryStore(
             {
@@ -690,7 +778,6 @@ class TestHealRegistryDoctrineImpl:
 
     def test_missing_file_heal_failure_does_not_abort_run(self, tmp_path, quiet_cross_prefix):
         """A blown-up missing-file sweep for one type doesn't abort the others."""
-        mod = _import_heal_registry()
         store = FakeRegistryStore(
             {
                 "fplan_registry.json": {"plans": {}, "next_number": 1},
@@ -707,9 +794,35 @@ class TestHealRegistryDoctrineImpl:
         assert result["healed"] == []
         assert result["healed_count"] == 0
 
+    def test_an_unreadable_registry_fails_the_missing_file_sweep_loudly(self, tmp_path, quiet_cross_prefix):
+        """A registry that cannot be read is a failed sweep, logged as an error by the run —
+        not an empty 'nothing to heal' answer with a warning. The other type still heals.
+
+        Mutant: the bare load -> the load wrapped in except Exception: return [] reddens this.
+        """
+        dead_path = str(tmp_path / "FPLAN-0007_gone_2026-07-02.md")
+        store = FakeRegistryStore(
+            {"fplan_registry.json": {"plans": {"0007": {"status": "open", "file_path": dead_path}}, "next_number": 8}}
+        )
+
+        def load(registry_file=None):
+            if registry_file == "tdplan_registry.json":
+                raise OSError("registry unreadable")
+            return store.load(registry_file)
+
+        with (
+            patch.object(mod, "_load_template_registry", return_value={"types": TYPES}),
+            patch.object(mod, "_citizen_seat_index", return_value={}),
+            patch.object(mod, "logger") as log,
+        ):
+            result = mod.heal_registry_doctrine_impl(tmp_path, load, store.save)
+
+        errors = [str(c.args[0]) for c in log.error.call_args_list]
+        assert any("Missing-file sweep failed for type TDPLAN" in e and "registry unreadable" in e for e in errors)
+        assert [a["number"] for a in result["healed"] if a["action"] == "auto_closed_missing_file"] == ["0007"]
+
     def test_per_type_heals_run_before_wrong_prefix_sweep(self, tmp_path, quiet_cross_prefix):
         """Case 1/2 first, then case 3 — so case 3 is left with ghost cleanup only."""
-        mod = _import_heal_registry()
         tdplan_file = _make_plan_file(tmp_path, "TDPLAN-0011_team_thing_2026-04-10.md")
         store = FakeRegistryStore(
             {
@@ -738,7 +851,6 @@ class TestHealRegistryDoctrineImpl:
 
     def test_types_without_prefix_are_skipped(self, tmp_path, quiet_cross_prefix):
         """A malformed template-registry type entry cannot crash the sweep."""
-        mod = _import_heal_registry()
         store = FakeRegistryStore({})
 
         with patch.object(mod, "_load_template_registry", return_value={"types": {"broken": {}}}):
@@ -748,7 +860,6 @@ class TestHealRegistryDoctrineImpl:
 
     def test_type_heal_failure_does_not_abort_run(self, tmp_path, quiet_cross_prefix):
         """A blown-up type is logged and the sweep still completes."""
-        mod = _import_heal_registry()
         store = FakeRegistryStore(
             {
                 "fplan_registry.json": {"plans": {}, "next_number": 1},
@@ -771,12 +882,106 @@ class TestHealRegistryDoctrineImpl:
 # ═══════════════════════════════════════════════════════════
 
 
+class RefusingStore(FakeRegistryStore):
+    """A store whose every save fails the way save_registry does: False, nothing written."""
+
+    def save(self, registry, registry_file=None) -> bool:
+        """Record the attempt, store nothing, answer False."""
+        self.saves.append(registry_file or "fplan_registry.json")
+        return False
+
+
+class TestAHealItCouldNotSaveReportsNothing:
+    """Leg 10: save_registry answers False and never raises.
+
+    Every heal save ignored that False, so heal reported rows it never wrote.
+    Each save now raises, and the doctrine logs it as that sweep's failure.
+    """
+
+    @staticmethod
+    def _heal_refused(root, registries, types, seats=None):
+        store = RefusingStore(registries)
+        with patch.object(mod, "logger") as log:
+            actions = _heal(root, store, types, seats)
+        return actions, [c.args[0] for c in log.error.call_args_list], store
+
+    def test_not_a_plan(self, tmp_path, quiet_cross_prefix):
+        report = tmp_path / "FPLAN-0516.md"
+        report.write_text("FPLAN-0508 rows seedgo\n", encoding="utf-8")
+        registries = {"fplan_registry.json": {"plans": {"0569": {"status": "open", "file_path": str(report)}}}}
+
+        actions, errors, store = self._heal_refused(tmp_path, registries, {"f": {"prefix": "FPLAN"}})
+
+        assert actions == []
+        assert errors == [
+            f"[{mod.MODULE_NAME}] Not-a-plan sweep failed for type FPLAN: "
+            "could not save fplan_registry.json: no row was closed"
+        ]
+        assert store.plans("fplan_registry.json")["0569"]["status"] == "open"
+
+    def test_missing_file(self, tmp_path, quiet_cross_prefix):
+        dead = str(tmp_path / "TDPLAN-0015_gone_2026-07-02.md")
+        registries = {"tdplan_registry.json": {"plans": {"0015": {"status": "open", "file_path": dead}}}}
+
+        actions, errors, _store = self._heal_refused(tmp_path, registries, {"td": {"prefix": "TDPLAN"}})
+
+        assert actions == []
+        assert errors == [
+            f"[{mod.MODULE_NAME}] Missing-file sweep failed for type TDPLAN: "
+            "could not save tdplan_registry.json: no missing-file row was closed"
+        ]
+
+    def test_unregistered_file(self, tmp_path, quiet_cross_prefix):
+        _make_plan_file(tmp_path, "FPLAN-0005_new_2026-10-04.md")
+
+        actions, errors, _store = self._heal_refused(tmp_path, {}, {"f": {"prefix": "FPLAN"}})
+
+        assert actions == []
+        assert errors == [
+            f"[{mod.MODULE_NAME}] Heal failed for type FPLAN: "
+            "could not save fplan_registry.json: FPLAN-0005 was not registered"
+        ]
+
+    def test_wrong_prefix_row(self, tmp_path, quiet_cross_prefix):
+        tdplan_file = _make_plan_file(tmp_path, "TDPLAN-0011_team_thing_2026-04-10.md")
+        registries = {
+            "fplan_registry.json": {"plans": {"0011": {"status": "open", "file_path": str(tdplan_file)}}},
+            "tdplan_registry.json": {"plans": {"0011": {"status": "closed", "file_path": str(tdplan_file)}}},
+        }
+
+        actions, errors, _store = self._heal_refused(
+            tmp_path, registries, {"f": {"prefix": "FPLAN"}, "td": {"prefix": "TDPLAN"}}
+        )
+
+        assert actions == []
+        assert errors == [
+            f"[{mod.MODULE_NAME}] Wrong-prefix sweep failed: "
+            "could not save fplan_registry.json: row '0011' is still there"
+        ]
+
+    def test_orphan_location(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "src/aipass/commons")
+        ghost = tmp_path / "src" / "commons"
+        registries = {"fplan_registry.json": {"plans": {"0001": {"status": "closed", "location": str(ghost)}}}}
+
+        actions, errors, store = self._heal_refused(
+            tmp_path, registries, {"f": {"prefix": "FPLAN"}}, seats={"commons": [seat]}
+        )
+
+        assert actions == []
+        assert errors == [
+            f"[{mod.MODULE_NAME}] Orphan-location sweep failed: "
+            "could not save fplan_registry.json: no location was re-attributed"
+        ]
+        assert store.plans("fplan_registry.json")["0001"]["location"] == str(ghost)
+
+
 class TestNeverTouchesPlanFiles:
     """Hard doctrine guarantee: registry rows change, .md files never do."""
 
     def test_no_rename_or_unlink_during_full_heal(self, tmp_path, quiet_cross_prefix):
         """Any rename/unlink/write_text on a Path during a heal is a failure."""
-        mod = _import_heal_registry()
         collided = _make_plan_file(tmp_path, "FPLAN-0011_real_2026-07-01.md")
         unregistered = _make_plan_file(tmp_path, "TDPLAN-0009_new_2026-07-02.md")
         before = {p: p.read_text(encoding="utf-8") for p in (collided, unregistered)}
@@ -793,13 +998,15 @@ class TestNeverTouchesPlanFiles:
             }
         )
 
-        with (
-            patch.object(mod, "_load_template_registry", return_value={"types": TYPES}),
-            patch.object(Path, "rename", side_effect=AssertionError("plan files must never be renamed")),
-            patch.object(Path, "unlink", side_effect=AssertionError("plan files must never be deleted")),
-            patch.object(Path, "write_text", side_effect=AssertionError("plan files must never be rewritten")),
-        ):
+        # The guarantee is read off the disk itself, not by patching pathlib:
+        # every file under the root, by path and content, before and after.
+        tree_before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+        with patch.object(mod, "_load_template_registry", return_value={"types": TYPES}):
             result = mod.heal_registry_doctrine_impl(tmp_path, store.load, store.save)
+
+        # Mutant: `index[key] = file_path` -> `index[key] = file_path.rename(...) or file_path` reddens this.
+        assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == tree_before
 
         # 3 heals: the dead-path ghost row closes (case 4) *and* the real
         # file squatting on its number still gets its own registration
@@ -837,7 +1044,6 @@ class TestHealOrphanLocations:
     """
 
     def test_ghost_path_heals_to_the_live_seat(self, tmp_path):
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seat = _seat(tmp_path, "src/aipass/commons")
         ghost = tmp_path / "src" / "commons"
@@ -850,10 +1056,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"commons": [seat]})
 
         assert len(actions) == 1
         assert quarantined == []
@@ -861,7 +1064,6 @@ class TestHealOrphanLocations:
 
     def test_existing_path_without_a_passport_is_an_orphan_too(self, tmp_path):
         """The baud case: project root holds records, the seat lives beneath it."""
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seat = _seat(tmp_path, "projects/baud/src/baud/baud")
         root = tmp_path / "projects" / "baud"
@@ -875,17 +1077,13 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"baud": [seat]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"baud": [seat]})
 
         assert len(actions) == 1
         assert store.registries["fplan_registry.json"]["plans"]["0001"]["location"] == str(seat)
 
     def test_unattributable_orphan_is_quarantined_not_guessed(self, tmp_path):
         """A /tmp scratch dir matches no citizen — it waits for a human."""
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seat = _seat(tmp_path, "src/aipass/commons")
         scratch = tmp_path / "tmp" / "flow_audit_scratch"
@@ -898,10 +1096,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"commons": [seat]})
 
         assert actions == []
         assert len(quarantined) == 1
@@ -912,7 +1107,6 @@ class TestHealOrphanLocations:
 
     def test_same_name_in_a_different_repo_is_not_attributed(self, tmp_path):
         """Name match alone is not evidence — the orphan must share the seat's repo."""
-        mod = _import_heal_registry()
         (tmp_path / "RepoA" / ".git").mkdir(parents=True)
         (tmp_path / "RepoB" / ".git").mkdir(parents=True)
         seat = _seat(tmp_path, "RepoA/src/flow")
@@ -926,16 +1120,12 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"flow": [seat]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"flow": [seat]})
 
         assert actions == []
         assert len(quarantined) == 1
 
     def test_ambiguous_name_with_two_live_seats_is_quarantined(self, tmp_path):
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seat_a = _seat(tmp_path, "src/a/twin")
         seat_b = _seat(tmp_path, "src/b/twin")
@@ -949,17 +1139,13 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"twin": [seat_a, seat_b]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"twin": [seat_a, seat_b]})
 
         assert actions == []
         assert len(quarantined) == 1
 
     def test_file_path_is_re_rooted_with_the_location(self, tmp_path):
         """A healed record must stay internally consistent, not half-moved."""
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seat = _seat(tmp_path, "src/aipass/commons")
         ghost = tmp_path / "src" / "commons"
@@ -979,15 +1165,13 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
-            mod._heal_orphan_locations({"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save)
+        _heal_orphans(tmp_path, store, {"commons": [seat]})
 
         row = store.registries["fplan_registry.json"]["plans"]["0001"]
         assert row["location"] == str(seat)
         assert row["file_path"] == str(seat / "FPLAN-0001_x.md")
 
     def test_live_seats_are_left_alone(self, tmp_path):
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seat = _seat(tmp_path, "src/aipass/commons")
 
@@ -999,17 +1183,13 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"commons": [seat]})
 
         assert actions == []
         assert quarantined == []
         assert store.saves == []
 
     def test_running_twice_changes_nothing_the_second_time(self, tmp_path):
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seat = _seat(tmp_path, "src/aipass/commons")
         ghost = tmp_path / "src" / "commons"
@@ -1022,17 +1202,15 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
-            first, _ = mod._heal_orphan_locations({"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save)
-            writes_after_first = len(store.saves)
-            second, _ = mod._heal_orphan_locations({"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save)
+        first, _ = _heal_orphans(tmp_path, store, {"commons": [seat]})
+        writes_after_first = len(store.saves)
+        second, _ = _heal_orphans(tmp_path, store, {"commons": [seat]})
 
         assert len(first) == 1
         assert second == []
         assert len(store.saves) == writes_after_first, "second run wrote to the registry"
 
     def test_rows_with_no_location_are_left_for_a_human(self, tmp_path):
-        mod = _import_heal_registry()
         store = FakeRegistryStore(
             {
                 "fplan_registry.json": {
@@ -1041,10 +1219,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {})
 
         assert actions == []
         assert len(quarantined) == 1
@@ -1055,7 +1230,6 @@ class TestDoctrineSurfacesQuarantine:
     """The doctrine result must carry the refusal lane, not just the heals."""
 
     def test_impl_returns_quarantined_list(self, tmp_path):
-        mod = _import_heal_registry()
         with (
             patch.object(mod, "_load_template_registry", return_value={"types": {}}),
             patch.object(mod, "_build_plan_file_index", return_value={}),
@@ -1079,51 +1253,57 @@ class TestOrphanDetectionIsNotOverBroad:
     """
 
     def test_repo_root_holding_many_seats_is_a_container_not_a_misfile(self, tmp_path):
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seats = {
             "alpha": [_seat(tmp_path, "src/alpha")],
             "beta": [_seat(tmp_path, "src/beta")],
         }
 
-        assert mod._is_orphan_location(tmp_path, seats) is False
+        # Mutant: `return len(_seats_beneath(location, seats)) == 1` -> `... >= 1` reddens this.
+        assert _is_orphan_through_heal(tmp_path, tmp_path, seats) is False
 
     def test_subdirectory_inside_a_citizen_is_left_alone(self, tmp_path):
         """A plan filed in devpulse/docs.local is a filing, not debris."""
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seat = _seat(tmp_path, "src/aipass/devpulse")
         subdir = seat / "docs.local"
         subdir.mkdir()
 
-        assert mod._is_orphan_location(subdir, {"devpulse": [seat]}) is False
+        assert _is_orphan_through_heal(tmp_path, subdir, {"devpulse": [seat]}) is False
 
     def test_a_gone_path_is_still_an_orphan(self, tmp_path):
-        mod = _import_heal_registry()
-        assert mod._is_orphan_location(tmp_path / "vanished", {}) is True
+        # Mutant: `if not location.exists(): return True` -> `... return False` reddens this.
+        assert _is_orphan_through_heal(tmp_path, tmp_path / "vanished", {}) is True
 
     def test_root_holding_exactly_one_seat_is_a_misfile(self, tmp_path):
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seat = _seat(tmp_path, "projects/baud/src/baud/baud")
 
-        assert mod._is_orphan_location(tmp_path / "projects" / "baud", {"baud": [seat]}) is True
+        assert _is_orphan_through_heal(tmp_path, tmp_path / "projects" / "baud", {"baud": [seat]}) is True
 
     def test_a_live_seat_is_never_an_orphan(self, tmp_path):
-        mod = _import_heal_registry()
+        """Even a seat holding one other seat beneath it is a seat, not a misfiled root.
+
+        Mutant: `if _is_citizen_seat(location): return False` -> `if False: ...` reddens this.
+        """
         seat = _seat(tmp_path, "src/aipass/flow")
-        assert mod._is_orphan_location(seat, {"flow": [seat]}) is False
+        inner = _seat(tmp_path, "src/aipass/flow/inner")
+        assert _is_orphan_through_heal(tmp_path, seat, {"flow": [seat], "inner": [inner]}) is False
 
     def test_containment_beats_a_name_that_does_not_match(self, tmp_path):
         """The baud root is not named 'baud/src/baud/baud' — containment carries it."""
-        mod = _import_heal_registry()
         (tmp_path / ".git").mkdir()
         seat = _seat(tmp_path, "projects/thing/src/inner/seatname")
         root = tmp_path / "projects" / "thing"
 
-        attributed, reason = mod._attribute_orphan(root, {"seatname": [seat]})
-        assert attributed == seat
-        assert reason == ""
+        store = FakeRegistryStore(
+            {"fplan_registry.json": {"plans": {"0001": {"status": "closed", "location": str(root)}}}}
+        )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"seatname": [seat]})
+
+        # Mutant: `if len(enclosed) == 1: return enclosed[0], ""` -> `if False: ...` reddens this.
+        assert quarantined == []
+        assert [a["to"] for a in actions] == [str(seat)]
 
 
 class TestFindQuarantinedLocations:
@@ -1135,7 +1315,6 @@ class TestFindQuarantinedLocations:
     """
 
     def test_a_row_with_no_location_is_quarantined_by_that_reason(self, tmp_path):
-        mod = _import_heal_registry()
         store = FakeRegistryStore(
             {
                 "fplan_registry.json": {"plans": {"0200": {"status": "open", "location": ""}}, "next_number": 356},
@@ -1154,7 +1333,6 @@ class TestFindQuarantinedLocations:
 
     def test_an_attributable_orphan_is_not_quarantined(self, tmp_path):
         """One seat beneath the location IS the evidence — nothing to rule on."""
-        mod = _import_heal_registry()
         seat = tmp_path / "proj" / "baud"
         seat.mkdir(parents=True)
         root = tmp_path / "proj"
@@ -1177,7 +1355,6 @@ class TestFindQuarantinedLocations:
 
     def test_an_unattributable_orphan_carries_the_refusal_reason(self, tmp_path):
         """A vanished path no live seat claims: named, never guessed at."""
-        mod = _import_heal_registry()
         gone = tmp_path / "deleted" / "somebody"
         store = FakeRegistryStore(
             {
@@ -1201,7 +1378,6 @@ class TestFindQuarantinedLocations:
 
     def test_an_unreadable_registry_skips_that_type_not_the_run(self, tmp_path):
         """One blown-up type must not hide the quarantined rows of the others."""
-        mod = _import_heal_registry()
         store = FakeRegistryStore(
             {"tdplan_registry.json": {"plans": {"0015": {"status": "open", "location": ""}}, "next_number": 16}}
         )

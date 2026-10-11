@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trigger.py
 # Description: Entry point CLI for drone @trigger — event bus and error registry
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -208,8 +208,12 @@ def print_help(modules: List[Any]):
 # =============================================================================
 
 
-def main():
-    """Main entry point - routes commands or shows help"""
+def main(argv: list[str] | None = None):
+    """Main entry point - routes commands or shows help.
+
+    Args:
+        argv: The arguments after the program name; sys.argv[1:] when None
+    """
 
     # A refusal has to reach the shell. error() sets a process-level failure
     # flag in cli, but nothing here ever read it, so every module that refused
@@ -222,7 +226,7 @@ def main():
     modules = discover_modules()
 
     # Parse arguments
-    args = sys.argv[1:]
+    args = sys.argv[1:] if argv is None else list(argv)
 
     # Show introspection when run with no arguments
     if len(args) == 0:

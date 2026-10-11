@@ -1,21 +1,18 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: conftest.py - Skills test configuration
-# Date: 2026-03-07
-# Version: 3.0.0
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Skills test configuration
+# Version: 3.3.0
+# Created: 2026-03-07
+# Modified: 2026-10-10
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
-#   - v3.0.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam -
-#     the fleet service resolves its directory per call, so there is no module
-#     attribute left to patch and no handler to re-import (DPLAN-0325)
-#   - v2.1.0 (2026-07-22): mock_infrastructure re-resolves json_handler via
-#     import_module at fixture-setup time instead of patching the stale
-#     module captured at conftest load — fixes real-file leaks (t_config.json
-#     etc.) when a combined multi-branch run pops sys.modules mid-session
-#   - v2.0.0 (2026-03-28): Added temp_dir, sample_data, mock_infrastructure,
-#     mock_logger, mock_json_handler fixtures for test quality compliance
-#   - v1.0.0 (2026-03-07): Initial implementation
+#   - v3.3.0 (2026-10-10): sample_data retired - requested only by the .archive scaffold (seedgo, PR #774)
+#   - v3.2.0 (2026-10-04): audit_guard - file denials ride an audit hook, no stdlib name replaced
+#   - v3.1.0 (2026-09-27): C1 console width pin, C2 command-state reset; unused temp_dir, mock_logger removed
+#   - v3.0.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam - no attribute to patch (DPLAN-0325)
+#   - v2.1.0 (2026-07-22): mock_infrastructure re-resolves json_handler at setup - fixed real-file leaks
+#   - v2.0.0 (2026-03-28): Added sample_data, mock_infrastructure, mock_json_handler fixtures
 #
 # CODE STANDARDS:
 #   - Sets the AIPASS_TEST_LOG_DIR seam before the first aipass import
@@ -38,15 +35,18 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 import logging
+import sys
 from pathlib import Path
-from typing import Generator, List, Tuple
+from typing import Callable, Generator
 
 import pytest
 
 # aipass is an installed package (pip install -e), so nothing here hacks
 # sys.path to reach it — a conftest that prepends src/ hides a broken install
 # and shadows the wheel the e2e job measures.
-from aipass.skills.apps.handlers.json import json_handler  # noqa: E402
+from aipass.cli.apps.modules import display
+from aipass.skills.apps.handlers.json import json_handler
+from aipass.skills.apps.modules import creator
 
 BRANCH_MODULE = "aipass.skills"
 
@@ -59,39 +59,6 @@ collect_ignore_glob = [".archive/*", "**/.archive/*"]
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def temp_dir(tmp_path: Path) -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after."""
-    test_dir = tmp_path / "test_workspace"
-    test_dir.mkdir(parents=True, exist_ok=True)
-    yield test_dir
-    for child in test_dir.iterdir():
-        if child.is_file():
-            child.unlink()
-
-
-@pytest.fixture()
-def sample_data() -> dict:
-    """Sample test data for JSON operations."""
-    return {
-        "config": {
-            "module_name": "test_module",
-            "version": "1.0.0",
-            "config": {"max_log_entries": 50},
-            "timestamp": "2026-03-28",
-        },
-        "data": {
-            "module_name": "test_module",
-            "created": "2026-03-28",
-            "last_updated": "2026-03-28",
-            "operations_total": 0,
-            "operations_successful": 0,
-            "operations_failed": 0,
-        },
-        "log": [{"timestamp": "2026-03-28T10:00:00", "operation": "test"}],
-    }
 
 
 @pytest.fixture(autouse=True)
@@ -128,29 +95,73 @@ def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     return sandbox
 
 
-@pytest.fixture()
-def mock_logger(monkeypatch: pytest.MonkeyPatch) -> List[Tuple[str, tuple]]:
-    """Capture calls made to the entry point's logger.
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def bus_recorder(monkeypatch: pytest.MonkeyPatch) -> list:
+    """Every trigger event the creator fires lands here, never on the real bus.
+
+    creator.py binds the trigger object at import, so the recorder replaces it
+    where this branch binds it; the bus probe counted ten real skill_created
+    fires before this (skills, fleet green leg 3).
 
     Returns:
-        A list that fills with (level, args) tuples as the code under test logs.
+        A list that fills with (event, data) tuples.
     """
-    captured: List[Tuple[str, tuple]] = []
+    fired: list = []
 
-    class _CapturingLogger:
-        def debug(self, *args: object, **kwargs: object) -> None:
-            captured.append(("debug", args))
+    class _Recorder:
+        def fire(self, event: str, **data: object) -> None:
+            fired.append((event, data))
 
-        def info(self, *args: object, **kwargs: object) -> None:
-            captured.append(("info", args))
+    monkeypatch.setattr(creator, "trigger", _Recorder())
+    return fired
 
-        def warning(self, *args: object, **kwargs: object) -> None:
-            captured.append(("warning", args))
 
-        def error(self, *args: object, **kwargs: object) -> None:
-            captured.append(("error", args))
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
-    from aipass.skills.apps import skills as branch_entry
 
-    monkeypatch.setattr(branch_entry, "logger", _CapturingLogger())
-    return captured
+# The guards the one audit hook runs: armed per test by audit_guard, else empty.
+_AUDIT_GUARDS: list = []
+
+
+def _run_audit_guards(event: str, args: tuple) -> None:
+    """The process's one audit hook: run every armed guard, nothing when none is."""
+    for guard in tuple(_AUDIT_GUARDS):
+        guard(event, args)
+
+
+@pytest.fixture(scope="session")
+def audit_hook_installed() -> None:
+    """Install the audit hook once per process - sys.addaudithook cannot be undone."""
+    sys.addaudithook(_run_audit_guards)
+
+
+@pytest.fixture()
+def audit_guard(audit_hook_installed: None) -> Generator[Callable, None, None]:
+    """Arm guards on the interpreter's audit events for one test.
+
+    The "open" event fires for builtins.open, io.open, os.open and pathlib
+    alike, so a guard sees every route to a file without replacing any stdlib
+    name - patching three names saw three routes. A guard that raises makes
+    the audited call raise that error.
+    """
+    armed: list = []
+
+    def arm(guard: Callable[[str, tuple], None]) -> None:
+        _AUDIT_GUARDS.append(guard)
+        armed.append(guard)
+
+    yield arm
+    for guard in armed:
+        _AUDIT_GUARDS.remove(guard)

@@ -1,35 +1,50 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.2.1
+# Version: 1.2.3
 # Created: 2026-08-27
-# Modified: 2026-09-15
+# Modified: 2026-10-08
 # =============================================
 
-"""Trinity push — the pins that make the prune lane safe to run.
+"""Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
 
-THE ONE LAW under test
-----------------------
-``vectorize -> verify -> prune`` is an ORDER, and every step of it can fail.
-The tests in :class:`TestNothingIsPrunedWithoutProof` exist because the cheap
-implementation of this lane — store, assume, delete — is exactly the shape
-that deleted four months of @ai_mail's mail into a collection that had never
-been created.  A store call's own success flag is the writer's opinion; the
-read-back is the evidence.  If the evidence is missing, mismatched, or simply
-never arrives, NOTHING may leave the live file.
+# Trinity push — the pins that make the prune lane safe to run.
+#
+# THE ONE LAW under test
+# ----------------------
+# ``vectorize -> verify -> prune`` is an ORDER, and every step of it can fail.
+# The tests in :class:`TestNothingIsPrunedWithoutProof` exist because the cheap
+# implementation of this lane — store, assume, delete — is exactly the shape
+# that deleted four months of @ai_mail's mail into a collection that had never
+# been created.  A store call's own success flag is the writer's opinion; the
+# read-back is the evidence.  If the evidence is missing, mismatched, or simply
+# never arrives, NOTHING may leave the live file.
+#
+# Every test here was written against the behaviour required, not the behaviour
+# found: the whole module is new, so "red first" means each pin fails against a
+# push that skips its step (see the mutation notes in the class docstrings).
 
-Every test here was written against the behaviour required, not the behaviour
-found: the whole module is new, so "red first" means each pin fails against a
-push that skips its step (see the mutation notes in the class docstrings).
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — the real store behind get_by_ids_subprocess(); a fake store_client stands in
+# seedgo: no-test-needed(covered_elsewhere) — compose_meta() text the push writes: tests/test_tab_renderer.py
 
 import copy
 import json
+import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.json import entry_limits
+from aipass.memory.apps.handlers.monitor import detector
+from aipass.memory.apps.handlers.rollover import orchestrator
+from aipass.memory.apps.handlers.templates import push_report
+from aipass.memory.apps.handlers.tracking import tab_renderer
+from aipass.memory.apps.modules import push as push_module
+from aipass.seedgo.apps.modules.door_trinity import check_branch, expected_meta_line
 from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.templates import trinity_push as tp
 
@@ -200,10 +215,8 @@ def _seedgo_renders_the_retired_todos_tab() -> bool:
 
     A changed mirror signature counts as landed: the checker pin then runs strict.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
-
     try:
-        line = trinity_groups.expected_meta_line("todos", "guinea", _config(), "prose")
+        line = expected_meta_line("todos", "guinea", _config(), "prose")
     except TypeError:
         return False
     return "rollover OFF" in line
@@ -384,7 +397,9 @@ class TestArchivedContentIsTheEntry:
             "reason": "extra field(s) extra",
         }
 
-        meta = tp._archive_metadata("guinea", prune, "2026-08-27T10:00:00")
+        store = FakeStore()
+        tp.archive_prunes(store, "guinea", [prune], [("global", "g")])
+        [meta] = store.store_calls[0]["metadatas"]
 
         assert meta["entry_number"] == 9
         assert meta["entry_date"] == "2026-08-27"
@@ -401,7 +416,9 @@ class TestArchivedContentIsTheEntry:
             "reason": "r",
         }
 
-        meta = tp._archive_metadata("guinea", prune, "2026-08-27T10:00:00")
+        store = FakeStore()
+        tp.archive_prunes(store, "guinea", [prune], [("global", "g")])
+        [meta] = store.store_calls[0]["metadatas"]
 
         assert all(isinstance(value, (str, int, float, bool)) for value in meta.values())
 
@@ -480,7 +497,7 @@ class TestTheMachineFrame:
 
     def test_a_missing_created_does_not_invent_a_false_history(self):
         meta = tp.build_doc_metadata({}, "local", "guinea")
-        assert meta["created"] == tp._today()
+        assert meta["created"] == meta["last_updated"]
 
     def test_managed_by_is_the_exact_branch_directory_name(self):
         """The owner's ruling, and what seedgo's checker compares against."""
@@ -511,30 +528,28 @@ class TestTheMachineFrame:
 
         frame = tp.build_frame(before, "local", "guinea", {"sessions": []}, _config())
 
-        assert list(frame) == tp._KEY_ORDER["local"]
+        template = json.loads((_MEMORY_ROOT / "templates" / "LOCAL.template.json").read_text(encoding="utf-8"))
+        assert list(frame) == list(template)
 
-    def test_the_frame_report_names_what_it_prunes(self):
+    def test_the_frame_report_names_what_it_prunes(self, tmp_path):
         before = {"document_metadata": {"status": {}, "weird": 1}, "active_tasks": {}, "sessions": []}
-        after = tp.build_frame(before, "local", "guinea", {"sessions": []}, _config())
+        root = _branch(tmp_path, "guinea", before)
 
-        changes = tp._frame_changes(before, after, "local")
+        plan = tp.plan_branch("guinea", root, _config(), backlog_path=tmp_path / "backlog.json")
+        [changes] = [item["frame_changes"] for item in plan["files"] if item["file_key"] == "local"]
 
         assert any("status" in change and "prune" in change for change in changes)
         assert any("active_tasks" in change for change in changes)
 
     def test_the_gold_templates_spell_the_branch_placeholder_as_spawn_does(self):
         """spawn renders {{BRANCH}} lowercase; gold must match or spawn-templates reverts spawn."""
-        from aipass.memory.apps.handlers.monitor import detector
-
-        assert sorted(path.name for path in detector._TEMPLATE_MAP.values()) == [
-            "LOCAL.template.json",
-            "OBSERVATIONS.template.json",
-        ]
-        for path in detector._TEMPLATE_MAP.values():
+        gold = {"local": "LOCAL.template.json", "observations": "OBSERVATIONS.template.json"}
+        for file_key, name in gold.items():
+            path = _MEMORY_ROOT / "templates" / name
             text = path.read_text(encoding="utf-8")
             assert "{{BRANCHNAME}}" not in text, path.name
             assert "{{BRANCH}}" in text, path.name
-            tags = tp._template_tags(json.loads(text), "guinea")
+            tags = tp.build_doc_metadata({}, file_key, "guinea")["tags"]
             assert tags[-1] == "guinea", path.name
             assert not [tag for tag in tags if "{{" in tag], path.name
 
@@ -819,9 +834,7 @@ class TestThePushedFileIsCanonical:
     """The output is measured by the standard's own checker, not by opinion."""
 
     def test_a_pushed_branch_satisfies_the_trinity_checker(self, tmp_path):
-        pytest.importorskip("aipass.seedgo.apps.handlers.aipass_standards.trinity_check")
-        from aipass.seedgo.apps.handlers.aipass_standards import trinity_check
-
+        pytest.importorskip("aipass.seedgo.apps.modules.door_trinity")
         local = {
             "document_metadata": {"created": "2026-01-01", "status": {"health": "healthy"}},
             "sessions": [_entry(2), _entry(1, findings=["drift"])],
@@ -840,7 +853,7 @@ class TestThePushedFileIsCanonical:
         plan = tp.plan_branch("guinea", root, _config())
         tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
 
-        result = trinity_check.check_branch(str(root))
+        result = check_branch(str(root))
         failing = [check["name"] for check in result["checks"] if check["score"] < 100]
         messages = [str(check.get("message")) for check in result["checks"] if check["score"] < 100]
         if failing == ["Meta lines & _usage"] and _seedgo_renders_the_retired_todos_tab():
@@ -881,21 +894,15 @@ class TestRefreshIsScopable:
     """One citizen's rollover must not rewrite the whole fleet's files."""
 
     def test_refresh_all_tabs_accepts_a_branch_list(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         import inspect
 
         assert "branches" in inspect.signature(tab_renderer.refresh_all_tabs).parameters
 
     def test_a_scoped_refresh_only_visits_the_named_branch(self, monkeypatch):
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         visited = []
         tmp = Path(tempfile.gettempdir())
         registry = [{"name": "alpha", "path": str(tmp / "alpha")}, {"name": "beta", "path": str(tmp / "beta")}]
         monkeypatch.setattr(tab_renderer, "_refresh_one_file", lambda *a, **k: (visited.append(a[1]), (0, 1, []))[1])
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(detector, "_read_registry", lambda: registry, raising=False)
 
         tab_renderer.refresh_all_tabs(branches=["alpha"])
@@ -904,14 +911,10 @@ class TestRefreshIsScopable:
 
     def test_an_unscoped_refresh_still_visits_everyone(self, monkeypatch):
         """The fleet-wide behaviour is still available — for lanes that mean it."""
-        from aipass.memory.apps.handlers.tracking import tab_renderer
-
         visited = []
         tmp = Path(tempfile.gettempdir())
         registry = [{"name": "alpha", "path": str(tmp / "alpha")}, {"name": "beta", "path": str(tmp / "beta")}]
         monkeypatch.setattr(tab_renderer, "_refresh_one_file", lambda *a, **k: (visited.append(a[1]), (0, 1, []))[1])
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(detector, "_read_registry", lambda: registry, raising=False)
 
         tab_renderer.refresh_all_tabs()
@@ -938,8 +941,6 @@ class TestTheFleetGate:
     """A fleet write needs --confirm; a dry-run and a single branch do not."""
 
     def test_a_bare_fleet_push_is_refused(self, monkeypatch):
-        from aipass.memory.apps.modules import push as push_module
-
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda *a, **k: ran.append(a))
 
@@ -950,8 +951,6 @@ class TestTheFleetGate:
         assert ran == []
 
     def test_a_fleet_push_without_confirm_never_reaches_the_engine(self, monkeypatch):
-        from aipass.memory.apps.modules import push as push_module
-
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda *a, **k: ran.append(a))
 
@@ -961,8 +960,6 @@ class TestTheFleetGate:
         assert ran == []
 
     def test_confirm_lets_a_fleet_push_through(self, monkeypatch):
-        from aipass.memory.apps.modules import push as push_module
-
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda branch, dry: ran.append((branch, dry)))
 
@@ -971,8 +968,6 @@ class TestTheFleetGate:
         assert ran == [(None, False)]
 
     def test_a_single_branch_push_does_not_need_confirm(self, monkeypatch):
-        from aipass.memory.apps.modules import push as push_module
-
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda branch, dry: ran.append((branch, dry)))
 
@@ -982,8 +977,6 @@ class TestTheFleetGate:
 
     def test_a_help_flag_anywhere_beats_the_push(self, monkeypatch):
         """The lesson from `rollover push --help` performing the reset it was asked to describe."""
-        from aipass.memory.apps.modules import push as push_module
-
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda *a, **k: ran.append(a))
 
@@ -1037,7 +1030,7 @@ class TestTodosMoveToTheBacklog:
     def _push(self, monkeypatch, tmp_path, root, dry_run, todos_count=10, store=None):
         monkeypatch.setattr(tp, "resolve_scope", lambda branch=None: _scope(root))
         monkeypatch.setattr(tp.config_loader, "load", lambda: _config(todos_count=todos_count))
-        monkeypatch.setattr(tp, "_destinations", lambda name: [("global", None)])
+        monkeypatch.setattr(tp, "_destinations", lambda name: ([("global", None)], None))
         return tp.push(
             branch=self.BRANCH,
             dry_run=dry_run,
@@ -1186,8 +1179,6 @@ class TestTodosMoveToTheBacklog:
         assert result["branches"][0]["todo_reasons"] == {"overflow": 2}
 
     def test_a_backlog_that_does_not_read_back_refuses_the_branch_and_leaves_local_json(self, tmp_path, monkeypatch):
-        from aipass.memory.apps.handlers.rollover import todo_roll
-
         root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(1)], "sessions": [_entry(1)]})
         before = (root / ".trinity" / "local.json").read_bytes()
         real_write = todo_roll.write_memory_file
@@ -1294,8 +1285,6 @@ class TestTodosMoveToTheBacklog:
     # -- the dry run and the second push ------------------------------------------
 
     def test_a_dry_run_writes_nothing_and_prints_the_branch_and_fleet_lines(self, tmp_path, monkeypatch):
-        from aipass.memory.apps.handlers.templates import push_report
-
         todos = [self._legacy(2), {"task": "fix drone help"}]
         root = _branch(tmp_path, self.BRANCH, {"todos": todos})
         local_before = (root / ".trinity" / "local.json").read_bytes()
@@ -1314,8 +1303,6 @@ class TestTodosMoveToTheBacklog:
         assert f"TODOS TO BACKLOG: 2 across 1 branches, {chars:,} chars" in lines
 
     def test_a_second_push_after_the_migration_moves_nothing(self, tmp_path, monkeypatch):
-        from aipass.memory.apps.handlers.templates import push_report
-
         root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(2), self._legacy(1)]})
         self._push(monkeypatch, tmp_path, root, dry_run=False)
         after_first = self._backlog(tmp_path).read_bytes()
@@ -1331,8 +1318,6 @@ class TestTodosMoveToTheBacklog:
         assert len(sessions) == len(sessions_after_first)
 
     def test_the_executed_report_counts_what_moved(self, tmp_path, monkeypatch):
-        from aipass.memory.apps.handlers.templates import push_report
-
         root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(1), self._todo(2)]})
         result = self._push(monkeypatch, tmp_path, root, dry_run=False)
         rendered = push_report.render(result, "@guinea")
@@ -1342,13 +1327,11 @@ class TestTodosMoveToTheBacklog:
 
     def test_a_clean_desk_and_an_emptied_one_do_not_render_the_same(self, tmp_path, monkeypatch):
         """@ai_mail, 2026-08-27: 'an empty todos[] reads as a clean desk'."""
-        from aipass.memory.apps.handlers.templates import push_report
 
         def rendered(sub: str, todos: list) -> str:
             root = _branch(tmp_path / sub, self.BRANCH, {"todos": todos})
-            plan = tp.plan_branch(self.BRANCH, root, _config(), backlog_path=tmp_path / sub / "backlog.json")
-            entry = tp._dry_entry(plan)
-            return "\n".join(push_report.render({"dry_run": True, "scope": 1, "errors": [], "branches": [entry]}, "@g"))
+            result = self._push(monkeypatch, tmp_path / sub, root, dry_run=True)
+            return "\n".join(push_report.render(result, "@g"))
 
         empty = rendered("empty", [])
         clean = rendered("clean", [self._todo(1), self._todo(2)])
@@ -1396,6 +1379,93 @@ class TestTodosMoveToTheBacklog:
 
         assert tp.is_canonical("sessions", note, {"field": "summary", "max_chars": 300})
         assert f"40 todo(s) moved to {backlog}" in note["summary"]
+
+
+# =============================================================================
+# THE PUSH LOOP OVER A REGISTRY THAT TURNS UNREADABLE (DPLAN-0354 leg 4)
+# =============================================================================
+
+
+class TestThePushLoopOverARegistryThatTurnsUnreadable:
+    """The loop with the real local-store lookup over a registry under tmp_path.
+
+    Every other push pin replaces the destinations whole, so the None the
+    lookup answers on an unreadable registry (leg 3b) never reached the loop.
+    Here it does: the entries go to the global store, are verified there and
+    pruned; the lookup logs the registry it could not read. Green from its
+    first run; its proof is the mutants of the lookup's catch, which die here.
+    """
+
+    def test_the_entries_reach_the_global_store_when_the_registry_cannot_be_read(self, monkeypatch, tmp_path):
+        repo = tmp_path / "repo"
+        root = _branch(repo, "guinea", {"sessions": [_entry(2), _entry(1, extra="drift")]})
+        registry = repo / "AIPASS_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": [{"name": "guinea", "path": "guinea"}]}), encoding="utf-8")
+        monkeypatch.setattr(detector, "_REPO_ROOT", repo)
+        monkeypatch.setattr(write_fence, "ROOT", repo)
+        monkeypatch.setattr(tp, "resolve_scope", lambda branch=None: _scope(root))
+        monkeypatch.setattr(tp.config_loader, "load", lambda: _config())
+        log = MagicMock()
+        monkeypatch.setattr(orchestrator, "logger", log)
+        # The push resolves the lookup lazily, through sys.modules: the real module patched here is registered there.
+        monkeypatch.setitem(sys.modules, orchestrator.__name__, orchestrator)
+        assert orchestrator.get_branch_local_chroma_path("guinea") == root / ".chroma"
+
+        registry.write_text("NOT JSON {{{", encoding="utf-8")
+        store = FakeStore("honest")
+        result = tp.push(branch="guinea", dry_run=False, store_client=store, backup_root=tmp_path / ".backup")
+
+        assert result["success"] is True
+        assert [entry["pruned"] for entry in result["branches"]] == [1]
+        assert list(store.shelves) == [str(None)]
+        errors = [call.args[0] for call in log.error.call_args_list]
+        assert any(str(registry) in text for text in errors)
+
+
+class TestThePushReportSaysWhyThereIsNoLocalStore:
+    """The report tells an unreadable registry from a branch with no local store (leg 6 of DPLAN-0354).
+
+    Until leg 6 both answered None from the lookup and the report said nothing:
+    a push that reached the global store only read the same either way. The
+    lookup is the real one over a registry under tmp_path; the store is a fake.
+    """
+
+    def _push_over(self, monkeypatch, tmp_path, registry_text: str) -> tuple:
+        repo = tmp_path / "repo"
+        root = _branch(repo, "guinea", {"sessions": [_entry(2), _entry(1, extra="drift")]})
+        (repo / "AIPASS_REGISTRY.json").write_text(registry_text, encoding="utf-8")
+        monkeypatch.setattr(detector, "_REPO_ROOT", repo)
+        monkeypatch.setattr(write_fence, "ROOT", repo)
+        monkeypatch.setattr(tp, "resolve_scope", lambda branch=None: _scope(root))
+        monkeypatch.setattr(tp.config_loader, "load", lambda: _config())
+        monkeypatch.setattr(orchestrator, "logger", MagicMock())
+        # The push resolves the lookup lazily, through sys.modules: the real module patched here is registered there.
+        monkeypatch.setitem(sys.modules, orchestrator.__name__, orchestrator)
+        store = FakeStore("honest")
+        result = tp.push(branch="guinea", dry_run=False, store_client=store, backup_root=tmp_path / ".backup")
+        return result, push_report.render(result, "@guinea"), store, root
+
+    def test_an_unreadable_registry_is_named_in_the_report(self, monkeypatch, tmp_path):
+        result, rendered, store, _root = self._push_over(monkeypatch, tmp_path, "NOT JSON {{{")
+
+        assert [entry["local_store"] for entry in result["branches"]] == ["registry unreadable"]
+        assert "   local store: none (registry unreadable) — global store only" in rendered
+        assert list(store.shelves) == [str(None)]
+
+    def test_a_branch_with_no_local_store_says_so(self, monkeypatch, tmp_path):
+        result, rendered, store, _root = self._push_over(monkeypatch, tmp_path, json.dumps({"branches": []}))
+
+        assert [entry["local_store"] for entry in result["branches"]] == ["no local store"]
+        assert "   local store: none (no local store) — global store only" in rendered
+        assert list(store.shelves) == [str(None)]
+
+    def test_a_readable_registry_with_a_store_renders_as_before(self, monkeypatch, tmp_path):
+        registry_text = json.dumps({"branches": [{"name": "guinea", "path": "guinea"}]})
+        result, rendered, store, root = self._push_over(monkeypatch, tmp_path, registry_text)
+
+        assert [entry["local_store"] for entry in result["branches"]] == [None]
+        assert not [line for line in rendered if line.startswith("   local store")]
+        assert sorted(store.shelves) == sorted([str(root / ".chroma"), str(None)])
 
 
 # =============================================================================
@@ -1458,8 +1528,24 @@ class TestEntryRulesReadTheConfig:
         assert tp.todo_defect(entry, cap_spec) is None
         assert tp.todo_defect(entry, {"field": "task", "max_chars": 100}) == tp.DEFECT_UNKNOWN
 
-    def test_the_global_fallback_is_cached_not_re_read_per_entry(self):
-        """734 entries must not be 734 config reads; the push path never touches it."""
+    def test_the_global_fallback_is_cached_not_re_read_per_entry(self, monkeypatch):
+        """734 entries must not be 734 config reads; the push path never touches it.
+
+        Counted at the config read itself: eight answers over the four sections
+        cost one read. The clear stays on the private cache, since no public reset
+        exists and one for this test alone would be a door for the test (leg 7).
+        """
+        reads = []
+        real_load = entry_limits.load_entry_limits
+
+        def counting_load(*args, **kwargs):
+            reads.append(args)
+            return real_load(*args, **kwargs)
+
+        monkeypatch.setattr(entry_limits, "load_entry_limits", counting_load)
         tp._RULES_CACHE.clear()
-        assert tp.entry_rules("todos") is not None
-        assert set(tp._RULES_CACHE) == {"sessions", "key_learnings", "todos", "observations"}
+        sections = ("sessions", "key_learnings", "todos", "observations")
+        answers = [tp.entry_rules(section) for section in sections * 2]
+
+        assert reads == [("",)]
+        assert [sorted(answer) if answer else answer for answer in answers] == [["optional", "required"]] * 8

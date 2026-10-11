@@ -3,7 +3,7 @@
 # Description: Exploration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -59,10 +59,14 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in ["explore", "secrets"]:
         return False
 
+    if "--help" in args or "-h" in args:
+        print_introspection()
+        return True
+
     if command == "explore":
-        result = _handle_explore(args)
+        result = _handle_explore()
     elif command == "secrets":
-        result = _handle_secrets(args)
+        result = _handle_secrets()
     else:
         return False
 
@@ -76,8 +80,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 # =============================================================================
 
 
-def _handle_explore(args: List[str]) -> bool:
-    result = explore_rooms(args)
+def _handle_explore() -> bool:
+    result = explore_rooms()
     if not result["success"]:
         error(result["error"])
         return True
@@ -125,8 +129,8 @@ def _handle_explore(args: List[str]) -> bool:
     return True
 
 
-def _handle_secrets(args: List[str]) -> bool:
-    result = list_secrets(args)
+def _handle_secrets() -> bool:
+    result = list_secrets()
     if not result["success"]:
         error(result["error"])
         return True

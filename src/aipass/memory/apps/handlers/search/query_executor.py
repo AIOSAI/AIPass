@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: query_executor.py
 # Description: Search Query Execution Handler
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-03-12
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -29,6 +29,7 @@ from typing import Dict, Any
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.repo_root import module_file
+from aipass.memory.apps.handlers.storage.chroma_subprocess import embedder_reason
 
 # Subprocess scripts for ML operations (run in memory venv)
 _HANDLERS_DIR = module_file(__file__).parent.parent
@@ -83,7 +84,10 @@ def encode_query_subprocess(query: str) -> dict:
         )
 
         if result.returncode != 0:
-            return {"success": False, "error": result.stderr or "Embedding subprocess failed"}
+            return {
+                "success": False,
+                "error": f"Embedding failed (exit {result.returncode}): {embedder_reason(result)}",
+            }
 
         data = json.loads(result.stdout)
         if not data.get("success"):
@@ -232,8 +236,15 @@ def _extract_plan_id(query: str) -> str | None:
     return f"{prefix}-{number}"
 
 
-def _fetch_plan_by_metadata(plan_id: str, n_results: int) -> list:
-    """Fetch plan chunks directly from ChromaDB by source_file metadata."""
+def _fetch_plan_by_metadata(plan_id: str, n_results: int) -> list | None:
+    """Fetch plan chunks directly from ChromaDB by source_file metadata.
+
+    Returns:
+        The matching chunks ([] when none carries the plan ID), or None when the
+        store could not answer. A failure is warned here, so it is never read as
+        "no match" (leg 8 of DPLAN-0354).
+    """
+    skipped = f"[search] Plan metadata fetch failed for {plan_id}"
     input_data = {
         "operation": "get_by_source",
         "collection_name": "flow_plans",
@@ -248,15 +259,16 @@ def _fetch_plan_by_metadata(plan_id: str, n_results: int) -> list:
             text=True,
             timeout=30,
         )
+        # Every way the store fails meets the one handler below; none leaves this function.
         if result.returncode != 0:
-            return []
+            raise RuntimeError(f"store exited {result.returncode}")
         data = json.loads(result.stdout)
         if not data.get("success"):
-            return []
+            raise RuntimeError(data.get("error", "store refused"))
         return data.get("results", [])
     except Exception as e:
-        logger.warning(f"[search] Plan metadata fetch failed: {e}")
-        return []
+        logger.warning(f"{skipped}: {e} — exact-ID pin skipped")
+        return None
 
 
 def _pin_plan_id_matches(query: str, filtered: list, n_results: int) -> list:

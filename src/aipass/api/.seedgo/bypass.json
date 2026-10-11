@@ -73,6 +73,233 @@
         "_reset_refusals"
       ],
       "reason": "Called from tests/conftest.py:207,209 — the unused_function checker skips tests/, so a fixture-only helper reads as dead. Same species as this branch's existing integrations_manager and api_key entries, and NAME-SCOPED rather than file-wide so a genuinely dead function in refusals.py is still caught. It exists because the refusal memory's 60s TTL outlives a suite run: one test provoking a refusal would silence every later test on that lane, and they would still pass — a remembered refusal raises exactly what a fresh one does. INTERIM, and it does not settle @devpulse's parked ruling on whether the checker should learn about conftest; if @seedgo teaches it, this entry becomes redundant, not wrong."
+    },
+    {
+      "file": "apps/handlers/host/lifetime.py",
+      "standard": "logged_fallback",
+      "lines": [341, 347],
+      "reason": "_alive's two handlers ARE its answers, not failures: ProcessLookupError from kill(pid, 0) is the kernel saying the pid is gone (False), PermissionError is the kernel saying it exists under another owner (True). No failure is dressed as an answer (api, fleet green leg 9)."
+    },
+    {
+      "file": "apps/handlers/host/tokens.py",
+      "standard": "logged_fallback",
+      "lines": [660],
+      "reason": "_is_due answers whether to rewrite a stamp; an unreadable stamp is due by definition (the docstring says so) and is overwritten with a readable one on the same request. True here is the answer, not a stand-in for a failure (api, fleet green leg 9). Re-ruled by devpulse 2026-10-10 (3ef9df96): a stamp nobody can read is not a stamp, the same answer as an absent one, and due is the fail-safe direction; the warning makes a hand-edited store visible once. Line moved 653 -> 656 with cf762733's comment, 656 -> 660 with 727ad04c's (PR #774 r10)."
+    },
+    {
+      "file": "apps/handlers/host/server.py",
+      "standard": "logged_fallback",
+      "lines": [592],
+      "reason": "_outside_room_for: a census that cannot answer leaves the attach on the ordinary naming rule, the same as no outside room. The caller acts identically on both, by design (docstring: A CENSUS THAT CANNOT ANSWER IS NOT AN ANSWER OF 'NO'); the attach still refuses downstream (api, fleet green leg 9). Re-ruled by devpulse 2026-10-10 (3ef9df96): the outside-room check is an improvement to the attach and a failed census read must not refuse it; a distinct sentinel would only move the 'treat as no room' decision to a caller that does not want it. Line moved 600 -> 592 when cf762733 moved UnavailableHTTPException to denials.py."
+    },
+    {
+      "file": "apps/handlers/host/server.py",
+      "standard": "exception_text_in_response",
+      "lines": [787],
+      "reason": "UploadRefused (devpulse ruling 3ef9df96, 2026-10-10): raised only at uploads.py:168, :198, :262, :337, each sentence built from constants and the caller's own declared values (Content-Length, byte counts); it never wraps another exception's text. The sentence is written for the client and the client needs it. If a builder ever wraps a foreign exception, the row returns to the cure (denials.py)."
+    },
+    {
+      "file": "apps/handlers/host/server.py",
+      "standard": "exception_text_in_response",
+      "lines": [970],
+      "reason": "MachineDoorFailed (devpulse ruling 3ef9df96, 2026-10-10): raised only at machine.py:168 (the DOOR_RAISED constant) and :178 (a message built from type(vitals).__name__); no foreign words possible. If a raise ever carries another exception's text, the row returns to the cure (denials.py)."
+    },
+    {
+      "file": "apps/handlers/host/server.py",
+      "standard": "exception_text_in_response",
+      "lines": [1115, 1131],
+      "reason": "VerbRefused (devpulse ruling 3ef9df96, 2026-10-10): raised at verbs.py:201, :404, :454 from constants and the caller's own message length, and at :459 as str(ReadRefused) from resolve_branch_root, whose sentences are api's own at reads.py:258, :290, :303 echoing the caller's branch or project name. Never a program's stderr or an OSError. If that changes, the rows return to the cure (denials.py)."
+    },
+    {
+      "file": "apps/handlers/host/machine.py",
+      "standard": "unused_function",
+      "functions": [
+        "forget"
+      ],
+      "reason": "The public door devpulse ruled (3ef9df96, 2026-10-10) in place of tests reaching the private _vitals cache; called from tests/test_host_fleet.py's machine_door fixture, and the unused_function checker skips tests/. Same species as the _reset_refusals entry, NAME-SCOPED so a genuinely dead function here is still caught. A reload or config change is its next product caller; when one lands, this entry goes. Added by api pending devpulse's word."
+    },
+    {
+      "file": "apps/handlers/host/lock.py",
+      "standard": "unused_function",
+      "functions": [
+        "forget"
+      ],
+      "reason": "The public door devpulse ruled (3ef9df96, 2026-10-10) in place of tests reaching the private _state cache; called from tests/test_host_fleet.py's lock_door fixture, and the unused_function checker skips tests/. Same species as the _reset_refusals entry, NAME-SCOPED so a genuinely dead function here is still caught. A reload or config change is its next product caller; when one lands, this entry goes. Added by api pending devpulse's word."
+    },
+    {
+      "file": "apps/handlers/host/uploads.py",
+      "standard": "logged_fallback",
+      "lines": [377],
+      "reason": "_pictures_from_user_dirs: no readable user-dirs config and no XDG line in it both mean the config has no answer; the one caller falls back to ~/Pictures in both cases, which is the correct directory on most machines (api, fleet green leg 9)."
+    },
+    {
+      "file": "apps/handlers/host/settings.py",
+      "standard": "logged_fallback",
+      "lines": [118],
+      "reason": "read_object: FileNotFoundError ONLY reads as {} (a fresh branch has written no settings, the same document as an empty file); every other OSError and every non-object raises. Ruled by the conformance corpus, FPLAN-0438 R3 (api, fleet green leg 9)."
+    },
+    {
+      "file": "apps/handlers/host/autostart.py",
+      "standard": "logged_fallback",
+      "lines": [374, 438],
+      "reason": "Both are status probes whose None means unknown and is shown as unknown: _port_in, an absent and an unreadable --port are both a port nobody can state (never a guess); linger_enabled, None is the could-not-ask answer its docstring names, beside True/False (api, fleet green leg 9)."
+    },
+    {
+      "file": "apps/handlers/openrouter/caller.py",
+      "standard": "logged_fallback",
+      "lines": [86],
+      "reason": "detect_caller: the shared None is a decision of api's (fleet green leg 5), written in its docstring: every caller does the right thing with it (get_response sends as 'unknown', ensure_caller_config answers {}), and a raise would end get_response before its request is sent (api, fleet green leg 9)."
+    },
+    {
+      "file": "tests/test_host_attach.py",
+      "standard": "sleep_in_test",
+      "reason": "FILE-WIDE because sleep_in_test passes no line. The one sleep left (time.sleep(0.5) in test_the_duration_is_the_socket_s_own_lifetime_not_a_constant) is the subject: the test pins the logged duration >= 0.5s, so the wall clock is what it measures. Every other wait in the file goes through StubSession.wait_until or wait_for_log on a Condition (fleet green leg 8); a new sleep here is hidden by this rule, so it is re-read each leg (api, fleet green leg 9)."
+    },
+    {
+      "file": "tests/test_host_read_lane_changes.py",
+      "standard": "sleep_in_test",
+      "reason": "FILE-WIDE because sleep_in_test passes no line. The one sleep (0.4s in slow(), test_concurrent_callers_asking_the_same_question_share_one_subprocess) IS the overlap under test: the 30 later callers must queue inside the cache's single flight while the first is in it, and they block inside the product, so there is no condition a test can wait on (api, fleet green leg 9). Moved with the test from test_host_read_lane.py in the oversize split (api, 2026-10-08)."
+    },
+    {
+      "file": "tests/test_host_perf.py",
+      "standard": "sleep_in_test",
+      "reason": "FILE-WIDE because sleep_in_test passes no line. The one sleep (0.2s in _run, test_a_stampede_of_readers_shares_one_exec) holds one exec open so eight readers overlap it inside the cache; the waiters block inside the product, so there is no condition to wait on (api, fleet green leg 9)."
+    },
+    {
+      "file": "tests/test_host_attach_pump.py",
+      "standard": "through_the_command",
+      "lines": [529],
+      "reason": "kwargs['preexec_fn'] is host_attach._acquire_controlling_tty: the identity IS the claim (open_attach hands Popen this very hook), so the name must be read; kept under compass 481 and accepted in leg 8 (api, fleet green leg 9). Moved with the test from test_host_attach.py:716 in the oversize split (api, 2026-10-08)."
+    },
+    {
+      "file": "tests/test_host_lifetime.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. os.kill is replaced in the stop tests because the subject is a SIGTERM to a pid the record names, and an unpatched kill would signal a real process; time.monotonic drives stop's 10s deadline without waiting it; sys.platform/shutil.which answer linger_enabled's own platform probe. A kill or clock parameter on stop() would be a door for these tests alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_attach_pump.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. os.close is spied to prove a second hangup closes nothing. A close seam on open_attach would be a door for the test alone (api, fleet green leg 10). Split from test_host_attach.py's row in the oversize split, the os.close half (api, 2026-10-08)."
+    },
+    {
+      "file": "tests/test_host_attach_route.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. shutil.which answers the tmux preflight on hosts with and without tmux (CI runners have none), forwarding every other lookup; the missing-tmux test uses the product's TMUX_BINARY instead (leg 10). A which seam on open_attach would be a door for the tests alone (api, fleet green leg 10). Split from test_host_attach.py's row in the oversize split, the shutil.which half (api, 2026-10-08)."
+    },
+    {
+      "file": "tests/conftest.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. The tmux_preflight fixture answers shutil.which for tmux alone and forwards every other lookup, so the attach lane's PTY cases measure the pump and not the runner's package list. It moved here from test_host_attach.py in the oversize split because three files use it (api, 2026-10-08); the reason is that file's row of leg 10. A new stdlib patch in conftest is hidden by this rule, so it is re-read each leg."
+    },
+    {
+      "file": "tests/test_host_read_lane_changes.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. refusals' time.monotonic drives the 60s refusal TTL past its window without sleeping it. A clock parameter on the refusal memory would be a door for these tests alone (api, fleet green leg 10). Split from test_host_read_lane.py's row in the oversize split, the time.monotonic half (api, 2026-10-08)."
+    },
+    {
+      "file": "tests/test_host_read_lane_history.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. Path.open is a pass-through spy proving read_git_remote opens no file (api, fleet green leg 10). Split from test_host_read_lane.py's row in the oversize split, the Path.open half (api, 2026-10-08)."
+    },
+    {
+      "file": "tests/test_caller_detection.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. get_caller_info's subject IS the live call stack: inspect.stack is answered with frames from flow/prax paths no test file lives under. A stack parameter would be a door for these tests alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_api_entry.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. discover_modules' subject is what importlib hands back for each module file (no handle_command, an import that raises); importlib.import_module is answered per test, scoped to the api entry module's own reference. An importer parameter would be a door for these tests alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_token_store.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. os.open is answered with the Windows delete-pending PermissionError and with a permanent denial, the two lock states the platform will not produce on demand on Linux CI. An opener parameter on the lock would be a door for these tests alone; the stale-lock race stays logged per devpulse's 09-19 ruling (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_uploads.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. os.open raising ENOSPC and Path.mkdir raising EPERM are the server-side failures (503, not 400) a test cannot make a real disk produce; the asserts read the product's own status, never the error type. A filesystem parameter on store_image would be a door for these tests alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_autostart.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. The one patch left (sys.platform = win32) is in the test of is_supported itself, whose subject is the platform answer; the stop_unit refusal now goes through is_supported (leg 10) (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_settings.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. os.unlink refusing is the double failure (write fails, cleanup fails) whose reason must still travel; no real file system refuses an unlink of a file the test owns on demand. An unlink parameter would be a door for this test alone (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_fleet.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. The binary lookup's PATH step is the subject: shutil.which is answered per name so each step of the search order is pinned independently of what the runner has installed (api, fleet green leg 10)."
+    },
+    {
+      "file": "tests/test_host_api.py",
+      "standard": "stdlib_patch",
+      "reason": "FILE-WIDE, the checker passes no line. One shutil.which answering nothing on PATH, so the route's missing-binary answer does not depend on whether the runner has baud installed (api, fleet green leg 10)."
+    },
+    {
+      "file": "apps/handlers/openrouter/provision.py",
+      "standard": "logged_fallback",
+      "lines": [227, 282],
+      "reason": "Provisioning is non-blocking by design: the failure is logged at error with its reason, and the one caller, client.get_response step 1b, discards the answer inside its deliberate catch, so a raise would only move the fallback. devpulse's ruling of 10-03 (leg 11 dispatch); no product change (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/support_host_attach.py",
+      "standard": "through_the_command",
+      "lines": [171],
+      "reason": "The fake PTY's resize validates with the product's own _require_dimension, so the double refuses exactly what the real session refuses; a copied validator would drift, and a public one would be a door for the double alone. HELD since leg 8 (api, fleet green leg 11). Moved with StubSession from test_host_attach.py:1513 in the oversize split (api, 2026-10-08)."
+    },
+    {
+      "file": "tests/test_host_attach_route.py",
+      "standard": "through_the_command",
+      "lines": [1020],
+      "reason": "_acquire_controlling_tty's off-POSIX refusal is reached by no caller (all sit behind PTY_AVAILABLE) and runs in a forked child; its injected defaults are the only way in. HELD since leg 8 (api, fleet green leg 11). Moved with the test from test_host_attach.py:2274 in the oversize split (api, 2026-10-08). Ruled bypass by devpulse 2026-10-10 (3ef9df96): the alternative to a refusal there is None() raised inside a forked child, so a private-helper unit test is the only way to pin it. Line drifted 1016 -> 1020."
+    },
+    {
+      "file": "tests/test_host_perf.py",
+      "standard": "through_the_command",
+      "lines": [920, 945, 946, 949],
+      "reason": "920: the close order of the two PTY ends on a failed spawn is visible only through _spawn_pty's close_fd seam. 945-949: an over-release of the session semaphore is an accounting bug no request can produce; the test uses the module's own bounded semaphore, since a stand-in would pass with the module downgraded. A public door would exist for these tests alone. HELD since leg 9 (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/test_cleanup.py",
+      "standard": "through_the_command",
+      "lines": [33],
+      "reason": "_write_json is imported by name: its parent mkdir and its two failure paths cannot be reached through cleanup_old_data, which only writes a store it has just read and parsed. A public writer would be a door for these tests alone. HELD since leg 9 (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/test_caller_detection.py",
+      "standard": "through_the_command",
+      "lines": [28],
+      "reason": "The flow and prax detection is pinned through get_caller_info (TestGetCallerInfo). The helpers stay imported by name for their fallback branch, where parts.index raises, which a stack frame's filename (a str turned into a Path) cannot produce; _create_fallback_info is reached only there. HELD since leg 9 (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/test_host_uploads.py",
+      "standard": "through_the_command",
+      "lines": [809],
+      "reason": "_validation_sentence([]): FastAPI never raises a validation error with an empty list, so no request reaches this input, and a public door would exist for this test alone. HELD since leg 9 (api, fleet green leg 11)."
+    },
+    {
+      "file": "tests/test_host_read_lane_changes.py",
+      "standard": "through_the_command",
+      "lines": [210, 211, 321, 337, 361, 392],
+      "reason": "The git-changes ReadCache (host_git._changes): its stored entry aged past the TTL (210, 211), its entries and failures inspected after a refusal and a recovery (321, 392), and its single-flight lock counted (337, 361). An inspection between tests is not a route the product has, and a public one would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch) (api, fleet green leg 12). Moved with the tests from test_host_read_lane.py:890, 891, 1001, 1017, 1041, 1072 in the oversize split; the clear around each case (153, 155) went to conftest.py with its fixture (api, 2026-10-08)."
+    },
+    {
+      "file": "tests/test_host_fleet.py",
+      "standard": "through_the_command",
+      "lines": [1187, 1190, 1423, 1426],
+      "reason": "host_machine._vitals and host_lock._state cleared around the cases that read them, so one case's cached answer is never served to the next. A cache reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch) (api, fleet green leg 12)."
+    },
+    {
+      "file": "tests/conftest.py",
+      "standard": "through_the_command",
+      "lines": [225, 227, 466, 468],
+      "reason": "_refusals._reset_refusals() empties the refusal memory around every test (466, 468), so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12). 225, 227: the git-changes ReadCache (host_git._changes) cleared around each case, the same ruling; moved with _clean_git_changes_cache from test_host_read_lane.py:153, 155 in the oversize split (api, 2026-10-08), named and requested per file since 2026-10-09."
     }
   ],
   "notes": {

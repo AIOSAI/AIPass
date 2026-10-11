@@ -1,46 +1,22 @@
 # =================== AIPass ====================
 # Name: test_watchdog_wire.py
 # Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-08-19
-# Modified: 2026-09-12
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for arm_wire — delivering THIS seat's dispatch completions.
+"""Tests for apps/handlers/watchdog/wire.py: arm_wire delivering THIS seat's dispatch completions."""
 
-Two failures are pinned here, from two different rounds.
-
-r2's, witnessed live on 2026-08-19: a session-wired watcher kept detecting after
-the session id churned, delivering COMPLETE lines into a dead session's task
-file. So the wire must take over a wire soldered to another session, never
-SIGTERM a recycled pid, and refuse to run continuously under
-run_in_background — where its per-line stdout notifies nobody.
-
-r4's, measured 2026-08-22 and the reason this file lost seventeen tests: the
-wire drained the detection daemon's events file AND @ai_mail's notification
-feed, with no dedupe. They carried the same completions 1-2 seconds apart, so
-every dispatch produced TWO wakes for months. ``test_one_completion_delivers_one_line``
-is the load-bearing test of this rewrite — a duplicate wake looks exactly like a
-working wake, so only a count can tell them apart.
-
-The other r4 headline is attribution: the feed names the branch that FINISHED,
-never the one that SENT the work, so this seat used to be woken fleet-wide.
-``test_another_citizens_completion_is_not_delivered`` pins rule 5.
-
-Every test passes ``repo_root``/``storage_path`` explicitly and drives loops by
-replacing the handler's own ``_sleep`` — no test waits a real tick.
-
-One thing here is about the HOST rather than the wire. ``_stdout_target`` has a
-recipe on Linux (/proc) and off it (``lsof``), and none at all on Windows, where
-a continuous arm therefore refuses. ``_a_stdout_target_this_host_can_name``
-below hands the arm a target on such a host so the ~35 pins that are about
-delivery keep running there; the pins that are about stdout resolution itself
-opt out of it by naming ``raw_stdout_probe``.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/watchdog/wire.py parses and imports
+# seedgo: no-test-needed(documentation) — that arm_wire and find_repo_root carry docstrings
+# seedgo: no-test-needed(constant) — the WRAPPER_* names and the BASELINE DEAD wording
 
 import json
 import os
 import shutil
+import signal as _real_signal
 import subprocess
 import sys
 import time
@@ -50,9 +26,39 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.devpulse.apps.handlers.watchdog import dispatches as watch_dispatches
 from aipass.devpulse.apps.handlers.watchdog import feed as watch_feed
 from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
 from aipass.devpulse.apps.handlers.watchdog import wire
+
+# Two failures are pinned here, from two different rounds.
+#
+# r2's, witnessed live on 2026-08-19: a session-wired watcher kept detecting after
+# the session id churned, delivering COMPLETE lines into a dead session's task
+# file. So the wire must take over a wire soldered to another session, never
+# SIGTERM a recycled pid, and refuse to run continuously under
+# run_in_background — where its per-line stdout notifies nobody.
+#
+# r4's, measured 2026-08-22 and the reason this file lost seventeen tests: the
+# wire drained the detection daemon's events file AND @ai_mail's notification
+# feed, with no dedupe. They carried the same completions 1-2 seconds apart, so
+# every dispatch produced TWO wakes for months. ``test_one_completion_delivers_one_line``
+# is the load-bearing test of this rewrite — a duplicate wake looks exactly like a
+# working wake, so only a count can tell them apart.
+#
+# The other r4 headline is attribution: the feed names the branch that FINISHED,
+# never the one that SENT the work, so this seat used to be woken fleet-wide.
+# ``test_another_citizens_completion_is_not_delivered`` pins rule 5.
+#
+# Every test passes ``repo_root``/``storage_path`` explicitly and drives loops by
+# replacing the handler's own ``_sleep`` — no test waits a real tick.
+#
+# One thing here is about the HOST rather than the wire. ``_stdout_target`` has a
+# recipe on Linux (/proc) and off it (``lsof``), and none at all on Windows, where
+# a continuous arm therefore refuses. ``_a_stdout_target_this_host_can_name``
+# below hands the arm a target on such a host so the ~35 pins that are about
+# delivery keep running there; the pins that are about stdout resolution itself
+# opt out of it by naming ``raw_stdout_probe``.
 
 
 # A pid that cannot be running, re-asserted where used so a machine where it IS
@@ -88,11 +94,24 @@ def _private_heartbeat(tmp_path, monkeypatch):
     return hb
 
 
+class _SignalNoRebind:
+    """wire's ``signal`` name for a test: every constant reads the real module,
+    and installing a handler does nothing."""
+
+    def __getattr__(self, name: str):
+        return getattr(_real_signal, name)
+
+    @staticmethod
+    def signal(*args, **kwargs) -> None:
+        return None
+
+
 @pytest.fixture(autouse=True)
 def _no_signal_rebind(monkeypatch):
     """arm_wire installs a SIGTERM handler for clean deregistration; inside
-    pytest that rebinding must not leak past the test."""
-    monkeypatch.setattr(wire.signal, "signal", lambda *a, **kw: None)
+    pytest that rebinding must not leak past the test. Only wire's own ``signal``
+    name is swapped: patching signal.signal itself is process-wide."""
+    monkeypatch.setattr(wire, "signal", _SignalNoRebind())
 
 
 @pytest.fixture
@@ -247,12 +266,19 @@ def _spawn_named(name: str) -> subprocess.Popen:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    for _ in range(500):
-        if wire._cmdline(proc.pid).startswith(name):
+    # A deadline poll on the real condition; each ps call paces the loop itself.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and proc.poll() is None:
+        if _argv_of(proc.pid).startswith(name):
             return proc
-        time.sleep(0.01)
     proc.kill()
     raise AssertionError(f"fixture broken: {name} never became argv[0] of pid {proc.pid}")
+
+
+def _argv_of(pid: int) -> str:
+    """A pid's command line as ``ps`` prints it — the OS's answer, not the wire's own reader."""
+    done = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, encoding="utf-8", check=False)
+    return done.stdout.strip()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -461,7 +487,7 @@ _REAL_LSOF = pytest.mark.skipif(
         pytest.param("darwin", id="darwin", marks=_REAL_LSOF),
     ],
 )
-def test_the_wire_leaves_no_process_running(tmp_path, monkeypatch, lane):
+def test_the_wire_leaves_no_process_running(tmp_path, monkeypatch, lane, pretend_platform):
     """Rule 2: idle is zero running processes. The arm door used to spawn a daemon.
 
     The claim is about what is LEFT RUNNING, and the mock has to read no wider
@@ -486,7 +512,7 @@ def test_the_wire_leaves_no_process_running(tmp_path, monkeypatch, lane):
     store = _store(tmp_path)
     _write_feed(root, [])
     if lane == "darwin":
-        monkeypatch.setattr(wire.sys, "platform", "darwin")
+        pretend_platform(wire, "darwin")
 
     spawned: list[subprocess.Popen] = []
     real_popen = subprocess.Popen
@@ -730,7 +756,7 @@ def _spy_register(monkeypatch, seen: dict) -> None:
             seen.update(metadata or {})
         return real_register(watch_type, metadata=metadata, storage_path=storage_path)
 
-    monkeypatch.setattr(wire._registry, "register", spy)
+    monkeypatch.setattr(watch_registry, "register", spy)
 
 
 def test_wire_records_conversation_id_from_env(tmp_path, monkeypatch):
@@ -794,7 +820,7 @@ def test_a_foreground_wire_is_recorded_as_foreground(tmp_path, monkeypatch):
     assert seen["wrapper"] == wire.WRAPPER_FOREGROUND
 
 
-def test_the_run_in_background_shape_records_as_background(tmp_path, monkeypatch):
+def test_the_run_in_background_shape_records_as_background(tmp_path, capsys, monkeypatch):
     """--once is legal under run_in_background (it exits on delivery), so the
     wrapper must still be recorded truthfully there rather than assumed."""
     root = _repo(tmp_path)
@@ -810,6 +836,24 @@ def test_the_run_in_background_shape_records_as_background(tmp_path, monkeypatch
     wire.arm_wire(repo_root=root, storage_path=store, once=True, max_ticks=1, wire_poll=0)
 
     assert seen["wrapper"] == wire.WRAPPER_BACKGROUND
+    assert "stdout is a pipe" not in capsys.readouterr().err
+
+
+def test_a_piped_once_wire_says_the_statusline_will_not_count_it(tmp_path, capsys, monkeypatch):
+    """A pipe after --once records as foreground; the wire names the pipe (mutant: the pipe check answers False)."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: Path("pipe:[918273]"))
+    seen: dict = {}
+    _spy_register(monkeypatch, seen)
+
+    wire.arm_wire(repo_root=root, storage_path=store, once=True, max_ticks=1, wire_poll=0)
+
+    err = capsys.readouterr().err
+    assert seen["wrapper"] == wire.WRAPPER_FOREGROUND
+    assert "stdout is a pipe" in err
+    assert "drone @devpulse watchdog baseline --once" in err
 
 
 def test_wire_no_longer_records_a_daemon_pid(tmp_path, monkeypatch):
@@ -892,64 +936,61 @@ def _missing_binary(name: str):
     return _run
 
 
-def test_cmdline_off_linux_asks_ps(monkeypatch):
+def test_cmdline_off_linux_asks_ps(monkeypatch, pretend_platform):
     argv_seen: list = []
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("drone @devpulse watchdog baseline --once\n", argv_seen))
 
     assert wire._cmdline(4242) == "drone @devpulse watchdog baseline --once"
     assert argv_seen == [["ps", "-p", "4242", "-o", "command="]]
 
 
-def test_a_live_wire_off_linux_is_recognised_as_ours(monkeypatch):
+def test_a_live_wire_off_linux_is_recognised_as_ours(monkeypatch, pretend_platform):
     """Row 1 in one assertion: with "" this was False for every pid, so a live
     wire was buried as a recycled pid instead of taken over."""
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("drone @devpulse watchdog baseline\n"))
 
     assert wire._looks_like_ours(4242) is True
 
 
-def test_cmdline_off_linux_is_empty_when_ps_cannot_run(monkeypatch):
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+def test_cmdline_off_linux_is_empty_when_ps_cannot_run(monkeypatch, pretend_platform):
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _missing_binary("ps"))
 
     assert wire._cmdline(4242) == ""
 
 
-def test_stdout_target_off_linux_asks_lsof(monkeypatch, raw_stdout_probe):
+def test_stdout_target_off_linux_asks_lsof(tmp_path, monkeypatch, raw_stdout_probe, pretend_platform):
     argv_seen: list = []
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        _fake_run("p4242\nfd1\nn/Users/p/.claude/sess-abc/tasks/t.output\n", argv_seen),
-    )
+    named = tmp_path / "sess-abc" / "tasks" / "t.output"
+    pretend_platform(wire, "darwin")
+    monkeypatch.setattr(subprocess, "run", _fake_run(f"p4242\nfd1\nn{named}\n", argv_seen))
 
-    assert wire._stdout_target(4242) == Path("/Users/p/.claude/sess-abc/tasks/t.output")
+    assert wire._stdout_target(4242) == named
     assert argv_seen == [["lsof", "-p", "4242", "-a", "-d", "1", "-Fn"]]
 
 
-def test_stdout_target_off_linux_names_this_process_by_number(monkeypatch, raw_stdout_probe):
+def test_stdout_target_off_linux_names_this_process_by_number(monkeypatch, raw_stdout_probe, pretend_platform):
     """pid None means "me". /proc spells that "self"; lsof needs the number."""
     argv_seen: list = []
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("nsocket:[4532132]\n", argv_seen))
 
     assert wire._stdout_target() == Path("socket:[4532132]")
     assert argv_seen == [["lsof", "-p", str(os.getpid()), "-a", "-d", "1", "-Fn"]]
 
 
-def test_stdout_target_off_linux_is_none_when_lsof_names_no_file(monkeypatch, raw_stdout_probe):
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+def test_stdout_target_off_linux_is_none_when_lsof_names_no_file(monkeypatch, raw_stdout_probe, pretend_platform):
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("p4242\nfd1\n"))
 
     assert wire._stdout_target(4242) is None
 
 
-def test_stdout_target_off_linux_is_none_when_lsof_cannot_run(monkeypatch, raw_stdout_probe):
+def test_stdout_target_off_linux_is_none_when_lsof_cannot_run(monkeypatch, raw_stdout_probe, pretend_platform):
     """None is "cannot tell". A guessed path would be read as a wrapper."""
-    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _missing_binary("lsof"))
 
     assert wire._stdout_target(4242) is None
@@ -957,15 +998,18 @@ def test_stdout_target_off_linux_is_none_when_lsof_cannot_run(monkeypatch, raw_s
 
 def test_a_continuous_wire_refuses_when_its_stdout_is_unknowable(tmp_path, capsys, monkeypatch, raw_stdout_probe):
     """Row 2's product half. "armed" with no way of being heard is the exact
-    lie this whole file exists to remove — refuse by name, non-zero, no entry."""
+    lie this whole file exists to remove — refuse by name, non-zero, no entry.
+    Mutant 'my_target = None' (never asking) reddens the asked pin."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
     _write_feed(root, [])
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: None)
+    asked: list = []
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: asked.append(pid))
 
     with pytest.raises(SystemExit) as exit_info:
         wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
+    assert asked == [None], "the refusal must come from asking where THIS process's stdout goes"
     assert exit_info.value.code == 1
     captured = capsys.readouterr()
     assert "stdout target unresolvable" in captured.err
@@ -976,14 +1020,17 @@ def test_a_continuous_wire_refuses_when_its_stdout_is_unknowable(tmp_path, capsy
 
 def test_once_still_arms_when_the_stdout_target_is_unknowable(tmp_path, capsys, monkeypatch, raw_stdout_probe):
     """--once exits on delivery, so ANY wrapper hears it. The refusal belongs to
-    the continuous wire alone; widening it would kill the bg-safe shape."""
+    the continuous wire alone; widening it would kill the bg-safe shape.
+    Mutant 'my_target = None' (never asking) reddens the asked pin."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
     _write_feed(root, [])
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: None)
+    asked: list = []
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: asked.append(pid))
 
     result = wire.arm_wire(once=True, repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
+    assert asked == [None]
     assert result["state"] == "stopped"
     assert "BASELINE DEAD" not in capsys.readouterr().out
 
@@ -1049,7 +1096,7 @@ def _register(monkeypatch, rows: list[dict]) -> list[int]:
         reads[0] += 1
         return list(rows)
 
-    monkeypatch.setattr(wire._dispatches, "outstanding", _outstanding)
+    monkeypatch.setattr(watch_dispatches, "outstanding", _outstanding)
     return reads
 
 
@@ -1064,10 +1111,20 @@ def test_a_dead_dispatch_of_mine_is_announced_at_sign_in(tmp_path, capsys, monke
     assert result["dead"] == 1
     assert "DEAD @prax [70da6e9c] dispatched 09-07 12:00" in out
     assert "no completion by 09-07 14:00" in out
-    assert "Re-dispatch in continue mode" in out
+    # Overdue alone proves nothing about the monitor. dispatch_monitor retries up
+    # to three times and the row stays overdue against the FIRST deadline, so a
+    # live monitor on attempt 2 looks identical here (a @seedgo row did exactly
+    # that on 2026-09-20 while its service was active). The line must not name a
+    # cause it did not check, and must not send the reader straight to a
+    # re-dispatch that would double a running retry.
+    assert "Nothing here checked whether its monitor is alive" in out
+    assert "retries a dispatch up to" in out
+    assert "re-dispatching" in out.lower()
+    assert "its monitor died" not in out
 
 
 def test_a_death_is_announced_once_ever_not_once_per_wire(tmp_path, capsys, monkeypatch):
+    """The cursor lives beside the feed cursor; mutant 'cursor at repo root' reddens it."""
     root = _repo(tmp_path)
     _write_feed(root, [])
     _register(monkeypatch, [_register_row("drone", "bc7fe224-7a4a-4a64-8869-08c29716ce75")])
@@ -1076,7 +1133,7 @@ def test_a_death_is_announced_once_ever_not_once_per_wire(tmp_path, capsys, monk
     first = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
     assert first["dead"] == 1
     assert "DEAD @drone" in capsys.readouterr().out
-    assert wire._dead_cursor_file(root).is_file()
+    assert watch_feed.cursor_file_for(root, name=wire.DEAD_CURSOR_NAME).is_file()
 
     second = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
     assert second["dead"] == 0
@@ -1203,7 +1260,7 @@ def test_an_unreadable_register_does_not_kill_the_wire(tmp_path, capsys, monkeyp
     def _broken(repo_root=None):
         raise RuntimeError("register cannot be located")
 
-    monkeypatch.setattr(wire._dispatches, "outstanding", _broken)
+    monkeypatch.setattr(watch_dispatches, "outstanding", _broken)
 
     result = wire.arm_wire(repo_root=root, storage_path=_store(tmp_path), max_ticks=1, wire_poll=0)
 

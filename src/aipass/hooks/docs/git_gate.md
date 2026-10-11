@@ -1,58 +1,153 @@
 [<- Back to the README](../README.md)
 
-# The git gate
+# The git gate, and the rm gate beside it
 
-**Branch** hooks · **Code** `apps/handlers/security/git_gate.py`
+**Branch** hooks · **Code** `apps/handlers/security/git_gate.py`, `apps/handlers/security/rm_gate.py`, `apps/modules/protected_paths.py`, `apps/modules/shell_reader.py`
 
 ---
 
 ## Git Gate
 
-The `git_gate` handler (`security/git_gate.py`) enforces git access via drone to prevent state conflicts between agents. It is **enabled by default** in every project created by `aipass init`.
+The `git_gate` handler (`security/git_gate.py`) enforces git access via drone to prevent state conflicts between agents. It ships in every project `aipass init` creates, and inside AIPass it is part of the gate set the loader forces on (see [project_config.md](project_config.md)): no project config switches it off. It fails closed — a crash refuses the call it was checking, and the engine refuses on import error and timeout (see [engine.md](engine.md)).
 
-**What it blocks:** Raw `git` write commands (push, commit, checkout, merge, etc.) and raw `gh` commands (except `gh api`).
+**What it blocks:** raw `git` and raw `gh`, read or write, for EVERY seat, the verified admin seat
+included; git or gh launched from inside a program, the gh credential, and GitHub API writes, for every
+seat too; and writes to the protected files off the admin seat (below).
 
-**What it allows raw is a CLOSED allow-list, not "read-only verbs".** `READ_ALLOWED_GIT_SUBCOMMANDS`
-(`security/git_gate.py:26`) holds exactly these 21: `ls-files`, `ls-tree`, `show`, `cat-file`,
-`rev-parse`, `rev-list`, `log`, `status`, `diff`, `blame`, `describe`, `for-each-ref`, `show-ref`,
-`symbolic-ref`, `shortlog`, `grep`, `archive`, `count-objects`, `var`, `help`, `version`. A verb that
-is not on the list is refused *whatever it does*, and several ordinary read verbs are not on it —
-measured 2026-09-05 by calling `_all_git_reads()` directly: `git tag --sort=…`, `git branch -a`,
-`git remote -v`, `git config --get …`, `git stash list`, `git reflog`, `git worktree list` and
-`git notes list` are all **blocked**. This surprised @devpulse live on `git tag --sort` (2026-09-05).
-The earlier wording here said "status, log, diff, show, blame, grep, **etc.**", which read as an open
-set; it is not one. Whether the list should grow is a code question, open.
+**If drone cannot do it, it cannot be done (5.0.0, the owner's ruling 2026-10-04).** No seat runs git
+or gh raw: `modules/admin_seat`'s grant opens none of these lanes. A git refusal (`RAW_GIT_REFUSED`)
+names the caller from its passport (or says it could not be named) and the drone twin of the verb
+(`_GIT_TWINS`), as published in `drone @git --help`: `git status` is `drone @git status`, `git log`
+is `drone @git log [count] [path ...]`, and likewise diff, show, blame, remote, branch, tag and the
+owner verbs. Drone's read twins of 2026-10-04 (5.1.0):
 
-**What it reads is code, not data (1.1.0, 2026-09-16).** Before matching, the command goes through
-`bash_writes.code_text()`, the branch's one shell reader: a heredoc body whose consumer only reads it (a
-mail body, a `cat` into a file) is blanked, and a shell's own program text (`bash -c "…"`,
-`bash <<'EOF'`) is kept, tokenized. The first cures the false fire where prose that merely quoted a
-write-shaped git line refused an `ai_mail` reply; the second closes the opposite hole, where a quoted
-`bash -c` script was blanked as an argument and read as no invocation at all. If the reader raises, the
-gate scans the raw command as before — a gate that cannot parse must not turn permissive.
+| Raw git | Its drone twin |
+|---|---|
+| `git ls-files`, `git check-ignore` | `drone @git tracked <path ...>` |
+| `git diff` with paths or `--stat` | `drone @git diff [--staged] [--stat] <path ...>` |
+| `git rev-list`, `git merge-base` | `drone @git status --all` (the ahead/behind line) |
+| `git log` with a range `a..b` | `drone @git log [n] <a>..<b>` |
+| `git archive` | `drone @git export <ref> <dir>` |
 
-One refusal is all-or-nothing per command: `_all_git_reads()` requires *every* git invocation in the
-command to be an allowed verb, so `git status && git tag` is refused whole.
+The diff and log rows depend on the call's words (`_SHAPED_TWINS`): a plain `git diff` or `git log`
+is still named its plain twin. A verb with no twin (`for-each-ref`, `rev-parse`, `cat-file`,
+`describe` …) cannot be done; the refusal says to mail @devpulse to ask @drone for one. A bare `git` (no argument) prints usage and passes. Agent Bash only: service code that
+runs git as a subprocess (drone itself) never passes through a hook.
 
-**What it protects:** Edits to `.claude/settings.json`, `.claude/hooks/`, and `.git/hooks/` — the enforcement layer itself.
-The path is matched with `\` read as `/` and case-insensitively (1.2.0). Before that, a Windows backslash
-path never matched and the edit was allowed.
+**gh.** Every raw `gh` call is refused for every seat, `gh api` GET included (`GH_REDIRECT`). Drone
+owns gh: the refusal maps `gh issue`, `gh run`, `gh workflow` and `gh pr create` to their
+`drone @git` twins.
 
-**Disabling for a project:** Set `git_gate.enabled` to `false` in your project's `.aipass/hooks.json`. This disables git enforcement in isolation — all other hooks (edit_gate, rm_gate, prompt injection, etc.) continue to work normally. No sync, rebase, or PR flows depend on git_gate being active; those are handled independently by `drone @git`.
+**What it reads is the program the shell will run (since DPLAN-0356 phase 3).** Both gates read the
+command through `modules/shell_reader.py`, the branch's ONE shell-word reader; there is no second copy.
+It hands back every program the command runs, spelled the way the shell runs it: quotes removed,
+escapes and `$'\x67it'` decoded, braces expanded, a glob in the command word (`/usr/bin/g?t`) resolved
+against PATH and the cwd, a variable set earlier in the same command folded in. `eval`, `source`, `.`,
+`bash -c`, `bash <<<`, a heredoc fed to a shell, `$(…)`, backticks, `find -exec`, `xargs` and the
+launchers (`sudo`, `env -S`, `timeout`, `su -c` …) are read as the programs they run. A script FILE a
+shell or interpreter is handed (`bash x.sh`, `python3 x.py`, `./x`) is read at decision time. A heredoc
+body a reader only reads (a mail body) is data, not a command.
 
-```json
-"git_gate": {
-    "enabled": false,
-    "handler": "aipass.hooks.apps.handlers.security.git_gate.handle",
-    "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit"
-}
+What the reader cannot name with confidence — a command word that is an unfolded expansion
+(`$UNSET x`, `$(cat verb)`), a shell fed through a pipe, a script that exists but is unreadable, not
+a regular file, or over 512 KB — is refused off the admin seat (`rm_gate`'s `UNREAD_REFUSED`). A script
+that does not exist yet is allowed and logged at INFO (phase 4, P1): writing a helper and running it in
+one command is everyday work, and there is nothing to read.
+
+**An unknown wrapper is read for what it runs (phase 4, P3).** A command word that is neither a tabled
+launcher nor a known plain program (`modules/shell_programs.PLAIN_PROGRAMS`: echo, grep, cat, mv, cp,
+pytest, ruff …) has its operands scanned for a delete verb, git or gh, and is read from there as a
+nested command. A plain program's operands are data, so `grep -rn rm .` and `echo git push` pass.
+
+One refusal per command: the twin named is the first git invocation's.
+
+**One program, many spellings.** `git.exe`, `GIT`, `Git`, `git.cmd`, `/usr/bin/git.exe` and `gh.exe`
+all run the program on Windows, so all are read as git or gh (`bash_writes.verb_name()`, the one
+executable-extension list). A file merely NAMED for a program (`git.py`) is nobody's invocation.
+
+**git and gh from inside a program (R5).** For every seat, an interpreter whose program text
+launches git or gh — `subprocess.run(['git', …])`, `os.system('gh …')`, node `execSync`, perl
+`system`, backticks — is refused (`INTERPRETER_GIT_REFUSED`), inline, in a heredoc or in a script file.
+
+**GitHub without gh (R6).** For every seat, reading the gh credential is refused
+(`CREDENTIAL_REFUSED`: `gh auth token`, `gh auth status --show-token`, `secret-tool`/`keyring`/`security`
+lookups, python `keyring.get_password`, `hosts.yml`, `.git-credentials`), and so is an HTTP client
+sending a non-GET method or a body to `api.github.com` (`GITHUB_HTTP_REFUSED`: curl, wget, httpie, or
+an interpreter's request). A text gate cannot close this fully; `bash_writes.NOT_CAUGHT` says so, and
+the kernel sandbox ([sandbox.md](sandbox.md)) is the real boundary.
+
+**What it protects: the files that switch the gates.** `modules/protected_paths.py` names them, and
+`git_gate` refuses any change to one of them on the edit tools (NotebookEdit included) AND on the Bash
+lane, off the verified admin seat (`PROTECTED_REFUSED`). A change is a write, a delete, a move away, a
+move over, a recursive copy over, or making a hard link to it; a directory deleted or moved whole
+counts when a protected file is inside it. The protected lane decides each on its own, without
+`rm_gate` (R2):
+
+- any `.aipass/hooks.json` under AIPASS_HOME, the root one included;
+- `~/.aipass/trusted_projects.json`;
+- `.claude/settings*.json`, `.claude/hooks/`, `.git/hooks/`;
+- this branch's promoted copies (`.live-*`): only `drone @hooks promote` writes them;
+- since phase 4: everything under AIPASS_HOME's `.git/`, and every sealed `*_REGISTRY.json` under it.
+
+**Default-deny on the Bash lane (phase 4, P2).** Listing write verbs was permanently incomplete: one
+nobody listed passed every fence. Off the admin seat, a protected path named as an operand is refused
+unless the program is on `shell_programs.READ_ONLY_PROGRAMS` (cat, head, tail, less, grep, rg, jq, wc,
+stat, ls, diff, the checksum tools, `find` without an acting flag, and `drone`, the router) — and a
+redirect into it is refused whatever the program. git and gh answer to this gate's own git lane.
+
+Who may write them is the admin grant alone; there is no name list. Paths are matched with `\` read
+as `/` and case-insensitively, and by FILE as well as by name (R1): an existing file with more than one
+link is compared by (device, inode) against every protected file, so a hard link in a seat's own
+directory is protected under its second name too. An external project's own `hooks.json` is not listed: trust decides
+whether it runs.
+
+**Why it is on:** agents reflexively reach for raw git, which causes state chaos in a multi-agent
+system. The gate redirects to `drone @git`, which enforces access tiers. No refusal text tells an
+agent how to switch a gate off.
+
+---
+
+## rm Gate
+
+`security/rm_gate.py` (Bash only) refuses deletes and records each refused one. It fails closed like
+`git_gate`.
+
+- **Raw `rm`**, recursive or not, is refused for every seat, the admin seat included — `find -exec rm`
+  and `xargs rm` are raw rm. The admin seat is taught `drone rm <path>`.
+- **`drone rm`** is refused off the verified admin seat.
+- **Every other delete** is refused off the admin seat with the same text: `rmdir`, `unlink`,
+  `shred` and their kin wherever a program runs (shell_reader names it, however it is spelled),
+  `find -delete`, and an interpreter's delete (`os.remove`, `shutil.rmtree`, `Path.unlink`; node
+  `fs.rmSync`; perl or php `unlink`; ruby `FileUtils.rm_rf`; a shell-out to `rm`) whether its program
+  is inline, a heredoc, or a script file read at decision time (R4).
+- **A program the reader cannot read** is refused off the admin seat (`UNREAD_REFUSED`).
+- What is still not seen — a delete through an alias or `getattr`, a script that changes after the
+  check — is named in `bash_writes.NOT_CAUGHT`.
+- `mv`, renaming and `mkdir` are never deletes. `git rm` answers to `git_gate`.
+
+Every refusal off the admin seat ends with `_DONT_DELETE`, verbatim:
+
+```
+Don't delete. Move or rename instead — that is the safety feature: the owner sees the files and decides.
+  rename it    name(disabled).ext       e.g. mv old.py 'old(disabled).py'
+  archive it   move it into a .archive/ folder beside it
+               (create the folder if it isn't there: mkdir -p .archive && mv old.py .archive/)
+  or both.     Archived files can stay forever.
+
+It must truly go? Mail @devpulse with the path and why:
+  drone @ai_mail email @devpulse "Delete request" "<path>: <why>"
+
+This refused attempt is recorded.
 ```
 
-**Why it's on by default:** Agents reflexively reach for raw git, which causes state chaos in a multi-agent system. The gate redirects to `drone @git` which enforces access tiers (read-only for most branches, write-only for devpulse). External users who don't need multi-agent git orchestration can safely disable it.
+Every refused attempt is one INFO line per deleting clause
+(`DELETE refused | lane=… | branch=… | cwd=… | cmd=…`). Service code that runs `drone rm` as a
+subprocess never passes through a hook.
 
 ---
 
 ## Related
 
 - [edit_gate.md](edit_gate.md) — the write fence that runs beside it on the same event
-- [bash_writes.md](bash_writes.md) — the shell reader that tells code from data
+- [bash_writes.md](bash_writes.md) — the write lane, and NOT_CAUGHT, the published residual
+- [engine.md](engine.md) — what happens when a gate itself breaks

@@ -100,6 +100,6 @@ def fence_write(target: str | Path, *, lane: str) -> str | None:
             {"lane": lane, "path": str(resolved), "root": str(home)},
             module_name=MODULE_NAME,
         )
-    except Exception as exc:  # noqa: BLE001 - the refusal stands whether or not its record lands
+    except Exception as exc:  # the refusal stands whether or not its record lands
         logger.debug(f"[{MODULE_NAME}] refusal not recorded: {type(exc).__name__}: {exc}")
     return refusal

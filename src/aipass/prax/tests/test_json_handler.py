@@ -1,36 +1,43 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
 # Description: Tests for the fleet json service through prax's own shim
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-28
-# Modified: 2026-09-11
+# Modified: 2026-10-08
 # =============================================
 
-"""Tests for the fleet's one json service (DPLAN-0325), exercised through prax's
-own shim.
+"""Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
 
-What this file used to be is in tests/.archive/: eighteen tests that re-simulated
-the handler's logic inline (``json.loads`` on a template they had just written,
-``all(k in data for k in required)``) and never called the module under test. The
-v4 template stamp; every one of them passed against a handler that had been
-deleted. They are subsumed by seedgo's cross-branch contract and are not
-rewritten here.
+# Tests for the fleet's one json service (DPLAN-0325), exercised through prax's
+# own shim.
+#
+# What this file used to be is in tests/.archive/: eighteen tests that re-simulated
+# the handler's logic inline (``json.loads`` on a template they had just written,
+# ``all(k in data for k in required)``) and never called the module under test. The
+# v4 template stamp; every one of them passed against a handler that had been
+# deleted. They are subsumed by seedgo's cross-branch contract and are not
+# rewritten here.
+#
+# These call the service. Redirection is the AIPASS_TEST_LOG_DIR seam, never a
+# patched module attribute — the service resolves its directory per call, and the
+# shim has no attributes to patch.
 
-These call the service. Redirection is the AIPASS_TEST_LOG_DIR seam, never a
-patched module attribute — the service resolves its directory per call, and the
-shim has no attributes to patch.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(json_handler) — that json_handler.py binds byte-identically fleet-wide
 
 import json
 import logging
 import os
 import stat
 from datetime import date
+from unittest.mock import patch
 
 import pytest
 
+import aipass.prax
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.json import json_service
+from aipass.prax.apps.handlers.monitoring import rate_tracker
 
 
 # =============================================
@@ -247,13 +254,13 @@ class TestWriteJson:
     def test_a_failed_write_answers_false_and_never_raises(self, handle, tmp_path, monkeypatch):
         """OSError anywhere on the way answers False. This is the semantics the
         six production bool consumers depend on."""
-        monkeypatch.setattr(json_service, "_replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
 
         assert handle.write_json(tmp_path / "doc.json", {"a": 1}) is False
 
     def test_a_failed_write_cleans_up_its_temp_file(self, handle, tmp_path, monkeypatch):
         """A staged file left behind is litter that accumulates silently."""
-        monkeypatch.setattr(json_service, "_replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
 
         handle.write_json(tmp_path / "doc.json", {"a": 1})
 
@@ -263,11 +270,27 @@ class TestWriteJson:
         """The staged-write guarantee: a write that cannot land destroys nothing."""
         target = tmp_path / "doc.json"
         target.write_text(json.dumps({"live": True}), encoding="utf-8")
-        monkeypatch.setattr(json_service, "_replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
 
         handle.write_json(target, {"replacement": True})
 
         assert json.loads(target.read_text(encoding="utf-8")) == {"live": True}
+
+    def test_a_caller_fails_the_real_replace_through_the_package_path(self, handle, tmp_path):
+        """The seam another branch's test uses to make the replace step fail, as a
+        full disk would: patched as aipass.prax.json_handler.replace_with_retry, a
+        path through the package that never names these handlers, so the fence and
+        the encapsulation wall both stand (DPLAN-0404, prax; aipass's
+        test_profile patched the private _replace_with_retry by its handler path)."""
+        target = tmp_path / "doc.json"
+        target.write_text(json.dumps({"live": True}), encoding="utf-8")
+
+        with patch("aipass.prax.json_handler.replace_with_retry", side_effect=_raise_oserror):
+            landed = handle.write_json(target, {"replacement": True})
+
+        assert landed is False
+        assert json.loads(target.read_text(encoding="utf-8")) == {"live": True}
+        assert list(tmp_path.glob("*.tmp")) == []
 
 
 def _raise_oserror(source, destination):
@@ -339,7 +362,8 @@ class TestTheWriteNeverChoosesTheDocumentsMode:
 class TestTheBoundedReplaceRetry:
     """os.replace on Windows fails while any reader holds the target open."""
 
-    def test_a_transient_sharing_violation_is_survived(self, monkeypatch, tmp_path):
+    def test_a_transient_sharing_violation_is_survived(self, handle, monkeypatch, tmp_path):
+        """Through write_json, the door every writer uses (prax, leg 6)."""
         attempts = {"count": 0}
         real_replace = os.replace
 
@@ -350,17 +374,16 @@ class TestTheBoundedReplaceRetry:
             real_replace(source, destination)
 
         monkeypatch.setattr(json_service.os, "replace", flaky)
-        source = tmp_path / "staged"
-        source.write_text("payload", encoding="utf-8")
+        target = tmp_path / "live.json"
 
-        json_service._replace_with_retry(str(source), str(tmp_path / "live"))
+        assert handle.write_json(target, {"payload": 1}) is True
 
         assert attempts["count"] == 3
-        assert (tmp_path / "live").read_text(encoding="utf-8") == "payload"
+        assert json.loads(target.read_text(encoding="utf-8")) == {"payload": 1}
 
-    def test_the_retry_is_bounded_and_then_raises(self, monkeypatch, tmp_path):
+    def test_the_retry_is_bounded_and_then_fails_honestly(self, handle, monkeypatch, tmp_path):
         """Bounded, then honest: a permanent permission problem is not retried
-        forever, it surfaces."""
+        forever; write_json answers False and the document never lands."""
         attempts = {"count": 0}
 
         def always_blocked(source, destination):
@@ -369,13 +392,17 @@ class TestTheBoundedReplaceRetry:
 
         monkeypatch.setattr(json_service.os, "replace", always_blocked)
         monkeypatch.setattr(json_service, "_REPLACE_BACKOFF_SECONDS", 0)
+        # The bound is set here, so the count is the test's own number and never
+        # a copy of the product's (prax, leg 14).
+        monkeypatch.setattr(json_service, "_REPLACE_ATTEMPTS", 3)
+        target = tmp_path / "live.json"
 
-        with pytest.raises(PermissionError):
-            json_service._replace_with_retry("source", "destination")
+        assert handle.write_json(target, {"payload": 1}) is False
 
-        assert attempts["count"] == json_service._REPLACE_ATTEMPTS
+        assert attempts["count"] == 3
+        assert target.exists() is False
 
-    def test_a_non_sharing_oserror_is_not_retried(self, monkeypatch):
+    def test_a_non_sharing_oserror_is_not_retried(self, handle, monkeypatch, tmp_path):
         """Only the Windows sharing violation is transient. Retrying a genuine
         failure 40 times buys nothing and hides it for 200ms."""
         attempts = {"count": 0}
@@ -386,8 +413,7 @@ class TestTheBoundedReplaceRetry:
 
         monkeypatch.setattr(json_service.os, "replace", wrong_kind)
 
-        with pytest.raises(FileNotFoundError):
-            json_service._replace_with_retry("source", "destination")
+        assert handle.write_json(tmp_path / "live.json", {"payload": 1}) is False
 
         assert attempts["count"] == 1
 
@@ -449,8 +475,11 @@ class TestEnsureJsonExists:
         """
         assert json_service.JSON_TYPES == ("config", "data", "log")
 
+        # The default is reached through ensure_json_exists on a missing
+        # document, the door that writes it (prax, leg 6).
         for json_type in json_service.JSON_TYPES:
-            document = json_service._default_document(json_type, "any")
+            assert handle.ensure_json_exists("any", json_type) is True
+            document = handle.read_json(handle.get_json_path("any", json_type))
 
             assert handle.validate_json_structure(document, json_type) is True
 
@@ -542,7 +571,7 @@ class TestSaveJson:
     def test_a_write_that_cannot_land_raises_writefailed(self, handle, monkeypatch):
         """A lost document must not look like success, and must not look like a
         caller's validation mistake either."""
-        monkeypatch.setattr(json_service, "_replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
 
         with pytest.raises(json_service.WriteFailed):
             handle.save_json("doomed", "log", [])
@@ -601,7 +630,7 @@ class TestLogOperation:
     def test_a_write_failure_answers_false_and_does_not_raise(self, handle, monkeypatch):
         """log_operation is called from the monitor's display and watchdog
         threads. A raising writer there is silent half-death, not fail-honestly."""
-        monkeypatch.setattr(json_service, "_replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
 
         assert handle.log_operation("doomed", module_name="ops") is False
 
@@ -669,7 +698,9 @@ class TestTheDataLegIsHealedNotReplaced:
     def test_the_config_leg_is_still_regenerated_not_merged(self, handle, sandbox):
         """The heal is the data leg's alone: an invalid config comes back as the
         default, with nothing of the invalid one carried over."""
-        sandbox.mkdir(parents=True, exist_ok=True)
+        # The default, as the same door writes it for a missing document (prax, leg 6).
+        assert handle.ensure_json_exists("stray", "config") is True
+        default = json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8"))
         (sandbox / "stray_config.json").write_text(
             json.dumps({"module_name": "stray", "stray": True}), encoding="utf-8"
         )
@@ -677,7 +708,7 @@ class TestTheDataLegIsHealedNotReplaced:
         assert handle.ensure_json_exists("stray", "config") is True
 
         written = json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8"))
-        assert written == json_service._default_document("config", "stray")
+        assert written == default
 
     def test_a_data_document_that_cannot_be_written_back_is_left_as_it_was(self, handle, sandbox):
         """json.load reads NaN; the writer refuses it. Healing such a document
@@ -813,31 +844,46 @@ class TestEveryLogWriteBumpsTheDataLeg:
 class TestRateTrackerKeepsKeysItDoesNotOwn:
     """rate_tracker_data.json is both the tracker's state and its data leg."""
 
-    def test_the_counters_and_the_trackers_files_survive_each_others_writes(self, sandbox, monkeypatch):
+    def test_the_counters_and_the_trackers_files_survive_each_others_writes(self, sandbox, monkeypatch, tmp_path):
         """The real tracker against the real shim, both writing one document.
 
         The old _save_state rebuilt the dict every scan: ``created`` re-stamped
         to today and the service's counters wiped. Now each writer sets only its
         own keys — and the bump that follows a save keeps the tracker's files.
+        The save is reached through configure and scan_rates, the public door
+        (prax, leg 14). The tracker's clock is frozen at its home on a day
+        after the seeded one, so a re-stamp shows as that day (prax, leg 15).
         """
-        import importlib
 
-        tracker = importlib.import_module("aipass.prax.apps.handlers.monitoring.rate_tracker")
-        monkeypatch.setattr(tracker, "json_handler", json_handler)
-        monkeypatch.setattr(tracker, "_tracked", {})
+        class _FrozenDate(date):
+            @classmethod
+            def today(cls):
+                return cls(2030, 6, 15)
+
+        monkeypatch.setattr(rate_tracker, "date", _FrozenDate)
+        logs = tmp_path / "scanned_logs"
+        logs.mkdir()
+        log_file = logs / "a.log"
+        log_file.write_bytes(b"x" * 4096)
+        monkeypatch.setattr(rate_tracker, "json_handler", json_handler)
+        monkeypatch.setattr(rate_tracker, "_tracked", {})
+        monkeypatch.setattr(rate_tracker, "_state_loaded", False)
+        monkeypatch.setattr(rate_tracker, "_logs_dir", None)
+        monkeypatch.setattr(rate_tracker, "_suppressed_files", set())
         _seed_data(sandbox, "rate_tracker", {"created": "2020-01-01", "last_updated": "2020-01-01"})
 
         json_handler.log_operation("runaway_detected", module_name="rate_tracker")
         json_handler.log_operation("runaway_detected", module_name="rate_tracker")
-        tracker._tracked["/logs/a.log"] = tracker.FileRateState(4096, 1000.0)
-        tracker._save_state()
+        rate_tracker.configure(logs_dir=logs)
+        rate_tracker.scan_rates()
 
         saved = _read_data(sandbox, "rate_tracker")
         assert saved["operations_total"] == 2
         assert saved["last_operation"] == "runaway_detected"
         assert saved["created"] == "2020-01-01"
         assert saved["module_name"] == "rate_tracker"
-        assert saved["files"] == {"/logs/a.log": tracker.FileRateState(4096, 1000.0).to_dict()}
+        assert list(saved["files"]) == [str(log_file)]
+        assert saved["files"][str(log_file)]["last_offset"] == 4096
 
         json_handler.log_operation("runaway_detected", module_name="rate_tracker")
 
@@ -890,12 +936,8 @@ class TestTheEntryPoint:
     """from aipass.prax import json_handler — the one sanctioned import."""
 
     def test_the_lazy_package_attribute_is_the_service(self):
-        import aipass.prax
-
         assert aipass.prax.json_handler is json_service
 
     def test_the_exception_types_are_reachable_from_the_entry_point(self):
-        import aipass.prax
-
         assert issubclass(aipass.prax.json_handler.InvalidDocument, ValueError)
         assert issubclass(aipass.prax.json_handler.WriteFailed, OSError)

@@ -3,7 +3,7 @@
 # HOOKS
 
 **Purpose:** Hook infrastructure for AIPass. One dispatch engine routes every hook event across
-platforms (Claude Code, Codex) with per-project configuration, full logging and crash isolation. On
+platforms (Claude Code, Codex) with per-project configuration, full logging and gates that fail closed. On
 one side it injects the grounding an agent wakes up with; on the other it fences the writes an agent
 makes.
 **Module:** `aipass.hooks`
@@ -17,12 +17,14 @@ makes.
 drone @hooks status     # What is wired to fire in this project
 drone @hooks log        # The most recent entries from the diagnostics stream
 drone @hooks verify     # Provider settings against project config, non-zero on ERROR
+drone @hooks promote    # Check, copy and make edited hook code live
 drone @hooks --help     # Every verb, generated from the code that runs it
 ```
 
-A platform bridge normalizes the event, the engine reads the project's `.aipass/hooks.json` (walking
-up from the working directory), dispatches the handlers whose matcher fits, and writes the outcome of
-each one to JSONL. One broken hook never blocks the rest — the engine catches, logs, and carries on.
+A platform bridge mounts the promoted copy of the hook code, the engine resolves the config (walking
+up from the working directory; never "no hooks"), dispatches the handlers whose matcher fits, and
+writes the outcome of each one to JSONL. A broken injector is logged and skipped; a broken gate
+refuses what it guards. Source edits are not live until `drone @hooks promote`.
 
 ---
 
@@ -32,7 +34,9 @@ each one to JSONL. One broken hook never blocks the rest — the engine catches,
   block, the date, alert banners and a mid-turn re-ground after compaction, each rendered under a cap
   its owner publishes and fired on a cadence rather than every turn.
 - **Fences writes.** A write into a file the seat does not own (another project, another branch, a
-  project-level file), raw git, destructive `rm`, sealed registries and new test files are refused at PreToolUse — on the tool lane and on
+  project-level file), raw git and raw `gh`, reads too, for every seat, the admin seat included (if
+  drone cannot do it, it cannot be done), raw `rm` for every seat and every other delete off the admin seat, the files that switch the
+  gates, sealed registries and new test files are refused at PreToolUse — on the tool lane and on
   the shell lane both, because a fence only one of them can see is not a fence.
 - **Measures memory writes.** A write to a `.trinity` file is judged against @memory's published
   caps, and a shell write that slips past the reader is reported afterwards by a tripwire.
@@ -40,8 +44,9 @@ each one to JSONL. One broken hook never blocks the rest — the engine catches,
   platform costs a bridge rather than a fork.
 - **Logs every dispatch** to a JSONL stream that is the source of truth for hook diagnostics, with a
   quieter copy in prax for warnings, blocks and crashes.
-- **Hands each project the switch.** `.aipass/hooks.json` decides what fires where; the framework
-  file and the template a new project is stamped from are separate rulings.
+- **Hands each project the switch, never over the gates.** `.aipass/hooks.json` decides what fires
+  where; inside AIPass the gates run whatever a project config says, and security never depends on
+  trust.
 
 Not the platform's hook system — this bridges it rather than replacing it. Not the handlers' business
 logic: each handler is self-contained and the engine only dispatches. Never another branch's files.
@@ -90,12 +95,15 @@ and `--help` does not name it, the bug is in `--help`.
 
 Three layers. `apps/hooks.py` is a thin router: it discovers the modules beside it and dispatches each
 command to the one that claims it. `apps/modules/` holds one business-logic module per concern —
-`engine` (the dispatcher itself), `cadence` (which turn a loader fires on), `injection_ledger` (what a
+`engine` (the dispatcher itself), `engine_closure` (the files the engine imports, and the edit
+check that keeps a NameError out of them), `door_trust_registry` (the one modules file aipass may
+import for the trust registry), `cadence` (which turn a loader fires on), `injection_ledger` (what a
 seat was told, per turn), `grounding_content` (the
 injected blocks and their budgets), `write_ownership` (whose file a write lands in, read from the registries),
-`bash_writes` and `testwrite_targets` (what a shell command can be
-seen to write, and which of those are new tests), `admin_seat` and `testgate_policy` (who is exempt,
-and what the policy says), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
+`bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (what a shell command can be
+seen to write, the programs it runs, and which writes are new tests), `admin_seat` and `testgate_policy` (who is exempt,
+and what the policy says), `promote` (source to live code), `protected_paths` (the files that switch
+the gates), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
 `cc_sessions`, `cc_transcripts`, `diagnostics_state`, `hook_test`, `release_notice`, `sandbox` and
 `wire_verify`. `apps/handlers/` holds the implementation, one directory per concern: `bridges/` per
 platform, `prompt/` for injection, `security/` for the gates, `lifecycle/` for session and compaction
@@ -119,13 +127,13 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | Doc | What it covers |
 |---|---|
 | [docs/wiring.md](docs/wiring.md) | The two-tier model, every event and its wiring shape, entry names vs handler filenames, what a new handler needs in provider settings |
-| [docs/engine.md](docs/engine.md) | Dispatch, the merged output document, dynamic handler import, the import-time working-directory rule |
-| [docs/project_config.md](docs/project_config.md) | The project template and what it ships, the trust hash and the re-enrol checkpoint, the release notice |
-| [docs/git_gate.md](docs/git_gate.md) | The closed allow-list of raw git verbs, what it protects, how a project disables it |
+| [docs/engine.md](docs/engine.md) | Dispatch, promote, gates fail closed while injectors skip, the merged output document, dynamic handler import, the import-time working-directory rule |
+| [docs/project_config.md](docs/project_config.md) | Which config runs and when trust matters, the project template and what it ships, the release notice |
+| [docs/git_gate.md](docs/git_gate.md) | Raw git and gh refused for every seat, the drone twins, the protected files, and the rm gate |
 | [docs/edit_gate.md](docs/edit_gate.md) | Who may write whose files (the 2026-09-18 ruling), the project fence, the verified admin seat, what the gate cannot see |
 | [docs/bash_writes.md](docs/bash_writes.md) | The scripted lane: what a shell command can be seen to write, what it misses, both Windows path spellings |
 | [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and judging a write on what it authors |
-| [docs/testwrite_gate.md](docs/testwrite_gate.md) | The ruling that agents do not create tests, the policy file, the fail-closed reasoning |
+| [docs/testwrite_gate.md](docs/testwrite_gate.md) | The ruling that agents do not create tests, the policy file, the fail-closed reasoning, the test template pointer |
 | [docs/prompt_injection.md](docs/prompt_injection.md) | The injection caps and where each is read from, the loud fail-open, the alert banners |
 | [docs/diagnostics.md](docs/diagnostics.md) | The two log streams and the post-edit diagnostics block |
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, the launch seam |
@@ -158,7 +166,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-09-30
 
 ---
 [← Back to AIPass](../../../README.md)

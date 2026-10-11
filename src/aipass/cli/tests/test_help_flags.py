@@ -1,4 +1,15 @@
-"""Tests for the whole-sequence help-flag predicate (help_flag_safety)."""
+# =================== AIPass ====================
+# Name: test_help_flags.py
+# Description: wants_help — the whole-sequence help-flag predicate every help gate calls
+# Version: 1.1.0
+# Created: 2026-08-13
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/cli/help_flags.py — the whole-sequence help predicate."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(help_flag_safety) — that each handle_command calls wants_help before acting
 
 import pytest
 

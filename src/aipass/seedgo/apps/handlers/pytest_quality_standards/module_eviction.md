@@ -5,7 +5,7 @@
 > about the **restore**, never about the eviction.
 
 **Scope:** `branch_level` · **Severity:** advisory · **Species:** `SYS_MODULES_EVICTION`,
-`PACKAGE_ATTRIBUTE_EVICTION`
+`PACKAGE_ATTRIBUTE_EVICTION`, `PARENT_ATTRIBUTE_REBIND`
 
 ---
 
@@ -68,7 +68,7 @@ fixtures, and helpers at module, class or nested level. A nested def is its own
 subject, reported once under `outer::inner`. No call is followed and no other file is
 opened.
 
-## The two species
+## The three species
 
 **`SYS_MODULES_EVICTION`** — the cache entry:
 
@@ -97,6 +97,51 @@ half of the same leak.
 
 `monkeypatch.delitem(sys.modules, ...)` and `monkeypatch.delattr(...)` are never
 evictions here. They are the cure.
+
+**`PARENT_ATTRIBUTE_REBIND`** (1.1.0, CI on PR #774) — the third species, the half a
+cache restore never sees:
+
+```python
+for name in [n for n in sys.modules if n.startswith("aipass.memory.apps.handlers.json")]:
+    monkeypatch.delitem(sys.modules, name, raising=False)
+memory_files = importlib.import_module("aipass.memory.apps.handlers.json.memory_files")  # flagged
+```
+
+The fresh import re-executes the evicted `json` package and sets it as the `json`
+attribute of the surviving `aipass.memory.apps.handlers`. Teardown restored
+`sys.modules` and nothing else. On 3.10/3.11 a dotted `mock.patch("pkg.mod.attr")`
+walks package attributes (`mock._importer`); on 3.12+ it reads `sys.modules`
+(`pkgutil.resolve_name`). So on that worker every later string patch landed on the new
+module while the product read the old one: two rows in `test_tab_renderer.py`, 3.10
+and 3.11 only.
+
+Read: every cache removal in the function (`del sys.modules[K]`, `sys.modules.pop(K)`,
+`<mp>.delitem(sys.modules, K)`) whose key resolves to literal names (a string, a
+module-level string constant, a `for` over a literal list) or to a literal
+`startswith` prefix over `sys.modules` (a comprehension filter, or an `if` in a `for`
+over `sys.modules`); then every LATER fresh import with a literal name —
+`importlib.import_module`, `import_module`, `__import__`, `import a.b`,
+`from a.b import c`. The first evicted package on the imported path whose own parent
+survived is the attribute that gets rebound. An unresolvable key or name reads as
+nothing.
+
+Acquitted by: a monkeypatch `setattr`/`delattr` of an attribute of that leaf name made
+**before the import** (memory's cure: `monkeypatch.setattr(handlers_pkg, "json",
+handlers_pkg.json)`); a `setattr(M, "leaf", ...)` or `M.leaf = ...` after the import or
+in a `finally`; a fixture teardown after its yield; an import inside
+`with pytest.raises(...)`, which fails and binds nothing (spawn's
+`test_the_denier_actually_denies`, the one false row of the first fleet run).
+**No cache restore acquits it** — monkeypatch, `patch.dict`, a `finally`, an autouse
+record all put `sys.modules` back and leave the attribute. `importlib.reload` keeps
+the module object and is not read.
+
+Fleet on 2026-10-10: 13 lines. 12 sit in functions the first species already flags
+(memory: `test_symbolic_extras.py:66`, `test_symbolic_extras_storage.py:67, 88, 95,
+102`, `test_vector.py:77`, and six in `tests/parked/`). One new row:
+trigger `tests/test_error_detected.py:537`, `TestFallbackStubs::fallback_mod` — a
+fixture that returns after `monkeypatch.delitem` and an `import ... as fresh`, so
+`aipass.trigger.apps.handlers.events.error_detected` stays the fallback copy. memory's
+cured `test_trinity_standard.py` produces no row.
 
 ## What is never flagged
 

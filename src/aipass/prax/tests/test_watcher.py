@@ -1,21 +1,60 @@
 # =================== AIPass ====================
 # Name: test_watcher.py
 # Description: Tests for file system watcher handlers
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for:
-- apps/handlers/watcher/monitor.py  (BranchFileHandler, start/stop_monitoring)
-- apps/handlers/discovery/watcher.py (PythonFileWatcher, start/stop_file_watcher)
-"""
+"""Tests for apps/handlers/watcher/monitor.py and apps/handlers/discovery/watcher.py."""
+
+# Tests for:
+# - apps/handlers/watcher/monitor.py  (BranchFileHandler, start/stop_monitoring)
+# - apps/handlers/discovery/watcher.py (PythonFileWatcher, start/stop_file_watcher)
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(json_structure) — start_monitoring's watcher_monitor_event log_operation record
+# seedgo: no-test-needed(json_structure) — _report_watcher_death's log_operation record, covered by that row
+# seedgo: no-test-needed(error_handling) — on_created's ValueError skip of a path outside ECOSYSTEM_ROOT
 
 import subprocess
 import sys
 import threading
+import time as _time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+from aipass.prax.apps.handlers.discovery import watcher as discovery_watcher
+from aipass.prax.apps.handlers.watcher import monitor as watcher_monitor
+
+
+def _discovery_watcher_doubled(monkeypatch, tmp_path):
+    """The discovery watcher with its collaborators doubled where it binds them (prax, leg 9).
+
+    The module is the one imported at the top, never re-imported. Its state
+    (_observer, _start_thread, _LIVENESS) is set to a fresh start through
+    monkeypatch, which is what the old reload gave each test.
+    """
+    observer_cls = MagicMock()
+    fake = tmp_path / "fake"
+    monkeypatch.setattr(discovery_watcher, "WatchdogObserver", observer_cls)
+    monkeypatch.setattr(discovery_watcher, "ECOSYSTEM_ROOT", fake / "ecosystem")
+    monkeypatch.setattr(discovery_watcher, "get_system_logs_dir", lambda: fake / "logs" / "system")
+    monkeypatch.setattr(discovery_watcher, "get_module_logs_dir", lambda module_name=None: fake / "logs" / "modules")
+    monkeypatch.setattr(discovery_watcher, "load_module_registry", lambda: {})
+    monkeypatch.setattr(discovery_watcher, "save_module_registry", MagicMock())
+    monkeypatch.setattr(discovery_watcher, "json_handler", MagicMock())
+    _fresh_watcher_state(monkeypatch)
+    return discovery_watcher, observer_cls.return_value, observer_cls
+
+
+def _fresh_watcher_state(monkeypatch):
+    """The discovery watcher's state as a fresh import leaves it, undone after the test (prax, leg 9)."""
+    monkeypatch.setattr(discovery_watcher, "_observer", None)
+    monkeypatch.setattr(discovery_watcher, "_start_thread", None)
+    monkeypatch.setattr(discovery_watcher, "_LIVENESS", discovery_watcher.LivenessState())
 
 
 # ============================================================================
@@ -26,37 +65,17 @@ from unittest.mock import MagicMock, patch
 class TestBranchFileHandler:
     """Tests for BranchFileHandler event callbacks and filtering."""
 
+    @pytest.fixture(autouse=True)
+    def _quiet_module(self, monkeypatch):
+        """The monitor's logger and json service, doubled where it binds them (prax, leg 9: no re-import)."""
+        monkeypatch.setattr(watcher_monitor, "logger", MagicMock())
+        monkeypatch.setattr(watcher_monitor, "json_handler", MagicMock())
+
     def _make_handler(self):
-        """Create a BranchFileHandler with a mock callback."""
-
-        # Provide a real base class so subclass methods work properly
-        class _RealFSHandler:
-            """Stub base so BranchFileHandler methods are not swallowed."""
-
-            pass
-
-        mock_watchdog_events = MagicMock()
-        mock_watchdog_events.FileSystemEventHandler = _RealFSHandler
-        mock_watchdog_events.FileSystemEvent = MagicMock()
-        mock_watchdog_observer = MagicMock()
-        with patch.dict(
-            sys.modules,
-            {
-                "watchdog": MagicMock(),
-                "watchdog.observers": mock_watchdog_observer,
-                "watchdog.events": mock_watchdog_events,
-            },
-        ):
-            import importlib
-
-            for key in list(sys.modules):
-                if key.startswith("aipass.prax.apps.handlers.watcher"):
-                    sys.modules.pop(key, None)
-            mod = importlib.import_module("aipass.prax.apps.handlers.watcher.monitor")
-
+        """A real BranchFileHandler on the real watchdog base, with a mock callback."""
         callback = MagicMock()
-        handler = mod.BranchFileHandler("TEST", callback)
-        return handler, callback, mod
+        handler = watcher_monitor.BranchFileHandler("TEST", callback)
+        return handler, callback, watcher_monitor
 
     def _make_event(self, src_path: str, is_directory: bool = False, dest_path: str | None = None):
         event = MagicMock()
@@ -68,41 +87,46 @@ class TestBranchFileHandler:
 
     # --- Callback firing tests ---
 
-    def test_on_created_fires_callback(self):
+    def test_on_created_fires_callback(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/src/aipass/flow/apps/module.py")
+        path = str(tmp_path / "src" / "aipass" / "flow" / "apps" / "module.py")
+        event = self._make_event(path)
         handler.on_created(event)
-        callback.assert_called_once_with("TEST", "CREATED", "/repo/src/aipass/flow/apps/module.py")
+        callback.assert_called_once_with("TEST", "CREATED", path)
 
-    def test_on_modified_fires_callback(self):
+    def test_on_modified_fires_callback(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/src/aipass/flow/apps/module.py")
+        path = str(tmp_path / "src" / "aipass" / "flow" / "apps" / "module.py")
+        event = self._make_event(path)
         handler.on_modified(event)
-        callback.assert_called_once_with("TEST", "MODIFIED", "/repo/src/aipass/flow/apps/module.py")
+        callback.assert_called_once_with("TEST", "MODIFIED", path)
 
-    def test_on_deleted_fires_callback(self):
+    def test_on_deleted_fires_callback(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/src/aipass/flow/apps/module.py")
+        path = str(tmp_path / "src" / "aipass" / "flow" / "apps" / "module.py")
+        event = self._make_event(path)
         handler.on_deleted(event)
-        callback.assert_called_once_with("TEST", "DELETED", "/repo/src/aipass/flow/apps/module.py")
+        callback.assert_called_once_with("TEST", "DELETED", path)
 
-    def test_on_moved_fires_callback_with_arrow(self):
+    def test_on_moved_fires_callback_with_arrow(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/old.py", dest_path="/repo/new.py")
+        old_path = str(tmp_path / "old.py")
+        new_path = str(tmp_path / "new.py")
+        event = self._make_event(old_path, dest_path=new_path)
         handler.on_moved(event)
-        callback.assert_called_once_with("TEST", "MOVED", "/repo/old.py \u2192 /repo/new.py")
+        callback.assert_called_once_with("TEST", "MOVED", f"{old_path} \u2192 {new_path}")
 
     # --- Ignore logic ---
 
-    def test_ignores_directory_events(self):
+    def test_ignores_directory_events(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/src/aipass/flow/apps/", is_directory=True)
+        event = self._make_event(str(tmp_path / "src" / "aipass" / "flow" / "apps"), is_directory=True)
         handler.on_created(event)
         callback.assert_not_called()
 
-    def test_ignores_log_files(self):
+    def test_ignores_log_files(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/logs/prax.log")
+        event = self._make_event(str(tmp_path / "logs" / "prax.log"))
         handler.on_modified(event)
         callback.assert_not_called()
 
@@ -148,11 +172,12 @@ class TestBranchFileHandler:
             handler.on_modified(event)
         callback.assert_not_called()
 
-    def test_does_not_ignore_normal_python_file(self):
+    def test_does_not_ignore_normal_python_file(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/src/aipass/prax/apps/modules/status.py")
+        changed = str(tmp_path / "src" / "aipass" / "prax" / "apps" / "modules" / "status.py")
+        event = self._make_event(changed)
         handler.on_modified(event)
-        callback.assert_called_once()
+        callback.assert_called_once_with(handler.branch_name, "MODIFIED", changed)
 
 
 # ============================================================================
@@ -163,36 +188,18 @@ class TestBranchFileHandler:
 class TestStartStopMonitoring:
     """Tests for start_monitoring and stop_monitoring functions."""
 
+    @pytest.fixture(autouse=True)
+    def _observer_double(self, monkeypatch):
+        """Observer replaced where the monitor binds it; watchdog counts as present (prax, leg 9)."""
+        observer_cls = MagicMock()
+        monkeypatch.setattr(watcher_monitor, "WATCHDOG_AVAILABLE", True)
+        monkeypatch.setattr(watcher_monitor, "Observer", observer_cls)
+        monkeypatch.setattr(watcher_monitor, "logger", MagicMock())
+        monkeypatch.setattr(watcher_monitor, "json_handler", MagicMock())
+        self._observer_cls = observer_cls
+
     def _import_watcher_monitor(self):
-        mock_observer_cls = MagicMock()
-        mock_observer_instance = MagicMock()
-        mock_observer_cls.return_value = mock_observer_instance
-
-        mock_watchdog_observer = MagicMock()
-        mock_watchdog_observer.Observer = mock_observer_cls
-
-        mock_watchdog_events = MagicMock()
-
-        with patch.dict(
-            sys.modules,
-            {
-                "watchdog": MagicMock(),
-                "watchdog.observers": mock_watchdog_observer,
-                "watchdog.events": mock_watchdog_events,
-            },
-        ):
-            import importlib
-
-            for key in list(sys.modules):
-                if key.startswith("aipass.prax.apps.handlers.watcher"):
-                    sys.modules.pop(key, None)
-            mod = importlib.import_module("aipass.prax.apps.handlers.watcher.monitor")
-
-        # Force WATCHDOG_AVAILABLE = True and Observer to be our mock
-        setattr(mod, "WATCHDOG_AVAILABLE", True)
-        setattr(mod, "Observer", mock_observer_cls)
-
-        return mod, mock_observer_instance, mock_observer_cls
+        return watcher_monitor, self._observer_cls.return_value, self._observer_cls
 
     def test_start_monitoring_schedules_paths(self, tmp_path):
         mod, observer_inst, _cls = self._import_watcher_monitor()
@@ -216,17 +223,18 @@ class TestStartStopMonitoring:
         observer_inst.schedule.assert_not_called()
         observer_inst.start.assert_called_once()
 
-    def test_start_monitoring_returns_none_when_watchdog_unavailable(self):
+    def test_start_monitoring_returns_none_when_watchdog_unavailable(self, monkeypatch):
         mod, _inst, _cls = self._import_watcher_monitor()
-        setattr(mod, "WATCHDOG_AVAILABLE", False)
+        monkeypatch.setattr(mod, "WATCHDOG_AVAILABLE", False)
         result = mod.start_monitoring([], MagicMock())
         assert result is None
 
     def test_stop_monitoring_stops_and_joins(self):
         mod, observer_inst, _cls = self._import_watcher_monitor()
         mod.stop_monitoring(observer_inst)
-        observer_inst.stop.assert_called_once()
-        observer_inst.join.assert_called_once()
+        # stop() and join() take nothing: the claim is each ran once, with no timeout handed on.
+        observer_inst.stop.assert_called_once_with()
+        observer_inst.join.assert_called_once_with()
 
     def test_stop_monitoring_handles_none(self):
         """No observer means no teardown: nothing is stopped, nothing is joined."""
@@ -253,99 +261,55 @@ class TestStartStopMonitoring:
 class TestDiscoveryWatcher:
     """Tests for the discovery watcher that registers new Python modules."""
 
-    def _import_discovery_watcher(self):
-        mock_observer_cls = MagicMock()
-        mock_observer_instance = MagicMock()
-        mock_observer_cls.return_value = mock_observer_instance
+    @pytest.fixture(autouse=True)
+    def _keep_monkeypatch(self, monkeypatch):
+        self._monkeypatch = monkeypatch
 
-        mock_watchdog_observer = MagicMock()
-        mock_watchdog_observer.Observer = mock_observer_cls
+    def _import_discovery_watcher(self, tmp_path):
+        return _discovery_watcher_doubled(self._monkeypatch, tmp_path)
 
-        mock_watchdog_events = MagicMock()
-
-        mock_config = MagicMock()
-        mock_config.ECOSYSTEM_ROOT = Path("/fake/ecosystem")
-        mock_config.get_system_logs_dir.return_value = Path("/fake/logs/system")
-        mock_config.get_module_logs_dir.return_value = Path("/fake/logs/modules")
-
-        mock_registry_load = MagicMock()
-        mock_registry_load.load_module_registry.return_value = {}
-
-        mock_registry_save = MagicMock()
-
-        mock_filtering = MagicMock()
-        mock_filtering.should_ignore_path.return_value = False
-
-        mock_trigger_mod = MagicMock()
-
-        with patch.dict(
-            sys.modules,
-            {
-                "watchdog": MagicMock(),
-                "watchdog.observers": mock_watchdog_observer,
-                "watchdog.events": mock_watchdog_events,
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.registry.load": mock_registry_load,
-                "aipass.prax.apps.handlers.registry.save": mock_registry_save,
-                "aipass.prax.apps.handlers.discovery.filtering": mock_filtering,
-                "aipass.trigger": MagicMock(),
-                "aipass.trigger.apps": MagicMock(),
-                "aipass.trigger.apps.modules": MagicMock(),
-                "aipass.trigger.apps.modules.core": mock_trigger_mod,
-            },
-        ):
-            import importlib
-
-            if "aipass.prax.apps.handlers.discovery.watcher" in sys.modules:
-                mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.discovery.watcher"])
-            else:
-                mod = importlib.import_module("aipass.prax.apps.handlers.discovery.watcher")
-
-        setattr(mod, "WatchdogObserver", mock_observer_cls)
-        return mod, mock_observer_instance, mock_observer_cls
-
-    def test_the_module_holds_no_trigger_at_import_time(self):
+    def test_the_module_holds_no_trigger_at_import_time(self, tmp_path):
         """FPLAN-0556. A name the module does not bind cannot be consulted, and
         re-adding the fire gate would have to re-add the import in the same
         edit — which is the edit that put three dead package shells into every
         process that logged."""
-        mod, _inst, _cls = self._import_discovery_watcher()
+        mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
 
         assert not hasattr(mod, "_HAS_TRIGGER")
         assert not hasattr(mod, "trigger")
 
-    def test_start_file_watcher_creates_and_starts_observer(self):
-        mod, observer_inst, _cls = self._import_discovery_watcher()
-        setattr(mod, "_observer", None)  # Ensure clean state
+    def test_start_file_watcher_creates_and_starts_observer(self, tmp_path, monkeypatch):
+        mod, observer_inst, _cls = self._import_discovery_watcher(tmp_path)
+        monkeypatch.setattr(mod, "_observer", None)  # Ensure clean state
         mod.start_file_watcher()
         observer_inst.schedule.assert_called_once()
         observer_inst.start.assert_called_once()
         assert getattr(mod, "_observer") is observer_inst
 
-    def test_start_file_watcher_skips_if_already_running(self):
-        mod, observer_inst, obs_cls = self._import_discovery_watcher()
+    def test_start_file_watcher_skips_if_already_running(self, tmp_path, monkeypatch):
+        mod, observer_inst, obs_cls = self._import_discovery_watcher(tmp_path)
         existing_observer = MagicMock()
         existing_observer.is_alive.return_value = True
-        setattr(mod, "_observer", existing_observer)
+        monkeypatch.setattr(mod, "_observer", existing_observer)
 
         mod.start_file_watcher()
 
         # Should not create a new observer
         observer_inst.start.assert_not_called()
 
-    def test_stop_file_watcher_stops_and_clears(self):
-        mod, _inst, _cls = self._import_discovery_watcher()
+    def test_stop_file_watcher_stops_and_clears(self, tmp_path, monkeypatch):
+        mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = True
-        setattr(mod, "_observer", mock_obs)
+        monkeypatch.setattr(mod, "_observer", mock_obs)
 
         mod.stop_file_watcher()
 
-        mock_obs.stop.assert_called_once()
-        mock_obs.join.assert_called_once()
+        mock_obs.stop.assert_called_once_with()
+        mock_obs.join.assert_called_once_with()
         assert getattr(mod, "_observer") is None
 
-    def test_stop_file_watcher_noop_when_not_running(self):
+    def test_stop_file_watcher_noop_when_not_running(self, tmp_path, monkeypatch):
         """Nothing is running, so no teardown is attempted.
 
         Two ways to be "not running", both no-ops: no observer at all, and an
@@ -354,15 +318,15 @@ class TestDiscoveryWatcher:
         already reads it as inactive, and stop() on a dead watchdog observer
         raises.
         """
-        mod, _inst, _cls = self._import_discovery_watcher()
+        mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
 
-        setattr(mod, "_observer", None)
+        monkeypatch.setattr(mod, "_observer", None)
         assert mod.stop_file_watcher() is None
         assert getattr(mod, "_observer") is None
 
         dead = MagicMock()
         dead.is_alive.return_value = False
-        setattr(mod, "_observer", dead)
+        monkeypatch.setattr(mod, "_observer", dead)
 
         mod.stop_file_watcher()
 
@@ -370,23 +334,23 @@ class TestDiscoveryWatcher:
         dead.join.assert_not_called()
         assert getattr(mod, "_observer") is dead
 
-    def test_is_file_watcher_active_true_when_alive(self):
-        mod, _inst, _cls = self._import_discovery_watcher()
+    def test_is_file_watcher_active_true_when_alive(self, tmp_path, monkeypatch):
+        mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = True
-        setattr(mod, "_observer", mock_obs)
+        monkeypatch.setattr(mod, "_observer", mock_obs)
         assert mod.is_file_watcher_active() is True
 
-    def test_is_file_watcher_active_false_when_none(self):
-        mod, _inst, _cls = self._import_discovery_watcher()
-        setattr(mod, "_observer", None)
+    def test_is_file_watcher_active_false_when_none(self, tmp_path, monkeypatch):
+        mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
+        monkeypatch.setattr(mod, "_observer", None)
         assert mod.is_file_watcher_active() is False
 
-    def test_is_file_watcher_active_false_when_dead(self):
-        mod, _inst, _cls = self._import_discovery_watcher()
+    def test_is_file_watcher_active_false_when_dead(self, tmp_path, monkeypatch):
+        mod, _inst, _cls = self._import_discovery_watcher(tmp_path)
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = False
-        setattr(mod, "_observer", mock_obs)
+        monkeypatch.setattr(mod, "_observer", mock_obs)
         assert mod.is_file_watcher_active() is False
 
 
@@ -408,22 +372,18 @@ class TestDiscoveryWatcher:
 # against the broken code. The thread has to be real for the assertion to mean
 # anything (prax observation, 2026-08-10: "a mocked output surface cannot fail").
 
-import time as _time
-
-import pytest
-
 
 class TestDispatcherSurvivesHandlerFailure:
     """The discovery handler must never be able to kill its own dispatcher."""
 
-    def _real_watcher_module(self):
-        """Import the REAL discovery watcher, with only registry writes stubbed."""
-        import importlib
+    @pytest.fixture(autouse=True)
+    def _keep_monkeypatch(self, monkeypatch):
+        self._monkeypatch = monkeypatch
 
-        for key in list(sys.modules):
-            if key.startswith("aipass.prax.apps.handlers.discovery"):
-                sys.modules.pop(key, None)
-        return importlib.import_module("aipass.prax.apps.handlers.discovery.watcher")
+    def _real_watcher_module(self):
+        """The REAL discovery watcher, bound at the top, its state fresh (prax, leg 9: no re-import)."""
+        _fresh_watcher_state(self._monkeypatch)
+        return discovery_watcher
 
     def _start_real_observer(self, mod, root: Path):
         """Start a real observer, or skip if this host cannot give us inotify."""
@@ -438,6 +398,20 @@ class TestDispatcherSurvivesHandlerFailure:
             pytest.skip(f"cannot start a real observer here: {e}")
         return observer
 
+    def _close_the_far_side(self, mod, monkeypatch, tmp_path: Path) -> MagicMock:
+        """Stub what a registering on_created reaches past the registry and the bus (prax, leg 5).
+
+        The two log-dir resolvers answer from the AIPASS_TEST_LOG_DIR temp dir and make
+        it when asked, and the module logger writes wherever this process routes it;
+        each is replaced at the name the watcher looks it up by, so nothing leaves tmp_path.
+        Returns the logger recorder.
+        """
+        monkeypatch.setattr(mod, "get_system_logs_dir", lambda: tmp_path / "system_logs")
+        monkeypatch.setattr(mod, "get_module_logs_dir", lambda name: tmp_path / name / "logs")
+        recorder = MagicMock()
+        monkeypatch.setattr(mod, "logger", recorder)
+        return recorder
+
     def test_a_vanishing_file_does_not_kill_the_dispatcher(self, tmp_path, monkeypatch):
         """THE regression pin: the exact 02:19 event, end to end, real threads.
 
@@ -449,7 +423,10 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: p.parent != tmp_path)
+        # A stat that wins the race registers the file; its fire must not reach the real bus.
+        monkeypatch.setattr(mod, "_get_trigger", lambda: None)
+        self._close_the_far_side(mod, monkeypatch, tmp_path)
 
         observer = self._start_real_observer(mod, tmp_path)
         try:
@@ -457,7 +434,7 @@ class TestDispatcherSurvivesHandlerFailure:
             assert observer.is_alive(), "fixture broken: dispatcher was not alive to begin with"
 
             victim = tmp_path / "probe.py"
-            victim.write_text("x = 1\n")
+            victim.write_text("x = 1\n", encoding="utf-8")
             victim.unlink()  # gone before the handler can stat it
             _time.sleep(1.0)
 
@@ -479,19 +456,22 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: p.parent != tmp_path)
+        # A stat that wins the race registers the file; its fire must not reach the real bus.
+        monkeypatch.setattr(mod, "_get_trigger", lambda: None)
+        self._close_the_far_side(mod, monkeypatch, tmp_path)
 
         observer = self._start_real_observer(mod, tmp_path)
         try:
             _time.sleep(0.3)
             victim = tmp_path / "probe.py"
-            victim.write_text("x = 1\n")
+            victim.write_text("x = 1\n", encoding="utf-8")
             victim.unlink()
             _time.sleep(0.5)
 
             # Generate traffic the dispatcher must chew through.
             for i in range(40):
-                (tmp_path / f"noise_{i}.txt").write_text("n")
+                (tmp_path / f"noise_{i}.txt").write_text("n", encoding="utf-8")
             _time.sleep(1.5)
 
             assert observer.event_queue.qsize() == 0, (
@@ -508,6 +488,7 @@ class TestDispatcherSurvivesHandlerFailure:
         FileNotFoundError is only the failure we happened to hit. Any exception
         reaching the dispatcher is equally fatal, so this raises something with
         no relationship to the filesystem and asserts the same containment.
+        Mutant `if should_ignore_path(py_file):` -> `if False:` reddens the ignore-filter assert.
         """
         mod = self._real_watcher_module()
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
@@ -519,7 +500,8 @@ class TestDispatcherSurvivesHandlerFailure:
             raise _Boom("registry is unreachable")
 
         monkeypatch.setattr(mod, "load_module_registry", _explode)
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        asked = []
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
 
         saved = []
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.append(modules))
@@ -542,12 +524,17 @@ class TestDispatcherSurvivesHandlerFailure:
         assert "_Boom" in errors[0], "the report must name the error type it did not expect"
         assert "anything.py" in errors[0], "the report must name the file that failed"
         assert saved == [], "the event must be dropped, not half-registered"
+        assert asked == [tmp_path / "anything.py"], "the ignore filter was never consulted"
 
     def test_a_swallowed_failure_is_still_reported(self, tmp_path, monkeypatch):
-        """Swallowing must not mean hiding — 15 silent hours is what made it costly."""
+        """Swallowing must not mean hiding — 15 silent hours is what made it costly.
+
+        Mutant `if should_ignore_path(py_file):` -> `if False:` reddens the ignore-filter assert.
+        """
         mod = self._real_watcher_module()
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        asked = []
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
 
         def _explode():
             raise RuntimeError("registry is unreachable")
@@ -567,6 +554,42 @@ class TestDispatcherSurvivesHandlerFailure:
         assert errors, "the handler swallowed a failure without saying anything"
         assert "anything.py" in errors[0], "the report must name the file that failed"
         assert "RuntimeError" in errors[0], "the report must name the error type"
+        assert asked == [tmp_path / "anything.py"], "the ignore filter was never consulted"
+
+    def test_a_file_that_vanished_is_a_miss_not_an_error(self, tmp_path, monkeypatch):
+        """The race the guard was built for is the ORDINARY case, not an incident.
+
+        Every create-then-delete inside one second — a test probe, an editor's
+        write-and-rename, a build step — reached the broad guard and printed a
+        full traceback at ERROR into whichever long-running process happened to
+        hold the watcher. Ten landed in api's server log from a single prax test
+        run (2026-09-15). The event is still dropped; it is just not news.
+        Mutant `if should_ignore_path(py_file):` -> `if False:` reddens the ignore-filter assert.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        asked = []
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
+
+        errors, infos = [], []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+        monkeypatch.setattr(mod.logger, "info", lambda msg, *a, **kw: infos.append(str(msg)))
+
+        gone = tmp_path / "vanished.py"
+        event = MagicMock()
+        event.event_type = "created"
+        event.is_directory = False
+        event.src_path = str(gone)
+        handler = mod.PythonFileWatcher()
+        handler.dispatch(event)
+
+        assert not errors, f"a file vanishing before its stat is not an error: {errors}"
+        assert any("vanished.py" in line for line in infos), (
+            f"the miss must still be on the record, naming the file: {infos}"
+        )
+        assert asked == [gone], "the ignore filter was never consulted"
 
     def test_a_healthy_created_file_is_still_registered(self, tmp_path, monkeypatch):
         """The guard must not have turned discovery into a no-op.
@@ -581,14 +604,19 @@ class TestDispatcherSurvivesHandlerFailure:
         `\r\n` there. Production was honest the whole time: the handler records
         the true on-disk size. The pin was the platform-naive half, and what it
         should say is "the registered size is the REAL size", not "the size is 6".
+        Mutant `if should_ignore_path(py_file):` -> `if False:` reddens the ignore-filter assert.
         """
         mod = self._real_watcher_module()
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        asked = []
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        bus = MagicMock()
+        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
 
         saved = {}
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
+        self._close_the_far_side(mod, monkeypatch, tmp_path)
 
         real_file = tmp_path / "keeper.py"
         real_file.write_bytes(b"y = 2\n")  # binary: exactly 6 bytes on every platform
@@ -603,6 +631,75 @@ class TestDispatcherSurvivesHandlerFailure:
         assert "keeper" in saved, "a perfectly good new module was not registered"
         assert saved["keeper"]["size"] == real_file.stat().st_size
         assert saved["keeper"]["size"] == 6, "binary write should be 6 bytes on every platform"
+        # The log paths come from the resolvers the watcher looks up, stubbed onto tmp_path
+        assert saved["keeper"]["system_log_file"] == str(tmp_path / "system_logs" / "prax_keeper.log")
+        assert saved["keeper"]["log_file"] == str(tmp_path / "prax" / "logs" / "keeper.log")
+        assert asked == [real_file], "the ignore filter was never consulted"
+        bus.fire.assert_called_once_with(
+            "module_discovered", module_name="keeper", file_path=str(real_file), relative_path="keeper.py"
+        )
+
+    def test_an_unreadable_registry_is_never_overwritten_by_one_new_module(self, tmp_path, monkeypatch):
+        """load_module_registry answers None when the registry cannot be read.
+
+        The handler used to receive {} there, add the one new module and save,
+        so the whole registry was replaced by a single entry (prax, leg 15: the
+        raise rule, compass 486). Now nothing is saved and nothing fires.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: p.parent != tmp_path)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: None)
+        bus = MagicMock()
+        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
+        saves = []
+        monkeypatch.setattr(mod, "save_module_registry", saves.append)
+        log = self._close_the_far_side(mod, monkeypatch, tmp_path)
+
+        real_file = tmp_path / "keeper.py"
+        real_file.write_bytes(b"y = 2\n")
+        handler = mod.PythonFileWatcher()
+        event = MagicMock()
+        event.event_type = "created"
+        event.is_directory = False
+        event.src_path = str(real_file)
+        handler.dispatch(event)
+
+        assert saves == []
+        bus.fire.assert_not_called()
+        # Turned away on purpose, not by a crash the handler's guard swallowed.
+        log.error.assert_not_called()
+        log.warning.assert_called_once_with(
+            f"[watcher] The module registry could not be read, so {real_file} was not registered"
+        )
+
+    def test_a_file_created_in_a_dropbox_or_an_archive_is_not_registered(self, tmp_path, monkeypatch):
+        """The owner's ruling of 09-27: nothing looks into a dropbox, a sandbox like .archive.
+
+        The live file created beside them is the control: it is registered as before.
+        Written after the cure; its proof is the mutant that drops in_sandbox.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: p.suffix != ".py")
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        monkeypatch.setattr(mod, "_get_trigger", lambda: MagicMock())
+        saved = {}
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
+        self._close_the_far_side(mod, monkeypatch, tmp_path)
+
+        handler = mod.PythonFileWatcher()
+        for rel in ("dropbox/handed.py", ".archive/old.py", "apps/live.py"):
+            created = tmp_path.joinpath("branch", *rel.split("/"))
+            created.parent.mkdir(parents=True, exist_ok=True)
+            created.write_bytes(b"x = 1\n")
+            event = MagicMock()
+            event.event_type = "created"
+            event.is_directory = False
+            event.src_path = str(created)
+            handler.dispatch(event)
+
+        assert set(saved) == {"live"}
 
     def test_the_recorded_size_is_the_real_size_under_crlf(self, tmp_path, monkeypatch):
         """The Windows half of the size pin, run on Linux.
@@ -615,11 +712,15 @@ class TestDispatcherSurvivesHandlerFailure:
 
         Same split as the 2026-08-08 Windows path work: run the platform branch by
         name rather than claiming a platform the suite never executes.
+        Mutant `if should_ignore_path(py_file):` -> `if False:` reddens the ignore-filter assert.
         """
         mod = self._real_watcher_module()
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        asked = []
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        bus = MagicMock()
+        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
 
         saved = {}
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
@@ -639,21 +740,29 @@ class TestDispatcherSurvivesHandlerFailure:
         assert saved["crlf"]["size"] == crlf_file.stat().st_size == 7, (
             "the registry must record the bytes the OS holds, not the length of a Python string"
         )
+        assert asked == [crlf_file], "the ignore filter was never consulted"
+        bus.fire.assert_called_once_with(
+            "module_discovered", module_name="crlf", file_path=str(crlf_file), relative_path="crlf.py"
+        )
 
     def test_the_file_is_stat_ed_once_not_twice(self, tmp_path, monkeypatch):
         """Two stats are two chances to lose the same race the guard now catches.
 
         The original built `size` and `modified_time` from separate stat() calls,
         so a file could vanish between them and produce a torn description.
+        Mutant `if should_ignore_path(py_file):` -> `if False:` reddens the ignore-filter assert.
         """
         mod = self._real_watcher_module()
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        asked = []
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
+        bus = MagicMock()
+        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
 
         real_file = tmp_path / "counted.py"
-        real_file.write_text("z = 3\n")
+        real_file.write_text("z = 3\n", encoding="utf-8")
 
         calls = []
         original_stat = Path.stat
@@ -673,22 +782,28 @@ class TestDispatcherSurvivesHandlerFailure:
         handler.dispatch(event)
 
         assert len(calls) == 1, f"expected exactly one stat() on the target, got {len(calls)}"
+        assert asked == [real_file], "the ignore filter was never consulted"
+        bus.fire.assert_called_once_with(
+            "module_discovered", module_name="counted", file_path=str(real_file), relative_path="counted.py"
+        )
 
     def test_a_discovered_module_reaches_the_bus(self, tmp_path, monkeypatch):
         """FPLAN-0556. `module_discovered` had never once fired: the gate in
         front of it read `_HAS_TRIGGER`, and the module-level import that set it
         could never succeed (circular back into the partially initialised
-        watcher), so the flag was False in every live process."""
+        watcher), so the flag was False in every live process.
+        Mutant `if should_ignore_path(py_file):` -> `if False:` reddens the ignore-filter assert."""
         mod = self._real_watcher_module()
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        asked = []
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
         bus = MagicMock()
         monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
 
         new_file = tmp_path / "brand_new.py"
-        new_file.write_text("x = 1\n")
+        new_file.write_text("x = 1\n", encoding="utf-8")
 
         event = MagicMock()
         event.event_type = "created"
@@ -699,16 +814,19 @@ class TestDispatcherSurvivesHandlerFailure:
         assert bus.fire.call_count == 1
         assert bus.fire.call_args[0][0] == "module_discovered"
         assert bus.fire.call_args[1]["module_name"] == "brand_new"
+        assert asked == [new_file], "the ignore filter was never consulted"
 
     def test_a_failed_discovery_fire_does_not_lose_the_registry_write(self, tmp_path, monkeypatch):
         """The registry entry is the product; the event is the notification.
 
         The fire now runs for real, so a trigger that raises has to be survivable
         at the fire site — the module-level flag used to make that unreachable.
+        Mutant `if should_ignore_path(py_file):` -> `if False:` reddens the ignore-filter assert.
         """
         mod = self._real_watcher_module()
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        asked = []
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
         saved = {}
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
@@ -717,7 +835,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
 
         new_file = tmp_path / "survivor.py"
-        new_file.write_text("x = 1\n")
+        new_file.write_text("x = 1\n", encoding="utf-8")
 
         event = MagicMock()
         event.event_type = "created"
@@ -726,19 +844,24 @@ class TestDispatcherSurvivesHandlerFailure:
         mod.PythonFileWatcher().dispatch(event)  # must not raise
 
         assert "survivor" in saved, "a broken trigger cost the registry its entry"
+        assert asked == [new_file], "the ignore filter was never consulted"
 
     def test_a_host_without_trigger_still_registers_the_module(self, tmp_path, monkeypatch):
-        """`_get_trigger()` returning None is the normal answer on such a host."""
+        """`_get_trigger()` returning None is the normal answer on such a host.
+
+        Mutant `if should_ignore_path(py_file):` -> `if False:` reddens the ignore-filter assert.
+        """
         mod = self._real_watcher_module()
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        asked = []
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
         saved = {}
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
         monkeypatch.setattr(mod, "_get_trigger", lambda: None)
 
         new_file = tmp_path / "lonely.py"
-        new_file.write_text("x = 1\n")
+        new_file.write_text("x = 1\n", encoding="utf-8")
 
         event = MagicMock()
         event.event_type = "created"
@@ -747,6 +870,7 @@ class TestDispatcherSurvivesHandlerFailure:
         mod.PythonFileWatcher().dispatch(event)
 
         assert "lonely" in saved
+        assert asked == [new_file], "the ignore filter was never consulted"
 
 
 class TestWatcherLiveness:
@@ -759,16 +883,14 @@ class TestWatcherLiveness:
     died at 02:19 on 2026-08-18 and no process noticed for 15 hours.
     """
 
-    def _fresh_module(self):
-        import importlib
+    @pytest.fixture(autouse=True)
+    def _keep_monkeypatch(self, monkeypatch):
+        self._monkeypatch = monkeypatch
 
-        for key in list(sys.modules):
-            if key.startswith("aipass.prax.apps.handlers.discovery"):
-                sys.modules.pop(key, None)
-        mod = importlib.import_module("aipass.prax.apps.handlers.discovery.watcher")
-        mod._LIVENESS.last_check = 0.0
-        mod._LIVENESS.death_reported = False
-        return mod
+    def _fresh_module(self):
+        """The discovery watcher bound at the top, with a liveness record never checked (prax, leg 9)."""
+        _fresh_watcher_state(self._monkeypatch)
+        return discovery_watcher
 
     def _dead_observer(self):
         obs = MagicMock()
@@ -776,15 +898,24 @@ class TestWatcherLiveness:
         obs.event_queue.qsize.return_value = 91234
         return obs
 
+    def _recording_bus(self, mod, monkeypatch):
+        """Replace the fire binding, `_get_trigger`, with a recorder: no death reaches the real bus."""
+        bus = MagicMock()
+        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
+        return bus
+
     def test_a_dead_watcher_is_reported_loudly(self, monkeypatch):
+        """Mutant `"file_watcher_died", watch_root` -> `"file_watcher_gone", watch_root` reddens it."""
         mod = self._fresh_module()
         monkeypatch.setattr(mod, "_observer", self._dead_observer())
         errors = []
         monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+        bus = self._recording_bus(mod, monkeypatch)
 
         assert mod.check_file_watcher_liveness() is False
         assert errors, "the watcher died and nothing was logged — this is the 15-hour silence"
         assert "DEAD" in errors[0]
+        bus.fire.assert_called_once_with("file_watcher_died", watch_root=str(mod.ECOSYSTEM_ROOT), queued_events=91234)
 
     def test_the_death_report_carries_the_queue_depth(self, monkeypatch):
         """The number that makes it actionable: how much memory is being retained."""
@@ -792,9 +923,11 @@ class TestWatcherLiveness:
         monkeypatch.setattr(mod, "_observer", self._dead_observer())
         errors = []
         monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+        bus = self._recording_bus(mod, monkeypatch)
 
         mod.check_file_watcher_liveness()
         assert "91234" in errors[0], "the report should say how many events are stranded"
+        assert bus.fire.call_args.kwargs["queued_events"] == 91234
 
     def test_the_death_is_reported_once_not_on_every_check(self, monkeypatch):
         """prax owns the runaway-log detector; a health check must not flood."""
@@ -802,11 +935,13 @@ class TestWatcherLiveness:
         monkeypatch.setattr(mod, "_observer", self._dead_observer())
         errors = []
         monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+        bus = self._recording_bus(mod, monkeypatch)
 
         for _ in range(50):
             mod.check_file_watcher_liveness(force=True)
 
         assert len(errors) == 1, f"death reported {len(errors)} times — that is a log flood"
+        assert bus.fire.call_count == 1, f"death fired {bus.fire.call_count} times on the bus"
 
     def test_a_live_watcher_reports_nothing(self, monkeypatch):
         mod = self._fresh_module()
@@ -850,6 +985,7 @@ class TestWatcherLiveness:
         monkeypatch.setattr(mod, "_observer", dead)
         errors = []
         monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+        bus = self._recording_bus(mod, monkeypatch)
 
         mod.check_file_watcher_liveness(force=True)
         assert len(errors) == 1
@@ -862,6 +998,7 @@ class TestWatcherLiveness:
         monkeypatch.setattr(mod, "_observer", self._dead_observer())
         mod.check_file_watcher_liveness(force=True)
         assert len(errors) == 2, "a second, distinct death went unreported"
+        assert [c.args[0] for c in bus.fire.call_args_list] == ["file_watcher_died", "file_watcher_died"]
 
     def test_the_liveness_check_never_raises(self, monkeypatch):
         """It is called BY the logger. A health check that breaks logging is worse."""
@@ -883,7 +1020,8 @@ class TestWatcherLiveness:
         monkeypatch.setattr(mod, "_get_trigger", lambda: broken)
 
         mod.check_file_watcher_liveness(force=True)
-        assert errors, "a broken trigger swallowed the death report"
+        assert len(errors) == 1, "a broken trigger swallowed the death report"
+        assert errors[0].startswith("[watcher] DISCOVERY WATCHER IS DEAD")
 
     def test_the_death_actually_reaches_the_bus(self, monkeypatch):
         """FPLAN-0556. Until 2026-09-12 this fire was unreachable: the trigger
@@ -984,6 +1122,7 @@ def _run_with_trigger_denied(body: str) -> subprocess.CompletedProcess:
         [sys.executable, "-"],
         input=script,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         cwd=str(Path(__file__).resolve().parents[3]),
     )
@@ -1055,15 +1194,21 @@ class TestOptionalTriggerIntegration:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_a_denied_trigger_does_not_stop_the_discovery_scan(self):
-        """The behaviour the guard exists for: work completes without trigger."""
+    def test_a_denied_trigger_does_not_stop_the_discovery_scan(self, tmp_path):
+        """The behaviour the guard exists for: work completes without trigger.
+
+        The subprocess roots the watcher at tmp_path, so the probe never lands in the live tree.
+        """
         result = _run_with_trigger_denied(
-            "\nfrom aipass.prax.apps.handlers.discovery import watcher\n"
+            "\nimport os\n"
+            f"os.environ['AIPASS_TEST_LOG_DIR'] = {str(tmp_path / 'logs')!r}\n"
+            "from aipass.prax.apps.handlers.discovery import watcher\n"
             "watcher.load_module_registry = lambda: {}\n"
             "watcher.save_module_registry = lambda modules, **kw: True\n"
             "from unittest.mock import MagicMock\n"
             "from pathlib import Path\n"
-            "probe = Path(watcher.ECOSYSTEM_ROOT) / 'prax' / 'docs.local' / 'denied_trigger_probe.py'\n"
+            f"watcher.ECOSYSTEM_ROOT = Path({str(tmp_path)!r})\n"
+            "probe = Path(watcher.ECOSYSTEM_ROOT) / 'denied_trigger_probe.py'\n"
             "probe.parent.mkdir(parents=True, exist_ok=True)\n"
             "probe.write_text('# throwaway\\n', encoding='utf-8')\n"
             "ev = MagicMock(); ev.is_directory = False; ev.src_path = str(probe)\n"
@@ -1119,19 +1264,21 @@ class TestTheBackgroundStartDoesNotMakeTheCallerWait:
     longer has a caller to raise to.
     """
 
-    def _module_and_a_gated_observer(self):
+    @pytest.fixture(autouse=True)
+    def _keep_monkeypatch(self, monkeypatch):
+        self._monkeypatch = monkeypatch
+
+    def _module_and_a_gated_observer(self, tmp_path):
         """The discovery watcher with a schedule() that blocks until released."""
-        mod, observer_inst, _cls = TestDiscoveryWatcher()._import_discovery_watcher()
-        setattr(mod, "_observer", None)
-        setattr(mod, "_start_thread", None)
+        mod, observer_inst, _cls = _discovery_watcher_doubled(self._monkeypatch, tmp_path)
 
         gate = threading.Event()
         observer_inst.schedule.side_effect = lambda *args, **kwargs: gate.wait(30)
         return mod, observer_inst, gate
 
-    def test_the_caller_returns_while_the_walk_is_still_running(self):
+    def test_the_caller_returns_while_the_walk_is_still_running(self, tmp_path):
         """The whole point: the walk outlives the call that asked for it."""
-        mod, observer_inst, gate = self._module_and_a_gated_observer()
+        mod, observer_inst, gate = self._module_and_a_gated_observer(tmp_path)
 
         try:
             mod.start_file_watcher_in_background()
@@ -1149,10 +1296,10 @@ class TestTheBackgroundStartDoesNotMakeTheCallerWait:
         finally:
             gate.set()
 
-    def test_a_second_call_during_the_walk_starts_no_second_observer(self):
+    def test_a_second_call_during_the_walk_starts_no_second_observer(self, tmp_path):
         """Two walks install two watches on every directory and deliver every
         event twice — the failure mode a non-blocking start invites."""
-        mod, observer_inst, gate = self._module_and_a_gated_observer()
+        mod, observer_inst, gate = self._module_and_a_gated_observer(tmp_path)
 
         try:
             mod.start_file_watcher_in_background()
@@ -1162,14 +1309,16 @@ class TestTheBackgroundStartDoesNotMakeTheCallerWait:
             gate.set()
             getattr(mod, "_start_thread").join(timeout=10)
 
-            observer_inst.schedule.assert_called_once()
-            observer_inst.start.assert_called_once()
+            assert observer_inst.schedule.call_count == 1
+            _handler, root = observer_inst.schedule.call_args.args
+            assert (root, observer_inst.schedule.call_args.kwargs) == (str(mod.ECOSYSTEM_ROOT), {"recursive": True})
+            observer_inst.start.assert_called_once_with()
         finally:
             gate.set()
 
-    def test_a_synchronous_start_during_the_walk_waits_and_installs_nothing(self):
+    def test_a_synchronous_start_during_the_walk_waits_and_installs_nothing(self, tmp_path):
         """The other half of the same rule: the two doors share one lock."""
-        mod, observer_inst, gate = self._module_and_a_gated_observer()
+        mod, observer_inst, gate = self._module_and_a_gated_observer(tmp_path)
 
         try:
             mod.start_file_watcher_in_background()
@@ -1178,20 +1327,20 @@ class TestTheBackgroundStartDoesNotMakeTheCallerWait:
 
             mod.start_file_watcher()
 
-            observer_inst.schedule.assert_called_once()
+            assert observer_inst.schedule.call_count == 1
+            assert observer_inst.schedule.call_args.args[1] == str(mod.ECOSYSTEM_ROOT)
+            observer_inst.start.assert_called_once_with()
         finally:
             gate.set()
 
-    def test_an_inotify_limit_is_logged_not_raised(self):
+    def test_an_inotify_limit_is_logged_not_raised(self, tmp_path, monkeypatch):
         """There is no caller left to hand the OSError to.
 
         _ensure_watcher used to catch it and warn; on a thread nobody joins an
         escaping exception is a silent death, so the warning moved inside with
         the same words.
         """
-        mod, observer_inst, _cls = TestDiscoveryWatcher()._import_discovery_watcher()
-        setattr(mod, "_observer", None)
-        setattr(mod, "_start_thread", None)
+        mod, observer_inst, _cls = _discovery_watcher_doubled(monkeypatch, tmp_path)
         observer_inst.schedule.side_effect = OSError("inotify watch limit reached")
 
         with patch.object(mod, "logger") as mock_logger:

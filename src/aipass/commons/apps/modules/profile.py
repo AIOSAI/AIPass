@@ -3,7 +3,7 @@
 # Description: Social Profile Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -68,7 +68,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command == "profile":
         result = _handle_profile(args)
     elif command == "who":
-        result = _handle_who(args)
+        result = _handle_who()
     else:
         return False
 
@@ -125,9 +125,9 @@ def _handle_profile(args: List[str]) -> bool:
     return True
 
 
-def _handle_who(args: List[str]) -> bool:
+def _handle_who() -> bool:
     """List all members."""
-    result = list_members(args)
+    result = list_members()
 
     if not result["success"]:
         error(result["error"])

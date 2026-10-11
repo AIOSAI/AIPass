@@ -151,11 +151,18 @@ def overdue(repo_root: Path | None = None) -> list[dict]:
     armed, no process has to survive for it to be noticed.
 
     An overdue entry is not a slow agent — ``expected_by`` is dispatch_monitor's
-    own hard timeout, which a live monitor kills the run at. Overdue means the
-    monitor died.
+    own hard timeout, which a live monitor kills the run at.
+
+    Overdue does NOT mean the monitor died, and this docstring said it did until
+    2026-09-20, when a @seedgo row went overdue while its systemd service was
+    still active: dispatch_monitor retries up to three times, the killed attempt
+    exits -1, and the monitor immediately starts the next one with a fresh
+    window. The row stays overdue against the FIRST expected_by throughout. Read
+    this as "past its first deadline, cause unknown" — the only thing that knows
+    is ``monitor_alive``, and it is None on every systemd-scope spawn.
     """
     late = [entry for entry in outstanding(repo_root) if entry.get("overdue")]
     if late:
-        logger.info("[watchdog.dispatches] %s dispatch(es) overdue — their monitors died", len(late))
+        logger.info("[watchdog.dispatches] %s dispatch(es) past the hard timeout, monitor state unknown", len(late))
         json_handler.log_operation("dispatches_overdue", {"count": len(late)})
     return late

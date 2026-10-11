@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: openrouter_client.py
 # Description: OpenRouter Client Module
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-10-03
 # =============================================
 # pyright: reportMissingImports=false
 
@@ -156,7 +156,11 @@ def test_connection():
     console.print("[dim]Testing connection...[/dim]")
 
     # Get API key via handler
-    api_key = keys.get_api_key("openrouter")
+    try:
+        api_key = keys.get_api_key("openrouter")
+    except keys.KeyUnavailable as e:
+        error(str(e))
+        return
 
     if not api_key:
         diagnosis = keys.diagnose_key("openrouter")
@@ -164,12 +168,14 @@ def test_connection():
         return
 
     # Real API ping — hit /models endpoint
-    model_list = models.fetch_models_from_api(api_key)
+    try:
+        model_list = models.fetch_models_from_api(api_key)
+    except models.ModelsUnavailable as e:
+        # The reason travels with the failure; an empty list is an answer (api, fleet green leg 3).
+        error(f"Connection failed — {e}")
+        return
 
-    if model_list:
-        success(f"Connection successful — {len(model_list)} models available")
-    else:
-        error("Connection failed — could not reach OpenRouter API")
+    success(f"Connection successful — {len(model_list)} models available")
 
 
 def make_call(args: List[str]):
@@ -205,7 +211,11 @@ def make_call(args: List[str]):
 
     console.print(f"[dim]Calling {model}...[/dim]")
 
-    response = client.get_response(prompt, caller="cli", model=model)
+    try:
+        response = client.get_response(prompt, caller="cli", model=model)
+    except (client.OpenRouterUnavailable, keys.KeyUnavailable) as e:
+        error(str(e))
+        return
 
     if response:
         success(f"Response received ({len(response['content'])} chars)")
@@ -223,7 +233,11 @@ def list_models(args: List[str] | None = None):
     show_all = args and "--all" in args
 
     # Get API key via handler
-    api_key = keys.get_api_key("openrouter")
+    try:
+        api_key = keys.get_api_key("openrouter")
+    except keys.KeyUnavailable as e:
+        error(str(e))
+        return
 
     if not api_key:
         diagnosis = keys.diagnose_key("openrouter")
@@ -233,10 +247,10 @@ def list_models(args: List[str] | None = None):
     console.print("[dim]Fetching available models...[/dim]")
 
     # Call handler to fetch models
-    model_list = models.fetch_models_from_api(api_key)
-
-    if not model_list:
-        error("Failed to fetch models")
+    try:
+        model_list = models.fetch_models_from_api(api_key)
+    except models.ModelsUnavailable as e:
+        error(f"Failed to fetch models — {e}")
         return
 
     success(f"Found {len(model_list)} models")
@@ -284,7 +298,11 @@ def check_status():
     console.print()
 
     # Key status
-    api_key = keys.get_api_key("openrouter")
+    try:
+        api_key = keys.get_api_key("openrouter")
+    except keys.KeyUnavailable as e:
+        error(str(e))
+        return
 
     if api_key:
         masked = api_key[:8] + "..." + api_key[-4:]
@@ -334,6 +352,11 @@ def get_response(prompt: str, caller: str | None = None, model: str | None = Non
 
     Returns:
         Dict with 'content', 'id', 'model' or None on failure
+
+    Raises:
+        client.OpenRouterUnavailable: the SDK refused to build a client or a
+        response could not be read; the reason travels (api, fleet green leg 10)
+        keys.KeyUnavailable: the secrets file could not be read (api, fleet green leg 11)
 
     Example:
         >>> from aipass.api.apps.modules.openrouter_client import get_response

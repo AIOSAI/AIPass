@@ -1,11 +1,16 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/conftest.py
-# Date: 2026-09-03
-# Version: 3.0.0
-# Category: canary/tests
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Shared pytest fixtures for canary - json seam, console width, command state, logger capture
+# Version: 3.3.0
+# Created: 2025-11-08
+# Modified: 2026-10-10
 #
 # CHANGELOG (Max 5 entries):
+#   - v3.3.0 (2026-10-10): temp_test_dir and sample_test_data retired - the template's
+#     fixtures, requested only by the git-ignored .archive scaffold (seedgo, PR #774)
+#   - v3.2.0 (2026-10-04): Template item 5 header - AIPass banner, the five META fields
+#   - v3.1.0 (2026-10-03): Template C1/C2 - pinned console width, command state reset
+#     after every test; product import moved to the top
 #   - v3.0.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam — the
 #     fleet service resolves its directory per call, so there is no singleton
 #     and no private attribute left to patch (DPLAN-0325)
@@ -26,7 +31,6 @@ test, so every test lands in its own tmp_path without knowing it.
 """
 
 import os
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator, List, Tuple
@@ -41,7 +45,9 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 
+from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.json import json_handler
+from aipass.cli.apps.modules import display
 
 # Never discover out of .archive/: it holds verbatim disposal copies (old
 # handler tests, the archived json_dir pin) that must not be collected or
@@ -49,24 +55,19 @@ from aipass.canary.apps.handlers.json import json_handler
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after."""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
 
 
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data shaped like a valid 'data' JSON document."""
-    return {
-        "created": "2026-09-03",
-        "last_updated": "2026-09-03",
-        "test_key": "test_value",
-        "sample_data": "example",
-    }
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -112,8 +113,6 @@ def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
 
         def error(self, *args, **kwargs):
             captured.append(("error", args))
-
-    from aipass.canary.apps import canary as canary_entry
 
     monkeypatch.setattr(canary_entry, "logger", _CapturingLogger())
     return captured

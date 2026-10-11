@@ -18,7 +18,6 @@ Usage:
     Standalone: drone @flow restore <number>
 """
 
-# ruff: noqa: E402
 import sys
 import os
 

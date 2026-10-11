@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: telegram_notifier.py
 # Description: Scheduler lifecycle notifications via Telegram
-# Version: 3.0.0
+# Version: 3.0.1
 # Created: 2026-02-15
-# Modified: 2026-06-25
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -15,19 +15,17 @@ and never raises. The tick MUST keep firing jobs regardless.
 """
 
 from aipass.prax import logger
-from aipass.daemon.apps.handlers.json import json_handler  # noqa: F401
+from aipass.daemon.apps.handlers.json import json_handler
 
 
 def _send(message: str) -> bool:
     """Send via skills notifier, fail-soft.
 
-    Cross-branch import authorized by TDPLAN-0008 contract —
-    daemon emits lifecycle pings through the skills telegram notifier.
+    Through skills' published door (DPLAN-0404) — daemon emits lifecycle
+    pings through the skills telegram notifier.
     """
     try:
-        from aipass.skills.lib.telegram.apps.handlers.notifier import (  # noqa: E501
-            send_telegram_notification,
-        )
+        from aipass.skills.apps.modules.door_notifier import send_telegram_notification
 
         return send_telegram_notification(message)
     except Exception as e:

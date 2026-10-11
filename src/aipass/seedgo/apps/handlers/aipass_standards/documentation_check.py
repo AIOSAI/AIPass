@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: documentation_check.py
 # Description: Documentation Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -78,7 +78,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if path.name == "__init__.py":
         return {
             "passed": True,
-            "checks": [{"name": "Documentation check", "passed": True, "message": "__init__.py file (skipped)"}],
+            "checks": [
+                {
+                    "name": "Documentation check",
+                    "passed": True,
+                    "message": "__init__.py file (skipped)",
+                    "declined": True,
+                }
+            ],
             "score": 100,
             "standard": "DOCUMENTATION",
         }
@@ -251,7 +258,7 @@ def _judge(found: list) -> Dict:
     }
 
 
-def check_function_docstrings(content: str, lines: List[str]) -> Dict:  # noqa: ARG001
+def check_function_docstrings(content: str, lines: List[str]) -> Dict:
     """
     Check that public functions have docstrings.
 

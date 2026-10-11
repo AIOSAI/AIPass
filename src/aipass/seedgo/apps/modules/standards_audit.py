@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_audit.py
 # Description: Standards Audit Module
-# Version: 1.0.0
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -17,7 +17,6 @@ import sys
 import time
 from pathlib import Path
 from typing import List, NoReturn
-from collections import defaultdict
 
 # IMPORTS — prax logger first, system-wide
 from aipass.prax import logger
@@ -34,11 +33,15 @@ from aipass.seedgo.apps.handlers.audit import argv as audit_argv
 from aipass.seedgo.apps.handlers.audit import discovery
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches, _is_branch_private, check_internal_access
 from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch_incremental
-from aipass.seedgo.apps.handlers.audit.audit_display import print_branch_summary, print_system_summary
+from aipass.seedgo.apps.handlers.audit.audit_display import (
+    cache_tag,
+    print_branch_summary,
+    print_system_summary,
+)
 from aipass.seedgo.apps.handlers.audit.artifact import write_audit_artifact
 
 # Bypass system
-from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
+from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules, registry_notes
 
 # The audit-tests lane's refusal vocabulary, reused rather than re-invented:
 # Law ARGV, its exit code and its did-you-mean live in one place so the two
@@ -443,7 +446,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             # Print completed branch result (persists above progress bar)
             avg = result.get("average", 0)
             style = "green" if avg >= 90 else "yellow" if avg >= 75 else "red"
-            cached_tag = " [dim](cached)[/dim]" if result.get("_cache_hit") else ""
+            cached_tag = cache_tag(result)
             progress.console.print(
                 f"  [dim][{idx}/{total_branches}][/dim] [cyan]{branch_name:<12}[/cyan]"
                 f" [{style}]{avg:>3}%[/{style}] [dim]({branch_elapsed:.1f}s)[/dim]{cached_tag}"
@@ -455,24 +458,21 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print(f"[dim]Audit complete — {total_branches} branches in {total_elapsed:.1f}s[/dim]")
     console.print()
 
-    # Calculate system-wide averages for each standard
-    standard_scores = defaultdict(list)
-    for result in audit_results:
-        for standard, score in result["scores"].items():
-            standard_scores[standard].append(score)
-
-    system_averages = {standard: int(sum(scores) / len(scores)) for standard, scores in standard_scores.items()}
-
-    overall_system_avg = int(sum(r["average"] for r in audit_results) / len(audit_results)) if audit_results else 0
-
-    # Print results — detailed for single branch, skip for full audit
+    # Print results — detailed for single branch, skip for full audit. The
+    # system averages computed here fed two parameters print_branch_summary
+    # never read; both went (seedgo, fleet green leg 8).
     if not is_compact:
         for result in audit_results:
-            print_branch_summary(result, system_averages, overall_system_avg, no_bypass=no_bypass)
+            print_branch_summary(result, no_bypass=no_bypass)
 
     # Print system summary (full audit only)
     if is_compact:
         print_system_summary(audit_results, no_bypass=no_bypass)
+
+    # A registry nobody could read changes no verdict; it is said once, here
+    # (devpulse's ruling, seedgo fleet green leg 15).
+    for note in registry_notes():
+        warning(note)
 
     # Machine-readable complete result set (no display budget)
     if write_artifact:
@@ -535,7 +535,11 @@ def print_help():
     console.print("  Pack name is REQUIRED; checkers auto-discover from the pack's handler dir.")
     console.print()
     console.print("  'tests' is not a pack: 'audit tests <target>' is the EXECUTION lane, the")
-    console.print("  same command as 'audit-tests <target>'. Every lane flag is forwarded whole.")
+    console.print("  same command as 'audit-tests <target>'. Every LANE flag is forwarded whole —")
+    console.print("  the lane's own flags, listed by 'drone @seedgo audit-tests --help', NOT the")
+    console.print("  pack-audit flags above. --artifact, --no-artifact, --full and --no-bypass")
+    console.print("  belong to the pack audit; the lane refuses them by name under law ARGV,")
+    console.print("  because it writes exactly one artifact at a path it owns.")
     console.print()
     console.print("  --no-bypass runs the identical audit with an EMPTY rule set: no .seedgo/")
     console.print("  bypass.json rule applies, so the score is the branch's raw compliance — the")

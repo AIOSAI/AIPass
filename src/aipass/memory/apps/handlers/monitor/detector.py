@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: detector.py
 # Description: Rollover Trigger Detection Handler
-# Version: 0.6.0
+# Version: 0.7.0
 # Created: 2025-11-16
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -146,8 +146,22 @@ class UndrainableFile:
 # =============================================================================
 
 
+class RegistryUnreadable(RuntimeError):
+    """A registry file exists but cannot be read as a registry.
+
+    Raised rather than answered with ``[]``: an empty list is what an empty
+    registry gives, and a walk that reads "no branches" does no rollover and
+    reports success (DPLAN-0354 leg 3).
+    """
+
+
 def _read_single_registry(registry_path: Path, root: Path) -> List[Dict[str, Any]]:
-    """Read branches from a single registry file, resolving paths against root."""
+    """Read branches from a single registry file, resolving paths against root.
+
+    An absent file has no branches. A file that exists and cannot be read
+    raises ``RegistryUnreadable``: the caller decides what one broken registry
+    costs.
+    """
     if not registry_path.exists():
         return []
 
@@ -165,8 +179,16 @@ def _read_single_registry(registry_path: Path, root: Path) -> List[Dict[str, Any
 
             return branches
     except Exception as e:
-        logger.warning(f"[detector] Failed to read registry {registry_path}: {e}")
-        return []
+        raise RegistryUnreadable(f"Unreadable registry {registry_path}: {e}") from e
+
+
+def _rows_or_skip(registry_path: Path) -> List[Dict[str, Any]]:
+    """A resident or caller registry's rows; an unreadable one is logged at error and gives none."""
+    try:
+        return _read_single_registry(registry_path, registry_path.parent)
+    except RegistryUnreadable as e:
+        logger.error(f"[detector] {e} — its branches are left out of this walk")
+    return []
 
 
 def _read_registry() -> List[Dict[str, Any]]:
@@ -204,6 +226,11 @@ def _read_registry() -> List[Dict[str, Any]]:
 
     Returns:
         List of branch dictionaries with absolute paths
+
+    Raises:
+        RegistryUnreadable: the core registry exists and cannot be read. An
+            unreadable resident or caller registry costs only its own rows and
+            is logged at error level; the core one leaves nothing to walk.
     """
     from aipass.memory.apps.handlers.monitor import registry_scope
 
@@ -212,7 +239,7 @@ def _read_registry() -> List[Dict[str, Any]]:
     seen_paths = {b.get("path") for b in branches}
     accepted = registry_scope.accepted_resident_paths(_REPO_ROOT)
     for reg_path in registry_scope.resident_registry_paths(_REPO_ROOT):
-        for branch in _read_single_registry(reg_path, reg_path.parent):
+        for branch in _rows_or_skip(reg_path):
             if branch.get("path") not in accepted or branch.get("path") in seen_paths:
                 continue
             branches.append(branch)
@@ -220,7 +247,7 @@ def _read_registry() -> List[Dict[str, Any]]:
 
     fence_root = Path(write_fence.ROOT).resolve()
     for reg_path in _find_caller_registries():
-        for branch in _read_single_registry(reg_path, reg_path.parent):
+        for branch in _rows_or_skip(reg_path):
             if branch.get("path") in seen_paths:
                 continue
             refusal = write_fence.outside_root(Path(branch["path"]).resolve(), fence_root)
@@ -229,6 +256,51 @@ def _read_registry() -> List[Dict[str, Any]]:
                 continue
             branches.append(branch)
             seen_paths.add(branch.get("path"))
+
+    return branches
+
+
+def read_scope() -> List[Dict[str, Any]]:
+    """Every branch a READ-ONLY lane may name: the write scope plus declared externals.
+
+    ``_read_registry()`` above is the WRITE scope -- what rollover, the
+    normalizer and the watcher walk -- and it stops at the repo edge on
+    purpose. The fence that made it stop there (2026-09-18) took the NAME
+    RESOLVER with it: ``lint @vera`` and ``health @vera`` began answering
+    "Unknown branch" for a read that was never in the fence's scope. @vera
+    reported it through @devpulse on 09-19.
+
+    The cure is not a wider write scope. It is this second, read-only answer,
+    reaching the external tier the way the fleet definition already does --
+    through the roots DECLARED in ``AIPASS_ROOTS.json``, which someone wrote
+    down, and never through whatever directory a caller happened to stand in.
+    That distinction is the whole lesson of ``known_registries.json``: one
+    call from another project's cwd put four of its branches into every later
+    rollover. A declaration cannot do that, because it does not accumulate.
+
+    Nothing here writes, and no caller of this function may: a lane that
+    resolves a branch through ``read_scope`` and then writes to it has crossed
+    the fence, and ``write_fence`` refuses it at the write itself.
+
+    Returns:
+        ``_read_registry()`` rows, then declared-external rows in the same
+        shape (``path`` as a string), deduplicated by resolved path.
+    """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+
+    branches = _read_registry()
+    seen_paths = {str(Path(branch["path"]).resolve()) for branch in branches if branch.get("path")}
+
+    # name_from="path": the DIRECTORY is the address. @drone routes by it, the
+    # other fleet lanes key on it, and Demo's registry spells its citizen
+    # MY_AGENT while the branch answers to @my-agent -- a resolver naming it
+    # from the registry refuses the only spelling anyone can type.
+    for item in registry_scope.external_branches(_REPO_ROOT, name_from="path"):
+        key = str(Path(item["path"]).resolve())
+        if key in seen_paths:
+            continue
+        branches.append({**item, "path": str(item["path"])})
+        seen_paths.add(key)
 
     return branches
 
@@ -512,7 +584,11 @@ def check_all_branches() -> Dict[str, Any]:
     undrainable: List[UndrainableFile] = []
 
     # Read registry
-    branches = _read_registry()
+    try:
+        branches = _read_registry()
+    except RegistryUnreadable as e:
+        logger.error(f"[detector] {e}")
+        return {"success": False, "error": str(e), "triggers": [], "count": 0, "undrainable": []}
     if not branches:
         return {"success": True, "triggers": [], "count": 0, "undrainable": [], "message": "No branches in registry"}
 
@@ -683,7 +759,11 @@ def get_rollover_stats() -> Dict[str, Any]:
         "branches": {},
     }
 
-    branches = _read_registry()
+    try:
+        branches = _read_registry()
+    except RegistryUnreadable as e:
+        logger.error(f"[detector] {e}")
+        return {"success": False, "error": str(e)}
     stats["total_branches"] = len(branches)
 
     for branch in branches:

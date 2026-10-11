@@ -1,18 +1,20 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/conftest.py
-# Date: 2025-11-08
-# Version: 1.3.0
+# Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
+# Version: 1.7.2
+# Created: 2026-03-05
+# Modified: 2026-10-10
 # Category: ai_mail/tests
-#
 # CHANGELOG (Max 5 entries):
-#   - v1.3.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam
-#     alone — mock_infrastructure lands each test in its own sandbox and
-#     mock_json_handler retires with the handler it mocked (DPLAN-0325)
-#   - v1.2.0 (2026-08-11): Autouse feed isolation — tests never touch the real notifications.jsonl
-#   - v1.1.0 (2026-03-27): Added mock_logger, mock_json_handler fixtures
-#   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
-#
+#   - v1.7.2 (2026-10-10): temp_test_dir, sample_test_data removed - spawn template leftovers no live test requests
+#   - v1.7.1 (2026-10-08): monitor_wake_stubbed patches the public doors wake_sender, log_wake_result
+#   - v1.7.0 (2026-10-08): wake_log_operation_suppressed, repo_root - test_wake.py's own
+#     fixtures, shared by its split siblings; monitor_json_silenced, monitor_logger_silenced,
+#     monitor_wake_stubbed, main_argv - the same for test_dispatch_monitor.py
+#   - v1.6.0 (2026-10-08): daemon_json_silenced, daemon_paths_in_tmp, email_modules_pinned,
+#     email_json_silenced - the autouse pairs of test_daemon.py and test_email_module.py,
+#     shared by their split siblings through pytestmark
+#   - v1.5.1 (2026-09-29): sandboxed_central docstring names the live caller, not a retired name
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
@@ -28,12 +30,23 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 import pytest
-import shutil
+import sys
 from pathlib import Path
 from typing import Generator
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import aipass.ai_mail.apps.handlers.central_writer as central_writer
+import aipass.ai_mail.apps.handlers.dispatch.daemon as daemon_mod
+import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as monitor_mod
+import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
+import aipass.ai_mail.apps.handlers.email.contacts as contacts_mod
+import aipass.ai_mail.apps.handlers.notify as notify_mod
+import aipass.ai_mail.apps.modules.email_send as email_send_mod
+import aipass.trigger.apps.modules.core as trigger_core
+from aipass.ai_mail.apps.handlers.dispatch import register, report
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.modules import email as email_mod
+from aipass.cli.apps.modules import display
 
 # Never collect out of an archive. apps/handlers/.archive/ and tests/.archive/
 # hold the pre-DPLAN-0325 handler and its internals tests verbatim: they import
@@ -41,6 +54,203 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 # a dot-prefixed part that was a SyntaxError. pytest's own norecursedirs already
 # skips dot-directories — this states the rule rather than relying on it.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
+
+# ---- The dispatch daemon's files (test_daemon*.py) ----------------------------
+# Requested by each daemon file's pytestmark, never autouse: they were the
+# autouse pair of test_daemon.py before its split (ai_mail, 2026-10-08).
+
+
+@pytest.fixture
+def daemon_json_silenced():
+    """Prevent log_operation from writing real JSON files during tests."""
+    with patch("aipass.ai_mail.apps.handlers.dispatch.daemon.json_handler") as mock_jh:
+        mock_jh.log_operation.return_value = True
+        yield mock_jh
+
+
+@pytest.fixture
+def daemon_paths_in_tmp(tmp_path, monkeypatch):
+    """Redirect all module-level file paths to tmp_path locations."""
+    monkeypatch.setattr(daemon_mod, "CONFIG_FILE", tmp_path / "safety_config.json")
+    monkeypatch.setattr(daemon_mod, "DAEMON_STATE_FILE", tmp_path / "daemon_state.json")
+    monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", tmp_path / "AIPASS_REGISTRY.json")
+
+
+# ---- The email modules' files (test_email_module*.py) ---------------------------
+# Requested by each file's pytestmark, never autouse: they were the autouse pair
+# of test_email_module.py before its split (ai_mail, 2026-10-08).
+
+
+@pytest.fixture
+def email_modules_pinned():
+    """Fail where a string-path patch would resolve to another module object.
+
+    The product imports some names at call time, through sys.modules; a patch
+    written against the objects imported at the top of this file must land on
+    those same objects. This compares and fails, rather than writing the
+    modules back into sys.modules: a quiet re-pin hid whichever test had
+    evicted them (compass 493, ai_mail leg 5).
+    """
+    assert sys.modules["aipass.ai_mail.apps.modules.email"] is email_mod
+    assert sys.modules["aipass.ai_mail.apps.modules.email_send"] is email_send_mod
+
+
+@pytest.fixture
+def email_json_silenced():
+    """Prevent log_operation from writing real JSON files during tests."""
+    with (
+        patch.object(email_mod, "json_handler") as mock_email_jh,
+        patch.object(email_send_mod, "json_handler") as mock_send_jh,
+    ):
+        mock_email_jh.log_operation.return_value = True
+        mock_send_jh.log_operation.return_value = True
+        yield
+
+
+# ---- The wake's files (test_wake*.py) -------------------------------------------
+# wake_log_operation_suppressed is requested by each wake file's pytestmark, never
+# autouse; repo_root is requested by name. Both were test_wake.py's own fixtures
+# before its split (ai_mail, 2026-10-08). A file that defines its own repo_root
+# keeps it: a module's fixture overrides this one.
+
+
+@pytest.fixture
+def wake_log_operation_suppressed(monkeypatch):
+    """Prevent json_handler.log_operation from touching real files."""
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.dispatch.wake.json_handler.log_operation",
+        lambda *args, **kwargs: None,
+    )
+
+
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    """Redirect _REPO_ROOT and BRANCH_REGISTRY to tmp_path."""
+    registry_file = tmp_path / "AIPASS_REGISTRY.json"
+    monkeypatch.setattr(wake_mod, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", registry_file)
+    return tmp_path
+
+
+# ---- The dispatch monitor's files (test_dispatch_monitor*.py) -------------------
+# The three silencers are requested by each monitor file's pytestmark, never
+# autouse; main_argv is requested by name. All four were test_dispatch_monitor.py's
+# own fixtures before its split (ai_mail, 2026-10-08); the module is named
+# monitor_mod here where the file named it mod.
+
+
+@pytest.fixture
+def monitor_json_silenced(monkeypatch):
+    """Prevent json_handler.log_operation from touching real files."""
+    monkeypatch.setattr(
+        monitor_mod,
+        "json_handler",
+        MagicMock(),
+    )
+
+
+@pytest.fixture
+def monitor_logger_silenced(monkeypatch):
+    """Suppress logger output during tests."""
+    monkeypatch.setattr(monitor_mod, "logger", MagicMock())
+
+
+@pytest.fixture
+def monitor_wake_stubbed(monkeypatch):
+    """Prevent wake_sender from importing/calling real wake_branch in unrelated tests."""
+    monkeypatch.setattr(monitor_mod, "wake_sender", MagicMock(return_value="skipped_sender"))
+    monkeypatch.setattr(monitor_mod, "log_wake_result", MagicMock())
+
+
+@pytest.fixture
+def main_argv(tmp_path):
+    """Build sys.argv and supporting files for main() tests."""
+    branch_dir = tmp_path / "branch"
+    ai_mail_dir = branch_dir / ".ai_mail.local"
+    ai_mail_dir.mkdir(parents=True)
+    logs_dir = branch_dir / "logs"
+    logs_dir.mkdir(parents=True)
+
+    lock_file = ai_mail_dir / ".dispatch.lock"
+    lock_file.write_text("{}", encoding="utf-8")
+
+    stderr_log = tmp_path / "stderr.log"
+    stderr_log.write_text("", encoding="utf-8")
+
+    argv = [
+        "dispatch_monitor.py",
+        "@test_branch",
+        str(lock_file),
+        "@sender",
+        str(stderr_log),
+        "--",
+        "claude",
+        "-c",
+        "--model",
+        "opus",
+    ]
+    return argv, lock_file, stderr_log
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
+
+
+@pytest.fixture(autouse=True)
+def sandboxed_central(tmp_path, monkeypatch) -> None:
+    """No test reaches the live central file: update_central scans and writes under tmp_path.
+
+    test_message_correlation's mark_as_opened ran the real update_central through
+    inbox_cleanup's central-stats update and rewrote .ai_central/AI_MAIL.central.json from the live
+    inboxes on every suite run (found by mtime, 2026-09-27). Redirecting the
+    module's four paths, rather than stubbing the function, keeps update_central
+    runnable for any test that means to exercise it.
+    """
+    central = tmp_path / "central_sandbox"
+    monkeypatch.setattr(central_writer, "_REPO_ROOT", central)
+    monkeypatch.setattr(central_writer, "BRANCH_REGISTRY", central / "AIPASS_REGISTRY.json")
+    monkeypatch.setattr(central_writer, "AI_CENTRAL_DIR", central / ".ai_central")
+    monkeypatch.setattr(central_writer, "CENTRAL_FILE", central / ".ai_central" / "AI_MAIL.central.json")
+
+
+class _BusRecorder:
+    """Stands where trigger stands: records each fire and delivers it nowhere."""
+
+    def __init__(self) -> None:
+        self.fires: list[tuple[str, dict]] = []
+
+    def fire(self, event: str, **data) -> None:
+        self.fires.append((event, data))
+
+    def events(self) -> list[str]:
+        return [event for event, _ in self.fires]
+
+
+@pytest.fixture(autouse=True)
+def recorded_bus(monkeypatch) -> _BusRecorder:
+    """No test fires on the real trigger bus; a test asserts what fired here.
+
+    The fleet bus probe counted 71 fires from this suite on the real bus
+    (2026-09-27): report.py, send.py and dispatch.py import trigger at call time
+    from its home, email_send.py binds it at import, so both homes are replaced.
+    """
+    recorder = _BusRecorder()
+    monkeypatch.setattr(trigger_core, "trigger", recorder)
+    monkeypatch.setattr(trigger_core.Trigger, "fire", staticmethod(recorder.fire))
+    monkeypatch.setattr(email_send_mod, "trigger", recorder)
+    return recorder
 
 
 @pytest.fixture(autouse=True)
@@ -79,8 +289,6 @@ def _isolate_notification_feed(tmp_path, monkeypatch):
     to the real .aipass/notifications.jsonl that BAUD renders — the toast era
     hid that leak because a toast vanishes; a feed line does not.
     """
-    import aipass.ai_mail.apps.handlers.notify as notify_mod
-
     monkeypatch.setattr(notify_mod, "FEED_PATH", tmp_path / "feed" / "notifications.jsonl")
 
 
@@ -146,7 +354,7 @@ def _strip_ambient_identity_source(monkeypatch):
 def _isolate_wake_depth(monkeypatch):
     """Start EVERY test with AIPASS_WAKE_DEPTH absent, and undo whatever it becomes.
 
-    _wake_sender() bumps the var with a raw os.environ write, which monkeypatch
+    wake_sender() bumps the var with a raw os.environ write, which monkeypatch
     never sees. The old per-test delenv(raising=False) recorded no undo when the
     var was absent, so each wake-back test left depth=1 behind for the next test
     on the worker (measured: 15 TestWakeSender tests, before None, after "1").
@@ -177,8 +385,6 @@ def _isolate_dispatch_register(tmp_path, monkeypatch):
     file a handler writes to is production state, and the pattern is now: guard
     it in conftest the day the writer lands, not the day someone notices.
     """
-    from aipass.ai_mail.apps.handlers.dispatch import register, report
-
     # In its OWN subdirectory, never tmp_path itself: the marker file this needs
     # is exactly what the find_caller_registry tests build tmp_path to control,
     # and dropping a second AIPASS_REGISTRY.json beside theirs broke 15 of them.
@@ -200,31 +406,4 @@ def _isolate_contacts_file(tmp_path, monkeypatch):
     "verified" identity by branch_detection's contact lookup, serving a fixture
     mailbox in place of a real one (found live, 2026-08-16, @devpulse).
     """
-    import aipass.ai_mail.apps.handlers.email.contacts as contacts_mod
-
     monkeypatch.setattr(contacts_mod, "CONTACTS_FILE", tmp_path / "contacts" / "contacts.json")
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
-
-
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data
-
-    Customize this fixture for your module's needs
-    """
-    return {"test_key": "test_value", "sample_data": "example"}
-
-
-@pytest.fixture
-def mock_logger(monkeypatch):
-    """Mock the prax logger to prevent real log I/O during tests."""
-    mock_log = MagicMock()
-    return mock_log

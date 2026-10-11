@@ -3,17 +3,16 @@
 # Description: Tests for creator module orchestration layer
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-10-04
 # =============================================
 
-"""
-Tests for modules/creator.py — thin orchestration layer.
+"""Tests for apps/modules/creator.py — routing, the create_skill wrapper and introspection."""
 
-Covers: handle_command (routing, introspection, --help), create_skill
-(delegation to handler, Rich output, trigger firing, json logging),
-print_introspection.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/modules/creator.py parses and carries no unused import
+# seedgo: no-test-needed(constant) — print_introspection's prose beyond the module and handler names pinned below
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from aipass.skills.apps.modules.creator import create_skill, handle_command, print_introspection
@@ -39,10 +38,20 @@ class TestHandleCommand:
         output = capsys.readouterr().out
         assert "creator Module" in output
 
-    def test_create_with_valid_name(self, tmp_path, monkeypatch):
+    def test_create_with_valid_name(self, tmp_path, monkeypatch, capsys, bus_recorder):
+        # Mutant killed: the create branch returns True without calling create_skill.
+        # Mutants killed 2026-10-04: the fire() call removed; its event name changed;
+        # its path argument changed with the call kept.
         monkeypatch.chdir(tmp_path)
         result = handle_command("create", ["test-skill"])
         assert result is True
+        skill_dir = tmp_path / ".aipass" / "skills" / "test-skill"
+        assert (skill_dir / "SKILL.md").is_file()
+        assert "Created skill 'test-skill'" in capsys.readouterr().out
+        assert [(event, data["name"], data["template_type"]) for event, data in bus_recorder] == [
+            ("skill_created", "test-skill", "markdown_only")
+        ]
+        assert Path(bus_recorder[0][1]["path"]).resolve() == skill_dir.resolve()
 
     def test_create_with_handler_flag(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

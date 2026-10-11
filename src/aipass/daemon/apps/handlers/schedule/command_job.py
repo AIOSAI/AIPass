@@ -3,7 +3,7 @@
 # Description: Command jobs - a scheduled drone command run as a subprocess, no wake
 # Version: 1.0.0
 # Created: 2026-09-11
-# Modified: 2026-09-11
+# Modified: 2026-09-27
 # =============================================
 
 """Command jobs (DPLAN-0338): a schedule job that runs a drone command instead of waking an agent.
@@ -132,7 +132,11 @@ def notify_email(job: dict) -> str:
 
 
 def command_job_problem(job: dict) -> str:
-    """'' when a command job is well-formed, else the reason discovery must refuse it."""
+    """'' when a command job is well-formed, else the reason discovery must refuse it.
+
+    command_argv's ValueError is the answer here, not a failure: its message is
+    never empty, so it always reads as a refusal and names why.
+    """
     try:
         command_argv(job.get("command"))
     except ValueError as e:

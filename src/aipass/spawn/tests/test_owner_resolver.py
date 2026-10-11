@@ -1,16 +1,30 @@
 # =================== META ====================
 # Name: test_owner_resolver.py
 # Description: Tests for owner resolver and registry authority
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for owner resolver: get_owner, is_owner, ensure_project_has_owner, backfill."""
+"""Tests for apps/handlers/registry.py's owner-resolution and backfill functions."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — docstrings on get_owner, is_owner, ensure_project_has_owner and is_protected
+# seedgo: no-test-needed(stdlib) — json.dumps/json.loads round-tripping the fixture registries and passports
 
 import json
-import pytest
 from unittest.mock import patch
+
+import pytest
+
+from aipass.spawn.apps.handlers.registry import (
+    add_to_registry,
+    backfill_owner_and_registry_id,
+    ensure_project_has_owner,
+    get_owner,
+    is_owner,
+    is_protected,
+)
 
 
 @pytest.fixture
@@ -103,7 +117,6 @@ class TestGetOwner:
     """Tests for get_owner()."""
 
     def test_returns_owner_entry(self, registry_with_owner, tmp_path):
-        from aipass.spawn.apps.handlers.registry import get_owner
 
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=registry_with_owner):
             result = get_owner(start_path=tmp_path)
@@ -113,7 +126,6 @@ class TestGetOwner:
         assert result["owner"] is True
 
     def test_returns_none_when_no_owner(self, registry_no_owner, tmp_path):
-        from aipass.spawn.apps.handlers.registry import get_owner
 
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=registry_no_owner):
             result = get_owner(start_path=tmp_path)
@@ -121,7 +133,6 @@ class TestGetOwner:
         assert result is None
 
     def test_returns_none_when_registry_missing(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import get_owner
 
         missing = tmp_path / "MISSING_REGISTRY.json"
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=missing):
@@ -130,7 +141,6 @@ class TestGetOwner:
         assert result is None
 
     def test_default_start_path_uses_cwd(self, registry_with_owner):
-        from aipass.spawn.apps.handlers.registry import get_owner
 
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=registry_with_owner):
             result = get_owner()
@@ -143,19 +153,16 @@ class TestIsOwner:
     """Tests for is_owner()."""
 
     def test_true_for_owner_email_with_at(self, registry_with_owner, tmp_path):
-        from aipass.spawn.apps.handlers.registry import is_owner
 
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=registry_with_owner):
             assert is_owner("@devpulse", start_path=tmp_path) is True
 
     def test_true_for_owner_email_without_at(self, registry_with_owner, tmp_path):
-        from aipass.spawn.apps.handlers.registry import is_owner
 
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=registry_with_owner):
             assert is_owner("devpulse", start_path=tmp_path) is True
 
     def test_case_insensitive(self, registry_with_owner, tmp_path):
-        from aipass.spawn.apps.handlers.registry import is_owner
 
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=registry_with_owner):
             assert is_owner("DEVPULSE", start_path=tmp_path) is True
@@ -164,25 +171,21 @@ class TestIsOwner:
             assert is_owner("ALPHA", start_path=tmp_path) is False
 
     def test_false_for_non_owner(self, registry_with_owner, tmp_path):
-        from aipass.spawn.apps.handlers.registry import is_owner
 
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=registry_with_owner):
             assert is_owner("@alpha", start_path=tmp_path) is False
 
     def test_false_for_empty_email(self, registry_with_owner, tmp_path):
-        from aipass.spawn.apps.handlers.registry import is_owner
 
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=registry_with_owner):
             assert is_owner("", start_path=tmp_path) is False
 
     def test_false_for_none_email(self, registry_with_owner, tmp_path):
-        from aipass.spawn.apps.handlers.registry import is_owner
 
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=registry_with_owner):
             assert is_owner(None, start_path=tmp_path) is False
 
     def test_false_when_no_owner_in_registry(self, registry_no_owner, tmp_path):
-        from aipass.spawn.apps.handlers.registry import is_owner
 
         with patch("aipass.spawn.apps.handlers.registry.find_registry", return_value=registry_no_owner):
             assert is_owner("@devpulse", start_path=tmp_path) is False
@@ -192,7 +195,6 @@ class TestEnsureProjectHasOwner:
     """Tests for ensure_project_has_owner() — registry-entry based."""
 
     def test_sets_owner_on_manager_branch(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import ensure_project_has_owner
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(
@@ -263,13 +265,11 @@ class TestEnsureProjectHasOwner:
         assert "owner" not in alpha_entry, f"a non-manager entry was stamped: {alpha_entry}"
 
     def test_noop_when_owner_already_set(self, registry_with_owner):
-        from aipass.spawn.apps.handlers.registry import ensure_project_has_owner
 
         result = ensure_project_has_owner(registry_with_owner)
         assert result is False
 
     def test_returns_false_for_empty_registry(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import ensure_project_has_owner
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(
@@ -290,7 +290,6 @@ class TestBackfillOwnerAndRegistryId:
     """Tests for backfill_owner_and_registry_id() — mints unique per-citizen UUIDs."""
 
     def test_mints_unique_uuids_for_entries_missing_registry_id(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import backfill_owner_and_registry_id
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(
@@ -336,7 +335,6 @@ class TestBackfillOwnerAndRegistryId:
         assert alpha_entry["registry_id"] != beta_entry["registry_id"]
 
     def test_remints_duplicate_registry_ids(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import backfill_owner_and_registry_id
 
         shared_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         reg = tmp_path / "TEST_REGISTRY.json"
@@ -385,7 +383,6 @@ class TestBackfillOwnerAndRegistryId:
         assert [len(i) for i in ids] == [36, 36], ids
 
     def test_noop_when_already_unique(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import backfill_owner_and_registry_id
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(
@@ -415,7 +412,6 @@ class TestBackfillOwnerAndRegistryId:
         assert result is False
 
     def test_seats_owner_when_missing(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import backfill_owner_and_registry_id
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(
@@ -451,7 +447,6 @@ class TestAddToRegistryMintsPerCitizenUid:
     """Tests for add_to_registry per-citizen UUID minting."""
 
     def test_always_mints_unique_registry_id(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import add_to_registry
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(
@@ -472,7 +467,6 @@ class TestAddToRegistryMintsPerCitizenUid:
         assert len(entry["registry_id"]) == 36  # UUID4 format
 
     def test_two_entries_get_different_uuids(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import add_to_registry
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(
@@ -497,7 +491,6 @@ class TestEnsureProjectHasOwnerFirstAgentFallback:
     """Tests for ensure_project_has_owner first-agent fallback."""
 
     def test_falls_back_to_first_agent_when_no_manager(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import ensure_project_has_owner
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(
@@ -577,7 +570,6 @@ class TestIsProtectedLayers:
 
     def test_floor_branches_are_protected(self):
         """Layer 1: the hardcoded floor refuses without touching the registry."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
         for name in ("spawn", "devpulse", "drone"):
             protected, reason = is_protected(name)
@@ -586,7 +578,6 @@ class TestIsProtectedLayers:
 
     def test_registry_owner_flag_protects(self, tmp_path):
         """Layer 2: a non-floor branch with owner:true is refused as registry owner."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
         reg = self._registry(tmp_path, "baud", owner=True)
         protected, reason = is_protected("baud", branch_dir=tmp_path / "nonexistent", registry_path=reg)
@@ -595,7 +586,6 @@ class TestIsProtectedLayers:
 
     def test_active_passport_protects(self, tmp_path):
         """Layer 3: no owner flag, but a registered passport still refuses."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
         reg = self._registry(tmp_path, "baud", owner=False)
         branch = tmp_path / "baud"
@@ -609,7 +599,6 @@ class TestIsProtectedLayers:
 
     def test_unregistered_branch_is_not_protected(self, tmp_path):
         """All three layers miss: an unregistered passport is deletable."""
-        from aipass.spawn.apps.handlers.registry import is_protected
 
         reg = self._registry(tmp_path, "baud", owner=False)
         branch = tmp_path / "baud"

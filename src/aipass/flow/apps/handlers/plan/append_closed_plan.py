@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: append_closed_plan.py
 # Description: Closed Plans Local Registry Handler
-# Version: 0.1.0
+# Version: 0.4.0
 # Created: 2026-03-03
-# Modified: 2026-09-18
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -13,7 +13,6 @@ Appends a closed plan entry to the branch's CLOSED_PLANS.local.json file.
 Creates the file if it doesn't exist.
 """
 
-# ruff: noqa: E402
 import json
 import os
 import re
@@ -23,17 +22,39 @@ from pathlib import Path
 # INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
-_PKG_ROOT = module_file(__file__).parents[4]
-
 # External: Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 MODULE_NAME = "append_closed_plan"
 CLOSED_PLANS_FILE = "CLOSED_PLANS.local.json"
 
 _LOCK_RETRIES = 10
 _LOCK_BACKOFF_BASE = 0.05
+
+
+def _sleep(seconds: float) -> None:
+    """time.sleep(seconds), the lock backoff's wait.
+
+    The reason is the tests alone: they patch this name so the backoff neither
+    waits nor replaces time.sleep for the whole process (flow's decision, leg 4).
+    """
+    time.sleep(seconds)
+
+
+def _create_exclusive(lock_path: Path) -> int:
+    """os.open(lock_path, O_CREAT | O_EXCL | O_WRONLY): the lock's one create.
+
+    It stands alone because this create is where platforms answer differently:
+    Windows answers a lock another writer is still removing (delete pending)
+    with PermissionError, which a retry wins, and Linux cannot produce that.
+    The tests (test_close_ops, the CLOSED_PLANS append tests) hand the denial
+    in through this name rather than replacing os.open for the whole process
+    (flow's decision, leg 11).
+    """
+    return os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
 
 def _acquire_append_lock(lock_path: Path) -> bool:
@@ -53,7 +74,7 @@ def _acquire_append_lock(lock_path: Path) -> bool:
     waited = 0.0
     for attempt in range(_LOCK_RETRIES):
         try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            fd = _create_exclusive(lock_path)
             os.write(fd, str(os.getpid()).encode())
             os.close(fd)
             return True
@@ -66,7 +87,7 @@ def _acquire_append_lock(lock_path: Path) -> bool:
                 "[%s] Lock denied on %s (delete-pending?), retry %d: %s", MODULE_NAME, lock_path, attempt + 1, exc
             )
         delay = _LOCK_BACKOFF_BASE * (2**attempt)
-        time.sleep(delay)
+        _sleep(delay)
         waited += delay
     if denial is not None:
         raise PermissionError(
@@ -93,7 +114,15 @@ def append_to_closed_plans(plan_key: str, plan_info: dict, plan_location: Path) 
         plan_location: Path to the directory where the plan resides (branch directory)
 
     Returns:
-        True on success, False on failure
+        True on success (or the entry was already there), False when the
+        lock stayed held past its budget.
+
+    Raises:
+        Exception: Whatever broke the read, the write or the lock (a denial
+            past budget is a PermissionError). It used to be logged and
+            answered False, so the caller could not tell a held lock from a
+            failure and never saw the reason (flow's decision, leg 5). The
+            one caller, close_plan_impl, catches it and reports it.
     """
     try:
         # Extract prefix from plan_info's file_path (e.g., FPLAN, DPLAN)
@@ -154,4 +183,4 @@ def append_to_closed_plans(plan_key: str, plan_info: dict, plan_location: Path) 
 
     except Exception as e:
         logger.warning(f"[{MODULE_NAME}] Failed to append closed plan: {e}")
-        return False
+        raise

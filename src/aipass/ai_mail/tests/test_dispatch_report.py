@@ -1,18 +1,31 @@
-"""The completion report — what the finishing agent can honestly say about its run.
+# =================== AIPass ====================
+# Name: test_dispatch_report.py
+# Description: Completion report tests — build_report, write_report, fire_completed, and the sent-mail attribution scan
+# Version: 1.0.1
+# Created: 2026-08-22
+# Modified: 2026-10-03
+# =============================================
 
-FPLAN-0452 P1.
+"""Tests for apps/handlers/dispatch/report.py."""
 
-Two of these tests exist because of a specific argument, and they are the ones
-to keep if the file ever shrinks:
+# The completion report — what the finishing agent can honestly say about its run.
+#
+# FPLAN-0452 P1.
+#
+# Two of these tests exist because of a specific argument, and they are the ones
+# to keep if the file ever shrinks:
+#
+# * ``test_a_mail_written_by_someone_else_during_the_run_is_not_claimed`` is the
+#   difference between a RECORD and an INFERENCE. An mtime scan of ``sent/``
+#   attributes by TIME; the stamp attributes by AUTHORSHIP.
+# * ``test_bg_orphaned_ships_beside_an_empty_email_list`` pins the honesty
+#   requirement. A run whose background tasks were killed reports zero emails for
+#   an agent that believed it had replied — without the flag beside it, a reader
+#   concludes the agent ignored its mail.
 
-* ``test_a_mail_written_by_someone_else_during_the_run_is_not_claimed`` is the
-  difference between a RECORD and an INFERENCE. An mtime scan of ``sent/``
-  attributes by TIME; the stamp attributes by AUTHORSHIP.
-* ``test_bg_orphaned_ships_beside_an_empty_email_list`` pins the honesty
-  requirement. A run whose background tasks were killed reports zero emails for
-  an agent that believed it had replied — without the flag beside it, a reader
-  concludes the agent ignored its mail.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — REPORTS_DIRNAME, REPORTS_MAX_FILES, REPORTS_KEEP_FILES, RESULT_EXCERPT_CHARS values
+# seedgo: no-test-needed(stdlib) — build_report's reported_at datetime.now() wall-clock stamp is not asserted
 
 import json
 import time
@@ -132,6 +145,47 @@ class TestTheHonestyRequirements:
         assert built["emails_sent"] == []
         assert built["bg_orphaned"] is True, "an empty email list without this flag reads as a lazy agent"
         assert "max_turns_hit" in built
+
+    def test_memories_that_cannot_be_listed_report_unknown_not_untouched(self, branch, monkeypatch):
+        """A listing that failed is not "no memory written": the report says None.
+
+        Before leg 10 memories_edited answered False on a listing error, the
+        same answer as an agent that never touched its memories. A raise out of
+        build_report would lose the report at dispatch_monitor's terminal catch,
+        so the unknown is recorded in the report instead. Its proof is the
+        mutant that puts False back (ai_mail, leg 10).
+        """
+
+        def _unlistable(branch_path, since):
+            raise OSError("listing failed")
+
+        monkeypatch.setattr(report, "memories_edited", _unlistable)
+
+        built = report.build_report(
+            "abc", "@devpulse", "@ai_mail", branch, time.time(), 30, 0, "completed", [], False, False, "woken"
+        )
+
+        assert built["memories_edited"] is None
+
+    def test_sent_mail_that_cannot_be_listed_reports_unknown_not_none_sent(self, branch, monkeypatch):
+        """A sent folder that failed to list is not "sent nothing": both mail fields say None.
+
+        An empty list here reads as an agent that ignored its mail, which is the
+        misreading this report exists to prevent. Its proof is the mutant that
+        puts the empty list back (ai_mail, leg 10).
+        """
+
+        def _unlistable(branch_path, dispatch_id):
+            raise OSError("listing failed")
+
+        monkeypatch.setattr(report, "emails_sent", _unlistable)
+
+        built = report.build_report(
+            "abc", "@devpulse", "@ai_mail", branch, time.time(), 30, 0, "completed", [], False, False, "woken"
+        )
+
+        assert built["emails_sent"] is None
+        assert built["agents_contacted"] is None
 
     def test_every_rule_four_fact_is_present(self, branch):
         built = report.build_report(
@@ -283,10 +337,14 @@ class TestTheStamp:
 class TestThePush:
     """In-process only, and it must never take the run down with it."""
 
-    def test_a_trigger_failure_is_reported_not_raised(self, monkeypatch):
+    def test_a_trigger_failure_is_reported_not_raised(self, monkeypatch, tmp_path, recorded_bus):
         """The durable write already happened; a failed push must not undo it."""
-        import sys
 
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", None)
+        def _raise(*args, **kwargs):
+            raise RuntimeError("trigger down")
 
-        assert report.fire_completed("abc", "@d", "@a", "/x.json") is False
+        monkeypatch.setattr(recorded_bus, "fire", _raise)
+
+        report_path = str(tmp_path / "x.json")
+
+        assert report.fire_completed("abc", "@d", "@a", report_path) is False

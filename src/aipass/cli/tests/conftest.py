@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for CLI branch tests
-# Version: 4.0.0
-# Created: 2026-03-07
-# Modified: 2026-09-03
+# Version: 4.2.0
+# Created: 2026-03-05
+# Modified: 2026-10-04
 # =============================================
 
 """Shared pytest fixtures for CLI tests."""
@@ -13,7 +13,7 @@ import re
 import tempfile
 from io import StringIO
 from pathlib import Path
-from typing import List, Tuple
+from typing import Generator, List, Tuple
 
 # Redirect prax logs to temp directory during tests
 # Must be set before any prax imports to catch logger initialization
@@ -23,7 +23,10 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import pytest
 from rich.console import Console
 
+from aipass.cli.apps import cli as branch_entry
 from aipass.cli.apps.handlers.json import json_handler
+from aipass.cli.apps.modules import display
+from aipass.trigger.apps.modules import core as trigger_core
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
 # handler's tests, the pre-service durability and provisioning suites) that must
@@ -76,23 +79,46 @@ def make_capture_console(**kwargs):
     return console, get_output
 
 
-@pytest.fixture
-def sample_data():
-    """Reusable sample test data for CLI module tests."""
-    return {
-        "module_name": "test_module",
-        "version": "1.0.0",
-        "config": {"max_log_entries": 100},
-        "created": "2026-01-01",
-        "last_updated": "2026-01-01",
-    }
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+class TriggerRecorder:
+    """Stands where display keeps its trigger and records what header() fires."""
+
+    def __init__(self) -> None:
+        self.fired: List[Tuple[str, dict]] = []
+
+    def fire(self, event: str, **data) -> None:
+        self.fired.append((event, data))
 
 
 @pytest.fixture(autouse=True)
-def _ensure_test_isolation():
-    """Auto-applied fixture ensuring clean state between tests."""
+def trigger_recorder(monkeypatch) -> TriggerRecorder:
+    """header() fires cli_header_displayed on the live trigger bus, which has a live
+    handler. display holds the trigger it loaded in _TRIGGER behind _TRIGGER_LOADED,
+    so a replacement at trigger's home comes too late once one header has run; the
+    recorder goes where display looks. The name at trigger's home and Trigger.fire on
+    the class are replaced as well, for any caller that loads the trigger itself: a
+    second copy of display.py, loaded by file path in discover_modules() until leg 3,
+    was one. The decision of the cli branch, fleet green leg 3."""
+    recorder = TriggerRecorder()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    monkeypatch.setattr(trigger_core, "trigger", recorder)
+    monkeypatch.setattr(trigger_core.Trigger, "fire", lambda _self, event, **data: recorder.fire(event, **data))
+    return recorder
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
     yield
-    # teardown: no shared state to clean up currently
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -139,7 +165,5 @@ def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
         def error(self, *args, **kwargs):
             captured.append(("error", args))
 
-    from aipass.cli.apps import cli as cli_entry
-
-    monkeypatch.setattr(cli_entry, "logger", _CapturingLogger())
+    monkeypatch.setattr(branch_entry, "logger", _CapturingLogger())
     return captured

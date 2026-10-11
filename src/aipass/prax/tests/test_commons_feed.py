@@ -1,21 +1,25 @@
 # =================== AIPass ====================
 # Name: test_commons_feed.py
 # Description: Tests for the commons live feed handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-21
-# Modified: 2026-07-21
+# Modified: 2026-10-03
 # =============================================
 
-"""Tests for apps/handlers/monitoring/commons_feed.py (DPLAN-0257)
+"""Tests for apps/handlers/monitoring/commons_feed.py."""
 
-Covers:
-- connect_readonly: mode=ro connection actually refuses writes
-- initial_cursors / fetch_new_events: only-new-row cursor semantics
-- fetch_backfill: last-N-events context on start, bounded by cursor
-- display formatting: format_event, event_room, _join_body
-- FeedState: record/visible room filtering
-- _get_commons_db_path: env override
-"""
+# Tests for apps/handlers/monitoring/commons_feed.py (DPLAN-0257)
+#
+# Covers:
+# - connect_readonly: mode=ro connection actually refuses writes
+# - initial_cursors / fetch_new_events: only-new-row cursor semantics
+# - fetch_backfill: last-N-events context on start, bounded by cursor
+# - display formatting: format_event, event_room, _join_body
+# - FeedState: record/visible room filtering
+# - _get_commons_db_path: env override
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — routing to run_commons_feed, covered by tests/test_monitor_module.py
 
 import importlib
 import sqlite3
@@ -334,9 +338,11 @@ class TestFeedState:
         assert state.events_count == 2
 
     def test_visible_true_when_no_filter(self):
-        """With no active room filter, every event is visible."""
+        """With no active room filter, every event is visible: the room the filter
+        test hides ("general") included (prax, leg 7)."""
         state = feed.FeedState()
         assert state.visible({"room_name": "dev"}) is True
+        assert state.visible({"room_name": "general"}) is True
 
     def test_visible_respects_room_filter(self):
         """With an active room filter, only matching-room events are visible."""

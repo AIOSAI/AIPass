@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair.py
 # Description: Project structure repair — thin CLI layer for move, cleanup, scan
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-15
-# Modified: 2026-05-15
+# Modified: 2026-09-27
 # =============================================
 
 """Repair orchestrator for project structure fixes.
@@ -211,6 +211,10 @@ def _print_move_result(result, dry_run):
         console.print(f"  To:   {result.get('new_path', '?')}")
         if result.get("archive_path"):
             console.print(f"  Archive: {result['archive_path']}")
+        if result.get("passport_error"):
+            warning(f"Passport not updated: {result['passport_error']}")
+        if result.get("chroma_error"):
+            warning(f".chroma not relocated: {result['chroma_error']}")
         if dry_run and result.get("actions"):
             console.print()
             console.print("  [bold cyan]Would:[/bold cyan]")

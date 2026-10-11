@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mock_drift_content.py
 # Description: Mock Drift Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -55,6 +55,22 @@ def get_mock_drift_standards() -> str:
         "  which is exactly the property whose absence this rule is about.",
         "  A target that resolves to no file is [bold]not[/bold] flagged: the",
         "  rule reports what it can resolve rather than guessing from a name.",
+        "",
+        "[bold cyan]SECOND SPECIES — CLASS STAND-IN:[/bold cyan]",
+        '  [red]monkeypatch.setattr(mod, "Path", lambda *a: ...)[/red] where',
+        "  [dim]mod[/dim]'s own source uses [dim]Path[/dim] as a class: an attribute",
+        "  read off it ([dim]Path.cwd()[/dim]), an isinstance/issubclass second",
+        "  argument, or a base in a class statement. The stand-in has no such",
+        "  surface, so that path dies — only on a host that reaches it. Measured:",
+        "  seedgo batch7 at 1.3.1, green on every dev seat, red on every clean",
+        "  checkout ([dim]Path.cwd()[/dim] ran only with the registry marker absent).",
+        "  Reads: the test file's own imports for [dim]mod[/dim], resolved to one",
+        "  production file through the corpus; helpers as well as test units.",
+        "  Convicts a lambda, a plain [dim]def[/dim] from the test file, or",
+        "  [dim]functools.partial(...)[/dim]. Acquits a class, [dim]type(...)[/dim],",
+        "  a MagicMock, and a target the module only constructs ([dim]Path(x)[/dim]).",
+        "  [dim]mod.subprocess[/dim]-style targets are not in the corpus: skipped.",
+        "  Fix: a subclass stand-in that keeps the class surface, or no patch.",
         "",
         "[bold cyan]HOW TO FIX:[/bold cyan]",
         "  Patch the attribute, not the module — one line per decorator:",

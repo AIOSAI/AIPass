@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: gateway_boundary_check.py
 # Description: Gateway Boundary Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-10-03
 # =============================================
 
 """Gateway Boundary Standards Checker Handler.
@@ -19,7 +19,7 @@ only doing api calls. api is api thats it."
 
 import ast
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
@@ -27,6 +27,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 
 AUDIT_SCOPE = "all_files"
 APPLIES_TO = "production"
+# A file that does not parse: judged by nobody here, and said so (ruff convicts a parse error).
+NOT_JUDGED = "Not judged: the file does not parse (ruff convicts that)"
 
 # Storage markers and who is ALLOWED to write them by hand. Anyone else must
 # go through the owner's door. The list is deliberately short: a marker earns
@@ -235,16 +237,18 @@ def _branch_of(module_path: str) -> str:
     return ""
 
 
-def _scan(source: str, branch: str) -> List[Tuple[int, str, str]]:
+def _scan(source: str, branch: str) -> Optional[List[Tuple[int, str, str]]]:
     """Find writes into another branch's storage.
 
-    Returns list of (line_number, description, matched_text).
+    Returns list of (line_number, description, matched_text), or None when the
+    source does not parse: nothing was judged, which is not the [] of a file
+    with no write (seedgo fleet green leg 15).
     """
     try:
         tree = ast.parse(source)
     except SyntaxError as e:
         logger.info("[gateway_boundary] unparseable source: %s", e)
-        return []
+        return None
 
     foreign_dirs = {m for m, allowed in _STORAGE_OWNERS.items() if branch not in allowed}
     foreign_files = {f for f, owner in _OWNED_FILENAMES.items() if owner != branch}
@@ -293,6 +297,12 @@ def _result(passed: bool, name: str, message: str, score: int) -> Dict:
     }
 
 
+def _declined(result: Dict) -> Dict:
+    """Mark a single-check result as a file this standard does not judge (out of the row's average)."""
+    result["checks"][0]["declined"] = True
+    return result
+
+
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """Check a Python file for hand-written writes into another branch's storage."""
     path = Path(module_path)
@@ -302,7 +312,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(True, "Bypassed", "Standard bypassed via .seedgo/bypass.json", 100)
 
     if path.suffix != ".py" or path.name == "__init__.py":
-        return _result(True, "Gateway boundary", "File skipped (non-target)", 100)
+        return _declined(_result(True, "Gateway boundary", "File skipped (non-target)", 100))
 
     if not path.exists():
         return _result(False, "File exists", f"File not found: {module_path}", 0)
@@ -315,6 +325,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     branch = _branch_of(module_path)
     all_violations = _scan(source, branch)
+    if all_violations is None:
+        return _result(True, "Gateway boundary", NOT_JUDGED, 100)
 
     non_bypassed = [
         (ln, desc, txt)

@@ -112,19 +112,18 @@ same day. Its sibling `handlers/cli/arg_gate.py` answers the opposite question �
 
 ```bash
 drone @prax status                       # System health (modules, loggers, last discovery scan)
-drone @prax status sync                  # ⚠ STILL WIRED — recreates repo-root STATUS.md (see below)
+drone @prax status sync                  # Scans branch STATUS.local.md files — writes nothing (see below)
 drone @prax status --help                # Status usage
 ```
 
-**`status sync` is not dormant, and that is a defect.** TDPLAN-0007
-decommissioned the STATUS flow: `STATUS.local.md` and the aggregated
-`STATUS.md` were deleted across every branch, and the engine was made inert by
-unwiring its *trigger registration*. The CLI subcommand was never unwired —
-`status sync` still routes to `sync_status()`, which walks every branch and
-writes `STATUS.md` back to the repo root, resurrecting a file the fleet
-decided to delete. This README described the command as dormant until the
-2026-08-13 audit ran it and recreated the file. The engine is intentionally
-revivable, so the fix (refuse and point at `DASHBOARD.local.json`, or finish
-the decommission) is a ruling for @devpulse, not a unilateral prax change —
-tracked in APLAN-0009. Until then, treat this command as one that writes.
+**`status sync` scans and declines to write.** TDPLAN-0007 decommissioned the
+STATUS flow: `STATUS.local.md` and the aggregated `STATUS.md` were deleted
+across every branch, and the engine was made inert by unwiring its *trigger
+registration*. The CLI subcommand was not unwired with it, so the command kept
+writing `STATUS.md` back to the repo root — the 2026-08-13 audit resurrected the
+file simply by running it. @devpulse ruled on 2026-09-15. Since `sync.py` 2.0.0
+the scan, the registry read and the aggregate are all still built (the engine is
+meant to stay revivable) and nothing is written: the call returns
+`status: "declined"` with the reason, and the command says so rather than
+reporting a write. Branch state lives in `DASHBOARD.local.json`.
 

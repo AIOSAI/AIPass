@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load_registry.py
 # Description: Load Registry Handler
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2025-11-07
-# Modified: 2025-11-07
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -14,7 +14,7 @@ Loads the Flow PLAN registry from JSON file with error handling.
 Features:
 - Loads fplan_registry.json
 - Returns default structure if file missing
-- Graceful error handling
+- Raises RegistryUnreadableError if the file exists but is unreadable
 - Reusable across Flow modules
 
 Usage:
@@ -25,7 +25,6 @@ Usage:
 import json
 from typing import Dict, Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
 
 # INFRASTRUCTURE IMPORT PATTERN
@@ -41,6 +40,11 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 MODULE_NAME = "load_registry"
 FLOW_JSON_DIR = FLOW_ROOT / "flow_json"
 REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
+
+
+class RegistryUnreadableError(Exception):
+    """A plan registry exists on disk but cannot be read as a registry."""
+
 
 # =============================================
 # HANDLER FUNCTION
@@ -61,7 +65,15 @@ def load_registry(registry_file: str | None = None) -> Dict[str, Any]:
         - plans: Dict of plan_number -> plan_info
         - next_number: Next available plan number
 
-    Returns default structure if file doesn't exist or on error.
+    Returns the default structure only when the file does not exist.
+
+    Raises:
+        RegistryUnreadableError: The file exists but cannot be read, is not
+            JSON, or is not a JSON object. It answered the empty default
+            until leg 6 of fleet green, and that answer is a namesake: create
+            reissued 0001 over live plans and saved a one-row registry over
+            the unreadable one; a bare-number close fell through to another
+            type's registry and closed its plan (flow's decision, leg 6).
     """
     target = FLOW_JSON_DIR / registry_file if registry_file else REGISTRY_FILE
 
@@ -71,15 +83,32 @@ def load_registry(registry_file: str | None = None) -> Dict[str, Any]:
     try:
         with open(target, "r", encoding="utf-8") as f:
             data = json.load(f)
-        json_handler.log_operation(
-            "registry_loaded",
-            {
-                "target_file": target.name,
-                "plan_count": len(data.get("plans", {})),
-                "success": True,
-            },
-        )
-        return data
-    except Exception as e:
-        logger.error(f"[{MODULE_NAME}] Failed to load registry from {target}: {e}")
-        return {"plans": {}, "next_number": 1}
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise RegistryUnreadableError(f"Plan registry {target} cannot be read: {e}") from e
+    if not isinstance(data, dict):
+        raise RegistryUnreadableError(f"Plan registry {target} is not a JSON object: {type(data).__name__}")
+    json_handler.log_operation(
+        "registry_loaded",
+        {
+            "target_file": target.name,
+            "plan_count": len(data.get("plans", {})),
+            "success": True,
+        },
+    )
+    return data
+
+
+def next_free_number(registry: Dict[str, Any]) -> int:
+    """The next plan number no row already holds.
+
+    ``next_number`` alone is not trusted: a self-heal registered a row at
+    the stored number without moving it on (DPLAN row 0358 beside
+    next_number 358, 2026-10-04), and the next create would have issued
+    0358 a second time and written over that row (flow's decision, leg 7).
+
+    Returns:
+        max(next_number, highest numeric row + 1), at least 1.
+    """
+    numbers = [int(key) for key in registry.get("plans", {}) if str(key).isdigit()]
+    highest_row = max(numbers, default=0)
+    return max(int(registry.get("next_number", 1)), highest_row + 1)

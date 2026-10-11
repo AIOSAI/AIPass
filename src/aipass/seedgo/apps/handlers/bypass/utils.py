@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: utils.py
 # Description: Shared bypass checking utility for standards checkers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-27
-# Modified: 2026-04-27
+# Modified: 2026-09-25
 # =============================================
 
 """Shared bypass checking utility for standards checkers."""
@@ -77,10 +77,13 @@ def matching_rule(
     # Normalize to forward slashes for cross-platform matching
     file_path_posix = Path(file_path).as_posix()
     for rule in bypass_rules:
-        if rule.get("standard") and rule.get("standard") != standard:
+        # A rule is active only when it names BOTH a file and a standard: a blank
+        # is a blank and does nothing (owner, 2026-09-25 18:55, survey row #10).
+        # It used to mean "every file" or "every standard".
+        rule_file, rule_standard = rule.get("file") or "", rule.get("standard") or ""
+        if not rule_file or rule_standard != standard:
             continue
-        rule_file = rule.get("file", "")
-        if rule_file and Path(rule_file).as_posix() not in file_path_posix:
+        if Path(rule_file).as_posix() not in file_path_posix:
             continue
         if not _scope_matches(rule, line, name):
             continue

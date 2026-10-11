@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: PRAX Status Command
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-09-12
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -25,7 +25,7 @@ if sys.platform == "win32":
 
 from aipass.prax.apps.modules.logger import get_system_status, system_logger as logger
 from aipass.prax.apps.handlers.status.sync import sync_status
-from aipass.cli.apps.modules import console, success, error, warning
+from aipass.cli.apps.modules import console, error, warning
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.cli.arg_gate import refuse
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
@@ -36,12 +36,14 @@ def print_help():
     console.print()
     console.print("[bold cyan]PRAX Status Commands:[/bold cyan]")
     console.print("  [white]status[/white]              Show PRAX system status")
-    console.print("  [white]status sync[/white]         Scan all branches, build STATUS.md at repo root")
+    console.print(
+        "  [white]status sync[/white]         Scan branch STATUS.local.md files (writes nothing — decommissioned)"
+    )
     console.print("  [white]status help[/white]         Show this help")
     console.print()
 
 
-def _format_last_scan(last_scan: dict) -> str:
+def _format_last_scan(last_scan: dict | None) -> str:
     """One line describing the last discovery scan.
 
     There used to be a `File Watcher: Active/Inactive` line here. It reported
@@ -50,7 +52,13 @@ def _format_last_scan(last_scan: dict) -> str:
     while discovery was perfectly healthy. A field that is always wrong is worse
     than no field. Since DPLAN-0339 step 4 discovery is a scheduled scan, so the
     honest facts are when it last ran and what it changed.
+
+    None is load_last_scan's answer for a registry it could not read, said as
+    such: printed as "never" it sent the operator to scan a registry that had
+    been scanned (prax, leg 7).
     """
+    if last_scan is None:
+        return "unreadable — the registry could not be read; see the prax log"
     if not last_scan:
         return "never — run: drone @prax discover run"
 
@@ -99,7 +107,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print()
     console.print("[bold cyan]PRAX System Status[/bold cyan]")
     console.print("=" * 60)
-    console.print(f"  Total Modules:   {status['total_modules']}")
+    total = status["total_modules"]
+    console.print(f"  Total Modules:   {'unreadable (see the prax log)' if total is None else total}")
     console.print(f"  Active Loggers:  {status['individual_loggers']}")
     console.print(f"  System Logs Dir: {status['system_logs_dir']}")
     console.print(f"  Module Logs Dir: {status['module_logs_dir']}")
@@ -130,7 +139,12 @@ def _handle_sync() -> bool:
     synced = result["branches_synced"]
     missing = result["branches_missing"]
 
-    success(f"STATUS.md written — {len(synced)} branches synced")
+    # The scan is real; the write is not. Saying "written" over a file that is
+    # deliberately absent is the shape of report this branch refuses to print.
+    warning(
+        f"Nothing written — {len(synced)} branches scanned",
+        details=result.get("reason", ""),
+    )
 
     if missing:
         warning(

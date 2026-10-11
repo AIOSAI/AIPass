@@ -3,7 +3,7 @@
 # Description: Dashboard Status Calculation Handler
 # Version: 0.4.0
 # Created: 2026-02-25
-# Modified: 2026-09-11
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -41,8 +41,12 @@ def _find_repo_root() -> Path:
 AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 
-def _read_todo_count(branch_path: Path) -> int:
-    """Read todos[] length from .trinity/local.json."""
+def _read_todo_count(branch_path: Path) -> Optional[int]:
+    """Read todos[] length from .trinity/local.json.
+
+    0 means no local.json or no todos. None means the file exists but cannot be
+    read: a 0 there was written into the dashboard as an empty list (prax, leg 15).
+    """
     local_path = branch_path / ".trinity" / "local.json"
     if not local_path.exists():
         return 0
@@ -51,7 +55,7 @@ def _read_todo_count(branch_path: Path) -> int:
         return len(data.get("todos", []))
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to read todos from %s: %s", local_path, exc)
-        return 0
+        return None
 
 
 def _read_mail_counts(branch_path: Path) -> tuple:
@@ -115,11 +119,15 @@ def merge_quick_status(existing: "Dict | None", computed: Dict) -> Dict:
     return merged
 
 
-def read_existing_quick_status(branch_path: "Path | None") -> Dict:
+def read_existing_quick_status(branch_path: "Path | None") -> "Dict | None":
     """Read the quick_status block already on disk, for merging into a fresh build.
 
     The refresh path builds each dashboard from the template, so the previous
     block is gone before the merge can see it. This fetches it back.
+
+    Returns {} when there is no dashboard or no block, and None when the file
+    exists but cannot be read: the keys other services wrote are lost then,
+    and refresh says so in the file (prax, leg 16).
     """
     if not branch_path:
         return {}
@@ -132,11 +140,11 @@ def read_existing_quick_status(branch_path: "Path | None") -> Dict:
         logger.warning(
             "Could not read the existing dashboard at %s (%s), so keys written by other services "
             "cannot be preserved on this refresh. prax's own counters are still correct and the "
-            "file is rewritten, not deleted.",
+            "file is rewritten with previous_unreadable in its quick_status, not deleted.",
             dashboard_path,
             type(exc).__name__,
         )
-        return {}
+        return None
     block = data.get("quick_status", {})
     return block if isinstance(block, dict) else {}
 
@@ -166,6 +174,10 @@ def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) ->
     else:
         new_mail, opened_mail, todo_count = 0, 0, 0
     active_plans = count_active_plans(flow)
+    # None is an unreadable local.json: the flag and summary count it as 0 and
+    # say so, and todo_count is left out so the merge keeps the last count written.
+    todos_unknown = todo_count is None
+    todo_count = todo_count or 0
 
     # Every counter this function renders in `summary` also raises the flag.
     # It used to skip todo_count, so a branch with pending todos published
@@ -182,6 +194,8 @@ def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) ->
         summary_parts.append(f"{active_plans} active plans")
     if todo_count > 0:
         summary_parts.append(f"{todo_count} todos")
+    if todos_unknown:
+        summary_parts.append("todos unreadable")
 
     result = {
         "new_mail": new_mail,
@@ -191,6 +205,8 @@ def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) ->
         "action_required": action_required,
         "summary": ", ".join(summary_parts) if summary_parts else "All clear",
     }
+    if todos_unknown:
+        del result["todo_count"]
 
     json_handler.log_operation(
         "status_calculated",

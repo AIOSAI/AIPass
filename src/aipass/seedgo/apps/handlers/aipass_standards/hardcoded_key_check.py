@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: hardcoded_key_check.py
 # Description: Hardcoded Key Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -22,7 +22,11 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: a key committed in a test is leaked exactly as hard.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
+# A file nothing could read is not a file with no key: it fails by name.
+UNREADABLE = "Cannot read the file, so it was not scanned for keys"
 
 # -- Key patterns -----------------------------------------------------------
 # Each tuple: (provider_label, compiled regex)
@@ -139,12 +143,14 @@ def _scan_line(lineno: int, line: str) -> list[tuple[int, str]]:
     return findings
 
 
-def _scan_file(file_path: Path) -> list[tuple[int, str]]:
+def _scan_file(file_path: Path) -> list[tuple[int, str]] | None:
     """
     Scan a single Python file for hardcoded keys.
 
     Skips __init__.py files, docstring regions, and comment lines.
-    Returns a list of (lineno, provider_label) tuples.
+    Returns a list of (lineno, provider_label) tuples, or None when the file
+    cannot be read: an unread file is not a file with no key, and the caller
+    fails it by name (seedgo fleet green leg 15).
     """
     if file_path.name == "__init__.py":
         return []
@@ -153,7 +159,7 @@ def _scan_file(file_path: Path) -> list[tuple[int, str]]:
         content = file_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         logger.info("Cannot read %s for key scanning", file_path)
-        return []
+        return None
 
     lines = content.splitlines()
     findings: list[tuple[int, str]] = []
@@ -243,6 +249,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
                     "name": "Hardcoded API keys",
                     "passed": True,
                     "message": "__init__.py skipped",
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -256,6 +263,13 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
 
     # Scan the file
     raw_findings = _scan_file(path)
+    if raw_findings is None:
+        return {
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": UNREADABLE}],
+            "score": 0,
+            "standard": "HARDCODED_KEY",
+        }
 
     # Filter out bypassed lines
     findings: list[tuple[int, str]] = []

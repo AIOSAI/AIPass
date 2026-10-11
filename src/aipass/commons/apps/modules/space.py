@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: space.py
 # Description: Spatial Navigation Module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -38,7 +38,7 @@ from aipass.commons.apps.handlers.rooms.space_ops import (
     get_visitors_data,
     record_visit,
 )
-from aipass.commons.apps.modules.commons_identity import get_caller_branch
+from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 from aipass.commons.apps.handlers.json import json_handler
 
 
@@ -195,6 +195,8 @@ def _cmd_enter(args: List[str]) -> bool:
         caller = get_caller_branch()
         visitor_name = caller["name"] if caller else "unknown"
         record_visit(room_name, visitor_name)
+    except CallerLookupFailed as exc:
+        logger.warning(f"[space] Visit not recorded: {exc}")  # the room was shown; the visit is non-critical
     except Exception:
         logger.warning("[space] Failed to get room state")  # visit recording is non-critical
 
@@ -272,7 +274,11 @@ def _cmd_decorate(args: List[str]) -> bool:
     item_name = args[1].lower().replace(" ", "_")
     description = args[2]
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        error(str(exc))
+        return True
     if not caller:
         error("Could not detect calling branch. Run from a branch directory.")
         return True

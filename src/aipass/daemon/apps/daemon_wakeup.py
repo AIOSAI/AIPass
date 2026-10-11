@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon_wakeup.py
 # Description: DAEMON Wake-Up Cron Trigger
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-02-15
-# Modified: 2026-09-19
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -22,6 +22,7 @@ Flow:
 # IMPORTS
 # =============================================
 
+import errno
 import os
 import sys
 import json
@@ -71,6 +72,8 @@ def print_introspection():
     console.print("  modules/")
     console.print("  [cyan]*[/cyan] wakeup_ops.py [dim](notifications archived — Telegram removed)[/dim]")
     console.print()
+    console.print("[dim]Run with --help for more info[/dim]")
+    console.print()
 
 
 def print_help() -> None:
@@ -82,6 +85,9 @@ def print_help() -> None:
     console.print("\n[yellow]DESCRIPTION:[/yellow]")
     console.print("  Checks daemon's email inbox and sends summary reports.")
     console.print("  Intended to be called periodically by cron.")
+    console.print("\n[yellow]EXAMPLES:[/yellow]")
+    console.print("  drone @daemon daemon_wakeup run      Check the inbox and log a report")
+    console.print("  drone @daemon daemon_wakeup --help   This help")
     console.print()
 
 
@@ -200,7 +206,11 @@ def main() -> int:
     Main cron entry point.
 
     Returns:
-        0 on success, 1 on error
+        0 on success (and when another instance holds the lock), 1 on error
+
+    Raises:
+        OSError: flock failed for a reason other than contention; the
+        ``__main__`` catch logs it and exits 1.
     """
     args = sys.argv[1:]
 
@@ -215,6 +225,13 @@ def main() -> int:
     if args[0] in ["--help", "-h"]:
         print_help()
         sys.exit(0)
+
+    # A --help after the first argument is still a request for help, never a run
+    # (daemon, fleet green leg 5): `daemon_wakeup run --help` used to run the job.
+    remaining = args[1:]
+    if "--help" in remaining or "-h" in remaining:
+        print_help()
+        return 0
 
     json_handler.log_operation("wakeup_triggered")
     log("=" * 60)
@@ -232,9 +249,14 @@ def main() -> int:
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as e:
+        lock_fd.close()
+        # Only contention means "another instance is running"; any other errno
+        # is a broken lock, and skipping on it would hide it behind exit 0.
+        if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
+            logger.error(f"Wakeup lock acquisition failed, not contention: {e}")
+            raise
         logger.warning(f"Wakeup lock acquisition failed (another instance running): {e}")
         log("Another instance already running, skipping.")
-        lock_fd.close()
         return 0
 
     try:

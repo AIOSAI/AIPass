@@ -1,16 +1,15 @@
 # =================== AIPass ====================
 # Name: test_scan.py
 # Description: Tests for branch command scanning
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for branch command scanning.
+"""Tests for apps/modules/scan.py and the scanning handlers it drives."""
 
-Covers handler-layer functions (scan_help_output, scan_module_files,
-scan_branch) and the orchestration module (scan.handle_command, scan.scan).
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 import subprocess
 from pathlib import Path
@@ -27,6 +26,7 @@ from aipass.drone.apps.handlers.scanning.formatters import (
     format_no_commands,
     format_scan_results,
 )
+from aipass.drone.apps.modules.scan import handle_command, scan
 
 
 # =============================================================================
@@ -82,33 +82,35 @@ class TestScanHelpOutput:
         result = scan_help_output(str(temp_test_dir), "nonexistent")
         assert result == []
 
-    def test_returns_empty_on_timeout(self, temp_test_dir: Path) -> None:
-        """Should return empty list when subprocess times out."""
+    def test_a_timeout_raises_instead_of_reading_as_no_commands(self, temp_test_dir: Path) -> None:
+        """A hung entry point is a failure, not an empty command list (mutant: the timeout caught, returns [])."""
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir(parents=True)
         (apps_dir / "slow.py").write_text("# entry", encoding="utf-8")
 
-        with patch(
-            "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="test", timeout=10),
+        with (
+            patch(
+                "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="test", timeout=10),
+            ),
+            pytest.raises(subprocess.TimeoutExpired),
         ):
-            result = scan_help_output(str(temp_test_dir), "slow")
+            scan_help_output(str(temp_test_dir), "slow")
 
-        assert result == []
-
-    def test_returns_empty_on_oserror(self, temp_test_dir: Path) -> None:
-        """Should return empty list on OSError."""
+    def test_an_oserror_raises_instead_of_reading_as_no_commands(self, temp_test_dir: Path) -> None:
+        """An entry point that cannot start is a failure, not an empty list (mutant: the OSError caught, returns [])."""
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir(parents=True)
         (apps_dir / "broken.py").write_text("# entry", encoding="utf-8")
 
-        with patch(
-            "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
-            side_effect=OSError("No such file"),
+        with (
+            patch(
+                "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
+                side_effect=OSError("No such file"),
+            ),
+            pytest.raises(OSError, match="No such file"),
         ):
-            result = scan_help_output(str(temp_test_dir), "broken")
-
-        assert result == []
+            scan_help_output(str(temp_test_dir), "broken")
 
     def test_falls_back_to_stderr(self, temp_test_dir: Path) -> None:
         """Should parse stderr when stdout is empty."""
@@ -294,6 +296,27 @@ class TestScanBranch:
         assert len(audit_cmds) == 1
         assert audit_cmds[0]["source"] == "help"
 
+    def test_a_failed_help_scan_keeps_module_commands_and_names_the_failure(
+        self, temp_test_dir: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The module-file results survive and the log names the failed --help scan (mutant: the warning removed)."""
+        apps_dir = temp_test_dir / "apps"
+        (apps_dir / "modules").mkdir(parents=True)
+        (apps_dir / "mybranch.py").write_text("# entry", encoding="utf-8")
+        (apps_dir / "modules" / "extra.py").write_text(
+            '"""Extra module."""\ndef handle_command(): pass\n',
+            encoding="utf-8",
+        )
+
+        with patch(
+            "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="test", timeout=10),
+        ):
+            result = scan_branch(str(temp_test_dir), "mybranch")
+
+        assert [c["name"] for c in result] == ["extra"]
+        assert "@mybranch: the --help scan failed" in caplog.text
+
     def test_returns_empty_when_nothing_found(self, temp_test_dir: Path) -> None:
         """Should return empty list when no commands found anywhere."""
         result = scan_branch(str(temp_test_dir), "empty")
@@ -388,7 +411,6 @@ class TestScanHandleCommand:
     @patch("aipass.drone.apps.modules.scan.scan")
     def test_routes_to_scan(self, mock_scan: MagicMock) -> None:
         """Should call scan() with the target argument."""
-        from aipass.drone.apps.modules.scan import handle_command
 
         mock_scan.return_value = [{"name": "x", "description": "", "source": "help"}]
 
@@ -400,7 +422,6 @@ class TestScanHandleCommand:
     @patch("aipass.drone.apps.modules.scan.scan")
     def test_returns_false_when_scan_fails(self, mock_scan: MagicMock) -> None:
         """Should return False when scan returns None (resolution failure)."""
-        from aipass.drone.apps.modules.scan import handle_command
 
         mock_scan.return_value = None
 
@@ -410,7 +431,6 @@ class TestScanHandleCommand:
 
     def test_no_args_shows_introspection(self) -> None:
         """Should call print_introspection when command is None and no args."""
-        from aipass.drone.apps.modules.scan import handle_command
 
         with patch("aipass.drone.apps.modules.scan.print_introspection") as mock_intro:
             result = handle_command(command=None, args=None)
@@ -420,7 +440,6 @@ class TestScanHandleCommand:
 
     def test_empty_args_returns_false(self) -> None:
         """Should return False when command is given but no args."""
-        from aipass.drone.apps.modules.scan import handle_command
 
         result = handle_command(command="scan", args=[])
 
@@ -435,6 +454,36 @@ class TestScanHandleCommand:
 class TestScanFunction:
     """Tests for scan.scan() orchestration."""
 
+    def test_a_failed_help_scan_is_named_on_stderr_and_the_module_results_still_show(
+        self, temp_test_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A failure is loud where the caller is: drone scan and drone activate both go through
+        scan(), so the failed --help scan is named on stderr, and the module-file results it
+        did find are still shown and returned (exit stays 0: the results are real, partial).
+
+        Red first: the failure reached the log and the operation record only. Mutant killed:
+        the stderr line removed."""
+        apps_dir = temp_test_dir / "apps"
+        (apps_dir / "modules").mkdir(parents=True)
+        (apps_dir / "mybranch.py").write_text("# entry", encoding="utf-8")
+        (apps_dir / "modules" / "extra.py").write_text(
+            '"""Extra module."""\ndef handle_command(): pass\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("aipass.drone.apps.modules.scan.resolve_branch", lambda _target: str(temp_test_dir))
+
+        with patch(
+            "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="mybranch --help", timeout=10),
+        ):
+            result = scan("@mybranch")
+
+        assert result is not None
+        assert [c["name"] for c in result] == ["extra"]
+        err = " ".join(capsys.readouterr().err.split())
+        assert "scan: @mybranch: the --help scan failed (" in err
+        assert "timed out after 10 seconds); showing module files only" in err
+
     @patch("aipass.drone.apps.modules.scan.resolve_branch")
     @patch("aipass.drone.apps.modules.scan.scan_branch")
     @patch("aipass.drone.apps.modules.scan.format_scan_results")
@@ -445,7 +494,6 @@ class TestScanFunction:
         mock_resolve: MagicMock,
     ) -> None:
         """Should resolve target, scan, format, and return results."""
-        from aipass.drone.apps.modules.scan import scan
 
         mock_resolve.return_value = "/fake/path"
         mock_scan_branch.return_value = [
@@ -455,36 +503,33 @@ class TestScanFunction:
         result = scan("@testbranch")
 
         mock_resolve.assert_called_once_with("@testbranch")
-        mock_scan_branch.assert_called_once_with("/fake/path", "testbranch")
+        mock_scan_branch.assert_called_once_with("/fake/path", "testbranch", [])
         mock_format.assert_called_once()
         assert result is not None
         assert len(result) == 1
 
     @patch("aipass.drone.apps.modules.scan.resolve_branch")
     @patch("aipass.drone.apps.modules.scan.scan_branch")
-    @patch("aipass.drone.apps.modules.scan.format_no_commands")
     def test_shows_no_commands_message(
         self,
-        mock_format_none: MagicMock,
         mock_scan_branch: MagicMock,
         mock_resolve: MagicMock,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """Should display no-commands message when scan finds nothing."""
-        from aipass.drone.apps.modules.scan import scan
+        """Mutant killed: scan() handing format_no_commands an empty name instead of the branch's."""
 
         mock_resolve.return_value = "/fake/path"
         mock_scan_branch.return_value = []
 
         result = scan("@emptybranch")
 
-        mock_format_none.assert_called_once()
-        assert result is not None  # Empty list, not None
-        assert len(result) == 0
+        out, _ = capsys.readouterr()
+        assert "No commands discovered for @emptybranch." in out
+        assert result == []
 
     @patch("aipass.drone.apps.modules.scan.resolve_branch", side_effect=Exception("not found"))
     def test_returns_none_on_resolution_failure(self, mock_resolve: MagicMock) -> None:
         """Should return None when branch resolution fails."""
-        from aipass.drone.apps.modules.scan import scan
 
         result = scan("@nonexistent")
 

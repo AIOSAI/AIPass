@@ -3,15 +3,18 @@
 # Description: Tests for .env template creation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for apps/handlers/auth/env.py -- .env template creation.
+"""Tests for apps/handlers/auth/env.py -- .env template creation, and keys.py's no-key diagnosis."""
 
-Tests:
-- create_env_template: openrouter provider, custom provider, no-overwrite,
-  file permissions, directory permissions, write failure
-"""
+# Tests:
+# - create_env_template: openrouter provider, custom provider, no-overwrite,
+#   file permissions, directory permissions, write failure
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the 0o600 / 0o700 modes on Windows, which has no Unix permission bits
+# seedgo: no-test-needed(ruff) — that env.py and keys.py parse and import
 
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.api.apps.handlers.auth import keys
 from aipass.api.apps.handlers.auth.env import create_env_template
 
 
@@ -82,13 +86,37 @@ class TestCreateEnvTemplate:
         dir_mode = stat.S_IMODE(os.stat(secrets_dir).st_mode)
         assert dir_mode == 0o700
 
-    def test_handles_write_failure(self, tmp_path: Path) -> None:
-        """OSError during write returns False."""
-        target = tmp_path / "secrets" / ".env"
-        with patch("builtins.open", side_effect=OSError("disk full")):
-            result = create_env_template(provider="openrouter", target_path=target)
+    def test_handles_a_parent_directory_that_cannot_be_made(self, tmp_path: Path) -> None:
+        """A mkdir the platform refuses returns False.
+
+        api, fleet green leg 3: the failure is real, not a patched builtins.open -
+        the parent of the target is a regular file, so the platform itself
+        refuses to build the directory the template would land in. This is the
+        mkdir step; the open step has its own case below (api, fleet green leg 4).
+        """
+        blocker = tmp_path / "secrets"
+        blocker.write_text("not a directory\n", encoding="utf-8")
+        target = blocker / ".env"
+
+        result = create_env_template(provider="openrouter", target_path=target)
 
         assert result is False
+        assert blocker.read_text(encoding="utf-8") == "not a directory\n"
+
+    def test_handles_a_file_that_cannot_be_opened(self, tmp_path: Path) -> None:
+        """An open that fails after the directory is made returns False and writes nothing.
+
+        The name holds a NUL byte, which Python itself refuses to open on every
+        platform before the disk is touched: the error is Python's, not the file
+        system's (api, fleet green leg 4).
+        """
+        secrets_dir = tmp_path / "secrets"
+        target = secrets_dir / ".env\x00"
+
+        result = create_env_template(provider="openrouter", target_path=target)
+
+        assert result is False
+        assert list(secrets_dir.iterdir()) == []
 
 
 class TestDiagnoseKeySuggestsRealCommand:
@@ -100,8 +128,6 @@ class TestDiagnoseKeySuggestsRealCommand:
 
     def test_missing_key_message_names_init(self) -> None:
         """The suggestion points at a command api.py actually routes."""
-        from aipass.api.apps.handlers.auth import keys
-
         with patch.object(keys, "_read_key_from_secrets", return_value=None):
             message = keys.diagnose_key("openrouter")
 

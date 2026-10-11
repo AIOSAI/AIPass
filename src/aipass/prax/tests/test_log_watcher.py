@@ -1,25 +1,32 @@
 # =================== AIPass ====================
 # Name: test_log_watcher.py
 # Description: Tests for log file monitoring handler
-# Version: 1.0.0
+# Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-10-03
 # =============================================
 
-"""Tests for apps/handlers/monitoring/log_watcher.py
+"""Tests for apps/handlers/monitoring/log_watcher.py."""
 
-Covers:
-- LogFileWatcher._detect_log_level()  -- level detection from markers
-- LogFileWatcher._extract_command_info() -- command pattern matching
-- LogFileWatcher._parse_log_message()  -- pipe-delimited parsing
-- start_log_watcher / stop_log_watcher / is_log_watcher_active
-- initialize_positions() -- seek-to-end on startup
-"""
+# Covers:
+# - LogFileWatcher._detect_log_level()  -- level detection from markers
+# - LogFileWatcher._extract_command_info() -- command pattern matching
+# - LogFileWatcher._parse_log_message()  -- pipe-delimited parsing
+# - start_log_watcher / stop_log_watcher / is_log_watcher_active
+# - initialize_positions() -- seek-to-end on startup
 
-import sys
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — detect_branch_from_log, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(json_structure) — start_log_watcher's log_watcher_started log_operation record
+
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
+
+import pytest
+from watchdog.observers import polling as watchdog_polling
+
+from aipass.prax.apps.handlers.monitoring import log_watcher
 
 
 # ---------------------------------------------------------------------------
@@ -27,58 +34,24 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 
 
-class _RealFSHandler:
-    """Stub base so LogFileWatcher subclass methods are not swallowed by MagicMock."""
+@pytest.fixture(autouse=True)
+def _log_watcher_doubled(monkeypatch, tmp_path) -> None:
+    """The real log_watcher, its edges doubled where the module bound them.
 
-    pass
+    No sys.modules stand-ins and no reload (prax, leg 14): the observer class is a
+    MagicMock so nothing watches a real directory, the logs dir is under tmp_path,
+    the branch detector answers PRAX, and MonitoringEvent records what was built.
+    LogFileWatcher keeps the real watchdog FileSystemEventHandler as its base.
+    """
+    monkeypatch.setattr(log_watcher, "WatchdogObserver", MagicMock())
+    monkeypatch.setattr(log_watcher, "get_system_logs_dir", MagicMock(return_value=tmp_path / "system_logs"))
+    monkeypatch.setattr(log_watcher, "detect_branch_from_log", MagicMock(return_value="PRAX"))
+    monkeypatch.setattr(log_watcher, "MonitoringEvent", MagicMock())
 
 
 def _import_log_watcher() -> ModuleType:
-    """Import log_watcher with all heavy deps mocked."""
-    mock_observer_cls = MagicMock()
-    mock_observer_instance = MagicMock()
-    mock_observer_cls.return_value = mock_observer_instance
-
-    mock_watchdog_observer = MagicMock()
-    mock_watchdog_observer.Observer = mock_observer_cls
-
-    # Provide a real base class for FileSystemEventHandler
-    mock_watchdog_events = MagicMock()
-    mock_watchdog_events.FileSystemEventHandler = _RealFSHandler
-
-    mock_config = MagicMock()
-    mock_config.get_system_logs_dir.return_value = Path("/fake/logs/system")
-
-    mock_branch_detector = MagicMock()
-    mock_branch_detector.detect_branch_from_log.return_value = "PRAX"
-
-    mock_event_queue_mod = MagicMock()
-
-    mock_trigger_mod = MagicMock()
-
-    with patch.dict(
-        sys.modules,
-        {
-            "watchdog": MagicMock(),
-            "watchdog.observers": mock_watchdog_observer,
-            "watchdog.events": mock_watchdog_events,
-            "aipass.prax.apps.handlers.config.load": mock_config,
-            "aipass.prax.apps.handlers.monitoring.event_queue": mock_event_queue_mod,
-            "aipass.prax.apps.handlers.monitoring.branch_detector": mock_branch_detector,
-            "aipass.trigger": MagicMock(),
-            "aipass.trigger.apps": MagicMock(),
-            "aipass.trigger.apps.modules": MagicMock(),
-            "aipass.trigger.apps.modules.core": mock_trigger_mod,
-        },
-    ):
-        import importlib
-
-        if "aipass.prax.apps.handlers.monitoring.log_watcher" in sys.modules:
-            mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.monitoring.log_watcher"])
-        else:
-            mod = importlib.import_module("aipass.prax.apps.handlers.monitoring.log_watcher")
-
-    return mod
+    """The log_watcher module, bound at the top; _log_watcher_doubled doubles its edges."""
+    return log_watcher
 
 
 def _make_watcher(mod: ModuleType):
@@ -153,35 +126,40 @@ class TestExtractCommandInfo:
         watcher, _ = _make_watcher(mod)
         line = "[drone] Drone started with args: ['close', 'plan', '0098']"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "drone" in result["command"]
-        assert "close" in result["command"]
+        # The command as it was typed, the form _match_executing_command already shows (prax, leg 4).
+        assert result == {"command": "drone close plan 0098", "caller": None, "target": None}
+
+    def test_drone_started_args_keep_a_comma_inside_an_argument(self):
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        line = "[drone] Drone started with args: ['dispatch', '@devpulse', 'Subject, with a comma']"
+        result = watcher._extract_command_info(line)
+        assert result == {
+            "command": "drone dispatch @devpulse Subject, with a comma",
+            "caller": None,
+            "target": "DEVPULSE",
+        }
 
     def test_flow_creating_plan(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[FLOW] Creating new flow plan"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "flow create plan" in result["command"]
+        assert result == {"command": "flow create plan", "caller": None, "target": None}
 
     def test_flow_closing_plan(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[FLOW] Closing FPLAN-0164"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "flow close plan" in result["command"]
-        assert "0164" in result["command"]
+        assert result == {"command": "flow close plan 0164", "caller": None, "target": None}
 
     def test_flow_opening_plan(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[FLOW] Opening FPLAN-0098"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "flow open plan" in result["command"]
-        assert "0098" in result["command"]
+        assert result == {"command": "flow open plan 0098", "caller": None, "target": None}
 
     def test_seedgo_audit(self):
         mod = _import_log_watcher()
@@ -206,32 +184,28 @@ class TestExtractCommandInfo:
         watcher, _ = _make_watcher(mod)
         line = "[ai_mail] checking inbox"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "ai_mail inbox" in result["command"]
+        assert result == {"command": "ai_mail inbox", "caller": None, "target": None}
 
     def test_prax_monitor(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[prax] Starting monitor session"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "prax monitor" in result["command"]
+        assert result == {"command": "prax monitor", "caller": None, "target": None}
 
     def test_prax_status(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[prax] Running status check"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "prax status" in result["command"]
+        assert result == {"command": "prax status", "caller": None, "target": None}
 
     def test_backup_snapshot(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[backup] Starting snapshot"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "backup snapshot" in result["command"]
+        assert result == {"command": "backup snapshot", "caller": None, "target": None}
 
     def test_caller_attribution_routing(self):
         mod = _import_log_watcher()
@@ -262,8 +236,7 @@ class TestExtractCommandInfo:
         watcher, _ = _make_watcher(mod)
         line = "[memory] Starting rollover process"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "memory rollover" in result["command"]
+        assert result == {"command": "memory rollover", "caller": None, "target": None}
 
     def test_spawn_create_branch(self):
         mod = _import_log_watcher()
@@ -279,8 +252,7 @@ class TestExtractCommandInfo:
         watcher, _ = _make_watcher(mod)
         line = "[trigger] Event fired: module_discovered"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "trigger fire" in result["command"]
+        assert result == {"command": "trigger fire", "caller": None, "target": None}
 
 
 # ============================================================================
@@ -335,46 +307,42 @@ class TestParseLogMessage:
 class TestLogWatcherLifecycle:
     """Test start_log_watcher, stop_log_watcher, is_log_watcher_active."""
 
-    def test_start_creates_and_starts_observer(self):
+    def test_start_creates_and_starts_observer(self, tmp_path, monkeypatch):
         mod = _import_log_watcher()
         mock_queue = MagicMock()
         mock_observer = MagicMock()
 
-        setattr(mod, "_log_observer", None)
+        monkeypatch.setattr(mod, "_log_observer", None)
 
         with patch.object(mod, "WatchdogObserver", return_value=mock_observer):
-            with patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs")):
+            with patch.object(mod, "get_system_logs_dir", return_value=tmp_path / "logs"):
                 result = mod.start_log_watcher(mock_queue)
 
         assert result is mock_observer
         mock_observer.schedule.assert_called_once()
         mock_observer.start.assert_called_once()
 
-    def test_start_with_polling_mode(self):
+    def test_start_with_polling_mode(self, tmp_path, monkeypatch):
         mod = _import_log_watcher()
         mock_queue = MagicMock()
         mock_observer = MagicMock()
         mock_polling_cls = MagicMock(return_value=mock_observer)
 
-        setattr(mod, "_log_observer", None)
+        monkeypatch.setattr(mod, "_log_observer", None)
 
-        with patch.dict(
-            sys.modules,
-            {
-                "watchdog.observers.polling": MagicMock(PollingObserver=mock_polling_cls),
-            },
-        ):
-            with patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs")):
-                result = mod.start_log_watcher(mock_queue, use_polling=True)
+        # The lazy import reads PollingObserver off the real polling module.
+        monkeypatch.setattr(watchdog_polling, "PollingObserver", mock_polling_cls)
+        with patch.object(mod, "get_system_logs_dir", return_value=tmp_path / "logs"):
+            result = mod.start_log_watcher(mock_queue, use_polling=True)
 
         assert result is mock_observer
         mock_observer.start.assert_called_once()
 
-    def test_stop_stops_and_clears(self):
+    def test_stop_stops_and_clears(self, monkeypatch):
         mod = _import_log_watcher()
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = True
-        setattr(mod, "_log_observer", mock_obs)
+        monkeypatch.setattr(mod, "_log_observer", mock_obs)
 
         mod.stop_log_watcher()
 
@@ -382,7 +350,7 @@ class TestLogWatcherLifecycle:
         mock_obs.join.assert_called_once_with(timeout=5.0)
         assert getattr(mod, "_log_observer") is None
 
-    def test_stop_noop_when_not_running(self):
+    def test_stop_noop_when_not_running(self, monkeypatch):
         """Nothing is running, so no teardown is attempted.
 
         Two ways to be "not running", both no-ops: no observer at all, and an
@@ -392,13 +360,13 @@ class TestLogWatcherLifecycle:
         """
         mod = _import_log_watcher()
 
-        setattr(mod, "_log_observer", None)
+        monkeypatch.setattr(mod, "_log_observer", None)
         assert mod.stop_log_watcher() is None
         assert getattr(mod, "_log_observer") is None
 
         dead = MagicMock()
         dead.is_alive.return_value = False
-        setattr(mod, "_log_observer", dead)
+        monkeypatch.setattr(mod, "_log_observer", dead)
 
         mod.stop_log_watcher()
 
@@ -406,23 +374,23 @@ class TestLogWatcherLifecycle:
         dead.join.assert_not_called()
         assert getattr(mod, "_log_observer") is dead
 
-    def test_is_active_true_when_alive(self):
+    def test_is_active_true_when_alive(self, monkeypatch):
         mod = _import_log_watcher()
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = True
-        setattr(mod, "_log_observer", mock_obs)
+        monkeypatch.setattr(mod, "_log_observer", mock_obs)
         assert mod.is_log_watcher_active() is True
 
-    def test_is_active_false_when_none(self):
+    def test_is_active_false_when_none(self, monkeypatch):
         mod = _import_log_watcher()
-        setattr(mod, "_log_observer", None)
+        monkeypatch.setattr(mod, "_log_observer", None)
         assert mod.is_log_watcher_active() is False
 
-    def test_is_active_false_when_dead(self):
+    def test_is_active_false_when_dead(self, monkeypatch):
         mod = _import_log_watcher()
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = False
-        setattr(mod, "_log_observer", mock_obs)
+        monkeypatch.setattr(mod, "_log_observer", mock_obs)
         assert mod.is_log_watcher_active() is False
 
 
@@ -484,41 +452,6 @@ class TestInitializePositions:
 # ============================================================================
 
 
-class TestGenerateErrorHash:
-    """Test _generate_error_hash deduplication helper."""
-
-    def test_returns_8_char_hex(self):
-        """Hash should be an 8-character hexadecimal string."""
-        mod = _import_log_watcher()
-        result = mod._generate_error_hash("mymodule", "something broke")
-        assert len(result) == 8
-        assert all(c in "0123456789abcdef" for c in result)
-
-    def test_same_input_same_hash(self):
-        """Identical module+message should produce identical hashes."""
-        mod = _import_log_watcher()
-        h1 = mod._generate_error_hash("mod", "error msg")
-        h2 = mod._generate_error_hash("mod", "error msg")
-        assert h1 == h2
-
-    def test_different_input_different_hash(self):
-        """Different inputs should produce different hashes."""
-        mod = _import_log_watcher()
-        h1 = mod._generate_error_hash("mod_a", "error one")
-        h2 = mod._generate_error_hash("mod_b", "error two")
-        assert h1 != h2
-
-
-class TestTriggerImportFallback:
-    """Test trigger import fallback when trigger module is unavailable."""
-
-    def test_has_trigger_flag_set(self):
-        """HAS_TRIGGER should be set based on trigger import availability."""
-        mod = _import_log_watcher()
-        # With our mock setup, trigger is available
-        assert hasattr(mod, "HAS_TRIGGER")
-
-
 class TestProcessLogLine:
     """Test _process_log_line dispatching."""
 
@@ -527,7 +460,7 @@ class TestProcessLogLine:
         mod = _import_log_watcher()
         watcher, mock_queue = _make_watcher(mod)
 
-        watcher._process_log_line("PRAX", "   ", "/fake/file.log")
+        watcher._process_log_line("PRAX", "   ")
         mock_queue.enqueue.assert_not_called()
 
     def test_command_line_emits_separator(self):
@@ -544,7 +477,7 @@ class TestProcessLogLine:
             patch.object(watcher, "_emit_command_separator") as mock_sep,
             patch.object(watcher, "_emit_log_event") as mock_log,
         ):
-            watcher._process_log_line("PRAX", "some command line", "/f.log")
+            watcher._process_log_line("PRAX", "some command line")
 
         mock_sep.assert_called_once()
         mock_log.assert_not_called()
@@ -558,9 +491,9 @@ class TestProcessLogLine:
             patch.object(watcher, "_extract_command_info", return_value=None),
             patch.object(watcher, "_emit_log_event") as mock_log,
         ):
-            watcher._process_log_line("PRAX", "normal log line", "/f.log")
+            watcher._process_log_line("PRAX", "normal log line")
 
-        mock_log.assert_called_once()
+        mock_log.assert_called_once_with("PRAX", "normal log line", "info")
 
 
 class TestReadNewContent:
@@ -581,8 +514,7 @@ class TestReadNewContent:
             f.write("new line\n")
 
         result = watcher._read_new_content(str(log_file))
-        assert result is not None
-        assert "new line" in result
+        assert result == "new line\n"
 
     def test_returns_none_when_no_new_content(self, tmp_path):
         """Should return None when file hasn't grown."""
@@ -606,8 +538,7 @@ class TestReadNewContent:
         watcher.log_positions[str(log_file)] = 99999  # Way past end
 
         result = watcher._read_new_content(str(log_file))
-        assert result is not None
-        assert "short" in result
+        assert result == "short\n"
 
     def test_returns_none_for_whitespace_only_content(self, tmp_path):
         """Should return None when new content is only whitespace."""
@@ -650,19 +581,20 @@ class TestOnModified:
         ):
             watcher.on_modified(event)
 
-        mock_process.assert_called()
+        mock_process.assert_called_once_with("PRAX", "line one")
 
-    def test_handles_read_exception(self):
+    def test_handles_read_exception(self, tmp_path):
         """Should catch exceptions during log reading."""
         mod = _import_log_watcher()
         watcher, mock_queue = _make_watcher(mod)
 
+        system_logs_dir = tmp_path / "logs" / "system"
         event = MagicMock()
         event.is_directory = False
-        event.src_path = "/fake/logs/system/crash.log"
+        event.src_path = str(system_logs_dir / "crash.log")
 
         with (
-            patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs/system")),
+            patch.object(mod, "get_system_logs_dir", return_value=system_logs_dir),
             patch.object(watcher, "_read_new_content", side_effect=OSError("disk error")),
         ):
             # Should not raise
@@ -722,8 +654,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "standards_checklist Running full standard check on prax"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "seedgo checklist" in result["command"]
+        assert result == {"command": "seedgo checklist prax", "caller": None, "target": None}
 
     def test_backup_versioned(self):
         """Should detect backup versioned commands."""
@@ -731,8 +662,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "[backup] Starting versioned backup"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "backup versioned" in result["command"]
+        assert result == {"command": "backup versioned", "caller": None, "target": None}
 
     def test_backup_sync(self):
         """Should detect backup sync commands."""
@@ -740,8 +670,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "[backup] Running sync operation"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "backup sync" in result["command"]
+        assert result == {"command": "backup sync", "caller": None, "target": None}
 
     def test_memory_search(self):
         """Should detect memory search commands."""
@@ -749,8 +678,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "[memory] Handling search query for branch status"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "memory search" in result["command"]
+        assert result == {"command": "memory search", "caller": None, "target": None}
 
     def test_trigger_triggered(self):
         """Should detect trigger events with 'triggered' keyword."""
@@ -758,8 +686,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "[trigger] Rule triggered: error_threshold"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "trigger fire" in result["command"]
+        assert result == {"command": "trigger fire", "caller": None, "target": None}
 
     def test_ai_mail_send_without_target(self):
         """Should handle ai_mail send without a parseable recipient."""
@@ -767,8 +694,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "[ai_mail] Sending broadcast message"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "ai_mail send" in result["command"]
+        assert result == {"command": "ai_mail send", "caller": None, "target": None}
 
     def test_drone_started_without_bracket_prefix(self):
         """Should detect 'Drone started with args' without [drone] prefix."""
@@ -776,9 +702,8 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "Drone started with args: ['audit', '@prax']"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "drone" in result["command"]
-        assert "audit" in result["command"]
+        # The @prax in the args is the target, read as _extract_target_from_cmd reads it (prax, leg 4).
+        assert result == {"command": "drone audit @prax", "caller": None, "target": "PRAX"}
 
 
 class TestMatchExecutingCommand:
@@ -807,8 +732,7 @@ class TestMatchExecutingCommand:
         watcher, _ = _make_watcher(mod)
         line = "Executing command: /path/to/aipass/flow run"
         result = watcher._match_executing_command(line)
-        assert result is not None
-        assert result["caller"] is None
+        assert result == {"command": "@flow run", "caller": None, "target": "FLOW"}
 
 
 class TestExtractTargetFromCmd:
@@ -820,10 +744,21 @@ class TestExtractTargetFromCmd:
         result = mod.LogFileWatcher._extract_target_from_cmd("audit @prax")
         assert result == "PRAX"
 
-    def test_extracts_path_target(self):
+    def test_extracts_path_target(self, tmp_path):
         """Should extract target from /aipass/branch pattern."""
         mod = _import_log_watcher()
-        result = mod.LogFileWatcher._extract_target_from_cmd("/path/to/aipass/seedgo/run.py")
+        cmd_path = str(tmp_path / "aipass" / "seedgo" / "run.py")
+        result = mod.LogFileWatcher._extract_target_from_cmd(cmd_path)
+        assert result == "SEEDGO"
+
+    def test_extracts_path_target_windows_form(self):
+        """Should extract target from a Windows-form path with backslashes.
+
+        Mutant: searching the raw cmd instead of its slash-normalised copy reddens this.
+        """
+        mod = _import_log_watcher()
+        cmd = "D:\\dev\\AIPass\\src\\aipass\\seedgo\\run.py"
+        result = mod.LogFileWatcher._extract_target_from_cmd(cmd)
         assert result == "SEEDGO"
 
     def test_returns_none_when_no_target(self):
@@ -843,7 +778,9 @@ class TestEmitCommandSeparator:
         watcher.last_command_per_branch.clear()
 
         watcher._emit_command_separator("PRAX", ("test cmd", "DRONE"))
-        mock_queue.enqueue.assert_called_once()
+        mock_queue.enqueue.assert_called_once_with(mod.MonitoringEvent.return_value)
+        built = mod.MonitoringEvent.call_args.kwargs
+        assert (built["message"], built["caller"]) == ("test cmd", "DRONE")
 
     def test_string_format(self):
         """Should handle plain string command format."""
@@ -852,7 +789,9 @@ class TestEmitCommandSeparator:
         watcher.last_command_per_branch.clear()
 
         watcher._emit_command_separator("PRAX", "test cmd")
-        mock_queue.enqueue.assert_called_once()
+        mock_queue.enqueue.assert_called_once_with(mod.MonitoringEvent.return_value)
+        built = mod.MonitoringEvent.call_args.kwargs
+        assert (built["message"], built["caller"]) == ("test cmd", None)
 
     def test_deduplication(self):
         """Should skip duplicate consecutive commands for same branch."""
@@ -884,114 +823,51 @@ class TestEmitCommandSeparator:
 class TestEmitLogEvent:
     """Test _emit_log_event event emission."""
 
-    def test_error_level_fires_trigger(self):
-        """Should fire trigger event for ERROR level logs."""
+    def test_an_error_line_is_queued_and_fires_no_error_detected(self, monkeypatch):
+        """@trigger 2026-09-24: this fire matched no key its handler reads; their own watcher covers these lines."""
         mod = _import_log_watcher()
         watcher, mock_queue = _make_watcher(mod)
-
-        # Set up trigger mock
         mock_trigger = MagicMock()
-        setattr(mod, "HAS_TRIGGER", True)
-        setattr(mod, "trigger", mock_trigger)
+        monkeypatch.setattr(mod, "trigger", mock_trigger, raising=False)
 
-        watcher._emit_log_event(
-            "PRAX",
-            "[PRAX] 2025-01-01 | mymodule | ERROR | something broke",
-            "error",
-            "/fake/prax.log",
-        )
-
-        mock_trigger.fire.assert_called_once()
-        call_kwargs = mock_trigger.fire.call_args
-        assert call_kwargs[0][0] == "error_detected"
-        assert call_kwargs[1]["branch"] == "PRAX"
-
-    def test_info_level_does_not_fire_trigger(self):
-        """Should not fire trigger for non-error levels."""
-        mod = _import_log_watcher()
-        watcher, mock_queue = _make_watcher(mod)
-
-        mock_trigger = MagicMock()
-        setattr(mod, "HAS_TRIGGER", True)
-        setattr(mod, "trigger", mock_trigger)
-
-        watcher._emit_log_event("PRAX", "normal info", "info")
+        watcher._emit_log_event("PRAX", "[PRAX] 2025-01-01 | mymodule | ERROR | something broke", "error")
 
         mock_trigger.fire.assert_not_called()
         mock_queue.enqueue.assert_called_once()
-        assert mod.MonitoringEvent.call_args.kwargs["level"] == "info"
+        assert mod.MonitoringEvent.call_args.kwargs["level"] == "error"
+        assert mod.MonitoringEvent.call_args.kwargs["message"] == "something broke"
 
-    def test_trigger_not_fired_when_unavailable(self):
-        """With no trigger available an error line still enqueues exactly one event."""
+    def test_an_info_line_is_queued_at_info(self):
         mod = _import_log_watcher()
         watcher, mock_queue = _make_watcher(mod)
 
-        setattr(mod, "HAS_TRIGGER", False)
-        setattr(mod, "trigger", None)
-
-        # Should not raise
-        watcher._emit_log_event("PRAX", "error msg", "error")
+        watcher._emit_log_event("PRAX", "normal info", "info")
 
         mock_queue.enqueue.assert_called_once()
-        event_kwargs = mod.MonitoringEvent.call_args.kwargs
-        assert event_kwargs["level"] == "error"
-        assert event_kwargs["message"] == "error msg"
-
-    def test_error_with_no_log_file_path(self):
-        """Should use 'unknown' for log_file when path not provided."""
-        mod = _import_log_watcher()
-        watcher, mock_queue = _make_watcher(mod)
-
-        mock_trigger = MagicMock()
-        setattr(mod, "HAS_TRIGGER", True)
-        setattr(mod, "trigger", mock_trigger)
-
-        watcher._emit_log_event("PRAX", "error msg", "error")
-
-        call_kwargs = mock_trigger.fire.call_args[1]
-        assert call_kwargs["log_file"] == "unknown"
-
-    def test_error_extracts_module_name_from_pipe_format(self):
-        """Should extract module name from pipe-delimited log lines."""
-        mod = _import_log_watcher()
-        watcher, mock_queue = _make_watcher(mod)
-
-        mock_trigger = MagicMock()
-        setattr(mod, "HAS_TRIGGER", True)
-        setattr(mod, "trigger", mock_trigger)
-
-        watcher._emit_log_event(
-            "PRAX",
-            "[PRAX] 2025-01-01 | mymod.handler | ERROR | crash",
-            "error",
-            "/fake/log.log",
-        )
-
-        call_kwargs = mock_trigger.fire.call_args[1]
-        assert call_kwargs["module_name"] == "mymod.handler"
+        assert mod.MonitoringEvent.call_args.kwargs["level"] == "info"
 
 
 class TestStartLogWatcherAdditional:
     """Additional tests for start_log_watcher."""
 
-    def test_stops_existing_observer_before_starting(self):
+    def test_stops_existing_observer_before_starting(self, tmp_path, monkeypatch):
         """Should stop existing observer if already running."""
         mod = _import_log_watcher()
         mock_queue = MagicMock()
         mock_old_observer = MagicMock()
         mock_old_observer.is_alive.return_value = True
-        setattr(mod, "_log_observer", mock_old_observer)
+        monkeypatch.setattr(mod, "_log_observer", mock_old_observer)
 
         mock_new_observer = MagicMock()
 
         with (
             patch.object(mod, "WatchdogObserver", return_value=mock_new_observer),
-            patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs")),
+            patch.object(mod, "get_system_logs_dir", return_value=tmp_path / "logs"),
             patch.object(mod, "stop_log_watcher") as mock_stop,
         ):
             mod.start_log_watcher(mock_queue)
 
-        mock_stop.assert_called_once()
+        mock_stop.assert_called_once_with()
 
 
 class TestInitializePositionsAdditional:
@@ -1128,7 +1004,6 @@ class TestEmitHookEvent:
             watcher._process_log_line(
                 "HOOKS",
                 "[HOOKS] cadence fired loader=global turn=35 period=5 offset=0 session=abc",
-                "/fake/file.log",
             )
 
         mock_hook.assert_called_once()
@@ -1150,7 +1025,7 @@ class TestEmitHookEvent:
             patch.object(watcher, "_emit_command_separator") as mock_cmd,
             patch.object(watcher, "_emit_log_event") as mock_log,
         ):
-            watcher._process_log_line("HOOKS", real_line, "/fake/hooks_cadence.log")
+            watcher._process_log_line("HOOKS", real_line)
 
         mock_hook.assert_called_once()
         hook_info = mock_hook.call_args[0][1]

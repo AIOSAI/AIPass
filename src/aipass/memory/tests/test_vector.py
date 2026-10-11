@@ -1,23 +1,24 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_vector.py
-# Date: 2026-04-03
-# Version: 2.0.0
-# Category: memory/tests
+# =================== AIPass ====================
+# Name: test_vector.py
+# Description: EmbeddingService and the embedder public API — PARKED with the symbolic tier, kept for revival
+# Version: 2.0.1
+# Created: 2026-04-05
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for vector embedding handler.
+"""Tests for apps/handlers/vector/embedder.py."""
 
-Covers:
-  - vector/embedder.py  EmbeddingService class (init, encode_batch with
-    pre-sort by length and order restoration)
-  - vector/embedder.py  Public API functions (encode_batch, encode_memories,
-    get_model_info)
-  - vector/embedder.py  Singleton management (_get_service, global reset)
-
-All tests use mocks/tmp_path -- no live fastembed or ONNX access.
-"""
-
+# Tests for vector embedding handler.
+#
+# Covers:
+#   - vector/embedder.py  EmbeddingService class (init, encode_batch with
+#     pre-sort by length and order restoration)
+#   - vector/embedder.py  Public API functions (encode_batch, encode_memories,
+#     get_model_info)
+#   - vector/embedder.py  Singleton management (_get_service, global reset)
+#
+# All tests use mocks/tmp_path -- no live fastembed or ONNX access.
+#
 # ---------------------------------------------------------------------------
 # PARKED 2026-08-14 — @devpulse's ruling, following the owner's symbolic-tier park.
 # vector/embedder.py had exactly two importers, symbolic/storage.py and
@@ -28,6 +29,10 @@ All tests use mocks/tmp_path -- no live fastembed or ONNX access.
 # Active curated-truth piece: Compass — drone @devpulse compass.
 # Revive: tests/parked/symbolic_20260814/README.md
 # ---------------------------------------------------------------------------
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — vector/embed_subprocess.py, the live lane: fastembed runs out of process
+
 import pytest as _parked
 
 _parked.skip(
@@ -77,9 +82,9 @@ def _import_embedder(monkeypatch):
     }
 
 
-def _reset_globals(embedder) -> None:
+def _reset_globals(embedder, monkeypatch) -> None:
     """Reset module-level singleton between tests."""
-    setattr(embedder, "_embedding_service", None)
+    monkeypatch.setattr(embedder, "_embedding_service", None)
 
 
 # ===========================================================================
@@ -92,7 +97,7 @@ class TestPublicEncodeBatch:
 
     def test_empty_list_returns_success_zero_count(self, monkeypatch):
         embedder, _ = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         result = embedder.encode_batch([])
 
@@ -102,7 +107,7 @@ class TestPublicEncodeBatch:
 
     def test_successful_encoding(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         fake_embeddings = [np.array([0.1, 0.2, 0.3]), np.array([0.4, 0.5, 0.6])]
         mocks["model"].embed.return_value = iter(fake_embeddings)
@@ -115,7 +120,7 @@ class TestPublicEncodeBatch:
 
     def test_service_failure_returns_error(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         mocks["model"].embed.side_effect = RuntimeError("ONNX runtime error")
 
@@ -126,7 +131,7 @@ class TestPublicEncodeBatch:
 
     def test_service_init_failure_returns_error(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         mocks["fastembed"].TextEmbedding.side_effect = RuntimeError("Model not found")
 
@@ -146,7 +151,7 @@ class TestPublicEncodeMemories:
 
     def test_empty_list_returns_success(self, monkeypatch):
         embedder, _ = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         result = embedder.encode_memories([])
 
@@ -157,7 +162,7 @@ class TestPublicEncodeMemories:
 
     def test_extracts_content_field(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         fake_embeddings = [np.array([0.1, 0.2])]
         mocks["model"].embed.return_value = iter(fake_embeddings)
@@ -174,7 +179,7 @@ class TestPublicEncodeMemories:
 
     def test_extracts_text_field(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         fake_embeddings = [np.array([0.1, 0.2])]
         mocks["model"].embed.return_value = iter(fake_embeddings)
@@ -190,7 +195,7 @@ class TestPublicEncodeMemories:
 
     def test_falls_back_to_str_representation(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         fake_embeddings = [np.array([0.1, 0.2])]
         mocks["model"].embed.return_value = iter(fake_embeddings)
@@ -206,7 +211,7 @@ class TestPublicEncodeMemories:
 
     def test_encoding_failure_propagates(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         mocks["model"].embed.side_effect = RuntimeError("Encoding crashed")
 
@@ -217,7 +222,7 @@ class TestPublicEncodeMemories:
 
     def test_multiple_memories_mixed_fields(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         fake_embeddings = [np.array([0.1]), np.array([0.2]), np.array([0.3])]
         mocks["model"].embed.return_value = iter(fake_embeddings)
@@ -250,7 +255,7 @@ class TestPublicGetModelInfo:
 
     def test_returns_model_metadata(self, monkeypatch):
         embedder, _ = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         result = embedder.get_model_info()
 
@@ -260,7 +265,7 @@ class TestPublicGetModelInfo:
 
     def test_service_init_failure_returns_error(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         mocks["fastembed"].TextEmbedding.side_effect = ImportError("no model")
 
@@ -280,7 +285,7 @@ class TestEmbeddingServiceEncodeBatch:
 
     def test_presorts_by_length_and_restores_order(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         received_texts: list[Any] = []
 
@@ -304,7 +309,7 @@ class TestEmbeddingServiceEncodeBatch:
 
     def test_empty_texts_returns_empty(self, monkeypatch):
         embedder, _ = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         service = embedder.EmbeddingService()
         result = service.encode_batch([])
@@ -315,7 +320,7 @@ class TestEmbeddingServiceEncodeBatch:
 
     def test_single_text_works(self, monkeypatch):
         embedder, mocks = _import_embedder(monkeypatch)
-        _reset_globals(embedder)
+        _reset_globals(embedder, monkeypatch)
 
         mocks["model"].embed.return_value = iter([np.array([0.5, 0.6])])
 

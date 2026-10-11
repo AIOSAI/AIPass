@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_ops.py
 # Description: Plan Closure Implementation Handler
-# Version: 1.2.0
+# Version: 1.5.0
 # Created: 2026-03-08
-# Modified: 2026-05-16
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -30,7 +30,7 @@ from aipass.flow.apps.handlers.plan.registry_routing import (
     _extract_prefix,
     _resolve_registry_file,
     _find_plan_across_registries,
-    _canonical_plan_id,
+    canonical_plan_id,
 )
 from aipass.flow.apps.handlers.plan.close_helpers import (
     PROCESSED_PLANS_DIR,
@@ -100,6 +100,33 @@ def _scope_reason(row_project: Any) -> str:
     if row_project is None:
         return "no project register above its location"
     return f"belongs to {describe_project(row_project)}"
+
+
+def _refuse_non_plan_file(plan_file: Path, plan_label: str, plan_key: str) -> Dict[str, Any] | None:
+    """The failure result when ``plan_file`` is present but not a plan, else None.
+
+    Close archives the file a row names. Rows registered before leg 7 of fleet
+    green name reports that were only named like plans, so close, close --all
+    and the orphan cleanup would move another branch's report into
+    processed_plans. Only monitor_ops.is_plan_file True passes; an unreadable
+    file (None) is refused as well (devpulse's ruling of leg 8, flow's design).
+    Nothing is saved, moved or renamed on a refusal.
+    """
+    from aipass.flow.apps.handlers.registry.monitor_ops import is_plan_file
+
+    verdict = is_plan_file(plan_file)
+    if verdict is True:
+        return None
+    why = "cannot be read" if verdict is None else "is not a plan (its first line is no plan header)"
+    logger.warning(f"[{MODULE_NAME}] Refused to close {plan_label}: {plan_file} {why}; nothing archived")
+    return {
+        "success": False,
+        "messages": [
+            {"type": "error_text", "text": f"Refused: {plan_file} {why}. Nothing was archived, moved or renamed."}
+        ],
+        "plan_key": plan_key,
+        "cancelled": False,
+    }
 
 
 # =============================================
@@ -247,6 +274,9 @@ def close_plan_impl(
 
             # Check if .md file is orphaned on disk (registry-closed but file never moved)
             if plan_file.exists():
+                refusal = _refuse_non_plan_file(plan_file, plan_label, plan_key)
+                if refusal is not None:
+                    return refusal
                 messages.append(
                     {
                         "type": "warning",
@@ -289,6 +319,13 @@ def close_plan_impl(
                 )
                 logger.info(f"[{MODULE_NAME}] Relocated {plan_label}: {relocated}")
                 plan_file = relocated
+
+        # A present file that is not a plan is never archived (leg 9). An
+        # absent one still closes in the registry only, as before.
+        if plan_file.exists():
+            refusal = _refuse_non_plan_file(plan_file, plan_label, plan_key)
+            if refusal is not None:
+                return refusal
 
         # --- Step 1/5: Template check (informational only -- never deletes) ---
         # Was previously a fast-delete branch (unlink + registry row removal). Removed:
@@ -344,9 +381,13 @@ def close_plan_impl(
             plan_info["status"] = "closed"
             plan_info["closed"] = datetime.now(timezone.utc).isoformat()
             if reg_file:
-                save_registry(registry, registry_file=reg_file)
+                saved = save_registry(registry, registry_file=reg_file)
             else:
-                save_registry(registry)
+                saved = save_registry(registry)
+            # save_registry answers False rather than raising, so the except
+            # below never saw a failed save (flow's decision, leg 10).
+            if not saved:
+                raise OSError("the registry was not saved; the plan is still open and nothing was archived")
             logger.info(f"[{MODULE_NAME}] Marked {plan_label} as closed")
         except Exception as e:
             logger.error(f"[{MODULE_NAME}] Failed to mark plan as closed: {e}")
@@ -374,9 +415,12 @@ def close_plan_impl(
                 plan_info["cleanup_completed"] = True
                 plan_info["cleanup_date"] = datetime.now(timezone.utc).isoformat()
                 if reg_file:
-                    save_registry(registry, registry_file=reg_file)
+                    saved = save_registry(registry, registry_file=reg_file)
                 else:
-                    save_registry(registry)
+                    saved = save_registry(registry)
+                if not saved:
+                    warn = "  Archived, but could not save the registry: the row reads unarchived"
+                    messages.append({"type": "warning", "text": warn})
                 if plan_file.parent != PROCESSED_PLANS_DIR:
                     logger.info(f"[{MODULE_NAME}] Archived {plan_label} to processed_plans")
                     messages.append({"type": "dim", "text": "  Plan archived to processed_plans/"})
@@ -405,8 +449,9 @@ def close_plan_impl(
             dashboard_success = update_dashboard_local()
             central_success = push_to_plans_central()
 
-            # Log dashboard update results (3-tier: modules log, handlers don't)
-            if not dashboard_success:
+            # Log dashboard update results (3-tier: modules log, handlers don't).
+            # None is "flow has no dashboard", not a failure (flow's decision, leg 4).
+            if dashboard_success is False:
                 logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
             if not central_success:
                 logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")
@@ -415,7 +460,7 @@ def close_plan_impl(
             plan_location = plan_info.get("location", "")
             if plan_location:
                 branch_dashboard_success = push_flow_to_branch_dashboard(Path(plan_location))
-                if not branch_dashboard_success:
+                if branch_dashboard_success is False:
                     logger.warning(
                         f"[{MODULE_NAME}] Failed to push flow section to branch dashboard at {plan_location}"
                     )
@@ -619,7 +664,7 @@ def close_all_plans_impl(
         held: List[tuple[str, str, str, Dict[str, Any]]] = []
 
         for plan_num, plan_info in open_plans:
-            plan_id = _canonical_plan_id(plan_num, plan_info)
+            plan_id = canonical_plan_id(plan_num, plan_info)
             if plan_id is None:
                 unresolved.append((plan_num, plan_info))
                 continue

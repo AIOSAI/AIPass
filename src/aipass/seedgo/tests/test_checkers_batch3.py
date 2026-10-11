@@ -1,34 +1,35 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch3.py
 # Description: Batch 3 tests for 8 seedgo checker handlers
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Batch 3 tests for seedgo checker handlers.
+"""Tests for apps/handlers/aipass_standards/log_structure_check.py and seven batch-3 sibling checkers."""
 
-Covers: log_structure_check, log_visibility_check, meta_check,
-modules_check, permission_flags_check, readme_check, shebang_check,
-silent_catch_check.
+# Covers log_visibility, meta, modules, permission_flags, readme, shebang and
+# silent_catch. Each checker gets 3 tests: clean pass, violation caught, bypass
+# respected.
 
-Each checker gets 3 tests: clean pass, violation caught, bypass respected.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the eight checker modules under test parse and import
 
-import sys
 import textwrap
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-# Pre-warm the REAL bypass submodules the checkers import, BEFORE the fixture
-# below replaces ``aipass.seedgo.apps.handlers.bypass`` with a MagicMock. Once
-# the parent is a MagicMock it is no longer a package, so any submodule that is
-# not already a loaded module object fails with
-# "'aipass.seedgo.apps.handlers.bypass' is not a package" on a cold process.
-from aipass.seedgo.apps.handlers.bypass import ignore_handler as _real_ignore_handler
-from aipass.seedgo.apps.handlers.bypass import utils as _real_bypass_utils
+import pytest
+
+from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
+from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
+from aipass.seedgo.apps.handlers.aipass_standards import log_visibility_check
+from aipass.seedgo.apps.handlers.aipass_standards import meta_check
+from aipass.seedgo.apps.handlers.aipass_standards import modules_check
+from aipass.seedgo.apps.handlers.aipass_standards import permission_flags_check
+from aipass.seedgo.apps.handlers.aipass_standards import readme_check
+from aipass.seedgo.apps.handlers.aipass_standards import shebang_check
+from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
 
 
 # ---------------------------------------------------------------------------
@@ -37,70 +38,18 @@ from aipass.seedgo.apps.handlers.bypass import utils as _real_bypass_utils
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports so checkers load in isolation."""
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
+def _pin_bypass_log(monkeypatch):
+    """Point is_bypassed's json_handler at a mock for every test here.
 
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # -- bypass utils (used by checkers for is_bypassed) --------------------
-    # Use real is_bypassed — it only does string matching and calls
-    # json_handler.log_operation (already mocked above). readme_check also
-    # imports the real ignore_handler, so the faked ``bypass`` package has to
-    # expose the pre-warmed real submodule objects.
-    # The real is_bypassed resolves json_handler from its own module globals,
-    # which sys.modules patching does not reach — point it at the mock so these
-    # tests never write to the shared seedgo_json/utils_log.json (a repo file
-    # that xdist workers would otherwise race on).
-    monkeypatch.setattr(_real_bypass_utils, "json_handler", json_mod)
-
-    bypass_pkg = MagicMock()
-    bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = _real_bypass_utils.is_bypassed
-    bypass_pkg.utils = bypass_utils
-    bypass_pkg.ignore_handler = _real_ignore_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.utils", bypass_utils)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        _real_ignore_handler,
-    )
-
-    # Force genuine re-imports of all 8 checkers.
-    # Dropping the sys.modules entry alone is NOT enough: ``from pkg import mod``
-    # short-circuits on the parent package attribute, handing back a stale module
-    # object still bound to whatever mocks a neighbouring test file installed.
-    # Drop the attribute too — monkeypatch restores both on teardown, so this
-    # file neither inherits nor leaves behind poisoned checker modules.
-    from aipass.seedgo.apps.handlers import aipass_standards as standards_pkg
-
-    checker_modules = [
-        "aipass.seedgo.apps.handlers.aipass_standards.log_structure_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.log_visibility_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.meta_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.modules_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.permission_flags_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.readme_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.shebang_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.silent_catch_check",
-    ]
-    for mod_name in checker_modules:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
-        monkeypatch.delattr(standards_pkg, mod_name.rsplit(".", 1)[1], raising=False)
+    The bypass tests call the real is_bypassed, which appends to the
+    repo-tracked seedgo_json/utils_log.json via the json_handler global in
+    its OWN module -- xdist workers racing on that shared file corrupt it
+    (JSONDecodeError: Extra data). sys.modules patching never reaches a
+    function's globals, so the pin must land on the utils module object.
+    """
+    mock_handler = MagicMock()
+    mock_handler.log_operation = MagicMock(return_value=True)
+    monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
 
 
 # ---------------------------------------------------------------------------
@@ -140,8 +89,6 @@ class TestLogStructureCheck:
     """Tests for log_structure_check.check_module."""
 
     def _import(self):
-        from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
-
         return log_structure_check
 
     def test_log_structure_clean_passes(self, tmp_path):
@@ -206,8 +153,6 @@ class TestLogVisibilityCheck:
     """Tests for log_visibility_check.check_module."""
 
     def _import(self):
-        from aipass.seedgo.apps.handlers.aipass_standards import log_visibility_check
-
         return log_visibility_check
 
     def test_log_visibility_clean_passes(self, tmp_path):
@@ -266,8 +211,6 @@ class TestMetaCheck:
     """Tests for meta_check.check_module."""
 
     def _import(self):
-        from aipass.seedgo.apps.handlers.aipass_standards import meta_check
-
         return meta_check
 
     def test_meta_clean_passes(self, tmp_path):
@@ -321,8 +264,6 @@ class TestModulesCheck:
     """Tests for modules_check.check_module."""
 
     def _import(self):
-        from aipass.seedgo.apps.handlers.aipass_standards import modules_check
-
         return modules_check
 
     def test_modules_clean_passes(self, tmp_path):
@@ -393,8 +334,6 @@ class TestPermissionFlagsCheck:
     """Tests for permission_flags_check.check_module."""
 
     def _import(self):
-        from aipass.seedgo.apps.handlers.aipass_standards import permission_flags_check
-
         return permission_flags_check
 
     def test_permission_flags_clean_passes(self, tmp_path):
@@ -452,8 +391,6 @@ class TestReadmeCheck:
     """Tests for readme_check.check_module (entry_point scope)."""
 
     def _import(self):
-        from aipass.seedgo.apps.handlers.aipass_standards import readme_check
-
         return readme_check
 
     def _make_branch(self, tmp_path: Path) -> tuple[Path, str]:
@@ -537,8 +474,6 @@ class TestShebangCheck:
     """Tests for shebang_check.check_module."""
 
     def _import(self):
-        from aipass.seedgo.apps.handlers.aipass_standards import shebang_check
-
         return shebang_check
 
     def test_shebang_clean_passes(self, tmp_path):
@@ -592,8 +527,6 @@ class TestSilentCatchCheck:
     """Tests for silent_catch_check.check_module."""
 
     def _import(self):
-        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
-
         return silent_catch_check
 
     def test_silent_catch_clean_passes(self, tmp_path):

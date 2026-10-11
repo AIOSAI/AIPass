@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.0.0
+# Version: 1.4.0
 # Created: 2026-03-15
-# Modified: 2026-03-15
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -40,6 +40,14 @@ from aipass.seedgo.apps.handlers.audit.branch_audit import discover_checkers
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import (
     get_branch_from_path,
     load_bypass_rules,
+    registry_notes,
+)
+
+# Which checkers judge a file, and how a failure reads (split out at the 600-line cap, leg 15)
+from aipass.seedgo.apps.handlers.checklist.verdicts import (
+    format_failure as _format_failure,
+    is_applicable as _is_applicable,
+    is_skip_or_error as _is_skip_or_error,
 )
 
 # Throwaway / prototype detection
@@ -50,6 +58,9 @@ from aipass.seedgo.apps.handlers.aipass_standards import applicability
 
 # .seedgoignore — gitignore-style per-directory + global default (tools/)
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
+
+# Bypass rules whose scope the checker cannot honour (a lines rule on a checker that passes no line)
+from aipass.seedgo.apps.handlers.bypass import inert
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -79,56 +90,35 @@ def _get_repo_root() -> Path | None:
     return None
 
 
-# =============================================================================
-# CHECKER APPLICABILITY
-# =============================================================================
+def not_judged_here(file_path: str, pack_name: str = "aipass") -> List[str]:
+    """Branch-level standards that apply to this file but the checklist cannot run.
 
+    A ``branch_level`` checker with no ``check_module()`` only judges a whole
+    branch, so :func:`_is_applicable` drops it here without a trace. The result
+    was a clean "All N standards passed" on backup's conftest while the audit
+    convicted that same file under ``unused_conftest_fixture``. Naming the rows
+    that were not judged is what keeps a pass here from reading as a pass there.
 
-def _is_entry_point(file_path: str) -> bool:
-    """Check if file is an entry point: apps/{name}.py (directly in apps/, not subdirectory)."""
-    p = Path(file_path)
-    if not p.name.endswith(".py"):
-        return False
-    if "apps/" not in file_path:
-        return False
-    return p.parent.name == "apps"
-
-
-def _is_applicable(checker, file_path: str) -> bool:
-    """Determine if a checker applies to the given file.
-
-    First gate is APPLIES_TO — whether the standard is meaningful for this
-    KIND of file (production / tests / everywhere), shared with the audit lane
-    via applicability.py so the two can never disagree about scope again.
-    Structural standards used to fail on nearly every test file in the fleet
-    here while the audit lane never even looked at tests/; that gap is what
-    branches were absorbing with bypass rules.
-
-    Then AUDIT_SCOPE — where a result is reported:
-      - "entry_point" (default) -> only apps/{name}.py files
-      - "all_files"             -> any .py file
-      - "branch_level"          -> normally skipped, but eligible if checker
-                                   also implements check_module() for per-file use
+    Applicability still gates the list, so a production file never names a
+    tests-only row and vice versa. ``entry_point`` rows are deliberately not
+    listed: every one implements ``check_module()`` and runs here on the only
+    files it judges (``apps/{name}.py``); elsewhere it has nothing to say.
     """
-    if not applicability.applies_to_file(checker, file_path):
-        return False
-
-    scope = getattr(checker, "AUDIT_SCOPE", "entry_point")
-
-    # Branch-level checkers skip per-file runs UNLESS they also implement
-    # check_module() for targeted single-file validation (e.g., ruff_check)
-    if scope == "branch_level":
-        return hasattr(checker, "check_module") and file_path.endswith(".py")
-
-    # Only check_module() capable checkers
-    if not hasattr(checker, "check_module"):
-        return False
-
-    if scope == "all_files":
-        return file_path.endswith(".py")
-
-    # Default: entry_point scope
-    return _is_entry_point(file_path)
+    resolved = str(Path(file_path).resolve())
+    if not resolved.endswith(".py") or not Path(resolved).exists():
+        return []
+    pack_path = _resolve_pack_path(pack_name)
+    if pack_path is None:
+        return []
+    names = []
+    for name, checker in sorted(discover_checkers(pack_path).items()):
+        if getattr(checker, "AUDIT_SCOPE", "entry_point") != "branch_level":
+            continue
+        if not applicability.applies_to_file(checker, resolved):
+            continue
+        if not _is_applicable(checker, resolved):
+            names.append(name)
+    return names
 
 
 # =============================================================================
@@ -145,14 +135,19 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
         prototype: If True, skip all standards (disposable code).
 
     Returns:
-        List of result dicts: [{"standard": str, "passed": bool, "detail": str|None}]
+        List of result dicts: [{"standard": str, "passed": bool, "detail": str|None}].
+        A result also carries "bypass_notes" (list of str) when a bypass rule for
+        this file and standard has a scope the checker cannot honour; the notes
+        never change "passed".
     """
     resolved = str(Path(file_path).resolve())
 
     if not Path(resolved).exists():
         return [{"standard": "(error)", "passed": False, "detail": f"File not found: {resolved}"}]
 
-    if not resolved.endswith(".py"):
+    # A non-.py file is judged only by a TEXT_FILES checker that reads its kind
+    # (verdicts.reads_text_file); with none, the answer is the one it always was.
+    if not resolved.endswith(".py") and not _text_checkers_for(resolved, pack_name):
         return [{"standard": "(skip)", "passed": True, "detail": "Not a Python file"}]
 
     if is_throwaway_path(resolved):
@@ -204,13 +199,27 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
             # Extract concise failure detail from checks
             detail = _format_failure(r)
 
-        results.append({"standard": name, "passed": passed, "detail": detail})
+        result = {"standard": name, "passed": passed, "detail": detail}
+        notes = inert.inert_notes(resolved, name, bypass_rules)
+        if notes:
+            result["bypass_notes"] = notes
+        results.append(result)
 
     if not results:
         return [{"standard": "(skip)", "passed": True, "detail": "No applicable checkers for this file"}]
 
     json_handler.log_operation("checklist_completed", {"file": str(file_path), "standards_run": len(results)})
     return results
+
+
+def _text_checkers_for(file_path: str, pack_name: str) -> List[str]:
+    """The pack's checkers that judge this non-.py file (TEXT_FILES and its kind)."""
+    pack_path = _resolve_pack_path(pack_name)
+    if pack_path is None:
+        return []
+    return [
+        name for name, checker in sorted(discover_checkers(pack_path).items()) if _is_applicable(checker, file_path)
+    ]
 
 
 def _resolve_pack_path(pack_name: str) -> Optional[Path]:
@@ -245,24 +254,6 @@ def _load_bypass_for_file(file_path: str) -> list:
     if bp is None:
         return []
     return load_bypass_rules(str(bp))
-
-
-def _format_failure(result: Dict) -> str:
-    """Extract a concise one-line failure description from checker result."""
-    checks = result.get("checks", [])
-    failed = [c for c in checks if not c.get("passed", False)]
-
-    if not failed:
-        return "Failed (no details)"
-
-    # Use first failure's message, trimmed
-    msg = failed[0].get("message", "Unknown issue")
-
-    # If multiple failures, indicate count
-    if len(failed) > 1:
-        msg = f"{msg} (+{len(failed) - 1} more)"
-
-    return msg
 
 
 # =============================================================================
@@ -309,6 +300,48 @@ def _print_results(results: List[Dict], file_path: str) -> None:
 
     if all_passed:
         console.print(f"[green]All {len(results)} standards passed[/green]")
+
+    # Notes, never the finding marker: each verdict above is the checker's. Fenced
+    # off by a blank line because hooks' auto_fix rejoins a finding's wrapped
+    # detail until one, and a note is no part of any finding.
+    notes = [(r["standard"], note) for r in results for note in r.get("bypass_notes", [])]
+    if notes:
+        console.print()
+    for std, note in notes:
+        console.print(f"  [yellow]inert bypass[/yellow] \u2014 {std}: {note}")
+
+
+def _print_not_judged(names: List[str]) -> None:
+    """One line naming the branch-level rows this lane did not judge.
+
+    ``soft_wrap`` keeps it one physical line at any console width, so a grep
+    for a standard's name finds the whole list rather than a wrapped fragment.
+
+    Printed AFTER the verdicts and behind a blank line: hooks' auto_fix parser
+    rejoins wrapped finding details until a blank line, a check or "All ", so
+    a line directly under the last finding would be glued onto it. It never
+    carries :data:`FINDING_MARKER` and never touches the pass count.
+    """
+    if not names:
+        return
+    console.print()
+    console.print(
+        f"[dim]Not judged here (branch-level, run by `drone @seedgo audit`): {', '.join(names)}[/dim]",
+        highlight=False,
+        soft_wrap=True,
+    )
+
+
+def _print_registry_notes(notes: List[str]) -> None:
+    """Each unreadable-registry note once, after every verdict, behind a blank line.
+
+    Devpulse's ruling (seedgo fleet green leg 15): a registry nobody could read
+    changes no verdict and is said here instead, never with the finding marker.
+    """
+    if notes:
+        console.print()
+    for note in notes:
+        console.print(f"[yellow]note[/yellow] — {note}", highlight=False, soft_wrap=True)
 
 
 # =============================================================================
@@ -393,7 +426,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         for f in py_files:
             results = run_checklist(str(f), pack_name=pack_name, prototype=prototype)
             _print_results(results, str(f))
+            if not _is_skip_or_error(results):
+                _print_not_judged(not_judged_here(str(f), pack_name=pack_name))
             console.print()
+        _print_registry_notes(registry_notes())
         return True
 
     # Single file mode
@@ -401,6 +437,9 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # Print results
     _print_results(results, str(resolved))
+    if not _is_skip_or_error(results):
+        _print_not_judged(not_judged_here(str(resolved), pack_name=pack_name))
+    _print_registry_notes(registry_notes())
 
     return True
 
@@ -486,7 +525,9 @@ def print_help() -> None:
     console.print("[yellow]SCOPE RULES:[/yellow]")
     console.print('  Checkers with [cyan]AUDIT_SCOPE = "entry_point"[/cyan] only run on apps/{name}.py files')
     console.print('  Checkers with [cyan]AUDIT_SCOPE = "all_files"[/cyan] run on any .py file')
+    console.print("  A non-.py text file is judged only by checkers declaring [cyan]TEXT_FILES = True[/cyan]")
     console.print('  Checkers with [cyan]AUDIT_SCOPE = "branch_level"[/cyan] are skipped (need full branch)')
+    console.print("  Skipped branch-level rows that apply to the file are named on one closing line, not counted")
     console.print()
 
     console.print("[yellow]EXAMPLES:[/yellow]")

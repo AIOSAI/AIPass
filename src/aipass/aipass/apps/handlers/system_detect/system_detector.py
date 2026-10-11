@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: system_detector.py
 # Description: Pure system detection logic for aipass doctor
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -21,7 +21,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
@@ -31,8 +31,13 @@ from aipass.aipass.apps.handlers.json import json_handler
 # =============================================================================
 
 
-def detect_python() -> Dict[str, Any]:
+def detect_python(version_info: Any = sys.version_info) -> Dict[str, Any]:
     """Return Python version info and ok/warning flags.
+
+    Args:
+        version_info: The interpreter's version, sys.version_info by default.
+            A seam for the tests: 3.8 and 3.7 are read without replacing sys
+            process-wide. Every product caller passes nothing.
 
     Returns:
         version: str like "3.11.5"
@@ -41,7 +46,7 @@ def detect_python() -> Dict[str, Any]:
         ok: bool — True if >=3.9
         warning: bool — True if ==3.8 (supported but near end)
     """
-    info = sys.version_info
+    info = version_info
     version = f"{info.major}.{info.minor}.{info.micro}"
     ok = (info.major, info.minor) >= (3, 9)
     warning = (info.major, info.minor) == (3, 8)
@@ -96,18 +101,23 @@ def detect_git() -> Dict[str, Any]:
 # =============================================================================
 
 
-def _shell_from_parent_proc() -> str | None:
+def _shell_from_parent_proc(os_name: str = os.name, getppid: Callable[[], int] = os.getppid) -> str | None:
     """POSIX fallback: read the invoking parent process's command name via /proc.
 
     Many containers/CI runners don't export $SHELL even though a real shell
     (bash/sh) is running the process — this is knowable via /proc/<ppid>/comm
     on Linux. Returns None if unavailable (non-Linux, /proc missing, read
     failure) — callers should keep the existing "unknown" fallback.
+
+    Args:
+        os_name: os.name by default; getppid: os.getppid by default. Seams for
+            the tests, handed down by detect_shell: a forced platform or parent
+            pid without replacing os process-wide.
     """
-    if os.name != "posix":
+    if os_name != "posix":
         return None
     try:
-        comm_path = Path(f"/proc/{os.getppid()}/comm")
+        comm_path = Path(f"/proc/{getppid()}/comm")
         if not comm_path.is_file():
             return None
         name = comm_path.read_text(encoding="utf-8").strip()
@@ -117,12 +127,16 @@ def _shell_from_parent_proc() -> str | None:
     return name or None
 
 
-def detect_shell() -> Dict[str, Any]:
+def detect_shell(os_name: str = os.name, getppid: Callable[[], int] = os.getppid) -> Dict[str, Any]:
     """Return shell name and path.
 
     Falls back to the parent process's command name (via /proc/<ppid>/comm on
     Linux) when $SHELL isn't set — common in containers/CI runners that don't
     export it even though a real shell is running the process.
+
+    Args:
+        os_name: os.name by default; getppid: os.getppid by default. Seams for
+            the tests, handed to the /proc fallback; product callers pass nothing.
 
     Returns:
         name: str — e.g. "bash", "zsh", or "unknown"
@@ -132,7 +146,7 @@ def detect_shell() -> Dict[str, Any]:
     if shell_path:
         return {"name": Path(shell_path).name, "path": shell_path}
 
-    name = _shell_from_parent_proc()
+    name = _shell_from_parent_proc(os_name, getppid)
     if name:
         resolved = shutil.which(name)
         if resolved:

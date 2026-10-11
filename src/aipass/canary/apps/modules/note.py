@@ -1,17 +1,23 @@
 # =================== AIPass ====================
 # Name: note.py
 # Description: Note store command - drone @canary note add|list
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-12
-# Modified: 2026-09-15
+# Modified: 2026-09-30
 # =============================================
 
 """Append-only note store: add a note, list the notes.
+
+``note list --json`` prints every record as one JSON array of
+``{"text", "timestamp"}`` objects, ``[]`` for an empty store. ``--json`` may
+sit anywhere in the arguments but belongs to list only: on add it is refused,
+never stored as note text.
 
 A store that will not parse is refused by file name with a non-zero exit, and
 is never reset or rewritten.
 """
 
+import json
 from typing import List
 
 from aipass.canary.apps.handlers.json import json_handler
@@ -20,6 +26,8 @@ from aipass.cli.apps.modules import console, error
 from aipass.prax import logger
 
 REPAIR_HINT = "inspect or move the file by hand - canary never rewrites a store it cannot read"
+
+JSON_FLAG = "--json"
 
 
 def print_introspection() -> None:
@@ -30,6 +38,7 @@ def print_introspection() -> None:
     console.print("[yellow]Commands:[/yellow]")
     console.print("  [cyan]note add TEXT[/cyan]   Append one note with a timestamp")
     console.print("  [cyan]note list[/cyan]       Print every note in order")
+    console.print("  [cyan]note list --json[/cyan] The same notes as one JSON array")
     console.print()
     console.print(f"[dim]Store: {store.STORE_PATH}[/dim]", markup=True, highlight=False)
     console.print("[dim]Run 'drone @canary note --help' for usage[/dim]")
@@ -44,6 +53,7 @@ def print_help() -> None:
     console.print("[bold cyan]Usage:[/bold cyan]")
     console.print("  [green]drone @canary note add TEXT[/green]   Append one note (text + timestamp)")
     console.print("  [green]drone @canary note list[/green]       Print notes in order, with index and timestamp")
+    console.print("  [green]drone @canary note list --json[/green] One JSON array of text/timestamp objects")
     console.print("  [green]drone @canary note[/green]            No subcommand: the module's own map and store path")
     console.print()
 
@@ -53,11 +63,13 @@ def print_help() -> None:
     console.print()
     console.print("[yellow]Refusals (exit 2):[/yellow]")
     console.print("  A store that will not parse is named and left exactly as it is - never reset")
-    console.print("  note add with no text, note list with arguments, an unknown subcommand")
+    console.print("  note add with no text, note list with arguments, an unknown subcommand,")
+    console.print("  --json on anything but list")
     console.print()
     console.print("[yellow]Examples:[/yellow]")
     console.print('  $ drone @canary note add "check the tick-5 interrupt"')
     console.print("  $ drone @canary note list")
+    console.print('  $ drone @canary note list --json   [dim]-> [{"text": "...", "timestamp": "..."}][/dim]')
     console.print()
 
 
@@ -100,11 +112,12 @@ def _add(words: List[str]) -> None:
     console.print(f"Added note at {record['timestamp']}", markup=False, highlight=False)
 
 
-def _list(extra: List[str]) -> None:
+def _list(extra: List[str], as_json: bool) -> None:
     """Print every note in store order with its index and timestamp.
 
     Args:
         extra: Arguments after 'list' - there must be none.
+        as_json: True for one JSON array of the stored records instead.
     """
     if extra:
         error(f"note list takes no arguments (got: {' '.join(extra)})", suggestion="drone @canary note list")
@@ -121,6 +134,10 @@ def _list(extra: List[str]) -> None:
         return
 
     json_handler.log_operation("notes_listed", {"count": len(records)})
+    if as_json:
+        payload = json.dumps(records, ensure_ascii=False)
+        console.print(payload, markup=False, highlight=False, emoji=False, soft_wrap=True)
+        return
     if not records:
         console.print(f"No notes yet - store: {store.STORE_PATH}", markup=False, highlight=False)
         return
@@ -160,11 +177,17 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_help()
         return True
 
-    subcommand, rest = args[0], args[1:]
+    as_json = JSON_FLAG in args
+    words = [arg for arg in args if arg != JSON_FLAG]
+    if as_json and words[:1] != ["list"]:
+        error("note refused: --json is only for list", suggestion="drone @canary note list --json")
+        return True
+
+    subcommand, rest = words[0], words[1:]
     if subcommand == "add":
         _add(rest)
     elif subcommand == "list":
-        _list(rest)
+        _list(rest, as_json)
     else:
         error(f"Unknown note subcommand: {subcommand}", suggestion="drone @canary note --help")
     return True

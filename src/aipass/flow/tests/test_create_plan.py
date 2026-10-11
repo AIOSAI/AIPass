@@ -1,20 +1,26 @@
-"""Tests for create_plan module -- handle_command routing."""
+# =================== AIPass ====================
+# Name: test_create_plan.py
+# Description: Tests for apps/modules/create_plan.py -- handle_command routing
+# Version: 1.0.0
+# Created: 2026-03-24
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/modules/create_plan.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that create_plan.py parses and imports
+# seedgo: no-test-needed(constant) — print_introspection's and print_help's literal banner text
 
 from unittest.mock import patch
 
+import pytest
+
+from aipass.cli.apps.modules import command_failed, reset_command_state
+from aipass.flow.apps.modules.create_plan import handle_command
 
 # ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.modules.create_plan"
-
-
-# ─── Helpers ─────────────────────────────────────────────
-
-
-def _import_handle_command():
-    """Import handle_command inside each test so autouse mocks are active."""
-    from aipass.flow.apps.modules.create_plan import handle_command
-
-    return handle_command
 
 
 # ═══════════════════════════════════════════════════════════
@@ -24,15 +30,12 @@ def _import_handle_command():
 
 class TestCommandRouting:
     def test_wrong_command_returns_false(self):
-        handle_command = _import_handle_command()
         assert handle_command("delete", []) is False
 
     def test_unrelated_command_returns_false(self):
-        handle_command = _import_handle_command()
         assert handle_command("close", ["42"]) is False
 
     def test_empty_command_returns_false(self):
-        handle_command = _import_handle_command()
         assert handle_command("", []) is False
 
 
@@ -44,7 +47,6 @@ class TestCommandRouting:
 class TestIntrospection:
     @patch(f"{_MOD}.print_introspection")
     def test_no_args_calls_introspection(self, mock_introspection):
-        handle_command = _import_handle_command()
         result = handle_command("create", [])
         assert result is True
         mock_introspection.assert_called_once()
@@ -53,7 +55,6 @@ class TestIntrospection:
     def test_no_args_does_not_parse(self, mock_introspection):
         """Introspection should not attempt to parse arguments."""
         with patch(f"{_MOD}.parse_create_plan_args") as mock_parse:
-            handle_command = _import_handle_command()
             result = handle_command("create", [])
             assert result is True  # Command was handled
             mock_parse.assert_not_called()
@@ -67,21 +68,18 @@ class TestIntrospection:
 class TestHelp:
     @patch(f"{_MOD}.print_help")
     def test_help_flag(self, mock_help):
-        handle_command = _import_handle_command()
         result = handle_command("create", ["--help"])
         assert result is True
         mock_help.assert_called_once()
 
     @patch(f"{_MOD}.print_help")
     def test_h_flag(self, mock_help):
-        handle_command = _import_handle_command()
         result = handle_command("create", ["-h"])
         assert result is True
         mock_help.assert_called_once()
 
     @patch(f"{_MOD}.print_help")
     def test_help_word(self, mock_help):
-        handle_command = _import_handle_command()
         result = handle_command("create", ["help"])
         assert result is True
         mock_help.assert_called_once()
@@ -98,7 +96,6 @@ class TestValidArgs:
     @patch(f"{_MOD}.get_plan_type", return_value={"prefix": "FPLAN", "digits": 4, "default_template": "default"})
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "flow_plans"))
     def test_valid_args_calls_parse(self, mock_parse, mock_get_type, mock_create, mock_display):
-        handle_command = _import_handle_command()
         result = handle_command("create", [".", "My Plan"])
         assert result is True
         mock_parse.assert_called_once_with([".", "My Plan"])
@@ -108,7 +105,6 @@ class TestValidArgs:
     @patch(f"{_MOD}.get_plan_type", return_value={"prefix": "FPLAN", "digits": 4, "default_template": "default"})
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "flow_plans"))
     def test_valid_args_calls_create_plan(self, mock_parse, mock_get_type, mock_create, mock_display):
-        handle_command = _import_handle_command()
         result = handle_command("create", [".", "My Plan"])
         assert result is True  # Command was handled
         mock_create.assert_called_once_with(
@@ -123,7 +119,6 @@ class TestValidArgs:
     @patch(f"{_MOD}.get_plan_type", return_value={"prefix": "FPLAN", "digits": 4, "default_template": "default"})
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "flow_plans"))
     def test_valid_args_calls_display_result(self, mock_parse, mock_get_type, mock_create, mock_display):
-        handle_command = _import_handle_command()
         result = handle_command("create", [".", "My Plan"])
         assert result is True  # Command was handled
         mock_display.assert_called_once_with(
@@ -142,7 +137,6 @@ class TestValidArgs:
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "dev_plans"))
     def test_dplan_type_passes_through(self, mock_parse, mock_get_type, mock_create, mock_display):
         """When args include 'dplan', parse_create_plan_args returns dev_plans type key."""
-        handle_command = _import_handle_command()
         result = handle_command("create", [".", "My Plan", "dplan"])
         assert result is True
         mock_create.assert_called_once_with(
@@ -159,19 +153,35 @@ class TestValidArgs:
 
 
 class TestInvalidPlanType:
+    @patch(f"{_MOD}.create_plan")
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "bad_type"))
     @patch(f"{_MOD}.get_plan_type", side_effect=ValueError("Unknown plan type 'bad_type'"))
-    def test_invalid_type_returns_true(self, mock_get_type, mock_parse):
-        """Invalid plan type is an error but command was still handled."""
-        handle_command = _import_handle_command()
+    def test_invalid_type_returns_true(
+        self, mock_get_type, mock_parse, mock_create, capsys: pytest.CaptureFixture[str]
+    ):
+        """Invalid plan type is an error but command was still handled.
+
+        Handled, and handled as a FAILURE: the reason reaches stderr through cli's
+        error(), which marks the process failed so flow's entry point exits 2
+        (compass 451), and no plan is created. create_plan is patched so that a
+        router which ran on past the refusal is caught here, not in a real registry.
+        Mutant: `cli_error(str(exc))` -> `console.print(str(exc))` reddens this.
+        """
+        reset_command_state()
         result = handle_command("create", [".", "My Plan", "bad_type"])
+
+        out, err = capsys.readouterr()
         assert result is True
+        assert "Unknown plan type 'bad_type'" in err
+        assert "Registered types: drone @flow templates" in out
+        assert command_failed() is True
+        mock_create.assert_not_called()
+        reset_command_state()
 
     @patch(f"{_MOD}.cli_error")
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "bad_type"))
     @patch(f"{_MOD}.get_plan_type", side_effect=ValueError("Unknown plan type 'bad_type'"))
     def test_invalid_type_calls_error(self, mock_get_type, mock_parse, mock_cli_error):
-        handle_command = _import_handle_command()
         result = handle_command("create", [".", "My Plan", "bad_type"])
         assert result is True  # Command was handled (error displayed)
         mock_cli_error.assert_called_once_with("Unknown plan type 'bad_type'")
@@ -189,7 +199,6 @@ class TestOperationLogging:
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "flow_plans"))
     @patch(f"{_MOD}.json_handler", spec=True)
     def test_logs_operation(self, mock_jh, mock_parse, mock_get_type, mock_create, mock_display):
-        handle_command = _import_handle_command()
         result = handle_command("create", [".", "My Plan"])
         assert result is True  # Command was handled
         mock_jh.log_operation.assert_called_once_with(

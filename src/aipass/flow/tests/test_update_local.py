@@ -3,24 +3,13 @@
 # Description: Tests for update_local handler — Flow dashboard updates
 # Version: 2.0.0
 # Created: 2026-04-26
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
-"""
-Tests for update_local handler — Flow's own dashboard card.
+"""Tests for apps/handlers/dashboard/update_local.py."""
 
-As of 2026-09-15 (DPLAN-0347 / FPLAN-0593 Phase 2) this handler no longer
-builds a card of its own: it delegates to push_flow_to_branch_dashboard, the
-one writer of the flow section, pointed at Flow's own root. The builders it
-used to own — registry merge, plan extraction, statistics, dashboard assembly —
-live in push_branch_dashboard.py and are pinned by test_push_branch_dashboard.py.
-
-What is pinned here is the delegation itself and the defect that motivated it:
-the top-level ``flow_plans`` key must never come back. It was written outside
-``sections``, where the dashboard's preserve and budget logic cannot see it, so
-@prax's refresh dropped it and the next plan operation re-added it — a flap
-measured on Flow's own dashboard the day this landed.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that update_local.py parses and imports
 
 import json
 from pathlib import Path
@@ -87,12 +76,20 @@ class TestDelegation:
         with patch(f"{_MOD}.push_flow_to_branch_dashboard", return_value=False):
             assert update_local.update_dashboard_local() is False
 
-    def test_returns_false_when_flow_has_no_dashboard(self, flow_root):
-        """No dashboard file means no branch to write to — refuse, never create."""
-        assert update_local.update_dashboard_local() is False
+    def test_returns_none_when_flow_has_no_dashboard(self, flow_root):
+        """No dashboard file means no branch to write to — refuse, never create.
+
+        None, not False: False is kept for a push that failed (flow's decision, leg 3).
+        Mutant: return result -> return bool(result) reddens this.
+        """
+        assert update_local.update_dashboard_local() is None
         assert not (flow_root / "DASHBOARD.local.json").exists()
 
 
+# WHY THIS IS PINNED: the top-level flow_plans key must never come back. It
+# was written outside "sections", where the dashboard's preserve and budget
+# logic cannot see it, so @prax's refresh dropped it and the next plan
+# operation re-added it — a flap measured on Flow's own dashboard.
 class TestNoTopLevelFlowPlansKey:
     """The regression this delegation exists to end."""
 

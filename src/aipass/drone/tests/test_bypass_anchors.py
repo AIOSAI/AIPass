@@ -1,54 +1,59 @@
 # =================== AIPass ====================
 # Name: test_bypass_anchors.py
 # Description: A line-scoped standards waiver must still point at what it claims
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""A waiver that fails OPEN and SILENT is the one failure mode a waiver must not have.
+"""Tests for .seedgo/bypass.json: each line-scoped waiver still points at its anchor, e.g. apps/plugins/devpulse_ops/auth.py."""
 
-THE SPECIES, @trigger's (round 5), measured fleet-wide by @seedgo (round 6). A
-bypass entry scoped to LINE NUMBERS is a pointer into a file, and every edit above
-those lines invalidates it silently. @trigger's round-4 sweep added comment lines
-and shifted four of their waivers off target; the suppressed violations resurfaced
-as unexplained findings in files nobody had touched semantically. Nothing reports
-this — a waiver that stops matching simply stops working, and a waiver that starts
-matching again suppresses whatever now occupies those lines.
-
-DRONE'S EXPOSURE, measured by @seedgo and reproduced here line by line before
-acting on it: nine numbers across two ``cli`` entries, every one adrift (+8 and
-+13 in ``apps/drone.py``, +4 in ``apps/modules/router.py``). Those two entries
-were DELETED rather than re-derived, because they had also become redundant —
-``cli_check`` learned the relayed-stream exemption in round two, so both files
-score 100 on their own merits. Verified by A/B here: removing both left ``cli`` at
-100 and violations at 0. The fleet rule decides it — if the exemption is
-structurally detectable, the checker learns it; a waiver is only for what cannot
-be measured.
-
-ONE LINE-SCOPED WAIVER SURVIVES, ``auth.py:27``, and it was on target. It stays
-because it is a genuine cannot-be-measured case, and it now carries an ``anchor``:
-the text that line must contain. This file is what makes the anchor mean anything.
-
-NOTHING BUT THIS FILE WATCHES THE ANCHOR. @trigger read the two match sites in
-seedgo before relying on theirs — ``bypass_handler.py:223`` and
-``bypass/utils.py:34`` both match on ``lines`` alone, so the ``anchor`` key is
-inert to the checker and this test is the only thing enforcing it. Said out loud
-because verifying the audit still scores 100 with the key present (which is what
-this branch did first) proves seedgo does not CHOKE on the field, not that it
-reads it — an absence of evidence standing in for knowledge.
-
-WHY AN ANCHOR RATHER THAN A RE-DERIVATION: re-deriving fixes today's numbers and
-leaves tomorrow's edit free to break them the same way. @seedgo has the general
-consequence queued for the checker pack — waivers should anchor to CONTENT, not to
-line numbers — and this is that rule enforced locally in the one branch that still
-has the exposure. If a future edit moves line 27, this file goes red naming the
-entry, instead of the waiver going quiet.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — whether seedgo honours a waiver at all, pinned by @seedgo in tests/test_bypass.py
 
 import json
 from pathlib import Path
 
 import pytest
+
+# A waiver that fails OPEN and SILENT is the one failure mode a waiver must not have.
+#
+# THE SPECIES, @trigger's (round 5), measured fleet-wide by @seedgo (round 6). A
+# bypass entry scoped to LINE NUMBERS is a pointer into a file, and every edit above
+# those lines invalidates it silently. @trigger's round-4 sweep added comment lines
+# and shifted four of their waivers off target; the suppressed violations resurfaced
+# as unexplained findings in files nobody had touched semantically. Nothing reports
+# this — a waiver that stops matching simply stops working, and a waiver that starts
+# matching again suppresses whatever now occupies those lines.
+#
+# DRONE'S EXPOSURE, measured by @seedgo and reproduced here line by line before
+# acting on it: nine numbers across two ``cli`` entries, every one adrift (+8 and
+# +13 in ``apps/drone.py``, +4 in ``apps/modules/router.py``). Those two entries
+# were DELETED rather than re-derived, because they had also become redundant —
+# ``cli_check`` learned the relayed-stream exemption in round two, so both files
+# score 100 on their own merits. Verified by A/B here: removing both left ``cli`` at
+# 100 and violations at 0. The fleet rule decides it — if the exemption is
+# structurally detectable, the checker learns it; a waiver is only for what cannot
+# be measured.
+#
+# ONE LINE-SCOPED WAIVER SURVIVES, ``auth.py:27``, and it was on target. It stays
+# because it is a genuine cannot-be-measured case, and it now carries an ``anchor``:
+# the text that line must contain. This file is what makes the anchor mean anything.
+#
+# NOTHING BUT THIS FILE WATCHES THE ANCHOR. @trigger read the two match sites in
+# seedgo before relying on theirs — ``bypass_handler.py:223`` and
+# ``bypass/utils.py:34`` both match on ``lines`` alone, so the ``anchor`` key is
+# inert to the checker and this test is the only thing enforcing it. Said out loud
+# because verifying the audit still scores 100 with the key present (which is what
+# this branch did first) proves seedgo does not CHOKE on the field, not that it
+# reads it — an absence of evidence standing in for knowledge.
+#
+# WHY AN ANCHOR RATHER THAN A RE-DERIVATION: re-deriving fixes today's numbers and
+# leaves tomorrow's edit free to break them the same way. @seedgo has the general
+# consequence queued for the checker pack — waivers should anchor to CONTENT, not to
+# line numbers — and this is that rule enforced locally in the one branch that still
+# has the exposure. If a future edit moves line 27, this file goes red naming the
+# entry, instead of the waiver going quiet.
 
 # No ``.resolve()`` here, and that is the point rather than an omission. The first
 # cut of this line was a bare module-level ``Path(__file__).resolve()`` — the exact

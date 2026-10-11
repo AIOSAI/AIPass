@@ -1,47 +1,53 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_help_markup.py
 # Description: Canary tests that literal [placeholders] survive Rich rendering
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-10
-# Modified: 2026-08-10
+# Modified: 2026-10-03
 # =============================================
 
-"""Rendered-output canaries for square-bracket placeholders.
+"""Tests for apps/modules/monitor.py, apps/prax.py and apps/modules/log_health.py's bracket rendering."""
 
-Rich treats ``[word]`` as a style tag, so an UNESCAPED literal placeholder is
-consumed silently: ``drone @prax monitor run [branches]`` renders as
-``drone @prax monitor run`` with no error and no visible gap. Every test here
-renders through a REAL Rich console (not the MagicMock the shared conftest
-installs) and asserts the bracketed text is still in the output — a mocked
-console records the call but never renders, so it cannot catch this class.
+# Rendered-output canaries for square-bracket placeholders.
+#
+# Rich treats ``[word]`` as a style tag, so an UNESCAPED literal placeholder is
+# consumed silently: ``drone @prax monitor run [branches]`` renders as
+# ``drone @prax monitor run`` with no error and no visible gap. Every test here
+# renders through the product's own Rich console, read back with capsys, and
+# asserts the bracketed text is still in the output — a mocked console records
+# the call but never renders, so it cannot catch this class.
+#
+# Covers:
+# - monitor.print_help() — the ``[branches]`` argument placeholder
+# - prax.print_help() — the ``[options]`` usage placeholder
+# - log_health._display_rates() — the ``[branch]`` attribution tag on every row
 
-Covers:
-- monitor.print_help() — the ``[branches]`` argument placeholder
-- prax.print_help() — the ``[options]`` usage placeholder
-- log_health._display_rates() — the ``[branch]`` attribution tag on every row
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — prax.py's main() on each flag, covered by tests/test_help_flag_safety.py
+# seedgo: no-test-needed(through_the_command) — monitor.py's run dispatch, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — log_health.py's handle_command, covered by tests/test_log_health.py
 
-import importlib
 import io
 from pathlib import Path
 
 import pytest
 from rich.console import Console
 
+from aipass.prax.apps import prax as prax_entry
+from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
+from aipass.prax.apps.modules import log_health, monitor
 
-def _render(module_path: str, call):
-    """Call ``call(module)`` with a real Rich console and return the output text."""
-    module = importlib.import_module(module_path)
-    buffer = io.StringIO()
-    real_console = Console(file=buffer, width=200, no_color=True, highlight=False, markup=True)
-    original = getattr(module, "console")
-    setattr(module, "console", real_console)
-    try:
+
+@pytest.fixture
+def render(capsys):
+    """Call ``call(module)`` through the product's own console and return what it printed."""
+
+    def _render(module, call) -> str:
+        capsys.readouterr()
         call(module)
-    finally:
-        setattr(module, "console", original)
-    return buffer.getvalue()
+        return capsys.readouterr().out
+
+    return _render
 
 
 # ---------------------------------------------------------------------------
@@ -52,24 +58,28 @@ def _render(module_path: str, call):
 class TestHelpPlaceholders:
     """Placeholders in --help output must reach the terminal."""
 
+    @pytest.fixture(autouse=True)
+    def _keep_render(self, render):
+        self._render = render
+
     def test_monitor_help_keeps_branches_placeholder(self):
         """monitor --help shows [branches], not a truncated 'monitor run'."""
-        output = _render("aipass.prax.apps.modules.monitor", lambda m: m.print_help())
+        output = self._render(monitor, lambda m: m.print_help())
         assert "[branches]" in output
 
     def test_prax_help_keeps_options_placeholder(self):
         """prax --help shows the [options] usage placeholder."""
-        output = _render("aipass.prax.apps.prax", lambda m: m.print_help())
+        output = self._render(prax_entry, lambda m: m.print_help())
         assert "[options]" in output
 
     def test_monitor_help_documents_commons_feed(self):
         """Commons feed mode is discoverable from --help (devpulse 62dcd0cc)."""
-        output = _render("aipass.prax.apps.modules.monitor", lambda m: m.print_help())
+        output = self._render(monitor, lambda m: m.print_help())
         assert "monitor run commons" in output
 
     def test_monitor_help_does_not_advertise_mission_control_filter(self):
         """_handle_interactive_cmd dispatches only help/status — no bare 'filter' claim."""
-        output = _render("aipass.prax.apps.modules.monitor", lambda m: m.print_help())
+        output = self._render(monitor, lambda m: m.print_help())
         for line in output.splitlines():
             if line.strip().startswith("filter"):
                 pytest.fail(f"help advertises an unhandled Mission Control command: {line.strip()}")
@@ -83,12 +93,14 @@ class TestHelpPlaceholders:
 class TestScopedBannerRenders:
     """The scope names must reach the terminal, not just console.print."""
 
-    def _banner(self, scope_args):
-        from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
+    @pytest.fixture(autouse=True)
+    def _keep_render(self, render):
+        self._render = render
 
+    def _banner(self, scope_args):
         scope = parse_scope(scope_args)
-        return _render(
-            "aipass.prax.apps.modules.monitor",
+        return self._render(
+            monitor,
             lambda m: m.console.print(f"[green]{m._mode_line(scope)}[/green]"),
         )
 
@@ -107,6 +119,10 @@ class TestScopedBannerRenders:
 
 class TestLogHealthBranchTag:
     """Every log-health row carries a visible [branch] tag."""
+
+    @pytest.fixture(autouse=True)
+    def _keep_render(self, render):
+        self._render = render
 
     ROWS = [
         {
@@ -135,8 +151,8 @@ class TestLogHealthBranchTag:
     @pytest.mark.parametrize("branch", ["prax", "seedgo", "cli"])
     def test_branch_tag_survives_rendering(self, branch):
         """Flagged, active and idle rows all keep their bracketed branch name."""
-        output = _render(
-            "aipass.prax.apps.modules.log_health",
+        output = self._render(
+            log_health,
             lambda m: m._display_rates(list(self.ROWS), is_scan=True),
         )
         assert f"[{branch}]" in output
@@ -158,6 +174,10 @@ class TestHelpCoversEveryCommand:
     flag, pointed the other way.
     """
 
+    @pytest.fixture(autouse=True)
+    def _keep_render(self, render):
+        self._render = render
+
     def _routable_commands(self):
         """The module files prax.py will load as command handlers."""
         modules_dir = Path(__file__).resolve().parent.parent / "apps" / "modules"
@@ -169,10 +189,10 @@ class TestHelpCoversEveryCommand:
 
     def test_help_lists_every_routable_module(self):
         """Every discovered command module appears in --help."""
-        output = _render("aipass.prax.apps.prax", lambda m: m.print_help())
+        output = self._render(prax_entry, lambda m: m.print_help())
 
         missing = [c for c in self._routable_commands() if c not in output]
-        assert not missing, f"commands missing from --help: {missing}"
+        assert missing == [], f"commands missing from --help: {missing}"
 
     def test_discovery_finds_the_modules_we_think_it_does(self):
         """The guard above is only as good as the list it checks."""

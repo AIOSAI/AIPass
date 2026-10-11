@@ -81,7 +81,10 @@ The standard AIPass three-layer shape. `apps/ai_mail.py` is a thin entry point t
 discovers modules and routes to the first one claiming a command. `apps/modules/` holds the
 orchestration, one module per surface: `email` (inbox, view, reply, close, contacts),
 `email_send` (direct, interactive and broadcast sending) and `dispatch` (send-plus-wake,
-register, status, daemon). `apps/handlers/` holds the implementation, grouped one directory
+register, status, daemon). Three doors sit beside them, re-exports for other branches and
+not commands (DPLAN-0404): `door_wake`, `door_verified_caller` and `door_session_pointer`.
+`apps/handlers/` is fenced: another branch that imports it directly is refused at import
+time, and reaches it through a door. `apps/handlers/` holds the implementation, grouped one directory
 per concern: `email/` for the delivery pipeline and the mailbox verbs, `dispatch/` for the
 wake path, the monitor, the register, completion reports and the session pointer,
 `registry/` and `users/` for address and identity resolution, `cli/` for the help-flag
@@ -135,7 +138,7 @@ Depth lives in [docs/](docs/), one file per handler group, each small enough for
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-08
 
 ---
 [← Back to AIPass](../../../README.md)

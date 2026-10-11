@@ -21,7 +21,7 @@ calls subprocess to check tmux state.
 import subprocess
 from typing import Optional
 
-from aipass.skills.apps.handlers.json import json_handler  # noqa: F401
+from aipass.skills.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 

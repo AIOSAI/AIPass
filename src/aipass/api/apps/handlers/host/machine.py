@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: machine.py
 # Description: Host API Machine Handler — the phone's vitals, proxied from @skills
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-09-13
-# Modified: 2026-09-13
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -77,6 +77,7 @@ Classes:
 
 Functions:
     read_machine() - The machine's vitals, at most one read per second
+    forget()       - Drop the cached reading so the next read asks @skills' machine_vitals() again
 """
 
 from typing import Any, Dict
@@ -94,6 +95,12 @@ _VITALS_KEY = "vitals"
 # What a refusal carries when the skill gave no detail at all. Only ever used in
 # place of NOTHING — a detail the skill did give travels untouched.
 NO_DETAIL = "@skills refused the machine read and gave no detail"
+
+# What the client is told when the door raises. Fixed, never the exception's
+# own words: those can carry host paths and module names, and this sentence
+# travels to a handset (CodeQL py/stack-trace-exposure, PR #774). The words
+# themselves go to the host log, with the traceback.
+DOOR_RAISED = "@skills' machine_vitals() raised; the error is in this host's log"
 
 _vitals = ReadCache("machine_vitals", MACHINE_TTL_SECONDS)
 
@@ -132,6 +139,11 @@ def read_machine() -> Dict[str, Any]:
     return _vitals.get(_VITALS_KEY, _ask_the_skill)
 
 
+def forget() -> None:
+    """Drop the cached reading so the next read asks @skills' machine_vitals() again."""
+    _vitals.clear()
+
+
 def _ask_the_skill() -> Dict[str, Any]:
     """
     One read through @skills' published door.
@@ -151,10 +163,9 @@ def _ask_the_skill() -> Dict[str, Any]:
     except Exception as exc:
         # The skill never raises for a reading, so reaching here is a defect in
         # the door itself: named, logged, and a 503 — never a 500 traceback.
-        message = f"@skills' machine_vitals() raised {type(exc).__name__}: {exc}"
-        logger.error("[host_api] %s", message)
+        logger.error("[host_api] @skills' machine_vitals() raised %s: %s", type(exc).__name__, exc, exc_info=True)
         json_handler.log_operation("host_api_machine_door_failed", {"error": type(exc).__name__})
-        raise MachineDoorFailed(message) from exc
+        raise MachineDoorFailed(DOOR_RAISED) from exc
 
     ok = vitals.get("ok") if isinstance(vitals, dict) else None
     if not isinstance(ok, bool):

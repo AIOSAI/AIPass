@@ -1,26 +1,33 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for seedgo's entry point routing, help and introspection
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-09-03
-# Modified: 2026-09-03
+# Modified: 2026-10-03
 # =============================================
 
-"""Tests for seedgo's CLI entry point.
+"""Tests for apps/seedgo.py, the entry point: routing, help and introspection."""
 
-Covers the four things the entry point promises: no-args shows introspection,
---help shows help without executing anything, a subcommand's --help never runs
-that subcommand, and an unknown command fails loudly with a non-zero code.
+# Covers the four things the entry point promises: no-args shows introspection,
+# --help shows help without executing anything, a subcommand's --help never runs
+# that subcommand, and an unknown command fails loudly with a non-zero code.
+#
+# The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
+# shell reads as success, so the refusal path is pinned by test rather than assumed.
+#
+# Not pinned here, and by no declared pass either: main() handing a module's
+# CommandRefused code to the shell, and the UTF-8 stream setup that runs only
+# when the file is executed as a script.
 
-The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
-shell reads as success, so the refusal path is pinned by test rather than assumed.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — importlib.util.spec_from_file_location's loading; discover_modules runs whole
 
 import sys
 
 import pytest
 
 from aipass.seedgo.apps import seedgo as branch_entry
+from aipass.seedgo.apps.modules import shadow_cycle
 
 
 class _StubModule:
@@ -180,6 +187,15 @@ def test_a_near_miss_of_a_declared_verb_is_not_claimed(verb, capsys):
         f"'{verb}s' was claimed by a module that only declares '{verb}'"
     )
     capsys.readouterr()
+
+
+def test_no_mail_without_run_is_claimed_and_still_runs_no_cycle(capsys):
+    """`shadow-cycle --no-mail` alone names the missing word, never an unknown option."""
+    assert shadow_cycle.handle_command("shadow-cycle", ["--no-mail"]) is True
+
+    out, err = capsys.readouterr()
+    assert "does not know the option" not in out + err
+    assert "shadow-cycle needs the word 'run'" in out + err
 
 
 def test_route_command_survives_a_raising_module(mock_logger):

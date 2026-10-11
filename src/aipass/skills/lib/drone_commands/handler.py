@@ -37,7 +37,7 @@ if _MODULES_DIR not in sys.path:
 if _APPS_DIR not in sys.path:
     sys.path.insert(0, _APPS_DIR)
 
-from modules import command_runner  # noqa: E402
+from modules import command_runner
 
 
 def run(action, args=None, config=None):

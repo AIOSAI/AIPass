@@ -3,7 +3,7 @@
 # Description: Digest Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -177,12 +177,9 @@ def _get_activity_totals(conn: sqlite3.Connection, hours: int = 24) -> Dict[str,
 # =============================================================================
 
 
-def show_digest(args: List[str]) -> dict:
+def show_digest() -> dict:
     """
     Query community digest data (last 24 hours).
-
-    Args:
-        args: Command arguments (currently unused)
 
     Returns:
         Dict with success, top_posts, active_branches, new_branches, totals

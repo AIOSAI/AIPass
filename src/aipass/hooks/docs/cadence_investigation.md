@@ -31,6 +31,16 @@ Three-layer dedup in `_load_and_increment()`:
 
 Special case: `turn < 0` (post-compact reset) always increments — debounce must not swallow the turn-0 all-fire guarantee.
 
+**Superseded 2026-09-30 (cadence 2.9.0, DPLAN-0355 follow-up): one decision per prompt key.** A headless first
+prompt runs before the transcript exists, so every sibling read token 0. Token 0 turned off layer 3, and a
+sibling that arrived 2s or more after the first write counted a second turn: canary's 7f1a35f6 fired navmap
+and branch at turn 0 and skipped tier0 and identity at turn 1. The state file now stores a prompt key,
+sha1(transcript size + NUL + prompt text). When both the stored state and the payload carry a key, the key
+decides alone: the counter increments only on a new key, however far apart the siblings run, and a real
+next prompt within 2s now counts. Layers 2 and 3 still decide when there is no key: a payload with neither a
+prompt nor a `transcript_path`, or a state file written before keys existed. The token stays the transcript
+size, because the ledger and the regroup stamp read it.
+
 Module: `apps/modules/cadence.py` (shared utility, accessed via `importlib.import_module` from handlers).
 
 ## 4. Action-gated sound

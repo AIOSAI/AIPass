@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_handling_check.py
 # Description: Error Handling Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -22,6 +22,8 @@ from aipass.seedgo.apps.handlers.aipass_standards import exception_handling
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: pytest.raises is the test idiom; a test's except blocks are deliberate.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 
@@ -49,7 +51,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-            lines = content.split("\n")
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
         return {
@@ -60,7 +61,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     # Only check: Error handling (for all files, not just non-test files)
-    error_handling_check = check_error_handling(content, lines, module_path)
+    error_handling_check = check_error_handling(content, module_path)
     if error_handling_check:
         checks.append(error_handling_check)
 
@@ -69,7 +70,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return {
             "passed": True,
             "checks": [
-                {"name": "Error handling", "passed": True, "message": "No try/except blocks detected (not applicable)"}
+                {
+                    "name": "Error handling",
+                    "passed": True,
+                    "message": "No try/except blocks detected (not applicable)",
+                    "declined": True,
+                }
             ],
             "score": 100,
             "standard": "ERROR_HANDLING",
@@ -126,8 +132,12 @@ def _silent_except_lines(content: str, module_path: str = "") -> Optional[List[i
     return sorted(silent)
 
 
-def check_error_handling(content: str, lines: List[str], module_path: str = "") -> Optional[Dict]:
-    """Check for proper error handling patterns"""
+def check_error_handling(content: str, module_path: str = "") -> Optional[Dict]:
+    """Check for proper error handling patterns.
+
+    It reads the content alone; the `lines` it also took were never read and
+    were dropped, with the split that built them (seedgo, fleet green leg 8).
+    """
     try_count = content.count("try:")
 
     if try_count == 0:

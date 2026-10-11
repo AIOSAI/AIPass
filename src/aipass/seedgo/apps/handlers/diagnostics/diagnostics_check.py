@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: diagnostics_check.py
 # Description: Diagnostics Orchestrator
-# Version: 2.0.0
+# Version: 2.1.2
 # Created: 2026-03-05
-# Modified: 2026-03-10
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -26,11 +26,9 @@ from typing import Dict, List, Optional
 from rich.console import Console
 
 from aipass.prax import logger
-from aipass.seedgo.apps.handlers.bypass.ignore_handler import get_audit_ignore_patterns
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import audit_ignore_match
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.module_root import module_file
-
-console = Console()
 
 AUDIT_SCOPE = "branch_level"
 
@@ -46,12 +44,14 @@ HANDLERS_DIR = DIAGNOSTICS_DIR.parent
 # =============================================
 
 
-def should_ignore_file(file_path: str, ignore_patterns: List[str]) -> bool:
-    """Check if file should be ignored based on audit patterns"""
-    for pattern in ignore_patterns:
-        if pattern in file_path:
-            return True
-    return False
+def should_ignore_file(file_path: str, branch_root: Path) -> bool:
+    """Whether the audit ignore list removes file_path, read relative to its branch root like the corpus."""
+    try:
+        rel = Path(file_path).resolve().relative_to(branch_root.resolve()).as_posix()
+    except ValueError as exc:
+        logger.info("[diagnostics_check] %s not under branch root %s, kept: %s", file_path, branch_root, exc)
+        return False
+    return audit_ignore_match(rel) is not None
 
 
 def check_file(file_path: str) -> Dict:
@@ -154,13 +154,13 @@ def check_file(file_path: str) -> Dict:
         }
 
 
-def check_directory(directory: str, pattern: str = "**/*.py") -> Dict:
+def check_directory(directory: str) -> Dict:
     """
     Run pyright on all Python files in a directory
 
     Args:
-        directory: Directory to scan
-        pattern: Glob pattern for files (default: all .py files)
+        directory: Directory to scan. Its glob `pattern` parameter was never
+            read and no caller passed it; dropped (seedgo, fleet green leg 8).
 
     Returns:
         dict: {
@@ -219,8 +219,8 @@ def check_directory(directory: str, pattern: str = "**/*.py") -> Dict:
                 "error": "Failed to parse pyright output",
             }
 
-        # Get ignore patterns
-        ignore_patterns = get_audit_ignore_patterns()
+        # The directory is a branch's apps/: the ignore list reads branch-relative paths.
+        branch_root = path.parent
 
         # Group diagnostics by file (filtering ignored files)
         file_diagnostics = {}
@@ -229,7 +229,7 @@ def check_directory(directory: str, pattern: str = "**/*.py") -> Dict:
             file_path = diag.get("file", "unknown")
 
             # Skip files matching ignore patterns
-            if should_ignore_file(file_path, ignore_patterns):
+            if should_ignore_file(file_path, branch_root):
                 continue
             if file_path not in file_diagnostics:
                 file_diagnostics[file_path] = {"file": file_path, "errors": 0, "warnings": 0, "diagnostics": []}
@@ -563,6 +563,9 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+
+    # Built when run, not at import: Rich fixes colour in __init__ (windows_compat 1.5.0, cli b6655280)
+    console = Console()
 
     # CLI usage: drone @seedgo diagnostics [file_or_directory]
     if len(sys.argv) < 2:

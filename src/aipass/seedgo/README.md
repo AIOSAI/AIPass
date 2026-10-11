@@ -65,9 +65,13 @@ help output rots the next time a verb is added. The generated surface is the one
 
 Three layers. `apps/seedgo.py` is a thin router: it discovers modules, dispatches to the first
 one that claims a command, and turns a refusal into an exit code. `apps/modules/` holds one
-business-logic module per verb — audit_tests, checklist, diagnostics_audit, inbox_audit,
-inventory, permissions, proof_query, readme_update, seedgo_proof, shadow_cycle,
-standards_audit, standards_query and test_map. `apps/handlers/` holds the implementation,
+business-logic module per verb — audit_tests, bypass, checklist, diagnostics_audit, home_paths
+(the developer-home scan the CI gate runs), inbox_audit, inventory, permissions, proof_query,
+readme_update, seedgo_proof, shadow_cycle, standards_audit, standards_query, test_map and
+tests_lane — and two doors, door_audit (the audit, bypass rules and context ratchets, for the
+CI audit script) and door_trinity (the .trinity/ check, for @memory). A door is the one modules
+file another branch may import: a re-export of this branch's handlers and nothing else
+(DPLAN-0404). `apps/handlers/` holds the implementation,
 grouped one directory per concern: the checker packs (`*_standards/`), the proof pack, the
 audit engine, the bypass and ignore systems, the test lanes, and the json shim every branch
 shares.
@@ -84,11 +88,14 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | Doc | What it covers |
 |---|---|
 | [docs/aipass_standards.md](docs/aipass_standards.md) | The scored checker pack: the standards table, how a rule is added, the `ruff`/`ruff_check` split |
+| [docs/aipass_standards_tests_1.md](docs/aipass_standards_tests_1.md) | The pack's test-file rows, calendar_bound to literal_path |
+| [docs/aipass_standards_tests_2.md](docs/aipass_standards_tests_2.md) | The pack's test-file rows, module_scope_side_effect to weak_oracle |
 | [docs/pytest_quality.md](docs/pytest_quality.md) | The v5 test-quality rules, and why they score without gating |
 | [docs/context_standards.md](docs/context_standards.md) | The startup budget: which files, which caps, which owner publishes each |
 | [docs/audit_engine.md](docs/audit_engine.md) | Discovery, scoring, the incremental cache, the info channel, bypass and `.seedgoignore` |
 | [docs/checklist_and_hooks.md](docs/checklist_and_hooks.md) | The per-file lane and the hook that runs it |
 | [docs/proof_and_coverage.md](docs/proof_and_coverage.md) | Proof certification, coverage mapping, the test inventory, the weekly cycle |
+| [docs/test_gold_standard.md](docs/test_gold_standard.md) | What a good test is here, when NOT to write one, and how a justified pass is declared |
 
 ---
 

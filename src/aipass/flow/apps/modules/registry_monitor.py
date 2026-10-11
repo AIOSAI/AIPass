@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_monitor.py
 # Description: Registry auto-healing module
-# Version: 3.2.0
+# Version: 3.4.0
 # Created: 2025-11-21
-# Modified: 2026-08-16
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -14,7 +14,7 @@ All business logic delegated to handlers/registry/monitor_ops.py.
 
 Features:
 - Scan and heal registry (orphaned entries, missing files)
-- Duplicate plan detection with auto-renumbering
+- Duplicate plan detection, reported and never renamed
 - Registry doctrine self-heal (number collisions, unregistered files,
   wrong-prefix rows, orphaned locations) applied directly on every scan
 - Quarantine list for locations the healer refuses to guess at, surfaced
@@ -31,7 +31,6 @@ Commands:
     status  - Show registry status
 """
 
-# ruff: noqa: E402
 import sys
 import os
 
@@ -63,7 +62,7 @@ from aipass.flow.apps.handlers.json import json_handler
 from aipass.cli.apps.modules import console, error, success, warning
 
 # Registry handlers
-from aipass.flow.apps.handlers.registry.load_registry import load_registry
+from aipass.flow.apps.handlers.registry.load_registry import RegistryUnreadableError, load_registry
 
 # Implementation handler
 from aipass.flow.apps.handlers.registry.monitor_ops import (
@@ -114,7 +113,7 @@ def scan_plan_files() -> Dict[str, Any]:
     Scan ecosystem for PLAN files and heal the registry (thin orchestrator)
 
     Two passes, both delegated to handlers:
-    1. monitor_ops.scan_plan_files_impl — detection + duplicate renumbering
+    1. monitor_ops.scan_plan_files_impl — detection + duplicate report
     2. heal_registry.heal_registry_doctrine_impl — direct, synchronous
        registry repair for the three doctrine cases (number collision,
        unregistered file, wrong-prefix row). Runs on every scan so these
@@ -186,7 +185,13 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if subcommand in ["scan", "heal"]:
         console.print("[bold]Scanning for PLAN files...[/bold]")
-        result = scan_plan_files()
+        try:
+            result = scan_plan_files()
+        except RegistryUnreadableError as exc:
+            # Refused, not routed on: a raise here used to reach flow.py's
+            # router, which logged it and answered "unknown command".
+            error(f"Registry scan refused: {exc}")
+            return True
 
         console.print()
         success("Scan complete")
@@ -194,7 +199,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print(f"  • Added: {len(result['added'])}")
         console.print(f"  • Updated: {len(result['updated'])}")
         console.print(f"  • Removed: {len(result['removed'])}")
-        console.print(f"  • Renumbered: {len(result['renumbered'])}")
+        console.print(f"  • Duplicates (reported, not renamed): {len(result['duplicates'])}")
+        for dup in result["duplicates"]:
+            console.print(f"    - {dup['prefix']}-{dup['number']}: {', '.join(dup['paths'])}")
         console.print(f"  • Doctrine healed: {result.get('doctrine_healed', 0)}")
 
         if result.get("doctrine_healed", 0) > 0:
@@ -216,7 +223,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     elif subcommand == "status":
-        status = get_status()
+        try:
+            status = get_status()
+        except RegistryUnreadableError as exc:
+            error(f"Registry status refused: {exc}")
+            return True
 
         console.print()
         console.print("[bold cyan]Registry Status[/bold cyan]")
@@ -281,7 +292,7 @@ def print_introspection():
 
     console.print("[yellow]Features:[/yellow]")
     console.print("  • Scan and heal registry")
-    console.print("  • Duplicate detection with auto-renumbering")
+    console.print("  • Duplicate detection (reported, never renamed)")
     console.print("  • Doctrine self-heal (collisions, unregistered files, wrong-prefix rows)")
     console.print("  • Registry status reporting")
     console.print()

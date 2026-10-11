@@ -1,10 +1,22 @@
-"""Tests for miscellaneous handlers -- central_writer.update_central, dispatch status.check_pid_status,
-daemon.run_daemon, delivery.deliver_to_inbox_file, inbox_resolve.resolve_inbox_target.
+# =================== AIPass ====================
+# Name: test_misc_handlers.py
+# Description: Tests for miscellaneous small handlers
+# Version: 1.0.1
+# Created: 2026-04-25
+# Modified: 2026-09-29
+# =============================================
 
-The increment_counter/update_data_metrics blocks left with their implementation:
-they were the only readers of ai_mail's own json_utils handler, which retired
-into apps/handlers/.archive/ when the canonical path became the fleet shim
-(DPLAN-0325). No production call site ever used either name."""
+"""Tests for apps/handlers/central_writer.py and four other small handlers it sits beside."""
+
+# update_central, check_pid_status, run_daemon, deliver_to_inbox_file, resolve_inbox_target.
+#
+# The increment_counter/update_data_metrics blocks left with their implementation:
+# they were the only readers of ai_mail's own json_utils handler, which retired
+# into apps/handlers/.archive/ when the canonical path became the fleet shim
+# (DPLAN-0325). No production call site ever used either name.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — CENTRAL_FILE, CONFIG_FILE and DAEMON_STATE_FILE path constants
 
 import json
 import os
@@ -145,6 +157,9 @@ def test_daemon_poll_cycle_is_called(tmp_path, monkeypatch):
     monkeypatch.setattr(daemon_mod, "DAEMON_STATE_FILE", tmp_path / "daemon_state.json")
 
     poll_calls = []
+    # _remove_pid_file runs for real against the tmp_path pid file this process owns (ai_mail, leg 5)
+    pid_file = tmp_path / "daemon.pid"
+    pid_file.write_text(str(os.getpid()), encoding="utf-8")
 
     def mock_poll_cycle(config, state):
         """Track poll_cycle invocations and trigger shutdown."""
@@ -154,9 +169,7 @@ def test_daemon_poll_cycle_is_called(tmp_path, monkeypatch):
 
     with (
         patch.object(daemon_mod, "_write_pid_file", return_value=True),
-        patch.object(daemon_mod, "_remove_pid_file"),
         patch.object(daemon_mod, "poll_cycle", side_effect=mock_poll_cycle),
-        patch.object(daemon_mod, "save_daemon_state"),
         patch.object(daemon_mod, "is_kill_switch_active", return_value=False),
         patch("os.waitpid", side_effect=ChildProcessError),
     ):
@@ -165,6 +178,10 @@ def test_daemon_poll_cycle_is_called(tmp_path, monkeypatch):
         daemon_mod.run_daemon()
 
     assert len(poll_calls) == 1
+    # save_daemon_state runs for real: its only write is the tmp_path state file (ai_mail, leg 5)
+    saved = json.loads((tmp_path / "daemon_state.json").read_text(encoding="utf-8"))
+    assert "last_updated" in saved
+    assert not pid_file.exists()
 
     # Clean up global state
     daemon_mod.SHUTDOWN = False
@@ -312,12 +329,12 @@ def test_resolve_inbox_target_explicit_branch(tmp_path):
     mock_get_user.assert_not_called()
 
 
-def test_resolve_inbox_target_unknown_branch():
+def test_resolve_inbox_target_unknown_branch(tmp_path):
     """Returns failure for unknown branch."""
     mock_get_branch = MagicMock(return_value=None)
     mock_get_user = MagicMock()
 
-    success, result = resolve_inbox_target("@nonexistent", Path("/repo"), mock_get_branch, mock_get_user)
+    success, result = resolve_inbox_target("@nonexistent", tmp_path, mock_get_branch, mock_get_user)
 
     assert success is False
     assert "Unknown branch" in result["error"]

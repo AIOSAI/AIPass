@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @commons
 # Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-09-15
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -68,9 +68,9 @@ if hasattr(signal, "SIGPIPE"):
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Cross-branch imports
-from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: E402
-from aipass.cli.apps.modules import console, header, error, warning  # noqa: E402
-from aipass.cli.apps.modules.display import reset_command_state, resolve_exit  # noqa: E402
+from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli.apps.modules import console, header, error, warning
+from aipass.cli.apps.modules.display import reset_command_state, resolve_exit
 
 
 # =============================================================================
@@ -83,6 +83,13 @@ MODULES_DIR = MODULE_ROOT / "modules"
 # and the README header quotes it - three places that used to be free to disagree
 # (the header said 1.1.0 while --version answered 1.0.0).
 VERSION = "1.2.0"
+
+# A help flag anywhere after the verb means explain, never execute. Only these
+# verbs' modules read the flag themselves, so only they are handed it; every
+# other module would treat it as an ordinary argument and run ('prompt --help'
+# posted a live daily prompt). Missing from this set costs contextual help,
+# never a run.
+HELP_AWARE_COMMANDS = frozenset({"activity", "catchup", "digest", "explore", "room", "secrets", "whoami"})
 
 
 # =============================================================================
@@ -394,13 +401,13 @@ def main() -> int:
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 
-    # Check if user wants module-specific help
-    if remaining_args and remaining_args[0] in ["--help", "-h"]:
-        # Try to find matching module for contextual help
-        for module in modules:
-            if hasattr(module, "handle_command"):
+    # A help flag anywhere after the verb: the help-aware modules explain
+    # themselves from the arguments as given, everyone else gets general help
+    if "--help" in remaining_args or "-h" in remaining_args:
+        if command in HELP_AWARE_COMMANDS:
+            for module in modules:
                 try:
-                    if module.handle_command(command, ["--help"]):
+                    if module.handle_command(command, remaining_args):
                         return 0
                 except Exception as e:
                     logger.warning(f"[commons] Module help error: {e}")

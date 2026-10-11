@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sandbox_checker.py
 # Description: Kernel sandbox prerequisite checks for aipass doctor
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-06-10
-# Modified: 2026-06-10
+# Modified: 2026-09-29
 # =============================================
 
 """Sandbox prerequisite checker — detects bwrap, node, srt, rg, broker.
@@ -21,7 +21,7 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
@@ -122,7 +122,7 @@ def check_node_present() -> Dict[str, Any]:
     return {"found": bool(path), "path": path}
 
 
-def _find_srt_resolver() -> Path | None:
+def _find_srt_resolver(find_spec: Callable[[str], Any] = importlib.util.find_spec) -> Path | None:
     """Locate _srt_resolve.mjs inside the sibling aipass.hooks branch.
 
     Uses importlib.util.find_spec so no absolute/hardcoded path is baked in —
@@ -130,12 +130,17 @@ def _find_srt_resolver() -> Path | None:
     namespace package (no __init__.py required) so find_spec still resolves
     it via submodule_search_locations.
 
+    Args:
+        find_spec: importlib.util.find_spec by default. A seam for the tests,
+            handed down by check_srt_resolvable: a missing or relocated hooks
+            package without replacing importlib.util process-wide.
+
     Returns:
         Path to the resolver script if aipass.hooks is importable and the
         file exists on disk, else None.
     """
     try:
-        spec = importlib.util.find_spec("aipass.hooks")
+        spec = find_spec("aipass.hooks")
     except (ImportError, ValueError, ModuleNotFoundError) as exc:
         logger.info("[sandbox_check] aipass.hooks not importable: %s", exc)
         return None
@@ -180,7 +185,7 @@ def _srt_install_hint() -> str:
     return plain
 
 
-def check_srt_resolvable() -> Dict[str, Any]:
+def check_srt_resolvable(find_spec: Callable[[str], Any] = importlib.util.find_spec) -> Dict[str, Any]:
     """Check if @anthropic-ai/sandbox-runtime is resolvable via node.
 
     Delegates to _srt_resolve.mjs (owned by the hooks branch) for resolution —
@@ -188,6 +193,10 @@ def check_srt_resolvable() -> Dict[str, Any]:
     locations in order, which correctly handles layouts where node's own
     install prefix differs from npm's global prefix (Debian/Ubuntu, official
     node Docker images). See DPLAN-0279.
+
+    Args:
+        find_spec: importlib.util.find_spec by default, handed to the resolver
+            lookup. A seam for the tests; product callers pass nothing.
 
     Returns:
         found: bool
@@ -202,7 +211,7 @@ def check_srt_resolvable() -> Dict[str, Any]:
             "install_hint": "Install node first, then: npm install -g @anthropic-ai/sandbox-runtime",
         }
 
-    resolver = _find_srt_resolver()
+    resolver = _find_srt_resolver(find_spec)
     if resolver is None:
         json_handler.log_operation("sandbox_check_srt", {"found": False})
         return {"found": False, "path": None, "install_hint": _srt_install_hint()}
@@ -311,6 +320,12 @@ def _find_broker_socket(repo_root: Path | None) -> Path | None:
     return None
 
 
-def is_linux() -> bool:
-    """Return True if running on Linux."""
-    return sys.platform.startswith("linux")
+def is_linux(platform: str | None = None) -> bool:
+    """Return True if running on Linux.
+
+    ``platform`` is the sys.platform to read (None means this process's). It is
+    handed in for the tests, which ask about darwin and win32 without replacing
+    sys.platform process-wide; doctor, the one caller, passes nothing (fleet green leg 4).
+    """
+    platform = sys.platform if platform is None else platform
+    return platform.startswith("linux")

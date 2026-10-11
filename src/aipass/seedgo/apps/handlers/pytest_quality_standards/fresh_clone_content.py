@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fresh_clone_content.py
 # Description: Fresh Clone Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-08
-# Modified: 2026-09-08
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -55,7 +55,7 @@ def get_fresh_clone_standards() -> str:
         "  Every test unit is read as an AST and asked one question: would this",
         "  pass on a machine that has only what the repo ships?",
         "",
-        "  [yellow]Three species:[/yellow]",
+        "  [yellow]Four species:[/yellow]",
         "  - [red]IGNORED_PATH[/red] — the unit opens, lists, globs or stats a",
         "    path whose spelling matches a root .gitignore pattern and is not",
         "    rooted at tmp_path. The path must be REACHED on the filesystem, not",
@@ -74,6 +74,14 @@ def get_fresh_clone_standards() -> str:
         "    one, handed BARE to the code under test as the world it should",
         "    describe, with the answer compared against a value WRITTEN DOWN in",
         "    the file. Class-level constants resolve one hop.",
+        "  - [red]OPTIONAL_EXTRA[/red] — the unit calls a production function whose",
+        "    OWN body imports an optional extra (OPTIONAL_EXTRA_MODULES, frozen from",
+        "    pyproject's optional-dependencies) inside try / except ImportError,",
+        "    and never spells the extra itself: no sys.modules entry, no",
+        "    importorskip, in the unit, its fixtures, autouse fixtures or module",
+        "    level. The host's install picks the path (api check_status, PR #774).",
+        "    The one species that reads production; module-level guards and",
+        "    helper calls are not followed.",
         "",
         "[bold cyan]THE IGNORE LIST IS A SHIPPED CONSTANT:[/bold cyan]",
         "  Derived by reading the root .gitignore line by line, then frozen into",

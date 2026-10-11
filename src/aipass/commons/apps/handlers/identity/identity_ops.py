@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: identity_ops.py
 # Description: Identity operations handler
-# Version: 1.2.0
+# Version: 1.6.0
 # Created: 2026-03-07
-# Modified: 2026-08-31
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -24,7 +24,7 @@ import os
 import re
 import json
 from pathlib import Path
-from typing import Callable, Dict, Any, Optional, List
+from typing import Callable, Dict, Any, Iterator, Optional, List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.commons.apps.handlers.json import json_handler
@@ -78,6 +78,16 @@ def _find_branch_registry_path() -> Path:
 BRANCH_REGISTRY_PATH = _find_branch_registry_path()
 
 
+class CallerLookupFailed(RuntimeError):
+    """
+    The caller lookup broke (database, registry or filesystem error).
+
+    Raised by get_caller_branch() so a broken lookup is never read as None,
+    which means "no branch detected" and tells the user to run from a branch
+    directory. Command handlers catch it and refuse with this message.
+    """
+
+
 # =============================================================================
 # BRANCH DETECTION
 # =============================================================================
@@ -110,6 +120,24 @@ def find_branch_root(start_path: Path) -> Optional[Path]:
     return None
 
 
+def list_registry_candidates(directory: Path) -> Iterator[Path]:
+    """
+    List the *_REGISTRY.json candidates in one directory (single level).
+
+    A seam, and the reason is the tests: test_identity emulates a
+    case-insensitive filesystem (what Windows and default macOS hand back)
+    by replacing this one lookup. Patching Path.glob instead would widen
+    every glob in the pytest process. commons' decision, DPLAN-0354 leg 3.
+
+    Args:
+        directory: The directory to list.
+
+    Returns:
+        The glob iterator, exactly as Path.glob returns it.
+    """
+    return directory.glob("*_REGISTRY.json")
+
+
 def _find_caller_registries() -> List[Path]:
     """
     Find the registries belonging to the caller's own project.
@@ -126,7 +154,14 @@ def _find_caller_registries() -> List[Path]:
     lowercase counter would otherwise answer an identity lookup.
 
     Returns:
-        List of registry paths from the nearest matching directory, or [].
+        List of registry paths from the nearest matching directory, or []
+        when AIPASS_CALLER_CWD is unset or no directory holds a registry.
+
+    Raises:
+        OSError: AIPASS_CALLER_CWD would not resolve. Logged, then raised:
+            an empty list would let get_caller_branch fall through to the
+            AIPass registry by name and serve a namesake's identity
+            (commons' decision, DPLAN-0354 leg 6).
     """
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
     if not caller_cwd:
@@ -136,14 +171,14 @@ def _find_caller_registries() -> List[Path]:
         caller_path = Path(caller_cwd).resolve()
     except OSError as exc:
         logger.warning(f"[commons.identity] Unusable AIPASS_CALLER_CWD '{caller_cwd}': {exc}")
-        return []
+        raise
 
     primary = BRANCH_REGISTRY_PATH.resolve() if BRANCH_REGISTRY_PATH.exists() else None
 
     for directory in [caller_path] + list(caller_path.parents):
         matches = sorted(
             path
-            for path in directory.glob("*_REGISTRY.json")
+            for path in list_registry_candidates(directory)
             # Windows and default macOS are case-insensitive, so this glob also
             # returns *_registry.json — plan counters and .template_registry.json
             # (pathlib's * matches dotfiles). Re-check the SUFFIX case-sensitively;
@@ -168,7 +203,18 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, Any]]:
 
     Returns:
         List of branch dicts (dict-shaped registries are flattened to
-        their values), or [] if the file is missing or unreadable.
+        their values), or [] if the file is missing.
+
+    Raises:
+        OSError, json.JSONDecodeError: the file exists but cannot be read
+            or parsed. Logged, then raised: an empty list reads as "no
+            match", and get_caller_branch would then serve the AIPass
+            namesake by name (commons' decision, DPLAN-0354 leg 6).
+        ValueError: the branches field is neither a list nor a dict
+            (commons' decision, DPLAN-0354 leg 7), or one of its entries
+            is not a dict (leg 8; the message names the index). Logged,
+            then raised, for the same reason: a registry with a junk
+            entry is malformed as a whole.
     """
     if not registry_path.exists():
         return []
@@ -178,16 +224,23 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, Any]]:
             registry = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning(f"[commons.identity] Unreadable registry {registry_path.name}: {exc}")
-        return []
+        raise
 
     raw_branches = registry.get("branches", [])
     if isinstance(raw_branches, dict):
         raw_branches = list(raw_branches.values())
     if not isinstance(raw_branches, list):
-        logger.warning(f"[commons.identity] Registry {registry_path.name} has a malformed branches field")
-        return []
+        malformed = f"Registry {registry_path.name} has a malformed branches field"
+        logger.warning(f"[commons.identity] {malformed}")
+        raise ValueError(malformed)
 
-    return [branch for branch in raw_branches if isinstance(branch, dict)]
+    for index, branch in enumerate(raw_branches):
+        if not isinstance(branch, dict):
+            malformed = f"Registry {registry_path.name} has a malformed branch entry at index {index}"
+            logger.warning(f"[commons.identity] {malformed}")
+            raise ValueError(malformed)
+
+    return raw_branches
 
 
 def _match_by_path(registry_path: Path, branch_path: Path) -> Optional[Dict[str, Any]]:
@@ -234,6 +287,12 @@ def _search_registries(matcher: Callable[[Path], Optional[Dict[str, Any]]]) -> O
 
     Returns:
         The first branch dict any registry matched, or None.
+
+    Raises:
+        OSError, json.JSONDecodeError, ValueError: a registry that exists
+            could not be read or has a malformed branches field, or
+            AIPASS_CALLER_CWD would not resolve. get_caller_branch,
+            the one product caller, turns both into CallerLookupFailed.
     """
     found = matcher(BRANCH_REGISTRY_PATH)
     if found:
@@ -297,6 +356,12 @@ def get_caller_branch() -> Optional[Dict[str, Any]]:
     Returns:
         Dict with branch info {"name": "SEED", "path": "...", "email": "@seed", ...}
         or None if no branch detected.
+
+    Raises:
+        CallerLookupFailed: the lookup itself broke (filesystem, registry or
+            database error). Never None: None tells the user to run from a
+            branch directory, which is the wrong message for a broken lookup
+            (commons' decision, DPLAN-0354 leg 3).
     """
     try:
         # Strategy 1 & 2: Walk up from CWD to find branch root
@@ -331,7 +396,7 @@ def get_caller_branch() -> Optional[Dict[str, Any]]:
 
     except Exception as e:
         logger.error(f"[commons.identity] Branch detection failed: {e}")
-        return None
+        raise CallerLookupFailed(f"Caller lookup failed: {e}") from e
 
 
 def _normalize_branch_name(branch_info: Dict[str, Any]) -> None:
@@ -442,7 +507,7 @@ def resolve_display_name(branch_name: str, compact: bool = False) -> str:
 # =============================================================================
 
 
-def extract_mentions(content: str) -> List[str]:
+def extract_mentions(content: str) -> Optional[List[str]]:
     """
     Extract @mention branch names from content.
 
@@ -453,7 +518,10 @@ def extract_mentions(content: str) -> List[str]:
         content: Text content to search for @mentions.
 
     Returns:
-        List of valid branch names that were mentioned (lowercased).
+        List of valid branch names that were mentioned (lowercased); [] when
+        the text mentions no registered agent. None when the agents lookup
+        failed — an answer success never gives, so the caller can say the
+        mentions were not delivered (commons' decision, DPLAN-0354 leg 3).
     """
     if not content:
         return []
@@ -483,4 +551,4 @@ def extract_mentions(content: str) -> List[str]:
 
     except Exception as e:
         logger.warning(f"[commons.identity] Mention extraction failed: {e}")
-        return []
+        return None

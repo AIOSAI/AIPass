@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for {{BRANCH}}'s entry point routing, help and introspection
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: {{DATE}}
 # Modified: {{DATE}}
 # =============================================
@@ -198,18 +198,20 @@ def test_branch_name_is_set_at_import_time(monkeypatch):
     assert reloaded.__version__ == branch_entry.__version__
 
 
-def test_module_import_path_logs_when_it_falls_back(monkeypatch, mock_logger):
-    """The fallback branch is logged, never silent.
+def test_failed_module_import_is_reported_by_its_package_name(monkeypatch, tmp_path, mock_logger):
+    """A module that fails to import is logged once, as an error, by its package name.
 
-    A swallowed ImportError here would make the local-layout fallback invisible.
+    discover_modules imports by the package path only (canary's leg 1, ported in
+    spawn's leg 10). The old body tried the package path, logged an info line,
+    then retried as apps.modules.<stem> and logged the error under that name.
+    Red first against that body at the levels assert; its mutants (the local
+    name restored, the error logged at info) each die at the assert aimed at.
     """
+    (tmp_path / "ghost.py").write_text("def handle_command(command, args):\n    return False\n", encoding="utf-8")
+    monkeypatch.setattr(branch_entry, "MODULES_DIR", tmp_path)
 
-    def _always_missing(name):
-        raise ImportError(f"no module named {name}")
+    modules = branch_entry.discover_modules()
 
-    monkeypatch.setattr(branch_entry.importlib, "import_module", _always_missing)
-
-    result = branch_entry._module_import_path("ghost")
-
-    assert result == "apps.modules.ghost"
-    assert any(level == "info" for level, _ in mock_logger)
+    assert modules == []
+    assert [level for level, _ in mock_logger] == ["error"]
+    assert mock_logger[0][1][1] == "aipass.{{BRANCH}}.apps.modules.ghost"

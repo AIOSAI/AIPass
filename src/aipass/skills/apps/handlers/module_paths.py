@@ -58,7 +58,7 @@ def _report(raw: str, error: OSError) -> None:
         sys.stderr.write(
             "[skills] resolve() unavailable for %s (%s); using the unresolved absolute spelling\n" % (raw, error)
         )
-    except Exception:  # noqa: BLE001 - a broken stderr must not break an import
+    except Exception:  # a broken stderr must not break an import
         pass
 
 

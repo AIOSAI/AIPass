@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.3.1
+# Version: 1.4.1
 # Description: Shared content loaders for grounding prompt injections (DPLAN-0276), each rendered under its cap
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-09-16
+# Modified: 2026-10-10
 # =============================================
 
 """Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating.
@@ -181,7 +181,7 @@ def load_navmap(hook_data: dict) -> str:
     return prompt_file.read_text(encoding="utf-8") if prompt_file else ""
 
 
-def _find_branch_root(cwd: str) -> Path | None:
+def find_branch_root(cwd: str) -> Path | None:
     """Walk up from CWD looking for .trinity/ or apps/ — stop at repo root."""
     search = Path(cwd).resolve()
     while search.parent != search:
@@ -196,7 +196,7 @@ def _find_branch_root(cwd: str) -> Path | None:
 def load_branch(hook_data: dict) -> str:
     """Read branch prompt + private integration prompts."""
     cwd = hook_data.get("cwd", "") or str(Path.cwd())
-    branch_root = _find_branch_root(cwd)
+    branch_root = find_branch_root(cwd)
     if not branch_root:
         return ""
 
@@ -221,7 +221,7 @@ def load_branch(hook_data: dict) -> str:
 def _find_passport(cwd: str) -> Path | None:
     """Walk up from CWD looking for .trinity/passport.json."""
     search = Path(cwd).resolve()
-    home = Path.home()
+    home = Path.home().resolve()  # both sides resolved: a symlinked home never stopped the walk (PR #774)
     while search != home and search.parent != search:
         passport = search / ".trinity" / "passport.json"
         if passport.exists():
@@ -393,7 +393,7 @@ def _tier_failure(label: str, filename: str) -> str | None:
 
 def _branch_failure(hook_data: dict) -> str | None:
     """Why the branch prompt is missing, or None when this seat is not a branch."""
-    root = _find_branch_root(hook_data.get("cwd", "") or str(Path.cwd()))
+    root = find_branch_root(hook_data.get("cwd", "") or str(Path.cwd()))
     if root is None:
         return None
     return f"branch: {root.name} is a branch but .aipass/aipass_local_prompt.md is missing or unreadable"
@@ -402,7 +402,7 @@ def _branch_failure(hook_data: dict) -> str | None:
 def _branch_has_trinity(cwd: str) -> Path | None:
     """The nearest .trinity/ above *cwd*, stopping at home."""
     search = Path(cwd).resolve()
-    home = Path.home()
+    home = Path.home().resolve()  # both sides resolved: a symlinked home never stopped the walk (PR #774)
     while search != home and search.parent != search:
         candidate = search / ".trinity"
         if candidate.is_dir():
@@ -457,7 +457,7 @@ def grounding_report(hook_data: dict) -> tuple[list[tuple[str, str]], list[str]]
     for label in SECTION_ORDER:
         try:
             content = loaders[label](hook_data)
-        except Exception as exc:  # noqa: BLE001 - any loader failure is a failure, whatever its type
+        except Exception as exc:  # any loader failure is a failure, whatever its type
             failures.append(_unhomed(f"{label}: loading it raised {type(exc).__name__}: {exc}"))
             continue
         if content and content.strip():

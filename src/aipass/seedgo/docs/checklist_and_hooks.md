@@ -13,6 +13,11 @@
 directory) and prints a per-standard verdict. It is the lane a human uses while writing, and
 it is the lane the PostToolUse hook uses automatically.
 
+Branch-level standards with no per-file check (`unused_conftest_fixture`, `dead_code`, ...) cannot
+run here; after the verdicts, behind a blank line, one closing line names the ones that apply to
+the file (`Not judged here (branch-level, run by ...): ...`), so a clean
+"All N standards passed" is never read as the audit's verdict. It changes no count.
+
 It is not the audit. The audit walks `apps/**/*.py` and reports per branch; the checklist
 takes a path, including a path under `tests/`, which the audit never opens. A bypass rule can
 be live in one lane and inert in the other, and a standard can pass one while failing the

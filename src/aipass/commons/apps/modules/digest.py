@@ -3,7 +3,7 @@
 # Description: Digest Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -67,7 +67,11 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "digest":
         return False
 
-    return _handle_digest(args)
+    if "--help" in args or "-h" in args:
+        print_introspection()
+        return True
+
+    return _handle_digest()
 
 
 # =============================================================================
@@ -75,9 +79,9 @@ def handle_command(command: str, args: List[str]) -> bool:
 # =============================================================================
 
 
-def _handle_digest(args: List[str]) -> bool:
+def _handle_digest() -> bool:
     """Query digest and display results."""
-    result = show_digest(args)
+    result = show_digest()
 
     if not result["success"]:
         error(f"Failed to generate digest: {result['error']}")

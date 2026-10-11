@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: skip_dirs.py
 # Description: Shared source-skip directories for branch-tree-scanning checkers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-10
-# Modified: 2026-06-10
+# Modified: 2026-10-08
 # =============================================
 
 """Shared skip-directory set for checkers that rglob branch trees.
@@ -104,3 +104,20 @@ SOURCE_SKIP_DIRS: frozenset[str] = frozenset(
         "docs",
     }
 )
+
+
+def in_skipped_dir(path: Path, root: Path) -> bool:
+    """Whether a path below ``root`` is, or sits inside, a SOURCE_SKIP_DIRS directory.
+
+    Only the parts below ``root`` are read, so a skip-named directory above the
+    walk (a temp root, a checkout under ``backups/``) never empties it. A skip
+    name that is an importable package is source, not output: commons'
+    ``apps/handlers/artifacts/`` is live code, and skipping it convicted two
+    true declarations (seedgo, leg 148dd7c5).
+    """
+    current = root
+    for part in path.relative_to(root).parts:
+        current = current / part
+        if part in SOURCE_SKIP_DIRS and not (part.isidentifier() and (current / "__init__.py").is_file()):
+            return True
+    return False

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation
-# Version: 1.2.0
+# Version: 1.2.3
 # Created: 2026-03-09
-# Modified: 2026-08-31
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -34,7 +34,8 @@ logger = system_logger
 # Long-lived callers turned that into a warning per drone call, forever.
 # Keyed per (kind, cwd, signals) so a genuinely NEW disagreement still speaks.
 #
-# Tests clear this directly (see tests/conftest.py). There is deliberately no
+# Tests replace this set with a fresh empty one per test through monkeypatch
+# (see tests/conftest.py), never clear it in place. There is deliberately no
 # public reset(): nothing in production has a reason to forget what it has
 # already said, and a production function that only tests call is exactly what
 # seedgo's unused_function standard exists to catch.
@@ -105,6 +106,18 @@ _REGISTRY_SUFFIX = "_REGISTRY.json"
 _REGISTRY_GLOB = f"*{_REGISTRY_SUFFIX}"
 
 
+def _registry_candidates(directory: Path) -> List[Path]:
+    """What the FILESYSTEM answers for ``*_REGISTRY.json`` in *directory* — untrusted.
+
+    The half of the lookup that varies by host: case-sensitive on Linux, folded
+    on Windows and default macOS. The product has no reason of its own for this
+    name; ``registries_in`` could glob inline. The reason is the test: a folding
+    listing cannot be produced on a Linux filesystem, so tests/test_registry_case_sweep.py
+    supplies one here and exercises the Python name check that follows.
+    """
+    return list(directory.glob(_REGISTRY_GLOB))
+
+
 def registries_in(directory: Path) -> List[Path]:
     """Every ``*_REGISTRY.json`` in *directory*, exact-case, sorted.
 
@@ -128,7 +141,7 @@ def registries_in(directory: Path) -> List[Path]:
     One reader, called from every walk in this tree — the tenth private copy of
     ``glob("*_REGISTRY.json")`` is how a fix lands on some of N identical paths.
     """
-    return sorted(p for p in directory.glob(_REGISTRY_GLOB) if p.name.endswith(_REGISTRY_SUFFIX))
+    return sorted(p for p in _registry_candidates(directory) if p.name.endswith(_REGISTRY_SUFFIX))
 
 
 def _project_name_from_registry(reg_file: Path) -> str | None:
@@ -167,6 +180,19 @@ def _project_name_from_registry(reg_file: Path) -> str | None:
     return derived
 
 
+def _working_directory() -> Path:
+    """The one raw read of where this process stands. Raises ENOENT when that is gone.
+
+    Unguarded on purpose: the guard is ``caller_cwd`` and every location site
+    goes through it (test_no_cwd_sweep bans any other ``Path.cwd()``). The
+    product has no reason of its own for this name; ``caller_cwd`` could read
+    ``Path.cwd()`` inline. The reason is the test: Windows will not let a
+    process stand in a deleted directory, so the tests supply that state here,
+    beneath the guard, so the guard itself always runs.
+    """
+    return Path.cwd()
+
+
 def caller_cwd() -> Path | None:
     """The caller's working directory, or None when the process has none.
 
@@ -185,7 +211,7 @@ def caller_cwd() -> Path | None:
     second copy, which is the direction the dependency already runs.
     """
     try:
-        return Path.cwd()
+        return _working_directory()
     except OSError as exc:
         logger.info("No current directory — it was deleted out from under this process (%s)", exc)
         return None

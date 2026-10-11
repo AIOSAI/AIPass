@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_content.py
 # Description: Host Portability Standards Content Handler
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-09-12
-# Modified: 2026-09-12
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -63,6 +63,20 @@ def get_host_portability_standards() -> str:
         "     Reason prose names the RECIPE unavailable, not the state:",
         "     [dim]reason='reads boot_id - no procfs on this host'[/dim]",
         "",
+        "  [red]ARM D -- a direct pathlib.Path subclass (the host's Python)[/red]",
+        "     [dim]class X(Path)[/dim] or [dim]class X(PurePath)[/dim] with no [dim]_flavour[/dim]:",
+        "     [yellow]AttributeError _flavour[/yellow] on 3.10 and 3.11, fine on 3.12+.",
+        "     A concrete flavour ([dim]PureWindowsPath[/dim]) is acquitted.",
+        "",
+        "  [red]ARM E -- a resolved path compared with one taken as given[/red]",
+        "     In one function, [dim]==[/dim] / [dim]!=[/dim] / [dim]in x.parents[/dim] /",
+        "     [dim]relative_to[/dim] / [dim]is_relative_to[/dim] / [dim]startswith[/dim] with one side",
+        "     through [dim].resolve()[/dim] or [dim]os.path.realpath[/dim] and the other from",
+        "     [dim]Path.home()[/dim], [dim]Path.cwd()[/dim], [dim]os.getcwd()[/dim] or [dim]tempfile[/dim] as given.",
+        "     Followed through same-function names, [dim]/[/dim], [dim].parent[/dim], [dim]str()[/dim],",
+        "     and same-file helpers (hooks loader: aipass_home -> _absolute -> resolve).",
+        "     macOS /var -> /private/var makes the two differ. Cure: resolve both.",
+        "",
         f"  Arm A also follows a name bound to a {_PROC} literal to where it is",
         "  READ; a bound [dim]Path()[/dim] is judged at its read, not its constructor.",
         "",
@@ -70,6 +84,8 @@ def get_host_portability_standards() -> str:
         "  - [dim]if sys.platform == 'linux':[/dim] / [dim]os.name[/dim] /",
         "    [dim]platform.system()[/dim] anywhere in the enclosing function",
         "  - [dim]try: ... except OSError / FileNotFoundError / Exception:[/dim]",
+        "  - [dim]with pytest.raises(FileNotFoundError):[/dim] (or OSError) -- the",
+        "    missing host raises what the test expects",
         "  - [dim]if not path.exists(): return[/dim] -- an existence early-out",
         "  - a skipif whose predicate names the host that HAS the recipe --",
         "    [dim]sys.platform != 'linux'[/dim], a path probe or [dim]shutil.which[/dim] --",

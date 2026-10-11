@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inert.py
-# Description: Detects bypass rules that can never match, for the audit info channel
-# Version: 1.0.0
+# Description: Detects bypass rules that can never match, for the audit info channel and the checklist
+# Version: 1.2.0
 # Created: 2026-08-09
-# Modified: 2026-08-09
+# Modified: 2026-10-03
 # =============================================
 
 """Detects bypass rules whose declared scope can never be evaluated.
@@ -86,6 +86,8 @@ ADVISORY_CAVEAT = (
 # audit_display), so the doubt travels on each conclusion as well as at the head
 # of the block: a line quoted or read on its own must still arrive marked.
 _UNVERIFIED = "unverified: "
+# A bypass.json nothing could read: no rule in it was judged, and that is said.
+UNREADABLE = "bypass.json unreadable, so none of its rules was judged: "
 
 
 def _argument(call: ast.Call, param: str) -> ast.expr | None:
@@ -122,6 +124,39 @@ def _binds_shared_matcher(tree: ast.AST) -> bool:
     return False
 
 
+def _module_strings(tree: ast.Module) -> Dict[str, str]:
+    """Top-level ``NAME = "text"`` bindings, so ``STANDARD_KEY`` reads as its value."""
+    strings: Dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            value, targets = node.value, node.targets
+        elif isinstance(node, ast.AnnAssign):
+            value, targets = node.value, [node.target]
+        else:
+            continue
+        if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                strings[target.id] = value.value
+    return strings
+
+
+def _standard_named(node: ast.expr | None, strings: Dict[str, str]) -> str | None:
+    """The standard a call passes: a string literal, or a module constant holding one.
+
+    Literals only, before 2026-10-03: every checker that passes ``STANDARD_KEY``
+    (most of the v5-era pack, sleep_in_test among them) was missing from the map,
+    and a missing standard is left alone, so its inert rules went unreported
+    (spawn leg 8, relayed by @devpulse).
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return strings.get(node.id)
+    return None
+
+
 @lru_cache(maxsize=1)
 def scope_support() -> Dict[str, Set[str]]:
     """Map each standard to the scope kinds its checker can actually evaluate.
@@ -145,13 +180,14 @@ def scope_support() -> Dict[str, Set[str]]:
             continue
         if not _binds_shared_matcher(tree):
             continue
+        strings = _module_strings(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or getattr(node.func, "id", None) not in _SHARED_NAMES:
                 continue
-            standard = _argument(node, "standard")
-            if not (isinstance(standard, ast.Constant) and isinstance(standard.value, str)):
+            standard = _standard_named(_argument(node, "standard"), strings)
+            if standard is None:
                 continue
-            kinds = support.setdefault(standard.value, set())
+            kinds = support.setdefault(standard, set())
             for param, scope in _SCOPE_ARG.items():
                 if _is_supplied(_argument(node, param)):
                     kinds.add(scope)
@@ -181,6 +217,33 @@ def inert_scopes(rule: dict) -> Tuple[str, ...]:
         evaluable = set().union(*support.values()) if support else set()
 
     return tuple(key for key in declared if key not in evaluable)
+
+
+def inert_notes(file_path: str, standard: str, bypass_rules: list | None) -> list[str]:
+    """One line per rule naming this file and standard whose scope can never match.
+
+    The checklist prints these beside the standard's verdict (seedgo fleet green
+    leg 13): a ``lines`` rule against a checker that passes no line closes
+    nothing, and before this nothing said so in the lane the edit hook runs. The
+    file and standard are matched as :func:`bypass.utils.matching_rule` matches
+    them; only the scope is judged here, by :func:`inert_scopes`. A note, not a
+    finding: the verdict is the checker's and stays as it was.
+    """
+    file_posix = Path(file_path).as_posix()
+    notes = []
+    for rule in bypass_rules or []:
+        if not isinstance(rule, dict) or rule.get("standard") != standard:
+            continue
+        rule_file = rule.get("file") or ""
+        if not rule_file or Path(rule_file).as_posix() not in file_posix:
+            continue
+        for key in inert_scopes(rule):
+            passed = "line" if key == "lines" else "name"
+            notes.append(
+                f"bypass rule '{key}' {rule[key]} closes nothing: this checker passes no {passed}, "
+                f"so only a file-wide rule bypasses it"
+            )
+    return notes
 
 
 @lru_cache(maxsize=1)
@@ -259,6 +322,9 @@ def check_branch_info(branch_path: str) -> list[str]:
 
     Kept off the violation channel on purpose: bypass hygiene is the branch's own
     housekeeping, not a standards failure.
+
+    A bypass.json that cannot be read or parsed answers one line naming it, never
+    the empty list a branch with nothing to report gets (seedgo fleet green leg 14).
     """
     bypass_file = Path(branch_path) / ".seedgo" / "bypass.json"
     if not bypass_file.exists():
@@ -268,7 +334,7 @@ def check_branch_info(branch_path: str) -> list[str]:
         rules = json.loads(bypass_file.read_text(encoding="utf-8")).get("bypass", [])
     except (OSError, ValueError) as e:
         logger.info("Cannot read %s for inert-rule info: %s", bypass_file, e)
-        return []
+        return [f"{UNREADABLE}{bypass_file} ({e})"]
 
     lines = []
     out_of_scope: Dict[str, list[str]] = {}

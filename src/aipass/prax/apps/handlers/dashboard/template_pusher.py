@@ -35,8 +35,8 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 
 logger = get_direct_logger()
 
-from aipass.prax.apps.handlers.json import json_handler  # noqa: E402
-from .status import calculate_quick_status, merge_quick_status  # noqa: E402
+from aipass.prax.apps.handlers.json import json_handler
+from .status import calculate_quick_status, merge_quick_status
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.repo_root import resolved_file
 

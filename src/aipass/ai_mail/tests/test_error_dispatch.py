@@ -1,4 +1,15 @@
-"""Tests for email error dispatch handler -- error report building, dispatch, and delivery callbacks."""
+# =================== AIPass ====================
+# Name: test_error_dispatch.py
+# Description: Tests for email error dispatch handler
+# Version: 1.0.2
+# Created: 2026-04-25
+# Modified: 2026-09-29
+# =============================================
+
+"""Tests for apps/handlers/email/error_dispatch.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(json_handler) — json_handler.log_operation's exact call args here
 
 import pytest
 from unittest.mock import patch, MagicMock
@@ -219,4 +230,4 @@ def test_on_email_delivered_central_failure_does_not_raise():
 
     on_email_delivered(update_central_fn=update_fn)
 
-    update_fn.assert_called_once()
+    update_fn.assert_called_once_with()

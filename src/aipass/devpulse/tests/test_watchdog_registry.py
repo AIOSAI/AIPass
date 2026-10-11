@@ -1,24 +1,36 @@
 # =================== AIPass ====================
 # Name: test_watchdog_registry.py
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-04-14
-# Modified: 2026-09-12
+# Modified: 2026-10-10
 # =============================================
 
-"""Tests for watchdog registry — register/deregister/list/kill (Phase 4)."""
+"""Tests for apps/handlers/watchdog/registry.py and the handlers that register through it."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/watchdog/registry.py parses and imports
+# seedgo: no-test-needed(documentation) — that register, deregister, list_active and kill_watch carry docstrings
 
 import json
 import os
 import subprocess
 import sys
+import threading
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
+from aipass.devpulse.apps.handlers.watchdog import agent as agent_handler
+from aipass.devpulse.apps.handlers.watchdog import registry as reg
 from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
+from aipass.devpulse.apps.handlers.watchdog import schedule as schedule_handler
+from aipass.devpulse.apps.handlers.watchdog import timer as tmr
+from aipass.devpulse.apps.handlers.watchdog import timer as watch_timer
 
 
 @pytest.fixture
@@ -116,7 +128,6 @@ def test_list_active_empty(store_path):
 def test_list_active_returns_all_with_elapsed(store_path):
     watch_registry.register("agent", {"agent_id": "@drone"}, storage_path=store_path)
     watch_registry.register("timer", {"duration": "5m"}, storage_path=store_path)
-    time.sleep(0.05)
 
     active = watch_registry.list_active(storage_path=store_path, prune_stale=False)
     assert len(active) == 2
@@ -216,24 +227,24 @@ def _fake_ps(stdout: str, argv_seen: list | None = None):
     return _run
 
 
-def test_is_zombie_off_linux_reads_the_ps_state(monkeypatch):
+def test_is_zombie_off_linux_reads_the_ps_state(monkeypatch, pretend_platform):
     argv_seen: list = []
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n", argv_seen))
 
     assert watch_registry.is_zombie(4242) is True
     assert argv_seen == [["ps", "-o", "state=", "-p", "4242"]]
 
 
-def test_a_running_state_off_linux_is_not_a_zombie(monkeypatch):
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+def test_a_running_state_off_linux_is_not_a_zombie(monkeypatch, pretend_platform):
+    pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("S\n"))
 
     assert watch_registry.is_zombie(4242) is False
 
 
-def test_is_zombie_off_linux_is_false_when_ps_cannot_run(monkeypatch):
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+def test_is_zombie_off_linux_is_false_when_ps_cannot_run(monkeypatch, pretend_platform):
+    pretend_platform(watch_registry, "darwin")
 
     def _explode(argv, **kwargs):
         raise FileNotFoundError(2, "No such file or directory", "ps")
@@ -242,39 +253,53 @@ def test_is_zombie_off_linux_is_false_when_ps_cannot_run(monkeypatch):
     assert watch_registry.is_zombie(4242) is False
 
 
-def test_a_zombie_is_not_alive_off_linux(monkeypatch):
+def test_a_zombie_is_not_alive_off_linux(monkeypatch, pretend_platform):
     """Row 3 in one assertion. This pid genuinely answers os.kill(pid, 0) — the
     ps state is the ONLY thing that can say it is a corpse, and before FPLAN-0554
     nothing asked it off Linux."""
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
 
     assert watch_registry.is_pid_alive(os.getpid()) is False
 
 
-def test_a_live_pid_off_linux_is_still_alive(monkeypatch):
+def test_a_live_pid_off_linux_is_still_alive(monkeypatch, pretend_platform):
     """The other half: the portable probe must not bury the living."""
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("S+\n"))
 
     assert watch_registry.is_pid_alive(os.getpid()) is True
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="POSIX-only RECIPE, not a POSIX-only rule: this is the one off-Linux test that goes through "
-    "list_active, so it takes _FileLock — which imports fcntl on every platform that is not win32. "
-    "Forcing darwin here tells the lock it is on POSIX, and on Windows that import does not exist. "
-    "The zombie state it prunes on has no Windows spelling either (ps -o state= is POSIX). Pruning "
-    "itself is pinned on this host and on macOS.",
-)
-def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch):
-    """What the bug cost operationally: a dead watch stayed listed forever."""
+def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch, pretend_platform):
+    """What the bug cost operationally: a dead watch stayed listed forever.
+
+    Runs on every host since registry 1.1.1: this goes through list_active and
+    so through _FileLock, whose door is now the fcntl binding, not the platform
+    name this test pretends. The Windows skip it used to carry was the symptom
+    of the same import that reddened two watch_agent rows on the Windows runner.
+    """
     watch_registry.register("agent", {"label": "reaped"}, storage_path=store_path)
-    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
 
     assert watch_registry.list_active(storage_path=store_path, prune_stale=True) == []
+
+
+def test_the_lock_is_a_no_op_where_fcntl_is_absent(store_path, monkeypatch, pretend_platform):
+    """Windows has no fcntl. The lock reads that fact from the module binding, not
+    from sys.platform, so a pretended darwin on a host without fcntl neither
+    imports it nor creates the lock file (CI red on PR #774, run 38068553235:
+    test_watchdog_agent's two off-Linux rows died in this door on the Windows
+    runner with ModuleNotFoundError: No module named 'fcntl')."""
+    monkeypatch.setattr(watch_registry, "fcntl", None)
+    pretend_platform(watch_registry, "darwin")
+
+    handle = watch_registry.register("agent", {"label": "unlocked"}, storage_path=store_path)
+
+    assert handle.startswith("agent-")
+    assert store_path.exists()
+    assert not store_path.with_suffix(store_path.suffix + ".lock").exists()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -450,11 +475,9 @@ def test_full_cycle_integration(store_path):
 
 def test_agent_handler_registers_and_deregisters(store_path, monkeypatch):
     """watch_agent registers on entry and deregisters in finally (even on early return)."""
-    from aipass.devpulse.apps.handlers.watchdog import agent as agent_handler
-
     # Force the handler's default storage path to our tmp file so register
     # lands in the right place.
-    monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
+    monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
     # @__definitely_not_a_branch__ hits the early "not found" return —
     # exercises the deregister-in-finally path with minimal work.
@@ -467,22 +490,20 @@ def test_agent_handler_registers_and_deregisters(store_path, monkeypatch):
 
 
 def test_timer_wake_in_registers_and_deregisters(store_path, monkeypatch):
-    """wake_in with a short duration registers then deregisters."""
-    from aipass.devpulse.apps.handlers.watchdog import timer as timer_handler
+    """wake_in with a short duration registers then deregisters; mutant 'register skipped' reddens it."""
+    monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
-    monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
-
-    # Take a peek mid-flight by patching time.sleep to snapshot the registry.
+    # Poll the store on disk from here while the timer waits in its own thread.
+    outcome: dict = {}
+    waker = threading.Thread(target=lambda: outcome.update(result=watch_timer.wake_in("1s")))
     snapshots: list[list] = []
-    real_sleep = time.sleep
-
-    def spy_sleep(duration):
-        """Capture the registry state while the timer is mid-wait."""
+    waker.start()
+    deadline = time.monotonic() + 30
+    while waker.is_alive() and time.monotonic() < deadline:
         snapshots.append(watch_registry.list_active(storage_path=store_path, prune_stale=False))
-        real_sleep(duration)
-
-    with patch("aipass.devpulse.apps.handlers.watchdog.timer.time.sleep", spy_sleep):
-        result = timer_handler.wake_in("1s")
+        waker.join(timeout=0.01)
+    waker.join(timeout=30)
+    result = outcome["result"]
 
     assert result["state"] == "woke"
     assert "handle" in result
@@ -498,13 +519,9 @@ def test_timer_wake_in_registers_and_deregisters(store_path, monkeypatch):
 
 def test_schedule_wake_at_registers_and_deregisters(store_path, monkeypatch):
     """wake_at with a tiny relative delay registers then deregisters."""
-    from aipass.devpulse.apps.handlers.watchdog import schedule as schedule_handler
-
-    monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
+    monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
     # Fast-forward clock so wake_at returns immediately without real waiting.
-    from datetime import datetime, timedelta
-
     start = datetime(2026, 4, 14, 12, 0, 0)
     calls = {"n": 0}
 
@@ -526,18 +543,19 @@ def test_schedule_wake_at_registers_and_deregisters(store_path, monkeypatch):
 
 def test_handler_deregisters_on_exception(store_path, monkeypatch):
     """If a handler raises mid-wait, the finally block must still deregister."""
-    from aipass.devpulse.apps.handlers.watchdog import timer as timer_handler
-
-    monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store_path)
+    monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
     # Make time.sleep raise after the register call.
     def exploding_sleep(duration):
         """Simulate a KeyboardInterrupt / cancellation mid-sleep."""
         raise RuntimeError("boom")
 
-    with patch("aipass.devpulse.apps.handlers.watchdog.timer.time.sleep", exploding_sleep):
-        with pytest.raises(RuntimeError, match="boom"):
-            timer_handler.wake_in("5s")
+    # Only timer's own ``time`` name is swapped: patching time.sleep is process-wide.
+    monkeypatch.setattr(
+        watch_timer, "time", SimpleNamespace(sleep=exploding_sleep, monotonic=time.monotonic, time=time.time)
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        watch_timer.wake_in("5s")
 
     # Even though wake_in raised, the finally block must have deregistered.
     assert watch_registry.list_active(storage_path=store_path, prune_stale=False) == []
@@ -547,6 +565,20 @@ def test_handler_deregisters_on_exception(store_path, monkeypatch):
 # default storage path — where the store lands when nobody passes one
 
 
+def test_a_call_that_names_no_store_writes_the_sealed_tmp_store(tmp_path):
+    """conftest's sealed_watchdog_store: a test's default store is its own tmp_path, never the seat's."""
+    handle = watch_registry.register("agent", {"agent_id": "@seal-probe"})
+    started = watch_timer.timer_start("seal-probe")
+
+    sealed = tmp_path / "_sealed_watchdog"
+    watches = json.loads((sealed / "watchdog_active.json").read_text(encoding="utf-8"))["watches"]
+    timers = json.loads((sealed / "watchdog_timers.json").read_text(encoding="utf-8"))["active"]
+    assert [watch["handle"] for watch in watches] == [handle]
+    assert list(timers) == ["seal-probe"]
+    assert timers["seal-probe"]["started_at"] == started["started_at"]
+
+
+@pytest.mark.live_default_store
 class TestTheDefaultStoreNeverLandsAtTheCallersFeet:
     """The 2026-08-31 CI red: on a fresh checkout (no AIPASS_REGISTRY.json
     anywhere — the marker is machine-local runtime state, exactly like the
@@ -565,25 +597,19 @@ class TestTheDefaultStoreNeverLandsAtTheCallersFeet:
         Red against the old code: the walk fails (no marker above tmp_path,
         no parent named devpulse) and the fallback answers tmp_path/.watchdog.
         """
-        from aipass.devpulse.apps.handlers.watchdog import registry as reg
-        from aipass.devpulse.apps.handlers.watchdog import timer as tmr
-
         monkeypatch.chdir(tmp_path)
         for mod in (reg, tmr):
-            default = mod._default_storage_path()
+            default = mod.default_storage_path()
             assert not default.is_relative_to(tmp_path), (
                 f"the default store landed at the caller's feet — the cwd fallback is back: {default}"
             )
 
     def test_the_default_path_lives_inside_the_package(self, tmp_path, monkeypatch):
         """The store resolves next to the code that owns it, from anywhere."""
-        from aipass.devpulse.apps.handlers.watchdog import registry as reg
-        from aipass.devpulse.apps.handlers.watchdog import timer as tmr
-
         monkeypatch.chdir(tmp_path)
         package_root = Path(reg.__file__).resolve().parents[3]
         assert package_root.name == "devpulse", (
             f"the layout assumption this test rests on moved — re-derive parents[N]: {package_root}"
         )
-        assert reg._default_storage_path() == (package_root / ".watchdog" / "watchdog_active.json")
-        assert tmr._default_storage_path() == (package_root / ".watchdog" / "watchdog_timers.json")
+        assert reg.default_storage_path() == (package_root / ".watchdog" / "watchdog_active.json")
+        assert tmr.default_storage_path() == (package_root / ".watchdog" / "watchdog_timers.json")

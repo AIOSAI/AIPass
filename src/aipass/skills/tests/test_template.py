@@ -3,26 +3,22 @@
 # Description: Tests for skill template management
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for template.py — template resolution, placeholder replacement, copy logic.
+"""Tests for apps/handlers/template.py: resolution, placeholder replacement, copy."""
 
-Covers: get_template, _replace_placeholder_in_file, copy_template
-(valid/invalid types, placeholder replacement, binary skip, error paths,
-target exists, cleanup on failure, __pycache__ exclusion).
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that template.py and module_paths.py parse and import
+# seedgo: no-test-needed(documentation) — that get_template and copy_template carry docstrings
 
 import shutil
 import sys
-from pathlib import Path
 from unittest.mock import patch
 
 from aipass.skills.apps.handlers.template import (
     TEMPLATES_DIR,
     VALID_TYPES,
-    _replace_placeholder_in_file,
     copy_template,
     get_template,
 )
@@ -68,14 +64,14 @@ class TestGetTemplate:
         for vt in VALID_TYPES:
             assert vt in result["error"]
 
-    def test_missing_directory_fails(self, monkeypatch):
+    def test_missing_directory_fails(self, monkeypatch, tmp_path):
         """If template dir doesn't exist on disk, should fail gracefully."""
         _tpl_mod = sys.modules["aipass.skills.apps.handlers.template"]
 
         monkeypatch.setattr(
             _tpl_mod,
             "TEMPLATES_DIR",
-            Path("/nonexistent/templates"),
+            tmp_path / "nonexistent" / "templates",
         )
         result = get_template("markdown_only")
         assert result["success"] is False
@@ -92,48 +88,62 @@ class TestGetTemplate:
 
 
 # ===================================================================
-# 2. _replace_placeholder_in_file — in-file substitution
+# 2. Placeholder substitution — reached through copy_template's copy step
 # ===================================================================
 
 
 class TestReplacePlaceholder:
-    """Tests for _replace_placeholder_in_file — {{SKILL_NAME}} replacement."""
+    """Placeholder substitution ({{SKILL_NAME}} replacement), reached through
+    copy_template() on a template dir built under tmp_path (item 10) rather
+    than by calling the private in-file replacer directly."""
+
+    @staticmethod
+    def _copied(tmp_path, files, skill_name="my-tool"):
+        """Build a one-off template dir under tmp_path holding `files`, copy it
+        via copy_template, and return the target directory it was copied to."""
+        src = tmp_path / "src-template"
+        src.mkdir()
+        for name, content in files.items():
+            path = src / name
+            if isinstance(content, bytes):
+                path.write_bytes(content)
+            else:
+                path.write_text(content, encoding="utf-8")
+        target = tmp_path / "target"
+        result = copy_template(src, target, skill_name)
+        assert result["success"] is True
+        return target
 
     def test_replaces_placeholder_in_text(self, tmp_path):
-        f = tmp_path / "test.md"
-        f.write_text("name: {{SKILL_NAME}}\ndesc: {{SKILL_NAME}} is great")
-        _replace_placeholder_in_file(f, "my-tool")
-        content = f.read_text()
+        target = self._copied(tmp_path, {"test.md": "name: {{SKILL_NAME}}\ndesc: {{SKILL_NAME}} is great"})
+        content = (target / "test.md").read_text(encoding="utf-8")
         assert "my-tool" in content
         assert "{{SKILL_NAME}}" not in content
 
     def test_no_placeholder_leaves_file_unchanged(self, tmp_path):
-        f = tmp_path / "noop.txt"
         original = "no placeholders here"
-        f.write_text(original)
-        _replace_placeholder_in_file(f, "anything")
-        assert f.read_text() == original
+        target = self._copied(tmp_path, {"noop.txt": original})
+        assert (target / "noop.txt").read_text(encoding="utf-8") == original
 
     def test_skips_binary_file(self, tmp_path):
         """Binary files with UnicodeDecodeError should be silently skipped."""
-        f = tmp_path / "binary.bin"
-        f.write_bytes(b"\x80\x81\x82\xff{{SKILL_NAME}}")
-        # Should not raise
-        _replace_placeholder_in_file(f, "test")
+        # Should not raise, and copy_template (asserted success inside _copied)
+        # must still complete the rest of the copy.
+        target = self._copied(tmp_path, {"binary.bin": b"\x80\x81\x82\xff{{SKILL_NAME}}"})
         # File should still be binary (unchanged or at least not crash)
-        assert f.exists()
+        assert (target / "binary.bin").exists()
 
     def test_empty_file_no_error(self, tmp_path):
-        f = tmp_path / "empty.md"
-        f.write_text("")
-        _replace_placeholder_in_file(f, "test")
-        assert f.read_text() == ""
+        target = self._copied(tmp_path, {"empty.md": ""})
+        assert (target / "empty.md").read_text(encoding="utf-8") == ""
 
     def test_multiple_placeholders_all_replaced(self, tmp_path):
-        f = tmp_path / "multi.md"
-        f.write_text("A={{SKILL_NAME}} B={{SKILL_NAME}} C={{SKILL_NAME}}")
-        _replace_placeholder_in_file(f, "x")
-        content = f.read_text()
+        target = self._copied(
+            tmp_path,
+            {"multi.md": "A={{SKILL_NAME}} B={{SKILL_NAME}} C={{SKILL_NAME}}"},
+            skill_name="x",
+        )
+        content = (target / "multi.md").read_text(encoding="utf-8")
         assert content == "A=x B=x C=x"
 
 
@@ -192,14 +202,14 @@ class TestCopyTemplate:
 
     def test_invalid_source_fails(self, tmp_path):
         target = tmp_path / "bad-src"
-        result = copy_template(Path("/nonexistent/template"), target, "bad")
+        result = copy_template(tmp_path / "nonexistent" / "template", target, "bad")
         assert result["success"] is False
         assert "Failed to create skill" in result["error"]
 
     def test_cleanup_on_failure(self, tmp_path):
         """If copy fails mid-way, target dir should be cleaned up."""
         target = tmp_path / "cleanup-test"
-        result = copy_template(Path("/nonexistent"), target, "test")
+        result = copy_template(tmp_path / "nonexistent", target, "test")
         assert result["success"] is False
         # Target should not exist after cleanup
         assert not target.exists()

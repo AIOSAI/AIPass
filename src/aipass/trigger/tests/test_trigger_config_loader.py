@@ -3,10 +3,13 @@
 # Description: Tests for the trigger operator config loader
 # Version: 1.0.0
 # Created: 2026-08-08
-# Modified: 2026-08-08
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for handlers/json/config_loader.py — regenerate when missing, never clobber what the operator wrote."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the lane in apps/handlers/escalation.py that reads the config; its own tests cover it
 
 import json
 from pathlib import Path
@@ -14,6 +17,7 @@ from typing import Any, Dict
 
 import pytest
 from aipass.trigger.apps.config import trail_logger
+from aipass.trigger.apps.handlers.json import config_loader
 
 
 # ---------------------------------------------------------------------------
@@ -28,8 +32,6 @@ def loader(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     Real reads and real writes — the loader's whole job is what it does to a
     file on disk, so a mocked filesystem would test nothing.
     """
-    from aipass.trigger.apps.handlers.json import config_loader
-
     monkeypatch.setattr(config_loader, "CONFIG_PATH", tmp_path / "custom_config" / "trigger.config.json")
     monkeypatch.setattr(config_loader, "logger", trail_logger(tmp_path / "config_loader.jsonl"))
     return config_loader

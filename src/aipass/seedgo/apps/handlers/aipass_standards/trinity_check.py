@@ -147,6 +147,8 @@ __all__ = [
     "validate_entry_shape",
 ]
 
+# APPLIES_TO: scores .trinity/, not Python.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "branch_level"
 
 # Ruling 6: this checker scores files OUTSIDE apps/, so the audit cache must

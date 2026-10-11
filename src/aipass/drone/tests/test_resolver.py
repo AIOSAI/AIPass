@@ -1,8 +1,15 @@
-"""Tests for branch resolution (@name -> path).
+# =================== AIPass ====================
+# Name: test_resolver.py
+# Description: Branch resolution, @name to path, and the resolver commands
+# Version: 1.0.0
+# Created: 2026-03-14
+# Modified: 2026-09-27
+# =============================================
 
-Covers resolve_branch(), list_branches(), branch_exists(), get_branch_info(),
-normalize helpers, and handle_command() routing.
-"""
+"""Tests for apps/modules/resolver.py: @name to path resolution and its commands."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 import json
 from pathlib import Path
@@ -337,26 +344,40 @@ class TestListBranches:
 
 
 class TestHandleCommand:
-    def test_resolve_command_success(self, populated_registry):
+    def test_resolve_command_success(self, populated_registry, capsys):
+        """Mutant killed: resolve printing the name without the path it resolved to."""
         assert handle_command("resolve", ["@ALPHA"]) is True
+        out = capsys.readouterr().out
+        assert f"@ALPHA -> {populated_registry.parent / 'alpha'}" in out
 
     def test_resolve_command_no_args(self, populated_registry):
         assert handle_command("resolve", []) is False
 
-    def test_exists_command_success(self, populated_registry):
+    def test_exists_command_success(self, populated_registry, capsys):
+        """Mutant killed: exists printing False for a registered branch."""
         assert handle_command("exists", ["@ALPHA"]) is True
+        assert "@ALPHA exists: True" in capsys.readouterr().out
 
     def test_exists_command_no_args(self, populated_registry):
         assert handle_command("exists", []) is False
 
-    def test_info_command_success(self, populated_registry):
+    def test_info_command_success(self, populated_registry, capsys):
+        """Mutant killed: info printing its label without the branch's record."""
         assert handle_command("info", ["@ALPHA"]) is True
+        out = capsys.readouterr().out
+        assert "Branch info:" in out
+        assert "'library'" in out
 
     def test_info_command_no_args(self, populated_registry):
         assert handle_command("info", []) is False
 
-    def test_list_command(self, populated_registry):
+    def test_list_command(self, populated_registry, capsys):
+        """Mutant killed: list printing none of the branches it found."""
         assert handle_command("list", []) is True
+        out = capsys.readouterr().out
+        assert "@ALPHA" in out.upper()
+        assert "@BETA" in out.upper()
+        assert "@GAMMA" not in out.upper()
 
     def test_resolve_nonexistent_returns_false(self, populated_registry):
         assert handle_command("resolve", ["@NONEXISTENT"]) is False
@@ -425,11 +446,11 @@ class TestResolverPathContainment:
     """resolve_branch() rejects registry entries with path traversal."""
 
     def test_traversal_path_raises(self, tmp_path: Path):
-        """Registry entry with ../../../tmp/evil is rejected (filtered at load or resolve)."""
+        """Registry entry with ../../../outside/evil is rejected (filtered at load or resolve)."""
         reg_file = tmp_path / "AIPASS_REGISTRY.json"
         _write_registry(
             reg_file,
-            [_make_branch("evil", "../../../tmp/evil")],
+            [_make_branch("evil", "../../../outside/evil")],
         )
         set_registry_path(reg_file)
         try:
@@ -502,7 +523,7 @@ class TestCrossProjectResolution:
         aipass_reg = aipass_root / "AIPASS_REGISTRY.json"
         _write_registry(
             aipass_reg,
-            [_make_branch("evil", "../../../tmp/escape")],
+            [_make_branch("evil", "../../../outside/escape")],
         )
 
         set_registry_path(ext_reg)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Escalation digest CLI — inspect repeat warning/error signatures
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-08
-# Modified: 2026-08-08
+# Modified: 2026-09-20
 # =============================================
 
 """
@@ -101,6 +101,13 @@ def _handle_status(console) -> None:
         f"{stats['error_threshold']} error in {stats['window_minutes']} min"
     )
     console.print(f"  Cooldown         : {stats['cooldown_minutes']} min per signature")
+    if stats.get("warning_age_hours"):
+        console.print(
+            f"  Aged warnings    : after {stats['warning_age_hours']}h go to the branch that logged them "
+            f"[dim](roll-up here every {stats['rollup_hours']}h)[/dim]"
+        )
+    else:
+        console.print("  Aged warnings    : [dim]lane off — every repeat stays on this digest[/dim]")
     console.print(f"  Branch warnings  : {'watched' if stats['watch_branch_log_warnings'] else 'not watched'}")
     console.print(f"  Suppressed errors: {'escalated' if stats['escalate_suppressed'] else 'stay silent'}")
     if stats["ignore_branches"]:
@@ -111,6 +118,11 @@ def _handle_status(console) -> None:
         f"[dim]({stats['tracked_warnings']} warning / {stats['tracked_errors']} error)[/dim]"
     )
     console.print(f"  Digests sent     : {stats['digests_sent']} [dim]across {stats['signatures_digested']}[/dim]")
+    if stats.get("aged_signatures"):
+        console.print(
+            f"  Aged to owners   : {stats['aged_signatures']} signature(s) "
+            f"[dim](registry rows — drone @trigger errors list)[/dim]"
+        )
     if not stats["email_wired"]:
         console.print("  [dim]Email callback not wired in this process (wired when events fire).[/dim]")
     if stats.get("trail_writes_dropped"):
@@ -145,6 +157,8 @@ def _handle_list(console, args: list) -> None:
         colour = "yellow" if row.get("level") == "WARNING" else "red"
         digests = row.get("digests_sent", 0)
         sent = f" [green]{digests} digest(s)[/green]" if digests else ""
+        if row.get("aged_since"):
+            sent += " [magenta]aged → owner[/magenta]"
         console.print(
             f"  [{colour}]{row.get('level', '?'):<8}[/{colour}] [dim]{row['signature']}[/dim] "
             f"@{row.get('branch', '?').lower()}/{row.get('module', '?')}"

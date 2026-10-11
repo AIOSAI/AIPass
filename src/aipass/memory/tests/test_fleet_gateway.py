@@ -1,36 +1,44 @@
 # =================== AIPass ====================
 # Name: test_fleet_gateway.py
 # Description: Pins the public cross-branch gateway for the fleet definition
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-08-30
+# Modified: 2026-09-27
 # =============================================
 
-"""The fleet definition has one owner and now one door.
+"""Tests for apps/modules/fleet.py."""
 
-@daemon reported (dispatch 2a70bbcd) that the cross-branch import I sanctioned
-fails two of @seedgo's checks at once. The rule is not arbitrary and it is not
-"do not consume @memory" — ``handlers_check.py:310`` says another branch's
-``modules`` package is its PUBLIC GATEWAY and sends cross-branch callers there
-explicitly. ``apps/handlers/`` is private implementation.
+# The fleet definition has one owner and now one door.
+#
+# @daemon reported (dispatch 2a70bbcd) that the cross-branch import I sanctioned
+# fails two of @seedgo's checks at once. The rule is not arbitrary and it is not
+# "do not consume @memory" — ``handlers_check.py:310`` says another branch's
+# ``modules`` package is its PUBLIC GATEWAY and sends cross-branch callers there
+# explicitly. ``apps/handlers/`` is private implementation.
+#
+# So the seam moves, and nothing else does. ``registry_scope`` stays the single
+# definition; this module is the door to it, owned here rather than shimmed in
+# each consumer's tree — a gateway living in @daemon would be a second public
+# surface for my module in a branch I do not control, and the next consumer would
+# import theirs or write a third.
+#
+# What is deliberately NOT re-exported is as much of the contract as what is:
+# ``resident_registry_paths`` and ``read_registry_branches`` are the mechanics of
+# HOW residents are found, and they stop being the whole story the moment the
+# external tier lands.
 
-So the seam moves, and nothing else does. ``registry_scope`` stays the single
-definition; this module is the door to it, owned here rather than shimmed in
-each consumer's tree — a gateway living in @daemon would be a second public
-surface for my module in a branch I do not control, and the next consumer would
-import theirs or write a third.
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — declared_residency answers, in tests/test_residency_scope.py
+# seedgo: no-test-needed(covered_elsewhere) — declared_roots values, in tests/test_declared_roots.py
+# seedgo: no-test-needed(covered_elsewhere) — find_repo_root's walk, in tests/test_repo_root.py
+# seedgo: no-test-needed(shared) — the json_handler.log_operation audit line; the json handler's lane
 
-What is deliberately NOT re-exported is as much of the contract as what is:
-``resident_registry_paths`` and ``read_registry_branches`` are the mechanics of
-HOW residents are found, and they stop being the whole story the moment the
-external tier lands.
-"""
-
-import importlib
 from pathlib import Path
 
 import pytest
 
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.memory.apps import memory
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.modules import fleet
 
@@ -109,8 +117,6 @@ class TestTheCommandSurfaceIsIntrospectionOnly:
         what looks like success to a caller. It goes through `error()` now and
         the exit code is pinned.
         """
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-
         reset_command_state()
         assert fleet.handle_command("fleet", ["nonsense"]) is True
         assert resolve_exit(True) == 2, "an unknown subcommand refused but would exit 0"
@@ -118,28 +124,36 @@ class TestTheCommandSurfaceIsIntrospectionOnly:
         assert "nonsense" in captured.out + captured.err
 
     def test_the_command_surface_executes_no_fleet_work(self, monkeypatch):
-        """The pin that keeps this a door: the CLI must never answer the question itself."""
+        """The pin that keeps this a door: the CLI must never answer the question itself.
+
+        Both bindings are watched: ``fleet`` holds its own names for the handler's
+        functions, so patching ``registry_scope`` alone never saw a call made
+        through the gateway. Mutant: ``fleet_branches()`` called ahead of the
+        ``log_operation`` line in ``handle_command`` — killed.
+        """
         called = []
-        monkeypatch.setattr(registry_scope, "fleet_branches", lambda *a, **k: called.append(a) or [])
-        monkeypatch.setattr(registry_scope, "accepted_resident_paths", lambda *a, **k: called.append(a) or set())
-        fleet.handle_command("fleet", [])
-        assert not called, "the gateway's CLI computed fleet state instead of describing the contract"
+        for owner in (registry_scope, fleet):
+            monkeypatch.setattr(owner, "fleet_branches", lambda *a, **k: called.append(a) or [])
+            monkeypatch.setattr(owner, "accepted_resident_paths", lambda *a, **k: called.append(a) or set())
+        assert fleet.handle_command("fleet", []) is True
+        assert called == [], "the gateway's CLI computed fleet state instead of describing the contract"
 
     def test_it_is_discovered_by_the_real_loops_own_rule(self):
         """Asserted against the discovery rule rather than trusted.
 
         ``apps/memory.py`` duck-types every file in ``modules/`` on
-        ``handle_command``. This confirms the rule is still what the module was
-        written against, so the shape above is deliberate and not incidental.
+        ``handle_command``. This runs the REAL ``discover_modules()`` and holds
+        it to the files on disk: every ``modules/*.py`` that defines
+        ``handle_command`` is discovered, and nothing that does not.
         """
         modules_dir = Path(fleet.__file__).parent
-        commanded = []
-        for path in sorted(modules_dir.glob("*.py")):
-            if path.name == "__init__.py":
-                continue
-            module = importlib.import_module(f"aipass.memory.apps.modules.{path.stem}")
-            if hasattr(module, "handle_command"):
-                commanded.append(path.stem)
+        on_disk = {
+            path.stem
+            for path in modules_dir.glob("*.py")
+            if not path.name.startswith("_") and "def handle_command(" in path.read_text(encoding="utf-8")
+        }
+        commanded = sorted(module.__name__.rsplit(".", 1)[-1] for module in memory.discover_modules())
+        assert commanded == sorted(on_disk)
         assert "fleet" in commanded
         assert "health" in commanded, "the precedent gateway no longer follows the convention this one copied"
 

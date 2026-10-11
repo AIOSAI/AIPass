@@ -237,7 +237,7 @@
       "path": "apps/README.md"
     },
     "f020": {
-      "content_hash": "0ef6c27137dc",
+      "content_hash": "41b011f487af",
       "has_branch_placeholder": false,
       "name": "__init__.py",
       "path": "apps/__init__.py"
@@ -249,7 +249,7 @@
       "path": "apps/handlers/README.md"
     },
     "f022": {
-      "content_hash": "081f1621005e",
+      "content_hash": "c5402a49e776",
       "has_branch_placeholder": false,
       "name": "__init__.py",
       "path": "apps/handlers/__init__.py"
@@ -279,7 +279,7 @@
       "path": "__init__.py"
     },
     "f027": {
-      "content_hash": "3f94fa075d1f",
+      "content_hash": "1469c1103a90",
       "has_branch_placeholder": true,
       "name": "{{BRANCH}}.py",
       "path": "apps/{{BRANCH}}.py"
@@ -339,7 +339,7 @@
       "path": "templates/README.md"
     },
     "f037": {
-      "content_hash": "7a753f85e4df",
+      "content_hash": "d86b3bf896a0",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "tests/README.md"
@@ -351,7 +351,7 @@
       "path": "tests/__init__.py"
     },
     "f039": {
-      "content_hash": "109bb10d6e10",
+      "content_hash": "acec07c1e0c4",
       "has_branch_placeholder": false,
       "name": "conftest.py",
       "path": "tests/conftest.py"
@@ -405,21 +405,33 @@
       "path": "apps/handlers/json/json_handler.py"
     },
     "f048": {
-      "content_hash": "e4fe1ed373a7",
+      "content_hash": "85dc65f0293f",
       "has_branch_placeholder": false,
       "name": "test_cli_routing.py",
       "path": "tests/test_cli_routing.py"
     },
     "f049": {
-      "content_hash": "e7a53600e91e",
+      "content_hash": "bd23375e1fe5",
       "has_branch_placeholder": false,
       "name": "test_scaffold.py",
       "path": "tests/test_scaffold.py"
+    },
+    "f050": {
+      "content_hash": "c75bf65448e2",
+      "has_branch_placeholder": false,
+      "name": "support_fence.py",
+      "path": "tests/support_fence.py"
+    },
+    "f051": {
+      "content_hash": "4126345ebb4e",
+      "has_branch_placeholder": false,
+      "name": "test_handlers_fence.py",
+      "path": "tests/test_handlers_fence.py"
     }
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-09-19",
+    "last_updated": "2026-10-10",
     "version": "1.0.0"
   }
 }

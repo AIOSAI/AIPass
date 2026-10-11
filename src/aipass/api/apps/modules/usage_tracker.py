@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: usage_tracker.py
 # Description: Usage Tracking Module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2025-11-15
-# Modified: 2026-08-11
+# Modified: 2026-10-05
 # =============================================
 
 """
@@ -27,7 +27,7 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from typing import List
+from typing import List, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
@@ -240,17 +240,26 @@ def show_caller_usage(args: List[str]):
         warning(f"No usage data found for caller: {caller}")
 
 
-def cleanup_data(args: List[str]):
-    """Orchestrate cleanup workflow"""
+def cleanup_data(args: List[str], data_path: Optional[Path] = None):
+    """Orchestrate cleanup workflow.
+
+    Args:
+        args: Optional first item, the retention in days.
+        data_path: The usage store to clean. None, what handle_command
+            passes, is the branch's api_json/usage_tracker_data.json. The
+            seam exists so the tests hand a store under tmp_path instead of
+            replacing pathlib.Path on this module (api, fleet green leg 13).
+    """
     days = int(args[0]) if args else DEFAULT_RETENTION_DAYS
 
     header(f"Cleanup Old Data (retain {days} days)")
     console.print()
 
     # Call handler for cleanup
-    # Navigate: usage_tracker.py -> modules/ -> apps/ -> api/
-    API_JSON_DIR = Path(__file__).resolve().parent.parent.parent / "api_json"
-    data_path = API_JSON_DIR / "usage_tracker_data.json"
+    if data_path is None:
+        # Navigate: usage_tracker.py -> modules/ -> apps/ -> api/
+        API_JSON_DIR = Path(__file__).resolve().parent.parent.parent / "api_json"
+        data_path = API_JSON_DIR / "usage_tracker_data.json"
 
     if not data_path.exists():
         warning("No usage data file found — nothing to clean")

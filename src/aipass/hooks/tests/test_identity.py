@@ -1,32 +1,41 @@
 # =================== AIPass ====================
 # Name: test_identity.py
-# Version: 1.3.0
+# Version: 1.3.3
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-16
+# Modified: 2026-10-10
 # =============================================
 
-"""Tests for handlers/prompt/identity.py.
+"""Tests for apps/handlers/prompt/identity.py."""
 
-handle() is cadence-gated (loader "identity", period 5). The render tests below
-pin the passport formatting, so the gate is held open for every test in this
-module; TestCadenceGate pins the gate itself.
-"""
+# handle() is cadence-gated (loader "identity", period 5). The render tests below
+# pin the passport formatting, so the gate is held open for every test in this
+# module; TestCadenceGate pins the gate itself.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/prompt/identity.py parses and imports
+# seedgo: no-test-needed(documentation) — the module docstring's account of the cadence period
+# seedgo: no-test-needed(stdlib) — importlib.import_module resolving the cadence module by name
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
+
+from aipass.hooks.apps.handlers.prompt.identity import handle
+from aipass.hooks.apps.modules.grounding_content import FACET_CHAR_BUDGET, IDENTITY_CHAR_BUDGET
 
 _CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
 
 
 @pytest.fixture(autouse=True)
 def _cadence_fires(monkeypatch):
-    """Hold the cadence gate open so render tests never depend on the live turn counter."""
-    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda *_a, **_k: True)
+    """Hold the cadence gate open so render tests never depend on the live turn counter.
+
+    Open for the identity loader only: a handler that asked under another name would render nothing.
+    """
+    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda loader_name, *_a, **_k: loader_name == "identity")
 
 
 class TestCadenceGate:
@@ -39,7 +48,6 @@ class TestCadenceGate:
         (trinity / "passport.json").write_text(json.dumps(SAMPLE_PASSPORT), encoding="utf-8")
 
     def test_skips_on_cadence_skip(self, tmp_path, monkeypatch):
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         self._write_passport(tmp_path)
         seen: list[str] = []
@@ -56,7 +64,6 @@ class TestCadenceGate:
         assert result == {"stdout": "", "exit_code": 0}
 
     def test_fires_on_cadence_fire(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         self._write_passport(tmp_path)
 
@@ -67,7 +74,6 @@ class TestCadenceGate:
 
     def test_is_withheld_when_cadence_check_raises(self, tmp_path, monkeypatch, caplog):
         """The degraded fail mode (DPLAN-0347): identity waits, the kernel fires alone and says why."""
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         self._write_passport(tmp_path)
 
@@ -123,7 +129,6 @@ SAMPLE_PASSPORT_V2 = {
 
 class TestIdentityHandler:
     def test_returns_identity_when_passport_found(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
@@ -138,8 +143,21 @@ class TestIdentityHandler:
         assert "Pragmatic" in result["stdout"]
         assert result["sound"] == "identity"
 
+    def test_a_passport_at_a_symlinked_home_is_not_read(self, tmp_path, monkeypatch):
+        """host_portability (PR #774): the resolved walk never met an unresolved home and read home's passport."""
+        real = tmp_path / "real_home"
+        (real / ".trinity").mkdir(parents=True)
+        (real / ".trinity" / "passport.json").write_text(json.dumps(SAMPLE_PASSPORT), encoding="utf-8")
+        (real / "work").mkdir()
+        (tmp_path / "home").symlink_to(real, target_is_directory=True)
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+        result = handle({"cwd": str(real / "work")})
+
+        assert result["stdout"] == ""
+
     def test_returns_empty_when_no_passport(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         result = handle({"cwd": str(tmp_path)})
 
@@ -148,7 +166,6 @@ class TestIdentityHandler:
         assert "sound" not in result
 
     def test_walks_up_to_find_passport(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
@@ -162,7 +179,6 @@ class TestIdentityHandler:
         assert "devpulse Identity" in result["stdout"]
 
     def test_formats_all_fields(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
@@ -181,7 +197,6 @@ class TestIdentityHandler:
         assert "Principles: Fail honestly * Memory is everything" in out
 
     def test_handles_minimal_passport(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
@@ -194,18 +209,16 @@ class TestIdentityHandler:
         assert "test Identity" in result["stdout"]
         assert result["sound"] == "identity"
 
-    def test_empty_hook_data(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.identity import handle
-
-        with patch("pathlib.Path.cwd", return_value=tmp_path / "nonexistent"):
-            result = handle({})
+    def test_empty_hook_data(self, tmp_path, monkeypatch):
+        # No cwd in the hook data: the real cwd is read, an empty directory (fleet green leg 7).
+        monkeypatch.chdir(tmp_path)
+        result = handle({})
 
         assert result["exit_code"] == 0
         assert result["stdout"] == ""
         assert "sound" not in result
 
     def test_corrupt_passport_json(self, tmp_path):
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
@@ -230,7 +243,6 @@ class TestPrinciplesLayoutFallback:
 
     @staticmethod
     def _render(tmp_path: Path, passport_data: dict) -> str:
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir(parents=True)
@@ -290,7 +302,6 @@ class TestPersonalityAndAntiTraits:
 
     @staticmethod
     def _render(tmp_path: Path, passport_data: dict) -> str:
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir(parents=True)
@@ -384,7 +395,6 @@ class TestPersonalityAndAntiTraits:
 
     def test_a_facet_longer_than_its_budget_is_cut_at_a_sentence(self, tmp_path):
         """Truncate rather than drop: every facet stays present, every kept word true."""
-        from aipass.hooks.apps.modules.grounding_content import FACET_CHAR_BUDGET
 
         first = "Short opening sentence. "
         long_facet = first + ("Filler words that run past the budget. " * 20)
@@ -412,7 +422,6 @@ class TestPersonalityAndAntiTraits:
         injected on EVERY turn, so an unbounded passport quietly costs the whole
         session. Six facets plus five anti-traits is the richest in the fleet.
         """
-        from aipass.hooks.apps.modules.grounding_content import IDENTITY_CHAR_BUDGET
 
         passport = {
             "branch_info": {"branch_name": "VERA", "path": "src/vera_studio/vera", "email": "@vera"},
@@ -446,7 +455,6 @@ class TestIdentityBudgetIsEnforced:
 
     @staticmethod
     def _render(tmp_path: Path, passport_data: dict) -> str:
-        from aipass.hooks.apps.handlers.prompt.identity import handle
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir(parents=True)
@@ -468,7 +476,6 @@ class TestIdentityBudgetIsEnforced:
         }
 
     def test_a_passport_with_no_facets_is_capped_too(self, tmp_path):
-        from aipass.hooks.apps.modules.grounding_content import IDENTITY_CHAR_BUDGET
 
         out = self._render(tmp_path, self._fat_passport())
 

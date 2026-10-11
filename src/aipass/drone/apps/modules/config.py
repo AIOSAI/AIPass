@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Registry configuration management
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -19,12 +19,13 @@ from aipass.cli.apps.modules import console
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.registry_handler import (
     get_registry_path,
+    passport_fault,
     set_registry_path,
     reset_registry_path,
 )
 from aipass.drone.apps.handlers.help_flags import wants_help
 
-__all__ = ["get_registry_path", "set_registry_path", "reset_registry_path"]
+__all__ = ["get_registry_path", "passport_fault", "set_registry_path", "reset_registry_path"]
 
 
 def print_introspection():

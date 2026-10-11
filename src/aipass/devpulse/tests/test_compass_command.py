@@ -3,24 +3,21 @@
 # Description: Tests for the compass module command router (FPLAN P2)
 # Version: 1.0.0
 # Created: 2026-06-16
-# Modified: 2026-06-16
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the compass command router (FPLAN-0212 P2).
+"""Tests for apps/modules/compass.py, driven through handle_command against a temp --db store."""
 
-These exercise the thin command layer (``apps/modules/compass.py``) end to
-end against a real temp SQLite store via the ``--db`` flag — the same path the
-live ``drone @devpulse compass`` invocation takes. Everything goes through the
-module entry point (``handle_command``): the round-trip (add -> query -> see
-rating) is driven and asserted entirely via the command's own console output,
-so the storage handler is never reached into directly.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(help_flag_safety) — that handle_command calls _wants_help before acting
+# seedgo: no-test-needed(constant) — the Rich colour tags in HELP_TEXT
 
 import re
 from pathlib import Path
 
 import pytest
 
+from aipass.cli.apps.modules import display as cli_display
 from aipass.devpulse.apps.modules import compass as compass_cmd
 
 
@@ -144,6 +141,46 @@ def test_add_persists_to_store(capsys, db):
     assert "1 result(s)" in out
 
 
+def test_add_tags_are_stored_and_searchable(capsys, db):
+    """--tags reaches the store: a query on a word found only in the tags finds the decision.
+
+    Mutant killed: _handle_add passing tags=None to add_decision.
+    """
+    capsys.readouterr()
+    compass_cmd.handle_command(
+        "compass",
+        ["add", "tag ctx", "tag decision", "--rating", "good", "--tags", "fleet,quetzal", "--db", db],
+    )
+    assert "tags: fleet,quetzal" in _output(capsys)
+
+    out = _query_out(capsys, db, "quetzal")
+    assert "1 result(s)" in out
+    assert "tag decision" in out
+
+
+def test_add_source_is_stored_as_given(capsys, db):
+    """--source user is stored as user; without the flag the entry reads source=devpulse.
+
+    Mutant killed: _handle_add passing source="devpulse" whatever the flag says.
+    """
+    _add(capsys, db, "owner ctx", "owner said so", "good", "--source", "user")
+    _add(capsys, db, "seat ctx", "seat decided", "good")
+
+    assert "source=user" in _query_out(capsys, db, "owner")
+    assert "source=devpulse" in _query_out(capsys, db, "seat")
+
+
+def test_add_unknown_source_errors_no_write(capsys, db):
+    """--source outside devpulse and user is refused by name and writes nothing."""
+    capsys.readouterr()
+    compass_cmd.handle_command(
+        "compass",
+        ["add", "ctx", "dec", "--rating", "good", "--source", "stranger", "--db", db],
+    )
+    assert "'stranger'" in _output(capsys)
+    assert "total decisions: 0" in _stats_out(capsys, db).lower()
+
+
 # ---------------------------------------------------------------------------
 # stats
 # ---------------------------------------------------------------------------
@@ -199,8 +236,6 @@ def test_a_missing_id_flips_the_exit_code(capsys, db, monkeypatch):
     rather than the wording — the wording is for humans, the code is for
     everything else.
     """
-    from aipass.cli.apps.modules import display as cli_display
-
     marks: list[int] = []
     monkeypatch.setattr(cli_display, "mark_command_failed", lambda: marks.append(1))
 
@@ -213,8 +248,6 @@ def test_a_missing_id_flips_the_exit_code(capsys, db, monkeypatch):
 
 def test_a_real_id_still_reports_success(capsys, db, monkeypatch):
     """The fix must not turn every rate into a failure."""
-    from aipass.cli.apps.modules import display as cli_display
-
     did = _add(capsys, db, "ctx", "did the thing", "good")
     marks: list[int] = []
     monkeypatch.setattr(cli_display, "mark_command_failed", lambda: marks.append(1))

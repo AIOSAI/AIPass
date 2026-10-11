@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: receipt.py
 # Description: Per-branch .template_version.json receipt writer
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-25
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """Template Version Receipt
@@ -76,12 +76,19 @@ def template_versions() -> dict[str, str]:
     return versions
 
 
+class ReceiptUnreadable(ValueError):
+    """A receipt file exists and cannot be read as a receipt."""
+
+
 def read_receipt(trinity_dir: Path) -> dict[str, Any] | None:
     """Return a branch's receipt, or ``None`` when it has none.
 
-    An unreadable receipt also reads as ``None`` — with an ERROR logged. The
-    caller's next move (write a fresh one, or refuse) is theirs to choose;
-    this function does not silently repair someone's file.
+    Raises:
+        ReceiptUnreadable: the file is there and is not a readable object. It
+            used to read as ``None``, the answer for no receipt, so the
+            renderer's bump reported a broken receipt as a missing one
+            (DPLAN-0354 leg 3). The caller's next move (write a fresh one, or
+            refuse) is theirs to choose; this function does not repair a file.
     """
     path = Path(trinity_dir) / RECEIPT_NAME
     if not path.is_file():
@@ -89,9 +96,10 @@ def read_receipt(trinity_dir: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
-        logger.error(f"[receipt] Unreadable receipt at {path}: {type(exc).__name__}: {exc}")
-        return None
-    return data if isinstance(data, dict) else None
+        raise ReceiptUnreadable(f"Unreadable receipt at {path}: {type(exc).__name__}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ReceiptUnreadable(f"Unreadable receipt at {path}: root is {type(data).__name__}, not an object")
+    return data
 
 
 def _write(path: Path, payload: dict[str, Any]) -> bool:
@@ -147,7 +155,12 @@ def write_receipt(
         return {"success": False, "error": error}
 
     stamped = _now()
-    existing = read_receipt(trinity_dir) or {}
+    try:
+        existing = read_receipt(trinity_dir) or {}
+    except ReceiptUnreadable as exc:
+        # This lane delivered the templates, so the receipt it writes is a fact; only config_rendered is lost.
+        logger.warning(f"[receipt] {exc} — replaced by the {stamped_by} stamp")
+        existing = {}
     rendered = config_rendered or existing.get("config_rendered") or stamped
 
     payload = {
@@ -180,7 +193,11 @@ def bump_config_rendered(trinity_dir: Path) -> dict[str, Any]:
     put a guess where the standard expects a fact.
     """
     trinity_dir = Path(trinity_dir)
-    existing = read_receipt(trinity_dir)
+    try:
+        existing = read_receipt(trinity_dir)
+    except ReceiptUnreadable as exc:
+        logger.error(f"[receipt] {exc}")
+        return {"success": False, "error": str(exc)}
     if existing is None:
         return {
             "success": False,

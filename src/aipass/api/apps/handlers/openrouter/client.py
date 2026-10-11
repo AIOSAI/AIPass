@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: OpenRouter Client Handler
-# Version: 3.0.0
+# Version: 3.1.1
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-10-03
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 
@@ -76,6 +76,17 @@ OPENROUTER_HEADERS = {"HTTP-Referer": "https://aipass.local", "X-Title": "AIPass
 _client_cache: Dict[str, OpenAI] = {}
 MAX_CACHED_CLIENTS = 5
 
+
+class OpenRouterUnavailable(Exception):
+    """The SDK refused to build a client, or a response could not be read.
+
+    Raised by create_client and extract_response with the SDK's reason
+    rather than answering None, which read the same as "no key" or "empty
+    reply" (api, fleet green leg 10). get_response lets it through: its one
+    live caller, make_call, shows the reason.
+    """
+
+
 # =============================================
 # CLIENT CREATION
 # =============================================
@@ -93,7 +104,11 @@ def create_client(
         timeout: Request timeout in seconds (default: 30)
 
     Returns:
-        OpenAI client instance or None on failure
+        OpenAI client instance, or None when the SDK is missing or no key is given
+
+    Raises:
+        OpenRouterUnavailable: the SDK refused to build the client; the reason travels
+        (api, fleet green leg 10)
 
     Example:
         >>> api_key = get_api_key("openrouter")
@@ -118,8 +133,7 @@ def create_client(
         return client
 
     except Exception as e:
-        logger.error(f"Error creating OpenRouter client: {e}")
-        return None
+        raise OpenRouterUnavailable(f"OpenRouter client could not be created: {e}") from e
 
 
 def get_cached_client(
@@ -227,7 +241,12 @@ def extract_response(response: Any) -> Optional[Dict[str, Any]]:
         response: OpenAI response object
 
     Returns:
-        Dict with 'content' (str), 'id' (str), 'model' (str) or None on failure
+        Dict with 'content' (str), 'id' (str), 'model' (str), or None when the
+        response is missing, has no choices, no message or no content
+
+    Raises:
+        OpenRouterUnavailable: reading the response object itself failed
+        (api, fleet green leg 10)
 
     Example:
         >>> response = make_api_request(client, messages, model)
@@ -272,8 +291,7 @@ def extract_response(response: Any) -> Optional[Dict[str, Any]]:
         return result
 
     except Exception as e:
-        logger.error(f"Failed to extract response: {e}")
-        return None
+        raise OpenRouterUnavailable(f"OpenRouter response could not be read: {e}") from e
 
 
 # =============================================
@@ -303,6 +321,12 @@ def get_response(
 
     Returns:
         Dict with 'content', 'id', 'model' or None on failure
+
+    Raises:
+        OpenRouterUnavailable: from create_client or extract_response, let through
+        so the caller can show the reason (api, fleet green leg 10)
+        KeyUnavailable: from get_api_key, the secrets file could not be read
+        (api, fleet green leg 11)
 
     Example:
         >>> response = get_response("What is Python?", caller="cli", model="anthropic/claude-3.5-sonnet")

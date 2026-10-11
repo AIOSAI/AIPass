@@ -14,7 +14,7 @@ Hooks operate on two tiers:
 
 **Tier 1 — Provider Settings (wiring).** Claude Code's `~/.claude/settings.json` (or project `.claude/settings.json`) defines hook entries that point to the bridge (`claude.py`). These are installed by `setup.sh` / `doctor` — they're pure wiring. Wiring comes in two shapes. Five events use **one fan-out entry** that dispatches every enabled handler for that event: PreToolUse, PostToolUse, SubagentStop, Stop, Notification. Three events are wired **per handler** (`claude.py EventType:hook_name`, one entry each): UserPromptSubmit (13 entries), PreCompact (8 — four handlers × `manual`/`auto`), SessionStart (1). The per-handler form exists for two reasons: a single fan-out entry answers with ONE merged document whose `additionalContext` shares one 10,000-unit display limit (How It Works, step 7), which the prompt injectors together would cross; and per-entry wiring gives each handler its own timeout budget (in the current manifest, UserPromptSubmit runs at 90s except `auto_process` at 120s; PreCompact runs 60s/120s/120s/30s; SessionStart 30s). Provider settings cannot be changed by branches — only setup tooling manages them.
 
-**Tier 2 — Project Config (control).** Each project's `.aipass/hooks.json` controls which hooks fire for that project. Created by `aipass init`. Edit `enabled` flags to turn hooks on/off per project. Use `drone @hooks status` to view current config.
+**Tier 2 — Project Config (control).** Each project's `.aipass/hooks.json` controls which hooks fire for that project. Created by `aipass init`. `enabled` flags turn hooks on/off per project, with limits on the gates: inside AIPass only the root config (a protected file) sets them, a branch-level `hooks.json` is ignored, and a project nested in AIPass has the gates forced over its config (see [project_config.md](project_config.md)). Use `drone @hooks status` to view current config.
 
 **Why provider-only wiring?** Claude Code does not fire `PreToolUse`/`PostToolUse` hooks from project-level settings — only from user-level settings (DPLAN-0160 platform limitation). So all hook entries live in provider settings, and per-project control happens through `.aipass/hooks.json`.
 
@@ -26,9 +26,9 @@ Hooks operate on two tiers:
 | UserPromptSubmit, SessionStart | **One** new entry: `claude.py <Event>:<hook_name>` |
 | PreCompact | **Two** new entries — one `matcher: manual`, one `matcher: auto` |
 
-Provider settings are human-gated (`git_gate.py` `TRUSTED_HOOK_EDITORS`), so when an entry is needed, email @devpulse to wire it. Without it the engine never receives the event and the handler never fires — and the suite cannot see the gap, so verify with firing evidence in `engine.jsonl`.
+Provider settings are protected files (`modules/protected_paths.py`, enforced by `git_gate` on the edit tools and Bash): only the verified admin seat writes them, so when an entry is needed, email @devpulse to wire it. Without it the engine never receives the event and the handler never fires — and the suite cannot see the gap, so verify with firing evidence in `engine.jsonl`.
 
-**Keeping the manifest and live settings in sync:** `.claude/provider_manifest.json` (repo root, self-editable by @hooks) is the source of truth; `~/.claude/settings.json` is the live copy Claude Code actually reads, and only `aipass doctor --fix` (or a trusted editor like @devpulse) can write it. Editing the manifest does NOT apply live — this sync step has silently lapsed before (DPLAN-0278: live drifted a full matcher behind for weeks). Run `aipass doctor` after any manifest edit to see the drift, then ask @devpulse to apply it (or run `aipass doctor --fix` if you're a trusted editor).
+**Keeping the manifest and live settings in sync:** `.claude/provider_manifest.json` (repo root, self-editable by @hooks) is the source of truth; `~/.claude/settings.json` is the live copy Claude Code actually reads, and only `aipass doctor --fix` or the admin seat (@devpulse) writes it. Editing the manifest does NOT apply live — this sync step has silently lapsed before (DPLAN-0278: live drifted a full matcher behind for weeks). Run `aipass doctor` after any manifest edit to see the drift, then ask @devpulse to apply it.
 
 ## Event Types
 
@@ -64,4 +64,4 @@ Wire a new per-handler entry with the name as it appears in `hooks.json`.
 ## Related
 
 - [engine.md](engine.md) — what the engine does with the event once the bridge hands it over
-- [project_config.md](project_config.md) — what a project gets, and the trust hash on `hooks.json`
+- [project_config.md](project_config.md) — what a project gets, which config runs, and the trust hash on an external project's `hooks.json`

@@ -1,13 +1,23 @@
-"""The dispatch register — what was promised, and what a reader can tell from it.
+# =================== AIPass ====================
+# Name: test_dispatch_register.py
+# Description: Tests for the dispatch register append-only log
+# Version: 1.0.2
+# Created: 2026-08-22
+# Modified: 2026-10-08
+# =============================================
 
-FPLAN-0452 P0.
+"""Tests for apps/handlers/dispatch/register.py: the append-only dispatch register."""
 
-The register's whole value is that crash detection costs nothing: an entry past
-its expected_by with no completion record is a FACT ABOUT A FILE, visible to
-anyone who looks, with no process running to discover it. These tests pin the
-properties that fact depends on — append-only, never production, honest about
-what it cannot parse.
-"""
+# FPLAN-0452 P0.
+#
+# The register's whole value is that crash detection costs nothing: an entry past
+# its expected_by with no completion record is a FACT ABOUT A FILE, visible to
+# anyone who looks, with no process running to discover it. These tests pin the
+# properties that fact depends on — append-only, never production, honest about
+# what it cannot parse.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
 
 import json
 import os
@@ -19,7 +29,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from aipass.ai_mail.apps.handlers.dispatch import register
+from aipass.ai_mail.apps.handlers.dispatch import register, report
+from aipass.ai_mail.apps.handlers.notify import jsonl_records
 
 
 @pytest.fixture
@@ -120,9 +131,10 @@ class TestAppendOnly:
     def test_close_appends_a_second_record_and_leaves_the_first_intact(self, repo):
         import json
 
+        report_path = str(repo / "reports" / "x.json")
         dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
         assert dispatch_id
-        register.close_dispatch(dispatch_id, "completed", "/reports/x.json", repo_root=repo)
+        register.close_dispatch(dispatch_id, "completed", report_path, repo_root=repo)
 
         lines = _lines(repo)
         assert len(lines) == 2, "close must APPEND, never rewrite"
@@ -130,7 +142,7 @@ class TestAppendOnly:
         closing = json.loads(lines[1])
         assert closing["dispatch_id"] == dispatch_id
         assert closing["status"] == "completed"
-        assert closing["report_path"] == "/reports/x.json"
+        assert closing["report_path"] == report_path
 
     def test_a_closed_dispatch_stops_being_outstanding(self, repo):
         dispatch_id = register.open_dispatch("@a", "@b", "s", 7200, repo_root=repo)
@@ -260,13 +272,17 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
     # see a dead monitor. These pin the mapping of the Win32 answers onto the
     # tri-state without needing the platform.
 
+    # The Win32 codes are written as Win32 documents them (STILL_ACTIVE 259,
+    # ERROR_INVALID_PARAMETER 87, ERROR_ACCESS_DENIED 5,
+    # PROCESS_QUERY_LIMITED_INFORMATION 0x1000), not read back from the module:
+    # an echo of the product's own constant cannot catch a wrong one (ai_mail, leg 9).
     @pytest.mark.parametrize(
         ("handle", "exit_code", "last_error", "expected"),
         [
-            (1, register._STILL_ACTIVE, 0, True),
+            (1, 259, 0, True),
             (1, 0, 0, False),
-            (0, None, register._ERROR_INVALID_PARAMETER, False),
-            (0, None, register._ERROR_ACCESS_DENIED, True),
+            (0, None, 87, False),
+            (0, None, 5, True),
             (0, None, 6, None),
         ],
         ids=["opened-and-running", "opened-but-exited", "no-such-pid", "exists-not-ours", "other-error-unknown"],
@@ -289,9 +305,12 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
         )
         monkeypatch.setattr(register, "_kernel32", lambda: fake_kernel32)
         monkeypatch.setattr(register, "_last_win32_error", lambda: last_error)
+        # Through monitor_alive, which routes win32 to the Windows leg (ai_mail, leg 14).
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(register.os, "kill", lambda *a: pytest.fail("os.kill must never be reached on win32"))
 
-        assert register._monitor_alive_windows(4242) is expected
-        assert opened_with == [(register._PROCESS_QUERY_LIMITED_INFORMATION, False, 4242)]
+        assert register.monitor_alive(4242) is expected
+        assert opened_with == [(0x1000, False, 4242)]
         assert closed == ([handle] if handle else []), "an opened handle is closed exactly once, an unopened one never"
 
     def test_on_win32_monitor_alive_asks_the_windows_leg_and_never_signals(self, monkeypatch):
@@ -372,6 +391,23 @@ class TestAReplyClosesTheRow:
 
         assert register.close_on_reply("@trigger", "@devpulse", "RE: Your brief", repo_root=repo) is None
         assert len(register.outstanding(repo_root=repo)) == 1
+
+    def test_a_register_that_cannot_be_read_raises_rather_than_matching_nothing(self, repo, monkeypatch):
+        """None means "this reply answers no open row"; an unreadable register is not that.
+
+        Before leg 11 the read failure answered None too. Its one caller,
+        reply's _close_dispatch_row_on_reply, swallows and logs every raise after
+        the reply is delivered, so the raise reaches a log line, never the reply.
+        Its proof is the mutant that answers None again (ai_mail, leg 11).
+        """
+
+        def _unreadable(**kwargs):
+            raise OSError("register unreadable")
+
+        monkeypatch.setattr(register, "outstanding", _unreadable)
+
+        with pytest.raises(OSError, match="register unreadable"):
+            register.close_on_reply("@api", "@devpulse", "RE: Your brief", repo_root=repo)
 
     def test_a_reply_to_someone_else_does_not_close_it(self, repo):
         """Answering a third party says nothing to the seat that promised it."""
@@ -525,6 +561,38 @@ class TestNeverProduction:
         assert target in result.parents
 
 
+class TestThePublicSeam:
+    """AIPASS_DISPATCH_REGISTER re-points the default register, read at every call.
+
+    A consumer's tests (devpulse's hermetic_mail_doors) transplanted the register
+    by patching this module's private find_repo_root; the fence refuses that
+    reach. The variable is the public seam in its place (DPLAN-0404 leg 15).
+    """
+
+    def test_the_variable_names_the_register_every_rootless_caller_reads(self, monkeypatch, tmp_path):
+        chosen = tmp_path / "chosen" / "dispatch_register.jsonl"
+        monkeypatch.setenv("AIPASS_DISPATCH_REGISTER", str(chosen))
+
+        dispatch_id = register.open_dispatch("@a", "@b", "s", 7200)
+
+        assert register.register_file() == chosen
+        assert [row["dispatch_id"] for row in register.outstanding()] == [dispatch_id]
+        assert chosen.exists()
+
+    def test_a_given_root_still_wins_over_the_variable(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AIPASS_DISPATCH_REGISTER", str(tmp_path / "chosen.jsonl"))
+        target = tmp_path / "rooted"
+
+        assert register.register_file(repo_root=target) == target / ".aipass" / register.REGISTER_FILENAME
+
+    def test_unset_is_the_repo_root_answer(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("AIPASS_DISPATCH_REGISTER", raising=False)
+        root = tmp_path / "root"
+        monkeypatch.setattr(register, "find_repo_root", lambda: root)
+
+        assert register.register_file() == root / ".aipass" / register.REGISTER_FILENAME
+
+
 class TestReadingIsForgiving:
     """Concurrent appenders mean a torn line is possible; it must cost one record, not all."""
 
@@ -540,6 +608,7 @@ class TestReadingIsForgiving:
         assert subjects == {"first", "second"}
 
     def test_no_register_yet_is_an_empty_state_not_a_failure(self, repo):
+        """The honest empty state — no file yet means no promises yet."""
         assert register.outstanding(repo_root=repo) == []
 
     def test_the_register_is_capped_like_the_feed(self, repo, monkeypatch):
@@ -562,9 +631,8 @@ class TestEmptyAndUnreadableAreNotTheSameAnswer:
     register that EXISTS and cannot be READ.
     """
 
-    def test_a_missing_register_is_empty_because_nothing_was_registered(self, repo):
-        """The honest empty state — no file yet means no promises yet."""
-        assert register.outstanding(repo_root=repo) == []
+    # The missing-register half of this pair is
+    # TestReadingIsForgiving.test_no_register_yet_is_an_empty_state_not_a_failure.
 
     def test_an_unreadable_register_raises_instead_of_reporting_all_clear(self, repo):
         """A register that exists but cannot be read must never answer "[]".
@@ -583,8 +651,6 @@ class TestEmptyAndUnreadableAreNotTheSameAnswer:
 
     def test_the_feed_keeps_the_tolerant_read(self, tmp_path):
         """Strictness is opt-in — a bell that raises at a delivery hook is worse."""
-        from aipass.ai_mail.apps.handlers.notify import jsonl_records
-
         unreadable = tmp_path / "feed.jsonl"
         unreadable.mkdir()
 
@@ -608,8 +674,6 @@ class TestTheSuiteCannotTouchProduction:
         assert register.register_file() != live
 
     def test_the_reports_directory_under_test_is_never_the_live_one(self):
-        from aipass.ai_mail.apps.handlers.dispatch import report
-
         live = Path(__file__).resolve().parents[4] / ".aipass" / report.REPORTS_DIRNAME
 
         assert live.name == report.REPORTS_DIRNAME, "anchor check: the live path must be real"

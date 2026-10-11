@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor_ops.py
 # Description: Registry Monitor Implementation Handler
-# Version: 2.0.1
+# Version: 2.1.0
 # Created: 2026-03-08
-# Modified: 2026-07-27
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -20,7 +20,7 @@ Usage:
 import os
 import re
 from pathlib import Path
-from typing import Callable, Dict, Any, List, Tuple
+from typing import Callable, Dict, Any, List, Optional, Tuple
 
 from aipass.prax import logger
 
@@ -81,6 +81,37 @@ IGNORE_FOLDERS = {
 }
 
 
+def is_plan_file(path: Path) -> Optional[bool]:
+    """True if ``path`` is a plan, not only a file named like one.
+
+    A plan carries its own identity on its first line, the line every plan
+    template opens with: ``# {PREFIX}-{NNNN}: {subject}``, the same prefix and
+    number as its filename. Older templates wrote ``# {PREFIX}-{NNNN} - {subject}``,
+    and live open plans still carry it, so both forms are plans (devpulse,
+    verifying leg 7: six open plans use the dash). A report or brief named after a plan
+    (``DPLAN-0356_ph2_report.md``, first line ``DPLAN-0356 phase 2 DONE``)
+    matches PLAN_PATTERN and nothing else. Until leg 7 of fleet green the
+    name alone was enough, and registry scan renamed such files in other
+    branches' folders and registered them as plans (flow's decision, leg 7).
+
+    Returns:
+        True for a plan, False for a look-alike, None when the file cannot be
+        read so nobody can tell. Every caller treats None as "not a plan to
+        act on": it is never renamed, registered or closed.
+    """
+    match = PLAN_PATTERN.match(path.name)
+    if not match:
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            first_line = fh.readline()
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning(f"[{MODULE_NAME}] Cannot read {path} to tell a plan from a look-alike, leaving it: {exc}")
+        return None
+    plan_id = f"# {match.group(1)}-{match.group(2)}"
+    return first_line.startswith((f"{plan_id}:", f"{plan_id} - "))
+
+
 # =============================================
 # HELPER
 # =============================================
@@ -122,7 +153,10 @@ def scan_plan_files_impl(
     - Missing registry entries (plan_file_created)
     - Orphaned entries (plan_file_deleted)
     - Location mismatches (plan_file_moved)
-    - Duplicate plan numbers are auto-renumbered on filesystem, then fire plan_file_created
+    - Duplicate plan numbers are reported in "duplicates", never renamed
+
+    Only a file that is_plan_file() calls a plan is counted; a file merely
+    named like one is not seen at all.
 
     Architecture (v2.0):
     - This function DETECTS changes and FIRES events
@@ -149,6 +183,7 @@ def scan_plan_files_impl(
             logger.warning(f"[{MODULE_NAME}] Error during scan: {error}")
 
     # Use os.walk() with error handling
+    found: List[Tuple[Tuple[str, str], Path]] = []
     for root, dirs, files in os.walk(str(ecosystem_root), topdown=True, onerror=handle_walk_error):
         # Skip ignored directories (modify dirs in-place to prevent descent).
         # Exact-name match — substring match ("dev" in "devpulse", "sys" in "system_logs")
@@ -158,51 +193,44 @@ def scan_plan_files_impl(
         # Check for PLAN files in this directory
         for filename in files:
             match = PLAN_PATTERN.match(filename)
-            if match:
-                file_path = Path(root) / filename
+            if match and is_plan_file(Path(root) / filename):
                 # Keyed by (prefix, number), never the bare number. Every type
                 # numbers from 0001, so APLAN-0007 and FPLAN-0007 are two
                 # different plans -- a number-only key called them one plan
-                # filed twice and sent the loser to be renamed on disk.
-                # heal_registry._build_plan_file_index keys the same way.
-                plan_key = (match.group(1), match.group(2))
+                # filed twice. heal_registry._build_plan_file_index keys the
+                # same way. A file only NAMED like a plan is not counted.
+                found.append(((match.group(1), match.group(2)), Path(root) / filename))
 
-                # Duplicate detection -- same TYPE and same number
-                if plan_key in plan_files:
-                    if plan_key not in duplicates:
-                        duplicates[plan_key] = [plan_files[plan_key]]
-                    duplicates[plan_key].append(file_path)
-                    logger.warning(f"[{MODULE_NAME}] Duplicate plan {filename} found: {file_path}")
-                else:
-                    plan_files[plan_key] = file_path
+    # Sort by path before deciding anything. os.walk yields directories and
+    # their files in OS order, so "keep the first occurrence" used to hand the
+    # number to whichever file the filesystem happened to name first -- the same
+    # tree renamed a different file on a different run, and a live plan could be
+    # the one renamed. heal_registry._build_plan_file_index sorts for the same
+    # reason. This does not decide the RIGHT keeper (the registry is not
+    # consulted here, and it holds one type only), just the same one every run.
+    found.sort(key=lambda entry: str(entry[1]))
 
-    # Auto-renumber duplicates (keep first, renumber rest)
-    renumbered: List[Dict[str, str]] = []
-    if duplicates:
-        logger.warning(f"[{MODULE_NAME}] Found {len(duplicates)} duplicate PLAN files")
+    for plan_key, file_path in found:
+        # Duplicate detection -- same TYPE and same number
+        if plan_key in plan_files:
+            if plan_key not in duplicates:
+                duplicates[plan_key] = [plan_files[plan_key]]
+            duplicates[plan_key].append(file_path)
+            logger.warning(f"[{MODULE_NAME}] Duplicate plan {file_path.name} found: {file_path}")
+        else:
+            plan_files[plan_key] = file_path
 
-        for (dup_prefix, plan_num), paths in duplicates.items():
-            # Keep first occurrence, renumber the rest. The replacement number
-            # comes from THIS prefix's own sequence -- each type numbers
-            # independently, so an unrelated DPLAN-0900 must not push a
-            # duplicate FPLAN to 0901.
-            for dup_path in paths[1:]:  # Skip first path (already in plan_files)
-                old_name = dup_path.name
-                prefix_max = max((int(num) for pfx, num in plan_files if pfx == dup_prefix), default=0)
-                new_num = f"{prefix_max + 1:04d}"
-                new_name = f"{dup_prefix}-{new_num}.md"
-                new_path = dup_path.parent / new_name
-
-                try:
-                    # Rename file on filesystem
-                    dup_path.rename(new_path)
-                    logger.info(f"[{MODULE_NAME}] Auto-renumbered: {old_name} -> {new_name} at {dup_path.parent}")
-
-                    # Add to plan_files with new number
-                    plan_files[(dup_prefix, new_num)] = new_path
-                    renumbered.append({"old_number": plan_num, "new_number": new_num, "path": str(new_path)})
-                except Exception as e:
-                    logger.error(f"[{MODULE_NAME}] Failed to renumber {old_name}: {e}")
+    # Duplicates are REPORTED, never renamed. The scan renamed every file
+    # after the first until leg 7 of fleet green, and the files it renamed
+    # were mostly reports named after a plan in other branches' folders (46
+    # renames in flow's logs, 2026-09-07 to 2026-10-04). Which of two real
+    # plans keeps a number is a human's call (flow's decision, leg 7).
+    duplicate_report: List[Dict[str, Any]] = [
+        {"prefix": dup_prefix, "number": plan_num, "paths": [str(p) for p in paths]}
+        for (dup_prefix, plan_num), paths in duplicates.items()
+    ]
+    if duplicate_report:
+        logger.warning(f"[{MODULE_NAME}] Found {len(duplicate_report)} duplicate plan number(s), none renamed")
 
     # Load current registry to compare (read-only - we don't modify it here)
     registry = load_registry()
@@ -254,14 +282,14 @@ def scan_plan_files_impl(
                 logger.info(f"[{MODULE_NAME}] Fired plan_file_deleted for {orphan_name}")
 
     # Log event results
-    if added or updated or removed or renumbered:
+    if added or updated or removed or duplicate_report:
         logger.info(
-            "[%s] Events fired - Created: %d, Moved: %d, Deleted: %d, Renumbered: %d",
+            "[%s] Events fired - Created: %d, Moved: %d, Deleted: %d, Duplicates reported: %d",
             MODULE_NAME,
             len(added),
             len(updated),
             len(removed),
-            len(renumbered),
+            len(duplicate_report),
         )
 
     # Reload registry to get updated count (after handlers processed events)
@@ -277,7 +305,7 @@ def scan_plan_files_impl(
             "added": len(added),
             "updated": len(updated),
             "removed": len(removed),
-            "renumbered": len(renumbered),
+            "duplicates": len(duplicate_report),
             "success": True,
         },
     )
@@ -287,8 +315,8 @@ def scan_plan_files_impl(
         "added": added,
         "updated": updated,
         "removed": removed,
-        "renumbered": renumbered,
-        "healing_performed": len(added) + len(updated) + len(removed) + len(renumbered) > 0,
+        "duplicates": duplicate_report,
+        "healing_performed": len(added) + len(updated) + len(removed) > 0,
     }
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-09-13
-# Modified: 2026-09-13
+# Modified: 2026-10-08
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -73,6 +73,7 @@ REFUSE_VERB = "'{verb}' does not take --repo. The external-repo door serves: " +
 REFUSE_MISSING = "--repo {path} does not exist."
 REFUSE_NOT_DIR = "--repo {path} is not a directory."
 REFUSE_NOT_REPO = "--repo {path} is not a git repository."
+REFUSE_GIT_FAILED = "--repo {path}: git could not run to read its top level ({reason}). Refused."
 REFUSE_NOT_TOP = "--repo {path} sits inside the git repository at {toplevel}, not at its top level. Name the repo root."
 REFUSE_AIPASS = (
     "--repo {path} is the AIPass repo. AIPass keeps its own verbs, lock, version guard and merge train; "
@@ -83,6 +84,44 @@ REFUSE_DETACHED = "push refused: HEAD is detached in {repo}. Check out the branc
 
 # What drone's router stamps onto every routed command, and what the rail reads.
 _STAMP_KEYS = ("AIPASS_CALLER_CWD", "AIPASS_CALLER_BRANCH", "AIPASS_CALLER_IDENTITY_SOURCE")
+
+
+def help_block() -> str:
+    """The door's block of the @git help page, its refusals rendered from the constants above.
+
+    Lives beside the constants it renders; it moved here from git_module when
+    that file reached its 1,500-line cap (2026-10-01).
+    """
+    placeholders = {"caller": "<caller>", "path": "<path>", "verb": "<verb>", "toplevel": "<toplevel>"}
+    refusals = (
+        REFUSE_NOT_ADMIN,
+        REFUSE_LANE_DARK.replace("{reason}", "<reason>"),
+        REFUSE_VERB,
+        REFUSE_NO_VALUE,
+        REFUSE_TWICE,
+        REFUSE_MISSING,
+        REFUSE_NOT_DIR,
+        REFUSE_NOT_REPO,
+        REFUSE_NOT_TOP,
+        REFUSE_AIPASS,
+    )
+    lines = "".join(f"    {text.format(**placeholders)}\n" for text in refusals)
+    return (
+        "External-repo door — admin seat only (DPLAN-0344):\n"
+        "  status | diff [--staged] | log [count] | commit <msg> [--all | files] | push | tag <name>  --repo <path>\n"
+        "  Runs the verb in another git repo (projects/baud, a clone outside the tree).\n"
+        "  <path> is absolute, or relative to the AIPass root (not your cwd), and must be\n"
+        "  that repo's top level. --repo=<path> works too, in any slot.\n"
+        "  Checked on EVERY use against @ai_mail's verified-caller rail — the 5-leg admin\n"
+        "  grant, never cached. Project managers keep their own CWD-bound owner tier;\n"
+        "  --repo is not theirs. No AIPass PR lock is taken (git's index.lock serialises).\n"
+        "  commit never pushes, as at home: push is its own verb. commit --all runs the\n"
+        "  same lint and test gate there it runs anywhere; file paths are repo-relative.\n"
+        "  issue, run and workflow are not door verbs: their --repo OWNER/NAME is gh's own.\n"
+        "  Every use, refusals included, is one line in .ai_central/git_repo_door.jsonl:\n"
+        "  caller, cwd, verb, args, repo, HEAD before and after, exit code.\n"
+        "  Refusals, exactly as printed:\n" + lines
+    )
 
 
 class RepoFlag(NamedTuple):
@@ -198,10 +237,10 @@ def admin_verdict() -> AdminVerdict:
         when refused, the exact refusal text.
     """
     try:
-        # Cross-branch handler import, named by @devpulse in the DPLAN-0344 brief:
-        # the admin contract has one home and this door consumes it rather than
-        # mirroring it. Lazy, so a dark lane refuses instead of breaking @git.
-        from aipass.ai_mail.apps.handlers.users import verified_caller as rail
+        # Through @ai_mail's door (DPLAN-0404): the admin contract has one home
+        # and this door consumes it rather than mirroring it. Lazy, so a dark
+        # lane refuses instead of breaking @git.
+        from aipass.ai_mail.apps.modules import door_verified_caller as rail
     except Exception as exc:
         logger.warning("git repo door: admin lane dark — verified-caller rail unavailable: %s", exc)
         return AdminVerdict(
@@ -226,7 +265,11 @@ def admin_verdict() -> AdminVerdict:
 
 
 def _git_toplevel(directory: Path) -> Path | None:
-    """The top level of the git work tree *directory* is in, or None if it is in none."""
+    """The top level of the git work tree *directory* is in, or None if it is in none.
+
+    Raises OSError or SubprocessError when git itself cannot run: that is a
+    failure to report, never an answer of "not a repository".
+    """
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -236,7 +279,7 @@ def _git_toplevel(directory: Path) -> Path | None:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("git repo door: git rev-parse failed in %s: %s", directory, exc)
-        return None
+        raise
     if result.returncode != 0 or not result.stdout.strip():
         return None
     return Path(result.stdout.strip()).resolve()
@@ -266,7 +309,10 @@ def resolve_repo(raw: str, aipass_root: Path) -> RepoTarget:
         return RepoTarget(None, REFUSE_NOT_DIR.format(path=raw))
 
     resolved = candidate.resolve()
-    toplevel = _git_toplevel(resolved)
+    try:
+        toplevel = _git_toplevel(resolved)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return RepoTarget(None, REFUSE_GIT_FAILED.format(path=raw, reason=exc))
     if toplevel is None:
         return RepoTarget(None, REFUSE_NOT_REPO.format(path=raw))
     if is_aipass_repo(toplevel) or toplevel == aipass_root.resolve():

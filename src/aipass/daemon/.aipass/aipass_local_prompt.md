@@ -85,7 +85,7 @@ drone @daemon branch-health DAEMON  # One branch, deep
  - Git is drone-only, and writing is devpulse's seat. I read status, diff and log.
  - A new test file needs permission from the gate; editing an existing test is fine.
  - Red-first, then green, then a mutation that proves the test would have caught the defect.
- - Delete through `drone rm` only, and only inside this branch.
+ - Don't delete: rename to `name(disabled)` or move to `.archive/`; if it must go, mail @devpulse with the path and why.
 
 # Integration points
 

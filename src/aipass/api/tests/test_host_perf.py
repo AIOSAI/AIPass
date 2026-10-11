@@ -1,55 +1,61 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_perf.py
 # Description: Tests for the host API's cost doctrine — threadpool, cache, pin
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-10-02
 # =============================================
 
-"""Tests for the host API's cost doctrine (DPLAN-0305 Audit 2).
+"""Tests for apps/handlers/host/server.py's cost doctrine: threadpool routes, the fleet cache, the pump cap."""
 
-The owner, 2026-08-18: the phone lags. @devpulse audited and found three causes in
-this branch, none of them exotic — the server was doing blocking work in the one
-place that must never block, re-walking the filesystem for a registry it already
-knew, and paying for the same 90ms process spawn twice per screen refresh.
+# Tests for the host API's cost doctrine (DPLAN-0305 Audit 2).
+#
+# The owner, 2026-08-18: the phone lags. @devpulse audited and found three causes in
+# this branch, none of them exotic — the server was doing blocking work in the one
+# place that must never block, re-walking the filesystem for a registry it already
+# knew, and paying for the same 90ms process spawn twice per screen refresh.
+#
+# THREE PROPERTIES ARE PINNED HERE, AND EACH IS PINNED SO IT CAN GO RED:
+#
+# 1. A read route runs OFF the event loop. A handler declared `async def` runs ON
+#    the loop, so a 90ms exec inside it means the whole server answers nothing for
+#    90ms — including /v1/ping. Declared `def`, FastAPI runs it in the anyio
+#    threadpool. The structural test is DERIVED from the app's routing table, not
+#    from a list written down here, so a new read route added as async goes red
+#    without anyone remembering this file exists.
+#
+# 2. The blocking probe below can actually SEE a blocked loop. A test that starts
+#    a slow request and then checks a fast one answers is worthless if the harness
+#    gives each request its own event loop — it would pass against a fully async
+#    server too. So the probe carries a vacuity floor: the same measurement is run
+#    against a deliberately-async blocking route and MUST fail there.
+#
+# 3. The snapshot exec is coalesced. Within the TTL the answer is remembered, and
+#    concurrent callers asking the same question share ONE exec rather than each
+#    spawning their own. Both halves are counted, never timed.
+#
+# 4. The socket pump's threads are its OWN and its cap is a sentence. Eight was
+#    never a decision — it is what asyncio's default executor happens to be on a
+#    4-CPU host, and the ninth terminal connected, authenticated, and then never
+#    pumped a byte. A cap the operator cannot see is the worst kind.
+#
+# 5. The audit trail's caller detection fetches ONE frame. It used to build a
+#    FrameInfo for the whole stack, which is cheap in a script and 1.77ms deep
+#    inside a request. The fast path and the old walk must give the same answer —
+#    a faster audit trail that names the wrong module is not a win.
+#
+# NOTHING HERE INVOKES THE REAL BINARY (the standing rule in test_host_fleet.py) —
+# every exec is a counted fake.
 
-THREE PROPERTIES ARE PINNED HERE, AND EACH IS PINNED SO IT CAN GO RED:
-
-1. A read route runs OFF the event loop. A handler declared `async def` runs ON
-   the loop, so a 90ms exec inside it means the whole server answers nothing for
-   90ms — including /v1/ping. Declared `def`, FastAPI runs it in the anyio
-   threadpool. The structural test is DERIVED from the app's routing table, not
-   from a list written down here, so a new read route added as async goes red
-   without anyone remembering this file exists.
-
-2. The blocking probe below can actually SEE a blocked loop. A test that starts
-   a slow request and then checks a fast one answers is worthless if the harness
-   gives each request its own event loop — it would pass against a fully async
-   server too. So the probe carries a vacuity floor: the same measurement is run
-   against a deliberately-async blocking route and MUST fail there.
-
-3. The snapshot exec is coalesced. Within the TTL the answer is remembered, and
-   concurrent callers asking the same question share ONE exec rather than each
-   spawning their own. Both halves are counted, never timed.
-
-4. The socket pump's threads are its OWN and its cap is a sentence. Eight was
-   never a decision — it is what asyncio's default executor happens to be on a
-   4-CPU host, and the ninth terminal connected, authenticated, and then never
-   pumped a byte. A cap the operator cannot see is the worst kind.
-
-5. The audit trail's caller detection fetches ONE frame. It used to build a
-   FrameInfo for the whole stack, which is cheap in a script and 1.77ms deep
-   inside a request. The fast path and the old walk must give the same answer —
-   a faster audit trail that names the wrong module is not a win.
-
-NOTHING HERE INVOKES THE REAL BINARY (the standing rule in test_host_fleet.py) —
-every exec is a counted fake.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that server.py parses and imports
+# seedgo: no-test-needed(covered_elsewhere) — what each route returns, tests/test_host_fleet.py
+# seedgo: no-test-needed(external) — the real baud binary; every subprocess.run here is a counted fake
 
 import contextlib
 import json
 import signal
+import sys
 import threading
 import time
 from pathlib import Path
@@ -107,13 +113,14 @@ def _completed(returncode: int, stdout: str = "", stderr: str = "") -> MagicMock
 
 ENVELOPE = {
     "project": "AIPASS",
-    "root": "/home/someone/Projects/AIPass",
+    # Data @baud would print, never opened: the paths only have to look like paths.
+    "root": "/srv/aipass",
     "generated_at": "2026-08-18T09:00:00Z",
     "error": None,
     "live_agent_sessions": [],
     "branches": [
-        {"name": "api", "project": "AIPASS", "has_room": True, "path": "/tmp/api"},
-        {"name": "baud", "project": "AIPASS", "has_room": False, "path": "/tmp/baud"},
+        {"name": "api", "project": "AIPASS", "has_room": True, "path": "/srv/aipass/api"},
+        {"name": "baud", "project": "AIPASS", "has_room": False, "path": "/srv/aipass/baud"},
     ],
 }
 
@@ -524,8 +531,6 @@ class TestTheSnapshotIsCoalesced:
             return _completed(0, json.dumps(ENVELOPE))
 
         monkeypatch.setattr(host_fleet.subprocess, "run", _run)
-        monkeypatch.setattr(host_fleet, "logger", MagicMock())
-        monkeypatch.setattr(host_fleet, "json_handler", MagicMock())
 
         answers: list = []
 
@@ -564,8 +569,6 @@ class TestTheSnapshotIsCoalesced:
         """
         outcomes = [_completed(2, "", "nope"), _completed(0, json.dumps(ENVELOPE))]
         monkeypatch.setattr(host_fleet.subprocess, "run", lambda *a, **k: outcomes.pop(0))
-        monkeypatch.setattr(host_fleet, "logger", MagicMock())
-        monkeypatch.setattr(host_fleet, "json_handler", MagicMock())
 
         with pytest.raises(host_fleet.FleetUnavailable):
             host_fleet.read_snapshot()
@@ -619,8 +622,6 @@ class TestTheSnapshotIsCoalesced:
             return _completed(0, json.dumps(ENVELOPE))
 
         monkeypatch.setattr(host_fleet.subprocess, "run", _run)
-        monkeypatch.setattr(host_fleet, "logger", MagicMock())
-        monkeypatch.setattr(host_fleet, "json_handler", MagicMock())
 
         host_fleet.read_snapshot()
         host_fleet.end_room("api", "AIPASS")
@@ -708,10 +709,8 @@ class TestTheRegistryIsPinnedAtBoot:
         order: list = []
 
         monkeypatch.setattr(host_server.host_config, "load_config", lambda: {"host": "127.0.0.1", "port": 8787})
-        monkeypatch.setattr(host_server.host_config, "validate_bind", lambda host, port: None)
         monkeypatch.setattr(host_server.host_config, "pin_registry", lambda: order.append("pinned"))
         monkeypatch.setattr(host_server, "create_app", lambda: order.append("app") or MagicMock())
-        monkeypatch.setattr(host_server, "json_handler", MagicMock())
 
         uvicorn = MagicMock()
         uvicorn.run = lambda *args, **kwargs: order.append("served")
@@ -720,6 +719,23 @@ class TestTheRegistryIsPinnedAtBoot:
             host_server.serve()
 
         assert order == ["pinned", "app", "served"]
+
+    @fastapi_required
+    def test_serving_runs_uvicorn_with_its_access_log_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """One access line per phone request grew the unit's log to 12.8 MB unrotated (10-01)."""
+        calls: list = []
+
+        monkeypatch.setattr(host_server.host_config, "load_config", lambda: {"host": "127.0.0.1", "port": 8787})
+        monkeypatch.setattr(host_server.host_config, "pin_registry", lambda: calls.append("pinned"))
+        monkeypatch.setattr(host_server, "create_app", MagicMock)
+
+        uvicorn = MagicMock()
+        uvicorn.run = lambda *args, **kwargs: calls.append(kwargs)
+
+        with patch.dict("sys.modules", {"uvicorn": uvicorn}), patch(PATCH_SERVER_LOGGER):
+            host_server.serve()
+
+        assert calls == ["pinned", {"host": "127.0.0.1", "port": 8787, "access_log": False}]
 
 
 # ==============================================
@@ -748,6 +764,26 @@ sighup_required = pytest.mark.skipif(
     not hasattr(signal, "SIGHUP"),
     reason="hangup detaches with SIGHUP, which this platform does not have",
 )
+
+
+@pytest.fixture
+def full_pump(monkeypatch: pytest.MonkeyPatch) -> list:
+    """A cap of one, already taken, on a host open_attach would otherwise serve.
+
+    The PTY, the winsize stamp and Popen are recorders, so a spawn the cap
+    failed to stop is a list entry and never a real process. Returns that list.
+    """
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()
+    spawned: list = []
+    monkeypatch.setattr(host_attach, "_PUMP_SLOTS", slots)
+    monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
+    monkeypatch.setattr(host_attach, "TMUX_BINARY", sys.executable)
+    monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: spawned.append("pty") or (-7, -8)))
+    monkeypatch.setattr(host_attach, "set_winsize", lambda *a: spawned.append("winsize"))
+    monkeypatch.setattr(host_attach.subprocess, "Popen", lambda *a, **k: spawned.append("popen") or MagicMock(pid=1))
+    return spawned
+
 
 # ==============================================
 # 5. THE PUMP'S THREADS ARE ITS OWN, AND ITS CAP SPEAKS
@@ -785,32 +821,26 @@ class TestThePumpPoolIsBoundedOutLoud:
 
         assert "run_in_executor(host_attach.pump_executor(), session.read)" in pump
 
-    def test_a_session_beyond_the_cap_is_refused_in_words(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_session_beyond_the_cap_is_refused_in_words(self, full_pump: list) -> None:
         """The whole point: a cap that speaks instead of a terminal that hangs."""
-        monkeypatch.setattr(host_attach, "_PUMP_SLOTS", threading.BoundedSemaphore(1))
-        host_attach._reserve_session("baud-first")
-
         with pytest.raises(host_attach.AttachUnavailable) as refusal:
-            host_attach._reserve_session("baud-api")
+            host_attach.open_attach("", room="baud-api")
 
         assert "cap" in str(refusal.value)
         assert "baud-api" in str(refusal.value)
 
-    def test_the_refusal_does_not_wait_for_a_slot(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_the_refusal_does_not_wait_for_a_slot(self, full_pump: list) -> None:
         """Waiting IS the silent hang, wearing a different hat.
 
         A blocking acquire would leave the socket accepted and empty until some
         other operator happened to close a terminal — the same blank screen the
         default executor gave, with a nicer implementation behind it.
         """
-        monkeypatch.setattr(host_attach, "_PUMP_SLOTS", threading.BoundedSemaphore(1))
-        host_attach._reserve_session("baud-first")
-
         refused = threading.Event()
 
         def _try() -> None:
             with contextlib.suppress(host_attach.AttachUnavailable):
-                host_attach._reserve_session("baud-api")
+                host_attach.open_attach("", room="baud-api")
             refused.set()
 
         waiter = threading.Thread(target=_try)
@@ -820,26 +850,19 @@ class TestThePumpPoolIsBoundedOutLoud:
         finally:
             waiter.join(timeout=5)
 
-    def test_the_cap_is_reserved_before_anything_is_spawned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_the_cap_is_reserved_before_anything_is_spawned(self, full_pump: list) -> None:
         """Refused, not opened. A PTY spawned only to be refused is waste.
 
         Also the ordering that makes the cap real under concurrency: reserving
         after the spawn would let two sockets arriving together both pass a cap
-        with room for one.
+        with room for one. full_pump replaces the module-level NAME pty, not an
+        attribute on the real pty module: pty is None on Windows, and the
+        subject here is the bound, not the terminal.
         """
-        monkeypatch.setattr(host_attach, "_PUMP_SLOTS", threading.BoundedSemaphore(1))
-        host_attach._reserve_session("baud-first")
-        spawned: list = []
-        # The module-level NAME, not an attribute on the real pty module: pty
-        # is None on Windows (a PTY is a POSIX object), so patching through it
-        # is an AttributeError there. The subject of this test is the bound,
-        # not the terminal, so it should run on every platform.
-        monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: spawned.append("pty") or (0, 0)))
-
         with pytest.raises(host_attach.AttachUnavailable):
-            host_attach._spawn_pty(["true"], None, "baud-api")
+            host_attach.open_attach("", room="baud-api")
 
-        assert spawned == [], "a PTY was opened for a session that was then refused"
+        assert full_pump == [], "a PTY was opened for a session that was then refused"
 
     @sighup_required
     def test_a_hangup_gives_the_thread_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -855,8 +878,11 @@ class TestThePumpPoolIsBoundedOutLoud:
         signal module would make this pass on Windows while proving nothing
         about Windows.
         """
-        monkeypatch.setattr(host_attach, "_PUMP_SLOTS", threading.BoundedSemaphore(1))
-        host_attach._reserve_session("baud-api")
+        slots = threading.BoundedSemaphore(1)
+        monkeypatch.setattr(host_attach, "_PUMP_SLOTS", slots)
+        # The slot open_attach would have taken for this session, taken by hand
+        # because the session is built by hand.
+        slots.acquire()
 
         session = host_attach.AttachSession(MagicMock(), -1, "api", "baud-api")
         with patch.object(host_attach, "json_handler", MagicMock()), patch.object(host_attach, "logger", MagicMock()):
@@ -870,11 +896,9 @@ class TestThePumpPoolIsBoundedOutLoud:
         # nothing (seedgo's no_oracle rule, 2026-09-07): a hangup that released
         # NOTHING and a hangup that released TWICE both left that line silent.
         # So the cap is exercised in both directions: one reservation fits, and
-        # the next does not.
-        host_attach._reserve_session("baud-next")
-
-        with pytest.raises(host_attach.AttachUnavailable):
-            host_attach._reserve_session("baud-one-too-many")
+        # the next does not, read on the semaphore the module was handed.
+        assert slots.acquire(blocking=False) is True
+        assert slots.acquire(blocking=False) is False
 
     def test_a_failed_spawn_gives_the_thread_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No session will be built to own that reservation.
@@ -883,18 +907,26 @@ class TestThePumpPoolIsBoundedOutLoud:
         refuses every terminal from then on while pumping precisely none — a
         leak that only ever shows up on the worst day.
         """
-        monkeypatch.setattr(host_attach, "_PUMP_SLOTS", threading.BoundedSemaphore(1))
-        monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: (-1, -1)))
-        monkeypatch.setattr(host_attach, "set_winsize", lambda *a, **k: None)
-        monkeypatch.setattr(host_attach.os, "close", lambda _fd: None)
+        sized: list = []
+        closed: list = []
+        slots = threading.BoundedSemaphore(1)
+        monkeypatch.setattr(host_attach, "_PUMP_SLOTS", slots)
+        monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: (-7, -8)))
+        monkeypatch.setattr(host_attach, "set_winsize", lambda *a: sized.append(a))
         monkeypatch.setattr(host_attach.subprocess, "Popen", MagicMock(side_effect=OSError("no")))
 
         with patch.object(host_attach, "logger", MagicMock()):
             with pytest.raises(host_attach.AttachUnavailable):
-                host_attach._spawn_pty(["true"], None, "baud-api")
+                host_attach._spawn_pty(["true"], None, "baud-api", close_fd=closed.append)
 
+        # The stand-in descriptors are observed, not discarded (api, fleet green
+        # leg 4): the master was sized, and each end was handed back exactly
+        # once. A list in the order of the closes, not a set: a set hid the
+        # slave's second close in the finally (api, fleet green leg 5).
+        assert sized == [(-7, host_attach.DEFAULT_COLS, host_attach.DEFAULT_ROWS)]
+        assert closed == [-7, -8]
         # The slot came back: a fresh reservation succeeds where the cap is one.
-        host_attach._reserve_session("baud-next")
+        assert slots.acquire(blocking=False) is True
 
     def test_an_over_release_is_loud_not_silent_capacity(self) -> None:
         """A slot handed back twice is an accounting bug, and says so.

@@ -85,7 +85,8 @@ scan before handing off to `drive_sync`. `restore` reads history back out,
 `status` reports what is stored, and `display` renders the panels the other
 lanes print. The Drive lane is `drive_sync`, `drive_check`, `drive_stats`,
 `drive_clear` and `share`. `settings` is a stub that fails honestly rather than
-pretending to have saved anything.
+pretending to have saved anything. `door_trail` is not a verb: it is the door
+other branches import, publishing this branch's operation trail.
 
 Underneath, the handlers do the work: walking and filtering a tree, applying
 ignore rules, copying, diffing, building store paths, reading and writing the

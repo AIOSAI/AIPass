@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: contacts.py
 # Description: Contacts address book — maps branch names to inbox paths
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-11
-# Modified: 2026-04-11
+# Modified: 2026-10-06
 # =============================================
 
 """
@@ -39,24 +39,31 @@ CONTACTS_FILE = find_repo_root() / "src/aipass/ai_mail/.ai_mail.local/contacts.j
 
 
 def _load_contacts() -> Dict:
-    """Load contacts.json from disk with fallback to empty structure.
+    """Load contacts.json from disk.
 
     Returns:
-        Dict with 'contacts' key mapping branch names to contact info.
-    """
-    if not CONTACTS_FILE.exists():
-        return {"contacts": {}}
-    try:
-        import json
+        Dict with 'contacts' key mapping branch names to contact info. A missing
+        file (FileNotFoundError) is the one answer: no book means no contacts.
 
+    Raises:
+        RuntimeError: the book exists and cannot be read or parsed. Read as empty,
+            a corrupt book let the identity chain synthesize a citizen where a
+            fault stood (ai_mail, leg 17).
+    """
+    import json
+
+    try:
         with open(CONTACTS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if not isinstance(data, dict) or "contacts" not in data:
-            return {"contacts": {}}
-        return data
-    except Exception as e:
-        logger.warning("[contacts] _load_contacts() failed: %s", e)
+    except FileNotFoundError:
+        logger.debug("[contacts] no book at %s: no contacts", CONTACTS_FILE)
         return {"contacts": {}}
+    except (OSError, ValueError) as e:
+        logger.error("[contacts] _load_contacts() could not read %s: %s", CONTACTS_FILE, e)
+        raise RuntimeError(f"{CONTACTS_FILE} could not be read: {e}") from e
+    if not isinstance(data, dict) or "contacts" not in data:
+        return {"contacts": {}}
+    return data
 
 
 def _save_contacts(data: Dict) -> bool:
@@ -93,6 +100,9 @@ def get_contact(branch_name: str) -> Optional[Dict]:
 
     Returns:
         Contact dict with 'project', 'inbox', 'last_seen' keys, or None if not found.
+
+    Raises:
+        RuntimeError: the book exists and cannot be read (see _load_contacts).
     """
     json_handler.log_operation("contacts_get", {"branch": branch_name})
     name_key = branch_name.lstrip("@").lower()
@@ -109,11 +119,17 @@ def register_contact(branch_name: str, project: str, inbox_path: str) -> bool:
         inbox_path: Absolute path to the branch's inbox.json file.
 
     Returns:
-        True on success, False on error.
+        True on success, False on error. A book that exists and cannot be read
+        is False and is left as found: a write over it would replace every row
+        with this one (ai_mail, leg 17).
     """
     json_handler.log_operation("contacts_register", {"branch": branch_name, "inbox": inbox_path})
     name_key = branch_name.lstrip("@").lower()
-    data = _load_contacts()
+    try:
+        data = _load_contacts()
+    except RuntimeError as e:
+        logger.error("[contacts] register_contact(%s) refused, book left as found: %s", name_key, e)
+        return False
     data["contacts"][name_key] = {
         "project": project,
         "inbox": inbox_path,
@@ -127,6 +143,9 @@ def all_contacts() -> Dict:
 
     Returns:
         Dict mapping branch names to contact info dicts.
+
+    Raises:
+        RuntimeError: the book exists and cannot be read (see _load_contacts).
     """
     json_handler.log_operation("contacts_list")
     data = _load_contacts()

@@ -1,75 +1,86 @@
 # =================== AIPass ====================
 # Name: test_host_api.py
-# Description: Tests for the Stage 0 host API — config, bind gate, tokens, auth
-# Version: 1.0.0
+# Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-10-11
 # =============================================
 
-"""Tests for apps/handlers/host/{config,tokens,server}.py and apps/modules/host_api.py.
+"""Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""
 
-FPLAN-0411 Phase 1. The two failures that would make everything downstream moot
-are a bind that silently widens and an auth check that honours a revoked token,
-so those carry the most tests.
+# FPLAN-0411 Phase 1. The two failures that would make everything downstream moot
+# are a bind that silently widens and an auth check that honours a revoked token,
+# so those carry the most tests.
+#
+# Tests — handlers/host/config.py (the bind gate, design call D1):
+# - validate_bind: wildcard 0.0.0.0 refused (it binds fine — that is the danger)
+# - validate_bind: IPv6 wildcard :: refused
+# - validate_bind: hostname refused as ambiguous
+# - validate_bind: empty address refused
+# - validate_bind: address this machine does not hold refused, no fallback
+# - validate_bind: non-loopback refused while LOOPBACK_ONLY (Phase 5 gate)
+# - validate_bind: non-loopback message names the review gate
+# - validate_bind: loopback accepted
+# - validate_bind: port out of range refused (0, 65536, non-int, bool)
+# - validate_bind: tailnet-shaped address accepted once LOOPBACK_ONLY is lifted
+# - load_config: defaults when the store is absent
+# - load_config: stored values merge over defaults
+# - load_config: non-dict store falls back to defaults
+# - save_config: round-trips through the store
+#
+# Tests — handlers/host/tokens.py (design call D2):
+# - issue_token: returns a raw value that is NOT in the store
+# - issue_token: store holds a sha256 hash of the raw
+# - issue_token: record carries id, label, scope, created, revoked=False
+# - issue_token: last_used stays null in Phase 1 (reservation, not a write)
+# - issue_token: empty label refused
+# - issue_token: unknown scope refused
+# - issue_token: two tokens are distinct and both verify
+# - verify_token: accepts the issued raw value
+# - verify_token: rejects an unknown value
+# - verify_token: rejects empty and non-string input
+# - verify_token: revoked token rejected with NO restart (store re-read per call)
+# - verify_token: malformed store denies everything rather than admitting one
+# - revoke_token: unknown id returns False
+# - revoke_token: already-revoked id returns False
+# - scope_allows: operate implies read; read does not imply operate
+# - scope_allows: unknown scope allows nothing
+# - store: token file is 0600 (POSIX)
+#
+# Tests — handlers/host/server.py:
+# - create_app: raises with install instructions when the extra is missing
+# - GET /v1/ping: 204, no auth, no body
+# - GET /v1/whoami: 401 with no Authorization header
+# - GET /v1/whoami: 401 with an unknown bearer token
+# - GET /v1/whoami: 200 with a valid read token
+# - GET /v1/whoami: 401 after revocation, same running app
+# - require_scope('operate'): 403 for a read token, 200 for an operate token
+# - errors: every failure carries the {error:{code,message}} envelope
+#
+# Tests — modules/host_api.py:
+# - handle_command: no args prints introspection
+# - handle_command: help flag ANYWHERE explains, never runs (S58/S59 lesson)
+# - handle_command: -h in trailing position explains
+# - handle_command: foreign command passes through
+# - handle_command: unknown subcommand reports, does not raise
+# - issue-token: refuses without --out (no raw secret to stdout, S49 precedent)
+# - issue-token: writes the raw value to a 0600 file
+# - issue-token: missing label refused
+# - serve: BindRefused is reported, server never starts
+#
+# WHERE EACH LIVES since the oversize split (api, 2026-10-08): the config,
+# face dir, baud binary and token tests listed above are in
+# test_host_api_config.py; the server's app, auth and routes in
+# test_host_api_routes.py. This file keeps the commands. The shared helpers
+# are in support_host_api.py, the token store fixture in conftest.py.
 
-Tests — handlers/host/config.py (the bind gate, design call D1):
-- validate_bind: wildcard 0.0.0.0 refused (it binds fine — that is the danger)
-- validate_bind: IPv6 wildcard :: refused
-- validate_bind: hostname refused as ambiguous
-- validate_bind: empty address refused
-- validate_bind: address this machine does not hold refused, no fallback
-- validate_bind: non-loopback refused while LOOPBACK_ONLY (Phase 5 gate)
-- validate_bind: non-loopback message names the review gate
-- validate_bind: loopback accepted
-- validate_bind: port out of range refused (0, 65536, non-int, bool)
-- validate_bind: tailnet-shaped address accepted once LOOPBACK_ONLY is lifted
-- load_config: defaults when the store is absent
-- load_config: stored values merge over defaults
-- load_config: non-dict store falls back to defaults
-- save_config: round-trips through the store
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
+# seedgo: no-test-needed(constant) — print_help() and print_introspection() display text beyond the names asserted
+# seedgo: no-test-needed(windows_compat) — the 0o600 token file mode on Windows; the POSIX tests carry a skipif
+# seedgo: no-test-needed(duplicate_test) — the face lane in depth, covered by tests/test_host_face.py
+# seedgo: no-test-needed(duplicate_test) — the lifetime and fleet lanes in depth, tests/test_host_lifetime.py
 
-Tests — handlers/host/tokens.py (design call D2):
-- issue_token: returns a raw value that is NOT in the store
-- issue_token: store holds a sha256 hash of the raw
-- issue_token: record carries id, label, scope, created, revoked=False
-- issue_token: last_used stays null in Phase 1 (reservation, not a write)
-- issue_token: empty label refused
-- issue_token: unknown scope refused
-- issue_token: two tokens are distinct and both verify
-- verify_token: accepts the issued raw value
-- verify_token: rejects an unknown value
-- verify_token: rejects empty and non-string input
-- verify_token: revoked token rejected with NO restart (store re-read per call)
-- verify_token: malformed store denies everything rather than admitting one
-- revoke_token: unknown id returns False
-- revoke_token: already-revoked id returns False
-- scope_allows: operate implies read; read does not imply operate
-- scope_allows: unknown scope allows nothing
-- store: token file is 0600 (POSIX)
-
-Tests — handlers/host/server.py:
-- create_app: raises with install instructions when the extra is missing
-- GET /v1/ping: 204, no auth, no body
-- GET /v1/whoami: 401 with no Authorization header
-- GET /v1/whoami: 401 with an unknown bearer token
-- GET /v1/whoami: 200 with a valid read token
-- GET /v1/whoami: 401 after revocation, same running app
-- require_scope('operate'): 403 for a read token, 200 for an operate token
-- errors: every failure carries the {error:{code,message}} envelope
-
-Tests — modules/host_api.py:
-- handle_command: no args prints introspection
-- handle_command: help flag ANYWHERE explains, never runs (S58/S59 lesson)
-- handle_command: -h in trailing position explains
-- handle_command: foreign command passes through
-- handle_command: unknown subcommand reports, does not raise
-- issue-token: refuses without --out (no raw secret to stdout, S49 precedent)
-- issue-token: writes the raw value to a 0600 file
-- issue-token: missing label refused
-- serve: BindRefused is reported, server never starts
-"""
-
-import json
 import os
 import stat
 import sys
@@ -86,10 +97,10 @@ from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import server as host_server
-from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.modules import host_api as host_api_module
 from aipass.api.apps.modules import host_serve as host_serve_module
+from aipass.api.tests.support_host_api import TAILNET_SHAPED, UNHELD_ADDRESS, _baud_binary, _face_bundle
 
 
 # A stand-in the status tests hand to a mocked log_path(). Nothing ever opens
@@ -99,14 +110,7 @@ STANDIN_LOG = Path(tempfile.gettempdir()) / "host_api_serve.log"
 
 
 # Patch targets
-PATCH_SECRETS_BASE = "aipass.api.apps.handlers.auth.secrets.SECRETS_BASE"
-PATCH_SECRETS_JSON = "aipass.api.apps.handlers.auth.secrets.json_handler"
-PATCH_SECRETS_LOGGER = "aipass.api.apps.handlers.auth.secrets.logger"
-
-PATCH_TOKENS_JSON = "aipass.api.apps.handlers.host.tokens.json_handler"
-PATCH_TOKENS_LOGGER = "aipass.api.apps.handlers.host.tokens.logger"
 PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
-PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 
 PATCH_MOD_CONSOLE = "aipass.api.apps.modules.host_api.console"
 PATCH_MOD_HEADER = "aipass.api.apps.modules.host_api.header"
@@ -134,19 +138,6 @@ PATCH_CFG_ERROR = "aipass.api.apps.modules.host_config_cli.error"
 PATCH_CFG_SUCCESS = "aipass.api.apps.modules.host_config_cli.success"
 PATCH_CFG_WARNING = "aipass.api.apps.modules.host_config_cli.warning"
 PATCH_CFG_JSON = "aipass.api.apps.modules.host_config_cli.json_handler"
-
-# An address in TEST-NET-3 (RFC 5737). Guaranteed not to be a real interface.
-UNHELD_ADDRESS = "203.0.113.7"
-# Shaped like the tailnet address Stage 0 is ultimately aimed at.
-TAILNET_SHAPED = "100.64.0.1"
-
-
-@pytest.fixture
-def store(tmp_path: Path):
-    """Redirect the secrets store to a temp dir for the whole test."""
-    with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
-        with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER):
-            yield tmp_path
 
 
 def _printed(*mocks: Any) -> str:
@@ -192,893 +183,6 @@ def quiet_module():
             "warning": mock_warning,
             "console": mock_console,
         }
-
-
-# =============================================
-# BIND GATE — handlers/host/config.py
-# =============================================
-
-
-class TestValidateBind:
-    """The bind rule: bind what was configured, or refuse. Never widen."""
-
-    def test_wildcard_ipv4_refused(self) -> None:
-        """0.0.0.0 binds fine on every machine — that is exactly why it is refused."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
-            host_config.validate_bind("0.0.0.0", 8787)
-
-        assert "wildcard" in str(exc.value).lower()
-
-    def test_wildcard_ipv6_refused(self) -> None:
-        """:: is the same hazard in IPv6 clothing."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused):
-            host_config.validate_bind("::", 8787)
-
-    def test_hostname_refused(self) -> None:
-        """A name is ambiguous, and an ambiguous bind is how private becomes public."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
-            host_config.validate_bind("localhost", 8787)
-
-        assert "hostname" in str(exc.value).lower()
-
-    def test_empty_address_refused(self) -> None:
-        """No configured address must never mean 'pick something'."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused):
-            host_config.validate_bind("", 8787)
-
-    def test_address_not_held_by_machine_refused(self) -> None:
-        """The address the config names is the address we bind, or we stop."""
-        with patch(PATCH_CONFIG_LOGGER), patch.object(host_config, "LOOPBACK_ONLY", False):
-            with pytest.raises(host_config.BindRefused) as exc:
-                host_config.validate_bind(UNHELD_ADDRESS, 8787)
-
-        assert "not available" in str(exc.value).lower()
-
-    def test_the_loopback_gate_is_open(self) -> None:
-        """
-        Opened 2026-08-14 by the owner's ruling on the Phase 5 security review.
-
-        Pinned as a fact rather than left implicit: whoever reads this next
-        should see that the gate was OPENED by a decision, not eroded.
-        """
-        assert host_config.LOOPBACK_ONLY is False
-
-    def test_closing_the_gate_still_refuses_non_loopback(self) -> None:
-        """
-        The refusal path survives the flip and can be switched back on.
-
-        A gate that is deleted the moment it opens cannot be closed again if the
-        review's conditions ever stop holding.
-        """
-        with patch.object(host_config, "LOOPBACK_ONLY", True):
-            with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
-                host_config.validate_bind(TAILNET_SHAPED, 8787)
-
-        assert "loopback-only" in str(exc.value).lower()
-        assert "security review" in str(exc.value).lower()
-
-    def test_opening_the_gate_did_not_open_the_wildcard(self) -> None:
-        """
-        THE test that matters after the flip, and the ratified NO-GO in code.
-
-        LOOPBACK_ONLY governs exactly one refusal. The wildcard check is separate
-        and unconditional: widening to a real address must never widen to every
-        address. If this ever goes green-by-deletion, the server can answer on
-        interfaces nobody chose.
-        """
-        for wildcard in ("0.0.0.0", "::"):
-            with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
-                host_config.validate_bind(wildcard, 8787)
-
-            assert "every" in str(exc.value).lower()
-
-    def test_opening_the_gate_did_not_open_hostnames(self) -> None:
-        """An ambiguous bind is still refused — the flip changed one rule only."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
-            host_config.validate_bind("localhost", 8787)
-
-        assert "literal ip" in str(exc.value).lower()
-
-    def test_opening_the_gate_did_not_open_unheld_addresses(self) -> None:
-        """Still probe-bound: an address this machine does not hold is refused."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
-            host_config.validate_bind(UNHELD_ADDRESS, 8787)
-
-        assert "not available" in str(exc.value).lower()
-
-    def test_loopback_accepted(self) -> None:
-        """
-        127.0.0.1 is the Phase 1 target and must pass cleanly.
-
-        The call used to stand alone: an implicit "did not raise", which the
-        checker is right to call no oracle at all.
-
-        The gate returns None by design — acceptance is the ABSENCE of a
-        refusal — so there is no value to read back. The oracle is the
-        contrast: the same call under the same LOOPBACK_ONLY setting accepts
-        loopback and refuses the tailnet-shaped address, which is a claim
-        about the gate and not merely about this one call not raising. A gate
-        emptied to `pass` now fails the second half.
-        """
-        with patch(PATCH_CONFIG_LOGGER):
-            assert host_config.validate_bind("127.0.0.1", 8787) is None
-
-            with pytest.raises(host_config.BindRefused):
-                host_config.validate_bind(TAILNET_SHAPED, 8787)
-
-    def test_tailnet_shaped_address_still_refused_when_gate_lifted_but_absent(self) -> None:
-        """Lifting the gate does not lower the standard: the machine must hold it."""
-        with patch(PATCH_CONFIG_LOGGER), patch.object(host_config, "LOOPBACK_ONLY", False):
-            with pytest.raises(host_config.BindRefused) as exc:
-                host_config.validate_bind(TAILNET_SHAPED, 8787)
-
-        # Refused for absence now, not for the phase gate.
-        assert "not available" in str(exc.value).lower()
-
-    @pytest.mark.parametrize("port", [0, -1, 65536, 99999])
-    def test_port_out_of_range_refused(self, port: int) -> None:
-        """Ports outside 1-65535 are refused before anything touches a socket."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused):
-            host_config.validate_bind("127.0.0.1", port)
-
-    def test_non_integer_port_refused(self) -> None:
-        """A string port is a config error, not something to coerce."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused):
-            host_config.validate_bind("127.0.0.1", "8787")  # type: ignore[arg-type]
-
-    def test_bool_port_refused(self) -> None:
-        """True is an int in Python. It is not a port."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused):
-            host_config.validate_bind("127.0.0.1", True)  # type: ignore[arg-type]
-
-
-class TestConfig:
-    """Config load/save behaviour."""
-
-    def test_defaults_when_store_absent(self, store: Path) -> None:
-        """A missing config yields loopback defaults — safe, not silent."""
-        with patch(PATCH_CONFIG_LOGGER):
-            config = host_config.load_config()
-
-        assert config["host"] == host_config.DEFAULT_HOST
-        assert config["port"] == host_config.DEFAULT_PORT
-
-    def test_stored_values_merge_over_defaults(self, store: Path) -> None:
-        """A config carrying only a port still gets the loopback host."""
-        with patch(PATCH_CONFIG_LOGGER):
-            host_config.save_config({"port": 9999})
-            config = host_config.load_config()
-
-        assert config["port"] == 9999
-        assert config["host"] == host_config.DEFAULT_HOST
-
-    def test_non_dict_store_falls_back_to_defaults(self, store: Path) -> None:
-        """A corrupted config must not produce a half-applied bind."""
-        provider_dir = store / host_config.CONFIG_PROVIDER
-        provider_dir.mkdir(parents=True, exist_ok=True)
-        (provider_dir / f"{host_config.CONFIG_SLUG}.json").write_text('"not-an-object"', encoding="utf-8")
-
-        with patch(PATCH_CONFIG_LOGGER):
-            config = host_config.load_config()
-
-        assert config["host"] == host_config.DEFAULT_HOST
-
-    def test_save_config_round_trips(self, store: Path) -> None:
-        """What was saved is what loads back."""
-        with patch(PATCH_CONFIG_LOGGER):
-            host_config.save_config({"host": "127.0.0.1", "port": 8080})
-            config = host_config.load_config()
-
-        assert config == {"host": "127.0.0.1", "port": 8080}
-
-
-def _face_bundle(directory: Path) -> Path:
-    """A directory shaped like @baud's built phone bundle: phone.html at its root."""
-    directory.mkdir(parents=True)
-    (directory / host_config.FACE_ENTRY).write_text("<!doctype html>", encoding="utf-8")
-    return directory
-
-
-class TestFaceDir:
-    """
-    FPLAN-0587 row 1: where the phone face is served from, stored beside the bind.
-
-    The bind rule's doctrine: a value that would not serve is refused at write
-    time, where whoever supplied it is still there, and nothing is stored.
-    """
-
-    def test_unset_by_default(self, store: Path) -> None:
-        """No face_dir stored is None — the checkout default is face.py's call."""
-        assert host_config.face_dir() is None
-
-    def test_a_built_bundle_is_stored_and_read_back(self, store: Path, tmp_path: Path) -> None:
-        """Stored as a plain string in the existing config, returned as a Path."""
-        bundle = _face_bundle(tmp_path / "face")
-
-        with patch(PATCH_CONFIG_LOGGER):
-            stored = host_config.set_face_dir(bundle)
-
-        assert stored == bundle
-        assert host_config.face_dir() == bundle
-        assert host_config.load_config()["face_dir"] == str(bundle)
-
-    def test_a_relative_path_is_refused(self, store: Path) -> None:
-        """Relative to what? The server's working directory is nobody's decision."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.FaceDirRefused, match="absolute"):
-            host_config.set_face_dir(Path("projects") / "baud" / "app" / "dist-phone")
-
-        assert host_config.face_dir() is None
-
-    def test_a_missing_directory_is_refused(self, store: Path, tmp_path: Path) -> None:
-        """A path that does not exist yet stores nothing — no config file at all."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.FaceDirRefused, match="not a directory"):
-            host_config.set_face_dir(tmp_path / "never-built")
-
-        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
-
-    def test_the_entry_file_itself_is_refused(self, store: Path, tmp_path: Path) -> None:
-        """Naming phone.html instead of the directory holding it is an easy slip."""
-        bundle = _face_bundle(tmp_path / "face")
-
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.FaceDirRefused, match="not a directory"):
-            host_config.set_face_dir(bundle / host_config.FACE_ENTRY)
-
-        assert host_config.face_dir() is None
-
-    def test_a_directory_without_phone_html_is_refused(self, store: Path, tmp_path: Path) -> None:
-        """An unbuilt or wrong directory would answer every navigation with a 503."""
-        empty = tmp_path / "empty"
-        empty.mkdir()
-
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.FaceDirRefused, match="phone.html"):
-            host_config.set_face_dir(empty)
-
-        assert host_config.face_dir() is None
-
-    def test_the_refusal_is_a_value_error(self) -> None:
-        """Callers outside this branch (@aipass's installer) may catch ValueError."""
-        assert issubclass(host_config.FaceDirRefused, ValueError)
-
-    def test_a_refusal_leaves_the_stored_dir_alone(self, store: Path, tmp_path: Path) -> None:
-        """Refused means nothing was written — not that the old value was dropped."""
-        bundle = _face_bundle(tmp_path / "face")
-
-        with patch(PATCH_CONFIG_LOGGER):
-            host_config.set_face_dir(bundle)
-            with pytest.raises(host_config.FaceDirRefused):
-                host_config.set_face_dir(tmp_path / "never-built")
-
-        assert host_config.face_dir() == bundle
-
-    def test_clearing_removes_the_key(self, store: Path, tmp_path: Path) -> None:
-        """None clears: the key is gone, not stored as null."""
-        with patch(PATCH_CONFIG_LOGGER):
-            host_config.set_face_dir(_face_bundle(tmp_path / "face"))
-            cleared = host_config.set_face_dir(None)
-
-        assert cleared is None
-        assert host_config.face_dir() is None
-        assert "face_dir" not in host_config.load_config()
-
-    def test_clearing_when_unset_writes_nothing(self, store: Path) -> None:
-        """A clear with nothing to clear must not create a config file nobody asked for."""
-        with patch(PATCH_CONFIG_LOGGER):
-            assert host_config.set_face_dir(None) is None
-
-        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
-
-    def test_the_bind_survives_a_face_dir_write(self, store: Path, tmp_path: Path) -> None:
-        """One store, two settings: writing one keeps the other."""
-        bundle = _face_bundle(tmp_path / "face")
-
-        with patch(PATCH_CONFIG_LOGGER):
-            host_config.save_config({"host": "127.0.0.1", "port": 9100})
-            host_config.set_face_dir(bundle)
-            config = host_config.load_config()
-
-        assert config == {"host": "127.0.0.1", "port": 9100, "face_dir": str(bundle)}
-
-
-def _baud_binary(path: Path, mode: int = 0o755) -> Path:
-    """A stand-in baud binary: a regular file with the given mode."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    path.chmod(mode)
-    return path
-
-
-posix_permissions = pytest.mark.skipif(sys.platform == "win32", reason="os.access X_OK is always true on Windows")
-
-
-class TestBaudBin:
-    """
-    FPLAN-0589 row 2: the baud binary the host lanes exec, stored beside face_dir.
-
-    Four legs, validated before any write, each refusal naming its own:
-    absolute, exists, a regular file, executable.
-    """
-
-    def test_unset_by_default(self, store: Path) -> None:
-        """No baud_bin stored is None — the automatic lookup is fleet.py's call."""
-        assert host_config.baud_bin() is None
-
-    def test_an_executable_file_is_stored_and_read_back(self, store: Path, tmp_path: Path) -> None:
-        """Stored as a plain string in the existing config, returned as a Path."""
-        binary = _baud_binary(tmp_path / "bin" / "baud-cli")
-
-        with patch(PATCH_CONFIG_LOGGER):
-            stored = host_config.set_baud_bin(binary)
-
-        assert stored == binary
-        assert host_config.baud_bin() == binary
-        assert host_config.load_config()["baud_bin"] == str(binary)
-
-    def test_a_relative_path_is_refused(self, store: Path) -> None:
-        """Leg one: relative to the server's working directory is nobody's decision."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BaudBinRefused, match="absolute"):
-            host_config.set_baud_bin(Path("bin") / "baud-cli")
-
-        assert host_config.baud_bin() is None
-
-    def test_a_missing_file_is_refused(self, store: Path, tmp_path: Path) -> None:
-        """Leg two: nothing is there — and no config file is created either."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BaudBinRefused, match="does not exist"):
-            host_config.set_baud_bin(tmp_path / "never-installed")
-
-        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
-
-    def test_a_directory_is_refused(self, store: Path, tmp_path: Path) -> None:
-        """Leg three: a directory exists and carries the x bit, and is still not a binary."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BaudBinRefused, match="not a regular file"):
-            host_config.set_baud_bin(tmp_path)
-
-        assert host_config.baud_bin() is None
-
-    @posix_permissions
-    def test_a_file_without_the_executable_bit_is_refused(self, store: Path, tmp_path: Path) -> None:
-        """Leg four: a download nobody chmodded would fail at every exec instead."""
-        binary = _baud_binary(tmp_path / "baud-cli", mode=0o644)
-
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BaudBinRefused, match="not executable"):
-            host_config.set_baud_bin(binary)
-
-        assert host_config.baud_bin() is None
-
-    def test_the_refusal_is_a_value_error(self) -> None:
-        """@aipass's installer may catch ValueError, as it does for the face dir."""
-        assert issubclass(host_config.BaudBinRefused, ValueError)
-
-    def test_a_refusal_leaves_the_stored_binary_alone(self, store: Path, tmp_path: Path) -> None:
-        """Refused means nothing was written — not that the old value was dropped."""
-        binary = _baud_binary(tmp_path / "baud-cli")
-
-        with patch(PATCH_CONFIG_LOGGER):
-            host_config.set_baud_bin(binary)
-            with pytest.raises(host_config.BaudBinRefused):
-                host_config.set_baud_bin(tmp_path / "never-installed")
-
-        assert host_config.baud_bin() == binary
-
-    def test_clearing_removes_the_key(self, store: Path, tmp_path: Path) -> None:
-        """None clears: the key is gone, not stored as null."""
-        with patch(PATCH_CONFIG_LOGGER):
-            host_config.set_baud_bin(_baud_binary(tmp_path / "baud-cli"))
-            cleared = host_config.set_baud_bin(None)
-
-        assert cleared is None
-        assert host_config.baud_bin() is None
-        assert "baud_bin" not in host_config.load_config()
-
-    def test_clearing_when_unset_writes_nothing(self, store: Path) -> None:
-        """A clear with nothing to clear must not create a config file nobody asked for."""
-        with patch(PATCH_CONFIG_LOGGER):
-            assert host_config.set_baud_bin(None) is None
-
-        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
-
-    def test_the_face_dir_survives_a_baud_bin_write_and_clear(self, store: Path, tmp_path: Path) -> None:
-        """One store, three settings: writing or clearing one keeps the others."""
-        bundle = _face_bundle(tmp_path / "face")
-
-        with patch(PATCH_CONFIG_LOGGER):
-            host_config.set_face_dir(bundle)
-            host_config.set_baud_bin(_baud_binary(tmp_path / "baud-cli"))
-            host_config.set_baud_bin(None)
-            config = host_config.load_config()
-
-        assert config["face_dir"] == str(bundle)
-        assert "baud_bin" not in config
-
-
-# =============================================
-# TOKENS — handlers/host/tokens.py
-# =============================================
-
-
-class TestIssueToken:
-    """Minting: the raw value exists once and is never stored."""
-
-    def test_raw_value_is_not_in_the_store(self, store: Path) -> None:
-        """A reader of the token file must not be able to authenticate with it."""
-        _, raw = host_tokens.issue_token("pixel-8")
-
-        stored = (store / host_tokens.TOKEN_PROVIDER / f"{host_tokens.TOKEN_SLUG}.json").read_text(encoding="utf-8")
-        assert raw not in stored
-
-    def test_store_holds_a_sha256_hash(self, store: Path) -> None:
-        """The stored digest is the sha256 of the raw value, nothing reversible."""
-        import hashlib
-
-        _, raw = host_tokens.issue_token("pixel-8")
-        records = host_tokens.load_tokens()
-
-        assert records[0]["hash"] == hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-    def test_record_carries_expected_fields(self, store: Path) -> None:
-        """The record shape the CLI and the auth layer both rely on."""
-        record, _ = host_tokens.issue_token("pixel-8", "operate")
-
-        assert record["label"] == "pixel-8"
-        assert record["scope"] == "operate"
-        assert record["revoked"] is False
-        assert record["id"]
-        assert record["created"]
-
-    def test_last_used_is_never_written_in_phase_1(self, store: Path) -> None:
-        """Reservation, not a feature: a per-request write needs Phase 5 locking."""
-        record, raw = host_tokens.issue_token("pixel-8")
-        host_tokens.verify_token(raw)
-
-        assert host_tokens.load_tokens()[0]["last_used"] is None
-        assert record["last_used"] is None
-
-    def test_empty_label_refused(self, store: Path) -> None:
-        """An unlabelled token cannot be revoked with confidence."""
-        with pytest.raises(host_tokens.TokenError):
-            host_tokens.issue_token("   ")
-
-    def test_unknown_scope_refused(self, store: Path) -> None:
-        """Scope is enumerated; a typo must not silently become read."""
-        with pytest.raises(host_tokens.TokenError) as exc:
-            host_tokens.issue_token("pixel-8", "admin")
-
-        assert "scope" in str(exc.value).lower()
-
-    def test_two_tokens_are_distinct_and_both_verify(self, store: Path) -> None:
-        """Issuing a second device must not disturb the first."""
-        _, first = host_tokens.issue_token("pixel-8")
-        _, second = host_tokens.issue_token("ipad")
-
-        assert first != second
-        assert host_tokens.verify_token(first) is not None
-        assert host_tokens.verify_token(second) is not None
-
-    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
-    def test_token_file_is_0600(self, store: Path) -> None:
-        """The store sits at 0600 like every other secret this branch writes."""
-        host_tokens.issue_token("pixel-8")
-        path = store / host_tokens.TOKEN_PROVIDER / f"{host_tokens.TOKEN_SLUG}.json"
-
-        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
-
-
-class TestSaveTokens:
-    """The store envelope, written directly."""
-
-    def test_writes_versioned_envelope(self, store: Path) -> None:
-        """Records live under a version key so a later reader need not guess."""
-        host_tokens.save_tokens([{"id": "abc", "label": "x", "scope": "read", "hash": "h", "revoked": False}])
-
-        raw = (store / host_tokens.TOKEN_PROVIDER / f"{host_tokens.TOKEN_SLUG}.json").read_text(encoding="utf-8")
-        envelope = json.loads(raw)
-
-        assert envelope["version"] == host_tokens.STORE_VERSION
-        assert envelope["tokens"][0]["id"] == "abc"
-
-    def test_round_trips_through_load(self, store: Path) -> None:
-        """What save writes, load reads back."""
-        records = [{"id": "abc", "label": "x", "scope": "read", "hash": "h", "revoked": False}]
-        host_tokens.save_tokens(records)
-
-        assert host_tokens.load_tokens() == records
-
-    def test_overwrites_rather_than_appends(self, store: Path) -> None:
-        """A full-list write replaces the store — no ghost records survive."""
-        host_tokens.save_tokens([{"id": "one"}, {"id": "two"}])
-        host_tokens.save_tokens([{"id": "three"}])
-
-        assert [record["id"] for record in host_tokens.load_tokens()] == ["three"]
-
-
-class TestVerifyToken:
-    """Verification, and the revocation property the phone lane depends on."""
-
-    def test_accepts_the_issued_value(self, store: Path) -> None:
-        """The happy path: the value we handed out resolves to its record."""
-        record, raw = host_tokens.issue_token("pixel-8")
-
-        assert host_tokens.verify_token(raw)["id"] == record["id"]  # type: ignore[index]
-
-    def test_rejects_unknown_value(self, store: Path) -> None:
-        """A value we never issued authenticates nothing."""
-        host_tokens.issue_token("pixel-8")
-
-        assert host_tokens.verify_token("not-a-real-token") is None
-
-    @pytest.mark.parametrize("value", ["", None, 12345, b"bytes"])
-    def test_rejects_empty_and_non_string(self, store: Path, value: Any) -> None:
-        """Junk input is denied, never crashed on."""
-        host_tokens.issue_token("pixel-8")
-
-        assert host_tokens.verify_token(value) is None
-
-    def test_revoked_token_rejected_without_restart(self, store: Path) -> None:
-        """THE property: revocation lands on the next verification, no restart."""
-        record, raw = host_tokens.issue_token("pixel-8")
-        assert host_tokens.verify_token(raw) is not None
-
-        host_tokens.revoke_token(record["id"])
-
-        assert host_tokens.verify_token(raw) is None
-
-    def test_malformed_store_denies_everything(self, store: Path) -> None:
-        """A broken store must fail closed — deny all, never admit one."""
-        _, raw = host_tokens.issue_token("pixel-8")
-
-        path = store / host_tokens.TOKEN_PROVIDER / f"{host_tokens.TOKEN_SLUG}.json"
-        path.write_text(json.dumps(["not", "an", "envelope"]), encoding="utf-8")
-
-        assert host_tokens.verify_token(raw) is None
-
-
-class TestRevokeToken:
-    """Revocation bookkeeping."""
-
-    def test_unknown_id_returns_false(self, store: Path) -> None:
-        """Revoking something that does not exist is a no-op, reported honestly."""
-        host_tokens.issue_token("pixel-8")
-
-        assert host_tokens.revoke_token("does-not-exist") is False
-
-    def test_already_revoked_returns_false(self, store: Path) -> None:
-        """A second revoke changes nothing and says so."""
-        record, _ = host_tokens.issue_token("pixel-8")
-        host_tokens.revoke_token(record["id"])
-
-        assert host_tokens.revoke_token(record["id"]) is False
-
-    def test_list_tokens_never_exposes_the_hash(self, store: Path) -> None:
-        """Display records carry no material an attacker could work from."""
-        host_tokens.issue_token("pixel-8")
-
-        assert all("hash" not in record for record in host_tokens.list_tokens())
-
-
-class TestScopes:
-    """operate implies read; nothing implies operate but operate."""
-
-    def test_operate_implies_read(self) -> None:
-        """An operate token can perform read actions."""
-        assert host_tokens.scope_allows("operate", "read") is True
-
-    def test_read_does_not_imply_operate(self) -> None:
-        """A read token must never reach a destructive verb."""
-        assert host_tokens.scope_allows("read", "operate") is False
-
-    def test_unknown_scope_allows_nothing(self) -> None:
-        """A corrupted scope field denies rather than defaults."""
-        assert host_tokens.scope_allows("wizard", "read") is False
-
-
-# =============================================
-# SERVER — handlers/host/server.py
-# =============================================
-
-
-class TestAvailabilityGuard:
-    """Optional dependency handling — loud failure, never a silent no-op."""
-
-    def test_create_app_without_extra_raises_with_instructions(self) -> None:
-        """A missing extra tells the operator exactly how to fix it."""
-        with patch.object(host_server, "HOST_API_AVAILABLE", False):
-            with pytest.raises(RuntimeError) as exc:
-                host_server.create_app()
-
-        assert "install" in str(exc.value).lower()
-
-    def test_serve_without_extra_raises_with_instructions(self) -> None:
-        """Same guard on the serving path."""
-        with patch.object(host_server, "HOST_API_AVAILABLE", False):
-            with pytest.raises(RuntimeError):
-                host_server.serve()
-
-
-fastapi_required = pytest.mark.skipif(
-    not host_server.is_available(),
-    reason="the [host] extra is not installed",
-)
-
-
-@pytest.fixture
-def client(store: Path):
-    """A TestClient over the real app, with the token store isolated."""
-    from fastapi.testclient import TestClient
-
-    with patch(PATCH_SERVER_LOGGER):
-        yield TestClient(host_server.create_app(), raise_server_exceptions=False)
-
-
-@fastapi_required
-class TestPing:
-    """The unauthenticated liveness probe."""
-
-    def test_ping_returns_204_without_auth(self, client: Any) -> None:
-        """Reachability must be answerable without a token, or the phone cannot
-        tell 'tunnel down' from 'token rejected'."""
-        response = client.get("/v1/ping")
-
-        assert response.status_code == 204
-
-    def test_ping_has_no_body(self, client: Any) -> None:
-        """It reports reachability and nothing else — no version, no hostname."""
-        response = client.get("/v1/ping")
-
-        assert response.content == b""
-
-
-@fastapi_required
-class TestAuth:
-    """Bearer auth on a real request path."""
-
-    def test_missing_header_is_401(self, client: Any) -> None:
-        """No credentials, no answer."""
-        response = client.get("/v1/whoami")
-
-        assert response.status_code == 401
-
-    def test_unknown_token_is_401(self, client: Any) -> None:
-        """A value we never issued gets the same treatment as none at all."""
-        response = client.get("/v1/whoami", headers={"Authorization": "Bearer nope"})
-
-        assert response.status_code == 401
-
-    def test_valid_token_is_200_and_echoes_its_own_identity(self, client: Any) -> None:
-        """whoami returns only what the caller already holds."""
-        record, raw = host_tokens.issue_token("pixel-8")
-
-        response = client.get("/v1/whoami", headers={"Authorization": f"Bearer {raw}"})
-
-        assert response.status_code == 200
-        assert response.json() == {"id": record["id"], "label": "pixel-8", "scope": "read"}
-
-    def test_revoked_token_is_401_on_the_same_running_app(self, client: Any) -> None:
-        """THE end-to-end property: revoke, and the very next request is denied.
-        No restart, no cooperation from the phone. This is the answer to the iOS
-        keychain surviving an uninstall."""
-        record, raw = host_tokens.issue_token("pixel-8")
-        headers = {"Authorization": f"Bearer {raw}"}
-        assert client.get("/v1/whoami", headers=headers).status_code == 200
-
-        host_tokens.revoke_token(record["id"])
-
-        assert client.get("/v1/whoami", headers=headers).status_code == 401
-
-    def test_errors_carry_the_shared_envelope(self, client: Any) -> None:
-        """One error shape for the whole API, so the client parses one thing."""
-        response = client.get("/v1/whoami")
-        body = response.json()
-
-        assert "error" in body
-        assert "code" in body["error"]
-        assert "message" in body["error"]
-
-
-@fastapi_required
-class TestScopeEnforcement:
-    """require_scope on an endpoint that demands operate."""
-
-    @pytest.fixture
-    def operate_client(self, store: Path):
-        """An app carrying one operate-scoped route, to exercise the dependency."""
-        from fastapi import Depends
-        from fastapi.testclient import TestClient
-
-        with patch(PATCH_SERVER_LOGGER):
-            app = host_server.create_app()
-
-            @app.get("/v1/test-operate")
-            async def _operate_route(record: dict = Depends(host_server.require_scope("operate"))) -> dict:
-                return {"ok": True}
-
-            yield TestClient(app, raise_server_exceptions=False)
-
-    def test_read_token_refused_on_operate_route(self, operate_client: Any) -> None:
-        """A read token reaching a destructive verb is the failure this prevents."""
-        _, raw = host_tokens.issue_token("pixel-8", "read")
-
-        response = operate_client.get("/v1/test-operate", headers={"Authorization": f"Bearer {raw}"})
-
-        assert response.status_code == 403
-
-    def test_operate_token_accepted_on_operate_route(self, operate_client: Any) -> None:
-        """The scope that is meant to work, works."""
-        _, raw = host_tokens.issue_token("ops-phone", "operate")
-
-        response = operate_client.get("/v1/test-operate", headers={"Authorization": f"Bearer {raw}"})
-
-        assert response.status_code == 200
-
-    def test_operate_token_still_reaches_read_routes(self, operate_client: Any) -> None:
-        """operate implies read, end to end."""
-        _, raw = host_tokens.issue_token("ops-phone", "operate")
-
-        response = operate_client.get("/v1/whoami", headers={"Authorization": f"Bearer {raw}"})
-
-        assert response.status_code == 200
-
-
-@fastapi_required
-class TestTheDeclaredRoutesAnswerThroughTheRealApp:
-    """
-    Four routes that were declared and never reached by a test.
-
-    Found by seedgo's entry_point_diff on 2026-09-07, and it was right: the
-    settings handler sat at 97% while not one of its six routes had ever been
-    executed through the app. That is the gap this branch's own APLAN-0013 N1b
-    item names, and a handler that is well tested behind a route nobody calls
-    is exactly the shape a coverage number cannot show you.
-
-    These go through the REAL app — create_app, the real dependency, the real
-    auth — and assert the documented status. The handlers underneath are
-    mocked, deliberately: what is unpinned is the wiring, not the logic, and a
-    route test that also exercises the handler cannot say which of the two
-    broke.
-    """
-
-    @pytest.fixture
-    def routed(self, store: Path):
-        """The real app plus a read token and an operate token for it."""
-        from fastapi.testclient import TestClient
-
-        with patch(PATCH_SERVER_LOGGER):
-            _, read_raw = host_tokens.issue_token("phone", "read")
-            _, operate_raw = host_tokens.issue_token("ops-phone", "operate")
-            client = TestClient(host_server.create_app(), raise_server_exceptions=False)
-            yield client, read_raw, operate_raw
-
-    def test_agent_settings_reads_through_the_route(self, routed: Any) -> None:
-        """GET /v1/agent-settings answers 200 with the handler's document."""
-        api, read_raw, _ = routed
-        owned = {"model": "opus", "outputStyle": None, "statusLine": None}
-
-        with patch.object(host_server.host_reads, "resolve_branch_root"):
-            with patch.object(host_server.host_settings, "read_agent_settings", return_value=owned) as reader:
-                response = api.get(
-                    "/v1/agent-settings",
-                    params={"branch": "demo"},
-                    headers={"Authorization": f"Bearer {read_raw}"},
-                )
-
-        assert response.status_code == 200
-        assert response.json() == owned
-        reader.assert_called_once()
-
-    def test_agent_settings_refuses_a_patch_that_is_not_an_object(self, routed: Any) -> None:
-        """
-        POST /v1/agent-settings answers 400 when `patch` is not a JSON object.
-
-        The route's own guard, before any handler runs — so this is the one
-        piece of that endpoint that genuinely lives in the route and could not
-        be pinned anywhere else.
-        """
-        api, _, operate_raw = routed
-
-        response = api.post(
-            "/v1/agent-settings",
-            json={"branch": "demo", "patch": "not-an-object"},
-            headers={"Authorization": f"Bearer {operate_raw}"},
-        )
-
-        assert response.status_code == 400
-        assert response.json()["error"]["code"] == "settings_refused"
-
-    def test_baud_settings_reads_through_the_route(self, routed: Any) -> None:
-        """GET /v1/baud-settings answers 200 with BAUD's whole document."""
-        api, read_raw, _ = routed
-        document = {"theme": "dark", "fontSize": 14}
-
-        with patch.object(host_server.host_reads, "repo_root"):
-            with patch.object(host_server.host_settings, "read_baud_settings", return_value=document) as reader:
-                response = api.get("/v1/baud-settings", headers={"Authorization": f"Bearer {read_raw}"})
-
-        assert response.status_code == 200
-        assert response.json() == document
-        reader.assert_called_once()
-
-    def test_baud_settings_answers_503_when_the_document_cannot_be_read(self, routed: Any) -> None:
-        """A SettingsUnavailable becomes 503, not a 500 traceback at the phone."""
-        api, read_raw, _ = routed
-        broken = host_settings.SettingsUnavailable("the settings file is not readable")
-
-        with patch.object(host_server.host_reads, "repo_root"):
-            with patch.object(host_server.host_settings, "read_baud_settings", side_effect=broken):
-                response = api.get("/v1/baud-settings", headers={"Authorization": f"Bearer {read_raw}"})
-
-        assert response.status_code == 503
-        assert response.json()["error"]["code"] == "settings_unavailable"
-
-    def test_hooks_sound_reads_the_live_flag_through_the_route(self, routed: Any) -> None:
-        """GET /v1/hooks-sound answers 200 and reports the flag as a bool."""
-        api, read_raw, _ = routed
-
-        with patch.object(host_server.host_settings, "hooks_sound_get", return_value=True) as reader:
-            response = api.get("/v1/hooks-sound", headers={"Authorization": f"Bearer {read_raw}"})
-
-        assert response.status_code == 200
-        assert response.json() == {"active": True}
-        reader.assert_called_once()
-
-    def test_hooks_sound_refuses_a_non_boolean_active(self, routed: Any) -> None:
-        """
-        POST /v1/hooks-sound answers 400 unless `active` is a real boolean.
-
-        A string "false" is the dangerous input here: truthy in most languages
-        the phone could be written in, and it must not read as "on".
-        """
-        api, _, operate_raw = routed
-
-        response = api.post(
-            "/v1/hooks-sound",
-            json={"active": "false"},
-            headers={"Authorization": f"Bearer {operate_raw}"},
-        )
-
-        assert response.status_code == 400
-        assert response.json()["error"]["code"] == "settings_refused"
-
-    def test_projects_answers_the_census_through_the_route(self, routed: Any) -> None:
-        """GET /v1/projects answers 200 with @baud's project census."""
-        api, read_raw, _ = routed
-        census = {"projects": [{"name": "AIPass", "path": "/somewhere"}]}
-
-        with patch.object(host_server.host_fleet, "list_projects", return_value=census) as lister:
-            response = api.get("/v1/projects", headers={"Authorization": f"Bearer {read_raw}"})
-
-        assert response.status_code == 200
-        assert response.json() == census
-        lister.assert_called_once()
-
-    def test_projects_answers_503_when_the_fleet_binary_is_unreachable(self, routed: Any) -> None:
-        """
-        A FleetUnavailable becomes 503, and this is the arm that matters.
-
-        The switcher menu going empty and the switcher menu failing are two
-        different sentences on the phone, and only one of them is honest when
-        the binary did not answer.
-        """
-        api, read_raw, _ = routed
-        broken = host_fleet.FleetUnavailable("the fleet binary did not answer")
-
-        with patch.object(host_server.host_fleet, "list_projects", side_effect=broken):
-            response = api.get("/v1/projects", headers={"Authorization": f"Bearer {read_raw}"})
-
-        assert response.status_code == 503
-        assert response.json()["error"]["code"] == "fleet_unavailable"
-
-    def test_every_one_of_these_routes_is_behind_the_auth(self, routed: Any) -> None:
-        """
-        None of the four is public, checked in one place.
-
-        Parametrised into one unit rather than four: the claim is about the
-        SET, and a per-route test would let one of them quietly leave the set
-        without anything going red.
-        """
-        api, _, _ = routed
-        declared = ["/v1/agent-settings", "/v1/baud-settings", "/v1/hooks-sound", "/v1/projects"]
-
-        unguarded = [route for route in declared if api.get(route).status_code != 401]
-
-        assert unguarded == [], f"these routes answered without a token: {unguarded}"
 
 
 # =============================================
@@ -1486,7 +590,9 @@ class TestDetachStatusAndStop:
         """
         handle_command("host-api", ["serv"])
 
-        quiet_module["error"].assert_called_once()
+        quiet_module["error"].assert_called_once_with(
+            "Unknown host-api subcommand: serv", suggestion="Run 'drone @api host-api --help' for available subcommands"
+        )
 
     def test_host_serve_declines_commands_that_are_not_host_api(self) -> None:
         """It answers for `host-api` subcommands and nothing else."""
@@ -1577,7 +683,9 @@ class TestDetachStatusAndStop:
         printed = _printed(quiet_module["console"].print)
         printed += _printed(quiet_module["error"])
 
-        quiet_module["error"].assert_called()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [
+            ("Cannot tell — the supervisor did not answer",)
+        ]
         assert "did not answer" in printed
         assert "No server is running" not in printed
 
@@ -1600,7 +708,7 @@ class TestDetachStatusAndStop:
 
         handle_command("host-api", ["stop"])
 
-        quiet_module["error"].assert_called_once()
+        quiet_module["error"].assert_called_once_with("did not exit within 10.0s")
 
 
 @pytest.fixture
@@ -1703,7 +811,9 @@ class TestServeCommand:
         with patch.object(host_server, "is_available", return_value=False):
             handle_command("host-api", ["serve"])
 
-        quiet_module["error"].assert_called_once()
+        quiet_module["error"].assert_called_once_with(
+            "Server libraries not installed", suggestion=host_server.INSTALL_HINT
+        )
 
 
 class TestSetConfigCommand:
@@ -1731,7 +841,7 @@ class TestSetConfigCommand:
         """A set command with nothing to set is a mistake, not a no-op."""
         handle_command("host-api", ["set-config"])
 
-        quiet_module["error"].assert_called_once()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [("Nothing to set",)]
 
     def test_non_numeric_port_refused(self, store: Path, quiet_module: dict) -> None:
         """A bad port never reaches the store."""
@@ -1767,7 +877,9 @@ class TestSetConfigCommand:
         with patch(PATCH_CONFIG_LOGGER):
             handle_command("host-api", ["set-config", "--face-dir", str(tmp_path / "never-built")])
 
-        quiet_module["error"].assert_called_once()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [
+            ("Refusing to store a face dir that would not serve",)
+        ]
         assert "not a directory" in str(quiet_module["error"].call_args)
         assert host_config.face_dir() is None
 
@@ -1786,7 +898,9 @@ class TestSetConfigCommand:
         with patch(PATCH_CONFIG_LOGGER):
             handle_command("host-api", ["set-config", "--host", "0.0.0.0", "--face-dir", str(bundle)])
 
-        quiet_module["error"].assert_called_once()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [
+            ("Refusing to store a bind that would not start",)
+        ]
         assert host_config.face_dir() is None
 
     def test_bind_and_face_dir_together_keep_both(self, store: Path, quiet_module: dict, tmp_path: Path) -> None:
@@ -1818,6 +932,22 @@ class TestSetConfigCommand:
 
         quiet_module["error"].assert_not_called()
         assert host_config.face_dir() == bundle
+
+    def test_a_save_is_logged_without_the_store_path(self, store: Path) -> None:
+        """
+        The caller gets the path back; the log line names the store in words.
+
+        The path is the result of a secret-named call, which CodeQL follows into
+        a log as clear-text secret data (PR #774 r10).
+        """
+        with patch(PATCH_CONFIG_LOGGER) as log:
+            written = host_config.save_config({"host": UNHELD_ADDRESS, "port": 8787})
+
+        assert Path(written).exists()
+        logged = " ".join(str(arg) for arg in log.info.call_args.args)
+        assert "config saved to the host_api config in the secrets store" in logged
+        assert written not in logged
+        assert str(store) not in logged
 
     def test_a_home_relative_face_dir_is_expanded(
         self, store: Path, quiet_module: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1859,7 +989,9 @@ class TestSetConfigCommand:
         with patch(PATCH_CONFIG_LOGGER):
             handle_command("host-api", ["set-config", "--baud-bin", str(tmp_path / "never-installed")])
 
-        quiet_module["error"].assert_called_once()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [
+            ("Refusing to store a baud binary that would not run",)
+        ]
         assert "does not exist" in str(quiet_module["error"].call_args)
         assert host_config.baud_bin() is None
 
@@ -1880,7 +1012,9 @@ class TestSetConfigCommand:
                 ["set-config", "--face-dir", str(bundle), "--baud-bin", str(tmp_path / "never-installed")],
             )
 
-        quiet_module["error"].assert_called_once()
+        assert [c.args for c in quiet_module["error"].call_args_list] == [
+            ("Refusing to store a baud binary that would not run",)
+        ]
         assert host_config.face_dir() is None
         assert host_config.baud_bin() is None
 
@@ -1945,7 +1079,7 @@ class TestIntrospection:
             host_config.save_config({"host": TAILNET_SHAPED, "port": 8787})
             handle_command("host-api", ["config"])
 
-        quiet_module["warning"].assert_called_once()
+        quiet_module["warning"].assert_called_once_with("Bind address would be REFUSED")
 
     def test_help_does_not_claim_loopback_only_while_the_gate_is_open(self) -> None:
         """

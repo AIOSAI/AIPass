@@ -52,7 +52,7 @@ def _turn_token_and_number(payload: dict) -> tuple[int | None, int | None]:
     try:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         return cadence.turn_token(payload), cadence.current_turn()
-    except Exception as exc:  # noqa: BLE001 - a ledger line without a turn is still a record
+    except Exception as exc:  # a ledger line without a turn is still a record
         logger.info("[HOOKS] injection_ledger: turn unreadable, recorded without it: %s", exc)
         return None, None
 
@@ -68,7 +68,7 @@ def _automated(event_type: str, payload: dict) -> bool | None:
     try:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         return bool(cadence.is_automated(payload))
-    except Exception as exc:  # noqa: BLE001 - a ledger line without the flag is still a record
+    except Exception as exc:  # a ledger line without the flag is still a record
         logger.info("[HOOKS] injection_ledger: automated flag unreadable, recorded without it: %s", exc)
         return None
 

@@ -1,69 +1,60 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_entry_limits.py
-# Date: 2026-06-13
-# Version: 1.1.0
+# =================== AIPass ====================
+# Name: test_entry_limits.py
+# Description: entry_limits config reader and the apps/modules/limits.py gateway over it
+# Version: 1.1.1
+# Created: 2026-06-13
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""
-Tests for the entry_limits config reader (Phase 1 of FPLAN-0270).
+"""Tests for apps/handlers/json/entry_limits.py and its gateway apps/modules/limits.py."""
 
-Covers:
-  - Normal config read returns four default entry types.
-  - per_branch override changes a cap.
-  - per_branch adds a new entry type.
-  - Missing config file returns safe defaults (no crash).
-  - Malformed JSON returns safe defaults + error logged (no crash).
+# Tests for the entry_limits config reader (Phase 1 of FPLAN-0270).
+#
+# Covers:
+#   - Normal config read returns four default entry types.
+#   - per_branch override changes a cap.
+#   - per_branch adds a new entry type.
+#   - Missing config file returns safe defaults (no crash).
+#   - Malformed JSON returns safe defaults + error logged (no crash).
+#
+# Note: entry_limits delegates config reading to config_loader, so tests
+# patch config_loader._CONFIG_PATH rather than a removed entry_limits attr.
 
-Note: entry_limits delegates config reading to config_loader, so tests
-patch config_loader._CONFIG_PATH rather than a removed entry_limits attr.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — classify_entries(), is_near_cap(): tests/test_changed_entries.py
+# seedgo: no-test-needed(covered_elsewhere) — check_fields() per field, pinned in tests/test_unified_schema.py
+# seedgo: no-test-needed(covered_elsewhere) — resolve_entry_types() merge, pinned in tests/test_trinity_standard.py
 
-import importlib
 import json
-import sys
 from pathlib import Path
+from unittest.mock import MagicMock
+
 import pytest
+
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.memory.apps.handlers.json import entry_limits as _entry_limits
+from aipass.memory.apps.modules import limits as _limits
 
 
 # ---------------------------------------------------------------------------
-# Helpers: fresh-import the module under test with mocks already in place
+# Helpers: the real modules, imported once, patched at the edge per test
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
-def _fresh_entry_limits(monkeypatch):
-    """Drop cached module so each test gets a fresh import.
+def _recorded_config_logger(monkeypatch):
+    """The prax logger is the edge: a recorder per test, so a test reads what config_loader logged.
 
-    Conftest's stand-in for aipass.memory.apps.handlers.json now carries the
-    real package's __path__, so sub-module discovery works with it in place --
-    the eviction here is only about getting FRESH modules per test, and
-    config_loader in particular so its _CONFIG_PATH can be re-patched.
-
-    Evicted with ``monkeypatch.delitem``, not a bare ``sys.modules.pop``: a
-    bare pop is one-way and the eviction outlives the test, which is how two
-    receipt tests went red on a single xdist worker on a single run.
+    Every other seam (``_CONFIG_PATH``) is monkeypatched by the test that
+    needs it, on the config_loader entry_limits actually bound.
     """
-    for name in (
-        "aipass.memory.apps.handlers.json",
-        "aipass.memory.apps.handlers.json.json_handler",
-        "aipass.memory.apps.handlers.json.config_loader",
-        "aipass.memory.apps.handlers.json.entry_limits",
-        # The public gateway binds the handler's function OBJECTS at import
-        # time. Left cached, it would hand back the PREVIOUS test's entry_limits
-        # and the identity pins below would compare two different modules.
-        "aipass.memory.apps.modules.limits",
-    ):
-        monkeypatch.delitem(sys.modules, name, raising=False)
-    yield
+    monkeypatch.setattr(_entry_limits.config_loader, "logger", MagicMock())
 
 
 def _get_modules():
-    """Import and return (entry_limits, config_loader) modules."""
-    config_loader = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
-    entry_limits = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
-    return entry_limits, config_loader
+    """Return (entry_limits, config_loader) — the config_loader entry_limits reads through."""
+    return _entry_limits, _entry_limits.config_loader
 
 
 # ---------------------------------------------------------------------------
@@ -484,10 +475,8 @@ _GATEWAY_INTERNAL = ("_field_violation", "_check_list_field", "_walk_strings", "
 
 
 def _get_gateway():
-    """Import and return (limits gateway, entry_limits) — both fresh, same generation."""
-    entry_limits = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
-    limits = importlib.import_module("aipass.memory.apps.modules.limits")
-    return limits, entry_limits
+    """Return (limits gateway, entry_limits) — both imported once, same generation."""
+    return _limits, _entry_limits
 
 
 class TestTheLimitsGatewayIsADoorNotACopy:
@@ -543,8 +532,6 @@ class TestTheLimitsGatewayIsADoorNotACopy:
         output-routing standard, and the exit code is what tells a caller the
         difference between "described the contract" and "did not understand you".
         """
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-
         limits, _ = _get_gateway()
         reset_command_state()
 
@@ -569,4 +556,4 @@ class TestTheLimitsGatewayIsADoorNotACopy:
 
         limits.handle_command("limits", [])
 
-        assert not writes, f"the gateway's CLI wrote config: {writes}"
+        assert writes == [], f"the gateway's CLI wrote config: {writes}"

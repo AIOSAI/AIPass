@@ -1,4 +1,15 @@
-"""Tests for the CLI templates module — operation output templates."""
+# =================== AIPass ====================
+# Name: test_templates.py
+# Description: The templates module — operation_start, operation_complete, routing, demo
+# Version: 1.1.1
+# Created: 2026-03-24
+# Modified: 2026-10-04
+# =============================================
+
+"""Tests for apps/modules/templates.py — the operation output templates."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — that templates.operation_start and operation_complete carry docstrings
 
 import pytest
 from unittest.mock import patch
@@ -92,9 +103,13 @@ class TestHandleCommandRouting:
         mock_run_demo.assert_not_called()
         assert result is True
 
-    def test_templates_unknown_subcommand_returns_false(self):
+    def test_templates_unknown_subcommand_refusal_names_the_token(self, capsys):
+        """`templates bogus` is refused by name, and the refusal trips the exit flag."""
         result = templates.handle_command("templates", ["bogus"])
-        assert result is False
+        out, err = capsys.readouterr()
+        assert "Unknown templates subcommand: bogus" in err
+        assert display.command_failed() is True
+        assert result is True
 
 
 # ============================================================================
@@ -112,12 +127,16 @@ class TestOperationStart:
         output = get_output()
         assert "Building files" in output
 
-    def test_details_in_output(self, plain_console):
+    def test_details_in_output(self, plain_console, tmp_path):
         console, get_output = plain_console
+        target = tmp_path / "app"
+        # The whole line is asserted, so it must never wrap: the temp root is about
+        # 108 characters on the Windows runner, one short of the capture width.
+        console.width = len(str(target)) + 80
         with patch.object(templates, "CONSOLE", console):
-            templates.operation_start("Deploying", target="/srv/app", mode="fast")
+            templates.operation_start("Deploying", target=target, mode="fast")
         output = get_output()
-        assert "target: /srv/app" in output
+        assert f"target: {target}" in output
         assert "mode: fast" in output
 
     def test_no_details_omits_detail_lines(self, plain_console):
@@ -310,8 +329,7 @@ class TestRunDemo:
             templates.run_demo()
         mock_json.log_operation.assert_called_once_with("templates_demo")
 
-    @patch.object(templates, "json_handler")
-    def test_run_demo_renders_expected_content(self, mock_json, plain_console):
+    def test_run_demo_renders_expected_content(self, plain_console):
         console, get_output = plain_console
         with (
             patch.object(templates, "CONSOLE", console),

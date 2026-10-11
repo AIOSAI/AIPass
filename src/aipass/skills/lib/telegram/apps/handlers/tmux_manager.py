@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.skills.apps.handlers.json import json_handler  # noqa: F401
+from aipass.skills.apps.handlers.json import json_handler
 
 # =============================================
 # CONSTANTS

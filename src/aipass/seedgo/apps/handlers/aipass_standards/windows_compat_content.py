@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: windows_compat_content.py
 # Description: Windows Compatibility Standards Content Handler
-# Version: 1.1.0
+# Version: 1.4.0
 # Created: 2026-05-10
-# Modified: 2026-09-18
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -37,6 +37,33 @@ def get_windows_compat_standards() -> str:
         "  3. [red]Unguarded POSIX-only calls[/red]: os.fork, os.setpgid, os.killpg,",
         "     os.getpgid, os.waitpid",
         "  4. [red]os.kill() without OSError handling[/red]: Windows raises WinError 87",
+        "  5. [red]Deferred platform-only import[/red]: fcntl, pwd, grp, termios, resource,",
+        "     msvcrt or winreg imported inside a function, outside a try whose handler",
+        "     catches ImportError. A platform guard does NOT clear it: the import is",
+        "     decided at call time, after a test may pretend sys.platform (devpulse",
+        "     a831fe55: _FileLock imported fcntl under sys.platform != 'win32'; a",
+        "     darwin-pretending test made the Windows runner import it). Module-level",
+        "     imports, gated or try/except, are decided once at import and not read.",
+        "  6. [red]Stream answer pinned at import[/red] (product files, not tests/conftest):",
+        "     a module-level rich [dim]Console(...)[/dim] -- the name, an alias of it, or a",
+        "     same-file subclass -- and any [dim].isatty()[/dim] / [dim]get_terminal_size()[/dim]",
+        "     call in module-level code. Rich runs its colour detection in __init__",
+        "     and keeps it; force_terminal left unset does not help (cli b6655280:",
+        "     a conftest imported display under pytest's suspended capture, a Windows",
+        "     xdist worker's NUL answered isatty() True, 380 of 518 Windows rows",
+        "     carried escape codes). Read: module body, class bodies, if/try/with",
+        "     blocks. Not read: function bodies, [dim]if __name__ == '__main__'[/dim],",
+        "     except handlers (a fallback for an absent cli does not run in the fleet).",
+        "     Acquitted: [dim]file=[/dim] other than sys.stdout/sys.stderr,",
+        "     [dim]force_terminal=True/False[/dim], [dim]color_system=None[/dim], or a",
+        "     subclass that defines [dim]_color_system[/dim] (cli's _LiveConsole: per print).",
+        "  7. [red]tmp_path name holding a backslash, written[/red] (test_* functions, no",
+        '     platform skipif): [dim]tmp_path / "a\\\\b.py"[/dim] (or [dim].joinpath[/dim]) then',
+        "     write_text / write_bytes / touch / mkdir / open for writing. One file on POSIX,",
+        "     a tree with no parents on Windows: the write raises before the code under",
+        "     test runs (seedgo batch7, PR #774 CI round three). Cure: write a real tree",
+        "     and hand over [dim]str(PureWindowsPath(path))[/dim]. Not read: a name only",
+        "     read or handed on, a name bound twice, names built in variables or helpers.",
         "",
         "  [yellow]Valid guards (checker recognizes):[/yellow]",
         "  - [dim]if sys.platform != 'win32':[/dim]",
@@ -62,6 +89,11 @@ def get_windows_compat_standards() -> str:
         "  [red]Bad -- os.kill without exception handling:[/red]",
         "  [dim]os.kill(pid, 0)  # WinError 87 on Windows[/dim]",
         "",
+        "  [red]Bad -- platform-only import deferred into a function:[/red]",
+        "  [dim]def __enter__(self):[/dim]",
+        "  [dim]    if sys.platform != 'win32':[/dim]",
+        "  [dim]        import fcntl[/dim]",
+        "",
         "[bold cyan]HOW TO FIX:[/bold cyan]",
         "",
         "  [green]Good -- platform-guarded import:[/green]",
@@ -73,8 +105,10 @@ def get_windows_compat_standards() -> str:
         "  [green]Good -- try/except import:[/green]",
         "  [dim]try:[/dim]",
         "  [dim]    import fcntl[/dim]",
-        "  [dim]except ImportError:[/dim]",
+        "  [dim]except ImportError as exc:[/dim]",
         "  [dim]    fcntl = None[/dim]",
+        "  [dim]    logger.info('fcntl absent: %s', exc)[/dim]",
+        "  [dim]# the function reads the binding: if fcntl is not None: ...[/dim]",
         "",
         "  [green]Good -- guarded POSIX constant:[/green]",
         '  [dim]if sys.platform != "win32":[/dim]',

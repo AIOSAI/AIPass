@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_process.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Kicks @memory's auto-process once per session and on pre-compact (TDPLAN-0005)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-06
-# Modified: 2026-09-06
+# Modified: 2026-10-08
 # =============================================
 
 """Kicks @memory's auto_process in a detached child; the work leaves the prompt lane.
@@ -70,7 +70,7 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "", "exit_code": 0}
 
     try:
-        module = importlib.import_module("aipass.memory.apps.handlers.intake.auto_process")
+        module = importlib.import_module("aipass.memory.apps.modules.door_auto_process")
         result = module.spawn_background()
 
         if not result.get("success"):

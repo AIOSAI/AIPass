@@ -1,36 +1,40 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_bypass_anchors.py - line-scoped waivers must still point at their reason
-# Date: 2026-08-31
-# Version: 1.1.0
-# Category: trigger/tests
+# =================== AIPass ====================
+# Name: test_bypass_anchors.py
+# Description: Line-scoped seedgo waivers must still point at their reason
+# Version: 1.2.0
+# Created: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""A line-scoped seedgo waiver fails OPEN and SILENT when its line moves.
+"""Tests that .seedgo/bypass.json line waivers still hit their anchor in apps/log_watcher_service.py and kin."""
 
-MEASURED HERE 2026-08-31, round 5. The round-4 dead-cwd sweep added comment
-lines to files that carried waivers keyed on line numbers. Every waived line
-shifted - the log_watcher_service prints by +1, runaway_handler by -8 where a
-dead _find_repo_root copy was deleted - and all four rules silently stopped
-matching. The suppressed violations resurfaced and read as fresh breakage in
-files nobody had touched semantically. Nothing warned: a rule matching no line
-is indistinguishable from a rule doing its job.
-
-Re-deriving fixed that day and left the next edit free to break it the same way,
-so the waivers now carry an `anchor` - the literal text the waived line must
-contain - and this file reds when a line moves out from under one. seedgo does
-NOT read `anchor` (bypass_handler matches on `lines` alone); this test is the
-only thing that does, which is why it lives here rather than in the standard.
-
-The structural fix belongs in the checker - waivers anchored on CONTENT, not
-line numbers - and is queued with @seedgo pending the owner's GO. This is the
-local reference, built the same way @drone built theirs.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — what a waived line does, in tests/test_runaway_handler.py
 
 import json
 from pathlib import Path
 
 import pytest
+
+# A line-scoped seedgo waiver fails OPEN and SILENT when its line moves.
+#
+# MEASURED HERE 2026-08-31, round 5. The round-4 dead-cwd sweep added comment
+# lines to files that carried waivers keyed on line numbers. Every waived line
+# shifted - the log_watcher_service prints by +1, runaway_handler by -8 where a
+# dead _find_repo_root copy was deleted - and all four rules silently stopped
+# matching. The suppressed violations resurfaced and read as fresh breakage in
+# files nobody had touched semantically. Nothing warned: a rule matching no line
+# is indistinguishable from a rule doing its job.
+#
+# Re-deriving fixed that day and left the next edit free to break it the same way,
+# so the waivers now carry an `anchor` - the literal text the waived line must
+# contain - and this file reds when a line moves out from under one. seedgo does
+# NOT read `anchor` (bypass_handler matches on `lines` alone); this test is the
+# only thing that does, which is why it lives here rather than in the standard.
+#
+# The structural fix belongs in the checker - waivers anchored on CONTENT, not
+# line numbers - and is queued with @seedgo pending the owner's GO. This is the
+# local reference, built the same way @drone built theirs.
 
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 BYPASS_FILE = BRANCH_ROOT / ".seedgo" / "bypass.json"
@@ -52,7 +56,7 @@ def test_there_is_something_to_anchor():
     2026-08-31). Asserting the RAW bypass list is non-empty is not enough - it
     stays full of file-scoped rules while the line-scoped subset goes to zero.
     """
-    assert _ALL_RULES, f"no bypass rules parsed at all from {BYPASS_FILE}"
+    assert len(_ALL_RULES) >= 1, f"no bypass rules parsed at all from {BYPASS_FILE}"
 
     # Recount from the RAW file rather than from the collector under judgement
     # (@drone's cure, relayed by @seedgo). Asserting LINE_SCOPED is non-empty
@@ -67,7 +71,7 @@ def test_there_is_something_to_anchor():
         "not being checked by anything"
     )
 
-    assert LINE_SCOPED, (
+    assert len(LINE_SCOPED) >= 1, (
         "no line-scoped waivers found - if the last one was genuinely retired, "
         "delete this file; if the parse broke, every anchor check below is "
         "vacuously green and the drift this file exists to catch is unwatched"

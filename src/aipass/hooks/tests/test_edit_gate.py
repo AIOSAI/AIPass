@@ -1,25 +1,70 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.3.0
+# Version: 1.5.2
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-09-18
+# Modified: 2026-10-08
 # =============================================
 
-"""Tests for handlers/security/edit_gate.py."""
+"""Tests for apps/handlers/security/edit_gate.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that edit_gate.py parses and imports, ruff and collection cover it
+# seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation checker covers it
+# seedgo: no-test-needed(stdlib) — tempfile.gettempdir's choice of directory, the stdlib's own
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps.handlers.lifecycle import auto_fix
+from aipass.hooks.apps.handlers.security.edit_gate import handle
+from aipass.hooks.apps.modules import diagnostics_state as ds
+from aipass.hooks.apps.modules import engine_closure
+
+# A made-up session for the seat pins: no real session or agent id is written here.
+_SESSION = "a-test-session"
+_PYRIGHT_TIMES_OUT = subprocess.TimeoutExpired("pyright", 15)
+
+
+def _seat(agent: str = "", session: str = _SESSION) -> dict:
+    """The seat fields of a hook payload: a session, and an agent id for a sub-agent."""
+    seat: dict = {}
+    if session:
+        seat["session_id"] = session
+    if agent:
+        seat["agent_id"] = agent
+    return seat
+
+
+def _auto_fix_edit(target: Path, seat: dict, ruff: list, pyright: list) -> dict:
+    """auto_fix's real entry after an Edit of *target*, the two structured checks answering as given."""
+    with (
+        patch.object(auto_fix, "_run_python_checks", return_value=[]),
+        patch.object(auto_fix, "_run_seedgo_checklist", return_value=[]),
+        patch.object(auto_fix, "_run_ruff_lint_structured", return_value=ruff),
+        patch.object(auto_fix, "_run_pyright_check", return_value=pyright),
+    ):
+        return auto_fix.handle({"tool_name": "Edit", "tool_input": {"file_path": str(target)}, **seat})
+
+
+def _auto_fix_edit_pyright_times_out(target: Path, seat: dict) -> dict:
+    """auto_fix's real entry after an Edit of *target*: ruff finds nothing, pyright times out."""
+    with (
+        patch.object(auto_fix, "_run_python_checks", return_value=[]),
+        patch.object(auto_fix, "_run_seedgo_checklist", return_value=[]),
+        patch.object(auto_fix, "_run_ruff_lint_structured", return_value=[]),
+        patch.object(auto_fix.subprocess, "run", side_effect=_PYRIGHT_TIMES_OUT),
+    ):
+        return auto_fix.handle({"tool_name": "Edit", "tool_input": {"file_path": str(target)}, **seat})
+
 
 class TestEditGateHandler:
     def test_allow_normal_edit(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -31,8 +76,6 @@ class TestEditGateHandler:
         assert result["stdout"] == ""
 
     def test_block_inbox_write(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -46,8 +89,6 @@ class TestEditGateHandler:
         assert "inbox.json" in parsed["reason"]
 
     def test_block_cross_branch(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -60,21 +101,19 @@ class TestEditGateHandler:
         assert parsed["decision"] == "block"
         assert "Cross-branch" in parsed["reason"]
 
-    def test_allow_trusted_cross_branch(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
-        result = handle(
-            {
-                "tool_name": "Edit",
-                "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/apps/test.py"},
-                "cwd": "/srv/example/AIPass/src/aipass/devpulse",
-            }
-        )
-        assert result["exit_code"] == 0
+    def test_a_cross_branch_write_is_the_verified_admin_seats_never_a_names(self):
+        """DPLAN-0356 item 5: a seat standing in .../devpulse crossed on its directory name alone."""
+        data = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/apps/test.py"},
+            "cwd": "/srv/example/AIPass/src/aipass/devpulse",
+        }
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
+            assert handle(data)["exit_code"] == 2
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
+            assert handle(data)["exit_code"] == 0
 
     def test_block_daemon_cross_branch(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
             result = handle(
                 {
@@ -88,8 +127,6 @@ class TestEditGateHandler:
         assert "daemon" in parsed["reason"]
 
     def test_allow_daemon_own_branch(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
             result = handle(
                 {
@@ -101,8 +138,6 @@ class TestEditGateHandler:
         assert result["exit_code"] == 0
 
     def test_skip_non_edit_tool(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Bash",
@@ -113,14 +148,10 @@ class TestEditGateHandler:
         assert result["stdout"] == ""
 
     def test_empty_file_path(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": ""}})
         assert result["exit_code"] == 0
 
     def test_empty_hook_data(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle({})
         assert result["exit_code"] == 0
 
@@ -147,32 +178,33 @@ class TestEditGateHandler:
         assert "'alpha' cannot write to 'beta'" in json.loads(result["stdout"])["reason"]
         assert _write(str(root / "agents" / "alpha"), root / "agents" / "alpha" / "notes.md")["exit_code"] == 0
 
-    def test_seedgo_and_spawn_write_anywhere_inside_aipass(self, registered_projects: dict):
+    def test_seedgo_and_spawn_write_their_own_branch_like_everyone_else(self, registered_projects: dict):
+        """DPLAN-0356 item 5: TRUSTED_CROSS_WRITERS let these two names write all of AIPass."""
         for seat in ("seedgo", "spawn"):
             for target in (
                 registered_projects["aipass"] / "src" / "aipass" / "hooks" / "apps" / "x.py",
                 registered_projects["aipass"] / "README.md",
             ):
-                assert _write(registered_projects[seat], target)["exit_code"] == 0, (seat, target)
+                assert _write(registered_projects[seat], target)["exit_code"] == 2, (seat, target)
 
     def test_a_file_outside_every_project_is_nobodys(self, registered_projects: dict, tmp_path: Path):
         """Scratch and temp files belong to no project: the ownership rule has nothing to say."""
         scratch = tmp_path / "scratch" / "notes.md"
         assert _write(registered_projects["hooks"], scratch)["exit_code"] == 0
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         command = f"echo x > {scratch.as_posix()}"
         bash = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": registered_projects["hooks"]})
         assert bash["exit_code"] == 0
 
-    def test_the_registry_owner_writes_anywhere_in_the_project(self, registered_projects: dict):
+    def test_the_registry_owner_row_grants_nothing_the_verified_grant_does(self, registered_projects: dict):
+        """DPLAN-0356 item 5: an ``owner: true`` row wrote across its project with no grant."""
         for target in (registered_projects["aipass"] / "README.md", Path(registered_projects["memory"]) / "x.py"):
-            assert _write(registered_projects["devpulse"], target)["exit_code"] == 0
+            with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
+                assert _write(registered_projects["devpulse"], target)["exit_code"] == 2
+            with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
+                assert _write(registered_projects["devpulse"], target)["exit_code"] == 0
 
 
 def _write(cwd: str, target: Path, tool: str = "Edit") -> dict:
-    from aipass.hooks.apps.handlers.security.edit_gate import handle
-
     return handle({"tool_name": tool, "tool_input": {"file_path": str(target)}, "cwd": cwd})
 
 
@@ -220,8 +252,6 @@ class TestEditGateProjectBoundary:
 
     @pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit", "NotebookEdit"])
     def test_block_upward_write_into_host_project(self, nested_projects: dict, tool: str):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": tool,
@@ -235,8 +265,6 @@ class TestEditGateProjectBoundary:
         assert "Cross-project" in parsed["reason"]
 
     def test_block_upward_write_from_project_root_seat(self, nested_projects: dict):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -247,8 +275,6 @@ class TestEditGateProjectBoundary:
         assert result["exit_code"] == 2
 
     def test_block_sideways_write_between_sibling_projects(self, nested_projects: dict):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Write",
@@ -262,8 +288,6 @@ class TestEditGateProjectBoundary:
 
     def test_reason_names_both_projects_and_the_target(self, nested_projects: dict):
         """Attribution must match the mail fence: caller project, target project."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -277,8 +301,6 @@ class TestEditGateProjectBoundary:
         assert "exceptions.py" in reason
 
     def test_allow_write_inside_own_project(self, nested_projects: dict):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -298,9 +320,7 @@ class TestEditGateProjectBoundary:
         project's files". The seat here is named devpulse and holds no grant:
         the name opens nothing.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
             result = handle(
                 {
                     "tool_name": "Edit",
@@ -312,9 +332,7 @@ class TestEditGateProjectBoundary:
         assert "Cross-project" in json.loads(result["stdout"])["reason"]
 
     def test_verified_admin_still_writes_down_into_nested_project(self, nested_projects: dict):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
             result = handle(
                 {
                     "tool_name": "Edit",
@@ -331,7 +349,7 @@ class TestEditGateProjectBoundary:
             registered_projects["vera"] / "README.md",
             Path(registered_projects["baud_seat"]) / "app.py",
         )
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
             for seat in ("seedgo", "spawn"):
                 for target in targets:
                     result = _write(registered_projects[seat], target)
@@ -352,8 +370,6 @@ class TestEditGateProjectBoundary:
         Those names are trusted inside the host tree only — a nested project
         with a src/<pkg>/devpulse directory resolves the same branch name.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         impostor = nested_projects["baud"] / "src" / "baud" / "devpulse"
         impostor.mkdir(parents=True)
         result = handle(
@@ -367,8 +383,6 @@ class TestEditGateProjectBoundary:
 
     def test_allow_when_no_project_root_is_resolvable(self, tmp_path: Path):
         """No registry on either side: fail open, exactly as before this fence."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         loose_a = tmp_path / "loose_a"
         loose_b = tmp_path / "loose_b"
         loose_a.mkdir()
@@ -385,8 +399,6 @@ class TestEditGateProjectBoundary:
     def test_daemon_session_from_project_seat_is_blocked(self, nested_projects: dict):
         """Dispatched project agents are fenced too — the daemon confinement
         below also keys on the src/<package>/<branch> shape and skips them."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
             result = handle(
                 {
@@ -399,8 +411,6 @@ class TestEditGateProjectBoundary:
 
     def test_inbox_write_still_blocked_from_a_project_seat(self, nested_projects: dict):
         """The project fence must not shadow the inbox rule's own message."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         inbox = nested_projects["host"] / "src" / "aipass" / "drone" / ".ai_mail.local" / "inbox.json"
         result = handle(
             {
@@ -415,14 +425,12 @@ class TestEditGateProjectBoundary:
 
 @pytest.fixture
 def branch_tree(tmp_path: Path):
-    """A two-file branch plus an isolated diagnostics state file.
+    """A two-file branch; the diagnostics state is conftest's sandbox, one seat per payload.
 
     Shaped src/<pkg>/<branch>/... so _get_branch resolves, with no *_REGISTRY.json
-    anywhere so the project fence stays out of the way.
+    anywhere so the project fence stays out of the way. The payloads here carry no
+    session, so the state is written for the "nosession" seat.
     """
-    import importlib
-
-    ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
     branch = tmp_path / "src" / "aipass" / "seedgo"
     (branch / "tests").mkdir(parents=True)
     (branch / "apps" / "modules").mkdir(parents=True)
@@ -432,18 +440,13 @@ def branch_tree(tmp_path: Path):
     impl = branch / "apps" / "modules" / "inbox_audit.py"
     impl.write_text("x = 1\n", encoding="utf-8")
 
-    state_file = tmp_path / ".diagnostics_state.json"
-    with patch.object(ds, "STATE_FILE", state_file):
-        yield {
-            "branch": branch,
-            "red_test": red_test,
-            "impl": impl,
-            "state_file": state_file,
-            "ds": ds,
-            "write_state": lambda errors: state_file.write_text(
-                json.dumps({"file": str(red_test), "errors": errors}), encoding="utf-8"
-            ),
-        }
+    return {
+        "branch": branch,
+        "red_test": red_test,
+        "impl": impl,
+        "ds": ds,
+        "write_state": lambda errors: ds.save_seat("nosession", str(red_test), errors),
+    }
 
 
 UNKNOWN_SYMBOL = {"line": 1, "message": '"_is_live_inbox" is unknown import symbol'}
@@ -460,8 +463,6 @@ class TestEditGateDiagnosticsState:
     """
 
     def _edit_other_file(self, tree: dict) -> dict:
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         return handle(
             {
                 "tool_name": "Edit",
@@ -498,6 +499,25 @@ class TestEditGateDiagnosticsState:
             result = self._edit_other_file(branch_tree)
         assert result["exit_code"] == 2
 
+    def _errored_at(self, tree: dict, relative: str, text: str, error: dict) -> dict:
+        errored = tree["branch"] / relative
+        errored.parent.mkdir(parents=True, exist_ok=True)
+        errored.write_text(text, encoding="utf-8")
+        ds.save_seat("nosession", str(errored), [error])
+        with patch.object(tree["ds"], "revalidate", return_value=[error]):
+            return self._edit_other_file(tree)
+
+    def test_an_error_on_a_placeholder_line_does_not_block(self, branch_tree: dict):
+        """spawn 94b406f9: a {{ placeholder }} line held every other .py edit for a day."""
+        text = "import os\n\nVALUE = {{ value }}\nOTHER = os.sep\n"
+        error = {"line": 2, "message": "Expected expression"}  # pyright counts from 0: the {{ line
+        assert self._errored_at(branch_tree, "apps/modules/gen.py", text, error)["exit_code"] == 0
+        error = {"line": 3, "message": "Expected expression"}  # the line after it: still the tree's
+        assert self._errored_at(branch_tree, "apps/modules/gen.py", text, error)["exit_code"] == 2
+
+    def test_an_error_in_a_file_under_templates_does_not_block(self, branch_tree: dict):
+        assert self._errored_at(branch_tree, "templates/citizen/x.py", "x: int = 's'\n", LOCAL_ERROR)["exit_code"] == 0
+
     def test_stale_state_is_dropped_when_the_file_is_clean_now(self, branch_tree: dict):
         """Defect 2: a resolving write the hook never saw left a permanent block."""
         branch_tree["write_state"]([LOCAL_ERROR])
@@ -507,10 +527,10 @@ class TestEditGateDiagnosticsState:
 
     def test_stale_state_file_is_cleared_not_just_ignored(self, branch_tree: dict):
         branch_tree["write_state"]([LOCAL_ERROR])
-        assert branch_tree["state_file"].exists()
+        assert ds.load_seat("nosession")
         with patch.object(branch_tree["ds"], "revalidate", return_value=[]):
             self._edit_other_file(branch_tree)
-        assert not branch_tree["state_file"].exists()
+        assert ds.load_seat("nosession") == {}
 
     def test_block_reports_the_revalidated_errors_not_the_recorded_ones(self, branch_tree: dict):
         """If the file still fails, the reason should quote what is true now."""
@@ -536,8 +556,6 @@ class TestEditGateDiagnosticsState:
         assert result["exit_code"] == 0
 
     def test_editing_the_errored_file_itself_is_still_allowed(self, branch_tree: dict):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         branch_tree["write_state"]([LOCAL_ERROR])
         result = handle(
             {
@@ -553,29 +571,19 @@ class TestDiagnosticsStateModule:
     """apps/modules/diagnostics_state.py — one definition of what the state file means."""
 
     def test_classifies_unknown_import_symbol_as_cross_file(self):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         assert ds.is_cross_file_error(UNKNOWN_SYMBOL) is True
 
     def test_classifies_unresolved_import_as_cross_file(self):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         assert ds.is_cross_file_error(MISSING_IMPORT) is True
 
     def test_does_not_classify_a_local_type_error_as_cross_file(self):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         assert ds.is_cross_file_error(LOCAL_ERROR) is False
 
     def test_all_cross_file_is_false_for_an_empty_list(self):
         """No errors is not 'all resolvable elsewhere' — callers must not read it as allow."""
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         assert ds.all_cross_file([]) is False
 
     def test_revalidate_returns_none_when_pyright_is_unavailable(self, tmp_path: Path):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         target = tmp_path / "thing.py"
         target.write_text("x = 1\n", encoding="utf-8")
         with patch.object(ds.subprocess, "run", side_effect=FileNotFoundError()):
@@ -583,8 +591,6 @@ class TestDiagnosticsStateModule:
 
     def test_revalidate_returns_none_on_timeout(self, tmp_path: Path):
         import subprocess as sp
-
-        from aipass.hooks.apps.modules import diagnostics_state as ds
 
         target = tmp_path / "thing.py"
         target.write_text("x = 1\n", encoding="utf-8")
@@ -601,8 +607,6 @@ class TestDiagnosticsStateModule:
         correctly answered None, and the test called that a failure. A longer budget
         would have masked a slow runner instead of fixing a dishonest assertion.
         """
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         target = tmp_path / "thing.py"
         target.write_text("x: int = 1\n", encoding="utf-8")
         found = ds.revalidate(str(target))
@@ -613,8 +617,6 @@ class TestDiagnosticsStateModule:
     def test_revalidate_reports_a_real_type_error(self, tmp_path: Path):
         """Same three-state honesty. This one hid the flaw better: `assert found and ...`
         reads None as falsy, so a timeout failed here too, just without saying why."""
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         target = tmp_path / "broken.py"
         target.write_text('x: int = "not an int"\n', encoding="utf-8")
         found = ds.revalidate(str(target))
@@ -623,48 +625,142 @@ class TestDiagnosticsStateModule:
         assert found and any("int" in e["message"] for e in found)
 
     def test_revalidate_returns_none_for_a_file_that_does_not_exist(self, tmp_path: Path):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         assert ds.revalidate(str(tmp_path / "gone.py")) is None
 
-    def test_load_returns_empty_dict_when_there_is_no_state(self, tmp_path: Path):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
+    def test_load_returns_empty_dict_when_there_is_no_state(self):
+        assert ds.load_seat("a-seat-with-nothing") == {}
 
-        with patch.object(ds, "STATE_FILE", tmp_path / "absent.json"):
-            assert ds.load() == {}
+    def test_load_returns_none_on_corrupt_state(self, tmp_path: Path):
+        """An unreadable seat file answers None, which no readable file can answer."""
+        ds.save_seat("a-seat", str(tmp_path / "a.py"), [LOCAL_ERROR])
+        (seat_file,) = ds.STATE_DIR.glob("*.json")
+        seat_file.write_text("{not json", encoding="utf-8")
 
-    def test_load_returns_empty_dict_on_corrupt_state(self, tmp_path: Path):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
+        assert ds.load_seat("a-seat") is None
 
-        corrupt = tmp_path / "corrupt.json"
-        corrupt.write_text("{not json", encoding="utf-8")
-        with patch.object(ds, "STATE_FILE", corrupt):
-            assert ds.load() == {}
+    def test_clear_is_safe_when_the_file_is_already_gone(self):
+        """Clearing an absent seat leaves nothing behind and reads back empty.
 
-    def test_clear_is_safe_when_the_file_is_already_gone(self, tmp_path: Path):
-        """Clearing an absent state file leaves it absent and reads back empty.
-
-        Had no oracle: it called clear() and asserted nothing, so a clear() that
+        Had no oracle once: it called clear and asserted nothing, so a clear that
         CREATED the file, or left a partial one behind, was green. The gate
         reads this state to decide whether an edit is fenced, so "absent" and
         "empty" are the two answers that matter.
         """
-        from aipass.hooks.apps.modules import diagnostics_state as ds
+        ds.clear_seat("a-seat-with-nothing")
 
-        absent = tmp_path / "absent.json"
-        with patch.object(ds, "STATE_FILE", absent):
-            ds.clear()
+        assert not list(ds.STATE_DIR.glob("*"))
+        assert ds.load_seat("a-seat-with-nothing") == {}
 
-            assert not absent.exists()
-            assert ds.load() == {}
+
+@pytest.fixture
+def seat_tree(tmp_path: Path) -> dict:
+    """A two-file branch under tmp_path; the diagnostics state is conftest's sandbox, patched nowhere else.
+
+    Both handlers run whole: auto_fix writes the state, edit_gate reads it. Only the
+    checkers' answers are given, and revalidate answers "could not tell" so the gate
+    decides on what was recorded.
+    """
+    branch = tmp_path / "src" / "aipass" / "seedgo"
+    (branch / "tests").mkdir(parents=True)
+    (branch / "apps" / "modules").mkdir(parents=True)
+    red_test = branch / "tests" / "test_track_e.py"
+    red_test.write_text("x = 1\n", encoding="utf-8")
+    impl = branch / "apps" / "modules" / "inbox_audit.py"
+    impl.write_text("x = 1\n", encoding="utf-8")
+    return {"branch": branch, "red_test": red_test, "impl": impl}
+
+
+class TestDiagnosticsStateBySeat:
+    """Each seat has its own diagnostics state (hooks, leg 4, devpulse's decisions A and B).
+
+    A seat is the session and, for a sub-agent, its agent id. Before leg 4 every seat
+    on the machine shared one state: a worker's open error refused its siblings, and a
+    sibling's clean edit erased it. Pins 1 and 2 and the no-answer pin were red on the
+    shared state; pins 3 and 6 were green and stay green.
+    """
+
+    def _gate_edit(self, tree: dict, target: Path, seat: dict) -> dict:
+        with patch.object(ds, "revalidate", return_value=None):
+            return handle(
+                {
+                    "tool_name": "Edit",
+                    "cwd": str(tree["branch"]),
+                    "tool_input": {"file_path": str(target), "old_string": "x", "new_string": "y"},
+                    **seat,
+                }
+            )
+
+    def test_pin1_a_seat_is_not_refused_for_a_sibling_seats_open_error(self, seat_tree: dict):
+        _auto_fix_edit(seat_tree["red_test"], _seat("worker-one"), [LOCAL_ERROR], [])
+
+        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat("worker-two"))
+
+        assert result["exit_code"] == 0
+
+    def test_pin2_a_siblings_clean_edit_does_not_erase_a_seats_open_error(self, seat_tree: dict):
+        _auto_fix_edit(seat_tree["red_test"], _seat("worker-one"), [LOCAL_ERROR], [])
+        _auto_fix_edit(seat_tree["impl"], _seat("worker-two"), [], [])
+
+        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat("worker-one"))
+
+        assert result["exit_code"] == 2
+        assert "test_track_e.py" in json.loads(result["stdout"])["reason"]
+
+    def test_pin3_a_seat_is_still_refused_for_its_own_open_error(self, seat_tree: dict):
+        _auto_fix_edit(seat_tree["red_test"], _seat("worker-one"), [LOCAL_ERROR], [])
+
+        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat("worker-one"))
+
+        assert result["exit_code"] == 2
+
+    def test_pin6_a_payload_without_a_session_is_one_seat_of_its_own(self, seat_tree: dict):
+        _auto_fix_edit(seat_tree["red_test"], _seat(session=""), [LOCAL_ERROR], [])
+
+        refused = self._gate_edit(seat_tree, seat_tree["impl"], _seat(session=""))
+        allowed = self._gate_edit(seat_tree, seat_tree["impl"], _seat())
+
+        assert refused["exit_code"] == 2
+        assert allowed["exit_code"] == 0
+
+    def test_a_check_that_gave_no_answer_never_clears_an_open_error(self, seat_tree: dict):
+        """Decision B: pyright timed out and ruff found nothing, so the file was not judged clean."""
+        _auto_fix_edit(seat_tree["red_test"], _seat(), [LOCAL_ERROR], [])
+        _auto_fix_edit_pyright_times_out(seat_tree["red_test"], _seat())
+
+        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat())
+
+        assert result["exit_code"] == 2
+
+    def test_pin4_a_version_1_file_is_nobodys_and_replaced_on_the_next_write(self, seat_tree: dict):
+        """Green from its first run, as the shape it reads did not exist before; its proof is a mutant."""
+        ds.LEGACY_FILE.write_text(
+            json.dumps({"file": str(seat_tree["red_test"]), "errors": [LOCAL_ERROR]}), encoding="utf-8"
+        )
+
+        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat(session=""))
+        _auto_fix_edit(seat_tree["red_test"], _seat(), [LOCAL_ERROR], [])
+
+        assert result["exit_code"] == 0
+        assert not ds.LEGACY_FILE.exists()
+
+    def test_pin5_an_entry_older_than_24_hours_is_ignored(self, seat_tree: dict):
+        """The clock is handed in through diagnostics_state's _now seam. Proof: a mutant."""
+        written_at = 1_000_000.0
+        with patch.object(ds, "_now", return_value=written_at):
+            _auto_fix_edit(seat_tree["red_test"], _seat(), [LOCAL_ERROR], [])
+        with patch.object(ds, "_now", return_value=written_at + 23 * 3600):
+            fresh = self._gate_edit(seat_tree, seat_tree["impl"], _seat())
+        with patch.object(ds, "_now", return_value=written_at + 25 * 3600):
+            stale = self._gate_edit(seat_tree, seat_tree["impl"], _seat())
+
+        assert fresh["exit_code"] == 2
+        assert stale["exit_code"] == 0
 
 
 class TestEditGateExternalProject:
     """Verify edit gate works for non-AIPass projects (e.g. src/vera_studio/)."""
 
     def test_block_cross_branch_external(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -678,8 +774,6 @@ class TestEditGateExternalProject:
         assert "Cross-branch" in parsed["reason"]
 
     def test_allow_own_branch_external(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -690,8 +784,6 @@ class TestEditGateExternalProject:
         assert result["exit_code"] == 0
 
     def test_block_daemon_cross_branch_external(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
             result = handle(
                 {
@@ -705,8 +797,6 @@ class TestEditGateExternalProject:
         assert "daemon" in parsed["reason"]
 
     def test_allow_daemon_own_branch_external(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
             result = handle(
                 {
@@ -720,12 +810,13 @@ class TestEditGateExternalProject:
     # The owner's ruling, 2026-09-18 22:17: "A manager (e.g. @vera in Vera Studio, like devpulse
     # in AIPass) edits her own project's agents' files, within her project only."
 
-    def test_the_manager_writes_her_projects_agents_files(self, registered_projects: dict):
+    def test_the_manager_row_no_longer_writes_her_projects_agents_files(self, registered_projects: dict):
+        """DPLAN-0356 item 5: the manager short-circuit is gone; her own branch is hers, the rest is not."""
         for target in (Path(registered_projects["writer"]) / "draft.md", registered_projects["vera"] / "README.md"):
-            assert _write(registered_projects["vera_seat"], target)["exit_code"] == 0, target
+            assert _write(registered_projects["vera_seat"], target)["exit_code"] == 2, target
 
     def test_the_manager_reaches_nothing_outside_her_project(self, registered_projects: dict):
-        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
             for target in (Path(registered_projects["hooks"]) / "x.py", registered_projects["aipass"] / "README.md"):
                 result = _write(registered_projects["vera_seat"], target)
                 assert result["exit_code"] == 2, target
@@ -744,38 +835,11 @@ class TestEditGateExternalProject:
         assert "Cross-branch" in json.loads(result["stdout"])["reason"]
 
 
-class TestCapGateStatesItsReach:
-    """RULING (third instance): this gate is PreToolUse Edit/Write only, so a write
-    made through Bash never reaches it. @baud drifted to 2529/300 for a week and
-    @api carried 12 sessions + 16 learnings over cap, both through that lane. It
-    cannot enforce there, so it must not imply it does — a gate with a documented
-    bypass that claims enforcement is what let the drift read as compliance."""
-
-    def _reason(self):
-        import json as _json
-        from unittest.mock import MagicMock
-
-        from aipass.hooks.apps.handlers.security.edit_gate import _evaluate_limits
-
-        el = MagicMock()
-        el.changed_entries.return_value = [
-            {"entry_type": "sessions", "key": "s1", "length": 2529, "cap": 300, "over_by": 2229}
-        ]
-        block = _evaluate_limits({}, {}, {"enforce": True}, el)
-        assert block is not None
-        return _json.loads(block["stdout"])["reason"]
-
-    def test_message_names_the_unchecked_lane(self):
-        assert "Bash" in self._reason()
-
-    def test_message_names_the_lane_it_does_cover(self):
-        assert "Edit/Write" in self._reason()
-
-    def test_message_still_lists_the_offending_entries(self):
-        """GUARD: the honesty note must not displace the actual finding."""
-        reason = self._reason()
-        assert "2529/300" in reason
-        assert "sessions" in reason
+# The cap gate's statement of its reach (the Bash lane refused, the Edit/Write lane
+# measured, the offending entry still listed) is pinned through handle() in
+# test_edit_gate_trinity.py::test_the_advisory_says_a_shell_write_is_refused_now.
+# The three pins that called _evaluate_limits with a stand-in entry_limits moved
+# there in fleet green leg 8.
 
 
 def _pyright_result(diagnostics: list[dict]) -> object:
@@ -801,12 +865,23 @@ class TestRevalidateParsesPyrightOutput:
     """
 
     def _revalidate(self, tmp_path: Path, diagnostics: list[dict]):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         target = tmp_path / "thing.py"
         target.write_text("x = 1\n", encoding="utf-8")
         with patch.object(ds.subprocess, "run", return_value=_pyright_result(diagnostics)):
             return ds.revalidate(str(target))
+
+    def test_a_scratch_module_beside_the_session_cwd_does_not_turn_clean_into_unknown(self, tmp_path, monkeypatch):
+        """memory leg 9: pyright ran from the session cwd, where a types.py broke its interpreter."""
+        pytest.importorskip("pyright")
+        seat = tmp_path / "seat"
+        seat.mkdir()
+        (seat / "types.py").write_text("X = 1\n", encoding="utf-8")
+        target = tmp_path / "proj" / "clean.py"
+        target.parent.mkdir()
+        (tmp_path / "proj" / "pyproject.toml").write_text("", encoding="utf-8")
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+        monkeypatch.chdir(seat)
+        assert ds.revalidate(str(target)) == []
 
     def test_clean_file_is_empty_list_not_none(self, tmp_path: Path):
         """[] and None are different answers — this is the distinction that broke."""
@@ -842,11 +917,96 @@ class TestRevalidateParsesPyrightOutput:
         """Garbage on stdout must never read as clean."""
         from unittest.mock import MagicMock
 
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         target = tmp_path / "thing.py"
         target.write_text("x = 1\n", encoding="utf-8")
         broken = MagicMock()
         broken.stdout = "not json at all"
         with patch.object(ds.subprocess, "run", return_value=broken):
             assert ds.revalidate(str(target)) is None
+
+
+class TestEveryRefusalIsLogged:
+    """A refusal an agent never sees explained is a refusal nobody can diagnose.
+
+    engine.jsonl records exit 2 and the stdout length, never the reason, and it
+    holds under an hour of fleet traffic. Measured 2026-09-22: a live block at
+    04:37:29 left no line in edit_gate.log at all. Every block goes through
+    _refuse(), and _refuse() is where the WARNING is written.
+    """
+
+    def test_inbox_refusal_is_logged(self, caplog):
+        result = handle(
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/.ai_mail.local/inbox.json"},
+                "cwd": "/srv/example/AIPass/src/aipass/hooks",
+            }
+        )
+        assert result["exit_code"] == 2
+        assert "refused" in caplog.text
+        assert "inbox.json" in caplog.text
+
+
+@pytest.fixture
+def engine_home(tmp_path: Path, monkeypatch) -> dict:
+    """An install whose hooks.json wires one handler, which imports a copy of the real loader at the top.
+
+    The copy is in the closure only through that import: the walk has to find it.
+    A second copy beside it is imported by nothing (the control).
+    """
+    home = tmp_path / "home"
+    (home / ".aipass").mkdir(parents=True)
+    wired = {"hooks": {"PreToolUse": [{"handler": "aipass.zz.apps.handlers.gate.handle"}]}}
+    (home / ".aipass" / "hooks.json").write_text(json.dumps(wired), encoding="utf-8")
+    pkg = home / "src" / "aipass" / "zz"
+    for sub in ("apps/handlers", "apps/modules"):
+        (pkg / sub).mkdir(parents=True)
+    (pkg / "apps" / "handlers" / "gate.py").write_text(
+        "from aipass.zz.apps.modules import imported\n\n\ndef handle(data):\n    return imported\n", encoding="utf-8"
+    )
+    real = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "config" / "loader.py"
+    text = real.read_text(encoding="utf-8")
+    for name in ("imported.py", "unimported.py"):
+        (pkg / "apps" / "modules" / name).write_text(text, encoding="utf-8")
+    monkeypatch.setenv("AIPASS_HOME", str(home))
+    return {
+        "seat": str(pkg),
+        "in": pkg / "apps" / "modules" / "imported.py",
+        "out": pkg / "apps" / "modules" / "unimported.py",
+    }
+
+
+def _name_before_import(target: Path, seat: str) -> dict:
+    """The 10-03 shape: a name used one line before the import that defines it."""
+    edit = {
+        "file_path": str(target),
+        "old_string": "import hashlib\n",
+        "new_string": "STAMP = time.time()\nimport hashlib\n",
+    }
+    return handle({"tool_name": "Edit", "tool_input": edit, "cwd": seat})
+
+
+class TestTheEngineClosureIsNotLeftCrashing:
+    """An edit that would leave a module the engine imports raising NameError is refused before it lands.
+
+    The 10-03 incident (leg 5, item 2): one such edit to a live-imported module
+    refused every tool fleet-wide until the owner repaired it by hand.
+    """
+
+    def test_a_name_used_before_its_import_in_a_closure_module_is_refused_with_line_and_rule(self, engine_home):
+        result = _name_before_import(engine_home["in"], engine_home["seat"])
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        line = engine_home["in"].read_text(encoding="utf-8").splitlines().index("import hashlib") + 1
+        assert f"L{line}: F821" in reason
+        assert "time" in reason
+
+    def test_the_same_edit_outside_the_closure_is_not_this_gates_business(self, engine_home):
+        assert _name_before_import(engine_home["out"], engine_home["seat"])["exit_code"] == 0
+
+    def test_closure_help_is_answered_and_the_list_does_not_run(self, capsys):
+        """`closure list --help` describes the verb and lists nothing (fleet green leg 8: the door reads --help)."""
+        assert engine_closure.handle_command("closure", ["list", "--help"]) is True
+        err = capsys.readouterr().err
+        assert "drone @hooks closure list" in err
+        assert "files in the hook engine's import closure" not in err

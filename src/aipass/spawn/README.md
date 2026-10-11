@@ -81,7 +81,10 @@ flags before parsing, routes a verb to the first module that claims it, and reso
 exit code so a refusal can never leave as success. `apps/modules/` holds one coordinator per
 surface — `core` (mint and adopt), `update`, `delete`, `sync_registry`,
 `regenerate_registry`, `migrate_passports`, `export_seeds`, `repair` and `grant_admin` —
-each parsing arguments and delegating. `apps/handlers/` holds the implementation, grouped by
+each parsing arguments and delegating. Two door modules, `door_owner` and
+`door_class_registry`, are no commands: they re-export handler names for other branches,
+because `apps/handlers/__init__.py` is a fence that refuses a foreign importer (DPLAN-0404).
+`apps/handlers/` holds the implementation, grouped by
 concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verify`,
 `class_registry`, `docs_page`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
 `receipt_ops`, `adoption_ops`), the engines (`update_ops`, `update_ignore`, `delete_ops`,
@@ -90,8 +93,10 @@ concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verif
 
 `templates/citizen/` is the one template both classes mint from, and its
 `.spawn/.template_registry.json` manifest is what a mint is verified against — change a
-template file and regenerate that manifest in the same pass. `templates/docs_page.md`, the
-docs page skeleton, sits beside it so that no mint ever stamps it.
+template file and regenerate that manifest in the same pass. A newborn is born fenced: the
+template's `apps/handlers/__init__.py` is the fleet's fence template (v2.1, DPLAN-0404), and
+its tests ship the fence pair `test_handlers_fence.py` and `support_fence.py`.
+`templates/docs_page.md`, the docs page skeleton, sits beside it so that no mint ever stamps it.
 
 The full directory tree lives in this branch's own prompt
 (`.aipass/aipass_local_prompt.md`) — one place, so it cannot disagree with itself.
@@ -122,8 +127,8 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - **aipass.cli** — console output, refusal formatting and exit-code state
 - **aipass.aipass.shared** — `deep_merge` and `backup_json`, registry discovery, and the one
   shared home detector used by the placeholder engine
-- **aipass.memory** (optional) — meta tabs at create; the import is guarded and degrades to
-  empty when it is unavailable
+- **aipass.memory** (optional) — meta tabs at create, through its `door_tab_renderer`; the
+  import is guarded and degrades to empty when it is unavailable
 
 ### Provides To
 
@@ -132,10 +137,12 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - **@seedgo** — the docs page skeleton its `docs_page` standard renders, read live through
   the same gateway
 - Registry CRUD on `AIPASS_REGISTRY.json` and any project's own `*_REGISTRY.json`
+- **@devpulse** — the owner check behind admin dispatch, through `door_owner`
+- **@aipass**, **@seedgo** — the citizen classes and their refusals, through `door_class_registry`
 
 ---
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-10-08
 
 ---
 [← Back to AIPass](../../../README.md)

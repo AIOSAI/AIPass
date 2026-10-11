@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-07-11
-# Modified: 2026-09-15
+# Modified: 2026-09-29
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -37,7 +37,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
@@ -164,11 +164,20 @@ def _merge_settings_scalars(settings: dict, wanted: Dict[str, Any]) -> List[str]
 # =============================================================================
 
 
-def _platform_bridge_command(command: str) -> str:
-    """Write-time OS transform for the venv interpreter path (manifest stays POSIX-canonical)."""
+def platform_bridge_command(command: str, os_name: Optional[str] = None) -> str:
+    """Write-time OS transform for the venv interpreter path (manifest stays POSIX-canonical).
+
+    *os_name* defaults to ``os.name`` read at call time; every product caller passes
+    nothing, or forwards doctor.check_provider_manifest's own os_name seam, None in
+    the product.  It exists so the tests can ask for the Windows answer without patching
+    ``os.name`` process-wide (the seam is for the test).
+
+    Public because a second module calls it: doctor's manifest check verifies with
+    the same transform this module writes with (write and verify must agree).
+    """
     # DPLAN-0234 Strand C: CC on Windows runs hooks via Git Bash so $AIPASS_HOME expansion still
     # works, but the venv interpreter itself lives at .venv/Scripts/python.exe there, not .venv/bin/python3.
-    if os.name == "nt":
+    if (os.name if os_name is None else os_name) == "nt":
         return command.replace("/.venv/bin/python3", "/.venv/Scripts/python.exe")
     return command
 
@@ -177,7 +186,7 @@ def _build_manifest_hook_entries(manifest_hooks: List[dict]) -> Dict[str, List[d
     """Build the settings.json hook-entry shape per event from manifest hook rows."""
     fresh: Dict[str, List[dict]] = {}
     for hook in manifest_hooks:
-        command = _platform_bridge_command(hook.get("command", ""))
+        command = platform_bridge_command(hook.get("command", ""))
         event = hook.get("event", "")
         if not command or not event:
             continue
@@ -220,7 +229,7 @@ def _strip_and_readd_hooks(
     return merged, actions
 
 
-def refresh_provider_hooks(manifest_path: Path) -> List[str]:
+def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = None) -> List[str]:
     """Write the manifest's hooks and settings scalars into ~/.claude/settings.json.
 
     The install-time entry point: setup.sh's venv-python heredoc is its only caller.
@@ -237,13 +246,18 @@ def refresh_provider_hooks(manifest_path: Path) -> List[str]:
 
     Fails honestly: raises if the manifest can't be read/parsed rather than silently
     leaving stale wiring in place.
+
+    *settings_path* defaults to ``~/.claude/settings.json`` computed at call time;
+    setup.sh passes nothing.  It exists so the tests write a tmp file instead of
+    patching ``Path.home`` (the seam is for the test).
     """
     manifest = json_handler.read_json(manifest_path)
     if manifest is None:
         raise FileNotFoundError(f"provider manifest unreadable: {manifest_path}")
     manifest_hooks = manifest.get("cli", {}).get("claude", {}).get("hooks", [])
 
-    settings_path = Path.home() / ".claude" / "settings.json"
+    if settings_path is None:
+        settings_path = Path.home() / ".claude" / "settings.json"
     settings = (json_handler.read_json(settings_path) if settings_path.exists() else {}) or {}
 
     merged_hooks, actions = _strip_and_readd_hooks(settings.get("hooks", {}) or {}, manifest_hooks)
@@ -256,7 +270,9 @@ def refresh_provider_hooks(manifest_path: Path) -> List[str]:
     return actions
 
 
-def auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[str]:
+def auto_wire_provider(
+    manifest_path: Path, interactive: bool = True, settings_path: Optional[Path] = None
+) -> List[str]:
     """Auto-wire provider settings from manifest into ~/.claude/settings.json.
 
     Hooks: manifest-driven strip-and-readd (removes stale AIPass bridge entries).
@@ -264,6 +280,10 @@ def auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[st
     removed or overwritten. A settings key the user has set to a different value is
     reported in the returned actions and left as the user set it.
     Returns list of action descriptions (for logging/display).
+
+    *settings_path* defaults to ``~/.claude/settings.json`` computed at call time;
+    doctor and the wire prompt pass nothing.  It exists so the tests write a tmp
+    file instead of patching ``Path.home`` (the seam is for the test).
     """
     actions: List[str] = []
 
@@ -274,7 +294,8 @@ def auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[st
     if not claude_section:
         return actions
 
-    settings_path = Path.home() / ".claude" / "settings.json"
+    if settings_path is None:
+        settings_path = Path.home() / ".claude" / "settings.json"
     if settings_path.exists():
         settings = json_handler.read_json(settings_path) or {}
     else:

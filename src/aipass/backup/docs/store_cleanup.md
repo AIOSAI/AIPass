@@ -8,7 +8,7 @@ Mirror cleanup (`handlers/cleanup/mirror.py`) removes snapshot files **whose sou
 
 There is **no lane** that removes files which are now *ignored* but still present in the source tree. A directory added to `.backupignore` after a backup stays in `snapshots/` and `versioned/` indefinitely:
 
-- `snapshots/` — `_should_delete()` keeps any file whose source still exists, and an ignored-but-present `target/` still exists. `cleanup_deleted_files()` accepts a `should_ignore` callback and **never calls it** — the ignore-aware sweep is unimplemented, not merely unused.
+- `snapshots/` — `_should_delete()` keeps any file whose source still exists, and an ignored-but-present `target/` still exists. There is no ignore-aware sweep: a file that became ignored keeps its snapshot copy while its source exists. (`cleanup_deleted_files()` used to accept a `should_ignore` callback it never called; the parameter was dropped 2026-09-27.)
 - `versioned/` — has no cleanup path at all. The store is append-only, and holds two copies of every new file (current + baseline), so it grows to roughly 2× the source.
 
 **`max_versions` does nothing.** `.backup/config.json` carries a `max_versions`

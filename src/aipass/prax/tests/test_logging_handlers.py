@@ -1,31 +1,75 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-08-04
+# Modified: 2026-10-08
 # =============================================
 
-"""Tests for prax logging handler modules.
+"""Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
 
-Covers: direct.py (doRollover), introspection.py (get_calling_module_path),
-log_watchdog.py (get_oversized_files, truncate_log_file),
-monitoring.py (run_monitoring_loop), operations.py (create_config_file),
-override.py (enhanced_getLogger, install_logger_override, restore_original_logger),
-setup.py (setup_system_logger, doRollover for _WindowsSafeRotatingHandler),
-terminal/filtering.py (load_filtered_modules, should_display_terminal),
-terminal/formatting.py (format_terminal_message, create_terminal_handler).
+# Tests for prax logging handler modules.
+#
+# Covers: direct.py (direct_log, doRollover), introspection.py (get_calling_module_path),
+# log_watchdog.py (get_oversized_files, truncate_log_file),
+# monitoring.py (run_monitoring_loop), operations.py (create_config_file),
+# override.py (enhanced_getLogger, install_logger_override, restore_original_logger),
+# setup.py (setup_system_logger, doRollover for _WindowsSafeRotatingHandler),
+# terminal/filtering.py (load_filtered_modules, should_display_terminal),
+# terminal/formatting.py (format_terminal_message, create_terminal_handler).
+#
+# Modules are bound at the top by import statement; the conftest runs the real
+# logger and json handler under each test's tmp_path (prax, leg 13).
 
-All imports happen inside test functions because the autouse mock_prax_infrastructure
-fixture must inject sys.modules mocks before any prax module is loaded.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — log_watchdog's sweep_stale_logs(), covered by tests/test_sweep.py
+# seedgo: no-test-needed(through_the_command) — setup_individual_logger(), covered by tests/test_logging.py
+# seedgo: no-test-needed(through_the_command) — append_jsonl() in jsonl_writer.py, covered by tests/test_jsonl_writer.py
 
-import importlib  # noqa: F401 — used inside test functions for dynamic module loading
 import json
 import logging
 import sys
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
+
+import pytest
+
+from aipass.prax.apps.handlers.config import load as config_load
+from aipass.prax.apps.handlers.logging import direct, introspection, lifecycle, log_watchdog, override
+from aipass.prax.apps.handlers.logging import monitoring as logging_monitoring
+from aipass.prax.apps.handlers.logging import operations as logging_operations
+from aipass.prax.apps.handlers.logging import setup as logging_setup
+from aipass.prax.apps.handlers.logging.terminal import filtering as terminal_filtering
+from aipass.prax.apps.handlers.logging.terminal import formatting as terminal_formatting
+
+# =============================================
+# direct.py -- direct_log
+# =============================================
+
+
+class TestDirectLog:
+    """direct_log() on the real body, into a logger whose files live under tmp_path."""
+
+    def test_direct_log_writes_the_line(self, monkeypatch, tmp_path):
+        """direct_log writes the message into the caller's system and local logs, both under tmp_path.
+
+        Mutant: dropping the log_fn(message) call reddens this; so does handing it the level.
+        """
+        logs, cache, message = tmp_path / "logs", {}, "direct_log reached its file"
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(logs))
+        monkeypatch.setattr(direct, "_direct_loggers", cache)
+        try:
+            direct.direct_log("warning", message)
+        finally:
+            for built in cache.values():
+                for handler in list(built.handlers):
+                    handler.close()
+                    built.removeHandler(handler)
+
+        written = sorted(logs.rglob("*.log"))
+        assert len(written) == 2
+        for log_file in written:
+            assert message in log_file.read_text(encoding="utf-8")
 
 
 # =============================================
@@ -34,104 +78,53 @@ from unittest.mock import ANY, MagicMock, patch
 
 
 class TestDirectRotatingFileHandlerDoRollover:
-    """Tests for direct.py RotatingFileHandler.doRollover()."""
+    """Tests for direct.py RotatingFileHandler.doRollover(), on the module bound at
+    the top: the handler takes its file as an argument, so nothing needs stubbing
+    (prax, leg 12)."""
 
     def test_do_rollover_success(self, mock_prax_infrastructure, tmp_path):
         """doRollover delegates to parent class on success."""
-        mock_config = MagicMock()
-        mock_config.get_system_logs_dir = MagicMock(return_value=tmp_path / "system")
-        mock_config.get_module_logs_dir = MagicMock(return_value=tmp_path / "local")
-        mock_config.DEFAULT_LOG_LEVEL = "DEBUG"
-        mock_config.load_log_config = MagicMock()
-        mock_config.lines_to_bytes = MagicMock(return_value=10000)
-        mock_config.PRAX_JSON_DIR = tmp_path / "prax_json"
+        log_file = tmp_path / "test.log"
+        log_file.write_text("line1\nline2\n", encoding="utf-8")
+        handler = direct.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="A" * 100,
+            args=(),
+            exc_info=None,
+        )
+        handler.emit(record)
+        handler.close()
 
-        mock_introspection = MagicMock()
-        mock_introspection.detect_branch_from_path = MagicMock(return_value="prax")
-
-        mock_override = MagicMock()
-        mock_override._original_getLogger = logging.getLogger
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.override": mock_override,
-            },
-        ):
-            _direct_mod_name = "aipass.prax.apps.handlers.logging.direct"
-            sys.modules.pop(_direct_mod_name, None)
-            direct_mod = importlib.import_module(_direct_mod_name)  # noqa: F841
-
-            log_file = tmp_path / "test.log"
-            log_file.write_text("line1\nline2\n", encoding="utf-8")
-            handler = direct_mod.RotatingFileHandler(  # noqa: F821
-                str(log_file), maxBytes=10, backupCount=1
-            )
-            record = logging.LogRecord(
-                name="test",
-                level=logging.INFO,
-                pathname="",
-                lineno=0,
-                msg="A" * 100,
-                args=(),
-                exc_info=None,
-            )
-            handler.emit(record)
-            handler.close()
-
-            # Rotation moved the old bytes aside and the record landed in a
-            # fresh file — both halves are pinned, so an emit that silently
-            # skipped the rollover cannot read green.
-            backup = tmp_path / "test.log.1"
-            assert backup.read_text(encoding="utf-8") == "line1\nline2\n"
-            assert log_file.read_text(encoding="utf-8") == "A" * 100 + "\n"
+        # Rotation moved the old bytes aside and the record landed in a
+        # fresh file — both halves are pinned, so an emit that silently
+        # skipped the rollover cannot read green.
+        backup = tmp_path / "test.log.1"
+        assert backup.read_text(encoding="utf-8") == "line1\nline2\n"
+        assert log_file.read_text(encoding="utf-8") == "A" * 100 + "\n"
 
     def test_do_rollover_os_error_suppressed(self, mock_prax_infrastructure, tmp_path):
         """A failed rotation is swallowed and logged — PermissionError is an OSError, one clause catches both."""
-        mock_config = MagicMock()
-        mock_config.get_system_logs_dir = MagicMock(return_value=tmp_path / "system")
-        mock_config.get_module_logs_dir = MagicMock(return_value=tmp_path / "local")
-        mock_config.DEFAULT_LOG_LEVEL = "DEBUG"
-        mock_config.load_log_config = MagicMock()
-        mock_config.lines_to_bytes = MagicMock(return_value=10000)
-        mock_config.PRAX_JSON_DIR = tmp_path / "prax_json"
+        log_file = tmp_path / "test_os.log"
+        log_file.write_text("data\n", encoding="utf-8")
+        handler = direct.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
+        # The stand-in's own error, so naming it is ours to do: the very object is handed on.
+        failure = OSError("disk error")
 
-        mock_introspection = MagicMock()
-        mock_override = MagicMock()
-        mock_override._original_getLogger = logging.getLogger
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.override": mock_override,
-            },
+        with (
+            patch(
+                "logging.handlers.RotatingFileHandler.doRollover",
+                side_effect=failure,
+            ),
+            patch.object(direct, "logger") as mock_logger,
         ):
-            _direct_mod_name = "aipass.prax.apps.handlers.logging.direct"
-            sys.modules.pop(_direct_mod_name, None)
-            direct_mod = importlib.import_module(_direct_mod_name)  # noqa: F841
+            handler.doRollover()
 
-            log_file = tmp_path / "test_os.log"
-            log_file.write_text("data\n", encoding="utf-8")
-            handler = direct_mod.RotatingFileHandler(  # noqa: F821
-                str(log_file), maxBytes=10, backupCount=1
-            )
-
-            with (
-                patch(
-                    "logging.handlers.RotatingFileHandler.doRollover",
-                    side_effect=OSError("disk error"),
-                ),
-                patch.object(direct_mod, "logger") as mock_logger,
-            ):
-                handler.doRollover()
-
-            mock_logger.warning.assert_called_once()
-            assert "disk error" in str(mock_logger.warning.call_args)
-            handler.close()
+        mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", failure)
+        handler.close()
 
 
 # =============================================
@@ -150,8 +143,6 @@ class TestGetCallingModulePath:
         the _PRAX_INTERNAL_MARKERS. Pinned to the file rather than tolerated as
         "a string or None".
         """
-        from aipass.prax.apps.handlers.logging import introspection
-
         result = introspection.get_calling_module_path()
         assert isinstance(result, str)
         assert result == __file__
@@ -159,16 +150,12 @@ class TestGetCallingModulePath:
 
     def test_returns_none_when_no_external_caller(self, mock_prax_infrastructure):
         """Returns None when _find_external_caller_path returns None."""
-        from aipass.prax.apps.handlers.logging import introspection
-
         with patch.object(introspection, "_find_external_caller_path", return_value=None):
             result = introspection.get_calling_module_path()
             assert result is None
 
     def test_returns_path_when_external_caller_found(self, mock_prax_infrastructure):
         """Returns the path from _find_external_caller_path when found."""
-        from aipass.prax.apps.handlers.logging import introspection
-
         fake_path = str(Path.home() / "src" / "aipass" / "flow" / "apps" / "flow.py")
         with patch.object(introspection, "_find_external_caller_path", return_value=fake_path):
             result = introspection.get_calling_module_path()
@@ -185,70 +172,43 @@ class TestGetOversizedFiles:
 
     def test_returns_empty_when_no_oversized(self, mock_prax_infrastructure, tmp_path):
         """Returns empty list when no files exceed threshold."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path / "prax_json",
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.log_watchdog", None)
-            import aipass.prax.apps.handlers.logging.log_watchdog as lw
+        lw = _import_watchdog(tmp_path)
 
-            logs_dir = tmp_path / "system_logs"
-            logs_dir.mkdir()
-            small_log = logs_dir / "small.log"
-            small_log.write_text("line1\nline2\nline3\n", encoding="utf-8")
+        logs_dir = tmp_path / "system_logs"
+        logs_dir.mkdir()
+        small_log = logs_dir / "small.log"
+        small_log.write_text("line1\nline2\nline3\n", encoding="utf-8")
 
-            with patch.object(lw, "_get_system_logs_dir", return_value=logs_dir):
-                result = lw.get_oversized_files(threshold=100)
-                assert result == []
+        with patch.object(lw, "_get_system_logs_dir", return_value=logs_dir):
+            result = lw.get_oversized_files(threshold=100)
+            assert result == []
 
     def test_returns_oversized_files(self, mock_prax_infrastructure, tmp_path):
         """Returns files that exceed the threshold."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path / "prax_json",
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.log_watchdog", None)
-            import aipass.prax.apps.handlers.logging.log_watchdog as lw
+        lw = _import_watchdog(tmp_path)
 
-            logs_dir = tmp_path / "system_logs"
-            logs_dir.mkdir()
-            big_log = logs_dir / "big.log"
-            big_log.write_text(
-                "\n".join(f"line {i}" for i in range(200)) + "\n",
-                encoding="utf-8",
-            )
+        logs_dir = tmp_path / "system_logs"
+        logs_dir.mkdir()
+        big_log = logs_dir / "big.log"
+        big_log.write_text(
+            "\n".join(f"line {i}" for i in range(200)) + "\n",
+            encoding="utf-8",
+        )
 
-            with patch.object(lw, "_get_system_logs_dir", return_value=logs_dir):
-                result = lw.get_oversized_files(threshold=100)
-                assert len(result) == 1
-                assert result[0]["name"] == "big.log"
-                assert result[0]["lines"] >= 100
+        with patch.object(lw, "_get_system_logs_dir", return_value=logs_dir):
+            result = lw.get_oversized_files(threshold=100)
+            assert len(result) == 1
+            assert result[0]["name"] == "big.log"
+            assert result[0]["lines"] >= 100
 
     def test_nonexistent_dir_returns_empty(self, mock_prax_infrastructure, tmp_path):
         """Returns empty list when system_logs dir does not exist."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path / "prax_json",
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.log_watchdog", None)
-            import aipass.prax.apps.handlers.logging.log_watchdog as lw
+        lw = _import_watchdog(tmp_path)
 
-            nonexistent = tmp_path / "does_not_exist"
-            with patch.object(lw, "_get_system_logs_dir", return_value=nonexistent):
-                result = lw.get_oversized_files()
-                assert result == []
+        nonexistent = tmp_path / "does_not_exist"
+        with patch.object(lw, "_get_system_logs_dir", return_value=nonexistent):
+            result = lw.get_oversized_files()
+            assert result == []
 
 
 # =============================================
@@ -261,66 +221,39 @@ class TestTruncateLogFile:
 
     def test_truncates_oversized_file(self, mock_prax_infrastructure, tmp_path):
         """Truncates file to keep_lines and adds truncation marker."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path / "prax_json",
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.log_watchdog", None)
-            import aipass.prax.apps.handlers.logging.log_watchdog as lw
+        lw = _import_watchdog(tmp_path)
 
-            log_file = tmp_path / "truncate_me.log"
-            lines = [f"line {i}\n" for i in range(500)]
-            log_file.write_text("".join(lines), encoding="utf-8")
+        log_file = tmp_path / "truncate_me.log"
+        lines = [f"line {i}\n" for i in range(500)]
+        log_file.write_text("".join(lines), encoding="utf-8")
 
-            original, new = lw.truncate_log_file(log_file, keep_lines=100)
-            assert original == 500
-            assert new == 101  # 100 kept lines + 1 marker
+        original, new = lw.truncate_log_file(log_file, keep_lines=100)
+        assert original == 500
+        assert new == 101  # 100 kept lines + 1 marker
 
-            content = log_file.read_text(encoding="utf-8")
-            assert "LOG TRUNCATED by PRAX watchdog" in content
+        content = log_file.read_text(encoding="utf-8")
+        assert "LOG TRUNCATED by PRAX watchdog" in content
 
     def test_no_truncation_when_under_limit(self, mock_prax_infrastructure, tmp_path):
         """File under limit is not modified."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path / "prax_json",
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.log_watchdog", None)
-            import aipass.prax.apps.handlers.logging.log_watchdog as lw
+        lw = _import_watchdog(tmp_path)
 
-            log_file = tmp_path / "small.log"
-            lines = [f"line {i}\n" for i in range(50)]
-            log_file.write_text("".join(lines), encoding="utf-8")
+        log_file = tmp_path / "small.log"
+        lines = [f"line {i}\n" for i in range(50)]
+        log_file.write_text("".join(lines), encoding="utf-8")
 
-            original, new = lw.truncate_log_file(log_file, keep_lines=100)
-            assert original == 50
-            assert new == 50
+        original, new = lw.truncate_log_file(log_file, keep_lines=100)
+        assert original == 50
+        assert new == 50
 
     def test_truncate_handles_os_error(self, mock_prax_infrastructure, tmp_path):
         """Returns (0, 0) on OSError."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path / "prax_json",
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.log_watchdog", None)
-            import aipass.prax.apps.handlers.logging.log_watchdog as lw
+        lw = _import_watchdog(tmp_path)
 
-            nonexistent = tmp_path / "does_not_exist.log"
-            original, new = lw.truncate_log_file(nonexistent, keep_lines=100)
-            assert original == 0
-            assert new == 0
+        nonexistent = tmp_path / "does_not_exist.log"
+        original, new = lw.truncate_log_file(nonexistent, keep_lines=100)
+        assert original == 0
+        assert new == 0
 
 
 # =============================================
@@ -329,19 +262,10 @@ class TestTruncateLogFile:
 
 
 def _import_watchdog(tmp_path):
-    """Fresh-import log_watchdog with mocked config."""
-    with patch.dict(
-        sys.modules,
-        {
-            "aipass.prax.apps.handlers.config.load": MagicMock(
-                PRAX_JSON_DIR=tmp_path / "prax_json",
-            ),
-        },
-    ):
-        sys.modules.pop("aipass.prax.apps.handlers.logging.log_watchdog", None)
-        import aipass.prax.apps.handlers.logging.log_watchdog as lw
-
-        return lw
+    """The log_watchdog module bound at the top (prax, leg 13: it never read the
+    config stub the old fresh import installed; its json service writes under the
+    conftest's tmp_path)."""
+    return log_watchdog
 
 
 class TestScanBranchLogFiles:
@@ -478,81 +402,58 @@ class TestEnforceBranchLogLimits:
 # =============================================
 
 
+def _monitoring_quiet(monkeypatch):
+    """logging/monitoring.py bound at the top, its logger doubled for the test
+    (prax, leg 13: the loop prints its status lines through it)."""
+    monkeypatch.setattr(logging_monitoring, "logger", MagicMock())
+    return logging_monitoring
+
+
 class TestRunMonitoringLoop:
     """Tests for monitoring.py run_monitoring_loop()."""
 
-    def test_loop_runs_and_handles_keyboard_interrupt(self, mock_prax_infrastructure):
+    def test_loop_runs_and_handles_keyboard_interrupt(self, mock_prax_infrastructure, monkeypatch):
         """Loop exits cleanly on KeyboardInterrupt and re-raises it."""
-        import pytest
+        mon = _monitoring_quiet(monkeypatch)
+        status_cb = MagicMock(
+            return_value={"total_modules": 5, "individual_loggers": 3},
+        )
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(PRAX_JSON_DIR=MagicMock()),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.monitoring", None)
-            import aipass.prax.apps.handlers.logging.monitoring as mon
+        with patch.object(mon.time, "sleep", side_effect=KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
+                mon.run_monitoring_loop(status_cb, interval=1, status_interval=60)
 
-            status_cb = MagicMock(
-                return_value={"total_modules": 5, "individual_loggers": 3},
-            )
-
-            with patch.object(mon.time, "sleep", side_effect=KeyboardInterrupt):
-                with pytest.raises(KeyboardInterrupt):
-                    mon.run_monitoring_loop(status_cb, interval=1, status_interval=60)
-
-    def test_loop_calls_status_callback_at_interval(self, mock_prax_infrastructure):
+    def test_loop_calls_status_callback_at_interval(self, mock_prax_infrastructure, monkeypatch):
         """Loop calls status_callback when counter hits status_interval."""
-        import pytest
+        mon = _monitoring_quiet(monkeypatch)
+        status_cb = MagicMock(
+            return_value={"total_modules": 2, "individual_loggers": 1},
+        )
+        call_count = 0
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(PRAX_JSON_DIR=MagicMock()),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.monitoring", None)
-            import aipass.prax.apps.handlers.logging.monitoring as mon
+        def fake_sleep(seconds):
+            """Simulate sleep and raise KeyboardInterrupt after 6 calls."""
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 6:
+                raise KeyboardInterrupt
 
-            status_cb = MagicMock(
-                return_value={"total_modules": 2, "individual_loggers": 1},
-            )
-            call_count = 0
+        with patch.object(mon.time, "sleep", side_effect=fake_sleep):
+            with pytest.raises(KeyboardInterrupt):
+                mon.run_monitoring_loop(status_cb, interval=5, status_interval=5)
 
-            def fake_sleep(seconds):
-                """Simulate sleep and raise KeyboardInterrupt after 6 calls."""
-                nonlocal call_count
-                call_count += 1
-                if call_count >= 6:
-                    raise KeyboardInterrupt
+        assert status_cb.called
 
-            with patch.object(mon.time, "sleep", side_effect=fake_sleep):
-                with pytest.raises(KeyboardInterrupt):
-                    mon.run_monitoring_loop(status_cb, interval=5, status_interval=5)
-
-            assert status_cb.called
-
-    def test_loop_flushes_stdout(self, mock_prax_infrastructure):
+    def test_loop_flushes_stdout(self, mock_prax_infrastructure, monkeypatch):
         """Loop flushes sys.stdout during startup."""
-        import pytest
+        mon = _monitoring_quiet(monkeypatch)
+        status_cb = MagicMock(return_value={})
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(PRAX_JSON_DIR=MagicMock()),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.monitoring", None)
-            import aipass.prax.apps.handlers.logging.monitoring as mon
-
-            status_cb = MagicMock(return_value={})
-
-            with patch.object(mon.time, "sleep", side_effect=KeyboardInterrupt):
-                with patch.object(mon.sys, "stdout") as mock_stdout:
-                    with pytest.raises(KeyboardInterrupt):
-                        mon.run_monitoring_loop(status_cb)
-                    mock_stdout.flush.assert_called()
+        with patch.object(mon.time, "sleep", side_effect=KeyboardInterrupt):
+            with patch.object(mon.sys, "stdout") as mock_stdout:
+                with pytest.raises(KeyboardInterrupt):
+                    mon.run_monitoring_loop(status_cb)
+                mock_stdout.flush.assert_called()
 
 
 # =============================================
@@ -563,46 +464,44 @@ class TestRunMonitoringLoop:
 class TestCreateConfigFile:
     """Tests for operations.py create_config_file()."""
 
-    def test_creates_config_when_missing(self, mock_prax_infrastructure, tmp_path):
+    @staticmethod
+    def _operations_at(monkeypatch, config_path):
+        """logging/operations.py bound at the top, writing its config to config_path,
+        with the defaults these asserts read and a logger double (prax, leg 13).
+
+        Returns (module, logger double).
+        """
+        log = MagicMock()
+        monkeypatch.setattr(logging_operations, "CONFIG_FILE", config_path)
+        # Real dicts — create_config_file() serialises these into the file.
+        monkeypatch.setattr(
+            logging_operations, "DEFAULT_SYSTEM_LOGS", {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"}
+        )
+        monkeypatch.setattr(
+            logging_operations, "DEFAULT_LOCAL_LOGS", {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
+        )
+        monkeypatch.setattr(logging_operations, "logger", log)
+        return logging_operations, log
+
+    def test_creates_config_when_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Creates default config file when it does not exist."""
-        mock_config = MagicMock()
-        mock_config.PRAX_JSON_DIR = tmp_path
-        # Real dicts, not MagicMock attrs — create_config_file() serialises these
-        # into the generated file, so they have to survive json.dump.
-        mock_config.DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"}
-        mock_config.DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
+        config_path = tmp_path / "prax_logger_config.json"
+        ops, _log = self._operations_at(monkeypatch, config_path)
 
-        mock_direct = MagicMock()
-        mock_direct_logger = MagicMock()
-        mock_direct.get_direct_logger = MagicMock(return_value=mock_direct_logger)
+        ops.create_config_file()
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.direct": mock_direct,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.operations", None)
-            import aipass.prax.apps.handlers.logging.operations as ops
-
-            config_path = tmp_path / "prax_logger_config.json"
-            ops.CONFIG_FILE = config_path
-
-            ops.create_config_file()
-
-            assert config_path.exists()
-            content = json.loads(config_path.read_text(encoding="utf-8"))
-            assert content["module_name"] == "prax_logger"
-            assert "config" in content
-            # The generated file must be readable by load_log_config(), which
-            # looks for these two sections and nothing else for retention.
-            assert content["config"]["system_logs"]["backup_count"] == 3
-            assert content["config"]["local_logs"]["max_lines"] == 250
-            assert content["config"]["debug_prints_enabled"] is False
-            # Keys no reader ever consults do not belong in a generated config.
-            for dead in ("max_log_size_mb", "backup_count", "console_output", "rotation_enabled", "debug_prints"):
-                assert dead not in content["config"], f"{dead} is written but never read"
+        assert config_path.exists()
+        content = json.loads(config_path.read_text(encoding="utf-8"))
+        assert content["module_name"] == "prax_logger"
+        assert "config" in content
+        # The generated file must be readable by load_log_config(), which
+        # looks for these two sections and nothing else for retention.
+        assert content["config"]["system_logs"]["backup_count"] == 3
+        assert content["config"]["local_logs"]["max_lines"] == 250
+        assert content["config"]["debug_prints_enabled"] is False
+        # Keys no reader ever consults do not belong in a generated config.
+        for dead in ("max_log_size_mb", "backup_count", "console_output", "rotation_enabled", "debug_prints"):
+            assert dead not in content["config"], f"{dead} is written but never read"
 
     def test_generated_config_is_readable_by_load_log_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """The file prax generates must be a file prax can read.
@@ -611,110 +510,47 @@ class TestCreateConfigFile:
         keys at config.* while the loader read config.system_logs/local_logs, so
         a fresh install produced a config that governed nothing.
         """
-        mock_config = MagicMock()
-        mock_config.PRAX_JSON_DIR = tmp_path
-        mock_config.DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"}
-        mock_config.DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
-
-        mock_direct = MagicMock()
-        mock_direct.get_direct_logger = MagicMock(return_value=MagicMock())
-
         config_path = tmp_path / "prax_logger_config.json"
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.direct": mock_direct,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.operations", None)
-            import aipass.prax.apps.handlers.logging.operations as ops
+        ops, _log = self._operations_at(monkeypatch, config_path)
+        ops.create_config_file()
 
-            ops.CONFIG_FILE = config_path
-            ops.create_config_file()
-
-        # Outside the patch: read it back with the real loader.
-        sys.modules.pop("aipass.prax.apps.handlers.logging.operations", None)
-        import aipass.prax.apps.handlers.config.load as load_mod
-
+        # Read it back with the real loader.
         mock_logger = MagicMock()
-        monkeypatch.setattr(load_mod, "logger", mock_logger)
-        monkeypatch.setattr(load_mod, "PRAX_LOGGER_CONFIG_FILE", config_path)
-        monkeypatch.setattr(load_mod, "_config_schema_warned", False)
+        monkeypatch.setattr(config_load, "logger", mock_logger)
+        monkeypatch.setattr(config_load, "PRAX_LOGGER_CONFIG_FILE", config_path)
+        monkeypatch.setattr(config_load, "_config_schema_warned", False)
 
-        result = load_mod.load_log_config()
+        result = config_load.load_log_config()
 
         assert result["system_logs"]["backup_count"] == 3
         assert result["local_logs"]["max_lines"] == 250
         mock_logger.warning.assert_not_called()
 
-    def test_does_not_overwrite_existing_config(self, mock_prax_infrastructure, tmp_path):
+    def test_does_not_overwrite_existing_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Does not overwrite an existing config file."""
-        mock_config = MagicMock()
-        mock_config.PRAX_JSON_DIR = tmp_path
-        # Real dicts, not MagicMock attrs — create_config_file() serialises these
-        # into the generated file, so they have to survive json.dump.
-        mock_config.DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"}
-        mock_config.DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
+        config_path = tmp_path / "prax_logger_config.json"
+        config_path.write_text('{"existing": true}', encoding="utf-8")
+        ops, _log = self._operations_at(monkeypatch, config_path)
 
-        mock_direct = MagicMock()
-        mock_direct_logger = MagicMock()
-        mock_direct.get_direct_logger = MagicMock(return_value=mock_direct_logger)
+        ops.create_config_file()
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.direct": mock_direct,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.operations", None)
-            import aipass.prax.apps.handlers.logging.operations as ops
+        content = json.loads(config_path.read_text(encoding="utf-8"))
+        assert content == {"existing": True}
 
-            config_path = tmp_path / "prax_logger_config.json"
-            config_path.write_text('{"existing": true}', encoding="utf-8")
-            ops.CONFIG_FILE = config_path
-
-            ops.create_config_file()
-
-            content = json.loads(config_path.read_text(encoding="utf-8"))
-            assert content == {"existing": True}
-
-    def test_handles_write_error_gracefully(self, mock_prax_infrastructure, tmp_path):
+    def test_handles_write_error_gracefully(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Handles write errors without raising."""
-        mock_config = MagicMock()
-        mock_config.PRAX_JSON_DIR = tmp_path
-        # Real dicts, not MagicMock attrs — create_config_file() serialises these
-        # into the generated file, so they have to survive json.dump.
-        mock_config.DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"}
-        mock_config.DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
+        config_path = tmp_path / "nonexistent_dir" / "config.json"
+        ops, mock_direct_logger = self._operations_at(monkeypatch, config_path)
 
-        mock_direct = MagicMock()
-        mock_direct_logger = MagicMock()
-        mock_direct.get_direct_logger = MagicMock(return_value=mock_direct_logger)
+        # Not raising is the weak half. The observable consequence is that
+        # no file appears and the failure is reported once as a warning.
+        ops.create_config_file()
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.direct": mock_direct,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.operations", None)
-            import aipass.prax.apps.handlers.logging.operations as ops
-
-            config_path = tmp_path / "nonexistent_dir" / "config.json"
-            ops.CONFIG_FILE = config_path
-
-            # Not raising is the weak half. The observable consequence is that
-            # no file appears and the failure is reported once as a warning.
-            ops.create_config_file()
-
-            assert not config_path.exists()
-            assert not config_path.parent.exists()
-            mock_direct_logger.info.assert_not_called()
-            mock_direct_logger.warning.assert_called_once()
-            assert mock_direct_logger.warning.call_args[0][0] == "Failed to create config file: %s"
+        assert not config_path.exists()
+        assert not config_path.parent.exists()
+        mock_direct_logger.info.assert_not_called()
+        mock_direct_logger.warning.assert_called_once()
+        assert mock_direct_logger.warning.call_args[0][0] == "Failed to create config file: %s"
 
 
 # =============================================
@@ -722,111 +558,65 @@ class TestCreateConfigFile:
 # =============================================
 
 
+def _override_doubled(monkeypatch, calling_module: str = "unknown_module", debug: bool = False) -> MagicMock:
+    """override.py bound at the top, with the names it took from introspection,
+    config and setup doubled on it for one test (prax, leg 13). getLogger is put
+    back by monkeypatch whatever an install does.
+
+    Returns the setup_individual_logger double.
+    """
+    build = MagicMock()
+    monkeypatch.setattr(override, "get_calling_module", MagicMock(return_value=calling_module))
+    monkeypatch.setattr(override, "get_debug_prints_enabled", MagicMock(return_value=debug))
+    monkeypatch.setattr(override, "setup_individual_logger", build)
+    monkeypatch.setattr(logging, "getLogger", logging.getLogger)
+    return build
+
+
 class TestEnhancedGetLogger:
     """Tests for override.py enhanced_getLogger()."""
 
-    def test_returns_logger_for_known_module(self, mock_prax_infrastructure):
+    def test_returns_logger_for_known_module(self, mock_prax_infrastructure, monkeypatch):
         """Returns a configured logger when module is detected."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
-        mock_config.get_system_logs_dir = MagicMock()
-        mock_config.get_module_logs_dir = MagicMock()
-        mock_config.load_log_config = MagicMock()
-        mock_config.lines_to_bytes = MagicMock()
-        # Real resolver — setLevel rejects a MagicMock level.
-        from aipass.prax.apps.handlers.config.load import resolve_log_level
-
-        mock_config.resolve_log_level = resolve_log_level
-
-        mock_introspection = MagicMock()
-        mock_introspection.get_calling_module = MagicMock(return_value="test_module")
-
-        mock_setup = MagicMock()
+        build = _override_doubled(monkeypatch, calling_module="test_module")
         mock_individual_logger = MagicMock()
         mock_individual_logger.handlers = [MagicMock()]
-        mock_setup.setup_individual_logger = MagicMock(
-            return_value=mock_individual_logger,
-        )
+        build.return_value = mock_individual_logger
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.setup": mock_setup,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.override", None)
-            import aipass.prax.apps.handlers.logging.override as ov
+        result = override.enhanced_getLogger("prax.test.known")
+        assert isinstance(result, logging.Logger)
+        # WHICH logger comes back, and what was done to it: the stdlib
+        # logger for the requested name, wearing the individual logger's
+        # handlers and cut off from the root logger.
+        assert result.name == "prax.test.known"
+        assert result.handlers == mock_individual_logger.handlers
+        assert result.propagate is False
+        build.assert_called_once_with("test_module")
 
-            result = ov.enhanced_getLogger("prax.test.known")
-            assert isinstance(result, logging.Logger)
-            # WHICH logger comes back, and what was done to it: the stdlib
-            # logger for the requested name, wearing the individual logger's
-            # handlers and cut off from the root logger.
-            assert result.name == "prax.test.known"
-            assert result.handlers == mock_individual_logger.handlers
-            assert result.propagate is False
-            mock_setup.setup_individual_logger.assert_called_once_with("test_module")
-
-    def test_returns_original_logger_for_unknown_module(self, mock_prax_infrastructure):
+    def test_returns_original_logger_for_unknown_module(self, mock_prax_infrastructure, monkeypatch):
         """Falls back to original logger when module is unknown."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
+        build = _override_doubled(monkeypatch)
 
-        mock_introspection = MagicMock()
-        mock_introspection.get_calling_module = MagicMock(return_value="unknown_module")
+        result = override.enhanced_getLogger("prax.test.unknown")
+        assert isinstance(result, logging.Logger)
+        # The same stdlib logger the caller asked for, handed back
+        # untouched: no handlers copied onto it, propagation left alone.
+        assert result.name == "prax.test.unknown"
+        # The stdlib's own registry entry for the name (prax, leg 6: no private name).
+        assert result is logging.root.manager.getLogger("prax.test.unknown")
+        assert result.handlers == []
+        assert result.propagate is True
+        build.assert_not_called()
 
-        mock_setup = MagicMock()
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.setup": mock_setup,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.override", None)
-            import aipass.prax.apps.handlers.logging.override as ov
-
-            result = ov.enhanced_getLogger("prax.test.unknown")
-            assert isinstance(result, logging.Logger)
-            # The same stdlib logger the caller asked for, handed back
-            # untouched: no handlers copied onto it, propagation left alone.
-            assert result.name == "prax.test.unknown"
-            assert result is ov._original_getLogger("prax.test.unknown")
-            assert result.handlers == []
-            assert result.propagate is True
-            mock_setup.setup_individual_logger.assert_not_called()
-
-    def test_debug_prints_when_enabled(self, mock_prax_infrastructure):
+    def test_debug_prints_when_enabled(self, mock_prax_infrastructure, monkeypatch, capsys):
         """Writes to stderr when debug prints are enabled."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.get_debug_prints_enabled = MagicMock(return_value=True)
+        _override_doubled(monkeypatch, debug=True)
 
-        mock_introspection = MagicMock()
-        mock_introspection.get_calling_module = MagicMock(return_value="unknown_module")
-
-        mock_setup = MagicMock()
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.setup": mock_setup,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.override", None)
-            import aipass.prax.apps.handlers.logging.override as ov
-
-            with patch("sys.stderr") as mock_stderr:
-                ov.enhanced_getLogger("debug_test")
-                mock_stderr.write.assert_called()
+        capsys.readouterr()
+        override.enhanced_getLogger("debug_test")
+        assert capsys.readouterr().err == (
+            "[DEBUG] enhanced_getLogger called with name: debug_test\n[DEBUG] Detected calling module: unknown_module\n"
+        )
 
 
 # =============================================
@@ -837,90 +627,32 @@ class TestEnhancedGetLogger:
 class TestInstallRestoreLoggerOverride:
     """Tests for override.py install/restore functions."""
 
-    def test_install_replaces_getlogger(self, mock_prax_infrastructure):
+    def test_install_replaces_getlogger(self, mock_prax_infrastructure, monkeypatch):
         """install_logger_override replaces logging.getLogger."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
+        _override_doubled(monkeypatch)
 
-        mock_introspection = MagicMock()
-        mock_setup = MagicMock()
+        override.install_logger_override()
+        assert logging.getLogger is override.enhanced_getLogger
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.setup": mock_setup,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.override", None)
-            import aipass.prax.apps.handlers.logging.override as ov
-
-            original_fn = logging.getLogger
-            try:
-                ov.install_logger_override()
-                assert logging.getLogger is ov.enhanced_getLogger
-            finally:
-                logging.getLogger = original_fn
-
-    def test_restore_puts_back_original(self, mock_prax_infrastructure):
+    def test_restore_puts_back_original(self, mock_prax_infrastructure, monkeypatch):
         """restore_original_logger restores the stdlib getLogger."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
+        _override_doubled(monkeypatch)
+        original_fn = logging.getLogger
 
-        mock_introspection = MagicMock()
-        mock_setup = MagicMock()
+        override.install_logger_override()
+        assert logging.getLogger is override.enhanced_getLogger
+        override.restore_original_logger()
+        # What stood there before install (prax, leg 6: no private name).
+        assert logging.getLogger is original_fn
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.setup": mock_setup,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.override", None)
-            import aipass.prax.apps.handlers.logging.override as ov
-
-            original_fn = logging.getLogger
-            try:
-                ov.install_logger_override()
-                assert logging.getLogger is ov.enhanced_getLogger
-                ov.restore_original_logger()
-                assert logging.getLogger is ov._original_getLogger
-            finally:
-                logging.getLogger = original_fn
-
-    def test_is_override_active_reflects_state(self, mock_prax_infrastructure):
+    def test_is_override_active_reflects_state(self, mock_prax_infrastructure, monkeypatch):
         """is_override_active returns correct state."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
+        _override_doubled(monkeypatch)
 
-        mock_introspection = MagicMock()
-        mock_setup = MagicMock()
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.setup": mock_setup,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.override", None)
-            import aipass.prax.apps.handlers.logging.override as ov
-
-            original_fn = logging.getLogger
-            try:
-                ov.restore_original_logger()
-                assert ov.is_override_active() is False
-                ov.install_logger_override()
-                assert ov.is_override_active() is True
-            finally:
-                logging.getLogger = original_fn
+        override.restore_original_logger()
+        assert override.is_override_active() is False
+        override.install_logger_override()
+        assert override.is_override_active() is True
 
 
 # =============================================
@@ -929,95 +661,48 @@ class TestInstallRestoreLoggerOverride:
 
 
 class TestSetupSystemLogger:
-    """Tests for setup.py setup_system_logger()."""
+    """Tests for setup.py setup_system_logger(), on the module bound at the top
+    with its log dirs and config under tmp_path (prax, leg 13)."""
 
-    def _make_mocks(self, tmp_path):
-        """Build the standard mock set for setup.py tests."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.get_system_logs_dir = MagicMock(return_value=tmp_path / "system")
-        mock_config.get_module_logs_dir = MagicMock(return_value=tmp_path / "local")
-        mock_config.load_log_config = MagicMock(
-            return_value={
+    @pytest.fixture(autouse=True)
+    def _system_logger_fresh(self, monkeypatch, tmp_path):
+        """No cached system logger; dirs and config under tmp_path; the handlers a
+        build hangs on the shared prax_system_logger are taken off afterwards."""
+        (tmp_path / "system").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "local").mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(logging_setup, "get_system_logs_dir", lambda: tmp_path / "system")
+        monkeypatch.setattr(logging_setup, "get_module_logs_dir", lambda branch=None: tmp_path / "local")
+        monkeypatch.setattr(
+            logging_setup,
+            "load_log_config",
+            lambda: {
                 "log_format": "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
                 "date_format": "%Y-%m-%d %H:%M:%S",
                 "system_logs": {"max_lines": 1000, "backup_count": 3},
                 "local_logs": {"max_lines": 500, "backup_count": 2},
-            }
+            },
         )
-        mock_config.lines_to_bytes = MagicMock(return_value=200000)
-        mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
-        mock_config.PRAX_JSON_DIR = tmp_path / "prax_json"
+        monkeypatch.setattr(logging_setup, "lines_to_bytes", lambda lines: 200000)
+        monkeypatch.setattr(logging_setup, "_system_logger", None)
+        shared = logging.getLogger("prax_system_logger")
+        before = list(shared.handlers)
+        yield
+        for handler in [h for h in shared.handlers if h not in before]:
+            shared.removeHandler(handler)
+            handler.close()
 
-        # Level resolution is a pure helper, not the subject of these tests.
-        # Delegate to the real implementation — a MagicMock here returns an
-        # unorderable stand-in that setLevel/min() cannot use.
-        from aipass.prax.apps.handlers.config.load import level_to_int, resolve_log_level
-
-        mock_config.resolve_log_level = resolve_log_level
-        mock_config.level_to_int = level_to_int
-
-        mock_introspection = MagicMock()
-        mock_introspection.get_calling_module_path = MagicMock(return_value=None)
-        mock_introspection.detect_branch_from_path = MagicMock(return_value=None)
-
-        mock_filtering = MagicMock()
-        mock_filtering.should_display_terminal = MagicMock(return_value=False)
-
-        mock_formatting = MagicMock()
-        mock_formatting.create_terminal_handler = MagicMock()
-
-        (tmp_path / "system").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "local").mkdir(parents=True, exist_ok=True)
-
-        return mock_config, mock_introspection, mock_filtering, mock_formatting
-
-    def test_creates_system_logger(self, mock_prax_infrastructure, tmp_path):
+    def test_creates_system_logger(self, mock_prax_infrastructure):
         """setup_system_logger creates and returns a logger."""
-        mock_config, mock_intro, mock_filt, mock_fmt = self._make_mocks(tmp_path)
+        result = logging_setup.setup_system_logger()
+        assert isinstance(result, logging.Logger)
+        assert result.name == "prax_system_logger"
+        assert len(result.handlers) >= 2
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_intro,
-                "aipass.prax.apps.handlers.logging.terminal.filtering": mock_filt,
-                "aipass.prax.apps.handlers.logging.terminal.formatting": mock_fmt,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.setup", None)
-            import aipass.prax.apps.handlers.logging.setup as setup_mod
-
-            setup_mod._system_logger = None
-            setup_mod._captured_loggers.clear()
-
-            result = setup_mod.setup_system_logger()
-            assert isinstance(result, logging.Logger)
-            assert result.name == "prax_system_logger"
-            assert len(result.handlers) >= 2
-
-    def test_returns_cached_logger_on_second_call(self, mock_prax_infrastructure, tmp_path):
+    def test_returns_cached_logger_on_second_call(self, mock_prax_infrastructure):
         """Second call returns the same cached logger."""
-        mock_config, mock_intro, mock_filt, mock_fmt = self._make_mocks(tmp_path)
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_intro,
-                "aipass.prax.apps.handlers.logging.terminal.filtering": mock_filt,
-                "aipass.prax.apps.handlers.logging.terminal.formatting": mock_fmt,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.setup", None)
-            import aipass.prax.apps.handlers.logging.setup as setup_mod
-
-            setup_mod._system_logger = None
-            setup_mod._captured_loggers.clear()
-
-            first = setup_mod.setup_system_logger()
-            second = setup_mod.setup_system_logger()
-            assert first is second
+        first = logging_setup.setup_system_logger()
+        second = logging_setup.setup_system_logger()
+        assert first is second
 
 
 # =============================================
@@ -1026,119 +711,84 @@ class TestSetupSystemLogger:
 
 
 class TestSetupWindowsSafeRotatingHandlerDoRollover:
-    """Tests for setup.py _WindowsSafeRotatingHandler.doRollover()."""
+    """Tests for the rotating handler setup.py builds into every module logger.
 
-    def _make_mocks(self, tmp_path):
-        """Build the standard mock set for setup.py handler tests."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.get_system_logs_dir = MagicMock(return_value=tmp_path)
-        mock_config.get_module_logs_dir = MagicMock(return_value=tmp_path)
-        mock_config.load_log_config = MagicMock(
-            return_value={
+    The handler is taken off a logger built by the public setup_individual_logger,
+    with both log dirs under tmp_path, not constructed by its private class name
+    (prax, leg 12).
+    """
+
+    @pytest.fixture
+    def system_handler(self, monkeypatch, tmp_path):
+        """The system-log handler of a freshly built logger, its file holding 'data'."""
+        monkeypatch.setattr(logging_setup, "get_system_logs_dir", lambda: tmp_path)
+        monkeypatch.setattr(logging_setup, "get_module_logs_dir", lambda branch: tmp_path / "local")
+        monkeypatch.setattr(
+            logging_setup,
+            "load_log_config",
+            lambda: {
                 "log_format": "%(message)s",
                 "date_format": "%H:%M:%S",
-                "system_logs": {"max_lines": 100, "backup_count": 1},
-                "local_logs": {"max_lines": 100, "backup_count": 1},
-            }
+                "system_logs": {"max_lines": 1, "backup_count": 1},
+                "local_logs": {"max_lines": 1, "backup_count": 1},
+            },
         )
-        mock_config.lines_to_bytes = MagicMock(return_value=20000)
-        mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
-        mock_config.PRAX_JSON_DIR = tmp_path / "prax_json"
+        monkeypatch.setattr(logging_setup, "lines_to_bytes", lambda lines: 10)
+        monkeypatch.setattr(logging_setup, "_captured_loggers", {})
+        monkeypatch.setattr(logging_setup, "_system_logger", None)
+        monkeypatch.setattr(logging_setup, "_terminal_output_enabled", False)
+        log_file = tmp_path / "prax_rollover_test.log"
+        log_file.write_text("data\n", encoding="utf-8")
+        built = logging_setup.setup_individual_logger("rollover_test", caller_branch="prax")
+        try:
+            yield built.handlers[0], log_file
+        finally:
+            for handler in list(built.handlers):
+                built.removeHandler(handler)
+                handler.close()
 
-        mock_introspection = MagicMock()
-        mock_introspection.get_calling_module_path = MagicMock(return_value=None)
-        mock_introspection.detect_branch_from_path = MagicMock(return_value=None)
-
-        mock_filtering = MagicMock()
-        mock_formatting = MagicMock()
-
-        return mock_config, mock_introspection, mock_filtering, mock_formatting
-
-    def test_do_rollover_success(self, mock_prax_infrastructure, tmp_path):
+    def test_do_rollover_success(self, mock_prax_infrastructure, system_handler, tmp_path):
         """Normal rollover succeeds."""
-        mock_config, mock_intro, mock_filt, mock_fmt = self._make_mocks(tmp_path)
+        handler, log_file = system_handler
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="A" * 50,
+            args=(),
+            exc_info=None,
+        )
+        handler.emit(record)
+        handler.close()
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_intro,
-                "aipass.prax.apps.handlers.logging.terminal.filtering": mock_filt,
-                "aipass.prax.apps.handlers.logging.terminal.formatting": mock_fmt,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.setup", None)
-            import aipass.prax.apps.handlers.logging.setup as setup_mod
+        # One outcome is reachable here, not two: the file is over
+        # maxBytes, so the old bytes move to .log.1 and the record lands in
+        # a fresh .log. Both halves pinned.
+        backup = tmp_path / "prax_rollover_test.log.1"
+        assert backup.read_text(encoding="utf-8") == "data\n"
+        assert log_file.read_text(encoding="utf-8") == "A" * 50 + "\n"
 
-            log_file = tmp_path / "rollover_test.log"
-            log_file.write_text("data\n", encoding="utf-8")
-            handler = setup_mod._WindowsSafeRotatingHandler(
-                str(log_file),
-                maxBytes=10,
-                backupCount=1,
-                encoding="utf-8",
-            )
-            record = logging.LogRecord(
-                name="test",
-                level=logging.INFO,
-                pathname="",
-                lineno=0,
-                msg="A" * 50,
-                args=(),
-                exc_info=None,
-            )
-            handler.emit(record)
-            handler.close()
-
-            # One outcome is reachable here, not two: the file is over
-            # maxBytes, so the old bytes move to .log.1 and the record lands in
-            # a fresh .log. Both halves pinned.
-            backup = tmp_path / "rollover_test.log.1"
-            assert backup.read_text(encoding="utf-8") == "data\n"
-            assert log_file.read_text(encoding="utf-8") == "A" * 50 + "\n"
-
-    def test_do_rollover_permission_error_suppressed(self, mock_prax_infrastructure, tmp_path):
+    def test_do_rollover_permission_error_suppressed(self, mock_prax_infrastructure, system_handler, tmp_path):
         """PermissionError during rollover is caught, not raised."""
-        mock_config, mock_intro, mock_filt, mock_fmt = self._make_mocks(tmp_path)
+        handler, log_file = system_handler
 
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_intro,
-                "aipass.prax.apps.handlers.logging.terminal.filtering": mock_filt,
-                "aipass.prax.apps.handlers.logging.terminal.formatting": mock_fmt,
-            },
+        with (
+            patch(
+                "logging.handlers.RotatingFileHandler.doRollover",
+                side_effect=PermissionError("locked"),
+            ),
+            patch.object(logging_setup, "logger") as mock_logger,
         ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.setup", None)
-            import aipass.prax.apps.handlers.logging.setup as setup_mod
+            handler.doRollover()
+        handler.close()
 
-            log_file = tmp_path / "perm_test.log"
-            log_file.write_text("data\n", encoding="utf-8")
-            handler = setup_mod._WindowsSafeRotatingHandler(
-                str(log_file),
-                maxBytes=10,
-                backupCount=1,
-                encoding="utf-8",
-            )
-
-            with (
-                patch(
-                    "logging.handlers.RotatingFileHandler.doRollover",
-                    side_effect=PermissionError("locked"),
-                ),
-                patch.object(setup_mod, "logger") as mock_logger,
-            ):
-                handler.doRollover()
-            handler.close()
-
-            # "It did not raise" is half the contract. The other half: the
-            # skipped rotation is reported once, and no backup was produced.
-            mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", ANY)
-            assert str(mock_logger.warning.call_args[0][1]) == "locked"
-            assert not (tmp_path / "perm_test.log.1").exists()
-            assert log_file.read_text(encoding="utf-8") == "data\n"
+        # "It did not raise" is half the contract. The other half: the
+        # skipped rotation is reported once, and no backup was produced.
+        mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", ANY)
+        assert str(mock_logger.warning.call_args[0][1]) == "locked"
+        assert not (tmp_path / "prax_rollover_test.log.1").exists()
+        assert log_file.read_text(encoding="utf-8") == "data\n"
 
 
 # =============================================
@@ -1146,69 +796,43 @@ class TestSetupWindowsSafeRotatingHandlerDoRollover:
 # =============================================
 
 
+def _filtering_at(monkeypatch, config_file):
+    """terminal/filtering.py bound at the top, reading config_file for this test
+    (prax, leg 13: it was re-imported per test and its CONFIG_FILE set raw)."""
+    monkeypatch.setattr(terminal_filtering, "CONFIG_FILE", config_file)
+    return terminal_filtering
+
+
 class TestLoadFilteredModules:
     """Tests for terminal/filtering.py load_filtered_modules()."""
 
-    def test_returns_defaults_when_no_config(self, mock_prax_infrastructure, tmp_path):
+    def test_returns_defaults_when_no_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Returns DEFAULT_FILTERED_MODULES when config file absent."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path,
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.terminal.filtering", None)
-            import aipass.prax.apps.handlers.logging.terminal.filtering as filt
+        filt = _filtering_at(monkeypatch, tmp_path / "nonexistent_config.json")
 
-            filt.CONFIG_FILE = tmp_path / "nonexistent_config.json"
+        result = filt.load_filtered_modules()
+        assert result == filt.DEFAULT_FILTERED_MODULES
 
-            result = filt.load_filtered_modules()
-            assert result == filt.DEFAULT_FILTERED_MODULES
-
-    def test_loads_from_config_file(self, mock_prax_infrastructure, tmp_path):
+    def test_loads_from_config_file(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Loads filtered modules from config file when present."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path,
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.terminal.filtering", None)
-            import aipass.prax.apps.handlers.logging.terminal.filtering as filt
+        config_file = tmp_path / "prax_terminal_config.json"
+        config_file.write_text(
+            json.dumps({"filtered_modules": ["custom_mod", "another_mod"]}),
+            encoding="utf-8",
+        )
+        filt = _filtering_at(monkeypatch, config_file)
 
-            config_file = tmp_path / "prax_terminal_config.json"
-            config_file.write_text(
-                json.dumps({"filtered_modules": ["custom_mod", "another_mod"]}),
-                encoding="utf-8",
-            )
-            filt.CONFIG_FILE = config_file
+        result = filt.load_filtered_modules()
+        assert result == {"custom_mod", "another_mod"}
 
-            result = filt.load_filtered_modules()
-            assert result == {"custom_mod", "another_mod"}
-
-    def test_returns_defaults_on_corrupt_config(self, mock_prax_infrastructure, tmp_path):
+    def test_returns_defaults_on_corrupt_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Returns defaults when config file is corrupt JSON."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path,
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.terminal.filtering", None)
-            import aipass.prax.apps.handlers.logging.terminal.filtering as filt
+        config_file = tmp_path / "prax_terminal_config.json"
+        config_file.write_text("NOT VALID JSON{{{{", encoding="utf-8")
+        filt = _filtering_at(monkeypatch, config_file)
 
-            config_file = tmp_path / "prax_terminal_config.json"
-            config_file.write_text("NOT VALID JSON{{{{", encoding="utf-8")
-            filt.CONFIG_FILE = config_file
-
-            result = filt.load_filtered_modules()
-            assert result == filt.DEFAULT_FILTERED_MODULES
+        result = filt.load_filtered_modules()
+        assert result == filt.DEFAULT_FILTERED_MODULES
 
 
 # =============================================
@@ -1219,59 +843,30 @@ class TestLoadFilteredModules:
 class TestShouldDisplayTerminal:
     """Tests for terminal/filtering.py should_display_terminal()."""
 
-    def test_external_module_displayed(self, mock_prax_infrastructure, tmp_path):
+    def test_external_module_displayed(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """External module is not filtered and should display."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path,
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.terminal.filtering", None)
-            import aipass.prax.apps.handlers.logging.terminal.filtering as filt
+        filt = _filtering_at(monkeypatch, tmp_path / "nonexistent.json")
 
-            result = filt.should_display_terminal("flow", filtered_modules={"prax_logger"})
-            assert result is True
+        result = filt.should_display_terminal("flow", filtered_modules={"prax_logger"})
+        assert result is True
 
-    def test_filtered_module_not_displayed(self, mock_prax_infrastructure, tmp_path):
+    def test_filtered_module_not_displayed(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Internal prax module is filtered and should not display."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path,
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.terminal.filtering", None)
-            import aipass.prax.apps.handlers.logging.terminal.filtering as filt
+        filt = _filtering_at(monkeypatch, tmp_path / "nonexistent.json")
 
-            result = filt.should_display_terminal("prax_logger", filtered_modules={"prax_logger"})
-            assert result is False
+        result = filt.should_display_terminal("prax_logger", filtered_modules={"prax_logger"})
+        assert result is False
 
-    def test_loads_from_config_when_no_set_provided(self, mock_prax_infrastructure, tmp_path):
+    def test_loads_from_config_when_no_set_provided(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Loads filtered modules from config when not explicitly passed."""
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": MagicMock(
-                    PRAX_JSON_DIR=tmp_path,
-                ),
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.terminal.filtering", None)
-            import aipass.prax.apps.handlers.logging.terminal.filtering as filt
+        filt = _filtering_at(monkeypatch, tmp_path / "nonexistent.json")
+        # "drone" is not in defaults, so it should display
+        result = filt.should_display_terminal("drone")
+        assert result is True
 
-            filt.CONFIG_FILE = tmp_path / "nonexistent.json"
-            # "drone" is not in defaults, so it should display
-            result = filt.should_display_terminal("drone")
-            assert result is True
-
-            # "prax_logger" IS in defaults, so it should NOT display
-            result = filt.should_display_terminal("prax_logger")
-            assert result is False
+        # "prax_logger" IS in defaults, so it should NOT display
+        result = filt.should_display_terminal("prax_logger")
+        assert result is False
 
 
 # =============================================
@@ -1283,25 +878,8 @@ class TestFormatTerminalMessage:
     """Tests for terminal/formatting.py format_terminal_message()."""
 
     def _import_formatting(self, tmp_path):
-        """Import formatting module with mocked dependencies."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.PRAX_JSON_DIR = tmp_path
-
-        mock_filtering = MagicMock()
-        mock_filtering.should_display_terminal = MagicMock(return_value=True)
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.terminal.filtering": mock_filtering,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.terminal.formatting", None)
-            import aipass.prax.apps.handlers.logging.terminal.formatting as fmt
-
-        return fmt
+        """terminal/formatting.py, bound at the top (prax, leg 13)."""
+        return terminal_formatting
 
     def test_format_with_branch(self, mock_prax_infrastructure, tmp_path):
         """Formats message with branch label."""
@@ -1386,33 +964,18 @@ class TestCreateTerminalHandler:
     """Tests for terminal/formatting.py create_terminal_handler()."""
 
     def _import_formatting(self, tmp_path):
-        """Import formatting module with mocked dependencies."""
-        mock_config = MagicMock()
-        mock_config.DEFAULT_LOG_LEVEL = logging.DEBUG
-        mock_config.PRAX_JSON_DIR = tmp_path
+        """terminal/formatting.py, bound at the top (prax, leg 13)."""
+        return terminal_formatting
 
-        mock_filtering = MagicMock()
-        mock_filtering.should_display_terminal = MagicMock(return_value=True)
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.terminal.filtering": mock_filtering,
-            },
-        ):
-            sys.modules.pop("aipass.prax.apps.handlers.logging.terminal.formatting", None)
-            import aipass.prax.apps.handlers.logging.terminal.formatting as fmt
-
-        return fmt
-
-    def test_returns_stream_handler(self, mock_prax_infrastructure, tmp_path):
+    def test_returns_stream_handler(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Returns a StreamHandler carrying config's DEFAULT_LOG_LEVEL."""
         fmt = self._import_formatting(tmp_path)
+        # DEBUG, not config's own default, so a handler left at another level
+        # cannot match by accident (prax, leg 13: set at the edge, not by stub).
+        monkeypatch.setattr(fmt, "DEFAULT_LOG_LEVEL", logging.DEBUG)
         handler = fmt.create_terminal_handler()
         assert isinstance(handler, logging.StreamHandler)
-        # _import_formatting sets DEFAULT_LOG_LEVEL to DEBUG; the handler must
-        # be gated at exactly that, not left at NOTSET.
+        # The handler must be gated at exactly that, not left at NOTSET.
         assert handler.level == logging.DEBUG
 
     def test_handler_has_terminal_formatter(self, mock_prax_infrastructure, tmp_path):
@@ -1439,3 +1002,94 @@ class TestCreateTerminalHandler:
         fmt = self._import_formatting(tmp_path)
         handler = fmt.create_terminal_handler()
         assert handler.stream is sys.stdout
+
+
+# =============================================
+# lifecycle.py -- run_initialize / run_shutdown
+# =============================================
+
+
+class TestLifecycleRecordsWhoAskedForIt:
+    """The lifecycle doors take the caller's module name — and must use it.
+
+    seedgo's accepted_and_never_used_parameter rule found both doors accepting
+    module_name and reading neither, with a docstring promising it was 'for log
+    prefixes'. The operation record is where it belongs: initialising the fleet's
+    logging is a system-wide act, and the record of it should say who asked.
+    """
+
+    def _lifecycle(self, monkeypatch):
+        """The real lifecycle handler, bound at the top, with every step stubbed out."""
+        for name in (
+            "create_config_file",
+            "save_module_registry",
+            "install_logger_override",
+            "start_file_watcher",
+            "stop_file_watcher",
+            "restore_original_logger",
+        ):
+            monkeypatch.setattr(lifecycle, name, lambda *a, **kw: None)
+        monkeypatch.setattr(lifecycle, "discover_python_modules", lambda *a, **kw: {})
+        monkeypatch.setattr(lifecycle, "setup_system_logger", lambda *a, **kw: MagicMock())
+        monkeypatch.setattr(lifecycle, "json_handler", MagicMock())
+
+        recorded = []
+        monkeypatch.setattr(lifecycle, "log_operation", lambda msg, data: recorded.append((msg, data)))
+        return lifecycle, recorded
+
+    def test_initialize_records_the_module_that_asked(self, monkeypatch):
+        lifecycle, recorded = self._lifecycle(monkeypatch)
+
+        lifecycle.run_initialize("some_caller")
+
+        assert [data.get("initiated_by") for _, data in recorded] == ["some_caller"]
+
+    def test_shutdown_records_the_module_that_asked(self, monkeypatch):
+        lifecycle, recorded = self._lifecycle(monkeypatch)
+
+        lifecycle.run_shutdown("some_caller")
+
+        assert [data.get("initiated_by") for _, data in recorded] == ["some_caller"]
+
+
+_COUNT_IMPORT_WRITES = """
+import sys
+writes = []
+def hook(event, args):
+    if event in ("os.rename", "os.replace"):
+        writes.append(str(args[1]))
+    elif event == "open" and any(c in str(args[1] or "r") for c in "wax+"):
+        writes.append(str(args[0]))
+sys.addaudithook(hook)
+import aipass.prax.apps.modules.dashboard
+print(len(writes))
+"""
+
+
+class TestAnImportWritesNothing:
+    """A fresh import of the dashboard module made 58 atomic writes (seedgo, 10-08).
+
+    Fourteen handlers call get_direct_logger() at module level, and each call
+    logged two json operations, direct_log_created and the introspection's
+    introspection_resolved: four renames per module, plus module_tracker's
+    initialisation. Every branch that imports the dashboard paid them
+    (DPLAN-0404, prax). The import runs in a fresh interpreter with
+    AIPASS_TEST_LOG_DIR set, so a red run writes under tmp_path, never prax_json.
+    """
+
+    def test_a_fresh_import_of_the_dashboard_module_writes_nothing(self, tmp_path):
+        import os
+        import subprocess
+
+        env = dict(os.environ, AIPASS_TEST_LOG_DIR=str(tmp_path / "logs"))
+        done = subprocess.run(
+            [sys.executable, "-c", _COUNT_IMPORT_WRITES],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+            cwd=str(tmp_path),
+            env=env,
+        )
+        assert done.returncode == 0, done.stderr[-600:]
+        assert done.stdout.strip().splitlines()[-1] == "0"

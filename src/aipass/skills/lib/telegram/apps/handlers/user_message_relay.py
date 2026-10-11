@@ -200,7 +200,7 @@ def handle(hook_data: dict) -> dict:
     local-command output, dispatch wakes), TG-origin messages, duplicate
     consecutive messages, and branches with no TG bot configured.
     """
-    global _last_relay_hash  # noqa: PLW0603
+    global _last_relay_hash
     try:
         # The switch gate comes first, before any other consideration: a skill
         # that is switched off does no work at all on this path, not even the

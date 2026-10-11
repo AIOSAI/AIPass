@@ -72,7 +72,7 @@
         {
           "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse",
           "event": "PreToolUse",
-          "matcher": "Bash|Edit|MultiEdit|Write|Read|Grep|Glob|WebSearch|WebFetch|Task"
+          "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|WebSearch|WebFetch|Task"
         },
         {
           "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PostToolUse",

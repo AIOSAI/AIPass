@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.4.1
+# Version: 4.4.3
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-08-23
+# Modified: 2026-10-08
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -226,7 +226,7 @@ def _session_short_id(session: dict) -> str:
     return str(session.get("sessionId", ""))[:8]
 
 
-def _session_label(session: dict, branch: str) -> str:
+def _session_label(session: dict) -> str:
     """Format a session's one-line label: PID · short-id · kind [auto-name] · age."""
     pid = session.get("pid", "?")
     short_id = _session_short_id(session)
@@ -309,7 +309,7 @@ def _resume_session(
     logger.info("[SESSION_BOOT] Continuing dead-window session via --continue")
     sid = session.get("sessionId", "")
     nf = _name_flag(branch, sid, extra_args)
-    return _exec_in_tmux(branch, "", claude_bin, [claude_bin] + defaults + ["--continue"] + ea + nf)
+    return _exec_in_tmux(branch, "", [claude_bin] + defaults + ["--continue"] + ea + nf)
 
 
 def _make_session_name(branch: str, session_id: str = "") -> str:
@@ -327,7 +327,7 @@ def _name_flag(branch: str, session_id: str = "", extra_args: list[str] | None =
     return ["--name", _make_session_name(branch, session_id)]
 
 
-def _exec_in_tmux(branch: str, session_id: str, claude_bin: str, claude_cmd: list[str]) -> dict:
+def _exec_in_tmux(branch: str, session_id: str, claude_cmd: list[str]) -> dict:
     """Exec a claude command inside a new tmux session."""
     session_name = _make_session_name(branch, session_id)
     if _tmux_session_exists(session_name):
@@ -557,12 +557,10 @@ def _takeover_bg(
 
     if session_id:
         logger.info("[SESSION_BOOT] Resuming session %s after takeover", session_id[:8])
-        return _exec_in_tmux(
-            branch, session_id, claude_bin, [claude_bin] + defaults + ["--resume", session_id] + ea + nf
-        )
+        return _exec_in_tmux(branch, session_id, [claude_bin] + defaults + ["--resume", session_id] + ea + nf)
 
     logger.info("[SESSION_BOOT] No sessionId for takeover — continuing last")
-    return _exec_in_tmux(branch, "", claude_bin, [claude_bin] + defaults + ["--continue"] + ea + nf)
+    return _exec_in_tmux(branch, "", [claude_bin] + defaults + ["--continue"] + ea + nf)
 
 
 def _is_session_file_present(pid: int | None) -> bool:
@@ -593,7 +591,7 @@ def _menu_single_session(
     cwd: str | None = None,
 ) -> dict:
     """Handle menu for a single live session."""
-    label = _session_label(session, branch)
+    label = _session_label(session)
     is_bg = session.get("kind") in ("bg", "background")
     sys.stderr.write(f"\n{branch} — live chat: {label}\n")
     if is_bg:
@@ -677,7 +675,7 @@ def _session_pointer():
     """
     import importlib
 
-    return importlib.import_module("aipass.ai_mail.apps.handlers.dispatch.session_pointer")
+    return importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
 
 
 def _chat_age(modified: float) -> str:
@@ -741,10 +739,10 @@ def _open_chat(
     _session_pointer().write_pointer(Path(cwd or Path.cwd()), session_id, "session_boot")
     nf = _name_flag(branch, session_id, extra_args)
     cmd = [claude_bin] + defaults + ["--resume", session_id] + list(extra_args or []) + nf
-    return _exec_in_tmux(branch, session_id, claude_bin, cmd)
+    return _exec_in_tmux(branch, session_id, cmd)
 
 
-def _describe_process(session: dict, branch: str) -> str:
+def _describe_process(session: dict) -> str:
     """Name a live process for what it is — a seat or a leftover, never 'a chat'."""
     pid = session.get("pid")
     kind = session.get("kind", "unknown")
@@ -834,7 +832,7 @@ def _menu_multi(
 
     sys.stderr.write(f"\n  {len(live)} live process(es) in this branch — not chats:\n")
     for session in live:
-        sys.stderr.write(f"    {_describe_process(session, branch)}\n")
+        sys.stderr.write(f"    {_describe_process(session)}\n")
 
     sys.stderr.write("\n  [n]  start new chat\n")
     sys.stderr.write("  [c]  close all live processes and exit\n\n")
@@ -847,7 +845,7 @@ def _menu_multi(
         logger.info("[SESSION_BOOT] Continuing last chat via --continue (no transcripts listed)")
         nf = _name_flag(branch, extra_args=extra_args)
         cmd = [claude_bin] + defaults + ["--continue"] + list(extra_args or []) + nf
-        return _exec_in_tmux(branch, "", claude_bin, cmd)
+        return _exec_in_tmux(branch, "", cmd)
 
     if choice == "c":
         return _close_all(live, branch, claude_bin)
@@ -959,11 +957,11 @@ def _continue_by_pointer(
         logger.info("[SESSION_BOOT] Continuing via session pointer: %s", reason)
         nf = _name_flag(branch, sid, extra_args)
         cmd = [claude_bin] + defaults + ["--resume", sid] + list(extra_args or []) + nf
-        return _exec_in_tmux(branch, sid, claude_bin, cmd)
+        return _exec_in_tmux(branch, sid, cmd)
     logger.info("[SESSION_BOOT] Continuing last chat via --continue (%s)", reason)
     nf = _name_flag(branch, extra_args=extra_args)
     cmd = [claude_bin] + defaults + ["--continue"] + list(extra_args or []) + nf
-    return _exec_in_tmux(branch, "", claude_bin, cmd)
+    return _exec_in_tmux(branch, "", cmd)
 
 
 def _dispatch_lock(cwd: str) -> dict | None:

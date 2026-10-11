@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mock_drift_check.py
-# Description: v5 - does a patch replace a function or a whole module
-# Version: 1.0.0
+# Description: v5 - does a patch's replacement match its target (whole module; function over a class)
+# Version: 1.1.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-10
 # =============================================
 
 """Does this patch replace a function, or a whole module?
@@ -75,6 +75,31 @@ the watched call names; `patch.object(module, "name")` takes an OBJECT as its fi
 argument, never a dotted string, so the target reader returns None for it every
 time. Leaving either in place would tell a future reader that a shape is covered
 when it is not.
+
+SECOND SPECIES, CLASS-STANDIN (1.1.0, PR #774 CI round four). The same family:
+a patch whose replacement does not match its target. `monkeypatch.setattr(mod,
+"Path", lambda *a: ...)` where `mod`'s own source uses `Path` AS A CLASS - an
+attribute read off it (`Path.cwd()`), the second argument of isinstance/issubclass,
+a base in a class statement. The stand-in has no such surface, so that use dies with
+`'function' object has no attribute 'cwd'` - and only on the path that reaches it.
+seedgo's own batch7 test at 1.3.1 did exactly this: `_find_registry` falls back to
+`Path.cwd()` only when the git-ignored registry marker is absent, so every dev seat
+was green and every clean checkout red.
+- `mod` must be a bare name the TEST FILE binds by import, resolved to exactly one
+  production file through the corpus (longest dotted suffix, at least two segments
+  when the import has two). Never by importing. `mod.subprocess` is unreadable - the
+  target is not in the corpus - and is skipped.
+- The stand-in convicted: a lambda, a name the test file binds only to a `def`, or
+  `functools.partial(...)` (a partial has no `.cwd` and isinstance against it
+  raises - same species). Acquitted: a class (`class _FakePath`), `type(...)`, a
+  MagicMock/Mock (every attribute), anything else.
+- A constructor-only use (`Path(x)`) acquits: a function answers a call. A name the
+  module binds by plain `import` is a module, not a class, and acquits.
+- Helpers are read, not only units: the incident's patch lived in `_windows_spelled`.
+  The row names the def holding the call; the score is floored at 0 because a helper
+  is a place to look that is not a unit.
+- Not claimed: `setattr("pkg.mod.Name", ...)` string targets, local shadowing of
+  the name inside the product module, `except Name` uses.
 
 STDLIB ONLY, like the rest of the pack: `ast`, `pathlib`, `typing`, and the pack's
 own corpus reader. That constraint is the reason the pack exists.
@@ -330,6 +355,185 @@ def find_module_patches(scanned: corpus.Corpus) -> List[Dict]:
     return rows
 
 
+# =============================================================================
+# SECOND SPECIES - A FUNCTION STANDING IN FOR A CLASS
+# =============================================================================
+
+
+def _module_files(scanned: corpus.Corpus) -> Dict[str, Set[str]]:
+    """Dotted module path (every suffix) -> the production relpaths it can name."""
+    files: Dict[str, Set[str]] = {}
+    for relpath in scanned.production_trees:
+        pure = PurePosixPath(relpath)
+        parts = list(pure.parts[:-1]) + [pure.stem]
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        for start in range(len(parts)):
+            files.setdefault(".".join(parts[start:]), set()).add(relpath)
+    return files
+
+
+def _resolve_module(dotted: str, files: Dict[str, Set[str]]) -> str:
+    """The ONE production file a dotted import names, or "" when none or ambiguous.
+
+    The longest suffix of `dotted` the corpus holds wins, and it must keep the last
+    two segments when there are two: `from thirdparty import worker` must not land
+    on a project file that merely shares the stem `worker`.
+    """
+    parts = dotted.split(".")
+    shortest = min(2, len(parts))
+    for start in range(len(parts) - shortest + 1):
+        found = files.get(".".join(parts[start:]), set())
+        if found:
+            return next(iter(found)) if len(found) == 1 else ""
+    return ""
+
+
+def _imported_modules(tree: ast.Module) -> Dict[str, str]:
+    """Local name -> dotted path, for every name a test file binds by import."""
+    names: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    names[alias.asname] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                names[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return names
+
+
+def _file_functions(tree: ast.Module) -> Set[str]:
+    """Names the test file binds ONLY to a def - a plain function, never a class."""
+    defs = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+    return defs - classes
+
+
+def _is_function_standin(value: ast.expr, functions: Set[str]) -> bool:
+    """A lambda, a plain function from this file, or a functools.partial - none has a class surface.
+
+    A partial of the original class is convicted too: `partial(Path).cwd` does not
+    exist and `isinstance(x, partial(Path))` raises, so it is the same species.
+    """
+    if isinstance(value, ast.Lambda):
+        return True
+    if isinstance(value, ast.Name):
+        return value.id in functions
+    return isinstance(value, ast.Call) and corpus.dotted_name(value.func) in ("partial", "functools.partial")
+
+
+def _class_names_in(node: ast.expr) -> List[ast.Name]:
+    """The bare names in an isinstance/issubclass second argument, tuple or single."""
+    items = node.elts if isinstance(node, ast.Tuple) else [node]
+    return [item for item in items if isinstance(item, ast.Name)]
+
+
+def _class_use(node: ast.AST, name: str) -> str:
+    """`line:how` when this one node uses `name` as a class, else ""."""
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == name:
+        return f"{node.lineno}:{name}.{node.attr}"
+    if isinstance(node, ast.Call) and corpus.dotted_name(node.func) in ("isinstance", "issubclass"):
+        if len(node.args) == 2 and any(item.id == name for item in _class_names_in(node.args[1])):
+            return f"{node.lineno}:{corpus.dotted_name(node.func)} second argument"
+    if isinstance(node, ast.ClassDef) and any(isinstance(base, ast.Name) and base.id == name for base in node.bases):
+        return f"{node.lineno}:used as a base of {node.name}"
+    return ""
+
+
+def _class_uses(tree: ast.Module, name: str) -> List[str]:
+    """Where a module's own source uses `name` AS A CLASS: `line:how`, in line order.
+
+    Three uses, and only these: an attribute read off it (`Path.cwd`), the second
+    argument of isinstance/issubclass, a base in a class statement. A bare call
+    `Name(...)` is a constructor and a function answers it, so it is not here.
+    A name the module binds by plain `import` is a module, never a class.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any((a.asname or a.name.split(".")[0]) == name for a in node.names):
+            return []
+
+    uses = {use for use in (_class_use(node, name) for node in ast.walk(tree)) if use}
+    return sorted(uses, key=lambda use: int(use.split(":", 1)[0]))
+
+
+def _owned_defs(parsed: corpus.TestFile) -> List[tuple]:
+    """(nodeid, def) for every module-level def and every method, helpers included.
+
+    HELPERS INCLUDED, because the real incident lived in one: `_windows_spelled`
+    patched Path, and no unit body held the call.
+    """
+    owned: List[tuple] = []
+    for node in parsed.tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            owned.append((f"{parsed.relpath}::{node.name}", node))
+        elif isinstance(node, ast.ClassDef):
+            owned.extend(
+                (f"{parsed.relpath}::{node.name}::{sub.name}", sub)
+                for sub in node.body
+                if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef))
+            )
+    return owned
+
+
+def _standin_row(call: ast.Call, nodeid: str, context: Dict) -> Optional[Dict]:
+    """One finding for a `.setattr(module, "Name", stand-in)` call, or None."""
+    if len(call.args) != 3 or not isinstance(call.args[0], ast.Name):
+        return None
+    name_arg = call.args[1]
+    if not (isinstance(name_arg, ast.Constant) and isinstance(name_arg.value, str)):
+        return None
+    if not _is_function_standin(call.args[2], context["functions"]):
+        return None
+    dotted = context["imports"].get(call.args[0].id, "")
+    relpath = _resolve_module(dotted, context["files"]) if dotted else ""
+    if not relpath:
+        return None
+    uses = _class_uses(context["trees"][relpath], name_arg.value)
+    if not uses:
+        return None
+    first_line, first_how = uses[0].split(":", 1)
+    more = f", +{len(uses) - 1} more" if len(uses) > 1 else ""
+    return {
+        "nodeid": nodeid,
+        "line": call.lineno,
+        "species": "CLASS-STANDIN",
+        "target": f"{dotted}.{name_arg.value}",
+        "reason": (
+            f"replaces '{name_arg.value}' in {relpath} with a function, but that module uses it as a "
+            f"class ({first_how} at {relpath}:{first_line}{more}) - the stand-in has no such surface, "
+            f"so that path dies with 'function' object has no attribute, and only on a host that reaches it"
+        ),
+    }
+
+
+def _setattr_calls(owner: ast.AST) -> List[ast.Call]:
+    """Every `<anything>.setattr(...)` call under one def - monkeypatch's spelling."""
+    return [
+        node
+        for node in ast.walk(owner)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "setattr"
+    ]
+
+
+def find_class_standins(scanned: corpus.Corpus) -> List[Dict]:
+    """Every `.setattr(module, "Name", lambda/function)` where the module reads Name as a class."""
+    files = _module_files(scanned)
+    rows: List[Dict] = []
+
+    for parsed in scanned.files:
+        context = {
+            "files": files,
+            "trees": scanned.production_trees,
+            "imports": _imported_modules(parsed.tree),
+            "functions": _file_functions(parsed.tree),
+        }
+        for nodeid, owner in _owned_defs(parsed):
+            rows.extend(row for row in (_standin_row(c, nodeid, context) for c in _setattr_calls(owner)) if row)
+
+    return rows
+
+
 def flagged_nodeids(rows: List[Dict]) -> List[str]:
     """The distinct units named by a list of findings, first-seen order.
 
@@ -396,9 +600,14 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             "advisory": True,
         }
 
-    flagged = find_module_patches(scanned)
-    units = flagged_nodeids(flagged)
-    score = int(((total - len(units)) / total) * 100)
+    module_rows = find_module_patches(scanned)
+    standin_rows = find_class_standins(scanned)
+    flagged = module_rows + standin_rows
+    units = flagged_nodeids(module_rows)
+    standins = flagged_nodeids(standin_rows)
+    # A stand-in found in a helper names the helper, which is not a unit, so the
+    # places to look can outnumber the units: floored at 0, never negative.
+    score = max(0, int(((total - len(flagged_nodeids(flagged))) / total) * 100))
     checks: List[Dict] = [
         {
             "name": "Patch target",
@@ -412,7 +621,20 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
                     + (f" (+{len(units) - MAX_REPORTED} more)" if len(units) > MAX_REPORTED else "")
                 )
             ),
-        }
+        },
+        {
+            "name": "Class stand-in",
+            "passed": not standins,
+            "message": (
+                "no lambda or plain function is patched over a class its module reads as a class"
+                if not standins
+                else (
+                    f"{len(standins)} place(s) patch a function over a class its module reads as a class: "
+                    + ", ".join(standins[:MAX_REPORTED])
+                    + (f" (+{len(standins) - MAX_REPORTED} more)" if len(standins) > MAX_REPORTED else "")
+                )
+            ),
+        },
     ]
 
     checks.extend(unreadable)

@@ -3,6 +3,8 @@
 # Edit this file to customize. Source defaults: templates/backupignore.template
 
 .backup/
+# Todo backlogs live under .backup/todo and are memory, not archive: keep them backed up (backup's ask, 09-15)
+!.backup/todo/
 .git/
 .svn/
 .hg/

@@ -1,4 +1,16 @@
-"""Red-first pins for FPLAN-0460: discovery delegates to registry_scope."""
+# =================== AIPass ====================
+# Name: test_fleet_scope_delegation.py
+# Description: Red-first pins for FPLAN-0460 - discovery delegates the fleet definition to @memory
+# Version: 1.0.1
+# Created: 2026-08-30
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/schedule/discovery.py — red-first pins for FPLAN-0460, delegation to registry_scope."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that discovery.py parses and imports
+# seedgo: no-test-needed(stdlib) — how @memory's fleet_branches reads its registries; @memory's own suite pins it
 
 from unittest.mock import patch
 

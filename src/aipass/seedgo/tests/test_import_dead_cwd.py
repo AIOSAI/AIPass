@@ -1,73 +1,77 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins seedgo imports against a working directory the OS cannot read
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-10-08
 # =============================================
 
-"""Every seedgo module must import without a readable working directory.
+"""Tests that every module under apps/, apps/handlers/__init__.py first, imports with a dead cwd."""
 
-TWO DEFECTS, TWO WORLDS — and one instrument would have proved only half.
+# Every seedgo module must import without a readable working directory.
+#
+# TWO DEFECTS, TWO WORLDS — and one instrument would have proved only half.
+#
+# WORLD A, the ntpath condition. ``ntpath.realpath`` calls ``os.getcwd()``
+# UNCONDITIONALLY, before it checks whether the path is even relative, and
+# ``Path.resolve()`` routes through it. So on Windows every module-level
+# ``Path(__file__).resolve()`` is an import-time working-directory read. Twelve
+# seedgo modules had one. Injected as the CONDITION rather than the platform:
+# ``os.path.realpath`` is wrapped to read ``os.getcwd()`` first, then ``getcwd``
+# is denied.
+#
+# WORLD B, the inspect.stack() shape. ``handlers/__init__.py`` called
+# ``inspect.stack()`` before anything else. That builds a FrameInfo per frame ->
+# ``getsourcefile`` -> (only for the frozen importlib frames an import puts on the
+# stack) ``getmodule``, whose module-scan loop calls ``os.path.realpath`` OUTSIDE
+# any try. World A CANNOT catch this one: on POSIX the walk raises earlier inside
+# ``getabsfile``, where ``inspect`` catches ``FileNotFoundError`` and returns
+# None — so a getcwd denial leaves the defective guard green while Windows dies,
+# because ``ntpath.abspath`` succeeds there and control reaches the unprotected
+# realpath. World B injects that asymmetry directly: ``abspath`` keeps working,
+# ``os.path.realpath`` raises.
+#
+# Both were REPRODUCED RED ON LINUX against the pre-fix source before the cure was
+# written; neither needed a Windows box. Measured on the Windows CI gate
+# 2026-08-31 (@memory's finding for A, @spawn's for B, relayed by @devpulse).
+#
+# THE INTERPRETER VERSION IS PART OF THE PLATFORM. Round 6, from CI: both worlds
+# went red on the Python 3.10 leg and neither was a defect in seedgo. 3.10's pathlib
+# delegates ``Path.resolve()`` to ``os.path.realpath`` through a ``_NormalAccessor``
+# that CAPTURED its own reference when pathlib was first imported (CPython 3.10
+# pathlib.py:358, called at :1077). Rebinding ``os.path.realpath`` afterwards
+# rebinds a name nothing reads again, so world A was inert there — not because the
+# delegation is missing, which was the first diagnosis and was wrong (@memory read
+# the source and refuted it). The arming probes refused rather than passing
+# quietly, which is the instrument discipline working; what they could not do was
+# still measure the claim. So:
+#
+#   * world A stays as the faithful ntpath emulation, keyed to a per-version
+#     cured in four lines: it patches the CAPTURED ACCESSOR too, so it arms on
+#     every interpreter and needs no version table at all;
+#   * ``ARM_WORLD_A_PRIME`` patches ``Path.resolve`` itself — the public call the
+#     defect makes, not the private delegate it routes through this year — so it
+#     arms on every version, and the module sweep rides it;
+#   * ``EMULATE_PY310_PATHLIB`` rebuilds the capture so the whole claim is
+#     falsifiable on THIS machine. A row no local platform can contradict enters
+#     silently (@ai_mail, round 5), and a CI red is a negative measurement: it
+#     proves not-armed, never why — which is precisely how the first, wrong
+#     mechanism survived a careful write-up.
+#
+# World B needed no change — ``inspect`` calls ``os.path.realpath`` directly on
+# every version. Its ARMING PROBE was the defect: it asked ``Path.resolve()``, a
+# question about pathlib, while the world denies realpath. Identical answers on
+# 3.11+ by delegation, divergent on 3.10. Deny and measure the call the DEFECT
+# makes (@memory's rule, applied to a probe rather than to a world).
+#
+# Each world carries a POSITIVE CONTROL — a module rebuilt in the defective shape
+# and imported live, which must die — and a NEGATIVE CONTROL FOR THE POSITIVE
+# CONTROL: the same module must import cleanly in the healthy world. @spawn's
+# lesson from the same round: a control that dies for any reason turns every pin
+# above it vacuously green, so the control needs a control.
 
-WORLD A, the ntpath condition. ``ntpath.realpath`` calls ``os.getcwd()``
-UNCONDITIONALLY, before it checks whether the path is even relative, and
-``Path.resolve()`` routes through it. So on Windows every module-level
-``Path(__file__).resolve()`` is an import-time working-directory read. Twelve
-seedgo modules had one. Injected as the CONDITION rather than the platform:
-``os.path.realpath`` is wrapped to read ``os.getcwd()`` first, then ``getcwd``
-is denied.
-
-WORLD B, the inspect.stack() shape. ``handlers/__init__.py`` called
-``inspect.stack()`` before anything else. That builds a FrameInfo per frame ->
-``getsourcefile`` -> (only for the frozen importlib frames an import puts on the
-stack) ``getmodule``, whose module-scan loop calls ``os.path.realpath`` OUTSIDE
-any try. World A CANNOT catch this one: on POSIX the walk raises earlier inside
-``getabsfile``, where ``inspect`` catches ``FileNotFoundError`` and returns
-None — so a getcwd denial leaves the defective guard green while Windows dies,
-because ``ntpath.abspath`` succeeds there and control reaches the unprotected
-realpath. World B injects that asymmetry directly: ``abspath`` keeps working,
-``os.path.realpath`` raises.
-
-Both were REPRODUCED RED ON LINUX against the pre-fix source before the cure was
-written; neither needed a Windows box. Measured on the Windows CI gate
-2026-08-31 (@memory's finding for A, @spawn's for B, relayed by @devpulse).
-
-THE INTERPRETER VERSION IS PART OF THE PLATFORM. Round 6, from CI: both worlds
-went red on the Python 3.10 leg and neither was a defect in seedgo. 3.10's pathlib
-delegates ``Path.resolve()`` to ``os.path.realpath`` through a ``_NormalAccessor``
-that CAPTURED its own reference when pathlib was first imported (CPython 3.10
-pathlib.py:358, called at :1077). Rebinding ``os.path.realpath`` afterwards
-rebinds a name nothing reads again, so world A was inert there — not because the
-delegation is missing, which was the first diagnosis and was wrong (@memory read
-the source and refuted it). The arming probes refused rather than passing
-quietly, which is the instrument discipline working; what they could not do was
-still measure the claim. So:
-
-  * world A stays as the faithful ntpath emulation, keyed to a per-version
-    cured in four lines: it patches the CAPTURED ACCESSOR too, so it arms on
-    every interpreter and needs no version table at all;
-  * ``ARM_WORLD_A_PRIME`` patches ``Path.resolve`` itself — the public call the
-    defect makes, not the private delegate it routes through this year — so it
-    arms on every version, and the module sweep rides it;
-  * ``EMULATE_PY310_PATHLIB`` rebuilds the capture so the whole claim is
-    falsifiable on THIS machine. A row no local platform can contradict enters
-    silently (@ai_mail, round 5), and a CI red is a negative measurement: it
-    proves not-armed, never why — which is precisely how the first, wrong
-    mechanism survived a careful write-up.
-
-World B needed no change — ``inspect`` calls ``os.path.realpath`` directly on
-every version. Its ARMING PROBE was the defect: it asked ``Path.resolve()``, a
-question about pathlib, while the world denies realpath. Identical answers on
-3.11+ by delegation, divergent on 3.10. Deny and measure the call the DEFECT
-makes (@memory's rule, applied to a probe rather than to a world).
-
-Each world carries a POSITIVE CONTROL — a module rebuilt in the defective shape
-and imported live, which must die — and a NEGATIVE CONTROL FOR THE POSITIVE
-CONTROL: the same module must import cleanly in the healthy world. @spawn's
-lesson from the same round: a control that dies for any reason turns every pin
-above it vacuously green, so the control needs a control.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — what os.getcwd() does on a live directory; only its denial is the subject
 
 import subprocess
 import sys
@@ -141,10 +145,12 @@ def _no_working_tree_litter():
 #: in this branch imports it (json_handler_check.py holds it as an accept
 #: STRING, not an import), and @aipass retires the file under FPLAN-0489.
 #: Measured, not assumed - 83 passed, 3 skipped before and after.
+#: aipass.prax.apps.handlers.logging.setup was dropped on 2026-10-08 (DPLAN-0404):
+#: prax's logger module above already loads it, so naming another branch's
+#: handlers here warmed nothing.
 PRELOAD = """
 from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
-import aipass.prax.apps.handlers.logging.setup  # noqa: F401
 import aipass.cli  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 import aipass.cli.apps.modules.display  # noqa: F401
@@ -847,6 +853,7 @@ def _run(world: str):
         input=world,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=str(SEEDGO_ROOT.parents[2]),
     )
 
@@ -1122,7 +1129,7 @@ class TestTheInstrumentsCanFire:
         assert "DEFECT_DIED" in faithful.stdout, faithful.stdout
         assert "DEFECT_DIED" in cross_check.stdout, cross_check.stdout
 
-    def test_a_getcwd_denial_does_NOT_reach_a_pre_captured_getcwd_accessor(self, tmp_path):
+    def test_a_getcwd_denial_does_not_reach_a_pre_captured_getcwd_accessor(self, tmp_path):
         """The realpath control's sibling, on the route nothing here was driving.
 
         Before 3.11 ``Path.cwd()`` is ``cls(cls._accessor.getcwd())`` — a
@@ -1138,7 +1145,7 @@ class TestTheInstrumentsCanFire:
         result = _run(PRELOAD + EMULATE_PY310_PATHLIB + BARE_MODULE_PATCH_ONLY + body)
         assert "DEFECT_SURVIVED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_world_a_convicts_the_getcwd_route_TOO(self, tmp_path):
+    def test_world_a_convicts_the_getcwd_route_too(self, tmp_path):
         """And the cured world reaches it. Without the second staticmethod line
         this pin is red — which is the whole reason it exists, because the tree
         has seven Path.cwd() sites today and none of them is reached at import.
@@ -1147,7 +1154,7 @@ class TestTheInstrumentsCanFire:
         result = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_A + body)
         assert "DEFECT_DIED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_the_emulation_is_INERT_on_a_host_that_already_has_an_accessor(self, tmp_path):
+    def test_the_emulation_is_inert_on_a_host_that_already_has_an_accessor(self, tmp_path):
         """The round-8 3.10 red, held closed on this interpreter forever.
 
         On CI's real 3.10 the host already had the pre-3.11 shape, and the
@@ -1168,7 +1175,7 @@ class TestTheInstrumentsCanFire:
         assert "ACCESSOR_NATIVE" in result.stdout, f"{result.stdout}\n{result.stderr}"
         assert "MKDIR_WORKED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_the_emulation_still_TAKES_on_a_host_without_one(self, tmp_path):
+    def test_the_emulation_still_takes_on_a_host_without_one(self, tmp_path):
         """The other half. An emulation that had learned to do nothing would
         satisfy the pin above and quietly take every 3.10 claim in this file
         dark - which is the arming-probe defect wearing a fix's clothes.
@@ -1185,7 +1192,7 @@ class TestTheInstrumentsCanFire:
         assert "ACCESSOR_EMULATED" in result.stdout, f"{result.stdout}\n{result.stderr}"
         assert "BODY_RAN" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_the_native_host_emulation_ROUTES_and_does_not_merely_declare(self, tmp_path):
+    def test_the_native_host_emulation_routes_and_does_not_merely_declare(self, tmp_path):
         """Arming probe for the reproduction itself.
 
         My first version of this world only SET pathlib._NormalAccessor. Both
@@ -1205,7 +1212,7 @@ class TestTheInstrumentsCanFire:
         result = _run(PRELOAD + EMULATE_NATIVE_ACCESSOR_HOST + probe)
         assert "MKDIR_WENT_THROUGH_ACCESSOR: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_the_native_world_does_not_DECAPITATE_a_real_pre_311_host(self, tmp_path):
+    def test_the_native_world_does_not_decapitate_a_real_pre_311_host(self, tmp_path):
         """The round-9 3.10 red, held closed here forever.
 
         Round 8 cured EMULATE_PY310_PATHLIB of replacing a real accessor, and I
@@ -1223,7 +1230,7 @@ class TestTheInstrumentsCanFire:
         assert "NATIVE_HOST_ALREADY" in result.stdout, f"{result.stdout}\n{result.stderr}"
         assert "IS_DIR: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_the_SYNTHESISED_accessor_delegates_what_it_does_not_name(self, tmp_path):
+    def test_the_synthesised_accessor_delegates_what_it_does_not_name(self, tmp_path):
         """Belt to the braces above, and the half a no-op guard cannot cover.
 
         The guard stops the world installing over a real accessor. It does not
@@ -1243,7 +1250,7 @@ class TestTheInstrumentsCanFire:
         assert "DELEGATES_STAT: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
         assert "DELEGATES_LISTDIR: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_the_real_310_host_ROUTES_stat_and_does_not_merely_declare_it(self, tmp_path):
+    def test_the_real_310_host_routes_stat_and_does_not_merely_declare_it(self, tmp_path):
         """Arming probe for the round-9 reproduction, for the same reason its
         round-8 sibling needed one: a host that carries the attribute without
         routing through it reproduces nothing, and the pin above would pass
@@ -1259,7 +1266,7 @@ class TestTheInstrumentsCanFire:
         result = _run(PRELOAD + EMULATE_REAL_310_ACCESSOR_HOST + probe)
         assert "STAT_WENT_THROUGH_ACCESSOR: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_the_accessor_absence_emulation_actually_REMOVES_it(self, tmp_path):
+    def test_the_accessor_absence_emulation_actually_removes_it(self, tmp_path):
         """Arming probe for REMOVE_ANY_NATIVE_ACCESSOR. On 3.11+ it is a no-op
         by construction, so without this pin the world could stop working and
         every arm expectation built on it would keep passing here while going
@@ -1289,7 +1296,7 @@ class TestTheInstrumentsCanFire:
         result = _run(PRELOAD + EMULATE_NATIVE_ACCESSOR_HOST + probe)
         assert "PARENTS_AND_EXIST_OK_HONOURED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_every_module_imports_on_a_NATIVE_accessor_host_too(self, tmp_path):
+    def test_every_module_imports_on_a_native_accessor_host_too(self, tmp_path):
         """The failing CI pin's own shape, run under the host that failed it.
 
         This is the pin the round-8 red actually killed - restated so that the
@@ -1298,7 +1305,7 @@ class TestTheInstrumentsCanFire:
         for a CI leg nobody runs locally.
         """
         modules = _seedgo_modules()
-        assert modules, "no seedgo modules enumerated - this pin would be vacuous"
+        assert modules != [], "no seedgo modules enumerated - this pin would be vacuous"
         body = (
             "import importlib\n"
             f"for name in {modules[:40]!r}:\n"
@@ -1310,7 +1317,7 @@ class TestTheInstrumentsCanFire:
         assert "ACCESSOR_NATIVE" in result.stdout, f"{result.stdout}\n{result.stderr}"
         assert "ALL_IMPORTED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_the_bare_patch_control_holds_on_an_NT_SHAPED_HOST_TOO(self, tmp_path):
+    def test_the_bare_patch_control_holds_on_an_nt_shaped_host_too(self, tmp_path):
         """THE LITMUS, and the pin that would have caught the round-6 red here.
 
         The control above claims a bare module patch cannot reach a captured
@@ -1328,7 +1335,7 @@ class TestTheInstrumentsCanFire:
         result = _run(PRELOAD + world + body)
         assert "DEFECT_SURVIVED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_world_a_still_convicts_on_an_NT_SHAPED_HOST(self, tmp_path):
+    def test_world_a_still_convicts_on_an_nt_shaped_host(self, tmp_path):
         """The other half. A litmus that only showed the control surviving
         everywhere would be satisfied by a world that denies nothing — so the
         cured world must still ARM under the same emulation, or the pair proves
@@ -1413,7 +1420,7 @@ class TestTheInstrumentsCanFire:
         produce live. A literal table, so it cannot vanish."""
         assert _alias_discrimination_verdict(host_reads, emulated_reads) == expected
 
-    def test_the_probe_answers_TRUE_on_an_nt_SHAPED_HOST_and_the_pin_survives_it(self, tmp_path):
+    def test_the_probe_answers_true_on_an_nt_shaped_host_and_the_pin_survives_it(self, tmp_path):
         """The round-8 red reproduced on Linux, and held closed.
 
         Running the bare-host measurement under the nt property is what CI did
@@ -1503,7 +1510,7 @@ class TestTheInstrumentsCanFire:
             # a future reader sees a measured boundary rather than a gap.
             assert alias_reads is True
 
-    def test_the_catchability_matches_WHAT_THE_HOST_IS(self, tmp_path):
+    def test_the_catchability_matches_what_the_host_is(self, tmp_path):
         """BOTH ARMS ASSERTED, so this row measures on every operating system.
 
         The round-9 version asserted ALIAS_CATCHABLE unconditionally and met a
@@ -1549,7 +1556,7 @@ class TestTheInstrumentsCanFire:
                 f"reads the cwd for the version reason - measured {verdict}"
             )
 
-    def test_the_alias_is_LOST_TO_VERSION_on_a_313_shaped_ntpath(self, tmp_path):
+    def test_the_alias_is_lost_to_version_on_a_313_shaped_ntpath(self, tmp_path):
         """The 3.13 row, emulated by property and stated with its dimension.
 
         THE ROUND-9 VERSION HAD TWO DEFECTS and the Windows leg found both.
@@ -1680,7 +1687,7 @@ class TestTheInstrumentsCanFire:
         readings, _ = self._measure_route_and_report(host)
         return readings
 
-    def test_the_arming_worlds_patch_the_module_pathlib_ROUTES_THROUGH(self, tmp_path):
+    def test_the_arming_worlds_patch_the_module_pathlib_routes_through(self, tmp_path):
         """The invariant every ``os.path.realpath`` world here rests on, keyed
         on the fact that decides it instead of on a 3.12 spelling.
 
@@ -1743,7 +1750,7 @@ class TestTheInstrumentsCanFire:
             "the chimera changed whether this host has a captured accessor, which it has no business touching"
         )
 
-    def test_the_pre_311_shape_answers_the_OTHER_arm_from_here(self, tmp_path):
+    def test_the_pre_311_shape_answers_the_other_arm_from_here(self, tmp_path):
         """The arm CI runs and this interpreter cannot reach on its own.
 
         Under the pre-3.11 shape the module patch must STOP reaching resolve -
@@ -1761,7 +1768,7 @@ class TestTheInstrumentsCanFire:
             "captured-accessor half of every world here is measuring nothing"
         )
 
-    def test_the_identity_break_goes_TOWARD_the_dialect_the_host_is_not(self, tmp_path):
+    def test_the_identity_break_goes_toward_the_dialect_the_host_is_not(self, tmp_path):
         """Round 12's windows red, reproduced on Linux and held closed.
 
         The fixed break - always point os.path at ntpath - changes nothing on
@@ -1805,7 +1812,7 @@ class TestTheInstrumentsCanFire:
             f"never exercised: {as_posix.stdout}\n{as_nt.stdout}"
         )
 
-    def test_the_break_actually_MOVES_the_identity_from_either_side(self, tmp_path):
+    def test_the_break_actually_moves_the_identity_from_either_side(self, tmp_path):
         """The reading, not just the announcement.
 
         A world that printed the right direction and changed nothing would pass
@@ -1866,7 +1873,7 @@ class TestTheInstrumentsCanFire:
                     f"break, and it read {intact} then {broken}: {report}"
                 )
 
-    def test_UNEXPLAINED_means_measured_and_not_merely_absent_from_the_table(self, tmp_path):
+    def test_unexplained_means_measured_and_not_merely_absent_from_the_table(self, tmp_path):
         """The other half of round 12's cure, and the reason the verdict kept
         its third value.
 
@@ -1882,7 +1889,7 @@ class TestTheInstrumentsCanFire:
         assert _module_patch_route(True, False) == ROUTE_VIA_MODULE
         assert _module_patch_route(False, True) == ROUTE_VIA_ACCESSOR
 
-    def test_the_object_flavour_world_STANDS_DOWN_on_a_host_that_has_one(self, tmp_path):
+    def test_the_object_flavour_world_stands_down_on_a_host_that_has_one(self, tmp_path):
         """Host == emulated is one layer, checked for the newest world.
 
         On 3.10 and 3.11 the flavour already IS an object, and installing over
@@ -1912,7 +1919,7 @@ class TestTheInstrumentsCanFire:
             f"the host's own flavour was replaced anyway: {result.stdout}\n{result.stderr}"
         )
 
-    def test_the_object_flavour_world_reports_UNAVAILABLE_with_no_flavour_at_all(self, tmp_path):
+    def test_the_object_flavour_world_reports_unavailable_with_no_flavour_at_all(self, tmp_path):
         """The arm 3.13 takes, reachable from an interpreter that has _flavour.
 
         A pathlib whose routing attribute is spelled somewhere else is not a
@@ -1944,7 +1951,7 @@ class TestTheInstrumentsCanFire:
             f"the world took the child down instead of reporting: {result.stdout}\n{result.stderr}"
         )
 
-    def test_the_stand_down_reads_the_CONCRETE_class_not_PurePath(self, tmp_path):
+    def test_the_stand_down_reads_the_concrete_class_not_the_pure_path(self, tmp_path):
         """Round 12's red 2, as the exact shape that defeated the guard.
 
         3.10 and 3.11 do not define _flavour on PurePath - the concrete
@@ -1982,7 +1989,7 @@ class TestTheInstrumentsCanFire:
             f"the host's own flavour was replaced anyway: {result.stdout}\n{result.stderr}"
         )
 
-    def test_the_object_flavour_REFUSES_realpath_like_the_real_one(self, tmp_path):
+    def test_the_object_flavour_refuses_realpath_like_the_real_one(self, tmp_path):
         """The stand-in must not be friendlier than the thing it stands in for.
 
         3.10's _PosixFlavour carries parsing and no realpath - resolve reaches
@@ -2041,7 +2048,7 @@ class TestTheInstrumentsCanFire:
         """
         assert _module_patch_route(reaches, has_accessor) == expected
 
-    def test_no_probe_DERIVES_its_path_from_the_host_it_measures(self, tmp_path):
+    def test_no_probe_derives_its_path_from_the_host_it_measures(self, tmp_path):
         """The round-10 species as a property of the source, because on this
         host the defect is invisible in behaviour.
 
@@ -2123,7 +2130,7 @@ class TestTheInstrumentsCanFire:
         assert _working_tree_entries(room) == {"here"}
         assert _working_tree_entries(room / "absent") == set()
 
-    def test_the_two_probe_literals_answer_DIFFERENT_questions(self, tmp_path):
+    def test_the_two_probe_literals_answer_different_questions(self, tmp_path):
         """Why this file carries two absolute literals instead of one.
 
         A later reader will see '/x' and '//x' a few hundred lines apart and be
@@ -2151,7 +2158,7 @@ class TestTheInstrumentsCanFire:
         assert "NEUTRAL True True" in result.stdout, f"{result.stdout}\n{result.stderr}"
         assert "VERSIONED True False" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_breaking_the_route_DISARMS_world_a_where_the_route_is_the_only_one(self, tmp_path):
+    def test_breaking_the_route_disarms_world_a_where_the_route_is_the_only_one(self, tmp_path):
         """The negative control, keyed on the route the host actually has.
 
         THE ROUND-10 VERSION DEMANDED `DEFECT_SURVIVED` EVERYWHERE and CI
@@ -2221,7 +2228,7 @@ class TestTheInstrumentsCanFire:
         """
         assert _chimera_control_expectation(reaches, has_accessor) == expected
 
-    def test_the_313_shape_reproduces_the_UNEXPLAINED_leg_from_here(self, tmp_path):
+    def test_the_313_shape_reproduces_the_unexplained_leg_from_here(self, tmp_path):
         """Round 11's leftover: the leg the captured-accessor mechanism did not
         explain, reproduced on this interpreter.
 
@@ -2254,7 +2261,7 @@ class TestTheInstrumentsCanFire:
             f"the 3.13 shape no longer reproduces the leg it was built from: {disarmed.stdout}\n{disarmed.stderr}"
         )
 
-    def test_the_313_shape_is_what_MOVES_the_route_and_not_the_chimera(self, tmp_path):
+    def test_the_313_shape_is_what_moves_the_route_and_not_the_chimera(self, tmp_path):
         """The control that separates the two halves of the row above.
 
         Without it, a world that broke nothing and a chimera that severed
@@ -2277,7 +2284,7 @@ class TestTheInstrumentsCanFire:
         else:
             assert without is False, "the 3.13 shape adds nothing on this host, so the row above proves nothing"
 
-    def test_the_pre_311_shape_reproduces_the_CI_answer_from_here(self, tmp_path):
+    def test_the_pre_311_shape_reproduces_the_ci_answer_from_here(self, tmp_path):
         """Red 2 of round 11, reproduced on this interpreter and held closed.
 
         The board said `DEFECT_DIED: FileNotFoundError` where the pin demanded
@@ -2324,7 +2331,7 @@ class TestTheInstrumentsCanFire:
                 f"{no_accessor.stdout}"
             )
 
-    def test_the_platform_arm_is_reachable_HERE_on_an_nt_identity_host(self, tmp_path):
+    def test_the_platform_arm_is_reachable_here_on_an_nt_identity_host(self, tmp_path):
         """Windows red 1, reproduced on Linux and held closed forever.
 
         The round-9 assertion demanded ALIAS_CATCHABLE on every host. This
@@ -2342,7 +2349,7 @@ class TestTheInstrumentsCanFire:
         )
         assert _alias_catchability(alias_reads, ntpath_absolute, alias_is_the_host) == ALIAS_LOST_TO_PLATFORM
 
-    def test_the_nt_identity_emulation_needs_BOTH_halves(self, tmp_path):
+    def test_the_nt_identity_emulation_needs_both_halves(self, tmp_path):
         """Control for the control, and the reason the world is two constants.
 
         Each half was measured alone before this pin was written. The identity
@@ -2397,7 +2404,7 @@ class TestTheInstrumentsCanFire:
         assert value[:1] == "'" and value[-1:] == "'", f"the probe path is not a plain literal: {value}"
         return value[1:-1]
 
-    def test_the_probe_literal_is_the_SAME_SHAPE_on_every_dialect(self, tmp_path):
+    def test_the_probe_literal_is_the_same_shape_on_every_dialect(self, tmp_path):
         """Windows red 2's real mechanism, pinned as a property of the input.
 
         The round-9 probe built its path as `os.path.abspath(os.sep)`: '/' on
@@ -2476,7 +2483,7 @@ class TestTheInstrumentsCanFire:
         assert "DRIVED_IS_ABSOLUTE: True" in emulated.stdout, emulated.stdout
         assert "ROOTED_IS_ABSOLUTE: False" in emulated.stdout, emulated.stdout
 
-    def test_world_a_ARMS_against_a_310_shaped_pathlib(self, tmp_path):
+    def test_world_a_arms_against_a_310_shaped_pathlib(self, tmp_path):
         """The cure, measured on the interpreter shape this machine does not
         have. With the captured accessor patched, the faithful world convicts
         against a pre-3.11 pathlib exactly as it does natively — which is what
@@ -2508,7 +2515,7 @@ class TestTheInstrumentsCanFire:
         result = _run(PRELOAD + EMULATE_PY310_PATHLIB + probe)
         assert "EMULATION_RESOLVES: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_a_bare_module_patch_does_NOT_reach_a_pre_captured_accessor(self, tmp_path):
+    def test_a_bare_module_patch_does_not_reach_a_pre_captured_accessor(self, tmp_path):
         """The mechanism, measured rather than asserted.
 
         Reproduced independently here before rebuilding the world: patching only
@@ -2528,7 +2535,7 @@ class TestTheInstrumentsCanFire:
 
 
 class TestEverySeedgoModuleImportsWithoutAReadableCwd:
-    def test_the_sweeps_world_is_ARMED_not_merely_reporting(self, world_a_result):
+    def test_the_sweeps_world_is_armed_not_merely_reporting(self, world_a_result):
         """Strengthened from either-outcome to ARMED, which the stand-in makes
         possible on every interpreter.
 
@@ -2623,96 +2630,49 @@ print("SWEPT")
 
 
 # ---------------------------------------------------------------------------
-# The caller-is-None branch, watched behaviourally as well as structurally
+# The fence (v2, DPLAN-0404) keeps its verdicts with the cwd dead
 # ---------------------------------------------------------------------------
 
-_DIRECT_CALL_BODY = """
-from aipass.seedgo.apps.handlers import _find_real_caller, _guard_branch_access
+#: The fence's own probe (tests/test_handlers_fence.py), run as a script so its
+#: frames carry the seat's filename. The old guard's private names it replaced
+#: (_find_real_caller and the caller-is-None branch) do not exist in v2.
+FENCE_PROBE = SEEDGO_ROOT / "tests" / "support_fence.py"
 
-# ARMING PROBE 2: the branch under test only RUNS when _find_real_caller
-# returns None. Fed on stdin every frame is <stdin> or frozen importlib, both
-# skipped, so it does. Without this the guard could return for some entirely
-# different reason and the pin would report the same green.
-print("CALLER_IS_NONE:", _find_real_caller() == (None, None))
+_RUN_PROBE_AT = """
+import runpy
+import sys
 
-_guard_branch_access()
-print("GUARD_RETURNED")
+sys.argv = ["probe", "pkg"]
+runpy.run_path(%(seat)r, run_name="__main__")
 """
 
 
-class TestTheCallerIsNoneBranchIsReachableByADirectCall:
-    """@devpulse relaying @spawn's correction of MY sentence, 2026-08-31.
-
-    I published "the deleted second inspect.stack() walk is unreachable, so only
-    an AST ban can watch it". Too strong, and @spawn measured the correction:
-    unreachable from IMPORT-shaped pins — apps/__init__ always supplies a real
-    on-disk frame — but reachable by calling ``_guard_branch_access()`` DIRECTLY
-    from a child fed on stdin, where every frame is a pseudo-file or frozen
-    importlib and ``_find_real_caller`` therefore returns None.
-
-    So the branch gets a behavioural pin as well as the structural one. The AST
-    ban still earns its place: no subprocess, and it names the defect precisely.
-    This one is the sibling that watches the BEHAVIOUR, and the two die to
-    different mutations — regrowing the walk kills both, deleting only the AST
-    rule leaves this standing.
-
-    The true sentence, for the record: import-shaped pins cannot reach it. Not
-    "nothing can".
-    """
+class TestTheFenceKeepsItsVerdictsWithADeadCwd:
+    """The v2 fence resolves its own file and every frame's under a try, and
+    reads a pseudo filename raw (DPLAN-0404). Under both worlds, kin is still
+    let in and a caller from no branch is still refused by name: a fence that
+    died here would refuse its own branch, and one that fell open would let
+    the elsewhere seat through."""
 
     @staticmethod
-    @pytest.fixture(scope="class", params=["native", "310-shaped"])
-    def result(request):
-        """Run on BOTH interpreter shapes.
+    def _verdict(world: str, seat: Path) -> tuple:
+        result = _run(PRELOAD + world + PROBE + PROBE_REALPATH + _RUN_PROBE_AT % {"seat": str(seat)})
+        lines = result.stdout.strip().splitlines()
+        return result, lines[-1] if lines else ""
 
-        Parametrised to close a mutant that survived the first run: putting the
-        old resolve-shaped probe back changed nothing on 3.12, because
-        delegation makes the two probes agree there. Under the 3.10 shape the
-        old probe reports VACUOUS and the substitution finally has a
-        consequence a local run can see.
-        """
-        shape = EMULATE_PY310_PATHLIB if request.param == "310-shaped" else ""
-        return _run(PRELOAD + shape + ARM_WORLD_B + PROBE_REALPATH + _DIRECT_CALL_BODY)
+    @pytest.mark.parametrize("world", [ARM_WORLD_A_PRIME, ARM_WORLD_B], ids=["world_a_prime", "world_b"])
+    def test_kin_is_allowed(self, world):
+        result, verdict = self._verdict(world, FENCE_PROBE)
+        assert "PROBE_ARMED" in result.stdout, result.stdout
+        assert verdict == "ALLOWED", result.stdout + result.stderr
 
-    def test_the_denial_bites_in_this_child(self, result):
-        """Arming probe 1. A world that silently failed to deny anything would
-        let a regrown inspect.stack() walk pass this whole class.
+    @pytest.mark.parametrize("world", [ARM_WORLD_A_PRIME, ARM_WORLD_B], ids=["world_a_prime", "world_b"])
+    def test_an_elsewhere_caller_is_refused(self, world, tmp_path):
+        seat = tmp_path / "elsewhere" / "probe.py"
+        seat.parent.mkdir()
+        seat.write_text(FENCE_PROBE.read_text(encoding="utf-8"), encoding="utf-8")
 
-        MEASURES os.path.realpath, which is what world B denies and what
-        ``inspect`` calls directly on every interpreter. The first version asked
-        ``Path.resolve()`` instead — a question about PATHLIB, true on 3.11+
-        only by delegation — and went red on the 3.10 CI leg over a property
-        world B never depended on. The world was fine; the probe was measuring
-        something else (@devpulse relaying the 3.10 leg of 8550ed10).
-        """
-        assert "PROBE_ARMED" in result.stdout, result.stderr
+        result, verdict = self._verdict(world, seat)
 
-    def test_the_branch_under_test_actually_runs(self, result):
-        """Arming probe 2, and @spawn's rule: a structural claim that read the
-        wrong thing reports exactly the same green as a clean tree. If
-        _find_real_caller returned a real caller here, the guard would be
-        exercising the ALLOW-pytest path instead and proving nothing."""
-        assert "CALLER_IS_NONE: True" in result.stdout, result.stdout
-
-    def test_the_OLD_probe_would_have_gone_vacuous_on_a_310_shaped_pathlib(self):
-        """Why this class's arming probe had to change, reproduced locally.
-
-        The original probe asked ``Path.resolve()`` — a question about pathlib —
-        while world B denies ``os.path.realpath``. On 3.11+ delegation makes the
-        two agree and the substitution is invisible; against a 3.10-shaped
-        pathlib the old probe reports VACUOUS while the world is fully armed,
-        which is the red the 3.10 CI leg produced.
-
-        Pinned so the correction is falsifiable HERE rather than only on the one
-        interpreter this machine does not have.
-        """
-        old_probe = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_B + PROBE)
-        new_probe = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_B + PROBE_REALPATH)
-        assert "PROBE_VACUOUS" in old_probe.stdout, old_probe.stdout
-        assert "PROBE_ARMED" in new_probe.stdout, new_probe.stdout
-
-    def test_the_guard_returns_rather_than_dying(self, result):
-        """The claim itself. A regrown second walk dies here under the realpath
-        denial; the cured plain return survives."""
-        assert "GUARD_RETURNED" in result.stdout, result.stderr
-        assert result.returncode == 0, result.stderr
+        assert "PROBE_ARMED" in result.stdout, result.stdout
+        assert verdict == "DENIED Caller branch: unknown", result.stdout + result.stderr

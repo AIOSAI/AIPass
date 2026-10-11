@@ -55,7 +55,7 @@ tests/  docs/  docs.local/  dropbox/  artifacts/  logs/  tools/  .archive/
 
  - A bare number is not an identity. Every per-type registry numbers from 0001, so `0012` exists in each. A bare number resolves against the FPLAN registry; pass the typed ID when it is not an FPLAN.
  - Nothing here reads the process working directory to find itself. Route through `repo_root.py` or the branch dies on a checkout with no readable cwd.
- - Close is two halves: archival in the foreground where failure can still be reported, vectorisation in a detached runner. A restored-then-reclosed plan archives twice today — see docs/known_issues.md.
+ - Close is two halves: archival in the foreground where failure can still be reported, vectorisation in a detached runner. A restored-then-reclosed plan archives twice today — see docs.local/known_issues.md.
  - `quick_status` on a dashboard is shared ground with other writers. Merge your keys, never replace the block, or you silently delete someone else's field.
  - The dashboard subject cap and char budget belong to @prax. Import them from `aipass.prax.apps.modules.dashboard`; a second copy of the number is what drifts.
  - The dashboard writer refuses to create a dashboard that does not exist. A directory without one is not a branch; `drone @prax dashboard refresh @<branch>` is what mints it.

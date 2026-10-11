@@ -1,29 +1,32 @@
 # =================== AIPass ====================
 # Name: test_canary_cli.py
 # Description: Tests for canary's entry point routing, help and introspection
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-08-22
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for canary's CLI entry point.
+"""Tests for apps/canary.py, the entry point: routing, help and introspection."""
 
-Covers the four things the entry point promises: no-args shows introspection,
---help shows help without executing anything, a subcommand's --help never runs
-that subcommand, and an unknown command fails loudly with a non-zero code.
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — that a Windows console is switched to utf-8 before any print
+# seedgo: no-test-needed(logged_fallback) — that a module which fails to import is logged and skipped
 
-The exit-code assertions are deliberate. Canary found owner-gate refusals that
-exited 0 in another branch — a refusal the shell reads as success — so its own
-refusal path is pinned by test rather than assumed.
-"""
-
-import importlib
 import os
+import subprocess
 import sys
 
 import pytest
 
 from aipass.canary.apps import canary as canary_entry
+
+# Covers the four things the entry point promises: no-args shows introspection,
+# --help shows help without executing anything, a subcommand's --help never
+# runs that subcommand, and an unknown command fails loudly with a non-zero code.
+#
+# The exit-code assertions are deliberate. Canary found owner-gate refusals that
+# exited 0 in another branch — a refusal the shell reads as success — so its own
+# refusal path is pinned by test rather than assumed.
 
 
 class _StubModule:
@@ -229,33 +232,20 @@ def test_failure_flag_from_an_earlier_command_does_not_leak(monkeypatch, stub_mo
 # =============================================================================
 
 
-def test_branch_name_is_set_at_import_time(monkeypatch):
-    """The entry point stamps AIPASS_BRANCH_NAME before prax resolves a branch.
+def test_a_fresh_import_stamps_the_branch_name_into_an_environment_without_one(tmp_path):
+    """A child interpreter imports the entry point cold, so the module body runs; proven by its mutant."""
+    env = {key: value for key, value in os.environ.items() if key != "AIPASS_BRANCH_NAME"}
+    probe = "import os\nimport aipass.canary.apps.canary\nprint(os.environ.get('AIPASS_BRANCH_NAME'))\n"
 
-    Uses importlib.reload so the module body actually re-executes — asserting on
-    the already-imported module would pass even if the line were deleted.
-    """
-    monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
+    child = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        cwd=str(tmp_path),
+        env=env,
+    )
 
-    reloaded = importlib.reload(sys.modules["aipass.canary.apps.canary"])
-
-    assert os.environ["AIPASS_BRANCH_NAME"] == "canary"
-    assert reloaded.__version__ == canary_entry.__version__
-
-
-def test_module_import_path_logs_when_it_falls_back(monkeypatch, mock_logger):
-    """The fallback branch is logged, never silent.
-
-    A swallowed ImportError here would make the local-layout fallback invisible
-    — the exact failure species canary exists to report.
-    """
-
-    def _always_missing(name):
-        raise ImportError(f"no module named {name}")
-
-    monkeypatch.setattr(canary_entry.importlib, "import_module", _always_missing)
-
-    result = canary_entry._module_import_path("ghost")
-
-    assert result == "apps.modules.ghost"
-    assert any(level == "info" for level, _ in mock_logger)
+    assert child.returncode == 0, child.stderr
+    assert child.stdout == "canary\n"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tracking.py
 # Description: Usage Tracking Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-16
-# Modified: 2026-09-13
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -99,12 +99,11 @@ def track_usage(
         # Wait for OpenRouter to process the generation
         time.sleep(DEFAULT_GENERATION_CHECK_DELAY)
 
-        # Query OpenRouter for real metrics
-        metrics = get_generation_metrics(generation_id, api_key)
-
-        if not metrics:
-            # Failed to retrieve generation metrics
-            return {"success": False, "error": "Failed to retrieve generation metrics"}
+        # Query OpenRouter for real metrics; the refusal carries its reason
+        try:
+            metrics = get_generation_metrics(generation_id, api_key)
+        except MetricsUnavailable as e:
+            return {"success": False, "error": str(e)}
 
         # Store the usage data
         if store_usage_data(caller, model, generation_id, metrics):
@@ -122,7 +121,18 @@ def track_usage(
         return {"success": False, "error": str(e)}
 
 
-def get_generation_metrics(generation_id: str, api_key: str) -> Optional[Dict[str, Any]]:
+class MetricsUnavailable(Exception):
+    """
+    OpenRouter could not give the metrics of one generation; str(exc) says why.
+
+    get_generation_metrics used to answer None for a timeout, a request error,
+    a non-200, a body without data and a body that did not parse alike, so
+    track_usage could only report "Failed to retrieve generation metrics"
+    (api, fleet green leg 9).
+    """
+
+
+def get_generation_metrics(generation_id: str, api_key: str) -> Dict[str, Any]:
     """
     Query OpenRouter /generation endpoint for real usage metrics
 
@@ -142,63 +152,55 @@ def get_generation_metrics(generation_id: str, api_key: str) -> Optional[Dict[st
         - latency: Total latency in milliseconds
         - provider_name: Provider that served the request
 
-        Returns None if request fails or data is invalid
+    Raises:
+        MetricsUnavailable: The request failed or timed out, OpenRouter answered
+            other than 200, or the body held no metrics that parse. The one
+            caller, track_usage, reports str(exc) and stores nothing.
     """
-    try:
-        # Set up request headers
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-        # Query the generation endpoint
+    try:
         response = requests.get(  # type: ignore[attr-defined]
             GENERATION_ENDPOINT, params={"id": generation_id}, headers=headers, timeout=DEFAULT_REQUEST_TIMEOUT
         )
-
-        # Check response status
-        if response.status_code == 200:
-            data = response.json()
-
-            # Validate response structure
-            if not data or "data" not in data:
-                logger.warning(
-                    f"[{MODULE_NAME}] Invalid response structure from OpenRouter for generation {generation_id}"
-                )
-                return None
-
-            # Extract metrics from response (use `or 0` to handle explicit None values)
-            metrics = data["data"]
-            result = {
-                "total_cost": float(metrics.get("total_cost") or 0),
-                "tokens_prompt": int(metrics.get("tokens_prompt") or 0),
-                "tokens_completion": int(metrics.get("tokens_completion") or 0),
-                "generation_time": int(metrics.get("generation_time") or 0),
-                "latency": int(metrics.get("latency") or 0),
-                "provider_name": metrics.get("provider_name") or "unknown",
-            }
-
-            # Retrieved metrics for generation_id
-            return result
-
-        else:
-            logger.warning(
-                f"[{MODULE_NAME}] OpenRouter API returned status {response.status_code} for generation {generation_id}"
-            )
-            return None
-
     except requests.exceptions.Timeout as e:
         logger.warning(f"[{MODULE_NAME}] Request timeout querying generation: {e}")
-        return None
-
+        raise MetricsUnavailable(f"Request timeout querying generation {generation_id}: {e}") from e
     except requests.exceptions.RequestException as e:
         logger.error(f"[{MODULE_NAME}] Request error querying generation: {e}")
-        return None
+        raise MetricsUnavailable(f"Request error querying generation {generation_id}: {e}") from e
 
-    except (ValueError, KeyError) as e:
+    if response.status_code != 200:
+        logger.warning(
+            f"[{MODULE_NAME}] OpenRouter API returned status {response.status_code} for generation {generation_id}"
+        )
+        raise MetricsUnavailable(f"OpenRouter answered status {response.status_code} for generation {generation_id}")
+
+    try:
+        data = response.json()
+    except ValueError as e:
         logger.error(f"[{MODULE_NAME}] Error parsing metrics: {e}")
-        return None
+        raise MetricsUnavailable(f"OpenRouter answered unreadable JSON for generation {generation_id}: {e}") from e
 
-    except Exception as e:
-        logger.error(f"[{MODULE_NAME}] Unexpected error getting generation metrics: {e}")
-        return None
+    if not data or "data" not in data:
+        logger.warning(f"[{MODULE_NAME}] Invalid response structure from OpenRouter for generation {generation_id}")
+        raise MetricsUnavailable(f"OpenRouter answered without a data block for generation {generation_id}")
+
+    # Extract metrics from response (use `or 0` to handle explicit None values)
+    metrics = data["data"]
+
+    try:
+        return {
+            "total_cost": float(metrics.get("total_cost") or 0),
+            "tokens_prompt": int(metrics.get("tokens_prompt") or 0),
+            "tokens_completion": int(metrics.get("tokens_completion") or 0),
+            "generation_time": int(metrics.get("generation_time") or 0),
+            "latency": int(metrics.get("latency") or 0),
+            "provider_name": metrics.get("provider_name") or "unknown",
+        }
+    except (ValueError, TypeError, AttributeError) as e:
+        logger.error(f"[{MODULE_NAME}] Error parsing metrics: {e}")
+        raise MetricsUnavailable(f"OpenRouter's metrics for generation {generation_id} do not parse: {e}") from e
 
 
 def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[str, Any]) -> bool:

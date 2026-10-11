@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ai_mail.py
 # Description: Entry point CLI for drone @ai_mail — inter-branch email system
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-08-21
+# Modified: 2026-10-07
 # =============================================
 
 """
@@ -157,6 +157,11 @@ def discover_modules() -> List[Any]:
             continue
 
         module_name = f"aipass.ai_mail.apps.modules.{file_path.stem}"
+
+        # A door_*.py is a door (DPLAN-0404): a re-export for other branches, not a command.
+        if file_path.name.startswith("door_"):
+            logger.info(f"  [door] {module_name}")
+            continue
 
         try:
             # Import module

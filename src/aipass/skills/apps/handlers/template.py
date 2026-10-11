@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template.py
 # Description: Skill template management
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-10
 # =============================================
 
 """Skill scaffolding templates: resolve a tier, copy it, fill placeholders.
@@ -95,12 +95,14 @@ def copy_template(template_path, target_path, skill_name):
         # Copy the entire template tree, excluding __pycache__
         shutil.copytree(str(template_path), str(target), ignore=shutil.ignore_patterns("__pycache__"))
 
-        # Replace placeholders in all files
+        # Replace placeholders in all files. Names are spelled with forward
+        # slashes and sorted below, so every host answers the same list in the
+        # same order: str() would spell apps\handlers on Windows.
         created_files = []
         for file_path in target.rglob("*"):
             if not file_path.is_file():
                 continue
-            created_files.append(str(file_path.relative_to(target)))
+            created_files.append(file_path.relative_to(target).as_posix())
             _replace_placeholder_in_file(file_path, skill_name)
 
         json_handler.log_operation(

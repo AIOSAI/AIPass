@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_currency_content.py
 # Description: Queryable content for the README currency proof
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-03
 # =============================================
 
 """
@@ -54,8 +54,6 @@ def get_readme_currency_proof() -> str:
         "  [red]\u2717[/red] README mentions [dim]diagnostics_check.py[/dim] which was archived",
         "  [green]\u2713[/green] All referenced standards actually exist in the pack",
         "",
-        # TODO: Expand with detection algorithm details, regex patterns
-        # for count extraction, and stale reference identification logic.
         "",
         f"[dim]{sep}[/dim]",
         "[bold cyan]HOW TO FIX:[/bold cyan]",

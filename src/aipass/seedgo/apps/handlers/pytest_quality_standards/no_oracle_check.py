@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: no_oracle_check.py
 # Description: v5 - does a test verify anything at all
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-06
 # =============================================
 
 """Does this test verify anything a reader can see?
@@ -90,20 +90,65 @@ def _calls_made(unit: corpus.TestUnit) -> List[str]:
     return sorted(names)
 
 
-def has_oracle(unit: corpus.TestUnit) -> bool:
+def has_oracle(unit: corpus.TestUnit, oracle_helpers: frozenset = frozenset()) -> bool:
     """True when the unit verifies something a reader can see.
 
     The public entry point for this rule - the report lane and the tests both
-    ask the question here rather than re-deriving it.
+    ask the question here rather than re-deriving it. ``oracle_helpers`` are
+    the call spellings (``name`` or ``self.name``) of the unit's own module
+    functions and class methods whose body holds an oracle; a call to one is
+    the unit's oracle (seedgo, fleet green leg 20).
     """
-    return bool(corpus.asserts_in(unit) or corpus.oracle_calls_in(unit) or _delegates(unit))
+    if corpus.asserts_in(unit) or corpus.oracle_calls_in(unit) or _delegates(unit):
+        return True
+    return any(
+        isinstance(node, ast.Call) and corpus.dotted_name(node.func) in oracle_helpers for node in ast.walk(unit.node)
+    )
+
+
+def _helper_has_oracle(node: ast.FunctionDef | ast.AsyncFunctionDef, relpath: str) -> bool:
+    """Whether a helper's own body holds an oracle: one level, never what it calls in turn."""
+    return has_oracle(corpus.TestUnit(name=node.name, node=node, relpath=relpath, line=node.lineno))
+
+
+def _oracle_helpers(test_file: corpus.TestFile) -> Dict[str, frozenset]:
+    """Per class name ("" for module level), the helper call spellings that hold an oracle.
+
+    A module function is called by its name, a method of the unit's own class
+    through ``self``; both are read in the same file only.
+    """
+    module_level = frozenset(
+        node.name
+        for node in test_file.tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _helper_has_oracle(node, test_file.relpath)
+    )
+    helpers: Dict[str, frozenset] = {"": module_level}
+    for node in test_file.tree.body:
+        if isinstance(node, ast.ClassDef):
+            methods = frozenset(
+                f"self.{sub.name}"
+                for sub in node.body
+                if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and _helper_has_oracle(sub, test_file.relpath)
+            )
+            helpers[node.name] = module_level | methods
+    return helpers
 
 
 def find_unoracled(scanned: corpus.Corpus) -> List[Dict]:
     """Every unit with no visible oracle, with the evidence for each."""
     rows: List[Dict] = []
-    for unit in scanned.units():
-        if has_oracle(unit):
+    for test_file in scanned.files:
+        helpers = _oracle_helpers(test_file)
+        rows.extend(_unoracled_in(test_file, helpers))
+    return rows
+
+
+def _unoracled_in(test_file: corpus.TestFile, helpers: Dict[str, frozenset]) -> List[Dict]:
+    """The rows of one file's units that have no visible oracle."""
+    rows: List[Dict] = []
+    for unit in test_file.units:
+        if has_oracle(unit, helpers.get(unit.class_name, helpers[""])):
             continue
         calls = _calls_made(unit)
         rows.append(

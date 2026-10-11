@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_token.py
 # Description: AIPASS-TEST ping token detection and auto-ack
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-22
-# Modified: 2026-04-22
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -118,10 +118,16 @@ def scan_and_ack_test_emails(branch_path: Path, branch_email: str) -> int:
 
     Returns the count of test emails acked.
     """
-    from aipass.ai_mail.apps.handlers.dispatch.daemon import _read_json
+    from aipass.ai_mail.apps.handlers.dispatch.daemon import JsonUnreadable, _read_json
 
     inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
-    inbox_data = _read_json(inbox_file)
+    try:
+        inbox_data = _read_json(inbox_file)
+    except JsonUnreadable as e:
+        # Nothing acked is the safe side; the dispatch scan reads the same
+        # inbox and refuses it too (ai_mail, leg 13).
+        logger.warning("[test_token] %s — no test email acked", e)
+        return 0
     if inbox_data is None:
         return 0
 

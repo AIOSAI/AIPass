@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_cleanup.py
 # Description: Inbox Cleanup Handler
-# Version: 3.3.0
+# Version: 3.3.2
 # Created: 2025-11-27
-# Modified: 2025-11-27
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -179,8 +179,8 @@ def mark_all_read_and_archive(branch_path: Path) -> Tuple[bool, str, int]:
             with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
 
-        # Update dashboard (outside lock - not inbox.json)
-        _update_dashboard(branch_path, 0, 0, 0)
+        # Update central stats (outside lock - not inbox.json)
+        _update_central_stats()
 
         # Trigger auto-purge of deleted folder
         _trigger_deleted_purge(branch_path)
@@ -192,8 +192,12 @@ def mark_all_read_and_archive(branch_path: Path) -> Tuple[bool, str, int]:
         return False, f"Failed to archive: {e}", 0
 
 
-def _update_dashboard(branch_path: Path, new: int, opened: int, total: int) -> None:
-    """Update central stats after inbox changes."""
+def _update_central_stats() -> None:
+    """Update central stats after inbox changes.
+
+    Not a dashboard write: update_central recounts every inbox from disk, and
+    prax's dashboard refresh reads the central file it writes.
+    """
     try:
         _get_update_central()()
     except Exception as e:
@@ -215,8 +219,12 @@ def _trigger_deleted_purge(branch_path: Path) -> None:
         logger.warning("[cleanup] _trigger_deleted_purge() failed: %s", e)
 
 
-def _sweep_closed(inbox_data: Dict, mailbox_path: Path) -> int:
+def sweep_closed(inbox_data: Dict, mailbox_path: Path) -> int:
     """Archive and remove closed messages still sitting in the inbox.
+
+    The cross-module sweep: delivery.py (both delivery writers) and
+    inbox_ops.load_inbox call it as well as this module, so it is public
+    since 2026-10-02 (ai_mail, leg 8); it was _sweep_closed before.
 
     Safety net for messages set to status=closed by direct JSON edit
     rather than through mark_as_closed_and_archive().  Modifies
@@ -239,7 +247,7 @@ def _sweep_closed(inbox_data: Dict, mailbox_path: Path) -> int:
         try:
             _save_to_deleted_folder(mailbox_path, msg)
         except Exception as e:
-            logger.warning("[cleanup] _sweep_closed archive failed: %s", e)
+            logger.warning("[cleanup] sweep_closed archive failed: %s", e)
 
     inbox_data["messages"] = [m for m in messages if m.get("status") != "closed"]
     return len(closed)
@@ -287,7 +295,7 @@ def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optio
             # Keep backward compat
             target_msg["read"] = True
 
-            _sweep_closed(inbox_data, inbox_file.parent)
+            sweep_closed(inbox_data, inbox_file.parent)
 
             # Recalculate counts (sweep may have removed messages)
             inbox_data["total_messages"] = len(inbox_data["messages"])
@@ -296,14 +304,13 @@ def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optio
                 for m in inbox_data["messages"]
                 if m.get("status") == "new" or (m.get("status") is None and not m.get("read", False))
             )
-            opened_count = sum(1 for m in inbox_data["messages"] if m.get("status") == "opened")
             inbox_data["unread_count"] = new_count
 
             with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
 
-        # Update dashboard (outside lock - not inbox.json)
-        _update_dashboard(branch_path, new_count, opened_count, inbox_data["total_messages"])
+        # Update central stats (outside lock - not inbox.json)
+        _update_central_stats()
 
         return True, f"Message {message_id} marked as opened", target_msg
 
@@ -357,7 +364,7 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
             messages.pop(message_index)
             inbox_data["messages"] = messages
 
-            _sweep_closed(inbox_data, mailbox_path)
+            sweep_closed(inbox_data, mailbox_path)
 
             # Update inbox counts
             inbox_data["total_messages"] = len(inbox_data["messages"])
@@ -367,7 +374,6 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
                 for m in inbox_data["messages"]
                 if m.get("status") == "new" or (m.get("status") is None and not m.get("read", False))
             )
-            opened_count = sum(1 for m in inbox_data["messages"] if m.get("status") == "opened")
             inbox_data["unread_count"] = new_count
 
             with open(inbox_file, "w", encoding="utf-8") as f:
@@ -377,8 +383,8 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
             _save_to_deleted_folder(mailbox_path, message_to_archive)
 
         if not skip_post_ops:
-            # Update dashboard (outside lock - not inbox.json)
-            _update_dashboard(branch_path, new_count, opened_count, inbox_data["total_messages"])
+            # Update central stats (outside lock - not inbox.json)
+            _update_central_stats()
 
             # Trigger auto-purge of deleted folder
             _trigger_deleted_purge(branch_path)

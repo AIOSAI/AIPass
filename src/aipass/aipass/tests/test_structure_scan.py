@@ -1,20 +1,26 @@
 # =================== AIPass ====================
 # Name: test_structure_scan.py
 # Description: Tests for doctor structure scanner (DPLAN-0177)
-# Version: 1.1.0
+# Version: 1.2.4
 # Created: 2026-05-14
-# Modified: 2026-09-15
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for structure scanner handler — agent detection, placement, pollution, registry."""
+"""Tests for apps/handlers/structure_scan/structure_scanner.py and the handlers it drives."""
+
+# Agent detection, placement, pollution, registry.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/structure_scan/structure_scanner.py parses and imports
+# seedgo: no-test-needed(documentation) — that the public scan and check functions carry docstrings
 
 import json
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import patch
 
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
-    _detect_package_names,
     check_placement,
     check_pyproject,
     check_registry_consistency,
@@ -24,12 +30,47 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     scan_agents,
 )
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
-from aipass.aipass.apps.modules.doctor import _check_structure
+from aipass.aipass.apps.modules.doctor import run_doctor
+from aipass.aipass.shared.registry_discovery import find_registry
 
 
 # =============================================================================
 # Helpers
 # =============================================================================
+
+_DOCTOR = "aipass.aipass.apps.modules.doctor"
+_OTHER_GROUPS = (
+    "_check_system",
+    "check_identity",
+    "_check_services",
+    "_check_community",
+    "_check_scaffold",
+    "_check_sandbox",
+)
+
+
+def _structure_via_doctor() -> list:
+    """The Structure group as run_doctor prints it (leg 6: the public door, not the private name).
+
+    The six other groups are stubbed where doctor resolves them, and _print_doctor_groups
+    is replaced by a recorder, so only the structure scan runs and nothing is printed.
+    """
+    printed: dict = {}
+
+    def record(groups: dict) -> tuple[int, int, int]:
+        printed.update(groups)
+        return 0, 0, 0
+
+    with patch(f"{_DOCTOR}._print_doctor_groups", side_effect=record):
+        stubs = [patch(f"{_DOCTOR}.{name}", return_value=[]) for name in _OTHER_GROUPS]
+        for stub in stubs:
+            stub.start()
+        try:
+            run_doctor()
+        finally:
+            for stub in stubs:
+                stub.stop()
+    return printed["Structure"]
 
 
 def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: str = "") -> Path:
@@ -106,6 +147,28 @@ class TestScanAgents:
         agents = scan_agents(tmp_path)
         assert len(agents) == 1
         assert agents[0].name == "good"
+
+    def test_never_enters_a_sandbox(self, tmp_path: Path) -> None:
+        """A passport inside dropbox/ or .archive/ is not an agent; the live one beside them is.
+
+        Red before the cure: a branch copied into a dropbox was reported as an agent.
+        Mutant (fleet green leg 3): "dropbox" -> "not_dropbox" in _SCAN_SKIP_DIRS reddens this.
+        """
+        _make_agent(tmp_path, "live", "uuid-l")
+        _make_agent(tmp_path, "copied", "uuid-c", subdir="dropbox")
+        _make_agent(tmp_path, "retired", "uuid-r", subdir=".archive")
+        assert [a.name for a in scan_agents(tmp_path)] == ["live"]
+
+    def test_a_project_under_a_directory_named_dropbox_still_shows_its_agents(self, tmp_path: Path) -> None:
+        """Only directories inside the project are skipped; the project's own parents never are.
+
+        Red before the cure: the skip names were checked against the absolute path, so a
+        project anywhere under a directory named dropbox showed no agents.
+        Mutant: the skip check back to the absolute passport_path.parts -> red.
+        """
+        project = tmp_path / "dropbox" / "proj"
+        _make_agent(project, "live", "uuid-l")
+        assert [a.name for a in scan_agents(project)] == ["live"]
 
     def test_empty_project(self, tmp_path: Path) -> None:
         """Returns empty list when no passports found."""
@@ -254,44 +317,67 @@ class TestProjectCitizenResidency:
 
 
 class TestDetectPackageNames:
+    """Package detection read through check_placement, its one caller (fleet green leg 3).
+
+    A detected package set shows as which src/<name>/ agents are flagged as outside it;
+    an empty set flags nothing.
+    """
+
+    @staticmethod
+    def _flagged(tmp_path: Path, *names: str) -> list:
+        """Seat an agent at src/<name>/ for each name; return the flagged agents' names."""
+        for name in names:
+            _make_agent(tmp_path, name)
+        return sorted(issue.agent_name for issue in check_placement(scan_agents(tmp_path), tmp_path))
+
     def test_no_pyproject(self, tmp_path: Path) -> None:
-        """Returns empty set when no pyproject.toml."""
-        result = _detect_package_names(tmp_path)
-        assert result == set()
+        """No pyproject.toml declares no package, so no agent is flagged.
+
+        Mutant (fleet green leg 3): the no-pyproject `return set()` -> `return {"other"}` -> red.
+        """
+        assert self._flagged(tmp_path, "myagent") == []
 
     def test_hatch_packages(self, tmp_path: Path) -> None:
-        """Detects package from hatch build config."""
+        """Detects package from hatch build config: "src/aipl" names package aipl.
+
+        Mutant (fleet green leg 3): `name = Path(pkg).name` -> `name = pkg` -> red.
+        """
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[tool.hatch.build.targets.wheel]\npackages = ["src/aipl"]\n',
             encoding="utf-8",
         )
-        result = _detect_package_names(tmp_path)
-        assert "aipl" in result
+        assert self._flagged(tmp_path, "aipl", "stray") == ["stray"]
 
     def test_setuptools_packages(self, tmp_path: Path) -> None:
-        """Detects package from setuptools config."""
+        """Detects package from setuptools config.
+
+        Mutant (fleet green leg 3): `names.add(pkg)` -> `pass` -> red.
+        """
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[tool.setuptools]\npackages = ["mypackage"]\n',
             encoding="utf-8",
         )
-        result = _detect_package_names(tmp_path)
-        assert "mypackage" in result
+        assert self._flagged(tmp_path, "mypackage", "stray") == ["stray"]
 
     def test_corrupt_pyproject(self, tmp_path: Path) -> None:
-        """Returns empty set for corrupt TOML."""
+        """Corrupt TOML declares no package, so no agent is flagged.
+
+        Mutant (fleet green leg 3): the parse-error `return set()` -> `return {"other"}` -> red.
+        """
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("not valid toml {{{", encoding="utf-8")
-        result = _detect_package_names(tmp_path)
-        assert result == set()
+        assert self._flagged(tmp_path, "myagent") == []
 
     def test_pyproject_without_packages(self, tmp_path: Path) -> None:
-        """Returns empty set when pyproject has no package declarations."""
+        """A wheel target with no packages key declares no package, so no agent is flagged.
+
+        Mutant (fleet green leg 3): hatch `.get("packages", [])` -> `.get("packages", ["src/x"])` -> red.
+        """
         pyproject = tmp_path / "pyproject.toml"
-        pyproject.write_text('[project]\nname = "test"\n', encoding="utf-8")
-        result = _detect_package_names(tmp_path)
-        assert result == set()
+        pyproject.write_text('[tool.hatch.build.targets.wheel]\nsources = ["src"]\n', encoding="utf-8")
+        assert self._flagged(tmp_path, "myagent") == []
 
 
 # =============================================================================
@@ -339,10 +425,20 @@ class TestPackageAwarePlacement:
         assert issues == []
 
     def test_no_pyproject_unchanged(self, tmp_path: Path) -> None:
-        """Without pyproject, src/<agent>/ still passes (original behavior)."""
-        _make_agent(tmp_path, "myagent")
-        agents = scan_agents(tmp_path)
-        issues = check_placement(agents, tmp_path)
+        """Without pyproject, src/<agent>/ still passes (original behavior).
+
+        Premise added 2026-09-27: a pyproject ABOVE the project root, declaring
+        another package, is not the project's and must not be read.
+        """
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.hatch.build.targets.wheel]\npackages = ["src/other"]\n',
+            encoding="utf-8",
+        )
+        project = tmp_path / "proj"
+        project.mkdir()
+        _make_agent(project, "myagent")
+        agents = scan_agents(project)
+        issues = check_placement(agents, project)
         assert issues == []
 
     def test_pyproject_without_packages_unchanged(self, tmp_path: Path) -> None:
@@ -453,8 +549,6 @@ class TestRegistryConsistency:
 class TestFindRegistry:
     def test_finds_registry(self, tmp_path: Path) -> None:
         """Shared find_registry finds *_REGISTRY.json from start_path."""
-        from aipass.aipass.shared.registry_discovery import find_registry
-
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
         result = find_registry(start_path=tmp_path)
         assert result is not None
@@ -469,8 +563,6 @@ class TestFindRegistry:
         or a consumer like @spawn's ``load_registry``, which mints a fresh
         ``metadata.id`` for a path it is handed -- acts on that guess.
         """
-        from aipass.aipass.shared.registry_discovery import find_registry
-
         isolated = tmp_path / "no_registry"
         isolated.mkdir()
         assert find_registry(start_path=isolated) is None
@@ -484,8 +576,6 @@ class TestFindRegistry:
         that happens to hold a registry made the old code answer with *that*
         file, discarding the question.  Restoring the fallback makes this red.
         """
-        from aipass.aipass.shared.registry_discovery import find_registry
-
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
         (elsewhere / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -497,8 +587,6 @@ class TestFindRegistry:
 
     def test_package_root_fallback_still_answers(self, tmp_path: Path) -> None:
         """None is the LAST resort — the package_root walk still resolves first."""
-        from aipass.aipass.shared.registry_discovery import find_registry
-
         root = tmp_path / "proj"
         (root / "pkg" / "deep").mkdir(parents=True)
         (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -514,8 +602,6 @@ class TestFindRegistry:
         An operator who names a path is not guessing, so this one path is
         returned unchecked -- and it stays a Path, never None.
         """
-        from aipass.aipass.shared.registry_discovery import find_registry
-
         target = tmp_path / "declared" / "AIPASS_REGISTRY.json"
         monkeypatch.setenv("AIPASS_REGISTRY", str(target))
         assert find_registry(start_path=tmp_path) == target
@@ -608,8 +694,13 @@ class TestCheckRootArtifacts:
         assert hits[0].name == ".venv"
         assert hits[0].severity == "info"
 
-    def test_venv_flagged_when_aipass_home_not_provided(self, tmp_path: Path) -> None:
-        """Without aipass_home, .venv still flags as info (no special-casing possible)."""
+    def test_venv_flagged_when_aipass_home_not_provided(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without aipass_home, .venv still flags as info (no special-casing possible).
+
+        Premise added 2026-09-27: the environment names this root as AIPASS_HOME,
+        and the scan still does not sniff it — only the argument counts.
+        """
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
         (tmp_path / ".venv").mkdir()
         hits = check_root_artifacts(tmp_path)
         assert len(hits) == 1
@@ -629,7 +720,7 @@ class TestCheckStructureIntegration:
             "aipass.aipass.apps.modules.doctor.find_project_root",
             return_value=None,
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
         assert "project root" in results[0].label
@@ -643,10 +734,50 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=None),
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         glyphs = {r.glyph for r in results}
         assert GLYPH_FAIL not in glyphs
         assert GLYPH_WARN not in glyphs
+
+    @staticmethod
+    def _unknown_rows(tmp_path: Path) -> tuple:
+        """Seat src/stray/ under a pyproject; return the package-names rows and the placement labels."""
+        _make_agent(tmp_path, "stray", "uuid-1")
+        _make_registry(tmp_path, [{"name": "stray", "path": str(tmp_path / "src" / "stray")}])
+        with (
+            patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
+            patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=None),
+        ):
+            results = _structure_via_doctor()
+        rows = [(r.glyph, r.detail) for r in results if r.label == "package names"]
+        return rows, [r.label for r in results if r.label.startswith("placement")]
+
+    def test_unparseable_pyproject_is_unknown_not_no_packages(self, tmp_path: Path) -> None:
+        """A pyproject that cannot be parsed is one WARN row naming the parse, and no placement issue.
+
+        Mutant: the parse-error `return None` -> `return set()` (the shape of HEAD) -> red at the row assert.
+        Mutant: check_placement drops the unknown list it was handed -> red at the row assert.
+        """
+        (tmp_path / "pyproject.toml").write_text("not valid toml {{{", encoding="utf-8")
+        rows, placement = self._unknown_rows(tmp_path)
+        assert [glyph for glyph, _ in rows] == [GLYPH_WARN]
+        assert "pyproject.toml could not be parsed" in rows[0][1]
+        assert placement == ["placement"]  # the all-clear row: unknown flagged nobody
+
+    def test_no_toml_parser_is_unknown_and_says_so(self, tmp_path: Path, monkeypatch) -> None:
+        """No tomllib and no tomli (Python 3.10 without it) is one WARN row naming the missing parser.
+
+        The stub stands where the product looks: the import runs at call time, so
+        sys.modules holding None for both names is what an interpreter without them answers.
+        Mutant: the no-parser `return None` -> `return set()` (the shape of HEAD) -> red at the row assert.
+        """
+        (tmp_path / "pyproject.toml").write_text('[tool.setuptools]\npackages = ["mypackage"]\n', encoding="utf-8")
+        monkeypatch.setitem(sys.modules, "tomllib", None)
+        monkeypatch.setitem(sys.modules, "tomli", None)
+        rows, placement = self._unknown_rows(tmp_path)
+        assert [glyph for glyph, _ in rows] == [GLYPH_WARN]
+        assert "no TOML parser" in rows[0][1]
+        assert placement == ["placement"]  # stray is not measured against a package set nobody read
 
     def test_root_artifacts_reported(self, tmp_path: Path) -> None:
         """Root artifacts show up as WARN in structure check."""
@@ -655,7 +786,7 @@ class TestCheckStructureIntegration:
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
         (tmp_path / ".chroma").mkdir()
         with patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path):
-            results = _check_structure()
+            results = _structure_via_doctor()
         root_results = [r for r in results if "root:" in r.label]
         assert len(root_results) >= 1
         assert root_results[0].glyph == GLYPH_WARN
@@ -670,7 +801,7 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         venv_results = [r for r in results if r.label == "root: .venv"]
         assert len(venv_results) == 1
         assert venv_results[0].glyph == GLYPH_PASS
@@ -682,7 +813,7 @@ class TestCheckStructureIntegration:
         _make_registry(tmp_path, [])
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
         with patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path):
-            results = _check_structure()
+            results = _structure_via_doctor()
         pollution_results = [r for r in results if "pollution" in r.label]
         assert len(pollution_results) == 1
         assert pollution_results[0].glyph == GLYPH_FAIL
@@ -699,7 +830,7 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         fence_results = [r for r in results if r.label.startswith("CLAUDE.md fence")]
         assert len(fence_results) == 1
         assert fence_results[0].glyph == GLYPH_WARN
@@ -730,7 +861,7 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         fence_results = [r for r in results if r.label.startswith("CLAUDE.md fence")]
         assert len(fence_results) == 1
         assert fence_results[0].glyph == GLYPH_PASS

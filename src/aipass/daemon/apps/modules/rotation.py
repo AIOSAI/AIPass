@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rotation.py
 # Description: Rounds firing + status surface (drone @daemon rotation)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-12
-# Modified: 2026-09-10
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -113,7 +113,7 @@ def _apply_wake_blocklist(roster: List[dict]) -> List[dict]:
     blocklist so a branch added there tomorrow is honoured without a code change.
     """
     try:
-        from aipass.ai_mail.apps.handlers.dispatch.wake import is_wake_blocked
+        from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
     # OSError, not only ImportError: MEASURED 2026-08-31 - importing ai_mail's wake
     # module under a dead working directory raises FileNotFoundError today, and an
     # uncaught one here takes the whole rotation down from inside an OPTIONAL
@@ -141,7 +141,7 @@ def _scheduled_lane_available() -> bool:
     rather than dropped into an interactive 5am tmux session.
     """
     try:
-        from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+        from aipass.ai_mail.apps.modules.door_wake import wake_branch
 
         return "scheduled" in inspect.signature(wake_branch).parameters
     except (ImportError, TypeError, ValueError) as e:
@@ -155,8 +155,8 @@ def _wake_steward(target: dict, prompt: str, model: str, fresh: bool) -> tuple:
     `errored` separates a crash in the wake path from an ordinary busy target —
     the first is a rotation failure worth reading, the second is just a miss.
     """
-    # Cross-branch handler import authorized by DPLAN-0204 §2.8 (same path as run.py)
-    from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+    # Through ai_mail's published door (DPLAN-0404), as run.py and inbox_sweep.py
+    from aipass.ai_mail.apps.modules.door_wake import wake_branch
 
     email = target["email"]
     kwargs = {

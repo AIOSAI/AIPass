@@ -1,65 +1,121 @@
 # =================== AIPass ====================
 # Name: test_monitor_module.py
 # Description: Tests for the unified monitoring module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-10-03
 # =============================================
 
-"""Tests for apps/modules/monitor.py
+"""Tests for apps/modules/monitor.py."""
 
-Covers:
-- handle_command() dispatching (introspection, help, run, unknown subcommands)
-- _get_watch_directories() registry-based directory enumeration
-- PID cache functions (_parse_lock_pid, _refresh_pid_cache, _get_pid_for_branch)
-- Threading management (_start_threads, _stop_threads, _display_worker)
-- Event rendering and emission (_render_event, _emit_watcher_event)
-- Inotify error handling and observer fallback
-- File/log watcher workers
-- Interactive loop and command dispatch
-- _print_status, _run_monitor orchestration
-"""
+# Covers:
+# - handle_command() dispatching (introspection, help, run, unknown subcommands)
+# - _get_watch_directories() registry-based directory enumeration
+# - PID cache functions (_parse_lock_pid, _refresh_pid_cache, _get_pid_for_branch)
+# - Threading management (_start_threads, _stop_threads, _display_worker)
+# - Event rendering and emission (_render_event, _emit_watcher_event)
+# - Inotify error handling and observer fallback
+# - File/log watcher workers
+# - Interactive loop and command dispatch
+# - _print_status, _run_monitor orchestration
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — _report_render_failures, covered by tests/test_display_resilience.py
+# seedgo: no-test-needed(through_the_command) — _standalone_run_args, covered by tests/test_display_resilience.py
+# seedgo: no-test-needed(through_the_command) — _rate_tracker_worker's scan_rates, covered by tests/test_rate_tracker.py
+# seedgo: no-test-needed(through_the_command) — the run -h screen, covered by tests/test_help_flag_safety.py
+# seedgo: no-test-needed(json_structure) — _run_monitor's log_operation("monitor_started") record, covered by that row
 
 import json
 import sys
+import threading
+from contextlib import contextmanager
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+from aipass.prax.apps.handlers.config import load as config_load
+from aipass.prax.apps.handlers.monitoring import filesystem_handler, interactive_filter, log_watcher
+from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
+from aipass.prax.apps.modules import monitor
+
 
 # ---------------------------------------------------------------------------
-# Shared helper: monitoring handler mock dict
+# monitor is imported once at the top and never reloaded (prax, leg 11). Each
+# collaborator it binds from the monitoring handlers, the logger and the json
+# service is doubled where monitor binds it, and its run state is reset, which
+# is what the reload under stubbed handler packages used to give each test.
+# The console is the real one, read with capsys.
 # ---------------------------------------------------------------------------
 
-_MONITORING_MOCKS = {
-    "aipass.prax.apps.handlers.monitoring": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.event_queue": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.filesystem_handler": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.log_watcher": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.unified_stream": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.module_tracker": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.branch_detector": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.interactive_filter": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.monitoring_filters": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.file_watcher_integration": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.telegram_relay": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.pid_cache": MagicMock(),
-    "aipass.prax.apps.handlers.monitoring.instance_lock": MagicMock(),
-}
+_DOUBLED_COLLABORATORS = (
+    "logger",
+    "json_handler",
+    "print_event",
+    "print_command_separator",
+    "print_hook_event",
+    "MonitoringQueue",
+    "ModuleTracker",
+    "MonitoringEvent",
+    "init_relay",
+    "relay_event",
+    "stop_relay",
+    "is_relay_enabled_by_env",
+    "_get_pid_for_branch",
+)
+
+_RUN_STATE_NONE = (
+    "_event_queue",
+    "_module_tracker",
+    "_display_thread",
+    "_file_watcher_thread",
+    "_log_watcher_thread",
+    "_rate_tracker_thread",
+    "_active_scope",
+)
+
+
+@pytest.fixture(autouse=True)
+def _monitor_doubled(monkeypatch):
+    for name in _DOUBLED_COLLABORATORS:
+        monkeypatch.setattr(monitor, name, MagicMock())
+    for name in _RUN_STATE_NONE:
+        monkeypatch.setattr(monitor, name, None)
+    monkeypatch.setattr(monitor, "_stop_event", threading.Event())
+    monkeypatch.setattr(monitor, "_render_failures", 0)
+    monkeypatch.setattr(monitor, "_last_render_warning", 0.0)
 
 
 def _import_monitor():
-    """Import (or reload) the monitor module with all handler mocks active."""
-    # Create fresh mocks each call so state doesn't leak between tests
-    fresh_mocks = {k: MagicMock() for k in _MONITORING_MOCKS}
-    with patch.dict(sys.modules, fresh_mocks):
-        import importlib
+    """The top-bound monitor; the autouse fixture above has doubled its edges."""
+    return monitor
 
-        if "aipass.prax.apps.modules.monitor" in sys.modules:
-            mod = importlib.reload(sys.modules["aipass.prax.apps.modules.monitor"])
-        else:
-            mod = importlib.import_module("aipass.prax.apps.modules.monitor")
-        return mod
+
+def _doubled(name: str) -> MagicMock:
+    """The double the autouse fixture set on monitor under this name."""
+    double = getattr(monitor, name)
+    assert isinstance(double, MagicMock), f"monitor.{name} is not doubled"
+    return double
+
+
+# The names monitor imports inside its functions, per real module.
+_LAZY_NAMES = {
+    filesystem_handler: ("MonitoringFileHandler",),
+    config_load: ("_find_repo_root", "get_system_logs_dir"),
+    log_watcher: ("start_log_watcher", "stop_log_watcher"),
+    interactive_filter: ("parse_command", "get_help_text"),
+}
+
+
+@contextmanager
+def _lazy_from(*pairs):
+    """Point every name monitor imports lazily from each real module at the double's attribute."""
+    with pytest.MonkeyPatch.context() as mp:
+        for module, double in pairs:
+            for name in _LAZY_NAMES[module]:
+                mp.setattr(module, name, getattr(double, name))
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +169,6 @@ class TestHandleCommand:
         Returning True is what the router reads as success; `monitor bogus` used
         to exit 0 (@devpulse's fleet CLI sweep, 2026-09-07).
         """
-        from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
-
         mod = _import_monitor()
 
         with pytest.raises(UnknownArgument) as refusal:
@@ -137,7 +191,7 @@ class TestDispatchRun:
     def test_bare_commons_routes_to_feed(self):
         """A standalone 'commons' target opens the feed, not the branch monitor."""
         mod = _import_monitor()
-        mod.is_relay_enabled_by_env.return_value = False
+        _doubled("is_relay_enabled_by_env").return_value = False
         with (
             patch(_COMMONS_FEED_TARGET, return_value=True) as mock_feed,
             patch.object(mod, "_run_monitor") as mock_branch,
@@ -174,7 +228,7 @@ class TestDispatchRun:
     def test_commons_feed_loads_relay_config_when_relay_flag_set(self):
         """--relay on the feed path loads config via monitor.py's own _load_relay_config."""
         mod = _import_monitor()
-        mod.is_relay_enabled_by_env.return_value = False
+        _doubled("is_relay_enabled_by_env").return_value = False
         with (
             patch(_COMMONS_FEED_TARGET, return_value=True) as mock_feed,
             patch.object(mod, "_load_relay_config", return_value={"bot_token": "x", "chat_id": 1}) as mock_load,
@@ -186,7 +240,7 @@ class TestDispatchRun:
     def test_commons_feed_no_relay_config_when_relay_disabled(self):
         """Without --relay (and no env flag), relay_config stays None."""
         mod = _import_monitor()
-        mod.is_relay_enabled_by_env.return_value = False
+        _doubled("is_relay_enabled_by_env").return_value = False
         with (
             patch(_COMMONS_FEED_TARGET, return_value=True) as mock_feed,
             patch.object(mod, "_load_relay_config") as mock_load,
@@ -299,12 +353,15 @@ class TestGetWatchDirectories:
 class TestPrintIntrospection:
     """Test print_introspection output."""
 
-    def test_print_introspection_runs(self):
-        """print_introspection runs without error and calls console.print."""
+    def test_print_introspection_runs(self, capsys):
+        """print_introspection logs its call and prints the module's self-map."""
         mod = _import_monitor()
-        mod.print_introspection()
-        mod.json_handler.log_operation.assert_called()
-        assert mod.console.print.call_count > 10
+        with patch.object(mod, "json_handler") as recorder:
+            mod.print_introspection()
+        recorder.log_operation.assert_called_once_with("print_introspection", {"module": "monitor"})
+        lines = capsys.readouterr().out.splitlines()
+        assert "PRAX Monitor Module" in lines
+        assert len(lines) > 10
 
 
 # ---------------------------------------------------------------------------
@@ -315,11 +372,13 @@ class TestPrintIntrospection:
 class TestPrintHelp:
     """Test print_help output."""
 
-    def test_print_help_runs(self):
-        """print_help runs without error and calls console.print."""
+    def test_print_help_runs(self, capsys):
+        """print_help prints the help screen."""
         mod = _import_monitor()
         mod.print_help()
-        assert mod.console.print.call_count > 10
+        lines = capsys.readouterr().out.splitlines()
+        assert "PRAX Monitor - Unified Branch Monitoring" in lines
+        assert len(lines) > 10
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +406,7 @@ class TestRenderEvent:
         with patch.object(mod, "_get_pid_for_branch", return_value=None):
             mod._render_event(event)
 
-        mod.print_command_separator.assert_called_once_with("FLOW", "seedgo audit", "prax", expected_target)
+        _doubled("print_command_separator").assert_called_once_with("FLOW", "seedgo audit", "prax", expected_target)
 
     def test_render_non_command_event(self):
         """Non-command events call print_event."""
@@ -360,7 +419,9 @@ class TestRenderEvent:
 
         with patch.object(mod, "_get_pid_for_branch", return_value=42):
             mod._render_event(event)
-        mod.print_event.assert_called_once_with("file_change", "FLOW", "STATUS.local.md modified", "info", pid=42)
+        _doubled("print_event").assert_called_once_with(
+            "file_change", "FLOW", "STATUS.local.md modified", "info", pid=42
+        )
 
     def test_render_command_event_action_with_empty_target(self):
         """Command event with action 'audit:' (empty after colon) passes target=None."""
@@ -374,7 +435,7 @@ class TestRenderEvent:
 
         with patch.object(mod, "_get_pid_for_branch", return_value=None):
             mod._render_event(event)
-        call_args = mod.print_command_separator.call_args
+        call_args = _doubled("print_command_separator").call_args
         assert call_args[0][3] is None
 
 
@@ -395,18 +456,18 @@ class TestThreadManagement:
         assert mock_cls.call_count == 4
         assert mock_thread.start.call_count == 4
 
-    def test_stop_threads_sets_stop_event(self):
+    def test_stop_threads_sets_stop_event(self, monkeypatch):
         """_stop_threads sets the stop event and stops the queue."""
         mod = _import_monitor()
         mock_queue = MagicMock()
-        setattr(mod, "_event_queue", mock_queue)
+        monkeypatch.setattr(mod, "_event_queue", mock_queue)
         mod._stop_event.clear()
 
         mock_thread = MagicMock()
         mock_thread.is_alive.return_value = True
-        setattr(mod, "_display_thread", mock_thread)
-        setattr(mod, "_file_watcher_thread", mock_thread)
-        setattr(mod, "_log_watcher_thread", mock_thread)
+        monkeypatch.setattr(mod, "_display_thread", mock_thread)
+        monkeypatch.setattr(mod, "_file_watcher_thread", mock_thread)
+        monkeypatch.setattr(mod, "_log_watcher_thread", mock_thread)
 
         mod._stop_threads()
 
@@ -414,28 +475,28 @@ class TestThreadManagement:
         mock_queue.stop.assert_called_once()
         assert mock_thread.join.call_count == 3
 
-    def test_stop_threads_handles_none_queue(self):
+    def test_stop_threads_handles_none_queue(self, monkeypatch):
         """_stop_threads works when event queue is None."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
-        setattr(mod, "_display_thread", None)
-        setattr(mod, "_file_watcher_thread", None)
-        setattr(mod, "_log_watcher_thread", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_display_thread", None)
+        monkeypatch.setattr(mod, "_file_watcher_thread", None)
+        monkeypatch.setattr(mod, "_log_watcher_thread", None)
 
         # Should not raise
         mod._stop_threads()
         assert mod._stop_event.is_set()
 
-    def test_stop_threads_skips_dead_threads(self):
+    def test_stop_threads_skips_dead_threads(self, monkeypatch):
         """_stop_threads skips threads that are not alive."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
 
         mock_thread = MagicMock()
         mock_thread.is_alive.return_value = False
-        setattr(mod, "_display_thread", mock_thread)
-        setattr(mod, "_file_watcher_thread", mock_thread)
-        setattr(mod, "_log_watcher_thread", mock_thread)
+        monkeypatch.setattr(mod, "_display_thread", mock_thread)
+        monkeypatch.setattr(mod, "_file_watcher_thread", mock_thread)
+        monkeypatch.setattr(mod, "_log_watcher_thread", mock_thread)
 
         mod._stop_threads()
         mock_thread.join.assert_not_called()
@@ -449,7 +510,7 @@ class TestThreadManagement:
 class TestDisplayWorker:
     """Test the display worker loop."""
 
-    def test_display_worker_processes_event(self):
+    def test_display_worker_processes_event(self, monkeypatch):
         """Display worker dequeues and renders events."""
         mod = _import_monitor()
         mock_event = MagicMock()
@@ -471,17 +532,17 @@ class TestDisplayWorker:
             return None
 
         mock_queue.dequeue = _dequeue
-        setattr(mod, "_event_queue", mock_queue)
+        monkeypatch.setattr(mod, "_event_queue", mock_queue)
         mod._stop_event.clear()
 
         with patch.object(mod, "_render_event") as mock_render:
             mod._display_worker()
         mock_render.assert_called_once_with(mock_event)
 
-    def test_display_worker_handles_none_queue(self):
+    def test_display_worker_handles_none_queue(self, monkeypatch):
         """Display worker sleeps when event queue is None, then stops."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
         mod._stop_event.clear()
 
         call_count = 0
@@ -506,40 +567,40 @@ class TestDisplayWorker:
 class TestEmitWatcherEvent:
     """Test watcher event emission."""
 
-    def test_emit_returns_early_when_no_queue(self):
+    def test_emit_returns_early_when_no_queue(self, monkeypatch):
         """No queue means no event is ever built — the early return is visible, not silent."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
 
         assert mod._emit_watcher_event("error", "test error") is None
 
         # The consequence of the early return: the event was never constructed,
         # so nothing was handed to a queue that does not exist.
-        mod.MonitoringEvent.assert_not_called()
+        _doubled("MonitoringEvent").assert_not_called()
 
-    def test_emit_error_level_has_priority_1(self):
+    def test_emit_error_level_has_priority_1(self, monkeypatch):
         """Error level events get priority 1."""
         mod = _import_monitor()
         mock_queue = MagicMock()
-        setattr(mod, "_event_queue", mock_queue)
+        monkeypatch.setattr(mod, "_event_queue", mock_queue)
 
         mod._emit_watcher_event("error", "bad stuff happened")
         mock_queue.enqueue.assert_called_once()
         # MonitoringEvent is mocked, so check the kwargs it was constructed with
-        me_cls = mod.MonitoringEvent
+        me_cls = _doubled("MonitoringEvent")
         me_cls.assert_called_once()
         call_kwargs = me_cls.call_args[1]
         assert call_kwargs["priority"] == 1
 
-    def test_emit_warning_level_has_priority_2(self):
+    def test_emit_warning_level_has_priority_2(self, monkeypatch):
         """Non-error level events get priority 2."""
         mod = _import_monitor()
         mock_queue = MagicMock()
-        setattr(mod, "_event_queue", mock_queue)
+        monkeypatch.setattr(mod, "_event_queue", mock_queue)
 
         mod._emit_watcher_event("warning", "something happened")
         mock_queue.enqueue.assert_called_once()
-        me_cls = mod.MonitoringEvent
+        me_cls = _doubled("MonitoringEvent")
         me_cls.assert_called_once()
         call_kwargs = me_cls.call_args[1]
         assert call_kwargs["priority"] == 2
@@ -588,22 +649,9 @@ class TestStartObserverWithFallback:
     """Test watchdog observer startup with fallback."""
 
     def _import_with_watchdog(self):
-        """Import monitor with watchdog modules also mocked."""
-        extra = {
-            "watchdog": MagicMock(),
-            "watchdog.observers": MagicMock(),
-            "watchdog.observers.polling": MagicMock(),
-        }
-        fresh_mocks = {k: MagicMock() for k in _MONITORING_MOCKS}
-        fresh_mocks.update(extra)
-        with patch.dict(sys.modules, fresh_mocks):
-            import importlib
-
-            if "aipass.prax.apps.modules.monitor" in sys.modules:
-                mod = importlib.reload(sys.modules["aipass.prax.apps.modules.monitor"])
-            else:
-                mod = importlib.import_module("aipass.prax.apps.modules.monitor")
-            return mod
+        """The top-bound monitor: it imports watchdog nowhere at module level, so the
+        reload under stubbed watchdog packages gave it nothing (prax, leg 11)."""
+        return monitor
 
     def test_success_path(self, tmp_path):
         """Observer starts successfully on first try."""
@@ -620,12 +668,12 @@ class TestStartObserverWithFallback:
         assert result is mock_observer
         mock_observer.start.assert_called_once()
 
-    def test_fallback_to_polling(self, tmp_path):
+    def test_fallback_to_polling(self, tmp_path, monkeypatch):
         """Falls back to PollingObserver when inotify fails."""
         mod = self._import_with_watchdog()
         handler = MagicMock()
         watch_dirs = [(tmp_path, True)]
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         import errno
 
@@ -651,12 +699,12 @@ class TestStartObserverWithFallback:
         assert result is mock_polling_observer
         mock_polling_observer.start.assert_called_once()
 
-    def test_both_fail_returns_none(self, tmp_path):
+    def test_both_fail_returns_none(self, tmp_path, monkeypatch):
         """Returns None when both inotify and polling fail."""
         mod = self._import_with_watchdog()
         handler = MagicMock()
         watch_dirs = [(tmp_path, True)]
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         import errno
 
@@ -689,46 +737,39 @@ class TestStartObserverWithFallback:
 class TestFileWatcherWorker:
     """Test file watcher worker thread."""
 
-    def test_no_watch_dirs_returns_early(self):
+    def test_no_watch_dirs_returns_early(self, monkeypatch):
         """Worker returns early when no watch directories found."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         mock_config = MagicMock()
         mock_config._find_repo_root.return_value = MagicMock()
         mock_fs_handler = MagicMock()
 
         with (
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.filesystem_handler": mock_fs_handler,
-                    "aipass.prax.apps.handlers.config.load": mock_config,
-                },
-            ),
+            _lazy_from((filesystem_handler, mock_fs_handler), (config_load, mock_config)),
             patch.object(mod, "_get_watch_directories", return_value=[]),
             patch.object(mod, "_emit_watcher_event") as mock_emit,
         ):
             mod._file_watcher_worker()
-        mock_emit.assert_called_once()
+        mock_emit.assert_called_once_with("warning", "File watcher: no watch directories found — file events disabled")
+        # The handler is sandboxed to the repo root the worker resolved (prax, leg 12:
+        # the kwarg had no pin, and sandbox_root=None survived its mutant).
+        built = mock_fs_handler.MonitoringFileHandler.call_args.kwargs
+        assert built["sandbox_root"] is mock_config._find_repo_root.return_value
+        assert built["event_queue"] is mod._event_queue
 
-    def test_observer_none_returns_early(self):
+    def test_observer_none_returns_early(self, monkeypatch):
         """A failed observer startup ends the worker before the watch loop is ever entered."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         mock_config = MagicMock()
         mock_config._find_repo_root.return_value = MagicMock()
         mock_fs_handler = MagicMock()
 
         with (
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.filesystem_handler": mock_fs_handler,
-                    "aipass.prax.apps.handlers.config.load": mock_config,
-                },
-            ),
+            _lazy_from((filesystem_handler, mock_fs_handler), (config_load, mock_config)),
             patch.object(mod, "_get_watch_directories", return_value=[("fakedir", True)]),
             patch.object(mod, "_start_observer_with_fallback", return_value=None) as mock_start,
             patch.object(mod, "_emit_watcher_event") as mock_emit,
@@ -742,10 +783,10 @@ class TestFileWatcherWorker:
         mock_sleep.assert_not_called()
         mock_emit.assert_not_called()
 
-    def test_worker_runs_loop_and_stops_observer(self, tmp_path):
+    def test_worker_runs_loop_and_stops_observer(self, tmp_path, monkeypatch):
         """Worker runs sleep loop and stops observer on stop_event."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
         mod._stop_event.clear()
 
         mock_config = MagicMock()
@@ -763,13 +804,7 @@ class TestFileWatcherWorker:
                 mod._stop_event.set()
 
         with (
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.filesystem_handler": mock_fs_handler,
-                    "aipass.prax.apps.handlers.config.load": mock_config,
-                },
-            ),
+            _lazy_from((filesystem_handler, mock_fs_handler), (config_load, mock_config)),
             patch.object(
                 mod,
                 "_get_watch_directories",
@@ -784,8 +819,9 @@ class TestFileWatcherWorker:
         ):
             mod._file_watcher_worker()
 
-        mock_observer.stop.assert_called_once()
-        mock_observer.join.assert_called_once()
+        # stop() and join() take nothing here: the claim is each ran once, with no timeout handed on.
+        mock_observer.stop.assert_called_once_with()
+        mock_observer.join.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -804,45 +840,43 @@ class TestStartLogWatcherWithFallback:
         mock_lw = MagicMock()
         mock_lw.start_log_watcher = MagicMock()
 
-        with patch.dict(
-            sys.modules,
-            {"aipass.prax.apps.handlers.monitoring.log_watcher": mock_lw},
-        ):
+        with _lazy_from((log_watcher, mock_lw)):
             result = mod._start_log_watcher_with_fallback(mock_queue)
         assert result is True
+        mock_lw.start_log_watcher.assert_called_once_with(mock_queue)
 
-    def test_fallback_to_polling(self):
+    def test_fallback_to_polling(self, monkeypatch):
         """Falls back to polling when inotify fails."""
         mod = _import_monitor()
         mock_queue = MagicMock()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         import errno
 
         mock_lw = MagicMock()
         call_count = 0
+        starts: list[tuple] = []
 
         def _start(eq, use_polling=False):
             """Fail on first call, succeed on second."""
             nonlocal call_count
             call_count += 1
+            starts.append((eq, use_polling))
             if call_count == 1:
                 raise OSError(errno.ENOSPC, "inotify limit")
 
         mock_lw.start_log_watcher = _start
 
-        with patch.dict(
-            sys.modules,
-            {"aipass.prax.apps.handlers.monitoring.log_watcher": mock_lw},
-        ):
+        with _lazy_from((log_watcher, mock_lw)):
             result = mod._start_log_watcher_with_fallback(mock_queue)
         assert result is True
+        assert starts == [(mock_queue, False), (mock_queue, True)]
 
-    def test_both_fail_returns_false(self):
+    def test_both_fail_returns_false(self, monkeypatch):
         """Returns False when both inotify and polling fail."""
         mod = _import_monitor()
         mock_queue = MagicMock()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
 
         import errno
 
@@ -859,10 +893,7 @@ class TestStartLogWatcherWithFallback:
 
         mock_lw.start_log_watcher = _start
 
-        with patch.dict(
-            sys.modules,
-            {"aipass.prax.apps.handlers.monitoring.log_watcher": mock_lw},
-        ):
+        with _lazy_from((log_watcher, mock_lw)):
             result = mod._start_log_watcher_with_fallback(mock_queue)
         assert result is False
 
@@ -875,32 +906,26 @@ class TestStartLogWatcherWithFallback:
 class TestLogWatcherWorker:
     """Test log watcher worker thread."""
 
-    def test_returns_early_when_no_queue(self):
+    def test_returns_early_when_no_queue(self, monkeypatch):
         """Worker returns early when event queue is None."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
 
         mock_lw = MagicMock()
-        with patch.dict(
-            sys.modules,
-            {"aipass.prax.apps.handlers.monitoring.log_watcher": mock_lw},
-        ):
+        with _lazy_from((log_watcher, mock_lw)):
             mod._log_watcher_worker()
         mock_lw.start_log_watcher.assert_not_called()
 
-    def test_returns_early_on_watcher_failure(self):
+    def test_returns_early_on_watcher_failure(self, monkeypatch):
         """A refused startup returns before the try/finally, so nothing is torn down."""
         mod = _import_monitor()
         queue = MagicMock()
-        setattr(mod, "_event_queue", queue)
+        monkeypatch.setattr(mod, "_event_queue", queue)
 
         with patch.object(mod, "_start_log_watcher_with_fallback", return_value=False) as mock_start:
             mock_lw = MagicMock()
             with (
-                patch.dict(
-                    sys.modules,
-                    {"aipass.prax.apps.handlers.monitoring.log_watcher": mock_lw},
-                ),
+                _lazy_from((log_watcher, mock_lw)),
                 patch("time.sleep") as mock_sleep,
             ):
                 assert mod._log_watcher_worker() is None
@@ -911,10 +936,10 @@ class TestLogWatcherWorker:
         mock_lw.stop_log_watcher.assert_not_called()
         mock_sleep.assert_not_called()
 
-    def test_worker_runs_loop_and_stops(self):
+    def test_worker_runs_loop_and_stops(self, monkeypatch):
         """Worker runs sleep loop and calls stop_log_watcher on stop_event."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", MagicMock())
+        monkeypatch.setattr(mod, "_event_queue", MagicMock())
         mod._stop_event.clear()
 
         mock_lw = MagicMock()
@@ -929,14 +954,11 @@ class TestLogWatcherWorker:
 
         with (
             patch.object(mod, "_start_log_watcher_with_fallback", return_value=True),
-            patch.dict(
-                sys.modules,
-                {"aipass.prax.apps.handlers.monitoring.log_watcher": mock_lw},
-            ),
+            _lazy_from((log_watcher, mock_lw)),
             patch("time.sleep", side_effect=_sleep),
         ):
             mod._log_watcher_worker()
-        mock_lw.stop_log_watcher.assert_called_once()
+        mock_lw.stop_log_watcher.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -947,26 +969,27 @@ class TestLogWatcherWorker:
 class TestHandleInteractiveCmd:
     """Test interactive command dispatch."""
 
-    def test_help_command(self):
+    def test_help_command(self, capsys):
         """Help command calls get_help_text and prints it."""
         mod = _import_monitor()
         mock_help = MagicMock(return_value="help text here")
         mod._handle_interactive_cmd("help", mock_help)
-        mock_help.assert_called_once()
-        mod.console.print.assert_called()
+        mock_help.assert_called_once_with()
+        assert capsys.readouterr().out == "help text here\n"
 
     def test_status_command(self):
         """Status command calls _print_status."""
         mod = _import_monitor()
         with patch.object(mod, "_print_status") as mock_status:
             mod._handle_interactive_cmd("status", MagicMock())
-        mock_status.assert_called_once()
+        mock_status.assert_called_once_with()
 
     def test_unknown_command(self):
         """Unknown command prints error."""
         mod = _import_monitor()
-        mod._handle_interactive_cmd("bogus", MagicMock())
-        mod.error.assert_called()
+        with patch.object(mod, "error") as recorder:
+            mod._handle_interactive_cmd("bogus", MagicMock())
+        recorder.assert_called_once_with("Unknown command: bogus")
 
 
 # ---------------------------------------------------------------------------
@@ -977,7 +1000,7 @@ class TestHandleInteractiveCmd:
 class TestInteractiveLoop:
     """Test interactive command loop."""
 
-    def test_non_tty_passive_mode(self):
+    def test_non_tty_passive_mode(self, capsys):
         """Without a TTY the loop says so, sleeps in half-seconds, and leaves quietly."""
         mod = _import_monitor()
         mod._stop_event.clear()
@@ -997,13 +1020,13 @@ class TestInteractiveLoop:
         ):
             assert mod._interactive_loop() is None
 
-        mod.logger.info.assert_called_once_with("[monitor] No TTY detected - passive mode (Ctrl+C to stop)")
+        _doubled("logger").info.assert_called_once_with("[monitor] No TTY detected - passive mode (Ctrl+C to stop)")
         assert call_count == 2, "the loop must re-check the stop event, not sleep once and leave"
         assert mock_sleep.call_args_list == [call(0.5), call(0.5)]
         # A clean stop-event exit is not an interruption: nothing is printed.
-        mod.console.print.assert_not_called()
+        assert capsys.readouterr().out == ""
 
-    def test_non_tty_keyboard_interrupt(self):
+    def test_non_tty_keyboard_interrupt(self, capsys):
         """Ctrl+C in passive mode prints the stopping banner and returns without setting the stop event."""
         mod = _import_monitor()
         mod._stop_event.clear()
@@ -1014,13 +1037,13 @@ class TestInteractiveLoop:
         ):
             assert mod._interactive_loop() is None
 
-        mod.console.print.assert_called_once_with("\n[yellow]Stopping monitoring...[/yellow]")
-        mod.logger.info.assert_any_call("[monitor] Stopped by user (passive mode)")
+        assert capsys.readouterr().out == "\nStopping monitoring...\n"
+        _doubled("logger").info.assert_any_call("[monitor] Stopped by user (passive mode)")
         # _run_monitor's own finally owns the stop event; the loop only leaves.
         assert mod._stop_event.is_set() is False
 
     @pytest.mark.parametrize("alias", ["quit", "exit", "q"])
-    def test_tty_quit_command(self, alias):
+    def test_tty_quit_command(self, alias, capsys):
         """Every exit alias breaks the TTY loop on its first turn and says so on the console."""
         mod = _import_monitor()
         mod._stop_event.clear()
@@ -1034,23 +1057,17 @@ class TestInteractiveLoop:
             # An alias that stopped breaking the loop would read a second line;
             # the EOFError makes that a red instead of a hang.
             patch("builtins.input", side_effect=[alias, EOFError()]) as mock_input,
-            patch.object(mod, "console") as mock_console,
             patch.object(mod, "_handle_interactive_cmd") as mock_handle,
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.interactive_filter": mock_filter,
-                },
-            ),
+            _lazy_from((interactive_filter, mock_filter)),
         ):
             mod._interactive_loop()
 
         mock_input.assert_called_once()
         mock_filter.parse_command.assert_called_once_with(alias)
         mock_handle.assert_not_called()
-        mock_console.print.assert_called_once_with("[yellow]Stopping monitoring...[/yellow]")
+        assert capsys.readouterr().out == "Stopping monitoring...\n"
 
-    def test_tty_keyboard_interrupt(self):
+    def test_tty_keyboard_interrupt(self, capsys):
         """Ctrl+C at the prompt breaks the loop after one read and says so on the console."""
         mod = _import_monitor()
         mod._stop_event.clear()
@@ -1060,23 +1077,18 @@ class TestInteractiveLoop:
         with (
             patch.object(sys.stdin, "isatty", return_value=True),
             patch("builtins.input", side_effect=KeyboardInterrupt) as mock_input,
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.interactive_filter": mock_filter,
-                },
-            ),
+            _lazy_from((interactive_filter, mock_filter)),
         ):
             assert mod._interactive_loop() is None
 
         mock_input.assert_called_once()
         # The interrupt beat the parser to it, so no line was ever dispatched.
         mock_filter.parse_command.assert_not_called()
-        mod.console.print.assert_called_once_with("\n[yellow]Stopping monitoring...[/yellow]")
-        mod.logger.info.assert_called_once_with("[monitor] Stopped by user")
+        assert capsys.readouterr().out == "\nStopping monitoring...\n"
+        _doubled("logger").info.assert_called_once_with("[monitor] Stopped by user")
         assert mod._stop_event.is_set() is False
 
-    def test_tty_eof_error(self):
+    def test_tty_eof_error(self, capsys):
         """A closed stdin ends the loop silently — logged, but nothing printed at the user."""
         mod = _import_monitor()
         mod._stop_event.clear()
@@ -1086,19 +1098,14 @@ class TestInteractiveLoop:
         with (
             patch.object(sys.stdin, "isatty", return_value=True),
             patch("builtins.input", side_effect=EOFError) as mock_input,
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.interactive_filter": mock_filter,
-                },
-            ),
+            _lazy_from((interactive_filter, mock_filter)),
         ):
             assert mod._interactive_loop() is None
 
         mock_input.assert_called_once()
-        mod.logger.info.assert_called_once_with("[monitor] EOF received, stopping interactive loop")
+        _doubled("logger").info.assert_called_once_with("[monitor] EOF received, stopping interactive loop")
         # Unlike Ctrl+C, EOF is not announced: a piped-in stdin ending is not news.
-        mod.console.print.assert_not_called()
+        assert capsys.readouterr().out == ""
         assert mod._stop_event.is_set() is False
 
     def test_tty_dispatches_interactive_cmd(self):
@@ -1124,16 +1131,11 @@ class TestInteractiveLoop:
         with (
             patch.object(sys.stdin, "isatty", return_value=True),
             patch("builtins.input", side_effect=_input),
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.interactive_filter": mock_filter,
-                },
-            ),
+            _lazy_from((interactive_filter, mock_filter)),
             patch.object(mod, "_handle_interactive_cmd") as mock_handler,
         ):
             mod._interactive_loop()
-        mock_handler.assert_called_once()
+        mock_handler.assert_called_once_with("status", mock_filter.get_help_text)
 
 
 # ---------------------------------------------------------------------------
@@ -1144,22 +1146,24 @@ class TestInteractiveLoop:
 class TestPrintStatusMonitor:
     """Test status display function."""
 
-    def test_print_status_with_queue(self):
+    def test_print_status_with_queue(self, monkeypatch, capsys):
         """Status display includes queue size when queue exists."""
         mod = _import_monitor()
         mock_queue = MagicMock()
         mock_queue.size.return_value = 5
-        setattr(mod, "_event_queue", mock_queue)
+        monkeypatch.setattr(mod, "_event_queue", mock_queue)
 
         mod._print_status()
-        assert mod.console.print.call_count >= 3
+        assert "  Queue size: 5" in capsys.readouterr().out.splitlines()
 
-    def test_print_status_without_queue(self):
+    def test_print_status_without_queue(self, monkeypatch, capsys):
         """Status display works when event queue is None."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
         mod._print_status()
-        assert mod.console.print.call_count >= 2
+        lines = capsys.readouterr().out.splitlines()
+        assert "Monitoring Status:" in lines
+        assert not any(line.startswith("  Queue size:") for line in lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1236,8 +1240,8 @@ class TestGetWatchDirectoriesEdgeCases:
         # No branch dirs from the broken registry, no CLI session dirs under a
         # home that does not exist — the whole answer is the empty list.
         assert result == []
-        mod.logger.warning.assert_called_once()
-        assert "Could not read the branch registry (JSONDecodeError)" in mod.logger.warning.call_args.args[0]
+        _doubled("logger").warning.assert_called_once()
+        assert "Could not read the branch registry (JSONDecodeError)" in _doubled("logger").warning.call_args.args[0]
 
     def test_includes_codex_sessions(self, tmp_path):
         """~/.codex/sessions is included when it exists."""
@@ -1281,9 +1285,9 @@ def _installed_scope_is_unscoped(queue):
     return scope is None or scope.is_scoped is False
 
 
-def _printed(mod):
-    """All strings passed to console.print during the call."""
-    return [str(c.args[0]) for c in mod.console.print.call_args_list if c.args]
+def _printed(capsys) -> list[str]:
+    """Every line the real console printed during the call, read with capsys (prax, leg 11)."""
+    return capsys.readouterr().out.splitlines()
 
 
 class TestBranchScopeWiring:
@@ -1318,20 +1322,20 @@ class TestBranchScopeWiring:
 class TestBannerTruth:
     """The banner may never claim 'all branches, no filters' while scoped."""
 
-    def test_unscoped_banner_unchanged(self):
+    def test_unscoped_banner_unchanged(self, capsys):
         mod = _import_monitor()
         _run_scoped(mod, [])
-        assert any("all branches, all levels, no filters" in line for line in _printed(mod))
+        assert any("all branches, all levels, no filters" in line for line in _printed(capsys))
 
-    def test_scoped_banner_names_the_scope(self):
+    def test_scoped_banner_names_the_scope(self, capsys):
         mod = _import_monitor()
         _run_scoped(mod, ["devpulse,seedgo"])
-        assert any("DEVPULSE, SEEDGO" in line for line in _printed(mod))
+        assert any("DEVPULSE, SEEDGO" in line for line in _printed(capsys))
 
-    def test_scoped_banner_drops_the_all_branches_claim(self):
+    def test_scoped_banner_drops_the_all_branches_claim(self, capsys):
         mod = _import_monitor()
         _run_scoped(mod, ["devpulse"])
-        lines = _printed(mod)
+        lines = _printed(capsys)
         # The floor: a banner that printed nothing would pass the loop below in silence.
         assert len(lines) >= 1, "the scoped run printed no banner at all - the loop below proves nothing"
         assert any("DEVPULSE" in line for line in lines), "the scope must still be named somewhere"
@@ -1339,26 +1343,24 @@ class TestBannerTruth:
             assert "all branches" not in line, f"scoped run still claims all branches: {line}"
             assert "no filters" not in line, f"scoped run still claims no filters: {line}"
 
-    def test_status_unscoped_unchanged(self):
+    def test_status_unscoped_unchanged(self, monkeypatch, capsys):
         mod = _import_monitor()
-        setattr(mod, "_event_queue", None)
-        setattr(mod, "_active_scope", None)
+        monkeypatch.setattr(mod, "_event_queue", None)
+        monkeypatch.setattr(mod, "_active_scope", None)
         mod._print_status()
-        assert any("all branches, all levels, no filters" in line for line in _printed(mod))
+        assert any("all branches, all levels, no filters" in line for line in _printed(capsys))
 
-    def test_status_names_the_scope(self):
+    def test_status_names_the_scope(self, monkeypatch, capsys):
         """`status` inside a scoped monitor reports the scope, not 'no filters'."""
-        from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
-
         mod = _import_monitor()
         queue = MagicMock()
         queue.size.return_value = 2
         queue.suppressed_count.return_value = 41
-        setattr(mod, "_event_queue", queue)
-        setattr(mod, "_active_scope", BranchScope(["SEEDGO"]))
+        monkeypatch.setattr(mod, "_event_queue", queue)
+        monkeypatch.setattr(mod, "_active_scope", BranchScope(["SEEDGO"]))
 
         mod._print_status()
-        lines = _printed(mod)
+        lines = _printed(capsys)
         assert any("SEEDGO" in line for line in lines)
         assert not any("no filters" in line for line in lines)
         assert any("41" in line for line in lines), "hidden-event count explains a quiet screen"
@@ -1367,24 +1369,24 @@ class TestBannerTruth:
 class TestUnknownScopeWarning:
     """A typo'd branch would otherwise be an empty screen with no explanation."""
 
-    def test_unknown_branch_warns(self):
+    def test_unknown_branch_warns(self, capsys):
         mod = _import_monitor()
         with patch.object(mod, "_known_branch_names", return_value={"SEEDGO", "PRAX"}):
             _run_scoped(mod, ["seedgoo"])
-        assert any("seedgoo" in line.lower() for line in _printed(mod))
+        assert any("seedgoo" in line.lower() for line in _printed(capsys))
 
-    def test_known_branch_does_not_warn(self):
+    def test_known_branch_does_not_warn(self, capsys):
         mod = _import_monitor()
         with patch.object(mod, "_known_branch_names", return_value={"SEEDGO", "PRAX"}):
             _run_scoped(mod, ["seedgo"])
-        assert not any("not a known branch" in line.lower() for line in _printed(mod))
+        assert not any("not a known branch" in line.lower() for line in _printed(capsys))
 
-    def test_no_registry_means_no_warning(self):
+    def test_no_registry_means_no_warning(self, capsys):
         """Cannot check == cannot claim. An empty registry read never cries wolf."""
         mod = _import_monitor()
         with patch.object(mod, "_known_branch_names", return_value=set()):
             _run_scoped(mod, ["whatever"])
-        assert not any("not a known branch" in line.lower() for line in _printed(mod))
+        assert not any("not a known branch" in line.lower() for line in _printed(capsys))
 
     def test_known_branch_names_survives_failure(self):
         """A broken registry read must not stop the monitor from starting."""
@@ -1399,10 +1401,10 @@ class TestUnknownScopeWarning:
 class TestWatcherEventsBypassScope:
     """'File watcher unavailable' must not be filtered out by a branch scope."""
 
-    def test_emit_watcher_event_bypasses_scope(self):
+    def test_emit_watcher_event_bypasses_scope(self, monkeypatch):
         mod = _import_monitor()
         queue = MagicMock()
-        setattr(mod, "_event_queue", queue)
+        monkeypatch.setattr(mod, "_event_queue", queue)
         mod._emit_watcher_event("error", "File watcher: completely unavailable")
         assert queue.enqueue.call_args.kwargs.get("bypass_scope") is True
 
@@ -1410,13 +1412,13 @@ class TestWatcherEventsBypassScope:
 class TestIntrospectionTruth:
     """Introspection lists what the handlers actually expose."""
 
-    def test_no_filterstate_claim(self):
+    def test_no_filterstate_claim(self, capsys):
         """interactive_filter.py has no FilterState — it never had one."""
         mod = _import_monitor()
         mod.print_introspection()
-        assert not any("FilterState" in line for line in _printed(mod))
+        assert not any("FilterState" in line for line in _printed(capsys))
 
-    def test_branch_scope_handler_listed(self):
+    def test_branch_scope_handler_listed(self, capsys):
         mod = _import_monitor()
         mod.print_introspection()
-        assert any("branch_scope.py" in line for line in _printed(mod))
+        assert any("branch_scope.py" in line for line in _printed(capsys))

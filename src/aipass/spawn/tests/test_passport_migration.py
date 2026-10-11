@@ -1,28 +1,16 @@
 # =================== META ====================
 # Name: test_passport_migration.py
 # Description: DPLAN-0319 — passport 2.0 fleet migration: order, drops, lanes, idempotency
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-27
 # =============================================
 
-"""Pins for the one-shot passport 2.0 migration (DPLAN-0319 deliverable 3).
+"""Tests for apps/handlers/passport_migration.py's fleet-wide passport 2.0 migration (DPLAN-0319 deliverable 3)."""
 
-Two fixture families, on purpose:
-
-* ``synthetic_fleet`` — hand-built passports reproducing every shape MEASURED
-  on the live fleet on 2026-08-28 (uppercase casing, the ``AIPASS_REGISTRY.json``
-  registry_path outlier, skills' stale path, a resident's hardcoded absolute
-  ``/home/...`` path, string traits, top-level principles, the three R8 drops).
-  These always run — including in a clean checkout — so they carry the
-  mutation-detection weight.
-* ``live_fleet_copy`` — real copies of the actual live passports, copied into
-  tmp_path at their real relative locations. ``.trinity/`` is gitignored
-  (.gitignore:27), so these SKIP on a clone and are the ground-truth pins on a
-  machine that has the fleet.
-
-Nothing in this file writes to the live tree. Every write lands in tmp_path.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that passport_migration.py and migrate_passports.py parse and import
+# seedgo: no-test-needed(documentation) — docstrings on migrate_document, migrate_fleet, and discover_passports
 
 import json
 import os
@@ -31,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from aipass.spawn.apps import spawn as spawn_entry
 from aipass.spawn.apps.handlers.passport_migration import (
     BACKUP_SUFFIX,
     BLOCK_ORDER,
@@ -45,6 +34,23 @@ from aipass.spawn.apps.handlers.passport_migration import (
     migrate_fleet,
     repo_root,
 )
+from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
+from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
+
+# Two fixture families, on purpose:
+#
+# * ``synthetic_fleet`` — hand-built passports reproducing every shape MEASURED
+#   on the live fleet on 2026-08-28 (uppercase casing, the ``AIPASS_REGISTRY.json``
+#   registry_path outlier, skills' stale path, a resident's hardcoded absolute
+#   ``/home/...`` path, string traits, top-level principles, the three R8 drops).
+#   These always run — including in a clean checkout — so they carry the
+#   mutation-detection weight.
+# * ``live_fleet_copy`` — real copies of the actual live passports, copied into
+#   tmp_path at their real relative locations. ``.trinity/`` is gitignored
+#   (.gitignore:27), so these SKIP on a clone and are the ground-truth pins on a
+#   machine that has the fleet.
+#
+# Nothing in this file writes to the live tree. Every write lands in tmp_path.
 
 RUN_DATE = "2026-08-28"
 
@@ -775,9 +781,12 @@ class TestNoHardcodedHomePaths:
                 assert not value.startswith("/"), f"{target.path}: absolute value {value!r}"
 
     def test_live_fleet_copy_has_no_home_substring_left(self, live_fleet_copy):
-        migrate_fleet(live_fleet_copy, confirm=True, run_date=RUN_DATE)
+        """The sweep must cover every planted passport, or it proves nothing about the ones it skipped."""
+        planted = sorted(live_fleet_copy.rglob("passport.json"))
+        receipt = migrate_fleet(live_fleet_copy, confirm=True, run_date=RUN_DATE)
+        assert receipt["scanned"] == len(planted), "the sweep below must cover every planted passport"
         targets = discover_passports(live_fleet_copy)
-        assert targets, "the live copy fixture planted no passports - the sweep below would prove nothing"
+        assert sorted(t.path for t in targets) == planted
         for target in targets:
             assert "/home/" not in target.path.read_text(encoding="utf-8"), target.path
 
@@ -849,7 +858,6 @@ class TestCli:
     """The command shape: dry-run default, --confirm, --root, --only, --help."""
 
     def test_help_returns_zero_and_writes_nothing(self, synthetic_fleet):
-        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 
         before = {t.path: t.path.read_bytes() for t in discover_passports(synthetic_fleet)}
         assert handle_migrate_passports(["--help"]) == 0
@@ -857,7 +865,6 @@ class TestCli:
             assert path.read_bytes() == content
 
     def test_default_run_against_a_root_writes_nothing(self, synthetic_fleet):
-        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 
         before = {t.path: t.path.read_bytes() for t in discover_passports(synthetic_fleet)}
         assert handle_migrate_passports(["--root", str(synthetic_fleet)]) == 0
@@ -865,7 +872,6 @@ class TestCli:
             assert path.read_bytes() == content
 
     def test_confirm_writes(self, synthetic_fleet):
-        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 
         assert handle_migrate_passports(["--root", str(synthetic_fleet), "--confirm"]) == 0
         assert _read(_passport(synthetic_fleet, "src/aipass/spawn"))["document_metadata"]["schema_version"] == "2.0.0"
@@ -877,16 +883,11 @@ class TestCli:
         assert _read(_passport(synthetic_fleet, "src/aipass/canary"))["document_metadata"]["schema_version"] == "1.0.0"
 
     def test_unknown_argument_is_refused(self):
-        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 
         assert handle_migrate_passports(["--wipe-everything"]) == 1
 
     def test_entry_point_routes_the_command(self, synthetic_fleet, monkeypatch):
-        import sys
-
-        from aipass.spawn.apps import spawn as spawn_entry
-
-        monkeypatch.setattr(sys, "argv", ["spawn", "migrate-passports", "--root", str(synthetic_fleet)])
+        monkeypatch.setattr("sys.argv", ["spawn", "migrate-passports", "--root", str(synthetic_fleet)])
         assert spawn_entry.main() == 0
 
 
@@ -899,7 +900,6 @@ class TestSyncRegistryBacksUpBeforeItsWrite:
     """`sync-registry --fix` rewrites citizen_class on live passports too."""
 
     def test_legacy_class_rewrite_backs_the_passport_up_first(self, tmp_path):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         root = tmp_path / "project"
         registry_id = "11111111-2222-3333-4444-555555555555"
@@ -968,7 +968,6 @@ class TestEmptyScanIsNotAnAllClear:
     """
 
     def test_zero_scanned_says_zero_scanned(self, tmp_path, capsys):
-        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 
         empty_root = tmp_path / "some_other_repo"
         (empty_root / "src").mkdir(parents=True)
@@ -987,7 +986,6 @@ class TestEmptyScanIsNotAnAllClear:
         assert _unwrapped("No passports found") in _unwrapped(captured.err), "the zero-scan notice belongs on stderr"
 
     def test_zero_scanned_names_the_root_it_searched(self, tmp_path, capsys):
-        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 
         empty_root = tmp_path / "some_other_repo"
         empty_root.mkdir()
@@ -1000,7 +998,6 @@ class TestEmptyScanIsNotAnAllClear:
 
     def test_a_populated_root_still_reports_the_all_clear(self, synthetic_fleet, capsys):
         """The fix must not silence the real all-clear — migrate, then re-run."""
-        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 
         handle_migrate_passports(["--root", str(synthetic_fleet), "--confirm"])
         capsys.readouterr()
@@ -1151,11 +1148,13 @@ class TestLiveBaselineGuardsOnTheWorld:
         assert "core-only" in reason
 
     def test_the_skip_reason_reports_the_counts_it_saw(self, tmp_path):
+        """Mutant: discover_passports files core passports as residents -> red."""
         for i in range(3):
             self._plant(tmp_path, Path(f"src/aipass/branch{i}"))
 
-        _, reason = _fleet_baseline_verdict(tmp_path)
+        shape, reason = _fleet_baseline_verdict(tmp_path)
 
+        assert shape == (3, 3, 0)
         assert reason is not None
         assert "3 core" in reason
         assert "0 resident" in reason
@@ -1188,4 +1187,4 @@ class TestLiveBaselineGuardsOnTheWorld:
             f"the verdict must measure exactly when a resident is present: shape={shape} reason={reason!r}"
         )
         if total and resident == 0:
-            assert f"{core} core, 0 resident" in reason, reason
+            assert reason is not None and f"{core} core, 0 resident" in reason, reason

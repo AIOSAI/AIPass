@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_paths.py
 # Description: Tests for shared path utilities
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for paths module -- repo root discovery and project root resolution."""
+"""Tests for apps/handlers/paths.py -- repo root discovery and project root resolution."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — find_project_root(), not driven here: tests/test_registry_case_sweep.py
 
 import pytest
 from pathlib import Path

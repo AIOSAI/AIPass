@@ -1,8 +1,11 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_profiles.py - Profile Handler Unit Tests
+# Description: Tests for apps/handlers/profiles/profile_queries.py
 # Date: 2026-03-24
 # Version: 1.0.0
+# Created: 2026-03-24
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,16 +17,10 @@
 #   - Mocks prax logger and json_handler to avoid side-effect dependencies
 # =============================================
 
-"""
-Unit tests for profile queries and profile operations.
+"""Tests for apps/handlers/profiles/profile_queries.py."""
 
-Covers:
-- format_time_ago() pure function with various timestamp inputs
-- get_profile / update_bio / update_status / update_role DB operations
-- get_activity_stats / get_all_agents_brief DB queries
-- increment_post_count / increment_comment_count mutations
-- Edge cases: missing agents, empty strings, malformed timestamps
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/profiles/ parses and imports
 
 import sqlite3
 from datetime import datetime, timezone, timedelta
@@ -41,6 +38,7 @@ from aipass.commons.apps.handlers.profiles.profile_queries import (
     increment_post_count,
     increment_comment_count,
 )
+from aipass.commons.apps.handlers.profiles.profile_ops import show_profile
 
 
 # =============================================================================
@@ -116,9 +114,9 @@ def _insert_test_agent(conn: sqlite3.Connection, name: str = "TEST_AGENT") -> No
 
 
 @patch("aipass.commons.apps.handlers.profiles.profile_queries.json_handler", autospec=True)
-def test_get_profile_returns_agent_data(mock_json: object, initialized_db: object) -> None:
+def test_get_profile_returns_agent_data(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """get_profile should return a dict with all profile fields for an existing agent."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     profile = get_profile(conn, "TEST_AGENT")
@@ -129,17 +127,17 @@ def test_get_profile_returns_agent_data(mock_json: object, initialized_db: objec
     assert profile["role"] == "tester"
 
 
-def test_get_profile_nonexistent_returns_none(initialized_db: object) -> None:
+def test_get_profile_nonexistent_returns_none(initialized_db: sqlite3.Connection) -> None:
     """get_profile should return None for an agent that does not exist."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     profile = get_profile(conn, "GHOST_BRANCH")
     assert profile is None
 
 
 @patch("aipass.commons.apps.handlers.profiles.profile_queries.json_handler", autospec=True)
-def test_update_bio_changes_agent_bio(mock_json: object, initialized_db: object) -> None:
+def test_update_bio_changes_agent_bio(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """update_bio should change the bio text and return True for an existing agent."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     result = update_bio(conn, "TEST_AGENT", "New bio text")
@@ -150,17 +148,17 @@ def test_update_bio_changes_agent_bio(mock_json: object, initialized_db: object)
     assert profile["bio"] == "New bio text"
 
 
-def test_update_bio_nonexistent_returns_false(initialized_db: object) -> None:
+def test_update_bio_nonexistent_returns_false(initialized_db: sqlite3.Connection) -> None:
     """update_bio should return False when the agent does not exist."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     with patch("aipass.commons.apps.handlers.profiles.profile_queries.json_handler", autospec=True):
         result = update_bio(conn, "NOBODY", "irrelevant")
     assert result is False
 
 
-def test_update_status_changes_agent_status(initialized_db: object) -> None:
+def test_update_status_changes_agent_status(initialized_db: sqlite3.Connection) -> None:
     """update_status should change the status and return True."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     result = update_status(conn, "TEST_AGENT", "busy building")
@@ -171,9 +169,9 @@ def test_update_status_changes_agent_status(initialized_db: object) -> None:
     assert profile["status"] == "busy building"
 
 
-def test_update_role_changes_agent_role(initialized_db: object) -> None:
+def test_update_role_changes_agent_role(initialized_db: sqlite3.Connection) -> None:
     """update_role should change the role and return True."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     result = update_role(conn, "TEST_AGENT", "architect")
@@ -184,9 +182,9 @@ def test_update_role_changes_agent_role(initialized_db: object) -> None:
     assert profile["role"] == "architect"
 
 
-def test_increment_post_count(initialized_db: object) -> None:
+def test_increment_post_count(initialized_db: sqlite3.Connection) -> None:
     """increment_post_count should increase the agent's post_count by 1."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     stats_before = get_activity_stats(conn, "TEST_AGENT")
@@ -201,9 +199,9 @@ def test_increment_post_count(initialized_db: object) -> None:
     assert stats["post_count"] == 1
 
 
-def test_increment_comment_count(initialized_db: object) -> None:
+def test_increment_comment_count(initialized_db: sqlite3.Connection) -> None:
     """increment_comment_count should increase the agent's comment_count by 1."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     stats_before = get_activity_stats(conn, "TEST_AGENT")
@@ -218,9 +216,9 @@ def test_increment_comment_count(initialized_db: object) -> None:
     assert stats["comment_count"] == 1
 
 
-def test_get_all_agents_brief_includes_inserted_agents(initialized_db: object) -> None:
+def test_get_all_agents_brief_includes_inserted_agents(initialized_db: sqlite3.Connection) -> None:
     """get_all_agents_brief should include agents inserted into the DB."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn, "ALPHA")
     _insert_test_agent(conn, "BETA")
 
@@ -228,3 +226,42 @@ def test_get_all_agents_brief_includes_inserted_agents(initialized_db: object) -
     names = [a["branch_name"] for a in agents]
     assert "ALPHA" in names
     assert "BETA" in names
+
+
+def test_show_profile_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    With no target named the caller's own profile is asked; the lookup raises
+    before any database is opened.
+    """
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.profiles.profile_ops.get_db") as db,
+    ):
+        result = show_profile([])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_profile_set_refuses_naming_a_failed_caller_lookup():
+    # Route: show_profile(["set", field, value]) dispatches to _handle_profile_set.
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.profiles.profile_ops.get_db") as db,
+    ):
+        result = show_profile(["set", "bio", "a pinned bio"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

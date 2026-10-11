@@ -1,12 +1,17 @@
 # =================== AIPass ====================
 # Name: test_registry_read.py
 # Description: Tests for registry read handler
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-10-04
 # =============================================
 
-"""Tests for registry read handler -- branch listing and email derivation."""
+"""Tests for apps/handlers/registry/read.py."""
+
+# Branch listing and email derivation.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — get_all_branches()'s broad except Exception fallback on a malformed registry file
 
 import json
 import pytest
@@ -14,7 +19,6 @@ from unittest.mock import patch
 
 import aipass.ai_mail.apps.handlers.registry.read as read_mod
 from aipass.ai_mail.apps.handlers.registry.read import (
-    _derive_email_from_branch_name,
     get_all_branches,
     get_branch_by_email,
     get_caller_project_branches,
@@ -48,37 +52,43 @@ SAMPLE_REGISTRY = {
 }
 
 
-# --- _derive_email_from_branch_name() tests ---------------------------
+# --- the email derived for a registry row with no email field ---------
 
 
-def test_derive_email_dotted():
+def _derived(registry_file, name):
+    """The email get_all_branches() derives for a row named `name` with no email field."""
+    registry_file.write_text(json.dumps({"branches": [{"name": name, "path": "src/x"}]}), encoding="utf-8")
+    return get_all_branches()[0]["email"]
+
+
+def test_derive_email_dotted(registry_file):
     """Dotted name: 'AIPASS.admin' takes part after dot."""
-    assert _derive_email_from_branch_name("AIPASS.admin") == "@admin"
+    assert _derived(registry_file, "AIPASS.admin") == "@admin"
 
 
-def test_derive_email_space():
+def test_derive_email_space(registry_file):
     """Space-separated name: 'AIPASS Workshop' takes first word."""
-    assert _derive_email_from_branch_name("AIPASS Workshop") == "@aipass"
+    assert _derived(registry_file, "AIPASS Workshop") == "@aipass"
 
 
-def test_derive_email_aipass_hyphen():
+def test_derive_email_aipass_hyphen(registry_file):
     """AIPASS-prefixed hyphen: 'AIPASS-HELP' takes second part."""
-    assert _derive_email_from_branch_name("AIPASS-HELP") == "@help"
+    assert _derived(registry_file, "AIPASS-HELP") == "@help"
 
 
-def test_derive_email_regular_hyphen():
+def test_derive_email_regular_hyphen(registry_file):
     """Non-AIPASS hyphen: 'DATA-LAKE' takes first part."""
-    assert _derive_email_from_branch_name("DATA-LAKE") == "@data"
+    assert _derived(registry_file, "DATA-LAKE") == "@data"
 
 
-def test_derive_email_plain():
+def test_derive_email_plain(registry_file):
     """Plain name: 'DRONE' lowercases whole name."""
-    assert _derive_email_from_branch_name("DRONE") == "@drone"
+    assert _derived(registry_file, "DRONE") == "@drone"
 
 
-def test_derive_email_lowercase():
+def test_derive_email_lowercase(registry_file):
     """Mixed case plain name: 'Flow' lowercases."""
-    assert _derive_email_from_branch_name("Flow") == "@flow"
+    assert _derived(registry_file, "Flow") == "@flow"
 
 
 # --- get_all_branches() tests ----------------------------------------

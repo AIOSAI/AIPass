@@ -1,14 +1,16 @@
 # =================== AIPass ====================
 # Name: registry_gate.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Blocks raw writes, edits, and deletions of *_REGISTRY.json (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-09-30
 # =============================================
 
 """Blocks raw writes, edits, and deletions of *_REGISTRY.json files.
+
+Failure mode: a crash refuses the call it was checking; the engine refuses on import error and timeout.
 
 Sealed-authority enforcement: the registry is the single source of truth
 for project ownership. Only drone @spawn (tier-gated) may write it.
@@ -34,6 +36,13 @@ _BLOCK_ALLOW = {"stdout": "", "exit_code": 0}
 _REDIRECT_RE = re.compile(r">{1,2}\s*\S*_REGISTRY\.json\b")
 _TEE_RE = re.compile(r"\btee\b[^&;|]*\S*_REGISTRY\.json\b")
 _SED_I_RE = re.compile(r"\bsed\b\s[^&;|]*-i[^&;|]*\S*_REGISTRY\.json\b")
+
+
+GATE_CRASHED = (
+    "registry_gate could not check this call ({error}), so it is refused: a gate that cannot read a call "
+    "does not let it through.\n"
+    'Mail @hooks and @devpulse: drone @ai_mail email @hooks "Gate broken: registry_gate" "<what you ran, and this text>"'
+)
 
 
 def _block(reason: str) -> dict:
@@ -152,8 +161,8 @@ def handle(hook_data: dict) -> dict:
     Returns:
         Result dict with stdout (block JSON or empty) and exit_code.
     """
+    tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     try:
-        tool_name = hook_data.get("tool_name", "")
         tool_input = hook_data.get("tool_input", {})
 
         if tool_name == "Bash":
@@ -161,6 +170,8 @@ def handle(hook_data: dict) -> dict:
         if tool_name in EDIT_TOOLS:
             return _check_edit(tool_input)
         return _BLOCK_ALLOW
-    except Exception as exc:
-        logger.info("[HOOKS] registry_gate: unexpected error (allowing): %s", exc)
+    except Exception as exc:  # fail closed on what this gate guards (DPLAN-0356 item 2)
+        logger.error("[HOOKS] registry_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
+        if tool_name == "Bash" or tool_name in EDIT_TOOLS:
+            return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
         return _BLOCK_ALLOW

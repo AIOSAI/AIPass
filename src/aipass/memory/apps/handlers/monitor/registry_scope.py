@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_scope.py
 # Description: The one definition of "the fleet" — core, passport-declared residents, declared-root externals
-# Version: 4.1.0
+# Version: 4.2.0
 # Created: 2026-08-27
-# Modified: 2026-08-30
+# Modified: 2026-10-04
 # =============================================
 
 """Fleet Scope
@@ -110,6 +110,15 @@ EXTERNAL_REGISTRY_GLOB = "*_REGISTRY.json"
 # The exact-case ending both globs are narrowed to. Windows and macOS glob
 # case-insensitively, so the pattern alone is wider than the rule it spells.
 CORE_REGISTRY_SUFFIX = "_REGISTRY.json"
+
+
+class RegistryUnreadable(RuntimeError):
+    """A registry file that exists and cannot be read as a registry.
+
+    Raised only to a caller that asked for it (``strict=True``). Every other
+    caller still gets ``[]`` for that file, logged at error: one broken
+    resident or external registry costs only its own rows.
+    """
 
 
 # The root implied by this SOURCE TREE's layout, re-exported from the one
@@ -285,7 +294,35 @@ def _exactly_named(candidates: list[Path], suffix: str) -> list[Path]:
     return repo_root.exactly_named(candidates, suffix)
 
 
-def read_registry_branches(registry_path: Path, name_from: str = "path") -> list[dict[str, Any]]:
+def _registry_rows(registry_path: Path) -> list[Any]:
+    """The raw ``branches`` list of one registry file.
+
+    Raises:
+        RegistryUnreadable: the file cannot be read, is not JSON, or is not a
+            registry's shape (root not an object, ``branches`` not a list).
+    """
+    try:
+        data = json.loads(Path(registry_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RegistryUnreadable(f"Unreadable registry {registry_path}: {exc}") from exc
+
+    # Same shape defect as `declared_residency`, and worse here: a passport is
+    # agent-written and expected to be wrong sometimes, while every lane trusts
+    # the registry as the anchor a passport cannot forge. A registry that
+    # crashes the reader takes the anchor down with it. Found by extending
+    # @daemon's report rather than by their tests, which only reached the
+    # passport.
+    if not isinstance(data, dict):
+        raise RegistryUnreadable(f"Unreadable registry {registry_path}: root is {type(data).__name__}, not an object")
+    branches = data.get("branches", [])
+    if not isinstance(branches, list):
+        raise RegistryUnreadable(
+            f"Unreadable registry {registry_path}: 'branches' is {type(branches).__name__}, not a list"
+        )
+    return branches
+
+
+def read_registry_branches(registry_path: Path, name_from: str = "path", strict: bool = False) -> list[dict[str, Any]]:
     """Read one registry's ACTIVE branches with absolute paths.
 
     Args:
@@ -295,30 +332,22 @@ def read_registry_branches(registry_path: Path, name_from: str = "path") -> list
             per-branch config lookups key on), or ``"registry"`` to keep the
             registry's own ``name`` field, whose casing disagrees for several
             citizens (``BACKUP`` vs ``backup``).
+        strict: Raise when the file is unreadable, in place of answering ``[]``.
 
     Returns:
         ``[{"name", "path", "registry"}]`` — empty when the file is
-        unreadable, which is logged as an error rather than raised: one
-        broken registry must not take out a fleet-wide lane.
+        unreadable and *strict* is false, which is logged as an error rather
+        than raised: one broken registry must not take out a fleet-wide lane.
+
+    Raises:
+        RegistryUnreadable: only when *strict* is true.
     """
     try:
-        data = json.loads(Path(registry_path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        logger.error(f"[registry_scope] Unreadable registry {registry_path}: {exc}")
-        return []
-
-    # Same shape defect as `declared_residency`, and worse here: a passport is
-    # agent-written and expected to be wrong sometimes, while every lane trusts
-    # the registry as the anchor a passport cannot forge. A registry that
-    # crashes the reader takes the anchor down with it. Found by extending
-    # @daemon's report rather than by their tests, which only reached the
-    # passport.
-    if not isinstance(data, dict):
-        logger.error(f"[registry_scope] Registry root is {type(data).__name__}, not an object: {registry_path}")
-        return []
-    branches = data.get("branches", [])
-    if not isinstance(branches, list):
-        logger.error(f"[registry_scope] Registry 'branches' is {type(branches).__name__}, not a list: {registry_path}")
+        branches = _registry_rows(registry_path)
+    except RegistryUnreadable as exc:
+        if strict:
+            raise
+        logger.error(f"[registry_scope] {exc}")
         return []
 
     found = []
@@ -625,7 +654,9 @@ def accepted_resident_paths(repo_root: Path | None = None) -> set[str]:
     return accepted
 
 
-def fleet_branches(repo_root: Path | None = None, name_from: str = "path") -> list[dict[str, Any]]:
+def fleet_branches(
+    repo_root: Path | None = None, name_from: str = "path", strict: bool = False
+) -> list[dict[str, Any]]:
     """Every branch @memory maintains: core citizens, residents, and externals.
 
     Deduplicated by resolved path, core registry first, residents in discovery
@@ -642,12 +673,23 @@ def fleet_branches(repo_root: Path | None = None, name_from: str = "path") -> li
     Args:
         repo_root: Repo root to resolve against; defaults to this checkout's.
         name_from: See :func:`read_registry_branches`.
+        strict: Raise when the core registry exists and cannot be read. A lane
+            that resolves a branch BY NAME and then writes asks for this: with
+            the core rows gone, a resident or external branch sharing a core
+            citizen's directory name is the only answer for that name, and the
+            todo backlog and the push key on the name (leg 10 of DPLAN-0354,
+            @memory's decision). An absent core registry is still ``[]``: a
+            fresh clone has none.
 
     Returns:
         ``[{"name", "path", "registry", "email", "residency"}]``.
+
+    Raises:
+        RegistryUnreadable: only when *strict* is true.
     """
     root = Path(repo_root) if repo_root is not None else REPO_ROOT
-    branches = read_registry_branches(root / CORE_REGISTRY, name_from=name_from)
+    core = root / CORE_REGISTRY
+    branches = read_registry_branches(core, name_from=name_from, strict=strict and core.exists())
     core_count = len(branches)
     for item in branches:
         residency = declared_residency(item["path"])

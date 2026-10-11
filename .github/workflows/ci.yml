@@ -64,7 +64,23 @@ jobs:
       # xdist (DPLAN-0277 phase 1b): loadscope keeps each test class on one
       # worker. The suite's shared-state hygiene was fixed for this — see the
       # repo-root conftest.py guard — and proven over repeated full runs.
-      - run: pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope
+      # --timeout (pytest-timeout, a dev extra): one hung test used to take the
+      # whole job to its 30-minute cap with no traceback — PR #774 round three,
+      # run 38087470864, the 3.10 leg sat 26 min behind one api socket test and
+      # the summary never printed. A per-test ceiling fails that one test with
+      # the stack of where it sat; the slowest honest test here is under 2 min.
+      # --timeout-method thread: the default signal method cannot interrupt a
+      # wait inside C (a lock, a portal join), and round five's macOS leg hung
+      # past its 300 s ceiling that way (run 38100884450, memory's search test
+      # FAILED then its worker never reported again). The thread method dumps
+      # every thread's stack and exits the worker; xdist marks the test failed
+      # and carries on, so the job ends with evidence instead of a cancel.
+      # --max-worker-restart 0: a worker that dies outright ("node down: Not
+      # properly terminated") ends the session red with the in-flight test
+      # named. Round five's macOS leg (run 38100884450) let xdist replace the
+      # dead worker and the session never finished: 8 minutes of silence, then
+      # the job cap, no summary. A dead worker is a red; say so in one line.
+      - run: pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope --timeout 300 --timeout-method thread --max-worker-restart 0
 
   standards:
     name: seedgo-audit
@@ -73,10 +89,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history: the README-freshness check reads `git log` to find the
-          # last commit touching each branch's .py. A shallow (depth-1) checkout
-          # makes every file look born at HEAD, so every README false-fails as
-          # "stale". Full history makes CI match a local audit exactly.
+          # Full history: stale_header_date (2026-09-25) reads `git log` for the
+          # last commit touching each test file. A shallow (depth-1) checkout
+          # makes every file look born at HEAD, so that checker DECLINES there
+          # rather than guess. Full history makes CI match a local audit exactly.
+          # (This once served a README-freshness check that no longer reads git.)
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -91,6 +108,10 @@ jobs:
           # defect. Installing the declared extra lets pyright resolve them so the
           # audit measures real type-correctness (and matches a local audit).
           pip install -e ".[dev,memory]"
+      # Public repo: no developer's home path in any tracked text file (the owner,
+      # 2026-10-04). Reads git ls-files; exit 1 on a hit, 2 when it could not measure.
+      - name: No developer home path in tracked files
+        run: python -m aipass.seedgo.apps.seedgo home-paths scan
       - name: Run seedgo standards audit
         run: python .github/scripts/seedgo_audit.py
 
@@ -108,7 +129,7 @@ jobs:
       - run: |
           python -m pip install --require-hashes -r .github/requirements/pip.txt
           pip install -e ".[dev,host]"
-      - run: coverage run -m pytest --rootdir=. --ignore=tests/e2e
+      - run: coverage run -m pytest --rootdir=. --ignore=tests/e2e --timeout 300 --timeout-method thread
       - run: coverage xml
       - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:

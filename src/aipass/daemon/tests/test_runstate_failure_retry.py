@@ -3,40 +3,43 @@
 # Description: A failed fire must not consume its own period
 # Version: 1.0.0
 # Created: 2026-08-30
-# Modified: 2026-08-30
+# Modified: 2026-09-27
 # =============================================
 
-"""
-A FAILED fire used to suppress its own retry for the rest of the period.
+"""Tests for apps/handlers/schedule/runstate.py — a failed fire must not consume its own period."""
 
-Reported by @ai_mail (mail 826e02cd) after @devpulse spotted it, and measured
-against this branch's live runstate before I touched anything:
-record_job_failure() stamped ``last_run`` exactly as the success path does, and
-every due-ness checker read ``last_run`` without ever consulting
-``last_status``. So the field meaning "when did this last SUCCEED" was being
-written by the failure path, and due-ness could not tell the two apart.
-
-Live proof at the time of the report - @vera/release-watch, whose only fire
-that day raised "resolve: Branch not found", was not due again until the next
-day.
-
-Two rules come out of the fix and both are pinned here:
-
-  1. WINDOWED schedules (daily, rotation, hourly) measure period-completion
-     from the last SUCCESS. A failure no longer counts as the period's work.
-  2. A failure still buys a short BACKOFF, so a permanently-broken job retries
-     a couple of times inside its window instead of once per ~2-minute tick.
-     Interval jobs keep measuring from the last ATTEMPT - their interval is
-     already the bound, and measuring them from the last success would make a
-     never-succeeding job due on every tick forever. That is the storm this
-     fix must not create while removing the suppression.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — _FAILURE_BACKOFF_MINUTES by value; the bounded-fires walk measures its effect
 
 from datetime import datetime, timedelta
 
 import pytest
 
 from aipass.daemon.apps.handlers.schedule import runstate as rs
+
+# A FAILED fire used to suppress its own retry for the rest of the period.
+#
+# Reported by @ai_mail (mail 826e02cd) after @devpulse spotted it, and measured
+# against this branch's live runstate before I touched anything:
+# record_job_failure() stamped ``last_run`` exactly as the success path does, and
+# every due-ness checker read ``last_run`` without ever consulting
+# ``last_status``. So the field meaning "when did this last SUCCEED" was being
+# written by the failure path, and due-ness could not tell the two apart.
+#
+# Live proof at the time of the report - @vera/release-watch, whose only fire
+# that day raised "resolve: Branch not found", was not due again until the next
+# day.
+#
+# Two rules come out of the fix and both are pinned here:
+#
+#   1. WINDOWED schedules (daily, rotation, hourly) measure period-completion
+#      from the last SUCCESS. A failure no longer counts as the period's work.
+#   2. A failure still buys a short BACKOFF, so a permanently-broken job retries
+#      a couple of times inside its window instead of once per ~2-minute tick.
+#      Interval jobs keep measuring from the last ATTEMPT - their interval is
+#      already the bound, and measuring them from the last success would make a
+#      never-succeeding job due on every tick forever. That is the storm this
+#      fix must not create while removing the suppression.
 
 
 DAILY = {"type": "daily", "time": "19:00"}
@@ -89,12 +92,7 @@ class TestAFailedFireDoesNotConsumeItsPeriod:
             }
         }
 
-        assert (
-            rs._is_daily_due(
-                DAILY, rs._due_from(st["jobs"][rs.job_key("@vera", "release-watch")]), datetime(2026, 8, 30, 19, 14)
-            )
-            is True
-        )
+        assert rs.is_job_due(_job(DAILY), st, now=datetime(2026, 8, 30, 19, 14)) is True
 
 
 class TestASuccessStillConsumesItsPeriod:
@@ -108,28 +106,33 @@ class TestASuccessStillConsumesItsPeriod:
     def test_a_succeeded_daily_job_is_due_again_the_next_day(self):
         st = _state_after_success("2026-08-29T19:02:04")
 
-        assert (
-            rs._is_daily_due(
-                DAILY, rs._due_from(st["jobs"][rs.job_key("@vera", "release-watch")]), datetime(2026, 8, 30, 19, 5)
-            )
-            is True
-        )
+        assert rs.is_job_due(_job(DAILY), st, now=datetime(2026, 8, 30, 19, 5)) is True
 
     def test_a_legacy_entry_with_no_last_success_at_still_counts_as_run(self):
+        """Mutant killed: _due_from reading an entry without last_success_at as never run."""
         # Entries written before last_success_at existed carry only last_run
         # plus last_status. Treating those as "never succeeded" would re-fire
         # every already-done job on this machine the moment the fix landed.
         entry = {"last_run": "2026-08-30T19:02:04", "last_status": "success"}
+        st = {"jobs": {rs.job_key("@vera", "release-watch"): entry}}
 
-        assert rs._due_from(entry) == "2026-08-30T19:02:04"
+        assert rs.is_job_due(_job(DAILY), st, now=datetime(2026, 8, 30, 19, 14)) is False
 
     def test_an_entry_with_no_status_at_all_is_read_as_a_run(self):
         # Oldest shape: last_run alone. Same reasoning - absence of a failure
         # marker is not evidence of a failure.
-        assert rs._due_from({"last_run": "2026-08-30T19:02:04"}) == "2026-08-30T19:02:04"
+        st = {"jobs": {rs.job_key("@vera", "release-watch"): {"last_run": "2026-08-30T19:02:04"}}}
+
+        assert rs.is_job_due(_job(DAILY), st, now=datetime(2026, 8, 30, 19, 14)) is False
 
     def test_a_failed_entry_reports_no_usable_success(self):
-        assert rs._due_from({"last_run": "x", "last_status": "failed"}) is None
+        """Mutant killed: _due_from handing back a failed entry's last_run as a success."""
+        # A failure with no failure timestamp holds no backoff, so only the
+        # status decides: the failed last_run is not the period's work.
+        entry = {"last_run": "2026-08-30T19:02:04", "last_status": "failed"}
+        st = {"jobs": {rs.job_key("@vera", "release-watch"): entry}}
+
+        assert rs.is_job_due(_job(DAILY), st, now=datetime(2026, 8, 30, 19, 4)) is True
 
 
 class TestTheFailureBackoffBoundsTheRetry:
@@ -141,13 +144,12 @@ class TestTheFailureBackoffBoundsTheRetry:
         st = _state_after_failure("2026-08-30T19:02:04")
         two_minutes_later = datetime(2026, 8, 30, 19, 4)
 
-        assert rs._in_failure_backoff(st["jobs"][rs.job_key("@vera", "release-watch")], two_minutes_later) is True
+        # Inside the window with no success on record: only the backoff says no.
+        assert rs.is_job_due(_job(DAILY), st, now=two_minutes_later) is False
 
     def test_the_backoff_expires_and_the_retry_happens(self):
         st = _state_after_failure("2026-08-30T19:02:04")
-        entry = st["jobs"][rs.job_key("@vera", "release-watch")]
 
-        assert rs._in_failure_backoff(entry, datetime(2026, 8, 30, 19, 14)) is False
         assert rs.is_job_due(_job(DAILY), st, now=datetime(2026, 8, 30, 19, 14)) is True
 
     def test_a_broken_daily_job_fires_a_bounded_number_of_times_in_its_window(self):
@@ -166,13 +168,30 @@ class TestTheFailureBackoffBoundsTheRetry:
         assert 1 <= fires <= 4, f"a broken daily job fired {fires} times in one window"
 
     def test_a_successful_job_is_never_held_by_a_stale_backoff(self):
+        """Mutant killed: _in_failure_backoff ignoring a success later than the failure."""
         # An entry that failed once and later succeeded must not be blocked by
-        # the old last_failure_at still sitting in the record.
+        # the old last_failure_at still sitting in the record. A one-minute
+        # interval is due again a minute after its success, so the only thing
+        # that could still hold it at 19:04 is the stale 19:02 failure.
+        every_minute = {"type": "interval", "interval_minutes": 1}
         st = _state_after_failure("2026-08-30T19:02:04")
-        rs.update_job_runstate(st, "@vera", "release-watch", DAILY, timestamp="2026-08-30T19:03:00")
-        entry = st["jobs"][rs.job_key("@vera", "release-watch")]
+        rs.update_job_runstate(st, "@vera", "release-watch", every_minute, timestamp="2026-08-30T19:03:00")
 
-        assert rs._in_failure_backoff(entry, datetime(2026, 8, 30, 19, 4)) is False
+        assert rs.is_job_due(_job(every_minute), st, now=datetime(2026, 8, 30, 19, 4)) is True
+
+    @pytest.mark.parametrize("garbage", ["zzz", "yesterday"], ids=["sorts-after-digits", "a-word"])
+    def test_an_unreadable_success_stamp_does_not_cancel_the_backoff(self, caplog, garbage):
+        """The stamps were compared as strings, so any text sorting after "2026-..." read as a later success.
+
+        Now both are parsed; an unparsable last_success_at cancels nothing and is warned (DPLAN-0354 leg 3, 7c).
+        Mutant killed: _in_failure_backoff treating an unparsable success as later than the failure.
+        """
+        st = _state_after_failure("2026-08-30T19:02:04")
+        st["jobs"]["@vera/release-watch"]["last_success_at"] = garbage
+
+        with caplog.at_level("WARNING"):
+            assert rs.is_job_due(_job(DAILY), st, now=datetime(2026, 8, 30, 19, 4)) is False
+        assert repr(garbage) in caplog.text
 
 
 class TestIntervalJobsKeepMeasuringFromTheAttempt:
@@ -194,7 +213,6 @@ class TestIntervalJobsKeepMeasuringFromTheAttempt:
             }
         }
 
-        assert rs._is_interval_due(INTERVAL, "2026-08-30T18:00:00", datetime(2026, 8, 30, 19, 5)) is True
         assert rs.is_job_due(_job(INTERVAL), st, now=datetime(2026, 8, 30, 19, 5)) is True
 
 

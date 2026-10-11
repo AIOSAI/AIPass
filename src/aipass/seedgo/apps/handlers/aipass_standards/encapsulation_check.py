@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-03-15
+# Modified: 2026-10-10
 # =============================================
 
 """
@@ -26,13 +26,16 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_test_path
+from aipass.seedgo.apps.handlers.aipass_standards.string_imports import STRING_IMPORT_NOTE, iter_string_imports
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
-# Applies to production source only: reaching into another module's internals is
-# what a unit test is FOR. 247 of 456 fleet test files failed this (54%, every
-# branch) for doing their job.
-APPLIES_TO = "production"
+# Applies everywhere since DPLAN-0404 leg 1, but a test file is asked ONE thing.
+# Reaching into its own branch's internals is what a unit test is FOR (247 of 456
+# fleet test files once failed the production rules for doing their job), so a
+# test is judged only on another branch's handlers: see check_test_file.
+APPLIES_TO = "everywhere"
 
 # Cross-branch/cross-package handler imports are import-statement checks, so a
 # violation hiding in a package marker file must not be invisible to the audit
@@ -120,8 +123,9 @@ def extract_branch_from_import(import_line: str) -> Optional[str]:
     if match:
         return match.group(1)
 
-    # Pattern 2: aipass.branch.apps.handlers...
-    match = re.search(r"from\s+aipass\.(\w+)\.apps\.handlers", import_line)
+    # Pattern 2: aipass.branch[.nested...].apps.handlers... -- handlers anywhere
+    # under a branch's tree are that branch's (skills' lib/telegram, 10-08)
+    match = re.search(r"from\s+aipass\.(\w+)\.(?:\w+\.)*?apps\.handlers", import_line)
     if match:
         return match.group(1)
 
@@ -148,15 +152,27 @@ def extract_handler_package(import_line: str) -> Optional[str]:
     return None
 
 
+def _posix(file_path: str) -> str:
+    """The path as a string with forward slashes, whatever host handed it in.
+
+    The checks below search the path for "apps/handlers/" and "apps/modules/";
+    Windows hands in C:\\...\\apps\\modules\\door.py, which matched neither,
+    and a door was judged as an entry point on Windows only (PR #774, round
+    two). Same idiom as apps/handlers/__init__.py.
+    """
+    return str(file_path).replace("\\", "/")
+
+
 def get_file_handler_package(file_path: str) -> Optional[str]:
     """
     Get the handler package a file belongs to
 
     Examples:
         '/home/.../apps/handlers/json/json_handler.py' -> 'json'
+        'C:\\...\\apps\\handlers\\json\\json_handler.py' -> 'json'
         '/home/.../apps/modules/something.py' -> None (not a handler)
     """
-    path_str = str(file_path)
+    path_str = _posix(file_path)
 
     if "apps/handlers/" not in path_str:
         return None
@@ -183,6 +199,60 @@ def _resolve_branch_path(file_path: str) -> Optional[Path]:
         registry_path = _find_registry()
         branch_path = (registry_path.parent / branch_path).resolve()
     return branch_path
+
+
+#: The conviction for the eager line, dated to the commit that planted it.
+EAGER_HANDLERS_MESSAGE = (
+    "apps/__init__.py imports handlers: the fence sees its own package as every caller (2026-04-25)"
+)
+
+
+def _imports_handlers(node: ast.stmt) -> bool:
+    """Whether one statement imports a handlers package or something under it."""
+    if isinstance(node, ast.Import):
+        return any(".apps.handlers" in alias.name for alias in node.names)
+    if not isinstance(node, ast.ImportFrom):
+        return False
+    module = node.module or ""
+    names = {alias.name for alias in node.names}
+    if node.level:
+        return module.split(".")[0] == "handlers" or (not module and "handlers" in names)
+    return ".apps.handlers" in module or (module.endswith(".apps") and "handlers" in names)
+
+
+def _apps_package_imports_handlers(apps_init: Path) -> Optional[Dict]:
+    """The failing guard check when apps/__init__.py imports handlers, else None.
+
+    Read from the parse tree, so a docstring that names the line is prose.
+    An unreadable or unparseable package fails the check by its own message:
+    a file this check could not read is not evidence the line is absent.
+    """
+    if not apps_init.exists():
+        return None
+    try:
+        tree = ast.parse(apps_init.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+        logger.info("encapsulation: cannot read %s: %s", apps_init, exc)
+        return {"name": "Handler security guard", "passed": False, "message": f"Cannot read apps/__init__.py: {exc}"}
+    if any(_imports_handlers(node) for node in ast.walk(tree) if isinstance(node, ast.stmt)):
+        return {"name": "Handler security guard", "passed": False, "message": EAGER_HANDLERS_MESSAGE}
+    return None
+
+
+def _calls_the_guard(content: str) -> bool:
+    """Whether handlers/__init__.py calls _guard_branch_access() at module level (guard v2)."""
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        logger.info("encapsulation: handlers/__init__.py unparseable, v2 marker unseen: %s", exc)
+        return False
+    return any(
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "_guard_branch_access"
+        for node in tree.body
+    )
 
 
 def check_handler_guard(module_path: str, bypass_rules: list | None = None) -> Optional[Dict]:
@@ -218,6 +288,14 @@ def check_handler_guard(module_path: str, bypass_rules: list | None = None) -> O
         _handler_guard_cache[branch_key] = None
         return None
 
+    # The package above the guard (DPLAN-0404 leg 1): an apps/__init__.py that
+    # imports handlers makes itself the first frame the guard sees, so every
+    # caller reads as kin. One line in all 18 branches since 2026-04-25.
+    eager = _apps_package_imports_handlers(branch_path / "apps" / "__init__.py")
+    if eager is not None:
+        _handler_guard_cache[branch_key] = eager
+        return eager
+
     if not init_path.exists():
         result = {
             "name": "Handler security guard",
@@ -243,7 +321,13 @@ def check_handler_guard(module_path: str, bypass_rules: list | None = None) -> O
     guard_patterns = ["_guard_branch_access", "inspect.stack", "ImportError"]
     has_guard = any(pattern in content for pattern in guard_patterns)
 
-    if has_guard:
+    if _calls_the_guard(content):
+        result = {
+            "name": "Handler security guard",
+            "passed": True,
+            "message": "Handler security guard present (module-level _guard_branch_access() call)",
+        }
+    elif has_guard:
         result = {
             "name": "Handler security guard",
             "passed": True,
@@ -318,12 +402,21 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "ENCAPSULATION",
         }
 
+    # A test is kin to its own branch only: one check, the cross-branch one
+    if is_test_path(module_path):
+        test_check = check_test_file(content, lines, module_path, bypass_rules)
+        score = 100 if test_check["passed"] else 0
+        json_handler.log_operation(
+            "check_completed", {"file": str(module_path), "score": score, "standard": "encapsulation"}
+        )
+        return {"passed": test_check["passed"], "checks": [test_check], "score": score, "standard": "ENCAPSULATION"}
+
     # Detect this file's context
     file_branch = get_branch_from_path(module_path)
     file_branch_name = file_branch.get("name", "").lower() if file_branch else None
     file_handler_package = get_file_handler_package(module_path)
     is_handler_file = file_handler_package is not None
-    is_module_file = "apps/modules/" in str(module_path)
+    is_module_file = "apps/modules/" in _posix(module_path)
 
     # Check 1: Cross-branch handler imports
     cross_branch_check = check_cross_branch_imports(lines, module_path, file_branch_name, bypass_rules)
@@ -448,14 +541,128 @@ def check_cross_branch_imports(
             }
         )
 
-    if violations:
-        first = violations[0]
-        return {
-            "name": "Cross-branch handler imports",
-            "passed": False,
-            "message": f"Line {first['line']}: {first['from_branch']}.apps.handlers imported (use modules entry point)",
-        }
+    # A target named as a call's string is an import too (DPLAN-0404 leg 1).
+    # The line reader above skips quoted handlers by design; the parse tree
+    # tells an import argument from prose, so the acquittal stands.
+    violations.extend(_string_violations(lines, module_path, file_branch, bypass_rules))
+    violations.sort(key=lambda v: v["line"])
 
+    if violations:
+        return {"name": "Cross-branch handler imports", "passed": False, "message": _conviction(violations[0])}
+
+    return {
+        "name": "Cross-branch handler imports",
+        "passed": True,
+        "message": "No cross-branch handler imports detected",
+    }
+
+
+def _conviction(violation: Dict) -> str:
+    """The message for a cross-branch violation; a string import quotes its line."""
+    head = f"Line {violation['line']}: {violation['from_branch']}.apps.handlers imported"
+    if violation.get("string"):
+        return f"{head} {STRING_IMPORT_NOTE} (use modules entry point): {violation['code']}"
+    return f"{head} (use modules entry point)"
+
+
+def _target_branch(target: str) -> str:
+    """The branch a dotted handlers target belongs to.
+
+    ``aipass.<branch>.`` names it whatever nests below: skills' telegram lives at
+    ``aipass.skills.lib.telegram.apps.handlers`` and is skills' own, where the
+    segment before ``apps`` would answer "telegram" (measured 10-07: skills'
+    own test convicted, daemon's patch of it named the wrong owner).
+    """
+    parts = target.split(".")
+    if parts[0] == "aipass" and len(parts) > 1:
+        return parts[1]
+    return target.split(".apps.handlers", 1)[0].split(".")[-1]
+
+
+def _is_foreign(target: str, file_branch: Optional[str]) -> bool:
+    """Whether a dotted handlers target names a branch other than the file's own."""
+    return not (file_branch and _target_branch(target).lower() == file_branch.lower())
+
+
+def _violation(lines: List[str], lineno: int, target: str, file_branch: Optional[str], string: bool) -> Dict:
+    """One cross-branch violation row, the shape check_cross_branch_imports reports."""
+    return {
+        "line": lineno,
+        "code": lines[lineno - 1].strip() if 0 < lineno <= len(lines) else target,
+        "from_branch": _target_branch(target),
+        "to_branch": file_branch or "unknown",
+        "string": string,
+    }
+
+
+def _string_violations(
+    lines: List[str], module_path: str, file_branch: Optional[str], bypass_rules: list | None
+) -> List[Dict]:
+    """Cross-branch handler targets a file names as a call's string argument."""
+    return [
+        _violation(lines, lineno, target, file_branch, string=True)
+        for lineno, target in iter_string_imports("\n".join(lines))
+        if _is_foreign(target, file_branch)
+        and not is_bypassed(module_path, "encapsulation", line=lineno, bypass_rules=bypass_rules)
+    ]
+
+
+def _import_violations(
+    content: str, lines: List[str], module_path: str, file_branch: Optional[str], bypass_rules: list | None
+) -> List[Dict]:
+    """Cross-branch handler imports read from import NODES, never from lines.
+
+    The test lane reads the parse tree because a test file carries source
+    fixtures: a handlers import inside a triple-quoted string is prose there,
+    and the line reader cannot see the quotes that open three lines above.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        logger.info("encapsulation: unparseable test file %s: %s", module_path, exc)
+        return [{"line": exc.lineno or 0, "code": "unparseable", "from_branch": "unknown", "to_branch": "?"}]
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and not node.level:
+            targets = [node.module or ""]
+        elif isinstance(node, ast.Import):
+            targets = [alias.name for alias in node.names]
+        else:
+            continue
+        for target in targets:
+            if ".apps.handlers" in target and _is_foreign(target, file_branch):
+                if not is_bypassed(module_path, "encapsulation", line=node.lineno, bypass_rules=bypass_rules):
+                    found.append(_violation(lines, node.lineno, target, file_branch, string=False))
+    return found
+
+
+def check_test_file(content: str, lines: List[str], module_path: str, bypass_rules: list | None = None) -> Dict:
+    """A test is kin to its own branch only (DPLAN-0404 leg 1).
+
+    Reaching into a module's internals is what a unit test is for, so the
+    same-branch shapes the production lane convicts (direct handler imports,
+    the guard) are not asked here. Another branch's handlers are another
+    matter: a test that imports or patches them is a cross-branch caller like
+    any product file, and it is what keeps the import alive after the
+    product side moves to the door.
+
+    Args:
+        content: Source of the test file.
+        lines: The same source split into lines, for quoting.
+        module_path: Path of the test file; its branch is the directory
+            under ``aipass/`` that carries an ``apps/``.
+        bypass_rules: Optional bypass rules.
+
+    Returns:
+        The one check dict, "Cross-branch handler imports".
+    """
+    branch_root = _branch_root(module_path)
+    file_branch = branch_root.name if branch_root else None
+    violations = _import_violations(content, lines, module_path, file_branch, bypass_rules)
+    violations.extend(_string_violations(lines, module_path, file_branch, bypass_rules))
+    violations.sort(key=lambda v: v["line"])
+    if violations:
+        return {"name": "Cross-branch handler imports", "passed": False, "message": _conviction(violations[0])}
     return {
         "name": "Cross-branch handler imports",
         "passed": True,

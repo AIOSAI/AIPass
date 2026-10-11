@@ -1,10 +1,22 @@
-"""Tests for the config module — registry configuration management."""
+# =================== AIPass ====================
+# Name: test_config.py
+# Description: The registry-path configuration commands
+# Version: 1.0.0
+# Created: 2026-04-05
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/modules/config.py: the registry-path configuration commands."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
+from aipass.drone.apps.modules.config import handle_command
 
 
 MODULE = "aipass.drone.apps.modules.config"
@@ -20,7 +32,6 @@ def _isolate_config():
     """Patch all external dependencies so config.py never touches real state."""
     with (
         patch(f"{MODULE}.logger") as mock_logger,
-        patch(f"{MODULE}.console") as mock_console,
         patch(f"{MODULE}.json_handler") as mock_jh,
         patch(f"{MODULE}.get_registry_path") as mock_get,
         patch(f"{MODULE}.set_registry_path") as mock_set,
@@ -29,7 +40,6 @@ def _isolate_config():
         mock_get.return_value = "/fake/registry.json"
         yield {
             "logger": mock_logger,
-            "console": mock_console,
             "json_handler": mock_jh,
             "get_registry_path": mock_get,
             "set_registry_path": mock_set,
@@ -51,30 +61,30 @@ def mocks(_isolate_config):
 class TestIntrospection:
     """command=None triggers introspection display."""
 
-    def test_none_command_returns_true(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_none_command_returns_true(self, mocks, capsys):
+        """Mutant killed: handle_command(None) returning True without introspecting."""
         result = handle_command(command=None)
         assert result is True
+        assert "config Module" in capsys.readouterr().out
 
-    def test_none_command_calls_print_introspection(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
+    def test_none_command_calls_print_introspection(self, mocks, capsys):
+        """Mutant killed: handle_command(None) returning True without introspecting."""
+        handle_command(command=None)
+        out = capsys.readouterr().out
+        assert "Connected Handlers:" in out
+        assert "reset_registry_path" in out
 
-        with patch(f"{MODULE}.print_introspection") as mock_intro:
-            handle_command(command=None)
-            mock_intro.assert_called_once()
-
-    def test_none_command_no_args_triggers_introspection(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_none_command_no_args_triggers_introspection(self, mocks, capsys):
+        """Mutant killed: handle_command(None) returning True without introspecting."""
         result = handle_command(command=None, args=None)
         assert result is True
+        assert "config Module" in capsys.readouterr().out
 
-    def test_none_command_empty_args_triggers_introspection(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_none_command_empty_args_triggers_introspection(self, mocks, capsys):
+        """Mutant killed: handle_command(None) returning True without introspecting."""
         result = handle_command(command=None, args=[])
         assert result is True
+        assert "config Module" in capsys.readouterr().out
 
 
 # ===========================================================================
@@ -85,32 +95,31 @@ class TestIntrospection:
 class TestHelp:
     """--help and -h flags route to print_help."""
 
-    def test_help_flag_as_command_returns_true(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_help_flag_as_command_returns_true(self, mocks, capsys):
+        """Mutant killed: a help request returning True without printing help."""
         result = handle_command(command="--help")
         assert result is True
+        assert "config — Registry configuration management" in capsys.readouterr().out
 
-    def test_h_flag_as_command_returns_true(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_h_flag_as_command_returns_true(self, mocks, capsys):
+        """Mutant killed: a help request returning True without printing help."""
         result = handle_command(command="-h")
         assert result is True
+        assert "config — Registry configuration management" in capsys.readouterr().out
 
-    def test_help_flag_in_args_returns_true(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_help_flag_in_args_returns_true(self, mocks, capsys):
+        """Mutant killed: a help request returning True without printing help."""
         result = handle_command(command="path", args=["--help"])
         assert result is True
+        assert "config — Registry configuration management" in capsys.readouterr().out
 
-    def test_h_flag_in_args_returns_true(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_h_flag_in_args_returns_true(self, mocks, capsys):
+        """Mutant killed: a help request returning True without printing help."""
         result = handle_command(command="set", args=["-h"])
         assert result is True
+        assert "config — Registry configuration management" in capsys.readouterr().out
 
     def test_help_does_not_log_operation(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
 
         handle_command(command="--help")
         mocks["json_handler"].log_operation.assert_not_called()
@@ -124,27 +133,25 @@ class TestHelp:
 class TestPathCommand:
     """'path' command shows the current registry path."""
 
-    def test_path_returns_true(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_path_returns_true(self, mocks, capsys):
+        """Mutant killed: path printing its label without the path."""
         result = handle_command(command="path")
         assert result is True
+        assert "Registry path: /fake/registry.json" in capsys.readouterr().out
 
-    def test_path_prints_registry_location(self, mocks):
+    def test_path_prints_registry_location(self, mocks, capsys):
+        """Mutant killed: the registry path read twice for one 'path'."""
         # The once-ness was a test of its own until FPLAN-0492. Printing the
         # handler's value already proves the handler was asked; only "exactly
         # once" was extra, and reading the registry path twice per 'path' is
         # still a defect worth catching. So it stays — as a second assertion
         # about this call, not as a second test claiming a second behaviour.
-        from aipass.drone.apps.modules.config import handle_command
 
         handle_command(command="path")
-        printed = mocks["console"].print.call_args[0][0]
-        assert "/fake/registry.json" in printed
-        mocks["get_registry_path"].assert_called_once()
+        assert "/fake/registry.json" in capsys.readouterr().out
+        assert mocks["get_registry_path"].call_args_list == [call()]
 
     def test_path_logs_operation(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
 
         handle_command(command="path")
         mocks["json_handler"].log_operation.assert_called_once_with(
@@ -160,39 +167,33 @@ class TestPathCommand:
 class TestSetCommand:
     """'set' command overrides the registry path."""
 
-    def test_set_with_arg_returns_true(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_set_with_arg_returns_true(self, mocks, capsys):
+        """Mutant killed: set confirming without naming the new path."""
         result = handle_command(command="set", args=["/new/path.json"])
         assert result is True
+        assert "Registry path set to: /new/path.json" in capsys.readouterr().out
 
     def test_set_calls_set_registry_path_with_correct_arg(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
 
         handle_command(command="set", args=["/custom/registry.json"])
         mocks["set_registry_path"].assert_called_once_with("/custom/registry.json")
 
-    def test_set_prints_new_path(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
+    def test_set_prints_new_path(self, mocks, capsys):
 
         handle_command(command="set", args=["/new/path.json"])
-        printed = mocks["console"].print.call_args[0][0]
-        assert "/new/path.json" in printed
+        assert "/new/path.json" in capsys.readouterr().out
 
     def test_set_without_args_returns_false(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
 
         result = handle_command(command="set")
         assert result is False
 
     def test_set_without_args_logs_warning(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+        """Mutant killed: the missing-path warning replaced by another message."""
         handle_command(command="set")
-        mocks["logger"].warning.assert_called()
+        mocks["logger"].warning.assert_called_once_with("config set requires a path argument")
 
     def test_set_without_args_does_not_call_set_registry_path(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
 
         handle_command(command="set")
         mocks["set_registry_path"].assert_not_called()
@@ -206,23 +207,21 @@ class TestSetCommand:
 class TestResetCommand:
     """'reset' command restores the default registry path."""
 
-    def test_reset_returns_true(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_reset_returns_true(self, mocks, capsys):
+        """Mutant killed: reset returning True without confirming."""
         result = handle_command(command="reset")
         assert result is True
+        assert "Registry path reset to default" in capsys.readouterr().out
 
     def test_reset_calls_reset_registry_path(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
+        """Mutant killed: reset confirming without resetting."""
+        handle_command(command="reset")
+        assert mocks["reset_registry_path"].call_args_list == [call()]
+
+    def test_reset_prints_confirmation(self, mocks, capsys):
 
         handle_command(command="reset")
-        mocks["reset_registry_path"].assert_called_once()
-
-    def test_reset_prints_confirmation(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
-        handle_command(command="reset")
-        printed = mocks["console"].print.call_args[0][0]
+        printed = capsys.readouterr().out.strip()
         # The one string the module prints, measured by running it. The two
         # `or` clauses this replaces both held, so neither was load-bearing:
         # any confirmation mentioning either word passed.
@@ -238,13 +237,11 @@ class TestUnknownCommand:
     """Unrecognized commands return False and log a warning."""
 
     def test_unknown_command_returns_false(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
 
         result = handle_command(command="bogus")
         assert result is False
 
     def test_unknown_command_logs_warning(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
 
         handle_command(command="destroy")
         mocks["logger"].warning.assert_called()

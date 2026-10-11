@@ -3,34 +3,29 @@
 # Description: Pins the refusal-exit contract on the owner-gated modules (FPLAN-0455)
 # Version: 1.0.0
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-27
 # =============================================
 
-"""Owner-guard refusals must mark the command failed — the exit-0 species pinned.
+"""Tests for apps/modules/feedback.py and apps/modules/admin_grant.py: a guard refusal marks the command failed."""
 
-The 2026-08-22 defect: refusals rendered with ``warning()``, which never calls
-``mark_command_failed()``, so ``feedback inbox && next`` and the admin_grant
-ceremony verbs reported success to the shell while doing nothing. The fixes
-landed with scar docstrings but no pins — these tests are the pins, one per
-guarded module, asserting the FAILURE MARK (the code contract) rather than the
-wording (the human contract). compass and watchdog carry their own pins in
-their own files; these cover the two that had none.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — the text of HELP_TEXT in both modules; these pins read the failure mark
 
 from unittest.mock import patch
 
 import pytest
 
+from aipass.cli.apps.modules import display as cli_display
 from aipass.devpulse.apps.handlers.owner import guard as owner_guard
 from aipass.devpulse.apps.modules import admin_grant as admin_grant_module
 from aipass.devpulse.apps.modules import feedback as feedback_module
 
 
+# The 2026-08-22 defect: refusals rendered with warning(), which never calls
+# mark_command_failed(), so `feedback inbox && next` reported success to the shell.
 @pytest.fixture
 def marks(monkeypatch):
     """Collect mark_command_failed() calls; refusals must append, successes must not."""
-    from aipass.cli.apps.modules import display as cli_display
-
     collected: list[int] = []
     monkeypatch.setattr(cli_display, "mark_command_failed", lambda: collected.append(1))
     return collected
@@ -106,3 +101,20 @@ def test_admin_grant_ceremony_refusal_past_the_guard_marks_the_command_failed(ca
         assert admin_grant_module.handle_command("admin_grant", [verb]) is True
     capsys.readouterr()
     assert marks, f"a REFUSED '{verb}' past the guard must mark the command failed, not exit 0"
+
+
+@pytest.mark.parametrize(("args", "force"), [(["keygen", "--force"], True), (["keygen"], False)])
+def test_admin_grant_keygen_hands_force_to_the_ceremony_only_when_asked(capsys, marks, args, force):
+    """--force reaches generate_key as force=True and is never assumed.
+
+    The door is a recorder on purpose: the real one overwrites the live signing key.
+    Mutant killed: _cmd_keygen passing force=False whatever the arguments say.
+    """
+    with (
+        patch.object(admin_grant_module, "_guard_caller", return_value=True),
+        patch.object(admin_grant_module, "generate_key", return_value=(True, "signing key generated")) as door,
+    ):
+        assert admin_grant_module.handle_command("admin_grant", args) is True
+    capsys.readouterr()
+    door.assert_called_once_with(force=force)
+    assert marks == []

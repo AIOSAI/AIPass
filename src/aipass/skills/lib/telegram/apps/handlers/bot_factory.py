@@ -2,10 +2,12 @@
 # META DATA HEADER
 # Name: bot_factory.py - Bot creation and deletion factory
 # Date: 2026-06-15
-# Version: 1.0.0
+# Version: 1.0.1
+# Modified: 2026-10-10
 # Category: skills/lib/telegram/apps/handlers
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.0.1 (2026-10-10): token-URL and secret-store errors logged by class, never by their words
 #   - v1.0.0 (2026-06-15): Ported from Dev-Pass — rewired registry, logger, config, base_bot path
 #
 # CODE STANDARDS:
@@ -109,11 +111,13 @@ def validate_token(bot_token: str) -> Optional[dict]:
     except HTTPError as e:
         logger.warning("Token validation HTTP error %d: %s", e.code, e.reason)
         return None
+    # The class, never the words: the getMe URL carries the token, and an error
+    # raised over it may quote it.
     except URLError as e:
-        logger.warning("Token validation network error: %s", e)
+        logger.warning("Token validation network error (%s)", type(e).__name__)
         return None
     except Exception as e:
-        logger.warning("Token validation unexpected error: %s", e)
+        logger.warning("Token validation unexpected error (%s)", type(e).__name__)
         return None
 
 
@@ -598,7 +602,7 @@ def create_bot(
         _api_set_secret("telegram", bot_id, secret_data, as_json=True)
         logger.info("Persisted bot token to @api secrets: telegram/%s", bot_id)
     except OSError as e:
-        logger.error("create_bot failed: could not persist the token to @api for '%s': %s", bot_id, e)
+        logger.error("create_bot failed: could not persist the token to @api for '%s' (%s)", bot_id, type(e).__name__)
         return None
 
     # Step 4b: Write the ordinary config. Fatal, not "non-fatal" as it was when

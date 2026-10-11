@@ -1,0 +1,570 @@
+# =================== AIPass ====================
+# Name: test_doctor_home.py
+# Description: Tests for doctor's home, owner-seating, preflight and citizen-count rows
+# Version: 1.0.0
+# Created: 2026-10-08
+# Modified: 2026-10-08
+# =============================================
+
+"""Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight and the drone count."""
+# The home and the seating lane of `aipass doctor`, split out of test_doctor.py
+# on 2026-10-08 (fleet green, oversize_test_file).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
+
+import json
+import logging
+import os
+from unittest.mock import MagicMock, patch
+
+import pytest  # pyright: ignore[reportMissingImports]
+
+from aipass.aipass.apps.handlers.ui.progress import (
+    GLYPH_FAIL,
+    GLYPH_PASS,
+    GLYPH_WARN,
+)
+from aipass.aipass.apps.modules.doctor import (
+    CheckResult,
+    check_identity,
+    run_doctor,
+    run_doctor_preflight,
+)
+from aipass.aipass.tests.support_doctor import _home_at
+
+
+# ---------------------------------------------------------------------------
+# _check_global_aipass_home tests (#688)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckGlobalAipassHome:
+    """Tests for _check_global_aipass_home doctor check."""
+
+    @staticmethod
+    def _global_rows():
+        """The global-settings rows, reached through check_identity, the Identity group (leg 6).
+
+        Edges: HOME is each test's scratch dir (_home_at), and no registry is found, so
+        the group stops before the registry, passport and owner rows. Only the two
+        labels this check writes are returned.
+        """
+        with patch("aipass.aipass.apps.modules.doctor._find_registry", return_value=None):
+            rows = check_identity()
+        return [r for r in rows if r.label in ("global settings", "global AIPASS_HOME")]
+
+    def test_nonexistent_path_is_error(self, tmp_path):
+        """AIPASS_HOME pointing to a nonexistent path is flagged as error."""
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(
+            json.dumps({"env": {"AIPASS_HOME": str(tmp_path / "gone")}}),
+            encoding="utf-8",
+        )
+        with _home_at(tmp_path):
+            results = self._global_rows()
+        fails = [r for r in results if "does not exist" in r.detail]
+        assert len(fails) == 1
+
+    def test_throwaway_path_is_error(self, tmp_path):
+        """AIPASS_HOME pointing to a temp path is flagged as error."""
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(
+            json.dumps({"env": {"AIPASS_HOME": str(tmp_path)}}),
+            encoding="utf-8",
+        )
+        with _home_at(tmp_path):
+            results = self._global_rows()
+        fails = [r for r in results if "throwaway" in r.detail]
+        assert len(fails) == 1
+
+    def test_valid_path_passes(self, tmp_path):
+        """AIPASS_HOME pointing to a real, non-temp path passes."""
+        real_home = tmp_path / "AIPass"
+        real_home.mkdir()
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(
+            json.dumps({"env": {"AIPASS_HOME": str(real_home)}}),
+            encoding="utf-8",
+        )
+        with (
+            _home_at(tmp_path),
+            patch(
+                "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
+                return_value=False,
+            ),
+        ):
+            results = self._global_rows()
+        assert any(r.glyph == GLYPH_PASS for r in results)
+
+    def test_no_settings_file_is_noop(self, tmp_path):
+        """Missing ~/.claude/settings.json produces no results."""
+        with _home_at(tmp_path):
+            results = self._global_rows()
+        assert results == []
+
+    def test_unreadable_settings_is_error_not_silence(self, tmp_path):
+        """Corrupt settings.json is a FAIL row, not the silence of a missing file.
+
+        Mutant: the unreadable branch returns `results` (empty) again -> red.
+        """
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text("{not json", encoding="utf-8")
+        with _home_at(tmp_path):
+            results = self._global_rows()
+        assert [(r.label, r.glyph) for r in results] == [("global settings", GLYPH_FAIL)]
+        assert "~/.claude/settings.json" in results[0].detail
+
+
+# ---------------------------------------------------------------------------
+# _check_owner_seating / _fix_owner_seating tests (DPLAN-0239 P3+P5)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckOwnerSeating:
+    """Tests for owner/identity detection via sync-registry --check.
+
+    Reached through check_identity, the Identity group doctor runs (leg 6). Edges stood
+    in for: the registry found is a tmp one with one branch (so the group reaches the
+    owner rows), and the two reads of the live provider settings under the home
+    (_check_global_aipass_home, _configured_aipass_home) answer nothing. Each test
+    patches the sync-registry run itself. Only the owner rows are read.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _identity_edges(self, tmp_path, monkeypatch) -> None:
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": [{"name": "vera"}]}), encoding="utf-8")
+        mod = "aipass.aipass.apps.modules.doctor"
+        monkeypatch.setattr(f"{mod}._find_registry", lambda: registry)
+        monkeypatch.setattr(f"{mod}._check_global_aipass_home", lambda: [])
+        monkeypatch.setattr(f"{mod}._configured_aipass_home", lambda: "")
+
+    @staticmethod
+    def _owner_rows():
+        return [r for r in check_identity() if r.label.startswith("owner")]
+
+    def test_clean_owner_returns_pass(self):
+        check_json = json.dumps({"clean": True, "owner": "vera", "owner_uid": "8fb38c96-abcd", "issues": []})
+        mock_proc = MagicMock(returncode=0, stdout=check_json, stderr="")
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
+            results = self._owner_rows()
+        assert len(results) == 1
+        assert results[0].glyph == GLYPH_PASS
+        assert "@vera" in results[0].detail
+        assert "8fb38c96" in results[0].detail
+
+    def test_unseated_owner_returns_errors(self):
+        check_json = json.dumps(
+            {
+                "clean": False,
+                "owner": None,
+                "owner_uid": "",
+                "issues": [
+                    {"flag": "no_owner", "detail": "No owner:true in registry"},
+                    {"flag": "metadata_id_missing", "detail": "metadata.id absent"},
+                ],
+            }
+        )
+        mock_proc = MagicMock(returncode=1, stdout=check_json, stderr="")
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
+            results = self._owner_rows()
+        assert len(results) == 2
+        assert all(r.glyph == GLYPH_FAIL for r in results)
+        assert results[0].label == "owner/no_owner"
+
+    def test_issue_with_branch_field(self):
+        check_json = json.dumps(
+            {
+                "clean": False,
+                "owner": "vera",
+                "owner_uid": "8fb38c96",
+                "issues": [
+                    {"flag": "entry_rid_stale", "detail": "stale rid", "branch": "vera"},
+                ],
+            }
+        )
+        mock_proc = MagicMock(returncode=1, stdout=check_json, stderr="")
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
+            results = self._owner_rows()
+        assert len(results) == 1
+        assert results[0].glyph == GLYPH_FAIL
+        assert results[0].label == "owner/entry_rid_stale"
+
+    def test_drone_not_found_returns_warn(self):
+        with patch(
+            "aipass.aipass.apps.modules.doctor.subprocess.run",
+            side_effect=FileNotFoundError("drone"),
+        ):
+            results = self._owner_rows()
+        assert len(results) == 1
+        assert results[0].glyph == GLYPH_WARN
+        assert "drone" in results[0].detail
+
+    def test_timeout_returns_warn(self):
+        import subprocess as _sp
+
+        with patch(
+            "aipass.aipass.apps.modules.doctor.subprocess.run",
+            side_effect=_sp.TimeoutExpired("drone", 30),
+        ):
+            results = self._owner_rows()
+        assert len(results) == 1
+        assert results[0].glyph == GLYPH_WARN
+
+    def test_non_json_output_returns_warn(self):
+        mock_proc = MagicMock(returncode=1, stdout="not json at all", stderr="")
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
+            results = self._owner_rows()
+        assert len(results) == 1
+        assert results[0].glyph == GLYPH_WARN
+
+    def test_empty_stdout_exit_zero(self):
+        mock_proc = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
+            results = self._owner_rows()
+        assert len(results) == 1
+        assert results[0].glyph == GLYPH_PASS
+
+
+class TestFixOwnerSeating:
+    """Tests for owner/identity repair via sync-registry --fix.
+
+    Reached through run_doctor(fix=True), the --fix run (leg 6). Every other edge of
+    that run is stood in for where doctor resolves it: the seven groups answer
+    nothing, and the three fix steps that write the live provider settings
+    (check_provider_manifest, reconcile_stale_deny, check_wire_verify) answer nothing.
+    The groups run_doctor would print are recorded instead of printed; each test
+    patches the sync-registry run itself and reads the owner rows of Identity.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _every_other_edge(self, monkeypatch) -> None:
+        mod = "aipass.aipass.apps.modules.doctor"
+        for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_sandbox", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_wire_verify", lambda: [])
+        self.printed: dict = {}
+
+        def _record(groups):
+            self.printed.update(groups)
+            return 0, 0, 0
+
+        monkeypatch.setattr(f"{mod}._print_doctor_groups", _record)
+
+    def _fix_rows(self):
+        run_doctor(fix=True)
+        return [r for r in self.printed["Identity"] if r.label.startswith("owner")]
+
+    def test_fix_success_returns_pass(self):
+        mock_proc = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
+            results = self._fix_rows()
+        assert len(results) == 1
+        assert results[0].glyph == GLYPH_PASS
+        assert "reconciled" in results[0].detail
+
+    def test_fix_failure_returns_fail(self):
+        mock_proc = MagicMock(returncode=1, stdout="", stderr="owner conflict")
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
+            results = self._fix_rows()
+        assert len(results) == 1
+        assert results[0].glyph == GLYPH_FAIL
+
+    def test_fix_drone_not_found(self):
+        with patch(
+            "aipass.aipass.apps.modules.doctor.subprocess.run",
+            side_effect=FileNotFoundError("drone"),
+        ):
+            results = self._fix_rows()
+        assert len(results) == 1
+        assert results[0].glyph == GLYPH_WARN
+
+    def test_fix_timeout(self):
+        import subprocess as _sp
+
+        with patch(
+            "aipass.aipass.apps.modules.doctor.subprocess.run",
+            side_effect=_sp.TimeoutExpired("drone", 60),
+        ):
+            results = self._fix_rows()
+        assert len(results) == 1
+        assert results[0].glyph == GLYPH_WARN
+
+
+# =============================================================================
+# TestRunDoctorPreflight
+# =============================================================================
+
+
+class TestRunDoctorPreflight:
+    """Tests for run_doctor_preflight — doctor-before-hello (round-2 addendum 2)."""
+
+    def test_returns_error_count_and_empty_items_when_hooks_wired(self) -> None:
+        groups = {
+            "System": [],
+            "Identity": [],
+            "Services": [CheckResult("hooks", GLYPH_PASS, "9 provider hooks wired", "")],
+            "Community": [],
+            "Structure": [],
+            "Sandbox": [],
+        }
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
+            error_count, hook_action_items = run_doctor_preflight()
+        assert error_count == 0
+        assert hook_action_items == []
+
+    def test_still_broken_hooks_surfaced_as_action_items(self) -> None:
+        groups = {
+            "Services": [
+                CheckResult("hooks", GLYPH_WARN, "2 hook(s) missing from provider settings: Stop, Notification", ""),
+                CheckResult("wire verify", GLYPH_FAIL, "verify failed", ""),
+            ],
+        }
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
+            _error_count, hook_action_items = run_doctor_preflight()
+        assert any("hooks:" in item for item in hook_action_items)
+        assert any("wire verify:" in item for item in hook_action_items)
+
+    def test_passing_checks_excluded_from_action_items(self) -> None:
+        groups = {"Services": [CheckResult("hooks", GLYPH_PASS, "9 provider hooks wired", "")]}
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
+            _error_count, hook_action_items = run_doctor_preflight()
+        assert hook_action_items == []
+
+    def test_fix_true_passed_through_to_compute_groups(self) -> None:
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value={}) as mock_compute:
+            run_doctor_preflight(fix=True)
+        mock_compute.assert_called_once_with(fix=True)
+
+    def test_error_count_reflects_fail_glyphs(self) -> None:
+        groups = {"System": [CheckResult("test", GLYPH_FAIL, "bad", "")]}
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
+            error_count, _hook_action_items = run_doctor_preflight()
+        assert error_count == 1
+
+
+# =============================================================================
+# TestDroneCitizenCount — the row must explain its own number
+# =============================================================================
+
+
+class TestDroneCitizenCount:
+    """`drone systems` lists addressable SYSTEMS; the registry lists CITIZENS.
+
+    Those are different sets — `@git` is routed by drone but has no branch
+    directory and no passport — so the two counts legitimately differ. Two
+    numbers disagreeing on a health screen with no explanation is a false
+    alarm generator; two independent readers tripped on it the same day.
+    """
+
+    @staticmethod
+    def _systems_stdout(names) -> str:
+        return "\n".join(f"  @{n}    Some description here" for n in names)
+
+    @staticmethod
+    def _run(stdout, registry_names):
+        """The drone row, reached through run_doctor, first row of its Services group (leg 6).
+
+        Edges stood in for: `drone systems` (and the pytest collect that follows it in
+        Services) answer the stubbed run, the registry names are given, the other six
+        groups answer nothing, and the rest of Services that reads the live provider
+        settings or the home (check_provider_manifest, check_wire_verify,
+        reconcile_stale_deny, check_admin_lane) answers nothing. The groups are
+        recorded instead of printed.
+        """
+        import subprocess as _sp
+
+        mod = "aipass.aipass.apps.modules.doctor"
+        proc = _sp.CompletedProcess(args=["drone", "systems"], returncode=0, stdout=stdout, stderr="")
+        printed: dict = {}
+
+        def _record(groups):
+            printed.update(groups)
+            return 0, 0, 0
+
+        with (
+            patch("subprocess.run", return_value=proc),
+            patch(f"{mod}._registry_citizen_names", return_value=set(registry_names)),
+            patch(f"{mod}._check_system", return_value=[]),
+            patch(f"{mod}.check_identity", return_value=[]),
+            patch(f"{mod}._check_community", return_value=[]),
+            patch(f"{mod}._check_structure", return_value=[]),
+            patch(f"{mod}._check_scaffold", return_value=[]),
+            patch(f"{mod}._check_sandbox", return_value=[]),
+            patch(f"{mod}.check_provider_manifest", return_value=[]),
+            patch(f"{mod}.check_wire_verify", return_value=[]),
+            patch(f"{mod}.reconcile_stale_deny", return_value=[]),
+            patch(f"{mod}.check_admin_lane", return_value=[]),
+            patch(f"{mod}._print_doctor_groups", side_effect=_record),
+        ):
+            run_doctor()
+        return printed["Services"][0]
+
+    def test_extra_system_is_named_not_silently_counted(self) -> None:
+        """The unregistered name appears, so nobody has to guess what the +1 is."""
+        row = self._run(self._systems_stdout(["drone", "aipass", "git"]), ["drone", "aipass"])
+
+        assert "git" in row.detail
+        assert "2 citizens" in row.detail
+
+    def test_counts_agree_reads_as_plain_citizens(self) -> None:
+        """No discrepancy → no extra noise; the row stays the short old form."""
+        row = self._run(self._systems_stdout(["drone", "aipass"]), ["drone", "aipass"])
+
+        assert row.detail == "2 citizens"
+        assert "service" not in row.detail
+
+    def test_registry_only_citizen_is_not_reported_as_extra(self) -> None:
+        """A citizen drone does not route is not an 'extra system'."""
+        row = self._run(self._systems_stdout(["drone"]), ["drone", "ghost"])
+
+        assert "ghost" not in row.detail
+
+    def test_row_still_passes_when_counts_differ(self) -> None:
+        """A legitimate difference is not a health failure."""
+        row = self._run(self._systems_stdout(["drone", "git"]), ["drone"])
+
+        assert row.glyph == GLYPH_PASS
+
+    def test_many_extras_are_summarized_not_dumped(self) -> None:
+        """The detail stays a one-liner even if the sets diverge badly."""
+        extras = [f"svc{n}" for n in range(9)]
+        row = self._run(self._systems_stdout(["drone", *extras]), ["drone"])
+
+        assert len(row.detail) < 120
+        assert "more" in row.detail
+
+    def test_description_text_containing_an_at_sign_is_not_counted(self) -> None:
+        """Counting lines-with-@ counted prose; count NAMES at line start.
+
+        The original row counted any line containing '@', so a description
+        mentioning '@drone' would inflate the citizen count.
+        """
+        stdout = "  @aipass    Concierge — talks to @drone and @spawn for routing\n"
+        row = self._run(stdout, ["aipass"])
+
+        assert row.detail == "1 citizens"
+
+
+# =============================================================================
+# TestHomeAgreement — the two AIPASS_HOME rows must be compared, not just printed
+# =============================================================================
+
+
+class TestHomeAgreement:
+    """Doctor prints the active tree and Claude Code's tree on adjacent lines.
+
+    Until now it never compared them. A second install to a different home
+    leaves terminal tooling pointed at tree 1 while Claude Code's env and every
+    hook command point at tree 2 — two registries, two citizen_id sets — and
+    doctor showed both facts side by side without ever saying they disagreed.
+    """
+
+    @staticmethod
+    def _run(active, configured):
+        """The agreement rows, reached through check_identity, the Identity group doctor runs (leg 6).
+
+        Edges stood in for: no registry is found (so the active tree is AIPASS_HOME from
+        the environment, set here), Claude Code's tree comes from _configured_aipass_home
+        (it reads the live provider settings), and _check_global_aipass_home answers
+        nothing (it reads the same live file). Only the pair rows are returned.
+        """
+        mod = "aipass.aipass.apps.modules.doctor"
+        with (
+            patch(f"{mod}._find_registry", return_value=None),
+            patch(f"{mod}._configured_aipass_home", return_value=configured),
+            patch(f"{mod}._check_global_aipass_home", return_value=[]),
+            patch.dict(os.environ, {"AIPASS_HOME": active}),
+        ):
+            rows = check_identity()
+        return [r for r in rows if r.label in ("AIPASS_HOME split", "AIPASS_HOME pair")]
+
+    def test_split_brain_is_an_error(self, tmp_path) -> None:
+        """Two different trees is a real fault, not an advisory."""
+        a, b = tmp_path / "tree1", tmp_path / "tree2"
+        a.mkdir()
+        b.mkdir()
+
+        rows = self._run(str(a), str(b))
+
+        assert len(rows) == 1
+        assert rows[0].glyph == GLYPH_FAIL
+
+    def test_split_brain_names_both_trees(self, tmp_path) -> None:
+        """The human needs to see WHICH two trees, not just that they differ."""
+        a, b = tmp_path / "tree1", tmp_path / "tree2"
+        a.mkdir()
+        b.mkdir()
+
+        rows = self._run(str(a), str(b))
+
+        assert "tree1" in rows[0].detail and "tree2" in rows[0].detail
+        assert rows[0].remediation
+
+    def test_agreement_emits_nothing(self, tmp_path) -> None:
+        """Silent when correct — doctor already prints both values."""
+        tmp_path.joinpath("tree").mkdir()
+        same = str(tmp_path / "tree")
+
+        assert self._run(same, same) == []
+
+    def test_trailing_slash_is_not_a_split(self, tmp_path) -> None:
+        """Cosmetic path differences must not raise a false alarm."""
+        tree = tmp_path / "tree"
+        tree.mkdir()
+
+        assert self._run(str(tree), str(tree) + "/") == []
+
+    def test_symlinked_same_tree_is_not_a_split(self, tmp_path) -> None:
+        """Same real directory reached two ways is one tree."""
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+
+        assert self._run(str(real), str(link)) == []
+
+    def test_a_pair_that_cannot_be_compared_is_one_warn_row(self, tmp_path) -> None:
+        """A home that cannot be resolved is one WARN row saying so, never silence or a traceback.
+
+        Silence (the empty list) reads as agreement. resolve on a symlink loop raises
+        RuntimeError up to Python 3.12 and answers the loop on 3.13, and a platform may
+        refuse the link itself: the test asks both inside itself and says which row follows.
+        Mutant: the catch narrowed to OSError -> red on 3.10 to 3.12 (RuntimeError escapes).
+        Mutant: the catch answers [] again (the shape of HEAD) -> red at the row assert.
+        """
+        log = logging.getLogger(__name__)
+        other = tmp_path / "tree"
+        other.mkdir()
+        loop = tmp_path / "loop"
+        expected = ("AIPASS_HOME split", GLYPH_FAIL)  # no loop, or resolve answers it: two different trees
+        try:
+            loop.symlink_to("loop2")
+            (tmp_path / "loop2").symlink_to("loop")
+        except OSError as exc:
+            log.info("the platform refused the symlink (%s): the pair differs and is compared", exc)
+        else:
+            try:
+                loop.resolve()
+            except (OSError, RuntimeError) as exc:
+                log.info("resolve raised on the loop (%s): the pair cannot be compared", exc)
+                expected = ("AIPASS_HOME pair", GLYPH_WARN)
+
+        rows = self._run(str(loop), str(other))
+
+        assert [(r.label, r.glyph) for r in rows] == [expected]
+
+    def test_missing_either_value_emits_nothing(self, tmp_path) -> None:
+        """Nothing to compare is not a disagreement — the other rows own that."""
+        assert self._run("", str(tmp_path)) == []
+        assert self._run(str(tmp_path), "") == []
+        assert self._run("", "") == []

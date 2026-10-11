@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verified_caller.py
 # Description: Verified-Caller Rail for privilege-bearing decisions
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2026-08-12
-# Modified: 2026-08-21
+# Modified: 2026-10-08
 # =============================================
 
 """
@@ -195,13 +195,10 @@ def verify_admin_caller(
         so a refusal can be read without a debugger.
     """
     try:
-        # Cross-branch handler import, authorized by @devpulse in the FPLAN-0401
-        # Phase 4 dispatch: "lazy-import it — one implementation, no drift".
-        # Their modules/ entry point re-exports this same function object, but
-        # importing the handler keeps the dependency tight (no CLI/help layer
-        # pulled in at verification time). Both shapes need a bypass entry;
-        # this is the narrower one. Bypassed: handlers (cross-branch import).
-        from aipass.devpulse.apps.handlers.owner.admin_grant import verify_admin_grant
+        # devpulse's door (DPLAN-0404): one implementation of the 5-leg contract,
+        # reached through its published re-export, never its handlers. Lazy, so
+        # a dark lane costs nothing at import.
+        from aipass.devpulse.apps.modules.door_admin_grant import verify_admin_grant
     except ImportError as exc:
         logger.warning("[identity] admin lane dark — reference implementation unavailable: %s", exc)
         return False, f"admin lane dark: devpulse admin_grant reference unavailable ({exc})"
@@ -229,8 +226,10 @@ def is_verified_admin_caller() -> bool:
     1. The verified-caller rail must say this process IS the holder. Every other
        citizen short-circuits here and does zero file I/O — noise control, NOT
        security (leg 1 inside the reference decides that, independently).
-    2. The 5-leg grant must verify. Any raise is a refusal: the bridge fails
-       closed, never open.
+    2. The 5-leg grant must verify. A verifier that raises is not a verdict:
+       the raise reaches the caller, which refuses loudly. Answered as False,
+       a broken verifier looked like a working one that said no (ai_mail,
+       leg 17). Refusal by exception is still refusal; the bridge never opens.
 
     Deliberately NOT cached. A revoked grant has to take effect on the next
     call; a per-process cache would keep a torn-up grant alive until restart,
@@ -238,14 +237,13 @@ def is_verified_admin_caller() -> bool:
 
     Returns:
         True if this caller may cross project boundaries, False otherwise.
+
+    Raises:
+        Whatever verify_admin_caller raises, unchanged.
     """
     if resolve_verified_caller() != ADMIN_HOLDER:
         return False
-    try:
-        verified, _reason = verify_admin_caller()
-    except Exception as exc:
-        logger.warning("[identity] admin verification failed unexpectedly: %s", exc)
-        return False
+    verified, _reason = verify_admin_caller()
     return bool(verified)
 
 

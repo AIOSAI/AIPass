@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: share.py
 # Description: Share module — single-file Drive upload with shareable link
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-01
-# Modified: 2026-08-08
+# Modified: 2026-10-02
 # =============================================
 
 """Share Module — upload a single file to Drive and return a shareable link."""
 
 import os
 import sys
+from pathlib import Path
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -74,6 +75,13 @@ def run_share(file_path: str, *, public: bool = False) -> dict:
     # against backup's own branch dir. Re-anchor it to where the user actually is.
     resolved_path = str(resolve_caller_path(file_path))
 
+    # A missing path is a local answer: refuse it before authenticating to Drive.
+    if not Path(resolved_path).is_file():
+        err_msg = f"Not a file: {resolved_path}"
+        cli_error(f"Share failed: {err_msg}")
+        logger.warning(f"[backup] Share failed: {err_msg}")
+        return {"success": False, "link": None, "file_id": None, "error": err_msg}
+
     client = DriveClient()
     if not client.authenticate():
         err_msg = f"Drive authentication failed: {client.last_error}"
@@ -125,10 +133,21 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    file_path = args[0]
+    # Separate flags from operands before picking the path. `share --public f.pdf`
+    # is the ordinary shell form, and args[0] used to hand "--public" to run_share
+    # as the filename — which authenticates against the real Drive account before
+    # anything discovers the path is a flag.
     public = "--public" in args
+    operands = [arg for arg in args if not arg.startswith("--")]
 
-    run_share(file_path, public=public)
+    if not operands:
+        cli_error(
+            "share needs a file path",
+            suggestion="drone @backup share <file_path> [--public]",
+        )
+        return True
+
+    run_share(operands[0], public=public)
     return True
 
 

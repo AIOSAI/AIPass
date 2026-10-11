@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_auth.py
 # Description: Init handler — provision a project for manager-class git (owner-tier)
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-08-04
-# Modified: 2026-08-04
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -161,6 +161,11 @@ def _resolved_path(entry: Dict[str, Any], repo_root: Path) -> Optional[Path]:
 
     Relative paths resolve against the repo root — never CWD, which would bind
     authority to wherever the user happened to be standing.
+
+    A recorded path that cannot resolve (a symlink loop raises RuntimeError on
+    Python 3.12) refuses by name. None would read as "records no path" and send
+    provision to the passport search, which rewrites the recorded path
+    (aipass's decision, fleet green leg 3).
     """
     raw = entry.get("path")
     if not raw or not str(raw).strip():
@@ -170,9 +175,12 @@ def _resolved_path(entry: Dict[str, Any], repo_root: Path) -> Optional[Path]:
         recorded = repo_root / recorded
     try:
         return recorded.resolve()
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         logger.warning("Registry path %s could not be resolved: %s", recorded, exc)
-        return None
+        raise GitAuthRefusal(
+            f"registry entry for '{entry.get('name', '?')}' records path '{raw}', which could not be resolved "
+            f"({exc}). Correct the path to the citizen's real branch directory, then re-run"
+        ) from exc
 
 
 def _locate_branch_dir(repo_root: Path, name: str) -> Optional[Path]:
@@ -180,11 +188,14 @@ def _locate_branch_dir(repo_root: Path, name: str) -> Optional[Path]:
 
     Used only when the registry records no path at all. The repo root is never
     a candidate — a root-level passport would mean root-level path-binding,
-    which is exactly what the guardrail exists to prevent.
+    which is exactly what the guardrail exists to prevent. A miss over a tree
+    with unreadable directories refuses and names them: None would claim the
+    passport is absent when it may sit inside one of them.
     """
     wanted = name.lower()
     root_depth = len(repo_root.parts)
-    for dirpath, dirnames, _filenames in os.walk(repo_root):
+    unread: List[OSError] = []
+    for dirpath, dirnames, _filenames in os.walk(repo_root, onerror=unread.append):
         current = Path(dirpath)
         if len(current.parts) - root_depth >= _MAX_SCAN_DEPTH:
             dirnames[:] = []
@@ -198,6 +209,14 @@ def _locate_branch_dir(repo_root: Path, name: str) -> Optional[Path]:
         branch_name = passport.get("branch_info", {}).get("branch_name") or passport.get("identity", {}).get("name")
         if str(branch_name or "").lower() == wanted:
             return current.resolve()
+    if unread:
+        shown = ", ".join(sorted(str(err.filename) for err in unread)[:3])
+        more = f" and {len(unread) - 3} more" if len(unread) > 3 else ""
+        raise GitAuthRefusal(
+            f"no readable directory under {repo_root} holds a passport for '{name}', but {len(unread)} "
+            f"could not be read ({shown}{more}) — the passport may be inside one; fix its permissions, or "
+            'add "path" pointing at the citizen\'s own branch directory, then re-run'
+        )
     return None
 
 
@@ -272,7 +291,11 @@ def verify_git_auth(registry_path: Path, owner_name: str) -> List[str]:
     if entry.get("owner") is not True:
         failures.append(f"check 3 (owner flag): entry for '{owner_name}' is not marked owner: true")
 
-    branch_dir = _resolved_path(entry, repo_root)
+    try:
+        branch_dir = _resolved_path(entry, repo_root)
+    except GitAuthRefusal as exc:
+        failures.append(f"check 4 (path-binding): {exc}")
+        return failures
     if branch_dir is None:
         failures.append(f"check 4 (path-binding): entry for '{owner_name}' records no path")
         return failures

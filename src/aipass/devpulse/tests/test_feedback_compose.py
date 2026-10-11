@@ -1,11 +1,20 @@
-# META
-# module: devpulse.feedback
-# description: Tests for feedback compose operations
-# END META
+# =================== AIPass ====================
+# Name: test_feedback_compose.py
+# Description: Tests for feedback compose — send, reply, ai_mail delivery
+# Version: 1.0.0
+# Created: 2026-04-14
+# Modified: 2026-09-27
+# =============================================
 
-"""Tests for feedback compose — send, reply, ai_mail delivery."""
+"""Tests for apps/handlers/feedback/compose.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that compose.py and storage.py parse and import
+# seedgo: no-test-needed(constant) — the Rich colour tags send_feedback() and reply_to() print
+# seedgo: no-test-needed(stdlib) — secrets.token_hex's randomness behind generate_id()
 
 import json
+import re
 from datetime import datetime
 from unittest.mock import patch
 
@@ -63,10 +72,12 @@ class TestSendFeedback:
         assert msg["thread"] == []
 
     def test_returns_message_id(self, empty_inbox, mock_feedback_dir):
-        """Should return a valid 8-char hex ID."""
+        """Returns the stored message's 8-char hex id (mutant: return a fresh generate_id())."""
         msg_id = compose.send_feedback("prax", "Subject", "Body")
         assert isinstance(msg_id, str)
         assert len(msg_id) == 8
+        assert re.fullmatch(r"[0-9a-f]{8}", msg_id)
+        assert storage.load_inbox()["messages"][0]["id"] == msg_id
 
     def test_increments_counts(self, empty_inbox, mock_feedback_dir):
         """Should increment total_messages and unread_count."""
@@ -295,24 +306,44 @@ class TestHonestDeliveryReporting:
             }
         )
 
-    def test_deliver_returns_success_tuple(self, tmp_path):
-        """_deliver_to_ai_mail returns (True, 'delivered') on success."""
-        ai_mail_dir = tmp_path / "seedgo" / ".ai_mail.local"
+    def test_a_delivered_reply_is_reported_as_delivered(self, inbox_with_message, mock_aipass_root, capsys):
+        """A delivered reply is reported as delivered, never as NOT delivered (mutant: `if delivered` -> `if False`)."""
+        ai_mail_dir = mock_aipass_root / "seedgo" / ".ai_mail.local"
         ai_mail_dir.mkdir(parents=True)
         inbox_path = ai_mail_dir / "inbox.json"
         with open(inbox_path, "w", encoding="utf-8") as f:
             json.dump({"messages": []}, f)
 
-        delivered, reason = compose._deliver_to_ai_mail("seedgo", "Subj", "Body", "aaa11111", str(inbox_path))
-        assert delivered is True
-        assert reason == "delivered"
+        assert compose.reply_to("aaa11111", "Body") is True
+        out, err = capsys.readouterr()
+        assert "Delivered to seedgo's ai_mail inbox." in out
+        assert "NOT delivered" not in err
 
-    def test_deliver_returns_failure_reason_when_inbox_missing(self, tmp_path):
-        """_deliver_to_ai_mail returns (False, reason) naming the missing path."""
+    def test_an_undelivered_reply_names_the_missing_inbox(self, mock_feedback_dir, tmp_path, capsys):
+        """An undeliverable reply names the missing inbox path on stderr (mutant: the error drops {reason})."""
         missing = tmp_path / "nowhere" / "inbox.json"
-        delivered, reason = compose._deliver_to_ai_mail("ghost", "Subj", "Body", "aaa11111", str(missing))
-        assert delivered is False
-        assert str(missing) in reason
+        storage.save_inbox(
+            {
+                "mailbox": "feedback",
+                "total_messages": 1,
+                "unread_count": 0,
+                "messages": [
+                    {
+                        "id": "aaa11111",
+                        "from": "ghost",
+                        "subject": "Subj",
+                        "body": "Body",
+                        "timestamp": "2026-04-11T10:00:00",
+                        "read": True,
+                        "thread": [],
+                        "reply_path": str(missing),
+                    },
+                ],
+            }
+        )
+        assert compose.reply_to("aaa11111", "Body") is True
+        err = capsys.readouterr().err
+        assert f"NOT delivered to ghost: ai_mail inbox not found at {missing}" in err
 
     def test_send_warns_when_sender_unknown(self, empty_inbox):
         """send_feedback tells an anonymous sender that replies cannot reach them."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Auto-discovery walker for apps/integrations/*/driver.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-15
-# Modified: 2026-04-15
+# Modified: 2026-09-28
 # =============================================
 """
 Driver auto-discovery for @api integrations layer.
@@ -85,7 +85,12 @@ def load_drivers(integrations_dir: Path | None = None) -> int:
 
 
 def _import_driver(driver_path: Path, project_name: str) -> None:
-    """Import a single driver.py and call its register() hook."""
+    """Import a single driver.py and call its register() hook.
+
+    The ImportError for a missing spec is a guard no input through load_drivers
+    reaches: every path it passes ends in driver.py, and the stdlib gives any .py
+    path a spec with a source loader, present on disk or not (api, fleet green leg 3).
+    """
     module_name = f"_aipass_integration_{project_name}"
 
     # Remove stale module if present (supports reload in tests)

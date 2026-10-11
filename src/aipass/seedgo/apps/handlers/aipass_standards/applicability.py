@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: applicability.py
 # Description: Where each standard applies - production, tests, or everywhere
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-09
-# Modified: 2026-08-09
+# Modified: 2026-09-21
 # =============================================
 
 """Single source of truth for WHERE a standard applies.
@@ -66,7 +66,15 @@ TEST_FILE_NAMES: frozenset[str] = frozenset({"conftest.py"})
 # skip_dirs.SOURCE_SKIP_DIRS and ignore_handler.AUDIT_IGNORE_PATTERNS, which
 # the checklist lane never consulted; test_applicability asserts they stay in
 # step so this cannot become a third list that drifts.
-RETIRED_DIRS: frozenset[str] = frozenset({".archive", ".sorting_unprocessed", ".backup", "deprecated"})
+#
+# "parked" joined the list on 2026-09-21, when the audit's corpus grew to
+# include tests/. A parked directory is the fleet's name for code set aside
+# pending a decision — api, cli and memory each keep one under tests/, with a
+# conftest whose only job is to stop pytest collecting what is in it. Six of
+# the nine parked files were already excluded by the house `(disabled)` suffix;
+# the three collection-barrier conftests were not, and would have entered the
+# corpus as live test files the moment tests/ did.
+RETIRED_DIRS: frozenset[str] = frozenset({".archive", ".sorting_unprocessed", ".backup", "deprecated", "parked"})
 
 
 _SEPARATOR = re.compile(r"[\\/]+")

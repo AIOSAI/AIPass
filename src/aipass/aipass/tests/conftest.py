@@ -1,25 +1,25 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/conftest.py
-# Date: 2025-11-08
-# Version: 1.0.0
-# Category: spawn/tests
+# Description: Shared pytest fixtures for aipass tests — json and profile redirects, console width, command state
+# Version: 1.4.0
+# Created: 2026-05-04
+# Modified: 2026-10-10
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.4.0 (2026-10-10): temp_test_dir, sample_test_data retired - requested only by the .archive scaffold (PR #774)
+#   - v1.3.0 (2026-10-05): tools_on_path writes PATH so shutil.which answers for real (DPLAN-0354 leg 8)
+#   - v1.2.0 (2026-09-28): header_events recorder keeps cli's header off the real trigger bus (DPLAN-0354 leg 3)
+#   - v1.1.0 (2026-09-27): template C1/C2 fixtures; unused mock_json_handler removed (DPLAN-0354)
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
-#
-# CODE STANDARDS:
-#   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
 
 """Shared pytest fixtures for aipass tests."""
 
 import os
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # The seam must exist at IMPORT time, not only inside the autouse fixture: the
 # repo-root conftest guard refuses to import a branch's json shim while
@@ -32,15 +32,8 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import pytest
 
 from aipass.aipass.apps.handlers.json import json_handler
-
-
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after."""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
+from aipass.aipass.apps.modules import profile as profile_mod
+from aipass.cli.apps.modules import display
 
 
 @pytest.fixture(autouse=True)
@@ -86,37 +79,73 @@ def isolate_profile_store(tmp_path_factory) -> Generator[Path, None, None]:
     that reaches profile code through an unmocked path is a candidate, and
     naming them one by one only holds until the next import order changes.
     """
-    from aipass.aipass.apps.modules import profile as profile_mod
-
     store_dir = tmp_path_factory.mktemp("profile_store")
     with (
-        patch.object(profile_mod, "_PROFILE_JSON", store_dir / profile_mod._PROFILE_FILENAME),
+        patch.object(profile_mod, "_PROFILE_JSON", store_dir / "user_profile.json"),
         patch.object(profile_mod, "_LEGACY_LOCAL_JSON", store_dir / "local.json"),
     ):
         yield store_dir
 
 
 @pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data."""
-    return {"test_key": "test_value", "sample_data": "example"}
+def tools_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Set PATH to one tmp directory holding an executable stub per name given.
 
-
-@pytest.fixture
-def mock_json_handler():
-    """Mock json_handler with functional read_json but stubbed logging.
-
-    Use when tests need real file I/O via read_json but want to
-    suppress log_operation and ensure_module_jsons side effects.
+    shutil.which reads PATH, so the product's own lookup answers for real and
+    nothing of the stdlib is patched (fleet green leg 8). No names: an empty
+    directory, so every lookup answers None. Where the platform keeps PATHEXT
+    (Windows), which only finds a name carrying one of its extensions, so the
+    stub takes the first; the platform decides that, inside the test.
+    Returns the directory.
     """
-    with (
-        patch("aipass.aipass.apps.handlers.json.json_handler.log_operation") as mock_log,
-        patch(
-            "aipass.aipass.apps.handlers.json.json_handler.ensure_module_jsons",
-            return_value=True,
-        ) as mock_ensure,
-    ):
-        mock = MagicMock()
-        mock.log_operation = mock_log
-        mock.ensure_module_jsons = mock_ensure
-        yield mock
+
+    def put(*names: str) -> Path:
+        bin_dir = tmp_path / "path_bin"
+        bin_dir.mkdir(exist_ok=True)
+        pathext = os.environ.get("PATHEXT", "")
+        suffix = pathext.split(os.pathsep)[0].lower() if pathext else ""
+        for name in names:
+            stub = bin_dir / f"{name}{suffix}"
+            stub.write_text("", encoding="utf-8")
+            stub.chmod(stub.stat().st_mode | 0o111)  # no effect where the platform has no mode bit
+        monkeypatch.setenv("PATH", str(bin_dir))
+        return bin_dir
+
+    return put
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
+
+
+class _HeaderEvents:
+    """Stands where cli's display keeps its trigger, and records each fire."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    def fire(self, event: str, **data: object) -> None:
+        self.calls.append((event, data))
+
+
+@pytest.fixture(autouse=True)
+def header_events(monkeypatch: pytest.MonkeyPatch) -> _HeaderEvents:
+    """cli's header() fires cli_header_displayed on the real trigger bus, which has a
+    live handler, and display caches the trigger it loaded in _TRIGGER. A test that
+    prints through the real console must not fire it, so every test gets a recorder
+    in that slot; a test about a header asserts the title off .calls."""
+    events = _HeaderEvents()
+    monkeypatch.setattr(display, "_TRIGGER", events)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return events

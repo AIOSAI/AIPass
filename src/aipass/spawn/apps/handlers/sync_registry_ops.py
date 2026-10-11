@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry_ops.py
 # Description: Registry sync handler — implementation logic for registry repair
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-03-10
+# Modified: 2026-09-29
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -193,6 +193,7 @@ def sync_registry(fix: bool = False) -> dict:
             "fixed": [],
             "spawn_rebuilt": [],
             "ids_fixed": [],
+            "ids_failed": [],
             "descriptions_backfilled": [],
         }
     project_root = registry_path.parent
@@ -218,6 +219,7 @@ def sync_registry(fix: bool = False) -> dict:
             "fixed": [],
             "spawn_rebuilt": [],
             "ids_fixed": [],
+            "ids_failed": [],
             "descriptions_backfilled": [],
         }
 
@@ -404,7 +406,10 @@ def sync_registry(fix: bool = False) -> dict:
                     logger.info(f"[sync-registry] Rebuilt .spawn/ for: {name}")
 
     # Fix registry_id mismatches in passports for all known branches
+    # None is the fixer's failure answer, named here and never read as "already
+    # correct" (spawn's decision, DPLAN-0354 leg 5).
     ids_fixed = []
+    ids_failed = []
     if fix:
         all_known = list(healthy) + list(unregistered_list)
         for name in all_known:
@@ -413,6 +418,8 @@ def sync_registry(fix: bool = False) -> dict:
                 was_fixed = fix_passport_registry_id(branch_path, registry_path)
                 if was_fixed:
                     ids_fixed.append(name)
+                elif was_fixed is None:
+                    ids_failed.append(name)
 
     json_handler.log_operation("registry_scanned")
 
@@ -423,6 +430,7 @@ def sync_registry(fix: bool = False) -> dict:
         "fixed": fixed,
         "spawn_rebuilt": spawn_rebuilt,
         "ids_fixed": ids_fixed,
+        "ids_failed": ids_failed,
         "descriptions_backfilled": descriptions_backfilled,
     }
 

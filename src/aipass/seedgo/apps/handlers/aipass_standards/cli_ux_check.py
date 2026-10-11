@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_ux_check.py
 # Description: CLI UX Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-17
-# Modified: 2026-07-17
+# Modified: 2026-10-02
 # =============================================
 
 """
@@ -38,6 +38,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Only check entry points: apps/{branch}.py files
+# APPLIES_TO: entry-point navigation and output quality.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
 
 
@@ -171,7 +173,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks.append(_check_examples_section(help_func, path.name))
 
     # --- Check 8: no_internal_modules ---
-    checks.append(_check_no_internal_modules(module_path, path))
+    checks.append(_check_no_internal_modules(path))
 
     # Calculate score
     passed_checks = sum(1 for check in checks if check["passed"])
@@ -436,12 +438,13 @@ def _check_examples_section(help_func: Optional[ast.FunctionDef], filename: str)
     }
 
 
-def _check_no_internal_modules(module_path: str, path: Path) -> Dict:
+def _check_no_internal_modules(path: Path) -> Dict:
     """
     Check 8: modules/ directory does not expose internal plumbing files.
 
     Files whose stems end with _wire, _fix, _impl, or _internal should be
-    underscore-prefixed to hide from discovery.
+    underscore-prefixed to hide from discovery. The `module_path` it also took
+    was never read and was dropped (seedgo, fleet green leg 8).
     """
     internal_suffixes = ("_wire", "_fix", "_impl", "_internal")
 

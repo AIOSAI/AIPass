@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tokens.py
 # Description: Host API Token Handler — bearer token issue, verify, revoke
-# Version: 1.0.0
+# Version: 1.1.2
 # Created: 2026-08-14
-# Modified: 2026-09-17
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -321,14 +321,17 @@ def save_tokens(records: List[Dict[str, Any]]) -> str:
         try:
             os.unlink(str(temporary))
         except OSError as cleanup_error:
-            logger.warning("[host_api] could not remove the temp store at %s: %s", temporary, cleanup_error)
+            # Named in words, never by its path: a path inside the secrets base
+            # reads as a secret's location (seedgo clear_text_secret_logging).
+            # This module keeps one store, so the words are enough to find it.
+            logger.warning("[host_api] could not remove the token store's temp file: %s", cleanup_error)
         raise
 
     return str(target)
 
 
 @contextmanager
-def _store_lock(wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
+def _store_lock(wait: Optional[float] = None) -> Iterator[None]:
     """
     Hold an exclusive write lock on the token store.
 
@@ -343,7 +346,11 @@ def _store_lock(wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
     lock still held, so it is polled the same way, inside the same wait.
 
     Args:
-        wait: Seconds to keep trying before giving up.
+        wait: Seconds to keep trying before giving up. None, what every
+            caller passes, is LOCK_WAIT_SECONDS read at the call rather than
+            bound at def time, so the tests shorten the wait through the
+            public writers without reaching this function by name
+            (api, fleet green leg 14).
 
     Yields:
         None, with the lock held.
@@ -352,6 +359,7 @@ def _store_lock(wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
         OSError: The lock could not be taken within *wait*, because it stayed
             held or because access stayed denied.
     """
+    wait = LOCK_WAIT_SECONDS if wait is None else wait
     path = lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + wait
@@ -362,7 +370,7 @@ def _store_lock(wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
             descriptor = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         except FileExistsError:
             if _lock_is_stale(path):
-                logger.warning("[host_api] breaking a stale token store lock at %s", path)
+                logger.warning("[host_api] breaking a stale token store lock")
                 _drop_lock(path)
                 continue
             if time.monotonic() >= deadline:
@@ -424,13 +432,13 @@ def _drop_lock(path: Path) -> None:
         os.unlink(str(path))
     except FileNotFoundError as e:
         # Tolerated: a stale-lock break may have removed it already.
-        logger.debug("[host_api] token store lock at %s was already gone: %s", path, e)
+        logger.debug("[host_api] the token store lock was already gone: %s", e)
     except OSError as e:
         # Not gone: refused, which is also Windows' answer for a lock already
         # being deleted. Never raised — a release that throws would mask
         # whatever the body was doing — but a warning, because a lock that
         # cannot be removed wedges every write until the staleness timeout.
-        logger.warning("[host_api] could not remove the token store lock at %s: %s", path, e)
+        logger.warning("[host_api] could not remove the token store lock: %s", e)
 
 
 # ==============================================
@@ -619,8 +627,10 @@ def touch_token(token_id: str) -> None:
                 save_tokens(records)
                 return
     except OSError as e:
-        # Deliberately swallowed. See the rule above.
-        logger.warning("[host_api] could not record last_used for %s: %s", token_id, e)
+        # Deliberately swallowed. See the rule above. No id on the line: it is
+        # read out of the credential store, and nothing read from there reaches
+        # a log (CodeQL py/clear-text-logging-sensitive-data, PR #774 r10).
+        logger.warning("[host_api] could not record last_used for the presented token: %s", e)
 
 
 def _is_due(last_used: Any) -> bool:
@@ -643,8 +653,10 @@ def _is_due(last_used: Any) -> bool:
         # Due, not fatal: an unreadable stamp gets overwritten with a readable
         # one on this request. Logged because the only way this fires is a
         # hand-edited store or a shape change nobody migrated, and both are
-        # things an operator should see once rather than never.
-        logger.warning("[host_api] unreadable last_used %r, treating as due: %s", last_used, e)
+        # things an operator should see once rather than never. The stamp itself
+        # stays off the line, and so does ValueError's text, which quotes it:
+        # it is a value read out of the credential store (PR #774 r10).
+        logger.warning("[host_api] unreadable last_used stamp, treating as due (%s)", type(e).__name__)
         return True
 
     return age >= LAST_USED_GRANULARITY_SECONDS

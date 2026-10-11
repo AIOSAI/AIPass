@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_control_verbs.py
 # Description: Tests for TG control verbs v1 (/start /kill /status) — DPLAN-0270 P1
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-29
-# Modified: 2026-07-29
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -305,7 +305,7 @@ class TestControlBotAipassBranchName:
         explicitly so the test proves routing, not the removed default.
         """
         bot = _make_bot(tmp_path, _patch_base_bot_deps, branch_name="aipass")
-        branch_info = {"name": "aipass", "path": "/home/patrick/Projects/AIPass/src/aipass/aipass"}
+        branch_info = {"name": "aipass", "path": str(tmp_path / "AIPass" / "src" / "aipass" / "aipass")}
 
         with (
             patch("subprocess.run", return_value=_run(returncode=1)) as mock_run,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.2.1
+# Version: 1.2.5
 # Created: 2026-03-09
-# Modified: 2026-08-31
+# Modified: 2026-10-04
 # =============================================
 
 """
@@ -67,6 +67,33 @@ def _validate_branch_path(branch_path: Path, project_root: Path, branch_name: st
 
 _registry_path: Optional[Path] = None
 
+#: The first passport the credential checks could not read, as the line main()
+#: prints on stderr after routing. None while every passport read was clean.
+_PASSPORT_FAULT: Optional[str] = None
+
+
+def passport_fault() -> Optional[str]:
+    """The line naming a passport the credential checks could not read, or None.
+
+    Both checks accept the registry when the passport cannot be read (fleet
+    green leg 7, drone's option C): refusing would send find_registry() to
+    another project's registry with no word said. The fault is said instead,
+    once, by drone.py main() on stderr after the command has run.
+    """
+    return _PASSPORT_FAULT
+
+
+def _record_passport_fault(passport_path: Path, registry_path: Path, exc: Exception) -> None:
+    """Record the first unreadable passport; a later read of the same fault says nothing new."""
+    global _PASSPORT_FAULT
+    if _PASSPORT_FAULT is not None:
+        return
+    _PASSPORT_FAULT = (
+        f"drone: passport {passport_path} could not be read ({type(exc).__name__}: {exc}); "
+        f"registry {registry_path} was used without its credential check"
+    )
+    logger.warning("%s", _PASSPORT_FAULT)
+
 
 def _first_registry_in(directory: Path) -> Optional[Path]:
     """Return the first *_REGISTRY.json in *directory*, or None.
@@ -85,6 +112,10 @@ def _registry_matches_credential(registry_path: Path) -> bool:
     missing an ID, or the caller has no directory to walk from).  Returns False
     only when both IDs exist and disagree — the caller should skip this registry
     and keep walking.
+
+    A registry it cannot read is accepted with a WARNING: load_registry() reads
+    the same file and raises naming it. A passport it cannot read is accepted
+    too, and recorded for passport_fault() so main() says it on stderr.
 
     DECLARED ROOTS DO NOT COME THROUGH HERE, AND THAT IS DELIBERATE.
     DECLARATION IS THE CREDENTIAL (@devpulse's ruling, FPLAN-0460 phase 3).
@@ -109,23 +140,31 @@ def _registry_matches_credential(registry_path: Path) -> bool:
         with open(registry_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         registry_id = data.get("metadata", {}).get("id") if isinstance(data, dict) else None
-        if not registry_id:
-            return True
+    except Exception as exc:
+        # A fault of the REGISTRY is accepted: load_registry() reads the same
+        # file and raises with its name. Skipping would resolve another
+        # registry further up without a word.
+        logger.warning("Credential pre-check could not read registry %s: %s", registry_path, exc)
+        return True
+    if not registry_id:
+        return True
 
-        cwd = caller_cwd()
-        if cwd is None:
-            # No location is not a failed check. The walk below infers from
-            # where the caller STANDS, and a process whose directory was
-            # deleted stands nowhere — the same answer as a walk that finds no
-            # passport, reached honestly instead of through the except below
-            # logging "pre-check failed" for a check that did not fail.
-            logger.info(
-                "Credential pre-check for %s has no current directory to walk from — "
-                "no passport is reachable, so the registry is accepted",
-                registry_path,
-            )
-            return True
+    cwd = caller_cwd()
+    if cwd is None:
+        # No location is not a failed check. The walk below infers from
+        # where the caller STANDS, and a process whose directory was
+        # deleted stands nowhere — the same answer as a walk that finds no
+        # passport, reached honestly instead of through an except logging
+        # "pre-check failed" for a check that did not fail.
+        logger.info(
+            "Credential pre-check for %s has no current directory to walk from — "
+            "no passport is reachable, so the registry is accepted",
+            registry_path,
+        )
+        return True
 
+    candidate = cwd / ".trinity" / "passport.json"
+    try:
         for parent in [cwd] + list(cwd.parents):
             candidate = parent / ".trinity" / "passport.json"
             if candidate.is_file():
@@ -137,7 +176,10 @@ def _registry_matches_credential(registry_path: Path) -> bool:
                 return passport_id == registry_id
         return True
     except Exception as exc:
-        logger.warning("Credential pre-check failed for %s: %s", registry_path, exc)
+        # A fault of the PASSPORT is accepted LOUDLY: refusing would send the
+        # walk to another project's registry in silence. passport_fault()
+        # carries it to main(), which says it once on stderr.
+        _record_passport_fault(candidate, registry_path, exc)
         return True
 
 
@@ -250,10 +292,14 @@ def _verify_registry_credential(registry_path: Path, registry_data: Dict[str, An
         if passport_path is None:
             return
 
-        with open(passport_path, "r", encoding="utf-8") as f:
-            passport = json.load(f)
-
-        passport_id = passport.get("citizenship", {}).get("registry_id")
+        try:
+            with open(passport_path, "r", encoding="utf-8") as f:
+                passport = json.load(f)
+            passport_id = passport.get("citizenship", {}).get("registry_id")
+        except Exception as exc:
+            # The same fault the pre-check records; said once, by main().
+            _record_passport_fault(passport_path, registry_path, exc)
+            return
         if not passport_id:
             return
 
@@ -286,6 +332,17 @@ def reset_registry_path() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _read_registry_json(registry_path: Path) -> Any:
+    """Open and parse one registry file; every error is the caller's to name.
+
+    The product has no reason of its own for this name; _load_registry_data
+    could open inline. The reason is the test: a read the OS refuses is
+    supplied here, not by replacing builtins.open for the whole process.
+    """
+    with open(registry_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
     """Read, parse, and normalize a registry file.
 
@@ -304,8 +361,7 @@ def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
         )
 
     try:
-        with open(registry_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = _read_registry_json(registry_path)
     except PermissionError as e:
         raise RegistryPermissionError(f"Permission denied reading registry: {e}")
     except json.JSONDecodeError as e:
@@ -376,8 +432,28 @@ def load_registry() -> Dict[str, Any]:
     return data
 
 
-def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]:
+def _fleet_gateway() -> Any:
+    """@memory's fleet gateway module, imported at CALL time and never at module level.
+
+    A failure anywhere in @memory's import chain must cost the external tier,
+    not every import of drone (see external_branches, which calls this inside
+    its guard). That call-time import is the product reason; it could sit
+    inline in the guard. Its own name is for the test: a module that will not
+    import is supplied here, not by replacing the interpreter's __import__ for
+    the whole process.
+    """
+    from aipass.memory.apps.modules import fleet
+
+    return fleet
+
+
+def external_branches(repo_root: Optional[Path] = None) -> Optional[List[Dict[str, Any]]]:
     """Citizens in declared roots, in DECLARATION ORDER, as registry entries.
+
+    Returns None when the tier is LOST (no project root to scope it, or the
+    gateway raised), and [] when the tier answered and declares nobody. None is
+    never a success answer, so a caller can tell the two apart; the lookups
+    below read it through _external_branches, where a lost tier is no externals.
 
     Consumes @memory's public gateway and never reads AIPASS_ROOTS.json — the
     file has exactly one reader and it is theirs. A second reader here would be
@@ -390,7 +466,7 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
     different rule would mean ``@wren`` resolving by one law and ``@memory`` by
     another.
 
-    Returns [] and says so LOUDLY when the gateway fails. An empty declared-roots
+    Returns None and says so LOUDLY when the gateway fails. An empty declared-roots
     file is a legal state and silent; another branch's module raising is not.
     """
     # Scoped to the project being resolved AGAINST, not to this checkout.
@@ -408,7 +484,7 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
             repo_root = get_registry_path().parent
         except Exception as exc:
             logger.warning("External tier: cannot locate a project root to scope declared roots: %s", exc)
-            return []
+            return None
 
     # Imported HERE, not at module level, and the import sits INSIDE the guard.
     # A module-level import made every failure in @memory's import chain a
@@ -425,16 +501,14 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
     # suite patches with patch.object(fleet, ...) — a call-time import is not a
     # fresh one.
     try:
-        from aipass.memory.apps.modules import fleet
-
-        records = fleet.external_branches(repo_root, name_from="registry")
+        records = _fleet_gateway().external_branches(repo_root, name_from="registry")
     except Exception as exc:
         logger.error(
             "External tier unavailable — @memory's fleet gateway raised: %s. "
             "Local and AIPASS_HOME resolution continue; declared-root citizens do not resolve.",
             exc,
         )
-        return []
+        return None
 
     entries: List[Dict[str, Any]] = []
     for record in records:
@@ -455,6 +529,16 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
             }
         )
     return entries
+
+
+def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """The lookups' view of the tier: a lost tier is no externals, never a crash.
+
+    external_branches has already logged the loss at ERROR; local and
+    AIPASS_HOME resolution go on without the declared roots.
+    """
+    tier = external_branches(repo_root)
+    return [] if tier is None else tier
 
 
 def _external_registry_path(entry: Dict[str, Any]) -> Optional[Path]:

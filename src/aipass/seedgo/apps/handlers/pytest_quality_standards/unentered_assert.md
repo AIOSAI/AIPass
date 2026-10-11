@@ -76,6 +76,12 @@ def test_each_row_is_shaped():
 
 An empty `rows` now fails the test instead of passing it silently.
 
+A literal behind a name counts too (fleet green leg 20): a `for` over `NAME` or
+`self.NAME` that is bound exactly once, in the unit's own body before the loop,
+at module level, or in the unit's own class body, to a list, tuple, set or dict
+literal with at least one element. A table computed by a call, a comprehension,
+an imported name, an empty literal, or a name bound twice keeps the flag.
+
 ## What this rule does not claim
 
 It does not claim the flagged assertion **is** dead. It claims nothing in the

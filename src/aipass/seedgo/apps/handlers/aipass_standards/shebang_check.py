@@ -22,6 +22,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: scan every .py file, not just entry point
+# APPLIES_TO: a test file is library code - nothing executes it directly.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 

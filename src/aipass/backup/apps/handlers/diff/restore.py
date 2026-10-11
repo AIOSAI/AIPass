@@ -17,6 +17,28 @@ from aipass.prax import logger
 from ..audit import trail
 
 
+def _stored_file(file_folder: Path) -> Path | None:
+    """Return the current version stored inside a file-folder.
+
+    The folder name is NOT always the file name: the path builder shortens a
+    name over 50 characters to name[:30]_md5[:8] for the FOLDER while the file
+    inside keeps its full name. Reading the folder instead of echoing its name
+    covers both layouts. The current version is the only file in there that is
+    not a baseline -- diffs live one level down in <name>_diffs/.
+    """
+    if not file_folder.is_dir():
+        return None
+
+    exact = file_folder / file_folder.name
+    if exact.is_file():
+        return exact
+
+    candidates = [f for f in sorted(file_folder.iterdir()) if f.is_file() and "-baseline-" not in f.name]
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
 def list_versions(file_folder: Path) -> list[dict]:
     """List all versions available for a file-folder.
 
@@ -26,7 +48,8 @@ def list_versions(file_folder: Path) -> list[dict]:
     if not file_folder.is_dir():
         return versions
 
-    name = file_folder.name
+    current = _stored_file(file_folder)
+    name = current.name if current is not None else file_folder.name
 
     # Find baseline
     for f in file_folder.iterdir():
@@ -34,8 +57,7 @@ def list_versions(file_folder: Path) -> list[dict]:
             versions.append({"timestamp": "baseline", "path": f, "type": "baseline"})
 
     # Find current
-    current = file_folder / name
-    if current.is_file():
+    if current is not None:
         versions.append({"timestamp": "current", "path": current, "type": "current"})
 
     # Find diffs
@@ -66,12 +88,13 @@ def restore_file(file_folder: Path, output_path: Path) -> bool:
     Returns:
         True if restoration succeeded.
     """
-    name = file_folder.name
-    current = file_folder / name
+    current = _stored_file(file_folder)
 
-    if not current.is_file():
+    if current is None:
         logger.warning(f"[restore] No current version found in {file_folder}")
         return False
+
+    name = current.name
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(str(current), str(output_path))

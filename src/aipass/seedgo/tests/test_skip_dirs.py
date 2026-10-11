@@ -1,39 +1,38 @@
 # =================== AIPass ====================
 # Name: test_skip_dirs.py
 # Description: Unit tests for skip_dirs (is_throwaway_path routine-case logging regression)
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-07-27
-# Modified: 2026-07-27
+# Modified: 2026-10-08
 # =============================================
 
-"""Tests for skip_dirs.is_throwaway_path.
+"""Tests for apps/handlers/aipass_standards/skip_dirs.py's is_throwaway_path and in_skipped_dir."""
 
-Regression coverage for the runaway-log bug (@trigger dispatch 98833403):
-is_throwaway_path used to logger.info() every time a path was NOT under a temp
-dir -- the routine outcome for ~100% of files during a branch audit walk,
-flooding system_logs/seedgo_skip_dirs.log at hundreds of lines/min.
-"""
+# Regression coverage for the runaway-log bug (@trigger dispatch 98833403):
+# is_throwaway_path used to logger.info() every time a path was NOT under a temp
+# dir -- the routine outcome for ~100% of files during a branch audit walk,
+# flooding system_logs/seedgo_skip_dirs.log at hundreds of lines/min.
 
-import sys
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — is_disabled_file's DISABLED_FILE_MARKER substring check
+# seedgo: no-test-needed(ruff) — that is_prototype_file and SOURCE_SKIP_DIRS parse and import (unexercised here)
+
 from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
+
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock aipass.prax.logger and force a fresh skip_dirs import per test."""
+    """Patch skip_dirs' logger seam directly, at the edge."""
     mock_logger = MagicMock()
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-    monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.handlers.aipass_standards.skip_dirs", raising=False)
+    monkeypatch.setattr(skip_dirs, "logger", mock_logger)
     return mock_logger
 
 
 def test_throwaway_path_under_temp_root_true(tmp_path):
-    from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
-
     scratch = tmp_path / "scratch.py"
     scratch.write_text("pass", encoding="utf-8")
 
@@ -42,8 +41,6 @@ def test_throwaway_path_under_temp_root_true(tmp_path):
 
 def test_throwaway_path_outside_temp_root_false_no_log(tmp_path, monkeypatch, _mock_infrastructure):
     """Routine non-match (the common case) returns False and never logs."""
-    from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
-
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [tmp_path / "not-this-one"])
     real_file = tmp_path / "src" / "module.py"
     real_file.parent.mkdir(parents=True)
@@ -54,11 +51,23 @@ def test_throwaway_path_outside_temp_root_false_no_log(tmp_path, monkeypatch, _m
 
 
 def test_throwaway_path_scratchpad_true(tmp_path):
-    from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
-
     scratchpad_dir = tmp_path / "scratchpad"
     scratchpad_dir.mkdir()
     fp = scratchpad_dir / "notes.py"
     fp.write_text("pass", encoding="utf-8")
 
     assert skip_dirs.is_throwaway_path(str(fp)) is True
+
+
+def test_a_skip_named_directory_above_the_walk_root_empties_nothing(tmp_path):
+    root = tmp_path / "backups" / "apps"
+    assert skip_dirs.in_skipped_dir(root / "modules" / "live.py", root) is False
+    assert skip_dirs.in_skipped_dir(root / "modules" / ".archive" / "old.py", root) is True
+
+
+def test_a_skip_named_package_is_source_and_an_archive_with_init_is_not(tmp_path):
+    for name in ("artifacts", ".archive"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "__init__.py").write_text("", encoding="utf-8")
+    assert skip_dirs.in_skipped_dir(tmp_path / "artifacts" / "ops.py", tmp_path) is False
+    assert skip_dirs.in_skipped_dir(tmp_path / ".archive" / "old.py", tmp_path) is True

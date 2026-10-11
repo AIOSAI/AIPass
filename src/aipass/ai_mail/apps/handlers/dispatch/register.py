@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Dispatch Register
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-22
-# Modified: 2026-09-10
+# Modified: 2026-10-08
 # =============================================
 
 """The dispatch register — what was promised, written before anything spawns.
@@ -237,7 +237,15 @@ def register_file(repo_root: Optional[Path] = None) -> Path:
     runtime state), so the walk found nothing and this RAISED for every
     consumer who passed ``repo_root``: 26 of @devpulse's tests and the CI job
     on PR 739. One root, one answer, no second opinion to disagree with.
+
+    AIPASS_DISPATCH_REGISTER, when set and no ``repo_root`` was given, names the
+    register file itself. It is read at every call, so a consumer's test fixture
+    re-points every rootless caller without patching this module's privates,
+    which the handlers fence refuses (DPLAN-0404 leg 15).
     """
+    override = os.environ.get("AIPASS_DISPATCH_REGISTER")
+    if override and repo_root is None:
+        return Path(override)
     root = find_repo_root()
     resolved = root / ".aipass" / REGISTER_FILENAME
     if repo_root is None:
@@ -440,16 +448,17 @@ def close_on_reply(
         The dispatch id that was closed, or None when the reply matched no open
         row. None is not an error and must not raise: a reply that closes
         nothing is still a reply and must be delivered.
+
+    Raises:
+        OSError: the register could not be read, which is not "matched nothing".
+            The one caller, reply's _close_dispatch_row_on_reply, runs after the
+            reply is delivered and logs every raise (ai_mail, leg 11).
     """
     thread = thread_subject(subject)
     if not replier or not recipient or not thread:
         return None
 
-    try:
-        rows = outstanding(repo_root=repo_root)
-    except OSError as exc:
-        logger.warning("[register] cannot read register to close a dispatch on reply: %s", exc)
-        return None
+    rows = outstanding(repo_root=repo_root)
 
     for row in rows:
         if str(row.get("target", "")) != str(replier):
