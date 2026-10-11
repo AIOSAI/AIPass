@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: clear_text_secret_logging_check.py
 # Description: Clear Text Secret Logging Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-10
-# Modified: 2026-10-10
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -49,8 +49,15 @@ its message -- a positional argument, an f-string piece, a ``%`` operand, a
      value back, a same-file parameter handed one, THE SAME-FILE HOP (a call
      whose argument is built, to a function that returns that parameter: the
      only place a parameter is followed, and per call -- a clean argument
-     through the same helper stays clean), and an attribute of a built name
-     (``target.parent``). A ``non_``/``not_`` prefix acquits nothing. This arm
+     through the same helper stays clean), an attribute of a built name
+     (``target.parent``), and since 1.2.0 (dispatch fad65d17, CodeQL round
+     ten) the READS of a built value -- ``.get(k)``, ``.pop(k)``,
+     ``.setdefault(k, d)``, ``.items()``, ``.keys()``, ``.values()``
+     (``FOLLOWED_READS``; the receiver carries, a default does not) beside the
+     subscripts and loops already followed -- and the ADDS of one:
+     ``seen.append(key)``, ``.extend``, ``.add``, ``.insert(i, x)`` on ``x``
+     bind the named collection (``FOLLOWED_ADDS``), and a dict literal
+     holding a built key or value is built. A ``non_``/``not_`` prefix acquits nothing. This arm
      is what reaches the CodeQL rows: no name on those log lines says secret,
      the source they were built from does.
 
@@ -81,6 +88,16 @@ credential(s) to the call words 1 (_without_credentials); no setter-verb
 exclusion 1 (@api host/config.py:150 from set_secret); token-word binding and
 attribute seeds 1 (@prax monitor.py:274, argparse's ``args.tokens``). Arm 1's
 new words trusted and confidential: 0 new rows.
+
+ROUND TEN (1.2.0, 2026-10-11, 1,383 files): CodeQL's alert kept two sources
+after rounds eight and nine; the chain it most plausibly reports is @api
+host/tokens.py load_tokens -- ``stored = secrets_store.get_secret(...)``,
+``records = stored.get("tokens")`` (lost here before 1.2.0), the
+comprehension, touch_token's loop and ``_is_due(record.get("last_used"))`` --
+to the ``last_used %r`` warning (:655). The pre-cure file (HEAD 6c3aa9aa)
+convicts at :655 and only there (:631's token_id crosses from server.py);
+@api's cure acquits. Live fleet 0 rows before and after; every sub-arm
+(each read, each add, the dict literal) measured alone: 0 rows.
 
 NOT A ROW, each for its reason:
   * An IDENTIFIER of a secret rather than the secret: a segment beside the
@@ -214,6 +231,18 @@ MAX_SHOWN = 4
 PASS_THROUGH_CALLS = frozenset(
     {"str", "repr", "Path", "fspath", "sorted", "list", "tuple", "set", "frozenset", "dict", "reversed"}
 )
+
+#: Reads whose result is (part of) the value they are called on (1.2.0, dispatch
+#: fad65d17): ``stored.get("tokens")``, ``built.items()``. Only the receiver
+#: carries: a ``.get(k, default)`` default is not followed.
+FOLLOWED_READS = frozenset({"get", "pop", "setdefault", "items", "keys", "values"})
+
+#: Adds that put a value into the collection they are called on (1.2.0):
+#: ``seen.append(key)`` binds ``seen``. ``insert(i, x)`` is judged on ``x`` only.
+FOLLOWED_ADDS = frozenset({"append", "extend", "add", "insert"})
+
+#: Whether a dict literal holding a built key or value is built (1.2.0).
+FOLLOW_DICT_LITERALS = True
 
 #: Comprehensions: their result is built from what they iterate.
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
@@ -424,6 +453,8 @@ class _File:
             return self._first((expr.left, expr.right), scope)
         if isinstance(expr, (ast.Tuple, ast.List)):
             return self._first(expr.elts, scope)
+        if isinstance(expr, ast.Dict) and FOLLOW_DICT_LITERALS:
+            return self._first([*(key for key in expr.keys if key is not None), *expr.values], scope)
         if isinstance(expr, ast.IfExp):
             return self._first((expr.body, expr.orelse), scope)
         if isinstance(expr, COMPREHENSIONS):
@@ -487,6 +518,10 @@ class _File:
             return self._first(call.args, scope)
         if name in PASS_THROUGH_CALLS:
             return self._first([*call.args, *(kw.value for kw in call.keywords)], scope)
+        if isinstance(call.func, ast.Attribute) and call.func.attr in FOLLOWED_READS:
+            found = self.leak(call.func.value, scope)
+            if found is not None:
+                return found
         target = self.callee(call)
         if target is not None:
             found = self.returns.get(target) or self._hop(call, target, scope)
@@ -635,7 +670,29 @@ def _derive_pass(file: _File, scopes: List[Tuple[ast.AST, List[ast.stmt]]]) -> b
             changed = _derive_return(file, node, scope) or changed
             if isinstance(node, ast.Call):
                 changed = _derive_parameters(file, node, scope) or changed
+                changed = _derive_add(file, node, scope) or changed
     return changed
+
+
+def _derive_add(file: _File, call: ast.Call, scope: ast.AST) -> bool:
+    """Mark a collection a built value is added to: ``seen.append(key)`` binds ``seen``.
+
+    The receiver must be a plain name (``self.items.append(x)`` binds no name,
+    like a subscript target); ``insert(i, x)`` is judged on ``x``, never ``i``.
+    """
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr in FOLLOWED_ADDS and isinstance(func.value, ast.Name)):
+        return False
+    known = file.derived.setdefault(scope, {})
+    if func.value.id in known:
+        return False
+    added = call.args[1:] if func.attr == "insert" else call.args
+    for value in added:
+        origin = file.leak(value, scope)
+        if origin is not None:
+            known[func.value.id] = origin
+            return True
+    return False
 
 
 def _derive_parameters(file: _File, call: ast.Call, scope: ast.AST) -> bool:

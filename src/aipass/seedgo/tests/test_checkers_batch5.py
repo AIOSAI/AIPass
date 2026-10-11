@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch5.py
 # Description: Unit tests for ruff_check and clear_text_secret_logging checker handlers (batch 5)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-16
-# Modified: 2026-10-10
+# Modified: 2026-10-11
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/ruff_check.py and clear_text_secret_logging_check.py."""
@@ -630,3 +630,174 @@ class TestATokenNamedBindingOrAttributeSeedsNothing:
 
     def test_a_secrets_named_attribute_through_the_same_path_is_convicted(self) -> None:
         assert _secret_rows(PARSER_TOKENS_SPECIMEN.replace("args.tokens", "args.secrets")) == [10]
+
+
+# =============================================
+# 6. clear_text_secret_logging follows reads and adds on a built value (dispatch fad65d17, CodeQL round ten)
+# =============================================
+
+#: @api apps/handlers/host/tokens.py BEFORE its round-ten cure (HEAD 6c3aa9aa), cut:
+#: load_tokens' get_secret (:158), .get("tokens") (:167) and comprehension (:172);
+#: touch_token's loop and its _is_due(record.get("last_used")) hop; the warnings :631 and :655.
+TOKENS_R10_SPECIMEN = """from datetime import datetime
+from aipass.prax import logger
+from aipass.api.apps.handlers.auth import secrets as secrets_store
+
+
+def load_tokens():
+    stored = secrets_store.get_secret("host_api", "tokens", as_json=True)
+    if not isinstance(stored, dict):
+        return []
+    records = stored.get("tokens")
+    if not isinstance(records, list):
+        return []
+    return [record for record in records if isinstance(record, dict)]
+
+
+def touch_token(token_id):
+    try:
+        records = load_tokens()
+        for record in records:
+            if record.get("id") != token_id:
+                continue
+            if not _is_due(record.get("last_used")):
+                return
+    except OSError as e:
+        logger.warning("[host_api] could not record last_used for %s: %s", token_id, e)
+
+
+def _is_due(last_used):
+    if not last_used:
+        return True
+    try:
+        age = (datetime.now() - datetime.fromisoformat(str(last_used))).total_seconds()
+    except ValueError as e:
+        logger.warning("[host_api] unreadable last_used %r, treating as due: %s", last_used, e)
+        return True
+    return age >= 60
+"""
+
+#: The cure @api shipped: the stamp and ValueError's text leave the line, the id leaves :631.
+TOKENS_R10_CURED = TOKENS_R10_SPECIMEN.replace(
+    '"[host_api] unreadable last_used %r, treating as due: %s", last_used, e',
+    '"[host_api] unreadable last_used stamp, treating as due (%s)", type(e).__name__',
+).replace('last_used for %s: %s", token_id, e', 'last_used for the presented token: %s", e')
+
+#: A secret document's keys appended one by one to a neutrally named list that is logged.
+APPENDED_KEYS_SPECIMEN = """from aipass.prax import logger
+from aipass.api.apps.modules.secrets import get_secret
+
+
+def report(provider):
+    document = get_secret(provider, "bot")
+    seen = []
+    for key in document:
+        seen.append(key)
+    logger.info("document keys: %s", seen)
+"""
+
+
+def _built_rows(body: str) -> tuple:
+    """(convicted lines, the log line) of a function that builds ``value`` from a secret document by ``body``."""
+    lines = body.split("\n")
+    source = (
+        "from aipass.prax import logger\nfrom aipass.api.apps.modules.secrets import get_secret\n\n\n"
+        "def report(provider):\n    document = get_secret(provider, 'bot')\n"
+        + "".join(f"    {line}\n" for line in lines)
+        + "    logger.info('value: %s', value)\n"
+    )
+    return _secret_rows(source), 7 + len(lines)
+
+
+class TestAReadOfABuiltValueCarriesItOn:
+    def test_the_pre_cure_tokens_last_used_warning_is_convicted(self) -> None:
+        assert secret_logging.scan(TOKENS_R10_SPECIMEN) == [
+            (34, "last_used (built from secrets_store.get_secret('host_api', 'tokens', as_json=True))")
+        ]
+
+    def test_the_cured_tokens_lines_are_acquitted(self) -> None:
+        assert _secret_rows(TOKENS_R10_CURED) == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "value = document.get('k')",
+            "value = document.pop('k')",
+            "value = document.setdefault('k', None)",
+            "value = list(document.items())",
+            "value = sorted(document.keys())",
+            "value = [v for v in document.values()]",
+            "for key, value in document.items():\n    pass",
+            "value, _rest = document.get('pair')",
+            "value = document['k'].get('inner')",
+        ],
+    )
+    def test_every_dict_read_of_a_built_value_is_convicted(self, body: str) -> None:
+        rows, log_line = _built_rows(body)
+        assert rows == [log_line]
+
+    @pytest.mark.parametrize(
+        "body",
+        ["value = document['k']", "value = document[0]", "value = document[:10]", "first, value = document"],
+    )
+    def test_a_subscript_a_wide_slice_or_an_unpacking_stays_convicted(self, body: str) -> None:
+        rows, log_line = _built_rows(body)
+        assert rows == [log_line]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "value = document.get('k')[-4:]",
+            "value = len(document.get('k'))",
+            "value = type(document.get('k')).__name__",
+            "value = mask(document.pop('k'))",
+            "value = config.get('k')",
+        ],
+    )
+    def test_a_redaction_a_type_name_or_a_clean_receiver_is_acquitted(self, body: str) -> None:
+        rows, _log_line = _built_rows(body)
+        assert rows == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "value = str(document.get('k'))",
+            "value = repr(document.get('k'))",
+            "value = f\"{document.get('k')!r}\"",
+            "value = '%r' % document.get('k')",
+        ],
+    )
+    def test_str_repr_and_r_formatting_of_a_read_stay_convicted(self, body: str) -> None:
+        rows, log_line = _built_rows(body)
+        assert rows == [log_line]
+
+
+class TestAnAddOfABuiltValueBindsTheCollection:
+    def test_a_secret_documents_keys_appended_to_a_logged_list_are_convicted(self) -> None:
+        assert secret_logging.scan(APPENDED_KEYS_SPECIMEN) == [(10, "seen (built from get_secret(provider, 'bot'))")]
+
+    def test_the_cured_count_only_line_is_acquitted(self) -> None:
+        source = APPENDED_KEYS_SPECIMEN.replace('"document keys: %s", seen', '"document keys: %d", len(seen)')
+        assert _secret_rows(source) == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "value = []\nvalue.extend(document)",
+            "value = set()\nvalue.add(document.get('k'))",
+            "value = []\nvalue.insert(0, document['k'])",
+            "value = {'k': document.get('k')}",
+            "value = dict(k=document.get('k'))",
+        ],
+    )
+    def test_extend_add_insert_and_a_dict_holding_a_built_value_are_convicted(self, body: str) -> None:
+        rows, log_line = _built_rows(body)
+        assert rows == [log_line]
+
+    @pytest.mark.parametrize(
+        "body",
+        ["value = []\nvalue.append(provider)", "value = []\nvalue.insert(len(document), 'x')"],
+    )
+    def test_a_clean_value_or_a_built_index_leaves_the_collection_clean(self, body: str) -> None:
+        rows, _log_line = _built_rows(body)
+        assert rows == []

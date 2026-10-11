@@ -1,6 +1,6 @@
 # Clear Text Secret Logging Standards
-**Status:** v1.1 (checker 1.1.0: arm 2's call-result seed and same-file hop, CodeQL round nine)
-**Date:** 2026-10-10 · **Modified:** 2026-10-10
+**Status:** v1.2 (checker 1.2.0: arm 2 follows reads and adds on a built value, CodeQL round ten)
+**Date:** 2026-10-10 · **Modified:** 2026-10-11
 
 ---
 
@@ -73,7 +73,16 @@ f-string piece, every `%` operand, every `.format()` argument, every `+` operand
      is built from that parameter has a built result (`strays = non_secret_keys(secret)`). This is
      the only place a parameter is followed back out, and it is per call: the same helper handed a
      clean argument returns clean;
-   - an attribute or subscript of a built name (`target.parent`).
+   - an attribute or subscript of a built name (`target.parent`, `doc["k"]`, `doc[0]`, `doc[:10]`);
+   - **a read of a built value** (1.2.0): `.get(k)`, `.pop(k)`, `.setdefault(k, d)`, `.items()`,
+     `.keys()`, `.values()` carry the receiver on (`records = stored.get("tokens")`); a `.get` default
+     is not followed. With the loops and unpacking above, `for k, v in built.items()` binds both;
+   - **an add of a built value** (1.2.0): `seen.append(key)`, `.extend(xs)`, `.add(x)` and
+     `.insert(i, x)` (judged on `x`, never `i`) bind the named list or set; a dict literal or
+     `dict(...)` holding a built key or value is built. `self.items.append(x)` binds no name.
+
+   `str()`, `repr()`, f-strings and `%r` of a built value stay rows; `len()`, `type(x).__name__` and a
+   slice of four characters or fewer stay redactions.
 
    A subscript or attribute target (`entry["k"] = token`) binds no name. A `non_` or `not_` prefix on
    a function says what it filters, not that its return is clean: it acquits nothing.
@@ -160,6 +169,34 @@ row:
 
 So `creds = load_credentials()`, the dispatch's third example, does not seed: credential(s) is not a
 CodeQL source word, and admitting it convicted a false row. It is still arm 1 on the line.
+
+### Round ten (checker 1.2.0)
+
+PR #774 round nine, head e23f11ca: the same one alert, two sources, constant since round seven.
+Neither api's `SECRETS_BASE` cure nor skills' telegram cure moved the count, so CodeQL's live
+sources here are secret-named CALL results. 1.1.0 seeded from the call and stopped one hop short:
+@api `host/tokens.py` `load_tokens` reads `stored = secrets_store.get_secret(...)` (:158), then
+`records = stored.get("tokens")` (:167, where the taint was lost), then the comprehension (:172);
+`touch_token` loops over `load_tokens()` and calls `_is_due(record.get("last_used"))`, and
+`_is_due` logs `last_used %r` (:655). 1.2.0 follows the `.get()` on both hops. The pre-cure file
+(HEAD 6c3aa9aa) convicts at :655 and only there: :631 logs `token_id`, which comes from
+`server.py` and is an identifier besides; a file-local arm cannot see it, and no change was asked.
+@api's cure (the stamp off the line, `type(e).__name__` instead of the error's text) acquits.
+
+Measured over 1,383 product files (`src/aipass/*/apps` and `*/lib`), the live fleet (api's cure on
+disk) at **0 rows** before and **0 rows** after. Each sub-arm alone, every other widening off:
+
+| sub-arm | rows alone | rows of the pre-cure tokens.py |
+|---|---|---|
+| `.get` | 0 | :655 |
+| `.pop`, `.setdefault`, `.items`, `.keys`, `.values` (each) | 0 | 0 |
+| `.append`, `.extend`, `.add`, `.insert` (each) | 0 | 0 |
+| dict literal | 0 | 0 |
+| all reads off | 0 | 0 (:655 lost) |
+| all adds off | 0 | :655 |
+
+No narrowing was needed: no sub-arm convicted a wrong row. The fixtures pin the arms: the pre-cure
+tokens cut goes red with `.get` disabled, the appended-keys fixture with `.append` disabled.
 
 ## Scoring
 

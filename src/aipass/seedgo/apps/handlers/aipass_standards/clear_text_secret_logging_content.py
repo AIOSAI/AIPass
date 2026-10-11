@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: clear_text_secret_logging_content.py
 # Description: Clear Text Secret Logging Standards Content Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-10
-# Modified: 2026-10-10
+# Modified: 2026-10-11
 # =============================================
 
 """
@@ -47,7 +47,12 @@ def get_clear_text_secret_logging_standards() -> str:
         "     sorted/list/tuple/set/dict/str/repr/join/format/f-strings, same-file returns and parameters,",
         "     attributes ([yellow]target.parent[/yellow]) and [red]the same-file hop[/red]: a built argument to a",
         "     function defined here taints that call's result when the parameter reaches its return",
-        "     ([yellow]strays = non_secret_keys(secret)[/yellow]). Per call: a clean argument stays clean. A",
+        "     ([yellow]strays = non_secret_keys(secret)[/yellow]). Per call: a clean argument stays clean.",
+        "     Since 1.2.0 it follows READS of a built value: .get/.pop/.setdefault/.items/.keys/.values",
+        "     ([yellow]records = stored.get('tokens')[/yellow]), subscripts, loops and unpacking; and ADDS:",
+        "     .append/.extend/.add/.insert(i, x) bind the named list or set, a dict literal or dict(...)",
+        "     holding a built value is built. str/repr/f-string/%r stay dirty; len(), type(x).__name__",
+        "     and a slice of 4 or fewer characters stay clean. A",
         "     non_/not_ prefix acquits nothing. Why so narrow: a parameter or loop var called token is a",
         "     shell word as often as a credential (and token_hex, issue_token return no secret); arm 1",
         "     judges its name wherever it is logged.",
@@ -72,6 +77,9 @@ def get_clear_text_secret_logging_standards() -> str:
         "  Round nine (1.1.0): CodeQL's next row was @skills telegram config.py load_bot_config,",
         "  strays from _get_secret through non_secret_keys - the call seed and the hop convict it.",
         "  Fleet after: 0 rows (the line was already cured); the narrowings each dropped a false row.",
+        "  Round ten (1.2.0): @api host/tokens.py, get_secret -> .get('tokens') -> loop ->",
+        "  _is_due(record.get('last_used')) -> the last_used %r warning; the pre-cure file convicts at",
+        "  :655 only, the cure acquits. Fleet 0 rows before and after, each sub-arm 0 alone.",
         "",
         "[bold cyan]SCORING:[/bold cyan]",
         "  SCORED, per file: 0 on any row, else 100. Every row on ONE check.",
