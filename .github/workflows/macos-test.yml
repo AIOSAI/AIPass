@@ -54,7 +54,10 @@ jobs:
           set -o pipefail
           # --timeout: a per-test ceiling (pytest-timeout, installed by setup.sh's
           # dev extra); see ci.yml's test job for the hang that made it necessary.
-          pytest -v --tb=short --rootdir=. -n auto --dist loadscope --timeout 300 2>&1 | tee pytest-output.txt
+          # --timeout-method thread + --max-worker-restart 0: see ci.yml's test
+          # job. This lane is where the dead worker hung the job (PR #774 round
+          # five, run 38100884450, 3 workers, gw2 "Not properly terminated").
+          pytest -v --tb=short --rootdir=. -n auto --dist loadscope --timeout 300 --timeout-method thread --max-worker-restart 0 2>&1 | tee pytest-output.txt
 
       - name: Upload test results
         if: always()

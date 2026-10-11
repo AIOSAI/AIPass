@@ -68,7 +68,9 @@ jobs:
           # dev extra). One hung test took the Linux 3.10 leg to its job cap with
           # no traceback (PR #774 round three, run 38087470864); the ceiling fails
           # that one test with the stack of where it sat instead.
-          pytest -v --tb=short --rootdir=. -n auto --dist loadscope --timeout 300 2>&1 | tee pytest-output.txt
+          # --timeout-method thread + --max-worker-restart 0: see ci.yml's test
+          # job (round five, run 38100884450: a dead worker hung the macOS job).
+          pytest -v --tb=short --rootdir=. -n auto --dist loadscope --timeout 300 --timeout-method thread --max-worker-restart 0 2>&1 | tee pytest-output.txt
 
       - name: Upload test results
         if: always()

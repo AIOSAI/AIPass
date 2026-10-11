@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI: a hung or dead xdist worker ends the job red with the test named, not a 20-minute cancel** (PR #774 round five, run 38100884450, 2026-10-10). The macOS leg printed `[gw2] node down: Not properly terminated` while memory's `test_search_extras` control test was in flight, xdist spawned a replacement worker, and the session never finished: eight minutes of silence, the job cap, no summary. Two flags on every xdist lane (ci.yml matrix, windows-test.yml, macos-test.yml) and the thread method on coverage: `--timeout-method thread`, because the default signal method cannot interrupt a wait inside C (a lock, a portal join) and the 300 s ceiling never fired; the thread method dumps every thread's stack and exits the worker. `--max-worker-restart 0`, because a worker that dies is a red: the session ends with `worker gw2 crashed while running <nodeid>` instead of a replacement that may never finish. The death itself is open: no faulthandler dump, so a silent signal or exit; a Linux probe (`fleet_green_signal_guard`) sweeps the suite for signals to pids a test does not own.
+
 ## [2026-10-10] — the fleet-green train: every one of the 18 branches at 100 under seedgo's gold-seal test pack (the checker legs, the oversize splits, ai_mail's doors and its 57 duplicate tests retired, the surfaced rows cured in the tests), the git lockdown (raw `git` and `gh` refused for every seat, reads included, `drone @git` twins for each, `drone rm` the one delete), the handlers fence restored fleet-wide through doors, hooks' gates grown (the scripted-write ownership lane, the memory lane, the per-leg test-write gate, a sed print script read as a read, bash_writes naming every `sed -i` file), aipass's branch prompt back under the injection cap, and the CI gate's tripwire moved for the retired handler_import standard (DPLAN-0354 / DPLAN-0356 / DPLAN-0403 / DPLAN-0404, merged as PR #774, v2.8.12)
 
 ### Added

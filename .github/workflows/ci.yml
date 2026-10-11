@@ -69,7 +69,18 @@ jobs:
       # run 38087470864, the 3.10 leg sat 26 min behind one api socket test and
       # the summary never printed. A per-test ceiling fails that one test with
       # the stack of where it sat; the slowest honest test here is under 2 min.
-      - run: pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope --timeout 300
+      # --timeout-method thread: the default signal method cannot interrupt a
+      # wait inside C (a lock, a portal join), and round five's macOS leg hung
+      # past its 300 s ceiling that way (run 38100884450, memory's search test
+      # FAILED then its worker never reported again). The thread method dumps
+      # every thread's stack and exits the worker; xdist marks the test failed
+      # and carries on, so the job ends with evidence instead of a cancel.
+      # --max-worker-restart 0: a worker that dies outright ("node down: Not
+      # properly terminated") ends the session red with the in-flight test
+      # named. Round five's macOS leg (run 38100884450) let xdist replace the
+      # dead worker and the session never finished: 8 minutes of silence, then
+      # the job cap, no summary. A dead worker is a red; say so in one line.
+      - run: pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope --timeout 300 --timeout-method thread --max-worker-restart 0
 
   standards:
     name: seedgo-audit
@@ -118,7 +129,7 @@ jobs:
       - run: |
           python -m pip install --require-hashes -r .github/requirements/pip.txt
           pip install -e ".[dev,host]"
-      - run: coverage run -m pytest --rootdir=. --ignore=tests/e2e --timeout 300
+      - run: coverage run -m pytest --rootdir=. --ignore=tests/e2e --timeout 300 --timeout-method thread
       - run: coverage xml
       - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
